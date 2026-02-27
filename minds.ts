@@ -10,8 +10,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { DEFAULT_TEMPLATE } from "./template.js";
-import { SECTIONS, appendToSection, countContentLines, type SectionName } from "./template.js";
+import { DEFAULT_TEMPLATE, SECTIONS, appendToSection, countContentLines, type SectionName } from "./template.js";
 
 const VALID_MIND_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
