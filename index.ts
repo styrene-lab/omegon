@@ -29,7 +29,7 @@ import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { Container, type SelectItem, SelectList, Text } from "@mariozechner/pi-tui";
-import { FactStore, parseExtractionOutput, type MindRecord } from "./factstore.js";
+import { FactStore, parseExtractionOutput, GLOBAL_DECAY, type MindRecord } from "./factstore.js";
 import { DEFAULT_CONFIG, type MemoryConfig } from "./types.js";
 import {
   type ExtractionTriggerState,
@@ -93,7 +93,7 @@ export default function (pi: ExtensionAPI) {
     // Initialize global store (user-level, shared across projects)
     // Skip if project memory IS the global path (e.g., working from ~/)
     if (path.resolve(memoryDir) !== path.resolve(globalMemoryDir)) {
-      globalStore = new FactStore(globalMemoryDir);
+      globalStore = new FactStore(globalMemoryDir, { decay: GLOBAL_DECAY });
     }
 
     // Ensure .gitignore covers memory/

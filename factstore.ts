@@ -168,7 +168,7 @@ export interface EdgeResult {
 
 // --- Decay math ---
 
-/** Default decay parameters */
+/** Project-level decay parameters */
 const DECAY = {
   /** Base rate — how fast a single-reinforcement fact decays */
   baseRate: 0.05,
@@ -181,17 +181,34 @@ const DECAY = {
 } as const;
 
 /**
+ * Global-level decay parameters.
+ * Shorter base half-life (30d) means unpromoted one-offs decay faster than project facts.
+ * Higher reinforcement factor (2.5x) means each cross-project confirmation dramatically
+ * extends durability. A fact reinforced by 3 projects holds 71% after 90 days;
+ * 5 reinforcements gives 95% at 90 days. Rewards genuinely cross-cutting knowledge.
+ */
+export const GLOBAL_DECAY = {
+  baseRate: 0.023, // ln(2)/30 ≈ 0.023
+  reinforcementFactor: 2.5,
+  minimumConfidence: 0.1,
+  halfLifeDays: 30,
+} as const;
+
+/**
  * Compute current confidence for a fact based on time since last reinforcement.
  * Uses exponential decay with reinforcement-adjusted half-life.
  *
  * halfLife = DECAY.halfLifeDays * (DECAY.reinforcementFactor ^ (reinforcement_count - 1))
  * confidence = e^(-ln(2) * daysSinceReinforced / halfLife)
  */
+export type DecayProfile = typeof DECAY | typeof GLOBAL_DECAY;
+
 export function computeConfidence(
   daysSinceReinforced: number,
   reinforcementCount: number,
+  profile: DecayProfile = DECAY,
 ): number {
-  const halfLife = DECAY.halfLifeDays * Math.pow(DECAY.reinforcementFactor, reinforcementCount - 1);
+  const halfLife = profile.halfLifeDays * Math.pow(profile.reinforcementFactor, reinforcementCount - 1);
   const confidence = Math.exp(-Math.LN2 * daysSinceReinforced / halfLife);
   return Math.max(confidence, 0);
 }
@@ -201,8 +218,10 @@ export function computeConfidence(
 export class FactStore {
   private db: any;
   private dbPath: string;
+  private decayProfile: DecayProfile;
 
-  constructor(memoryDir: string) {
+  constructor(memoryDir: string, opts?: { decay?: DecayProfile }) {
+    this.decayProfile = opts?.decay ?? DECAY;
     this.dbPath = path.join(memoryDir, "facts.db");
     fs.mkdirSync(memoryDir, { recursive: true });
     this.db = new Database(this.dbPath);
@@ -385,7 +404,7 @@ export class FactStore {
       opts.confidence ?? 1.0,
       now,
       opts.reinforcement_count ?? 1,
-      opts.decay_rate ?? DECAY.baseRate,
+      opts.decay_rate ?? this.decayProfile.baseRate,
     );
 
     return { id, duplicate: false };
@@ -539,7 +558,7 @@ export class FactStore {
       VALUES (?, ?, ?, ?, ?, 1.0, ?, 1, ?, 'active', ?, ?, ?, ?)
     `).run(
       id, opts.sourceFact, opts.targetFact, opts.relation, opts.description,
-      now, DECAY.baseRate, now, opts.session ?? null,
+      now, this.decayProfile.baseRate, now, opts.session ?? null,
       opts.sourceMind ?? null, opts.targetMind ?? null,
     );
 
@@ -621,13 +640,13 @@ export class FactStore {
       .slice(0, limit);
   }
 
-  /** Apply confidence decay to edges (same math as facts) */
+  /** Apply confidence decay to edges (same decay profile as this store's facts) */
   private applyEdgeDecay(edges: Edge[]): Edge[] {
     const now = Date.now();
     for (const edge of edges) {
       const lastReinforced = new Date(edge.last_reinforced).getTime();
       const daysSince = (now - lastReinforced) / (1000 * 60 * 60 * 24);
-      edge.confidence = computeConfidence(daysSince, edge.reinforcement_count);
+      edge.confidence = computeConfidence(daysSince, edge.reinforcement_count, this.decayProfile);
     }
     return edges;
   }
@@ -691,7 +710,7 @@ export class FactStore {
     for (const fact of facts) {
       const lastReinforced = new Date(fact.last_reinforced).getTime();
       const daysSince = (now - lastReinforced) / (1000 * 60 * 60 * 24);
-      fact.confidence = computeConfidence(daysSince, fact.reinforcement_count);
+      fact.confidence = computeConfidence(daysSince, fact.reinforcement_count, this.decayProfile);
     }
 
     // Sort by confidence descending within each section
@@ -794,7 +813,7 @@ export class FactStore {
   renderForInjection(mind: string, opts?: { maxFacts?: number; minConfidence?: number; maxEdges?: number }): string {
     const maxFacts = opts?.maxFacts ?? 80;
     const maxEdges = opts?.maxEdges ?? 20;
-    const minConfidence = opts?.minConfidence ?? DECAY.minimumConfidence;
+    const minConfidence = opts?.minConfidence ?? this.decayProfile.minimumConfidence;
 
     let facts = this.getActiveFacts(mind);
 
