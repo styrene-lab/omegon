@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import { createTriggerState, shouldExtract } from "./extraction.js";
+import { createTriggerState, shouldExtract } from "./triggers.js";
 import { DEFAULT_CONFIG } from "./types.js";
 
 const config = { ...DEFAULT_CONFIG };

@@ -1,25 +1,25 @@
 /**
- * Project Memory Extension
+ * Project Memory Extension — v2 (SQLite-backed)
  *
- * Persistent, cross-session project knowledge stored as structured markdown.
- * Supports multiple "minds" — composable memory stores with lifecycle management.
+ * Persistent, cross-session project knowledge stored in SQLite with
+ * confidence-decay reinforcement. Facts that aren't encountered in
+ * sessions gradually fade; facts that keep appearing grow more durable.
  *
- * - Active memory: .pi/memory/memory.md (default mind)
- * - Minds: .pi/memory/minds/<name>/memory.md
- * - Archive: .pi/memory/archive/ or minds/<name>/archive/
+ * Storage: .pi/memory/facts.db (SQLite with WAL mode)
+ * Rendering: Active facts → Markdown-KV for LLM context injection
  *
  * Tools:
- *   memory_query          — Read active memory
+ *   memory_query          — Read active memory (rendered Markdown-KV)
  *   memory_store          — Explicitly add a fact
- *   memory_search_archive — Search archived facts
+ *   memory_search_archive — Search all facts (including archived/superseded)
  *
  * Commands:
  *   /memory               — Interactive mind manager
  *   /memory edit           — Edit current mind in editor
- *   /memory refresh        — Re-evaluate against codebase
- *   /memory clear          — Reset current mind to template
+ *   /memory refresh        — Re-evaluate and prune memory
+ *   /memory clear          — Reset current mind
  *
- * Background extraction via subagent.
+ * Background extraction via subagent outputs JSONL actions.
  */
 
 import * as path from "node:path";
@@ -28,57 +28,80 @@ import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { Container, type SelectItem, SelectList, Text } from "@mariozechner/pi-tui";
-import { MemoryStorage } from "./storage.js";
-import { appendToSection, type SectionName } from "./template.js";
+import { FactStore, parseExtractionOutput, type MindRecord } from "./factstore.js";
 import { DEFAULT_CONFIG, type MemoryConfig } from "./types.js";
 import {
   type ExtractionTriggerState,
   createTriggerState,
   shouldExtract,
-  runExtraction,
-} from "./extraction.js";
-import { MindManager, type MindMeta } from "./minds.js";
+} from "./triggers.js";
+import { runExtractionV2, formatFactsForExtraction } from "./extraction-v2.js";
+import { migrateToFactStore, needsMigration, markMigrated } from "./migration.js";
+import { SECTIONS } from "./template.js";
 import { serializeConversation, convertToLlm } from "@mariozechner/pi-coding-agent";
 
+const VALID_MIND_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+
+function sanitizeMindName(input: string): string | null {
+  const sanitized = input.trim().replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^[^a-zA-Z0-9]+/, "");
+  if (!sanitized || !VALID_MIND_NAME.test(sanitized)) return null;
+  return sanitized;
+}
+
 export default function (pi: ExtensionAPI) {
-  let storage: MemoryStorage | null = null;
-  let mindManager: MindManager | null = null;
+  let store: FactStore | null = null;
   let triggerState: ExtractionTriggerState = createTriggerState();
   let postCompaction = false;
   let firstTurn = true;
   let config: MemoryConfig = { ...DEFAULT_CONFIG };
   let activeExtractionPromise: Promise<void> | null = null;
   let sessionActive = false;
-
-  /** Track consecutive extraction failures for backoff */
   let consecutiveExtractionFailures = 0;
+  let memoryDir = "";
 
-  /** Rebuild storage to point at the currently active mind */
-  function rebuildStorage(cwd: string): void {
-    if (!mindManager) return;
-    const activeMind = mindManager.getActiveMindName();
-    if (activeMind) {
-      const mindDir = mindManager.getMindDir(activeMind);
-      const archiveDir = mindManager.getMindArchiveDir(activeMind);
-      storage = new MemoryStorage(cwd, mindDir, archiveDir);
-    } else {
-      storage = new MemoryStorage(cwd);
-    }
-    storage.init();
+  /** Get the active mind name (null = default) */
+  function activeMind(): string {
+    return store?.getActiveMind() ?? "default";
   }
 
-  /** Get the display label for the current memory target */
   function activeLabel(): string {
-    const activeMind = mindManager?.getActiveMindName();
-    return activeMind ?? "default";
+    const mind = store?.getActiveMind();
+    return mind ?? "default";
   }
 
   // --- Lifecycle ---
 
   pi.on("session_start", async (_event, ctx) => {
-    mindManager = new MindManager(path.join(ctx.cwd, ".pi", "memory"));
-    mindManager.init();
-    rebuildStorage(ctx.cwd);
+    memoryDir = path.join(ctx.cwd, ".pi", "memory");
+
+    // Check for migration
+    if (needsMigration(memoryDir)) {
+      store = new FactStore(memoryDir);
+      const result = migrateToFactStore(memoryDir, store);
+      markMigrated(memoryDir);
+      if (ctx.hasUI) {
+        const msg = `Memory migrated to SQLite: ${result.factsImported} facts imported, ${result.archiveFactsImported} archive facts, ${result.mindsImported} minds`;
+        ctx.ui.notify(msg, "success");
+      }
+    } else {
+      store = new FactStore(memoryDir);
+    }
+
+    // Ensure .gitignore covers memory/
+    const gitignorePath = path.join(memoryDir, "..", ".gitignore");
+    try {
+      const fs = await import("node:fs");
+      const existing = fs.existsSync(gitignorePath)
+        ? fs.readFileSync(gitignorePath, "utf8")
+        : "";
+      if (!existing.includes("memory/")) {
+        const entry = existing.endsWith("\n") || existing === "" ? "memory/\n" : "\nmemory/\n";
+        fs.writeFileSync(gitignorePath, existing + entry, "utf8");
+      }
+    } catch {
+      // Best effort
+    }
+
     triggerState = createTriggerState();
     postCompaction = false;
     firstTurn = true;
@@ -91,7 +114,6 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", async (_event, ctx) => {
     sessionActive = false;
 
-    // If extraction is already in flight, wait for it
     if (activeExtractionPromise) {
       if (ctx.hasUI) {
         ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", "saving memory…"));
@@ -102,76 +124,47 @@ export default function (pi: ExtensionAPI) {
       });
       await Promise.race([activeExtractionPromise, timeout]);
       if (timeoutId) clearTimeout(timeoutId);
+      store?.close();
       return;
     }
 
-    // Otherwise, if there's been meaningful activity since last extraction,
-    // run a final one with the shorter shutdown timeout
-    if (!storage) return;
+    if (!store) return;
     const usage = ctx.getContextUsage();
-    if (!usage) return;
+    if (!usage) { store.close(); return; }
 
     const hasActivity = triggerState.toolCallsSinceExtract >= 2 ||
       (usage.tokens - triggerState.lastExtractedTokens) >= config.minimumTokensBetweenUpdate;
 
-    if (!hasActivity) return;
+    if (!hasActivity) { store.close(); return; }
 
     if (ctx.hasUI) {
       ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", "saving memory…"));
     }
 
     const shutdownConfig = { ...config, extractionTimeout: config.shutdownExtractionTimeout };
-    const targetStorage = storage;
 
     try {
       triggerState.isRunning = true;
-      const currentMemory = targetStorage.readMemory();
-      const branch = ctx.sessionManager.getBranch();
-      const messages = branch
-        .filter((e): e is SessionMessageEntry => e.type === "message")
-        .map((e) => e.message);
-
-      const recentMessages = messages.slice(-30);
-      if (recentMessages.length === 0) return;
-
-      const serialized = serializeConversation(convertToLlm(recentMessages));
-      const result = await runExtraction(ctx.cwd, currentMemory, serialized, shutdownConfig);
-      targetStorage.writeExtractionResult(result);
+      await runExtractionCycle(ctx, shutdownConfig);
     } catch {
-      // Best-effort — don't block exit on failure
+      // Best-effort
     } finally {
       triggerState.isRunning = false;
+      store?.close();
     }
   });
 
   pi.on("session_compact", async (_event, ctx) => {
     postCompaction = true;
 
-    // Compaction is the ideal extraction point — we're about to lose the full
-    // conversation context. Run extraction against the pre-compaction messages
-    // before they're truncated.
-    if (storage && !triggerState.isRunning) {
-      const targetStorage = storage;
+    if (store && !triggerState.isRunning) {
       triggerState.isRunning = true;
-
       try {
-        const currentMemory = targetStorage.readMemory();
-        const branch = ctx.sessionManager.getBranch();
-        const messages = branch
-          .filter((e): e is SessionMessageEntry => e.type === "message")
-          .map((e) => e.message);
-
-        const recentMessages = messages.slice(-30);
-        if (recentMessages.length > 0) {
-          const serialized = serializeConversation(convertToLlm(recentMessages));
-          const result = await runExtraction(ctx.cwd, currentMemory, serialized, config);
-          targetStorage.writeExtractionResult(result);
-
-          const usage = ctx.getContextUsage();
-          triggerState.lastExtractedTokens = usage?.tokens ?? 0;
-          triggerState.isInitialized = true;
-          consecutiveExtractionFailures = 0;
-        }
+        await runExtractionCycle(ctx, config);
+        const usage = ctx.getContextUsage();
+        triggerState.lastExtractedTokens = usage?.tokens ?? 0;
+        triggerState.isInitialized = true;
+        consecutiveExtractionFailures = 0;
       } catch {
         consecutiveExtractionFailures++;
       } finally {
@@ -179,31 +172,58 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Reset counters after extraction attempt — fresh slate post-compaction
     triggerState.toolCallsSinceExtract = 0;
     triggerState.manualStoresSinceExtract = 0;
   });
 
+  // --- Extraction cycle ---
+
+  async function runExtractionCycle(ctx: ExtensionContext, cfg: MemoryConfig): Promise<void> {
+    if (!store) return;
+
+    const mind = activeMind();
+    const currentFacts = store.getActiveFacts(mind);
+
+    const branch = ctx.sessionManager.getBranch();
+    const messages = branch
+      .filter((e): e is SessionMessageEntry => e.type === "message")
+      .map((e) => e.message);
+
+    const recentMessages = messages.slice(-30);
+    if (recentMessages.length === 0) return;
+
+    const serialized = serializeConversation(convertToLlm(recentMessages));
+    const rawOutput = await runExtractionV2(ctx.cwd, currentFacts, serialized, cfg);
+
+    if (!rawOutput.trim()) return;
+
+    const actions = parseExtractionOutput(rawOutput);
+    if (actions.length > 0) {
+      store.processExtraction(mind, actions);
+    }
+
+    updateStatus(ctx);
+  }
+
   // --- Context Injection ---
 
   pi.on("before_agent_start", async (event, ctx) => {
-    if (!storage) return;
+    if (!store) return;
     if (!firstTurn && !postCompaction) return;
 
     firstTurn = false;
     postCompaction = false;
 
-    const lineCount = storage.countLines();
-    const activeMind = mindManager?.getActiveMindName();
-    const mindLabel = activeMind ? ` (mind: ${activeMind})` : "";
+    const mind = activeMind();
+    const factCount = store.countActiveFacts(mind);
+    const mindLabel = mind !== "default" ? ` (mind: ${mind})` : "";
 
-    // Always inject — even on empty memory, so the LLM knows tools exist
-    if (lineCount <= 10) {
+    if (factCount <= 3) {
       return {
         message: {
           customType: "project-memory",
           content: [
-            `Project memory initialized${mindLabel} (empty — no facts stored yet).`,
+            `Project memory initialized${mindLabel} (${factCount} facts stored).`,
             "Use **memory_store** to persist important discoveries as you work",
             "(architecture decisions, constraints, patterns, known issues).",
             "Facts persist across sessions and will be available next time.",
@@ -213,14 +233,17 @@ export default function (pi: ExtensionAPI) {
       };
     }
 
+    const rendered = store.renderForInjection(mind);
+
     return {
       message: {
         customType: "project-memory",
         content: [
-          `Project memory available${mindLabel} (${lineCount} lines from this and previous sessions).`,
+          `Project memory available${mindLabel} (${factCount} facts from this and previous sessions).`,
           "Use **memory_query** to read accumulated knowledge about this project.",
           "Use **memory_store** to persist important discoveries (architecture decisions, constraints, patterns, known issues).",
-          "Use **memory_search_archive** to search older archived facts.",
+          "Use **memory_search_archive** to search older archived facts.\n\n",
+          rendered,
         ].join(" "),
         display: false,
       },
@@ -230,7 +253,7 @@ export default function (pi: ExtensionAPI) {
   // --- Background Extraction Triggers ---
 
   pi.on("tool_execution_end", async (event, ctx) => {
-    if (!storage) return;
+    if (!store) return;
 
     triggerState.toolCallsSinceExtract++;
 
@@ -242,45 +265,26 @@ export default function (pi: ExtensionAPI) {
     if (!usage) return;
 
     if (shouldExtract(triggerState, usage.tokens, config, consecutiveExtractionFailures)) {
-      activeExtractionPromise = runBackgroundExtraction(ctx)
-        .catch(() => {})
-        .finally(() => { activeExtractionPromise = null; });
+      activeExtractionPromise = (async () => {
+        if (!store || triggerState.isRunning) return;
+        triggerState.isRunning = true;
+        try {
+          await runExtractionCycle(ctx, config);
+          const usage = ctx.getContextUsage();
+          triggerState.lastExtractedTokens = usage?.tokens ?? 0;
+          triggerState.toolCallsSinceExtract = 0;
+          triggerState.manualStoresSinceExtract = 0;
+          triggerState.isInitialized = true;
+          consecutiveExtractionFailures = 0;
+        } catch {
+          consecutiveExtractionFailures++;
+        } finally {
+          triggerState.isRunning = false;
+        }
+      })();
+      activeExtractionPromise.catch(() => {}).finally(() => { activeExtractionPromise = null; });
     }
   });
-
-  async function runBackgroundExtraction(ctx: ExtensionContext): Promise<void> {
-    if (!storage || triggerState.isRunning) return;
-    triggerState.isRunning = true;
-
-    // Snapshot the storage ref — mind may switch during async extraction
-    const targetStorage = storage;
-
-    try {
-      const currentMemory = targetStorage.readMemory();
-      const branch = ctx.sessionManager.getBranch();
-      const messages = branch
-        .filter((e): e is SessionMessageEntry => e.type === "message")
-        .map((e) => e.message);
-
-      const recentMessages = messages.slice(-30);
-      if (recentMessages.length === 0) return;
-
-      const serialized = serializeConversation(convertToLlm(recentMessages));
-      const result = await runExtraction(ctx.cwd, currentMemory, serialized, config);
-      targetStorage.writeExtractionResult(result);
-
-      const usage = ctx.getContextUsage();
-      triggerState.lastExtractedTokens = usage?.tokens ?? 0;
-      triggerState.toolCallsSinceExtract = 0;
-      triggerState.manualStoresSinceExtract = 0;
-      triggerState.isInitialized = true;
-      consecutiveExtractionFailures = 0;
-    } catch {
-      consecutiveExtractionFailures++;
-    } finally {
-      triggerState.isRunning = false;
-    }
-  }
 
   // --- Tools ---
 
@@ -295,14 +299,15 @@ export default function (pi: ExtensionAPI) {
     ].join(" "),
     parameters: Type.Object({}),
     async execute() {
-      if (!storage) {
+      if (!store) {
         return { content: [{ type: "text", text: "Project memory not initialized." }] };
       }
-      const memory = storage.readMemory();
-      const activeMind = mindManager?.getActiveMindName();
+      const mind = activeMind();
+      const rendered = store.renderForInjection(mind);
+      const factCount = store.countActiveFacts(mind);
       return {
-        content: [{ type: "text", text: memory }],
-        details: { lines: storage.countLines(), mind: activeMind ?? "default" },
+        content: [{ type: "text", text: rendered }],
+        details: { facts: factCount, mind: activeLabel() },
       };
     },
   });
@@ -326,29 +331,32 @@ export default function (pi: ExtensionAPI) {
       }),
     }),
     async execute(_toolCallId, params) {
-      if (!storage) {
+      if (!store) {
         return {
           content: [{ type: "text", text: "Project memory not initialized." }],
           isError: true,
         };
       }
 
-      const memory = storage.readMemory();
-      const bullet = params.content.startsWith("- ") ? params.content : `- ${params.content}`;
-      const updated = appendToSection(memory, params.section as SectionName, bullet);
+      const mind = activeMind();
+      const content = params.content.replace(/^-\s*/, "").trim();
+      const result = store.storeFact({
+        mind,
+        section: params.section as any,
+        content,
+        source: "manual",
+      });
 
-      if (updated === memory) {
+      if (result.duplicate) {
         return {
-          content: [{ type: "text", text: `Duplicate — already stored in ${params.section}: ${bullet}` }],
-          details: { section: params.section, duplicate: true },
+          content: [{ type: "text", text: `Reinforced existing fact in ${params.section}: ${content}` }],
+          details: { section: params.section, reinforced: true, id: result.id },
         };
       }
 
-      storage.writeMemory(updated);
-
       return {
-        content: [{ type: "text", text: `Stored in ${params.section}: ${bullet}` }],
-        details: { section: params.section, lines: storage.countLines() },
+        content: [{ type: "text", text: `Stored in ${params.section}: ${content}` }],
+        details: { section: params.section, id: result.id, facts: store.countActiveFacts(mind) },
       };
     },
   });
@@ -365,74 +373,76 @@ export default function (pi: ExtensionAPI) {
       query: Type.String({ description: "Search terms (file paths, symbol names, concepts)" }),
     }),
     async execute(_toolCallId, params) {
-      if (!storage) {
+      if (!store) {
         return { content: [{ type: "text", text: "Project memory not initialized." }] };
       }
 
-      const results = storage.searchArchive(params.query);
+      const mind = activeMind();
+      const results = store.searchArchive(params.query, mind);
 
       if (results.length === 0) {
-        return { content: [{ type: "text", text: "No matches in memory archive." }] };
+        // Also try cross-mind search
+        const allResults = store.searchArchive(params.query);
+        if (allResults.length === 0) {
+          return { content: [{ type: "text", text: "No matches in memory archive." }] };
+        }
+
+        const formatted = allResults
+          .map(f => `[${f.mind}/${f.section}] ${f.content} (${f.status}, ${f.created_at.split("T")[0]})`)
+          .join("\n");
+
+        return {
+          content: [{ type: "text", text: `Cross-mind archive results:\n${formatted}` }],
+          details: { totalMatches: allResults.length, crossMind: true },
+        };
       }
 
       const formatted = results
-        .map((r) => `## ${r.month}\n${r.matches.join("\n")}`)
-        .join("\n\n");
+        .map(f => `[${f.section}] ${f.content} (${f.status}, ${f.created_at.split("T")[0]})`)
+        .join("\n");
 
       return {
         content: [{ type: "text", text: formatted }],
-        details: { months: results.length, totalMatches: results.reduce((n, r) => n + r.matches.length, 0) },
+        details: { totalMatches: results.length },
       };
     },
   });
 
   // --- Interactive Mind Manager ---
 
-  function buildMindItems(minds: MindMeta[], activeName: string | null): SelectItem[] {
-    const statusIcon = { active: "◉", refined: "◈", retired: "◌" };
+  function buildMindItems(minds: (MindRecord & { factCount: number })[], activeName: string): SelectItem[] {
     const items: SelectItem[] = [];
-
-    // Default mind entry
-    const defaultActive = activeName === null;
-    items.push({
-      value: "__default__",
-      label: `${defaultActive ? "▸ " : "  "}default`,
-      description: defaultActive ? "active • project default memory" : "project default memory",
-    });
 
     for (const mind of minds) {
       const isActive = activeName === mind.name;
-      const icon = statusIcon[mind.status] ?? "?";
       const badges: string[] = [
-        isActive ? "active" : mind.status,
-        `${mind.lineCount} lines`,
+        isActive ? "active target" : mind.status,
+        `${mind.factCount} facts`,
       ];
       if (mind.readonly) badges.push("read-only");
-      if (mind.origin?.type === "link") badges.push("linked");
+      if (mind.origin_type === "link") badges.push("linked");
       if (mind.description) badges.push(mind.description);
       if (mind.parent) badges.push(`(from: ${mind.parent})`);
       items.push({
         value: mind.name,
-        label: `${isActive ? "▸ " : "  "}${icon} ${mind.name}`,
+        label: `${isActive ? "▸ " : "  "}${mind.name}`,
         description: badges.join(" • "),
       });
     }
 
-    // Action entries
     items.push({ value: "__create__", label: "  + Create new mind", description: "Start a fresh memory store" });
     items.push({ value: "__link__", label: "  ⟷ Link external mind", description: "Import from a path (read-only)" });
-    items.push({ value: "__edit__", label: "  ✎ Edit current mind", description: "Open in editor" });
-    items.push({ value: "__refresh__", label: "  ↻ Refresh current mind", description: "Prune and consolidate memory" });
+    items.push({ value: "__edit__", label: "  ✎ Edit current mind", description: "Open rendered view in editor" });
+    items.push({ value: "__refresh__", label: "  ↻ Refresh current mind", description: "Run extraction to prune and consolidate" });
 
     return items;
   }
 
-  /** Notify the LLM that the memory context has changed (queued for next turn) */
-  function notifyMindSwitch(newLabel: string, lineCount: number): void {
+  function notifyMindSwitch(newLabel: string, factCount: number): void {
     pi.sendMessage({
       customType: "project-memory",
       content: [
-        `Memory context switched to "${newLabel}" (${lineCount} lines).`,
+        `Memory context switched to "${newLabel}" (${factCount} facts).`,
         "Your previous memory_query results are stale.",
         "Use **memory_query** to read the current memory if you need project context.",
       ].join(" "),
@@ -443,38 +453,42 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function showMindActions(ctx: ExtensionCommandContext, mindName: string): Promise<void> {
-    if (!mindManager || !storage) return;
+    if (!store) return;
 
-    const meta = mindManager.readMeta(mindName);
-    if (!meta) {
+    const mind = store.getMind(mindName);
+    if (!mind) {
       ctx.ui.notify(`Mind "${mindName}" not found`, "error");
       return;
     }
 
-    const isLinked = meta.origin?.type === "link";
-    const isReadonly = meta.readonly === true;
+    const isReadonly = mind.readonly === 1;
+    const isLinked = mind.origin_type === "link";
 
     const actions: SelectItem[] = [
       { value: "switch", label: "Switch to this mind", description: "Make it the active memory store" },
     ];
     if (!isReadonly) {
-      actions.push({ value: "edit", label: "Edit in editor", description: "Open memory.md in editor" });
+      actions.push({ value: "edit", label: "Edit in editor", description: "Edit rendered memory as markdown" });
     }
     if (isLinked) {
-      actions.push({ value: "sync", label: "Sync from source", description: `Pull latest from ${(meta.origin as any).path}` });
+      actions.push({ value: "sync", label: "Sync from source", description: `Pull latest from ${mind.origin_path}` });
     }
     actions.push({ value: "fork", label: "Fork", description: "Create a writable copy with a new name" });
     actions.push({ value: "ingest", label: "Ingest into another mind", description: "Merge facts into a target" });
-    if (!isReadonly) {
-      actions.push({ value: "status", label: "Change status", description: `Currently: ${meta.status}` });
+    if (!isReadonly && mindName !== "default") {
+      actions.push({ value: "status", label: "Change status", description: `Currently: ${mind.status}` });
     }
-    actions.push({ value: "delete", label: "Delete", description: isLinked ? "Remove link (source unaffected)" : "Remove this mind permanently" });
+    if (mindName !== "default") {
+      actions.push({ value: "delete", label: "Delete", description: isLinked ? "Remove link (source unaffected)" : "Remove this mind permanently" });
+    }
 
     const action = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
       const container = new Container();
       container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
       container.addChild(new Text(theme.fg("accent", theme.bold(` Mind: ${mindName} `)), 1, 0));
-      container.addChild(new Text(theme.fg("muted", ` ${meta.description}`), 1, 0));
+      if (mind.description) {
+        container.addChild(new Text(theme.fg("muted", ` ${mind.description}`), 1, 0));
+      }
 
       const selectList = new SelectList(actions, Math.min(actions.length, 10), {
         selectedPrefix: (t) => theme.fg("accent", t),
@@ -500,111 +514,73 @@ export default function (pi: ExtensionAPI) {
 
     switch (action) {
       case "switch": {
-        mindManager.setActiveMind(mindName);
-        rebuildStorage(ctx.cwd);
+        store!.setActiveMind(mindName === "default" ? null : mindName);
         updateStatus(ctx);
+        const count = store!.countActiveFacts(mindName);
         ctx.ui.notify(`Switched to mind: ${mindName}`, "success");
-        notifyMindSwitch(mindName, storage!.countLines());
-        break;
-      }
-      case "sync": {
-        try {
-          const result = mindManager.sync(mindName);
-          if (result.updated) {
-            ctx.ui.notify(`Synced "${mindName}" from source (${result.lineCount} lines)`, "success");
-            updateStatus(ctx);
-          } else {
-            ctx.ui.notify(`"${mindName}" is already up to date`, "info");
-          }
-        } catch (err: any) {
-          ctx.ui.notify(`Sync failed: ${err.message}`, "error");
-        }
+        notifyMindSwitch(mindName, count);
         break;
       }
       case "edit": {
-        const content = mindManager.readMindMemory(mindName);
-        const edited = await ctx.ui.editor(`Edit Mind: ${mindName}`, content);
-        if (edited !== undefined && edited !== content) {
-          mindManager.writeMindMemory(mindName, edited);
-          ctx.ui.notify(`Mind "${mindName}" updated`, "success");
+        const rendered = store!.renderForInjection(mindName);
+        const edited = await ctx.ui.editor(`Edit Mind: ${mindName}`, rendered);
+        if (edited !== undefined && edited !== rendered) {
+          // Parse edited markdown back into facts — this is lossy but useful
+          // Archive all current facts and re-import from edited content
+          ctx.ui.notify("Direct editing not yet supported for SQLite store. Use memory_store tool.", "warning");
         }
         break;
       }
       case "fork": {
-        const newName = await ctx.ui.input("New mind name:");
-        if (!newName?.trim()) return;
-        const sanitized = newName.trim().replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^[^a-zA-Z0-9]+/, "");
-        if (!sanitized) {
+        const rawName = await ctx.ui.input("New mind name:");
+        if (!rawName?.trim()) return;
+        const newName = sanitizeMindName(rawName);
+        if (!newName) {
           ctx.ui.notify("Name must contain at least one alphanumeric character", "error");
           return;
         }
-        if (sanitized !== newName.trim()) {
-          ctx.ui.notify(`Name sanitized to: ${sanitized}`, "info");
+        if (newName !== rawName.trim()) {
+          ctx.ui.notify(`Name sanitized to: ${newName}`, "info");
         }
-        if (mindManager.mindExists(sanitized)) {
-          ctx.ui.notify(`Mind "${sanitized}" already exists`, "error");
+        if (store!.mindExists(newName)) {
+          ctx.ui.notify(`Mind "${newName}" already exists`, "error");
           return;
         }
         const desc = await ctx.ui.input("Description:", `Fork of ${mindName}`);
-        try {
-          mindManager.fork(mindName, sanitized, desc ?? `Fork of ${mindName}`);
-          ctx.ui.notify(`Forked "${mindName}" → "${sanitized}"`, "success");
-        } catch (err: any) {
-          ctx.ui.notify(err.message, "error");
-        }
+        store!.forkMind(mindName, newName, desc ?? `Fork of ${mindName}`);
+        ctx.ui.notify(`Forked "${mindName}" → "${newName}"`, "success");
         break;
       }
       case "ingest": {
-        const otherMinds = mindManager.list().filter((m) => m.name !== mindName);
-        // Build target list: default + other minds
-        const targetEntries: { name: string; label: string }[] = [
-          { name: "__default__", label: "default (project memory)" },
-          ...otherMinds.map((m) => ({ name: m.name, label: `${m.name} (${m.lineCount} lines)` })),
-        ];
-        if (targetEntries.length === 0) {
+        const allMinds = store!.listMinds().filter(m => m.name !== mindName);
+        if (allMinds.length === 0) {
           ctx.ui.notify("No targets to ingest into", "warning");
           return;
         }
         const targetIdx = await ctx.ui.select(
           "Ingest into:",
-          targetEntries.map((t) => t.label),
+          allMinds.map(m => `${m.name} (${m.factCount} facts)`),
         );
         if (targetIdx === undefined) return;
-        const targetEntry = targetEntries[targetIdx];
-        const targetLabel = targetEntry.name === "__default__" ? "default" : targetEntry.name;
+        const target = allMinds[targetIdx];
 
-        // Preview what will be ingested
-        const sourceContent = mindManager.readMindMemory(mindName);
-        const bulletCount = sourceContent.split("\n").filter((l) => l.trim().startsWith("- ")).length;
-
-        const sourceReadonly = mindManager.isReadonly(mindName);
+        const sourceCount = store!.countActiveFacts(mindName);
+        const sourceReadonly = store!.isMindReadonly(mindName);
         const retireMsg = sourceReadonly ? "" : ` and retire "${mindName}"`;
         const ok = await ctx.ui.confirm(
           "Ingest Mind",
-          `Merge ${bulletCount} bullets from "${mindName}" into "${targetLabel}" (duplicates skipped)${retireMsg}?`,
+          `Merge ${sourceCount} facts from "${mindName}" into "${target.name}" (duplicates skipped)${retireMsg}?`,
         );
         if (!ok) return;
 
-        let result: { factsIngested: number };
-        if (targetEntry.name === "__default__") {
-          result = mindManager.ingestIntoDefault(mindName);
-        } else {
-          result = mindManager.ingest(mindName, targetEntry.name);
-        }
-        const skipped = bulletCount - result.factsIngested;
-        const skippedMsg = skipped > 0 ? ` (${skipped} duplicates skipped)` : "";
+        const result = store!.ingestMind(mindName, target.name);
         ctx.ui.notify(
-          `Ingested ${result.factsIngested} facts into "${targetLabel}"${skippedMsg}. "${mindName}" retired.`,
+          `Ingested ${result.factsIngested} facts into "${target.name}" (${result.duplicatesSkipped} duplicates skipped)`,
           "success",
         );
-        const wasActive = mindManager.getActiveMindName() === mindName;
-        if (wasActive) {
-          if (targetEntry.name === "__default__") {
-            mindManager.setActiveMind(null);
-          } else {
-            mindManager.setActiveMind(targetEntry.name);
-          }
-          rebuildStorage(ctx.cwd);
+
+        if (activeMind() === mindName) {
+          store!.setActiveMind(target.name === "default" ? null : target.name);
           updateStatus(ctx);
         }
         break;
@@ -613,17 +589,17 @@ export default function (pi: ExtensionAPI) {
         const statuses = ["active", "refined", "retired"] as const;
         const idx = await ctx.ui.select("New status:", [...statuses]);
         if (idx === undefined) return;
-        mindManager.setStatus(mindName, statuses[idx]);
+        store!.setMindStatus(mindName, statuses[idx]);
         ctx.ui.notify(`Status of "${mindName}" → ${statuses[idx]}`, "success");
         break;
       }
       case "delete": {
-        const ok = await ctx.ui.confirm("Delete Mind", `Permanently delete mind "${mindName}"?`);
+        const ok = await ctx.ui.confirm("Delete Mind", `Permanently delete mind "${mindName}" and all its facts?`);
         if (!ok) return;
-        const wasActive = mindManager.getActiveMindName() === mindName;
-        mindManager.delete(mindName);
+        const wasActive = activeMind() === mindName;
+        store!.deleteMind(mindName);
         if (wasActive) {
-          rebuildStorage(ctx.cwd);
+          store!.setActiveMind(null);
           updateStatus(ctx);
         }
         ctx.ui.notify(`Deleted mind: ${mindName}`, "success");
@@ -633,14 +609,14 @@ export default function (pi: ExtensionAPI) {
   }
 
   function updateStatus(ctx: ExtensionContext): void {
-    if (!ctx.hasUI) return;
+    if (!ctx.hasUI || !store) return;
 
-    const activeMind = mindManager?.getActiveMindName();
-    const lines = storage?.countLines() ?? 0;
-    if (activeMind) {
-      ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", `🧠 ${activeMind} (${lines})`));
+    const mind = activeMind();
+    const count = store.countActiveFacts(mind);
+    if (mind !== "default") {
+      ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", `🧠 ${mind} (${count})`));
     } else {
-      ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", `🧠 ${lines}`));
+      ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", `🧠 ${count}`));
     }
   }
 
@@ -649,26 +625,25 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("memory", {
     description: "Interactive mind manager — view, switch, create, fork, ingest memory stores",
     getArgumentCompletions: (prefix: string) => {
-      const subs = ["edit", "refresh", "clear", "archive", "link"];
+      const subs = ["edit", "refresh", "clear", "link", "stats"];
       const filtered = subs.filter((s) => s.startsWith(prefix));
       return filtered.length > 0 ? filtered.map((s) => ({ value: s, label: s })) : null;
     },
     handler: async (args, ctx) => {
-      if (!storage || !mindManager) {
+      if (!store) {
         ctx.ui.notify("Project memory not initialized", "error");
         return;
       }
 
       const subcommand = args?.trim().split(/\s+/)[0] ?? "";
 
-      // Direct subcommands (no interactive UI)
       switch (subcommand) {
         case "edit": {
-          const memory = storage.readMemory();
-          const edited = await ctx.ui.editor("Project Memory:", memory);
-          if (edited !== undefined && edited !== memory) {
-            storage.writeMemory(edited);
-            ctx.ui.notify("Memory updated", "success");
+          const mind = activeMind();
+          const rendered = store.renderForInjection(mind);
+          const edited = await ctx.ui.editor("Project Memory:", rendered);
+          if (edited !== undefined && edited !== rendered) {
+            ctx.ui.notify("Direct editing not yet supported for SQLite store. Use memory_store tool.", "warning");
           } else {
             ctx.ui.notify("No changes", "info");
           }
@@ -676,25 +651,31 @@ export default function (pi: ExtensionAPI) {
         }
 
         case "refresh": {
-          ctx.ui.notify("Pruning and consolidating memory (this takes 15–60s)…", "info");
-          const targetStorage = storage;
-
-          // Run as background extraction so the terminal isn't blocked
+          ctx.ui.notify("Running extraction to prune and consolidate memory (15–60s)…", "info");
           activeExtractionPromise = (async () => {
             try {
               triggerState.isRunning = true;
-              const currentMemory = targetStorage.readMemory();
-              const result = await runExtraction(
+              const mind = activeMind();
+              const currentFacts = store!.getActiveFacts(mind);
+              const factsFormatted = formatFactsForExtraction(currentFacts);
+              const rawOutput = await runExtractionV2(
                 ctx.cwd,
-                currentMemory,
-                `[Memory refresh requested. No new conversation context — prune stale facts, consolidate near-duplicates, and tighten wording on existing entries.]`,
+                currentFacts,
+                `[Memory refresh requested. Review existing facts for accuracy and relevance. Archive stale or redundant facts. No new conversation context.]`,
                 config,
               );
-              const { linesWritten, factsArchived } = targetStorage.writeExtractionResult(result);
-              ctx.ui.notify(
-                `Memory refreshed: ${linesWritten} lines active, ${factsArchived} facts archived`,
-                "success",
-              );
+              if (rawOutput.trim()) {
+                const actions = parseExtractionOutput(rawOutput);
+                if (actions.length > 0) {
+                  const result = store!.processExtraction(mind, actions);
+                  ctx.ui.notify(
+                    `Memory refreshed: ${result.added} added, ${result.reinforced} reinforced`,
+                    "success",
+                  );
+                }
+              } else {
+                ctx.ui.notify("No changes needed", "info");
+              }
               updateStatus(ctx);
             } catch (err: any) {
               ctx.ui.notify(`Refresh failed: ${err.message}`, "error");
@@ -707,11 +688,15 @@ export default function (pi: ExtensionAPI) {
         }
 
         case "clear": {
-          const ok = await ctx.ui.confirm("Clear Memory", "Reset current memory to empty template?");
+          const mind = activeMind();
+          const count = store.countActiveFacts(mind);
+          const ok = await ctx.ui.confirm("Clear Memory", `Archive all ${count} active facts in "${mind}"?`);
           if (ok) {
-            const template = storage.loadTemplate();
-            storage.writeMemory(template);
-            ctx.ui.notify("Memory cleared", "success");
+            const facts = store.getActiveFacts(mind);
+            for (const f of facts) {
+              store.archiveFact(f.id);
+            }
+            ctx.ui.notify(`Archived ${count} facts`, "success");
             updateStatus(ctx);
           }
           return;
@@ -724,51 +709,67 @@ export default function (pi: ExtensionAPI) {
             return;
           }
           const linkPath = parts[0];
-          const linkName = (parts[1] ?? path.basename(linkPath))
-            .replace(/[^a-zA-Z0-9_-]/g, "-")
-            .replace(/^[^a-zA-Z0-9]+/, "");
+          const rawName = parts[1] ?? path.basename(linkPath);
+          const linkName = sanitizeMindName(rawName);
           if (!linkName) {
             ctx.ui.notify("Could not derive a valid name from path", "error");
             return;
           }
-          if (mindManager.mindExists(linkName)) {
+          if (store.mindExists(linkName)) {
             ctx.ui.notify(`Mind "${linkName}" already exists`, "error");
             return;
           }
-          try {
-            const meta = mindManager.link(linkName, linkPath);
-            ctx.ui.notify(`Linked "${linkName}" from ${linkPath} (${meta.lineCount} lines, read-only)`, "success");
-          } catch (err: any) {
-            ctx.ui.notify(err.message, "error");
-          }
+          // For linked minds, we'd need to import from external path
+          // This is a simplified version — full link/sync needs more work
+          ctx.ui.notify(`Linked mind support is being rebuilt for SQLite store`, "warning");
           return;
         }
 
-        case "archive": {
-          const archives = storage.listArchive();
-          if (archives.length === 0) {
-            ctx.ui.notify("No archive files yet", "info");
-          } else {
-            const listing = archives.map((a) => `${a.month}: ${a.lines} facts`).join("\n");
-            ctx.ui.notify(`Memory Archive:\n${listing}`, "info");
+        case "stats": {
+          const mind = activeMind();
+          const facts = store.getActiveFacts(mind);
+          const total = facts.length;
+          const bySection = new Map<string, number>();
+          const bySource = new Map<string, number>();
+          let totalReinforcements = 0;
+          let avgConfidence = 0;
+
+          for (const f of facts) {
+            bySection.set(f.section, (bySection.get(f.section) ?? 0) + 1);
+            bySource.set(f.source, (bySource.get(f.source) ?? 0) + 1);
+            totalReinforcements += f.reinforcement_count;
+            avgConfidence += f.confidence;
           }
+          avgConfidence = total > 0 ? avgConfidence / total : 0;
+
+          const lines = [
+            `Mind: ${activeLabel()}`,
+            `Active facts: ${total}`,
+            `Avg confidence: ${(avgConfidence * 100).toFixed(1)}%`,
+            `Avg reinforcements: ${(totalReinforcements / Math.max(total, 1)).toFixed(1)}`,
+            "",
+            "By section:",
+            ...SECTIONS.map(s => `  ${s}: ${bySection.get(s) ?? 0}`),
+            "",
+            "By source:",
+            ...Array.from(bySource.entries()).map(([s, n]) => `  ${s}: ${n}`),
+          ];
+          ctx.ui.notify(lines.join("\n"), "info");
           return;
         }
       }
 
       // Interactive mind manager
-      const minds = mindManager.list();
-      const activeName = mindManager.getActiveMindName();
-      const items = buildMindItems(minds, activeName);
+      const minds = store.listMinds();
+      const active = activeMind();
+      const items = buildMindItems(minds, active);
 
       const selected = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
         const container = new Container();
         container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-        const currentLabel = activeName ?? "default";
         container.addChild(new Text(
           theme.fg("accent", theme.bold(" Memory Minds ")) +
-          theme.fg("dim", `(active: ${currentLabel})`),
+          theme.fg("dim", `(active: ${activeLabel()})`),
           1, 0,
         ));
 
@@ -794,91 +795,73 @@ export default function (pi: ExtensionAPI) {
 
       if (!selected) return;
 
-      // Handle actions
       if (selected === "__create__") {
-        const name = await ctx.ui.input("Mind name:");
-        if (!name?.trim()) return;
-        const sanitized = name.trim().replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^[^a-zA-Z0-9]+/, "");
-        if (!sanitized) {
+        const rawName = await ctx.ui.input("Mind name:");
+        if (!rawName?.trim()) return;
+        const name = sanitizeMindName(rawName);
+        if (!name) {
           ctx.ui.notify("Name must contain at least one alphanumeric character", "error");
           return;
         }
-        if (sanitized !== name.trim()) {
-          ctx.ui.notify(`Name sanitized to: ${sanitized}`, "info");
+        if (name !== rawName.trim()) {
+          ctx.ui.notify(`Name sanitized to: ${name}`, "info");
         }
-        if (mindManager.mindExists(sanitized)) {
-          ctx.ui.notify(`Mind "${sanitized}" already exists`, "error");
+        if (store.mindExists(name)) {
+          ctx.ui.notify(`Mind "${name}" already exists`, "error");
           return;
         }
         const desc = await ctx.ui.input("Description:");
-        mindManager.create(sanitized, desc ?? "");
-        const activate = await ctx.ui.confirm("Activate", `Switch to "${sanitized}" now?`);
+        store.createMind(name, desc ?? "");
+        const activate = await ctx.ui.confirm("Activate", `Switch to "${name}" now?`);
         if (activate) {
-          mindManager.setActiveMind(sanitized);
-          rebuildStorage(ctx.cwd);
+          store.setActiveMind(name);
           updateStatus(ctx);
-          notifyMindSwitch(sanitized, storage!.countLines());
+          notifyMindSwitch(name, 0);
         }
-        ctx.ui.notify(`Created mind: ${sanitized}`, "success");
+        ctx.ui.notify(`Created mind: ${name}`, "success");
         return;
       }
 
       if (selected === "__link__") {
-        const linkPath = await ctx.ui.input("Path to external mind directory:");
-        if (!linkPath?.trim()) return;
-        const linkName = await ctx.ui.input("Local name for this mind:");
-        if (!linkName?.trim()) return;
-        const sanitized = linkName.trim().replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^[^a-zA-Z0-9]+/, "");
-        if (!sanitized) {
-          ctx.ui.notify("Name must contain at least one alphanumeric character", "error");
-          return;
-        }
-        if (sanitized !== linkName.trim()) {
-          ctx.ui.notify(`Name sanitized to: ${sanitized}`, "info");
-        }
-        if (mindManager.mindExists(sanitized)) {
-          ctx.ui.notify(`Mind "${sanitized}" already exists`, "error");
-          return;
-        }
-        try {
-          const meta = mindManager.link(sanitized, linkPath.trim());
-          ctx.ui.notify(`Linked "${sanitized}" from ${linkPath.trim()} (${meta.lineCount} lines, read-only)`, "success");
-        } catch (err: any) {
-          ctx.ui.notify(err.message, "error");
-        }
+        ctx.ui.notify("Linked mind support is being rebuilt for SQLite store", "warning");
         return;
       }
 
       if (selected === "__edit__") {
-        const memory = storage.readMemory();
-        const edited = await ctx.ui.editor("Edit Current Mind:", memory);
-        if (edited !== undefined && edited !== memory) {
-          storage.writeMemory(edited);
-          ctx.ui.notify("Memory updated", "success");
-          updateStatus(ctx);
+        const mind = activeMind();
+        const rendered = store.renderForInjection(mind);
+        const edited = await ctx.ui.editor("Edit Current Mind:", rendered);
+        if (edited !== undefined && edited !== rendered) {
+          ctx.ui.notify("Direct editing not yet supported for SQLite store. Use memory_store tool.", "warning");
         }
         return;
       }
 
       if (selected === "__refresh__") {
-        // Delegate to the refresh subcommand handler
-        ctx.ui.notify("Pruning and consolidating memory (this takes 15–60s)…", "info");
-        const targetStorage = storage;
+        ctx.ui.notify("Running extraction to prune and consolidate memory (15–60s)…", "info");
         activeExtractionPromise = (async () => {
           try {
             triggerState.isRunning = true;
-            const currentMemory = targetStorage.readMemory();
-            const result = await runExtraction(
+            const mind = activeMind();
+            const currentFacts = store!.getActiveFacts(mind);
+            const rawOutput = await runExtractionV2(
               ctx.cwd,
-              currentMemory,
-              `[Memory refresh requested. No new conversation context — prune stale facts, consolidate near-duplicates, and tighten wording on existing entries.]`,
+              currentFacts,
+              `[Memory refresh requested. Review existing facts for accuracy and relevance. Archive stale or redundant facts. No new conversation context.]`,
               config,
             );
-            const { linesWritten, factsArchived } = targetStorage.writeExtractionResult(result);
-            ctx.ui.notify(
-              `Memory refreshed: ${linesWritten} lines active, ${factsArchived} facts archived`,
-              "success",
-            );
+            if (rawOutput.trim()) {
+              const actions = parseExtractionOutput(rawOutput);
+              if (actions.length > 0) {
+                const result = store!.processExtraction(mind, actions);
+                ctx.ui.notify(
+                  `Memory refreshed: ${result.added} added, ${result.reinforced} reinforced`,
+                  "success",
+                );
+              }
+            } else {
+              ctx.ui.notify("No changes needed", "info");
+            }
             updateStatus(ctx);
           } catch (err: any) {
             ctx.ui.notify(`Refresh failed: ${err.message}`, "error");
@@ -890,23 +873,8 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      if (selected === "__default__") {
-        if (activeName === null) {
-          ctx.ui.notify("Already using default memory", "info");
-          return;
-        }
-        mindManager.setActiveMind(null);
-        rebuildStorage(ctx.cwd);
-        updateStatus(ctx);
-        ctx.ui.notify("Switched to default memory", "success");
-        notifyMindSwitch("default", storage!.countLines());
-        return;
-      }
-
       // Selected an existing mind — show actions
       await showMindActions(ctx, selected);
     },
   });
-
-
 }
