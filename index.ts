@@ -123,44 +123,23 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", async (_event, ctx) => {
     sessionActive = false;
 
+    // Only wait briefly for an already-running extraction.
+    // Do NOT start a new extraction during shutdown — the TUI remains interactive
+    // and long-running extractions cause stray keypresses to trigger UI overlays
+    // (e.g., Session Tree). Unextracted data persists and will be picked up next session.
     if (activeExtractionPromise) {
       if (ctx.hasUI) {
         ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", "saving memory…"));
       }
       let timeoutId: NodeJS.Timeout | null = null;
       const timeout = new Promise<void>((resolve) => {
-        timeoutId = setTimeout(resolve, config.shutdownExtractionTimeout);
+        timeoutId = setTimeout(resolve, 5_000);
       });
       await Promise.race([activeExtractionPromise, timeout]);
       if (timeoutId) clearTimeout(timeoutId);
-      store?.close(); globalStore?.close();
-      return;
     }
 
-    if (!store) return;
-    const usage = ctx.getContextUsage();
-    if (!usage) { store.close(); globalStore?.close(); return; }
-
-    const hasActivity = triggerState.toolCallsSinceExtract >= 2 ||
-      (usage.tokens - triggerState.lastExtractedTokens) >= config.minimumTokensBetweenUpdate;
-
-    if (!hasActivity) { store.close(); globalStore?.close(); return; }
-
-    if (ctx.hasUI) {
-      ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", "saving memory…"));
-    }
-
-    const shutdownConfig = { ...config, extractionTimeout: config.shutdownExtractionTimeout };
-
-    try {
-      triggerState.isRunning = true;
-      await runExtractionCycle(ctx, shutdownConfig);
-    } catch {
-      // Best-effort
-    } finally {
-      triggerState.isRunning = false;
-      store?.close(); globalStore?.close();
-    }
+    store?.close(); globalStore?.close();
   });
 
   pi.on("session_compact", async (_event, ctx) => {
