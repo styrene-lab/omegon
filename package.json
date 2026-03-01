@@ -8,5 +8,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "better-sqlite3": "^12.6.2"
+  },
+  "overrides": {
+    "prebuild-install": "7.1.3"
   }
 }
