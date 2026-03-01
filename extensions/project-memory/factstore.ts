@@ -1036,6 +1036,213 @@ export class FactStore {
   }
 
   // ---------------------------------------------------------------------------
+  // JSONL Export/Import — portable fact sync across machines
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Export all facts and edges to JSONL format.
+   * Each line is a self-contained JSON object with type prefix.
+   * Includes all statuses so the full history is portable.
+   */
+  exportToJsonl(): string {
+    const lines: string[] = [];
+
+    // Export minds (except default which is auto-created)
+    const minds = this.listMinds();
+    for (const mind of minds) {
+      if (mind.name === "default") continue;
+      lines.push(JSON.stringify({
+        _type: "mind",
+        name: mind.name,
+        description: mind.description,
+        status: mind.status,
+        origin_type: mind.origin_type,
+        created_at: mind.created_at,
+      }));
+    }
+
+    // Export all active facts (all minds)
+    const allFacts = this.db.prepare(
+      `SELECT * FROM facts WHERE status = 'active' ORDER BY mind, section, created_at`
+    ).all() as Fact[];
+
+    for (const fact of allFacts) {
+      lines.push(JSON.stringify({
+        _type: "fact",
+        id: fact.id,
+        mind: fact.mind,
+        section: fact.section,
+        content: fact.content,
+        status: fact.status,
+        created_at: fact.created_at,
+        source: fact.source,
+        content_hash: fact.content_hash,
+        confidence: fact.confidence,
+        last_reinforced: fact.last_reinforced,
+        reinforcement_count: fact.reinforcement_count,
+        decay_rate: fact.decay_rate,
+        supersedes: fact.supersedes,
+      }));
+    }
+
+    // Export active edges
+    const allEdges = this.db.prepare(
+      `SELECT * FROM edges WHERE status = 'active' ORDER BY created_at`
+    ).all() as Edge[];
+
+    for (const edge of allEdges) {
+      lines.push(JSON.stringify({
+        _type: "edge",
+        id: edge.id,
+        source_fact_id: edge.source_fact_id,
+        target_fact_id: edge.target_fact_id,
+        relation: edge.relation,
+        description: edge.description,
+        confidence: edge.confidence,
+        last_reinforced: edge.last_reinforced,
+        reinforcement_count: edge.reinforcement_count,
+        decay_rate: edge.decay_rate,
+        source_mind: edge.source_mind,
+        target_mind: edge.target_mind,
+      }));
+    }
+
+    return lines.join("\n") + "\n";
+  }
+
+  /**
+   * Import from JSONL, merging with existing data.
+   * Uses content_hash dedup for facts — existing facts get reinforced,
+   * new facts get inserted. Edges dedup by source+target+relation.
+   * Returns counts of what happened.
+   */
+  importFromJsonl(jsonl: string): { factsAdded: number; factsReinforced: number; edgesAdded: number; edgesReinforced: number; mindsCreated: number } {
+    let factsAdded = 0;
+    let factsReinforced = 0;
+    let edgesAdded = 0;
+    let edgesReinforced = 0;
+    let mindsCreated = 0;
+
+    // Map from imported fact ID → local fact ID (for edge remapping)
+    const factIdMap = new Map<string, string>();
+
+    const tx = this.db.transaction(() => {
+      for (const line of jsonl.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        let record: any;
+        try {
+          record = JSON.parse(trimmed);
+        } catch {
+          continue;
+        }
+
+        switch (record._type) {
+          case "mind": {
+            if (!this.mindExists(record.name)) {
+              this.createMind(record.name, record.description ?? "", {
+                origin_type: record.origin_type ?? "local",
+              });
+              mindsCreated++;
+            }
+            break;
+          }
+          case "fact": {
+            const mind = record.mind ?? "default";
+            if (!this.mindExists(mind)) {
+              this.createMind(mind, "", { origin_type: "local" });
+              mindsCreated++;
+            }
+
+            // Dedup by content hash
+            const hash = record.content_hash ?? contentHash(record.content);
+            const existing = this.db.prepare(
+              `SELECT id FROM facts WHERE mind = ? AND content_hash = ? AND status = 'active'`
+            ).get(mind, hash);
+
+            if (existing) {
+              // Reinforce, take higher reinforcement count
+              const existingFact = this.getFact(existing.id);
+              if (existingFact && record.reinforcement_count > existingFact.reinforcement_count) {
+                this.db.prepare(`
+                  UPDATE facts SET reinforcement_count = ?, last_reinforced = ?, confidence = 1.0
+                  WHERE id = ?
+                `).run(record.reinforcement_count, record.last_reinforced ?? new Date().toISOString(), existing.id);
+              } else {
+                this.reinforceFact(existing.id);
+              }
+              factIdMap.set(record.id, existing.id);
+              factsReinforced++;
+            } else {
+              const id = nanoid();
+              const now = new Date().toISOString();
+              this.db.prepare(`
+                INSERT INTO facts (id, mind, section, content, status, created_at, created_session,
+                                   supersedes, source, content_hash, confidence, last_reinforced,
+                                   reinforcement_count, decay_rate)
+                VALUES (?, ?, ?, ?, 'active', ?, NULL, ?, ?, ?, ?, ?, ?, ?)
+              `).run(
+                id, mind, record.section, record.content,
+                record.created_at ?? now,
+                record.supersedes ?? null,
+                record.source ?? "ingest",
+                hash,
+                record.confidence ?? 1.0,
+                record.last_reinforced ?? now,
+                record.reinforcement_count ?? 1,
+                record.decay_rate ?? this.decayProfile.baseRate,
+              );
+              factIdMap.set(record.id, id);
+              factsAdded++;
+            }
+            break;
+          }
+          case "edge": {
+            // Remap fact IDs
+            const sourceId = factIdMap.get(record.source_fact_id) ?? record.source_fact_id;
+            const targetId = factIdMap.get(record.target_fact_id) ?? record.target_fact_id;
+
+            // Verify both facts exist locally
+            if (!this.getFact(sourceId) || !this.getFact(targetId)) continue;
+
+            const result = this.storeEdge({
+              sourceFact: sourceId,
+              targetFact: targetId,
+              relation: record.relation,
+              description: record.description,
+              sourceMind: record.source_mind,
+              targetMind: record.target_mind,
+            });
+
+            if (result.duplicate) {
+              edgesReinforced++;
+            } else {
+              edgesAdded++;
+            }
+            break;
+          }
+        }
+      }
+    });
+
+    tx();
+    return { factsAdded, factsReinforced, edgesAdded, edgesReinforced, mindsCreated };
+  }
+
+  /**
+   * Get the mtime of the database file, or null if it doesn't exist.
+   */
+  getDbMtime(): Date | null {
+    try {
+      const stat = fs.statSync(this.dbPath);
+      return stat.mtime;
+    } catch {
+      return null;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 

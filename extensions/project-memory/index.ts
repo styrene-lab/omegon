@@ -94,16 +94,49 @@ export default function (pi: ExtensionAPI) {
     // Uses global.db to avoid collision with project facts.db when CWD is ~/
     globalStore = new FactStore(globalMemoryDir, { decay: GLOBAL_DECAY, dbName: "global.db" });
 
-    // Ensure .gitignore covers memory/
+    // Auto-import: if facts.jsonl exists and is newer than facts.db, merge it in.
+    // This enables cross-machine sync — pull facts.jsonl via git, rebuild local db.
+    const jsonlPath = path.join(memoryDir, "facts.jsonl");
+    try {
+      const fsSync = await import("node:fs");
+      if (fsSync.existsSync(jsonlPath)) {
+        const jsonlMtime = fsSync.statSync(jsonlPath).mtime;
+        const dbMtime = store.getDbMtime();
+        // Import if db is fresh (just created) or jsonl is newer
+        if (!dbMtime || jsonlMtime > dbMtime) {
+          const jsonl = fsSync.readFileSync(jsonlPath, "utf8");
+          const result = store.importFromJsonl(jsonl);
+          if (ctx.hasUI && (result.factsAdded > 0 || result.edgesAdded > 0)) {
+            ctx.ui.notify(
+              `Memory sync: +${result.factsAdded} facts, ${result.factsReinforced} reinforced, +${result.edgesAdded} edges`,
+              "success"
+            );
+          }
+        }
+      }
+    } catch {
+      // Best effort — don't block startup
+    }
+
+    // Ensure .gitignore covers memory/ db files but allows facts.jsonl
     const gitignorePath = path.join(memoryDir, "..", ".gitignore");
     try {
       const fs = await import("node:fs");
-      const existing = fs.existsSync(gitignorePath)
+      let existing = fs.existsSync(gitignorePath)
         ? fs.readFileSync(gitignorePath, "utf8")
         : "";
-      if (!existing.includes("memory/")) {
-        const entry = existing.endsWith("\n") || existing === "" ? "memory/\n" : "\nmemory/\n";
-        fs.writeFileSync(gitignorePath, existing + entry, "utf8");
+      let changed = false;
+      if (!existing.includes("memory/*.db")) {
+        existing += (existing.endsWith("\n") || existing === "" ? "" : "\n") + "memory/*.db\nmemory/*.db-wal\nmemory/*.db-shm\n";
+        changed = true;
+      }
+      // Remove old blanket "memory/" ignore if present (we now want facts.jsonl tracked)
+      if (existing.includes("memory/\n")) {
+        existing = existing.replace("memory/\n", "");
+        changed = true;
+      }
+      if (changed) {
+        fs.writeFileSync(gitignorePath, existing, "utf8");
       }
     } catch {
       // Best effort
@@ -137,6 +170,18 @@ export default function (pi: ExtensionAPI) {
       });
       await Promise.race([activeExtractionPromise, timeout]);
       if (timeoutId) clearTimeout(timeoutId);
+    }
+
+    // Auto-export: write facts.jsonl for cross-machine sync via git
+    if (store) {
+      try {
+        const fsSync = await import("node:fs");
+        const jsonlPath = path.join(memoryDir, "facts.jsonl");
+        const jsonl = store.exportToJsonl();
+        fsSync.writeFileSync(jsonlPath, jsonl, "utf8");
+      } catch {
+        // Best effort — don't block shutdown
+      }
     }
 
     store?.close(); globalStore?.close();
