@@ -16,7 +16,7 @@ Verify the CLI is installed:
 which cleave
 ```
 
-If missing, tell user: `pipx install cleave`
+If missing, tell user: `pipx install styrene-cleave`
 
 ## State Machine
 
@@ -159,7 +159,7 @@ Present to user:
 
 | Condition | Action |
 |-----------|--------|
-| CLI not found | Tell user to install: `pipx install cleave` |
+| CLI not found | Tell user to install: `pipx install styrene-cleave` |
 | Non-zero exit with no JSON on stdout | Read stderr, present error to user |
 | Budget exhaustion | Present cost summary, ask user whether to increase budget and retry |
 | Circuit breaker tripped | Present failure count and errors, ask user |
