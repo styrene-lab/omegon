@@ -62,8 +62,8 @@ export default function (pi: ExtensionAPI) {
       parts.push(dim(autoCompact ? "(auto)" : "(manual)"));
 
       ctx.ui.setStatus("status-bar", parts.join(" "));
-    } catch {
-      // Don't break anything
+    } catch (err) {
+      console.error("[status-bar] render error:", err);
     }
   }
 

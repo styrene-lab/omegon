@@ -6,7 +6,21 @@
   "author": "",
   "license": "ISC",
   "pi": {
-    "extensions": ["./extensions"],
+    "extensions": [
+      "./extensions/00-secrets",
+      "./extensions/defaults.ts",
+      "./extensions/diffuse",
+      "./extensions/local-inference",
+      "./extensions/mcp-bridge",
+      "./extensions/model-budget.ts",
+      "./extensions/offline-driver.ts",
+      "./extensions/project-memory",
+      "./extensions/spinner-verbs.ts",
+      "./extensions/status-bar.ts",
+      "./extensions/terminal-title.ts",
+      "./extensions/view",
+      "./extensions/web-search"
+    ],
     "skills": ["./skills"],
     "prompts": ["./prompts"]
   },
