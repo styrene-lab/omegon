@@ -1,43 +1,56 @@
 /**
- * status-bar — Session usage tracking (complements Pi's built-in status)
+ * status-bar — Severity-colored context gauge + turn counter
  *
- * Renders: $0.43 (sub) 0.2%/200k (auto)
+ * Renders: T{turns} ████████░░░░░░░░ {pct}%
  *
- * Only shows session cost + context % — Pi's built-in row already renders
- * the model name, full context gauge, and token counters.
+ * Bar color = context fullness severity (a direct value proposition —
+ * it affects both remaining window AND inference quality):
+ *   green (<70%), yellow (70-90%), red (>90%)
  *
- * Also provides /usage command that opens the Claude usage dashboard.
+ * The built-in footer already renders token counts, cost, model, and
+ * context %/window on line 2 — this extension adds only the visual
+ * gauge and turn counter.
+ *
+ * Source: ctx.getContextUsage().percent
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
-interface SessionUsage {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  cost: number;
-}
-
 export default function (pi: ExtensionAPI) {
-  const session: SessionUsage = {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    cost: 0,
-  };
+  let turns = 0;
 
-  function formatTokens(n: number): string {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-    return n.toString();
-  }
+  /**
+   * Build a context gauge colored by severity.
+   *
+   * Color reflects a single value proposition: context fullness directly
+   * affects remaining window capacity AND current inference quality.
+   *   green (<70%)  — plenty of room
+   *   yellow (70-90%) — getting tight, consider compacting
+   *   red (>90%)    — compact now, quality is degrading
+   *
+   * Token types (cache/input/output) are NOT color-coded here — they have
+   * no inherent good/bad mapping, and the built-in footer already shows
+   * their counts as ↑input ↓output R{cache} W{write}.
+   *
+   * Source: ctx.getContextUsage().percent
+   */
+  function buildContextBar(ctx: ExtensionContext, barWidth: number): string {
+    const theme = ctx.ui.theme;
+    const usage = ctx.getContextUsage();
+    const pct = usage?.percent ?? 0;
 
-  function formatCost(n: number): string {
-    if (n >= 100) return `$${Math.round(n)}`;
-    if (n >= 10) return `$${n.toFixed(1)}`;
-    return `$${n.toFixed(3)}`;
+    if (barWidth <= 0) return "";
+
+    const filledBlocks = pct > 0 ? Math.max(1, Math.round((pct / 100) * barWidth)) : 0;
+    const emptyBlocks = barWidth - filledBlocks;
+
+    const color = pct > 90 ? "error" : pct > 70 ? "warning" : "success";
+
+    let bar = "";
+    if (filledBlocks > 0) bar += theme.fg(color, "█".repeat(filledBlocks));
+    if (emptyBlocks > 0) bar += theme.fg("dim", "░".repeat(emptyBlocks));
+
+    return bar;
   }
 
   function render(ctx: ExtensionContext) {
@@ -45,21 +58,26 @@ export default function (pi: ExtensionAPI) {
 
     try {
       const theme = ctx.ui.theme;
-      const dim = (s: string) => theme.fg("dim", s);
-      const parts: string[] = [];
-
-      // Session cost
-      parts.push(theme.fg("accent", formatCost(session.cost)) + " " + dim("(sub)"));
-
-      // Context % (compact — Pi's built-in has the full gauge)
       const usage = ctx.getContextUsage();
       const pct = usage?.percent ?? 0;
-      const win = usage?.contextWindow || ctx.model?.contextWindow || 0;
-      parts.push(`${Math.round(pct)}%/${formatTokens(win)}`);
 
-      // Compaction mode hint
-      const autoCompact = true; // pi default
-      parts.push(dim(autoCompact ? "(auto)" : "(manual)"));
+      // T{turns} [████████░░░░] {pct}%
+      const parts: string[] = [];
+
+      parts.push(theme.fg("dim", `T${turns}`));
+
+      const bar = buildContextBar(ctx, 16);
+      if (bar) parts.push(bar);
+
+      // Context % — colored by severity
+      const pctStr = `${Math.round(pct)}%`;
+      if (pct > 90) {
+        parts.push(theme.fg("error", pctStr));
+      } else if (pct > 70) {
+        parts.push(theme.fg("warning", pctStr));
+      } else {
+        parts.push(theme.fg("dim", pctStr));
+      }
 
       ctx.ui.setStatus("status-bar", parts.join(" "));
     } catch (err) {
@@ -68,42 +86,23 @@ export default function (pi: ExtensionAPI) {
   }
 
   // — Events —
+  // Re-render after state changes. Source: pi extension event lifecycle.
 
   pi.on("session_start", async (_event, ctx) => {
-    session.input = 0;
-    session.output = 0;
-    session.cacheRead = 0;
-    session.cacheWrite = 0;
-    session.cost = 0;
+    turns = 0;
     render(ctx);
   });
 
-  // Accumulate usage from assistant messages
-  pi.on("message_end", async (event: any, ctx) => {
-    const msg = event?.message;
-    if (msg?.role === "assistant" && msg?.usage) {
-      const u = msg.usage;
-      session.input += u.input || 0;
-      session.output += u.output || 0;
-      session.cacheRead += u.cacheRead || 0;
-      session.cacheWrite += u.cacheWrite || 0;
-      if (u.cost?.total) {
-        session.cost += u.cost.total;
-      }
-    }
+  pi.on("turn_end", async (_event, ctx) => {
+    turns++;
+    render(ctx);
+  });
+
+  pi.on("message_end", async (_event, ctx) => {
     render(ctx);
   });
 
   pi.on("tool_execution_end", async (_event, ctx) => {
     render(ctx);
-  });
-
-  // — /usage command — opens Claude usage dashboard
-  pi.registerCommand("usage", {
-    description: "Open Claude usage dashboard in browser",
-    handler: async (_args, ctx) => {
-      await pi.exec("open", ["https://claude.ai/settings/usage"]);
-      ctx.ui.notify("Opened claude.ai/settings/usage", "info");
-    },
   });
 }
