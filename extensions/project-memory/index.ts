@@ -1578,29 +1578,25 @@ export default function (pi: ExtensionAPI) {
     const mind = activeMind();
     const count = store.countActiveFacts(mind);
 
-    const parts: string[] = [];
-
-    // Mind name (only shown for non-default)
-    if (mind !== "default") {
-      parts.push(theme.fg("dim", `Memory(${mind}):`));
-    } else {
-      parts.push(theme.fg("dim", "Memory:"));
-    }
-
-    // Fact count
-    parts.push(theme.fg("dim", `${count} facts`));
+    // Label + fact count as a single unit: "Memory: 2 facts" or "Memory(mind): 2 facts"
+    const label = mind !== "default" ? `Memory(${mind}): ${count} facts` : `Memory: ${count} facts`;
+    const badges: string[] = [];
 
     // Working memory — pinned facts count
     if (workingMemory.size > 0) {
-      parts.push(theme.fg("dim", `${workingMemory.size} pinned`));
+      badges.push(`${workingMemory.size} pinned`);
     }
 
     // Semantic search availability
     if (embeddingAvailable) {
-      parts.push(theme.fg("dim", "🕸️ semantic"));
+      badges.push("semantic");
     }
 
-    ctx.ui.setStatus("memory", parts.join(theme.fg("dim", " · ")));
+    const status = badges.length > 0
+      ? `${label} · ${badges.join(" · ")}`
+      : label;
+
+    ctx.ui.setStatus("memory", theme.fg("dim", status));
   }
 
   // --- Commands ---
