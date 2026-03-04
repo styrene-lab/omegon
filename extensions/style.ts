@@ -26,7 +26,7 @@ const CORE_PALETTE = {
 };
 
 const SIGNALS = {
-	green:  "#3daa8e",
+	green:  "#34d399",
 	red:    "#f44747",
 	orange: "#e98100",
 	yellow: "#e9c400",

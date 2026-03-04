@@ -13,7 +13,7 @@
 		"surfaceBg": "#1a2428",
 		"borderColor": "#2d4a47",
 		"borderDim": "#1e3533",
-		"green": "#3daa8e",
+		"green": "#34d399",
 		"red": "#f44747",
 		"orange": "#e98100",
 		"yellow": "#e9c400"
@@ -62,7 +62,7 @@
 		"syntaxKeyword": "#3dc9b0",
 		"syntaxFunction": "#8ac4b8",
 		"syntaxVariable": "#d4e8e4",
-		"syntaxString": "#3daa8e",
+		"syntaxString": "#34d399",
 		"syntaxNumber": "#e9c400",
 		"syntaxType": "#5fb8a8",
 		"syntaxOperator": "#8a9a96",
