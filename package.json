@@ -20,6 +20,7 @@
       "./extensions/project-memory",
       "./extensions/spinner-verbs.ts",
       "./extensions/status-bar.ts",
+      "./extensions/style.ts",
       "./extensions/terminal-title.ts",
       "./extensions/view",
       "./extensions/web-search"
