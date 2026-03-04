@@ -23,7 +23,7 @@ Principles:
 
 ### Core Palette
 
-Derived from `themes/verdant.json`. These are the ground-truth tokens.
+Derived from `themes/default.json`. These are the ground-truth tokens.
 
 | Token | Hex | Role |
 |-------|-----|------|
@@ -198,7 +198,7 @@ group: Infrastructure {
 - Use `diagram` preset (1024×768) for technical visuals
 - Use `schnell` for iteration, `dev` for finals
 - Quantize to `4` bits on 16GB machines
-- Prompts should reference the verdant palette by description: "dark teal-green accent on deep charcoal background"
+- Prompts should reference the palette by description: "dark teal-green accent on deep charcoal background"
 
 ---
 

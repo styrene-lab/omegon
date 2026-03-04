@@ -1,7 +1,7 @@
 /**
  * defaults — Auto-configure pi-kit defaults on first install
  *
- * Sets theme to verdant if no theme is configured.
+ * Sets theme to default if no theme is configured.
  * Only writes settings once (checks before writing to avoid clobbering user choice).
  */
 
@@ -22,16 +22,16 @@ export default function (pi: ExtensionAPI) {
 
       let changed = false;
 
-      // Set verdant theme if no theme is configured
+      // Set default theme if no theme is configured
       if (!settings.theme) {
-        settings.theme = "verdant";
+        settings.theme = "default";
         changed = true;
       }
 
       if (changed) {
         fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n", "utf8");
         if (ctx.hasUI) {
-          ctx.ui.notify("pi-kit: set theme to verdant (restart to apply)", "success");
+          ctx.ui.notify("pi-kit: set theme to default (restart to apply)", "success");
         }
       }
     } catch {

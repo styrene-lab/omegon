@@ -1,6 +1,6 @@
 {
 	"$schema": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
-	"name": "verdant",
+	"name": "default",
 	"vars": {
 		"primary": "#3dc9b0",
 		"primaryMuted": "#4a9e90",
