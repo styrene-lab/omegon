@@ -1,7 +1,7 @@
 // @secret HF_TOKEN "HuggingFace token (gated model access for FLUX.1)"
 // @config DIFFUSION_CLI_DIR "Path to uv project with mflux installed" [default: ~/diffusion-cli]
 // @config PI_VISUALS_DIR "Output directory for generated images and diagrams" [default: ~/.pi/visuals]
-// @config EXCALIDRAW_RENDER_DIR "Path to Excalidraw render pipeline (uv + playwright)" [default: <pi-kit>/skills/visualize/references/excalidraw]
+// @config EXCALIDRAW_RENDER_DIR "Path to Excalidraw render pipeline (uv + playwright)" [default: <pi-kit>/extensions/render/excalidraw-renderer]
 
 /**
  * render — Visual rendering extension for pi
@@ -70,10 +70,9 @@ function hasCmd(cmd: string): boolean {
 
 const DIFFUSION_CLI_DIR = process.env.DIFFUSION_CLI_DIR || join(homedir(), "diffusion-cli");
 
-// Excalidraw renderer lives alongside the visualize skill references.
-// Resolve relative to this extension file → ../../skills/visualize/references/excalidraw
+// Excalidraw renderer lives alongside this extension.
 const EXCALIDRAW_RENDER_DIR = process.env.EXCALIDRAW_RENDER_DIR ||
-	join(import.meta.dirname ?? __dirname, "..", "..", "skills", "visualize", "references", "excalidraw");
+	join(import.meta.dirname ?? __dirname, "excalidraw-renderer");
 
 const PRESETS = ["schnell", "dev", "dev-fast", "diagram", "portrait", "wide"] as const;
 
@@ -319,6 +318,17 @@ export default function renderExtension(pi: ExtensionAPI) {
 			"Output is saved to ~/.pi/visuals/. " +
 			"First-time setup: cd <render_dir> && uv sync && uv run playwright install chromium",
 		promptSnippet: "Render .excalidraw JSON files to inline PNG images",
+		promptGuidelines: [
+			"Include ALL necessary context in the prompt — the local model cannot see conversation history or access tools",
+			"Use Excalidraw for freeform visual arguments where spatial layout matters — not for structural diagrams (use D2 for those)",
+			"Write complete .excalidraw JSON with the element template: roughness 0, fillStyle solid, fontFamily 3 (Cascadia), viewBackgroundColor #ffffff",
+			"Every element id must be unique; index values must be alphabetically ordered (a0, a1, a2...)",
+			"If a text element has containerId, the container must list that text in boundElements",
+			"Arrow points are relative to the arrow's x/y — first point is always [0, 0]",
+			"Apply Verdant semantic colors: primary (#3b82f6/#1e3a5f), start (#fed7aa/#c2410c), end (#a7f3d0/#047857), decision (#fef3c7/#b45309), ai (#ddd6fe/#6d28d9), evidence (#1e293b/#334155)",
+			"Text on dark fills: #ffffff. Text on light fills: #374151",
+			"Diagrams argue, not display — the shape should mirror the concept (fan-out for one-to-many, convergence for aggregation, timeline for sequences)",
+		],
 		parameters: Type.Object({
 			path:   Type.String({ description: "Path to .excalidraw JSON file to render" }),
 			scale:  Type.Optional(Type.Number({ description: "Device scale factor (default: 2)" })),

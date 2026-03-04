@@ -11,19 +11,23 @@
   "pi": {
     "extensions": [
       "./extensions/00-secrets",
+      "./extensions/chronos",
       "./extensions/defaults.ts",
+      "./extensions/distill.ts",
       "./extensions/render",
       "./extensions/local-inference",
       "./extensions/mcp-bridge",
       "./extensions/model-budget.ts",
       "./extensions/offline-driver.ts",
       "./extensions/project-memory",
+      "./extensions/session-log.ts",
       "./extensions/spinner-verbs.ts",
       "./extensions/status-bar.ts",
       "./extensions/style.ts",
       "./extensions/terminal-title.ts",
       "./extensions/view",
-      "./extensions/web-search"
+      "./extensions/web-search",
+      "./extensions/whoami.ts"
     ],
     "skills": ["./skills"],
     "prompts": ["./prompts"]
