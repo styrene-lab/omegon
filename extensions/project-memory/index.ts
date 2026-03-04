@@ -1574,15 +1574,33 @@ export default function (pi: ExtensionAPI) {
   function updateStatus(ctx: ExtensionContext): void {
     if (!ctx.hasUI || !store) return;
 
+    const theme = ctx.ui.theme;
     const mind = activeMind();
     const count = store.countActiveFacts(mind);
-    const vecIcon = embeddingAvailable ? "⚡" : "";
-    const wmCount = workingMemory.size > 0 ? ` wm:${workingMemory.size}` : "";
+
+    const parts: string[] = [];
+
+    // Mind name (only shown for non-default)
     if (mind !== "default") {
-      ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", `🧠${vecIcon} ${mind} (${count}${wmCount})`));
+      parts.push(theme.fg("dim", `Memory(${mind}):`));
     } else {
-      ctx.ui.setStatus("memory", ctx.ui.theme.fg("dim", `🧠${vecIcon} ${count}${wmCount}`));
+      parts.push(theme.fg("dim", "Memory:"));
     }
+
+    // Fact count
+    parts.push(theme.fg("dim", `${count} facts`));
+
+    // Working memory — pinned facts count
+    if (workingMemory.size > 0) {
+      parts.push(theme.fg("dim", `${workingMemory.size} pinned`));
+    }
+
+    // Semantic search availability
+    if (embeddingAvailable) {
+      parts.push(theme.fg("dim", "semantic"));
+    }
+
+    ctx.ui.setStatus("memory", parts.join(theme.fg("dim", " · ")));
   }
 
   // --- Commands ---
