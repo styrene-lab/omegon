@@ -134,6 +134,25 @@ refactor/split-service-layer
 
 **Main branch**: `main`. Tags and releases are cut from main only.
 
+### Cleave Branches (Ephemeral)
+
+The cleave extension creates worktree branches for parallel task execution. These follow a distinct pattern:
+
+```
+cleave/<childId>-<label>
+```
+
+Cleave branches are **merge-and-delete** — never long-lived. After `cleave_run` completes:
+- Worktree directories are pruned automatically
+- Local branches may linger — clean up with `git branch --merged main | grep cleave/ | xargs -r git branch -d`
+- On merge failure, branches are preserved for manual resolution
+
+### Rebase Restrictions
+
+**Never rebase branches that modify `.pi/memory/facts.jsonl`.**
+
+The JSONL memory file uses `merge=union` in `.gitattributes`, which keeps all lines from both sides on merge. Rebase replays commits sequentially, losing one side's additions. Always use merge commits when `facts.jsonl` is involved.
+
 ## Tagging
 
 ```bash
@@ -207,3 +226,25 @@ git push origin main --tags
 ```
 
 See `_reference/ci-validation.md` for CI workflow templates that enforce these conventions.
+
+## Memory-Safe Merge Workflow
+
+When merging branches that touch `facts.jsonl`, follow this sequence:
+
+```bash
+# Merge (never rebase)
+git checkout main
+git merge feature/my-feature
+
+# facts.jsonl auto-resolves via merge=union — no manual conflict resolution needed
+# If .gitattributes merge=union isn't configured, keep ALL lines from both sides
+
+# Verify
+git diff HEAD -- .pi/memory/facts.jsonl  # should show additions from both sides
+
+# Clean up
+git branch -d feature/my-feature
+git push origin --delete feature/my-feature  # if pushed
+```
+
+The `importFromJsonl()` function deduplicates by `content_hash` on next session start, so redundant lines from union merge are harmless.
