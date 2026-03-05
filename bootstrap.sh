@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash disable=SC2059,SC2016,SC1091
 # =============================================================================
 # pi-kit bootstrap.sh
 #
@@ -13,9 +14,16 @@
 #
 # Usage:
 #   chmod +x bootstrap.sh && ./bootstrap.sh
+#   ./bootstrap.sh --yes    # Non-interactive mode (auto-accept all installs)
 # =============================================================================
 
 set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Non-interactive mode
+# ---------------------------------------------------------------------------
+AUTO_YES=false
+[[ "${1:-}" =~ ^(-y|--yes)$ ]] && AUTO_YES=true
 
 # ---------------------------------------------------------------------------
 # Colors & helpers
@@ -30,7 +38,7 @@ RESET='\033[0m'
 
 info()    { printf "${BLUE}ℹ${RESET}  %s\n" "$*"; }
 success() { printf "${GREEN}✅${RESET} %s\n" "$*"; }
-warn()    { printf "${YELLOW}⚠️${RESET}  %s\n" "$*"; }
+warn()    { printf "${YELLOW}⚠${RESET}  %s\n" "$*"; }
 fail()    { printf "${RED}❌${RESET} %s\n" "$*"; }
 header()  { printf "\n${BOLD}${CYAN}━━━ %s ━━━${RESET}\n\n" "$*"; }
 
@@ -44,6 +52,54 @@ check_fail() { fail "$1";    (( FAIL++ )) || true; }
 check_warn() { warn "$1";    (( WARN++ )) || true; }
 
 has_cmd() { command -v "$1" &>/dev/null; }
+
+# Prompt helper — auto-accepts in --yes mode
+confirm() {
+    local prompt="$1"
+    if [ "$AUTO_YES" = true ]; then
+        printf "   %s [y/N] y (--yes)\n" "$prompt"
+        return 0
+    fi
+    read -rp "   ${prompt} [y/N] " yn
+    [[ "${yn}" =~ ^[Yy] ]]
+}
+
+# ---------------------------------------------------------------------------
+# Ensure ~/.local/bin is on PATH (used by uv, pipx, etc.)
+# ---------------------------------------------------------------------------
+ensure_local_bin_on_path() {
+    local shell_name shell_rc
+
+    shell_name="$(basename "$SHELL")"
+    case "$shell_name" in
+        zsh)  shell_rc="$HOME/.zshrc" ;;
+        bash) shell_rc="$HOME/.bashrc" ;;
+        fish) shell_rc="$HOME/.config/fish/config.fish" ;;
+        *)    shell_rc="$HOME/.profile" ;;
+    esac
+
+    # Already in profile — nothing to do
+    if grep -q '.local/bin' "$shell_rc" 2>/dev/null; then
+        return 0
+    fi
+
+    warn "\$HOME/.local/bin is not in your shell profile"
+    if confirm "Add it to ${shell_rc}?"; then
+        if [ "$shell_name" = "fish" ]; then
+            echo 'fish_add_path ~/.local/bin' >> "$shell_rc"
+        else
+            {
+                echo ''
+                echo '# Added by pi-kit bootstrap — uv (Python project manager)'
+                echo 'export PATH="$HOME/.local/bin:$PATH"'
+            } >> "$shell_rc"
+        fi
+        success "Added ~/.local/bin to ${shell_rc}"
+        info "Run: source ${shell_rc}  (or open a new terminal)"
+    else
+        warn "uv works now, but won't be found in new terminals until ~/.local/bin is on PATH"
+    fi
+}
 
 # ---------------------------------------------------------------------------
 # Detect OS & package manager
@@ -135,7 +191,7 @@ pkg_name_for() {
 }
 
 # ---------------------------------------------------------------------------
-# Prerequisite checks — Node.js & git (hard requirements)
+# Prerequisite checks — Node.js, npm, git (hard requirements)
 # ---------------------------------------------------------------------------
 header "Core Prerequisites"
 
@@ -148,19 +204,32 @@ if has_cmd node; then
         check_pass "Node.js ${NODE_VER}"
     else
         warn "Node.js ${NODE_VER} found — v20+ recommended"
-        read -rp "   Install latest Node.js via ${PKG_MGR}? [y/N] " yn
-        if [[ "${yn}" =~ ^[Yy] ]]; then
+        if confirm "Install latest Node.js via ${PKG_MGR}?"; then
             pkg_install "$(pkg_name_for node)"
         fi
     fi
 else
     check_fail "Node.js not found"
-    read -rp "   Install Node.js via ${PKG_MGR}? [y/N] " yn
-    if [[ "${yn}" =~ ^[Yy] ]]; then
+    if confirm "Install Node.js via ${PKG_MGR}?"; then
         pkg_install "$(pkg_name_for node)"
     else
         fail "Node.js is required. Aborting."
         exit 1
+    fi
+fi
+
+# -- npm / npx --
+# On some Linux distros (e.g. apt install nodejs), npm is a separate package.
+if has_cmd npm && has_cmd npx; then
+    check_pass "npm $(npm --version) / npx available"
+else
+    check_fail "npm/npx not found (pi requires npx for extension loading)"
+    if [ "$PKG_MGR" = "apt" ]; then
+        if confirm "Install npm via apt?"; then
+            sudo apt-get install -y npm
+        fi
+    else
+        warn "npm should be bundled with Node.js — try reinstalling Node"
     fi
 fi
 
@@ -169,12 +238,25 @@ if has_cmd git; then
     check_pass "git $(git --version | awk '{print $3}')"
 else
     check_fail "git not found"
-    read -rp "   Install git via ${PKG_MGR}? [y/N] " yn
-    if [[ "${yn}" =~ ^[Yy] ]]; then
+    if confirm "Install git via ${PKG_MGR}?"; then
         pkg_install git
     else
         fail "git is required. Aborting."
         exit 1
+    fi
+fi
+
+# -- pi coding agent --
+if has_cmd pi || npx --yes @mariozechner/pi-coding-agent --version &>/dev/null; then
+    check_pass "pi coding agent available"
+else
+    check_warn "pi coding agent not found"
+    info "Install with: npm install -g @mariozechner/pi-coding-agent"
+    if confirm "Install pi coding agent globally via npm?"; then
+        npm install -g @mariozechner/pi-coding-agent
+        if has_cmd pi; then
+            check_pass "pi coding agent installed"
+        fi
     fi
 fi
 
@@ -187,13 +269,12 @@ if has_cmd ollama; then
     check_pass "Ollama installed ($(ollama --version 2>/dev/null || echo 'version unknown'))"
 else
     check_fail "Ollama not found"
-    read -rp "   Install Ollama? [y/N] " yn
-    if [[ "${yn}" =~ ^[Yy] ]]; then
+    if confirm "Install Ollama?"; then
         if [ "$OS" = "macos" ]; then
             brew install --cask ollama
         else
             info "Installing Ollama via official install script..."
-            curl -fsSL https://ollama.ai/install.sh | sh
+            curl -fsSL https://ollama.com/install.sh | sh
         fi
     fi
 fi
@@ -204,8 +285,7 @@ if has_cmd ollama; then
         check_pass "Ollama server is running"
     else
         warn "Ollama is installed but the server isn't running"
-        read -rp "   Start Ollama now? [y/N] " yn
-        if [[ "${yn}" =~ ^[Yy] ]]; then
+        if confirm "Start Ollama now?"; then
             if [ "$OS" = "macos" ]; then
                 open -a Ollama
                 info "Waiting for Ollama to start..."
@@ -239,8 +319,7 @@ if has_cmd ollama; then
             info "  • ollama pull qwen3:8b          (8GB RAM)"
             info "  • ollama pull qwen3:30b          (32GB RAM)"
             info "  • ollama pull nemotron-3-nano:30b (32GB RAM)"
-            read -rp "   Pull qwen3:8b now (smallest)? [y/N] " yn
-            if [[ "${yn}" =~ ^[Yy] ]]; then
+            if confirm "Pull qwen3:8b now (smallest)?"; then
                 ollama pull qwen3:8b
             fi
         fi
@@ -252,8 +331,7 @@ if has_cmd ollama; then
         else
             check_warn "No embedding model found (semantic memory search will use keyword fallback)"
             info "Recommended: ollama pull qwen3-embedding:0.6b  (~500MB)"
-            read -rp "   Pull qwen3-embedding:0.6b now? [y/N] " yn
-            if [[ "${yn}" =~ ^[Yy] ]]; then
+            if confirm "Pull qwen3-embedding:0.6b now?"; then
                 ollama pull qwen3-embedding:0.6b
             fi
         fi
@@ -272,68 +350,16 @@ fi
 
 if has_cmd uv; then
     check_pass "uv installed ($(uv --version 2>/dev/null))"
-
-    # Ensure ~/.local/bin is in the user's shell profile so uv persists
-    UV_BIN_DIR="$HOME/.local/bin"
-    SHELL_NAME="$(basename "$SHELL")"
-    case "$SHELL_NAME" in
-        zsh)  SHELL_RC="$HOME/.zshrc" ;;
-        bash) SHELL_RC="$HOME/.bashrc" ;;
-        fish) SHELL_RC="$HOME/.config/fish/config.fish" ;;
-        *)    SHELL_RC="$HOME/.profile" ;;
-    esac
-
-    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$UV_BIN_DIR" 2>/dev/null || \
-       ! grep -q '.local/bin' "$SHELL_RC" 2>/dev/null; then
-        warn "~/.local/bin is not in your shell profile"
-        read -rp "   Add it to ${SHELL_RC}? [y/N] " yn
-        if [[ "${yn}" =~ ^[Yy] ]]; then
-            if [ "$SHELL_NAME" = "fish" ]; then
-                echo 'fish_add_path ~/.local/bin' >> "$SHELL_RC"
-            else
-                echo '' >> "$SHELL_RC"
-                echo '# Added by pi-kit bootstrap — uv (Python project manager)' >> "$SHELL_RC"
-                echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
-            fi
-            success "Added ~/.local/bin to ${SHELL_RC}"
-            info "Run: source ${SHELL_RC}  (or open a new terminal)"
-        else
-            warn "uv works now, but won't be found in new terminals until ~/.local/bin is on PATH"
-        fi
-    fi
+    ensure_local_bin_on_path
 else
     check_fail "uv not found (needed for image generation & Excalidraw rendering)"
-    read -rp "   Install uv? [y/N] " yn
-    if [[ "${yn}" =~ ^[Yy] ]]; then
+    if confirm "Install uv?"; then
         curl -LsSf https://astral.sh/uv/install.sh | sh
         # Make uv available for the rest of this script
         export PATH="$HOME/.local/bin:$PATH"
         if has_cmd uv; then
             check_pass "uv installed successfully"
-
-            # Persist PATH in shell profile
-            SHELL_NAME="$(basename "$SHELL")"
-            case "$SHELL_NAME" in
-                zsh)  SHELL_RC="$HOME/.zshrc" ;;
-                bash) SHELL_RC="$HOME/.bashrc" ;;
-                fish) SHELL_RC="$HOME/.config/fish/config.fish" ;;
-                *)    SHELL_RC="$HOME/.profile" ;;
-            esac
-
-            if ! grep -q '.local/bin' "$SHELL_RC" 2>/dev/null; then
-                read -rp "   Add ~/.local/bin to ${SHELL_RC} so uv persists? [y/N] " yn
-                if [[ "${yn}" =~ ^[Yy] ]]; then
-                    if [ "$SHELL_NAME" = "fish" ]; then
-                        echo 'fish_add_path ~/.local/bin' >> "$SHELL_RC"
-                    else
-                        echo '' >> "$SHELL_RC"
-                        echo '# Added by pi-kit bootstrap — uv (Python project manager)' >> "$SHELL_RC"
-                        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
-                    fi
-                    success "Added ~/.local/bin to ${SHELL_RC}"
-                    info "Run: source ${SHELL_RC}  (or open a new terminal)"
-                fi
-            fi
+            ensure_local_bin_on_path
         else
             check_warn "uv installed but not on PATH — restart your shell after this script"
         fi
@@ -349,8 +375,7 @@ if has_cmd d2; then
     check_pass "d2 installed ($(d2 --version 2>/dev/null || echo 'version unknown'))"
 else
     check_fail "d2 not found"
-    read -rp "   Install d2? [y/N] " yn
-    if [[ "${yn}" =~ ^[Yy] ]]; then
+    if confirm "Install d2?"; then
         if [ "$OS" = "macos" ]; then
             brew install d2
         else
@@ -376,15 +401,12 @@ if [ "$ARCH" = "arm64" ] && [ "$OS" = "macos" ]; then
     else
         check_fail "mflux not found at ${DIFFUSION_CLI_DIR}"
         if has_cmd uv; then
-            read -rp "   Set up mflux in ${DIFFUSION_CLI_DIR}? [y/N] " yn
-            if [[ "${yn}" =~ ^[Yy] ]]; then
+            if confirm "Set up mflux in ${DIFFUSION_CLI_DIR}?"; then
                 info "Creating uv project and installing mflux..."
                 if [ ! -d "$DIFFUSION_CLI_DIR" ]; then
                     uv init "$DIFFUSION_CLI_DIR"
                 fi
-                cd "$DIFFUSION_CLI_DIR"
-                uv add mflux
-                cd - >/dev/null
+                ( cd "$DIFFUSION_CLI_DIR" && uv add mflux )
                 if [ -f "${DIFFUSION_CLI_DIR}/.venv/bin/mflux-generate" ]; then
                     check_pass "mflux installed successfully"
                 else
@@ -419,12 +441,8 @@ if [ -d "$EXCALIDRAW_RENDER_DIR" ]; then
     else
         check_fail "Excalidraw renderer not bootstrapped"
         if has_cmd uv; then
-            read -rp "   Set up Excalidraw renderer (uv sync + Playwright Chromium)? [y/N] " yn
-            if [[ "${yn}" =~ ^[Yy] ]]; then
-                cd "$EXCALIDRAW_RENDER_DIR"
-                uv sync
-                uv run playwright install chromium
-                cd - >/dev/null
+            if confirm "Set up Excalidraw renderer (uv sync + Playwright Chromium)?"; then
+                ( cd "$EXCALIDRAW_RENDER_DIR" && uv sync && uv run playwright install chromium )
                 check_pass "Excalidraw renderer bootstrapped"
             fi
         else
@@ -444,8 +462,7 @@ if has_cmd pandoc; then
     check_pass "pandoc installed ($(pandoc --version | head -1))"
 else
     check_warn "pandoc not found (view extension will skip rich doc rendering)"
-    read -rp "   Install pandoc? [y/N] " yn
-    if [[ "${yn}" =~ ^[Yy] ]]; then
+    if confirm "Install pandoc?"; then
         pkg_install pandoc
         if has_cmd pandoc; then
             check_pass "pandoc installed successfully"
@@ -466,15 +483,15 @@ header "Web Search (API Keys)"
 WEB_SEARCH_PROVIDERS=0
 PI_SECRETS_FILE="$HOME/.pi/agent/secrets.json"
 
-# Checks env var first, then pi secrets recipe file
+# Checks env var first, then pi secrets recipe file (exact key match)
 has_secret() {
     local name="$1"
     # 1) Environment variable
     if [ -n "${!name:-}" ]; then
         return 0
     fi
-    # 2) pi secrets.json recipe
-    if [ -f "$PI_SECRETS_FILE" ] && grep -q "\"${name}\"" "$PI_SECRETS_FILE" 2>/dev/null; then
+    # 2) pi secrets.json recipe — match "KEY_NAME"\s*: to avoid substring false positives
+    if [ -f "$PI_SECRETS_FILE" ] && grep -qE "\"${name}\"\\s*:" "$PI_SECRETS_FILE"; then
         return 0
     fi
     return 1
@@ -533,8 +550,6 @@ fi
 # Validation Summary
 # ---------------------------------------------------------------------------
 header "Validation Summary"
-
-TOTAL=$((PASS + FAIL + WARN))
 
 printf "${GREEN}  Passed:   %d${RESET}\n" "$PASS"
 printf "${YELLOW}  Warnings: %d${RESET}\n" "$WARN"
@@ -595,7 +610,7 @@ else
 fi
 
 # Image Generation
-if [ -f "${DIFFUSION_CLI_DIR}/.venv/bin/mflux-generate" ] 2>/dev/null; then
+if [ -f "${DIFFUSION_CLI_DIR}/.venv/bin/mflux-generate" ]; then
     cap_status "Image Generation (FLUX.1)" "ready"
 elif [ "$ARCH" = "arm64" ] && [ "$OS" = "macos" ]; then
     cap_status "Image Generation (FLUX.1)" "missing"
@@ -611,7 +626,7 @@ else
 fi
 
 # Excalidraw
-if [ -d "${EXCALIDRAW_RENDER_DIR}/.venv" ] 2>/dev/null; then
+if [ -d "${EXCALIDRAW_RENDER_DIR}/.venv" ]; then
     cap_status "Excalidraw Rendering" "ready"
 else
     cap_status "Excalidraw Rendering" "missing"
