@@ -1,6 +1,6 @@
 ---
 name: cleave
-description: Recursive task decomposition via the cleave extension. Use /cleave command or cleave_assess tool.
+description: Task decomposition, code assessment, and OpenSpec integration. Use /cleave for parallel execution, /assess for code review (cleave, diff, spec subcommands), cleave_assess tool for complexity checks.
 ---
 
 # Cleave
@@ -14,6 +14,10 @@ Task decomposition is provided by the **cleave extension** (`extensions/cleave/`
 | `cleave_assess` tool | Assess directive complexity → execute / cleave / needs_assessment |
 | `cleave_run` tool | Execute a split plan with git worktree isolation |
 | `/cleave <directive>` | Full interactive workflow: assess → plan → confirm → execute → report |
+| `/assess cleave` | Adversarial review of last 3 commits → auto-fix all C/W issues |
+| `/assess diff [ref]` | Review changes since ref (default: HEAD~1) — analysis only |
+| `/assess spec [change]` | Validate implementation against OpenSpec Given/When/Then scenarios |
+| `/assess complexity <directive>` | Check if a task needs decomposition |
 
 ## Usage
 
@@ -38,6 +42,25 @@ split plan instead of invoking the LLM planner:
 
 This makes OpenSpec the upstream planning layer and cleave the downstream
 execution engine. OpenSpec is optional — cleave works standalone.
+
+### Full Lifecycle
+
+When OpenSpec is present, the complete lifecycle is:
+
+```
+/opsx:propose → /opsx:ff → /cleave → /assess spec → /opsx:verify → /opsx:archive
+```
+
+After `/cleave` completes with an OpenSpec change:
+- Tasks are automatically marked `[x]` done in `tasks.md`
+- The report includes Next Steps guidance
+- If all tasks complete: `/assess spec` → `/opsx:verify` → `/opsx:archive`
+- If partial: `/opsx:apply` or `/cleave` again
+
+### Session Start
+
+On session start, active OpenSpec changes are surfaced with task progress.
+This status is injected into the agent context (not just displayed).
 
 ## Complexity Formula
 

@@ -10,7 +10,7 @@ pi install https://github.com/cwilson613/pi-kit
 
 ![pi-kit Architecture](docs/img/architecture.png)
 
-pi-kit extends the pi agent with **19 extensions**, **4 skills**, and **3 prompt templates** — loaded automatically on session start.
+pi-kit extends the pi agent with **20 extensions**, **6 skills**, and **4 prompt templates** — loaded automatically on session start.
 
 ## Extensions
 
@@ -58,10 +58,12 @@ Multi-provider web search with deduplication.
 
 ### 🪓 Cleave
 
-Recursive task decomposition for complex multi-system work.
+Recursive task decomposition, code assessment, and OpenSpec lifecycle integration.
 
-- `cleave_assess`: Evaluate directive complexity — returns execute/cleave decision
-- `cleave_run`: Dispatch parallel child agents in isolated git worktrees, harvest and merge results
+- **Tools**: `cleave_assess` (complexity evaluation), `cleave_run` (parallel dispatch in git worktrees)
+- **Commands**: `/cleave <directive>`, `/assess cleave`, `/assess diff`, `/assess spec`, `/assess complexity`
+- **OpenSpec integration**: When `openspec/` exists, uses `tasks.md` as the split plan, enriches child tasks with design.md decisions and spec acceptance criteria, writes back task completion, and guides through verify → archive
+- **Session awareness**: Surfaces active OpenSpec changes with task progress on session start
 
 ### 💰 Model Budget
 
@@ -105,7 +107,9 @@ Skills provide specialized instructions the agent loads on-demand when a task ma
 
 | Skill | Description |
 |-------|-------------|
+| `cleave` | Task decomposition, code assessment, OpenSpec lifecycle integration |
 | `git` | Conventional commits, semantic versioning, branch naming, changelogs |
+| `oci` | Container and artifact best practices |
 | `python` | Project setup, pytest, ruff, mypy, packaging, venv management |
 | `rust` | Cargo, clippy, rustfmt, Zellij WASM plugin development |
 | `style` | Verdant color system, typography, spacing — shared across all visual output |
@@ -114,7 +118,8 @@ Skills provide specialized instructions the agent loads on-demand when a task ma
 
 Pre-built prompts for common workflows:
 
-- **assess** — Evaluate a task or codebase
+- **assess** — Adversarial assessment of session work (see also `/assess` command)
+- **cleave** — Task decomposition, assessment, and OpenSpec lifecycle
 - **new-repo** — Scaffold a new repository
 - **oci-login** — OCI registry authentication
 

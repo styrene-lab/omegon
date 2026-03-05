@@ -29,7 +29,6 @@ import {
 	buildOpenSpecContext,
 	writeBackTaskCompletion,
 	getActiveChangesStatus,
-	readSpecScenarios,
 	type OpenSpecContext,
 } from "./openspec.js";
 import { buildPlannerPrompt, getRepoTree, parsePlanResponse } from "./planner.js";
@@ -119,8 +118,15 @@ function formatSpecVerification(ctx: OpenSpecContext): string {
 // ─── Extension ──────────────────────────────────────────────────────────────
 
 export default function cleaveExtension(pi: ExtensionAPI) {
-	// ── Session start: surface active OpenSpec changes ────────────────
-	pi.on("session_start", (_event, ctx) => {
+	// ── Agent start: inject OpenSpec status into context ─────────────
+	// Uses before_agent_start (not session_start) so the status message
+	// enters the agent's conversation context, not just the TUI display.
+	let openspecFirstTurn = true;
+
+	pi.on("before_agent_start", (_event, ctx) => {
+		if (!openspecFirstTurn) return;
+		openspecFirstTurn = false;
+
 		try {
 			const status = getActiveChangesStatus(ctx.cwd);
 			if (status.length === 0) return;
@@ -151,13 +157,16 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 				lines.push("", `All tasks complete. Run \`/opsx:verify\` → \`/opsx:archive\` to finalize.`);
 			}
 
-			pi.sendMessage({
-				customType: "view",
-				content: lines.join("\n"),
-				display: true,
-			});
+			const content = lines.join("\n");
+			return {
+				message: {
+					customType: "openspec-status",
+					content,
+					display: true,
+				},
+			};
 		} catch {
-			// Non-fatal — don't block session start
+			// Non-fatal — don't block agent start
 		}
 	});
 
@@ -177,6 +186,8 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			"Call cleave_assess before starting any multi-system or cross-cutting task to determine if decomposition is needed",
 			"If decision is 'execute', proceed directly. If 'cleave', use /cleave to decompose.",
 			"Complexity formula: (1 + systems) × (1 + 0.5 × modifiers). Threshold default: 2.0.",
+			"The /assess command provides code assessment: `/assess cleave` (adversarial review + auto-fix), `/assess diff [ref]` (review only), `/assess spec [change]` (validate against OpenSpec scenarios).",
+			"When the repo has openspec/ with active changes, suggest `/assess spec` after implementation and before `/opsx:archive`.",
 		],
 
 		parameters: Type.Object({
@@ -200,7 +211,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 
 	// ── /assess command ──────────────────────────────────────────────────
 	const ASSESS_SUBS = [
-		{ value: "cleave", label: "cleave", description: "Adversarial review → fix plan → auto-execute" },
+		{ value: "cleave", label: "cleave", description: "Adversarial review → auto-fix (optional: ref)" },
 		{ value: "diff", label: "diff", description: "Assess uncommitted or recent changes for issues" },
 		{ value: "spec", label: "spec", description: "Assess implementation against OpenSpec scenarios" },
 		{ value: "complexity", label: "complexity", description: "Assess directive complexity (cleave_assess)" },
@@ -223,23 +234,43 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 				// issue list → immediately dispatch cleave to fix everything.
 				case "cleave": {
 					// Gather context: recent git changes
+					// Use user-provided ref or auto-detect a sensible range
+					const ref = rest || "";
 					let diffStat = "";
 					let diffContent = "";
 					let recentLog = "";
-					try {
-						const stat = await pi.exec("git", ["diff", "--stat", "HEAD~3"], { cwd: ctx.cwd, timeout: 5_000 });
-						diffStat = stat.stdout.trim();
-						const diff = await pi.exec("git", ["diff", "HEAD~3"], { cwd: ctx.cwd, timeout: 10_000 });
-						diffContent = diff.stdout.slice(0, 30_000); // Cap to avoid blowing context
-						const log = await pi.exec("git", ["log", "--oneline", "-10"], { cwd: ctx.cwd, timeout: 5_000 });
-						recentLog = log.stdout.trim();
-					} catch {
-						// Fall back to unstaged diff
+					let effectiveRef = ref;
+
+					if (!effectiveRef) {
+						// Auto-detect: try HEAD~3 first, fall back to lower counts
+						// or unstaged diff if the repo is too shallow
+						for (const candidate of ["HEAD~3", "HEAD~2", "HEAD~1"]) {
+							try {
+								const test = await pi.exec("git", ["rev-parse", "--verify", candidate], { cwd: ctx.cwd, timeout: 3_000 });
+								if (test.code === 0) { effectiveRef = candidate; break; }
+							} catch { /* try next */ }
+						}
+					}
+
+					if (effectiveRef) {
+						try {
+							const stat = await pi.exec("git", ["diff", "--stat", effectiveRef], { cwd: ctx.cwd, timeout: 5_000 });
+							diffStat = stat.stdout.trim();
+							const diff = await pi.exec("git", ["diff", effectiveRef], { cwd: ctx.cwd, timeout: 10_000 });
+							diffContent = diff.stdout.slice(0, 30_000); // Cap to avoid blowing context
+							const log = await pi.exec("git", ["log", "--oneline", "-10"], { cwd: ctx.cwd, timeout: 5_000 });
+							recentLog = log.stdout.trim();
+						} catch { /* fall through to unstaged */ }
+					}
+
+					// Fall back to unstaged diff
+					if (!diffStat && !diffContent) {
 						try {
 							const stat = await pi.exec("git", ["diff", "--stat"], { cwd: ctx.cwd, timeout: 5_000 });
 							diffStat = stat.stdout.trim();
 							const diff = await pi.exec("git", ["diff"], { cwd: ctx.cwd, timeout: 10_000 });
 							diffContent = diff.stdout.slice(0, 30_000);
+							effectiveRef = "unstaged";
 						} catch { /* non-git or error — proceed anyway */ }
 					}
 
@@ -257,7 +288,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 						content: [
 							"**Assess → Cleave pipeline starting...**",
 							"",
-							`Reviewing changes from last 3 commits:`,
+							`Reviewing changes since \`${effectiveRef}\`:`,
 							"```",
 							diffStat,
 							"```",
@@ -416,21 +447,22 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 						: null;
 
 					if (!target) {
-						// Auto-select: prefer the change with incomplete tasks
+						// Auto-select: prefer the most recently modified change
+						// (filesystem mtime is a better proxy for "what I'm working on"
+						// than task count)
 						const status = getActiveChangesStatus(repoPath);
-						const incomplete = status
-							.filter((s) => s.totalTasks > 0 && s.doneTasks < s.totalTasks)
-							.sort((a, b) => (b.totalTasks - b.doneTasks) - (a.totalTasks - a.doneTasks));
+						const withTasks = status.filter((s) => s.totalTasks > 0);
 
-						if (incomplete.length > 0) {
-							target = changes.find((c) => c.name === incomplete[0].name) ?? changes[0];
+						if (withTasks.length > 0) {
+							const byRecency = [...withTasks].sort((a, b) => b.lastModifiedMs - a.lastModifiedMs);
+							target = changes.find((c) => c.name === byRecency[0].name) ?? changes[0];
 						} else {
 							target = changes[0];
 						}
 					}
 
-					const scenarios = readSpecScenarios(target.path);
-					if (scenarios.length === 0) {
+					const specCtx = buildOpenSpecContext(target.path);
+					if (specCtx.specScenarios.length === 0) {
 						pi.sendMessage({
 							customType: "view",
 							content: `Change \`${target.name}\` has no delta spec scenarios to assess against.\n\nUse \`/assess diff\` for general code review instead.`,
@@ -438,6 +470,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 						});
 						return;
 					}
+					const scenarios = specCtx.specScenarios;
 
 					// Build the scenario criteria for the LLM
 					const scenarioText = scenarios.map((s) => {
@@ -460,12 +493,26 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 						} catch { /* proceed without diff */ }
 					}
 
+					// Include design decisions if available
+					const designContext = specCtx.decisions.length > 0
+						? [
+							"### Design Decisions",
+							"",
+							"The implementation should also reflect these decisions from design.md:",
+							"",
+							...specCtx.decisions.map((d) => `- ${d}`),
+							"",
+						]
+						: [];
+
 					pi.sendMessage({
 						customType: "view",
 						content: [
 							`**Spec Assessment: \`${target.name}\`**`,
 							"",
-							`Evaluating implementation against ${scenarios.length} spec scenarios...`,
+							`Evaluating implementation against ${scenarios.length} spec scenarios` +
+								(specCtx.decisions.length > 0 ? ` and ${specCtx.decisions.length} design decisions` : "") +
+								"...",
 						].join("\n"),
 						display: true,
 					});
@@ -481,6 +528,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 							"",
 							scenarioText,
 							"",
+							...designContext,
 							"### Instructions",
 							"",
 							"1. Read the relevant source files to check each scenario",
@@ -563,7 +611,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 							"",
 							"| Subcommand | Description |",
 							"|---|---|",
-							"| `/assess cleave` | Adversarial review of recent work → auto-fix all issues |",
+							"| `/assess cleave [ref]` | Adversarial review of recent work → auto-fix all issues |",
 							"| `/assess diff [ref]` | Review changes since ref (default: HEAD~1) — analysis only |",
 							"| `/assess spec [change]` | Assess implementation against OpenSpec spec scenarios |",
 							"| `/assess complexity <directive>` | Check if a task needs decomposition |",
@@ -649,11 +697,22 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			if (openspecDir) {
 				const executableChanges = findExecutableChanges(openspecDir);
 				if (executableChanges.length > 0) {
-					// Try to find a change whose name matches the directive
+					// Try to find a change whose name matches the directive.
+					// Three strategies: exact slug containment, word overlap, partial prefix.
 					const directiveSlug = directive.toLowerCase().replace(/[^\w]+/g, "-");
-					const matched = executableChanges.find((c) =>
-						directiveSlug.includes(c.name) || c.name.includes(directiveSlug.slice(0, 20)),
+					const directiveWords = new Set(
+						directive.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter((w) => w.length > 2),
 					);
+
+					const matched = executableChanges.find((c) => {
+						// Strategy 1: slug containment (either direction)
+						if (directiveSlug.includes(c.name) || c.name.includes(directiveSlug.slice(0, 20))) return true;
+						// Strategy 2: word overlap — change name words appear in directive
+						const changeWords = c.name.split("-").filter((w) => w.length > 2);
+						const overlap = changeWords.filter((w) => directiveWords.has(w)).length;
+						if (changeWords.length > 0 && overlap >= Math.ceil(changeWords.length * 0.5)) return true;
+						return false;
+					});
 
 					// Only use OpenSpec if we found a matching change — never silently
 					// pick an unrelated change
@@ -786,6 +845,12 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			"dispatches child pi processes, harvests results, detects conflicts, and " +
 			"merges branches back. Requires a split plan (from cleave_assess + planning).\n\n" +
 			"Each child runs in an isolated git worktree on its own branch.",
+		promptSnippet:
+			"Execute a cleave decomposition plan — parallel child dispatch in git worktrees, conflict detection, merge, and report",
+		promptGuidelines: [
+			"When an OpenSpec change was used to generate the plan, ALWAYS pass `openspec_change_path` so child tasks get design context and tasks.md is updated on completion.",
+			"After cleave_run completes with OpenSpec, follow the Next Steps in the report (typically `/assess spec` → `/opsx:verify` → `/opsx:archive`).",
+		],
 		parameters: Type.Object({
 			directive: Type.String({ description: "The original task directive" }),
 			plan_json: Type.String({

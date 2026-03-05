@@ -17,7 +17,7 @@
  * Group ordering defines dependencies (later groups may depend on earlier).
  */
 
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import type { ChildPlan, SplitPlan } from "./types.js";
 
@@ -668,6 +668,8 @@ export interface ChangeStatus {
 	hasProposal: boolean;
 	hasDesign: boolean;
 	hasSpecs: boolean;
+	/** Most recent mtime across change artifacts (ms since epoch) */
+	lastModifiedMs: number;
 }
 
 /**
@@ -697,6 +699,19 @@ export function getActiveChangesStatus(repoPath: string): ChangeStatus[] {
 		}
 
 		const specsDir = join(change.path, "specs");
+
+		// Find most recent modification time across artifacts
+		let lastModifiedMs = 0;
+		for (const file of ["tasks.md", "proposal.md", "design.md"]) {
+			const fp = join(change.path, file);
+			if (existsSync(fp)) {
+				try {
+					const mtime = statSync(fp).mtimeMs;
+					if (mtime > lastModifiedMs) lastModifiedMs = mtime;
+				} catch { /* skip */ }
+			}
+		}
+
 		result.push({
 			name: change.name,
 			path: change.path,
@@ -705,6 +720,7 @@ export function getActiveChangesStatus(repoPath: string): ChangeStatus[] {
 			hasProposal: change.hasProposal,
 			hasDesign: change.hasDesign,
 			hasSpecs: existsSync(specsDir),
+			lastModifiedMs,
 		});
 	}
 

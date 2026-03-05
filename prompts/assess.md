@@ -1,5 +1,5 @@
 ---
-description: Adversarial assessment of work completed in this session
+description: Adversarial assessment of work completed in this session. See also /assess command (cleave, diff, spec, complexity subcommands).
 ---
 # Adversarial Assessment
 

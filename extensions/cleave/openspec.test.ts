@@ -798,6 +798,18 @@ describe("getActiveChangesStatus", () => {
 		assert.equal(result.length, 3);
 	});
 
+	it("includes lastModifiedMs from artifact mtimes", () => {
+		const changeDir = path.join(dir, "openspec", "changes", "timed");
+		fs.mkdirSync(changeDir, { recursive: true });
+		fs.writeFileSync(path.join(changeDir, "tasks.md"), "## 1. X\n- [ ] task");
+
+		const result = getActiveChangesStatus(dir);
+		assert.equal(result.length, 1);
+		assert.ok(result[0].lastModifiedMs > 0, "lastModifiedMs should be positive");
+		// Should be recent (within last minute)
+		assert.ok(Date.now() - result[0].lastModifiedMs < 60_000);
+	});
+
 	it("excludes archive directory", () => {
 		const archiveDir = path.join(dir, "openspec", "changes", "archive", "old-change");
 		fs.mkdirSync(archiveDir, { recursive: true });
