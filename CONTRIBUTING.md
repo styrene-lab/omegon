@@ -104,7 +104,7 @@ After cleave completes successfully, worktree directories are pruned but branche
 
 ```bash
 # Delete local branches already merged into main
-git branch --merged main | grep 'cleave/' | xargs -r git branch -d
+git branch --merged main | grep 'cleave/' | xargs git branch -d
 
 # Prune remote tracking refs for deleted remote branches
 git fetch --prune
@@ -136,17 +136,7 @@ Files that should never cause merge conflicts due to their nature:
 
 ### What Gets Tracked
 
-```
-✅ Tracked                          ❌ Ignored
-─────────────────────────────────   ─────────────────────────
-extensions/**/*.ts                  node_modules/
-skills/**/SKILL.md                  *.db, *.db-wal, *.db-shm
-prompts/*.md                        .env
-themes/*.json                       .claude/
-.pi/memory/facts.jsonl              .DS_Store
-.gitattributes                      bin/rg, bin/fd
-package.json
-```
+See `.gitignore` (repo root) and `.pi/.gitignore` (memory directory) for the authoritative ignore rules. Key principle: `facts.jsonl` is tracked, `*.db` files are not.
 
 ## Scaling Notes
 
