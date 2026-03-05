@@ -14,7 +14,6 @@
  * The Claude Code SDK calls are replaced with pi's extension API.
  */
 
-import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -184,7 +183,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			"Assess task complexity for decomposition — returns pattern match, complexity score, and execute/cleave decision",
 		promptGuidelines: [
 			"Call cleave_assess before starting any multi-system or cross-cutting task to determine if decomposition is needed",
-			"If decision is 'execute', proceed directly. If 'cleave', use /cleave to decompose.",
+			"If decision is 'execute', proceed directly. If 'cleave', use /cleave to decompose. If 'needs_assessment', proceed directly — it means no pattern matched but the task is likely simple enough for in-session execution.",
 			"Complexity formula: (1 + systems) × (1 + 0.5 × modifiers). Threshold default: 2.0.",
 			"The /assess command provides code assessment: `/assess cleave` (adversarial review + auto-fix), `/assess diff [ref]` (review only), `/assess spec [change]` (validate against OpenSpec scenarios).",
 			"When the repo has openspec/ with active changes, suggest `/assess spec` after implementation and before `/opsx:archive`.",
@@ -218,10 +217,17 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 	];
 
 	pi.registerCommand("assess", {
-		description: "Code assessment toolkit (usage: /assess <cleave|diff|complexity> [args])",
+		description: "Code assessment toolkit (usage: /assess <cleave|diff|spec|complexity> [args])",
 		getArgumentCompletions: (prefix: string) => {
-			const filtered = ASSESS_SUBS.filter((s) => s.value.startsWith(prefix));
-			return filtered.length > 0 ? filtered : null;
+			const parts = prefix.split(" ");
+			if (parts.length <= 1) {
+				// First argument: complete subcommand names
+				const partial = parts[0] || "";
+				const filtered = ASSESS_SUBS.filter((s) => s.value.startsWith(partial));
+				return filtered.length > 0 ? filtered : null;
+			}
+			// After subcommand, no further completions
+			return null;
 		},
 		handler: async (args, ctx) => {
 			const parts = (args || "").trim().split(/\s+/);
