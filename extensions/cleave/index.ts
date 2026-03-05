@@ -3,8 +3,9 @@
  *
  * Provides:
  *   - `cleave_assess` tool: Assess directive complexity (LLM-callable)
- *   - `/assess` command: Code assessment toolkit (cleave, diff, complexity)
+ *   - `/assess` command: Code assessment toolkit (cleave, diff, spec, complexity)
  *   - `/cleave` command: Full decomposition workflow
+ *   - Session-start handler: Surfaces active OpenSpec changes with task progress
  *
  * State machine: ASSESS → PLAN → CONFIRM → DISPATCH → HARVEST → REPORT
  *
@@ -26,6 +27,9 @@ import {
 	findExecutableChanges,
 	openspecChangeToSplitPlanWithContext,
 	buildOpenSpecContext,
+	writeBackTaskCompletion,
+	getActiveChangesStatus,
+	readSpecScenarios,
 	type OpenSpecContext,
 } from "./openspec.js";
 import { buildPlannerPrompt, getRepoTree, parsePlanResponse } from "./planner.js";
@@ -115,6 +119,48 @@ function formatSpecVerification(ctx: OpenSpecContext): string {
 // ─── Extension ──────────────────────────────────────────────────────────────
 
 export default function cleaveExtension(pi: ExtensionAPI) {
+	// ── Session start: surface active OpenSpec changes ────────────────
+	pi.on("session_start", (_event, ctx) => {
+		try {
+			const status = getActiveChangesStatus(ctx.cwd);
+			if (status.length === 0) return;
+
+			const lines = ["**OpenSpec Changes**", ""];
+			for (const s of status) {
+				const progress = s.totalTasks > 0
+					? `${s.doneTasks}/${s.totalTasks} tasks`
+					: "no tasks";
+				const artifacts: string[] = [];
+				if (s.hasProposal) artifacts.push("proposal");
+				if (s.hasDesign) artifacts.push("design");
+				if (s.hasSpecs) artifacts.push("specs");
+				const artStr = artifacts.length > 0 ? ` [${artifacts.join(", ")}]` : "";
+
+				const icon = s.totalTasks > 0 && s.doneTasks >= s.totalTasks ? "✓" : "◦";
+				lines.push(`  ${icon} **${s.name}** — ${progress}${artStr}`);
+			}
+
+			const incomplete = status.filter((s) => s.totalTasks > 0 && s.doneTasks < s.totalTasks);
+			if (incomplete.length > 0) {
+				lines.push("", `Use \`/opsx:apply\` to continue or \`/cleave\` to parallelize.`);
+			}
+
+			const withTasks = status.filter((s) => s.totalTasks > 0);
+			const allDone = withTasks.length > 0 && withTasks.every((s) => s.doneTasks >= s.totalTasks);
+			if (allDone) {
+				lines.push("", `All tasks complete. Run \`/opsx:verify\` → \`/opsx:archive\` to finalize.`);
+			}
+
+			pi.sendMessage({
+				customType: "view",
+				content: lines.join("\n"),
+				display: true,
+			});
+		} catch {
+			// Non-fatal — don't block session start
+		}
+	});
+
 
 	// ── cleave_assess tool ───────────────────────────────────────────────
 	pi.registerTool({
@@ -156,6 +202,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 	const ASSESS_SUBS = [
 		{ value: "cleave", label: "cleave", description: "Adversarial review → fix plan → auto-execute" },
 		{ value: "diff", label: "diff", description: "Assess uncommitted or recent changes for issues" },
+		{ value: "spec", label: "spec", description: "Assess implementation against OpenSpec scenarios" },
 		{ value: "complexity", label: "complexity", description: "Assess directive complexity (cleave_assess)" },
 	];
 
@@ -337,6 +384,127 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 					return;
 				}
 
+				// ── /assess spec [change] ──────────────────────────────
+				// Review implementation against OpenSpec spec scenarios.
+				// Uses Given/When/Then as the assessment criteria.
+				case "spec": {
+					const repoPath = ctx.cwd;
+					const openspecDir = detectOpenSpec(repoPath);
+					if (!openspecDir) {
+						pi.sendMessage({
+							customType: "view",
+							content: "No `openspec/` directory found. Nothing to assess against.",
+							display: true,
+						});
+						return;
+					}
+
+					const changes = findExecutableChanges(openspecDir);
+					if (changes.length === 0) {
+						pi.sendMessage({
+							customType: "view",
+							content: "No OpenSpec changes with tasks.md found.",
+							display: true,
+						});
+						return;
+					}
+
+					// If a change name was provided, use it; otherwise pick the
+					// one with the most incomplete tasks
+					let target = rest
+						? changes.find((c) => c.name === rest || c.name.includes(rest))
+						: null;
+
+					if (!target) {
+						// Auto-select: prefer the change with incomplete tasks
+						const status = getActiveChangesStatus(repoPath);
+						const incomplete = status
+							.filter((s) => s.totalTasks > 0 && s.doneTasks < s.totalTasks)
+							.sort((a, b) => (b.totalTasks - b.doneTasks) - (a.totalTasks - a.doneTasks));
+
+						if (incomplete.length > 0) {
+							target = changes.find((c) => c.name === incomplete[0].name) ?? changes[0];
+						} else {
+							target = changes[0];
+						}
+					}
+
+					const scenarios = readSpecScenarios(target.path);
+					if (scenarios.length === 0) {
+						pi.sendMessage({
+							customType: "view",
+							content: `Change \`${target.name}\` has no delta spec scenarios to assess against.\n\nUse \`/assess diff\` for general code review instead.`,
+							display: true,
+						});
+						return;
+					}
+
+					// Build the scenario criteria for the LLM
+					const scenarioText = scenarios.map((s) => {
+						const scenList = s.scenarios.map((sc) => {
+							const lines = sc.split("\n").map((l) => `    ${l}`).join("\n");
+							return lines;
+						}).join("\n");
+						return `**${s.domain} → ${s.requirement}**\n${scenList}`;
+					}).join("\n\n");
+
+					// Get recent diff for context
+					let diffContent = "";
+					try {
+						const diff = await pi.exec("git", ["diff", "HEAD~5", "--", "."], { cwd: repoPath, timeout: 10_000 });
+						diffContent = diff.stdout.slice(0, 30_000);
+					} catch {
+						try {
+							const diff = await pi.exec("git", ["diff", "--", "."], { cwd: repoPath, timeout: 10_000 });
+							diffContent = diff.stdout.slice(0, 30_000);
+						} catch { /* proceed without diff */ }
+					}
+
+					pi.sendMessage({
+						customType: "view",
+						content: [
+							`**Spec Assessment: \`${target.name}\`**`,
+							"",
+							`Evaluating implementation against ${scenarios.length} spec scenarios...`,
+						].join("\n"),
+						display: true,
+					});
+
+					pi.sendUserMessage(
+						[
+							`## Spec-Driven Assessment: \`${target.name}\``,
+							"",
+							"Assess whether the current implementation satisfies these OpenSpec scenarios.",
+							"For each scenario, determine: **PASS**, **FAIL**, or **UNCLEAR**.",
+							"",
+							"### Acceptance Criteria",
+							"",
+							scenarioText,
+							"",
+							"### Instructions",
+							"",
+							"1. Read the relevant source files to check each scenario",
+							"2. For each scenario, report:",
+							"   - **PASS** — implementation clearly satisfies the Given/When/Then",
+							"   - **FAIL** — implementation contradicts or is missing",
+							"   - **UNCLEAR** — can't determine without running tests",
+							"3. Summarize with a count: N/M scenarios passing",
+							"4. For any FAIL items, explain what's wrong and suggest fixes",
+							"5. Do NOT auto-fix — this is assessment only",
+							...(diffContent ? [
+								"",
+								"### Recent Changes (for context)",
+								"",
+								"```diff",
+								diffContent,
+								"```",
+							] : []),
+						].join("\n"),
+						{ deliverAs: "followUp" },
+					);
+					return;
+				}
+
 				// ── /assess complexity <directive> ─────────────────────
 				case "complexity": {
 					if (!rest) {
@@ -397,12 +565,16 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 							"|---|---|",
 							"| `/assess cleave` | Adversarial review of recent work → auto-fix all issues |",
 							"| `/assess diff [ref]` | Review changes since ref (default: HEAD~1) — analysis only |",
+							"| `/assess spec [change]` | Assess implementation against OpenSpec spec scenarios |",
 							"| `/assess complexity <directive>` | Check if a task needs decomposition |",
 							"| `/assess <directive>` | Shorthand for `/assess complexity <directive>` |",
 							"",
 							"**`/assess cleave`** is the power move: reviews the last 3 commits,",
 							"finds Critical and Warning issues, then immediately fixes them all",
 							"and commits the result.",
+							"",
+							"**`/assess spec`** validates implementation against OpenSpec Given/When/Then",
+							"scenarios from delta specs.",
 						].join("\n"),
 						display: true,
 					});
@@ -783,6 +955,20 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			// failure, preserve branches so the user can manually resolve.
 			const mergeFailures = mergeResults.filter((m) => !m.success);
 
+			// ── TASK WRITE-BACK ────────────────────────────────────────
+			// Mark completed child tasks as [x] done in OpenSpec tasks.md
+			let writeBackResult: { updated: number; totalTasks: number; allDone: boolean } | null = null;
+			if (params.openspec_change_path && mergeFailures.length === 0) {
+				const completedLabels = state.children
+					.filter((c) => c.status === "completed")
+					.map((c) => c.label);
+				try {
+					writeBackResult = writeBackTaskCompletion(params.openspec_change_path, completedLabels);
+				} catch {
+					// Non-fatal — report will note write-back wasn't possible
+				}
+			}
+
 			// ── SPEC VERIFICATION ──────────────────────────────────────
 			// If OpenSpec specs exist, check implementation against scenarios
 			let specVerification: string | null = null;
@@ -861,6 +1047,40 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			// Spec verification (post-merge)
 			if (specVerification) {
 				reportLines.push("", specVerification);
+			}
+
+			// Task write-back status
+			if (writeBackResult && writeBackResult.updated > 0) {
+				reportLines.push(
+					"",
+					"### Task Write-Back",
+					`  ✓ Marked ${writeBackResult.updated} tasks as done in \`tasks.md\``,
+				);
+			}
+
+			// Next steps guidance
+			if (allOk && params.openspec_change_path) {
+				reportLines.push("", "### Next Steps");
+				if (writeBackResult?.allDone) {
+					reportLines.push(
+						"  All tasks complete. Ready to finalize:",
+						"  1. Run `/assess spec` to validate implementation against spec scenarios",
+						"  2. Run `/opsx:verify` for full verification",
+						"  3. Run `/opsx:archive` to merge delta specs and close the change",
+					);
+				} else {
+					reportLines.push(
+						"  Some tasks remain. Continue with:",
+						"  1. Run `/opsx:apply` to work on remaining tasks",
+						"  2. Or run `/cleave` again targeting the unfinished groups",
+					);
+				}
+			} else if (allOk && !params.openspec_change_path) {
+				reportLines.push(
+					"",
+					"### Next Steps",
+					"  Run tests and review the merged changes.",
+				);
 			}
 
 			const rawReport = reportLines.join("\n");

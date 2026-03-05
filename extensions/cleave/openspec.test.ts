@@ -20,6 +20,8 @@ import {
 	parseDesignDecisions,
 	readSpecScenarios,
 	buildOpenSpecContext,
+	writeBackTaskCompletion,
+	getActiveChangesStatus,
 } from "./openspec.js";
 
 function tmpDir(): string {
@@ -620,5 +622,193 @@ describe("openspecChangeToSplitPlanWithContext", () => {
 		const usersChild = result.plan.children.find(c => c.label === "users-module")!;
 		assert.ok(authChild.scope.includes("src/auth/middleware.ts"), `auth scope: ${authChild.scope}`);
 		assert.ok(usersChild.scope.includes("src/users/profile.ts"), `users scope: ${usersChild.scope}`);
+	});
+});
+
+// ─── writeBackTaskCompletion ────────────────────────────────────────────────
+
+describe("writeBackTaskCompletion", () => {
+	let dir: string;
+	beforeEach(() => { dir = tmpDir(); });
+	afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+	it("marks tasks done for completed labels", () => {
+		fs.writeFileSync(path.join(dir, "tasks.md"), [
+			"## 1. Auth",
+			"- [ ] 1.1 Create login form",
+			"- [ ] 1.2 Add JWT middleware",
+			"## 2. API",
+			"- [ ] 2.1 Create user endpoints",
+			"- [ ] 2.2 Add pagination",
+		].join("\n"));
+
+		const result = writeBackTaskCompletion(dir, ["auth"]);
+		assert.equal(result.updated, 2);
+		assert.equal(result.allDone, false);
+
+		const content = fs.readFileSync(path.join(dir, "tasks.md"), "utf-8");
+		assert.ok(content.includes("[x] 1.1 Create login form"));
+		assert.ok(content.includes("[x] 1.2 Add JWT middleware"));
+		assert.ok(content.includes("[ ] 2.1 Create user endpoints"));
+	});
+
+	it("marks all tasks done and sets allDone=true", () => {
+		fs.writeFileSync(path.join(dir, "tasks.md"), [
+			"## 1. Auth",
+			"- [ ] 1.1 Create login form",
+			"## 2. API",
+			"- [ ] 2.1 Create endpoints",
+		].join("\n"));
+
+		const result = writeBackTaskCompletion(dir, ["auth", "api"]);
+		assert.equal(result.updated, 2);
+		assert.equal(result.allDone, true);
+	});
+
+	it("skips already-checked tasks", () => {
+		fs.writeFileSync(path.join(dir, "tasks.md"), [
+			"## 1. Auth",
+			"- [x] 1.1 Already done",
+			"- [ ] 1.2 Still todo",
+		].join("\n"));
+
+		const result = writeBackTaskCompletion(dir, ["auth"]);
+		assert.equal(result.updated, 1); // Only the unchecked one
+	});
+
+	it("returns zero when no labels match", () => {
+		fs.writeFileSync(path.join(dir, "tasks.md"), [
+			"## 1. Auth",
+			"- [ ] 1.1 Create login form",
+		].join("\n"));
+
+		const result = writeBackTaskCompletion(dir, ["nonexistent"]);
+		assert.equal(result.updated, 0);
+	});
+
+	it("returns zero when no tasks.md", () => {
+		const result = writeBackTaskCompletion(dir, ["auth"]);
+		assert.equal(result.updated, 0);
+		assert.equal(result.totalTasks, 0);
+	});
+
+	it("handles multi-word label slugs", () => {
+		fs.writeFileSync(path.join(dir, "tasks.md"), [
+			"## 1. Database Layer",
+			"- [ ] 1.1 Create schema",
+			"- [ ] 1.2 Add migrations",
+		].join("\n"));
+
+		const result = writeBackTaskCompletion(dir, ["database-layer"]);
+		assert.equal(result.updated, 2);
+	});
+
+	it("preserves non-task lines unchanged", () => {
+		const original = [
+			"# Tasks for add-auth",
+			"",
+			"## 1. Auth",
+			"- [ ] 1.1 Create login form",
+			"",
+			"Some notes here.",
+			"",
+			"## 2. API",
+			"- [ ] 2.1 Create endpoints",
+		].join("\n");
+		fs.writeFileSync(path.join(dir, "tasks.md"), original);
+
+		writeBackTaskCompletion(dir, ["auth"]);
+		const content = fs.readFileSync(path.join(dir, "tasks.md"), "utf-8");
+		assert.ok(content.includes("# Tasks for add-auth"));
+		assert.ok(content.includes("Some notes here."));
+		assert.ok(content.includes("[x] 1.1 Create login form"));
+		assert.ok(content.includes("[ ] 2.1 Create endpoints"));
+	});
+});
+
+// ─── getActiveChangesStatus ─────────────────────────────────────────────────
+
+describe("getActiveChangesStatus", () => {
+	let dir: string;
+	beforeEach(() => { dir = tmpDir(); });
+	afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+	it("returns empty when no openspec dir", () => {
+		const result = getActiveChangesStatus(dir);
+		assert.equal(result.length, 0);
+	});
+
+	it("returns change status with task progress", () => {
+		const changeDir = path.join(dir, "openspec", "changes", "add-auth");
+		fs.mkdirSync(changeDir, { recursive: true });
+		fs.writeFileSync(path.join(changeDir, "tasks.md"), [
+			"## 1. Auth",
+			"- [x] 1.1 Done task",
+			"- [ ] 1.2 Todo task",
+			"## 2. API",
+			"- [ ] 2.1 Another task",
+		].join("\n"));
+		fs.writeFileSync(path.join(changeDir, "proposal.md"), "# Proposal");
+
+		const result = getActiveChangesStatus(dir);
+		assert.equal(result.length, 1);
+		assert.equal(result[0].name, "add-auth");
+		assert.equal(result[0].totalTasks, 3);
+		assert.equal(result[0].doneTasks, 1);
+		assert.equal(result[0].hasProposal, true);
+		assert.equal(result[0].hasDesign, false);
+	});
+
+	it("reports all artifacts present", () => {
+		const changeDir = path.join(dir, "openspec", "changes", "add-feature");
+		const specsDir = path.join(changeDir, "specs");
+		fs.mkdirSync(specsDir, { recursive: true });
+		fs.writeFileSync(path.join(changeDir, "tasks.md"), "## 1. A\n- [x] done");
+		fs.writeFileSync(path.join(changeDir, "proposal.md"), "p");
+		fs.writeFileSync(path.join(changeDir, "design.md"), "d");
+		fs.writeFileSync(path.join(specsDir, "spec.md"), "s");
+
+		const result = getActiveChangesStatus(dir);
+		assert.equal(result[0].hasProposal, true);
+		assert.equal(result[0].hasDesign, true);
+		assert.equal(result[0].hasSpecs, true);
+		assert.equal(result[0].doneTasks, 1);
+		assert.equal(result[0].totalTasks, 1);
+	});
+
+	it("handles changes without tasks.md", () => {
+		const changeDir = path.join(dir, "openspec", "changes", "wip-change");
+		fs.mkdirSync(changeDir, { recursive: true });
+		fs.writeFileSync(path.join(changeDir, "proposal.md"), "# WIP");
+
+		const result = getActiveChangesStatus(dir);
+		assert.equal(result.length, 1);
+		assert.equal(result[0].totalTasks, 0);
+		assert.equal(result[0].doneTasks, 0);
+	});
+
+	it("lists multiple changes", () => {
+		for (const name of ["change-a", "change-b", "change-c"]) {
+			const changeDir = path.join(dir, "openspec", "changes", name);
+			fs.mkdirSync(changeDir, { recursive: true });
+			fs.writeFileSync(path.join(changeDir, "tasks.md"), "## 1. X\n- [ ] task");
+		}
+
+		const result = getActiveChangesStatus(dir);
+		assert.equal(result.length, 3);
+	});
+
+	it("excludes archive directory", () => {
+		const archiveDir = path.join(dir, "openspec", "changes", "archive", "old-change");
+		fs.mkdirSync(archiveDir, { recursive: true });
+		fs.writeFileSync(path.join(archiveDir, "tasks.md"), "## 1. X\n- [ ] task");
+
+		const activeDir = path.join(dir, "openspec", "changes", "current");
+		fs.mkdirSync(activeDir, { recursive: true });
+		fs.writeFileSync(path.join(activeDir, "tasks.md"), "## 1. Y\n- [ ] task");
+
+		const result = getActiveChangesStatus(dir);
+		assert.equal(result.length, 1);
+		assert.equal(result[0].name, "current");
 	});
 });

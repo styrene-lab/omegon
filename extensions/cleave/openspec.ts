@@ -17,7 +17,7 @@
  * Group ordering defines dependencies (later groups may depend on earlier).
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import type { ChildPlan, SplitPlan } from "./types.js";
 
@@ -573,6 +573,145 @@ function mergeSmallGroups(groups: TaskGroup[], maxGroups: number): TaskGroup[] {
 
 	return result;
 }
+
+// ─── Task Write-Back ────────────────────────────────────────────────────────
+
+/**
+ * After a successful cleave merge, mark completed child tasks as done
+ * in the original OpenSpec tasks.md.
+ *
+ * Maps completed child labels back to task groups and checks off their
+ * unchecked tasks. Returns the number of tasks marked done.
+ */
+export function writeBackTaskCompletion(
+	changePath: string,
+	completedLabels: string[],
+): { updated: number; totalTasks: number; allDone: boolean } {
+	const tasksPath = join(changePath, "tasks.md");
+	if (!existsSync(tasksPath)) return { updated: 0, totalTasks: 0, allDone: false };
+
+	const content = readFileSync(tasksPath, "utf-8");
+	const groups = parseTasksFile(content);
+
+	// Build a set of completed label slugs for matching
+	const completedSet = new Set(completedLabels.map((l) => l.toLowerCase()));
+
+	// Track which group numbers are completed
+	const completedGroupNumbers = new Set<number>();
+	for (const group of groups) {
+		const groupSlug = group.title
+			.toLowerCase()
+			.replace(/[^\w\s-]/g, "")
+			.replace(/[\s_]+/g, "-")
+			.replace(/-+/g, "-")
+			.replace(/^-|-$/g, "")
+			.slice(0, 40);
+
+		if (completedSet.has(groupSlug)) {
+			completedGroupNumbers.add(group.number);
+		}
+	}
+
+	if (completedGroupNumbers.size === 0) {
+		const totalTasks = groups.reduce((sum, g) => sum + g.tasks.length, 0);
+		return { updated: 0, totalTasks, allDone: false };
+	}
+
+	// Rewrite tasks.md line by line, checking off tasks in completed groups
+	const lines = content.split("\n");
+	let currentGroupNumber = -1;
+	let updated = 0;
+
+	for (let i = 0; i < lines.length; i++) {
+		// Detect group header
+		const groupMatch = lines[i].match(/^##\s+(?:(\d+)\.\s+)?(.+)$/);
+		if (groupMatch) {
+			currentGroupNumber = groupMatch[1] ? parseInt(groupMatch[1], 10) : -1;
+			// If unnumbered, find by title match
+			if (currentGroupNumber === -1) {
+				const title = groupMatch[2].trim();
+				const g = groups.find((g) => g.title === title);
+				if (g) currentGroupNumber = g.number;
+			}
+			continue;
+		}
+
+		// Check off unchecked tasks in completed groups
+		if (completedGroupNumbers.has(currentGroupNumber)) {
+			const taskMatch = lines[i].match(/^(\s*-\s+)\[ \](\s+.*)$/);
+			if (taskMatch) {
+				lines[i] = `${taskMatch[1]}[x]${taskMatch[2]}`;
+				updated++;
+			}
+		}
+	}
+
+	if (updated > 0) {
+		writeFileSync(tasksPath, lines.join("\n"), "utf-8");
+	}
+
+	// Check if all tasks are now done
+	const totalTasks = groups.reduce((sum, g) => sum + g.tasks.length, 0);
+	const wasDone = groups.reduce((sum, g) => sum + g.tasks.filter((t) => t.done).length, 0);
+	const allDone = wasDone + updated >= totalTasks;
+
+	return { updated, totalTasks, allDone };
+}
+
+// ─── Active Changes Status ──────────────────────────────────────────────────
+
+export interface ChangeStatus {
+	name: string;
+	path: string;
+	totalTasks: number;
+	doneTasks: number;
+	hasProposal: boolean;
+	hasDesign: boolean;
+	hasSpecs: boolean;
+}
+
+/**
+ * Summarize all active OpenSpec changes and their task completion status.
+ *
+ * Returns a list of changes with their task progress, suitable for
+ * session-start status display.
+ */
+export function getActiveChangesStatus(repoPath: string): ChangeStatus[] {
+	const openspecDir = detectOpenSpec(repoPath);
+	if (!openspecDir) return [];
+
+	const changes = listChanges(openspecDir);
+	const result: ChangeStatus[] = [];
+
+	for (const change of changes) {
+		let totalTasks = 0;
+		let doneTasks = 0;
+
+		if (change.hasTasks) {
+			const content = readFileSync(join(change.path, "tasks.md"), "utf-8");
+			const groups = parseTasksFile(content);
+			for (const group of groups) {
+				totalTasks += group.tasks.length;
+				doneTasks += group.tasks.filter((t) => t.done).length;
+			}
+		}
+
+		const specsDir = join(change.path, "specs");
+		result.push({
+			name: change.name,
+			path: change.path,
+			totalTasks,
+			doneTasks,
+			hasProposal: change.hasProposal,
+			hasDesign: change.hasDesign,
+			hasSpecs: existsSync(specsDir),
+		});
+	}
+
+	return result;
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
  * Infer file scope patterns from task descriptions.
