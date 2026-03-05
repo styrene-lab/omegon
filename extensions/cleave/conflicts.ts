@@ -198,6 +198,10 @@ export function detectConflicts(results: TaskResult[]): Conflict[] {
 	}
 
 	// ── Step 4: Assumption Violation ──────────────────────────────────────
+	// Only check assumption violations between siblings that have overlapping
+	// file scopes. In greenfield projects where each child creates entirely
+	// new files, cross-child assumption checking produces false positives
+	// from generic task description language.
 	const allAssumptions: Array<[number, string]> = [];
 	for (let i = 0; i < results.length; i++) {
 		for (const a of results[i].assumptions) {
@@ -208,6 +212,15 @@ export function detectConflicts(results: TaskResult[]): Conflict[] {
 	for (const [assIdx, assumption] of allAssumptions) {
 		for (const [decIdx, decision] of allDecisions) {
 			if (assIdx === decIdx) continue;
+
+			// Skip if the two siblings have zero file scope overlap.
+			// Non-overlapping children are unlikely to have real assumption
+			// violations — the detector would fire on generic phrasing.
+			const filesA = new Set(results[assIdx].fileClaims);
+			const filesB = results[decIdx].fileClaims;
+			const hasOverlap = filesB.some((f) => filesA.has(f));
+			if (filesA.size > 0 && filesB.length > 0 && !hasOverlap) continue;
+
 			// Check negation patterns
 			const negInAssumption =
 				assumption.includes("not ") &&

@@ -270,6 +270,68 @@ describe("detectConflicts", () => {
 		assert.equal(violations.length, 0, "Same sibling should not self-conflict");
 	});
 
+	it("skips assumption violation when siblings have non-overlapping file scopes", () => {
+		const results = [
+			makeResult({
+				fileClaims: ["src/core/lib.rs", "src/core/mod.rs"],
+				assumptions: ["Redis is not available in production"],
+				decisions: [],
+			}),
+			makeResult({
+				fileClaims: ["src/render/canvas.rs", "src/render/mod.rs"],
+				decisions: ["Use Redis for all caching needs"],
+				assumptions: [],
+			}),
+		];
+		const violations = detectConflicts(results).filter(
+			(c) => c.type === "assumption_violation",
+		);
+		assert.equal(violations.length, 0,
+			"Non-overlapping file scopes should suppress assumption violation detection");
+	});
+
+	it("still detects assumption violation when siblings have overlapping file scopes", () => {
+		const results = [
+			makeResult({
+				fileClaims: ["src/shared/config.ts", "src/core/lib.ts"],
+				assumptions: ["Redis is not available in production"],
+				decisions: [],
+			}),
+			makeResult({
+				fileClaims: ["src/shared/config.ts", "src/cache/redis.ts"],
+				decisions: ["Use Redis for all caching needs"],
+				assumptions: [],
+			}),
+		];
+		const violations = detectConflicts(results).filter(
+			(c) => c.type === "assumption_violation",
+		);
+		assert.ok(violations.length >= 1,
+			"Overlapping file scopes should still detect assumption violations");
+	});
+
+	it("still detects assumption violation when no file claims exist (empty scopes)", () => {
+		// If neither sibling reported file claims, we can't know the scope —
+		// so the check should still run (conservative approach)
+		const results = [
+			makeResult({
+				fileClaims: [],
+				assumptions: ["Redis is not available in production"],
+				decisions: [],
+			}),
+			makeResult({
+				fileClaims: [],
+				decisions: ["Use Redis for all caching needs"],
+				assumptions: [],
+			}),
+		];
+		const violations = detectConflicts(results).filter(
+			(c) => c.type === "assumption_violation",
+		);
+		assert.ok(violations.length >= 1,
+			"Empty file scopes should still check for assumption violations (conservative)");
+	});
+
 	// ── Combined ──────────────────────────────────────────────────────────
 
 	it("detects multiple conflict types simultaneously", () => {

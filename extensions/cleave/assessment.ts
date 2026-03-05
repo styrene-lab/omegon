@@ -8,7 +8,7 @@
 import type { AssessmentFlags, AssessmentResult, PatternDefinition, PatternMatch } from "./types.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PATTERN LIBRARY — 9 domain patterns for fast-path assessment
+// PATTERN LIBRARY — 12 domain patterns for fast-path assessment
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const PATTERNS: Record<string, PatternDefinition> = {
@@ -148,6 +148,62 @@ export const PATTERNS: Record<string, PatternDefinition> = {
 		modifiersDefault: ["error_handling"],
 		splitStrategy: ["Reproduce bug", "Fix implementation", "Add regression test"],
 	},
+	greenfield_project: {
+		name: "Greenfield Project",
+		description: "New project scaffolding with multiple modules, crates, or packages from scratch",
+		keywords: [
+			"new project", "greenfield", "scaffold", "bootstrap", "from scratch", "create",
+			"initialize", "init", "setup", "starter", "boilerplate", "foundation",
+			"workspace", "monorepo", "crate", "package", "module", "library", "app",
+			"application", "binary", "build", "architecture", "project structure",
+		],
+		requiredAny: ["new project", "greenfield", "scaffold", "bootstrap", "from scratch", "initialize", "init"],
+		expectedComponents: {
+			structure: ["workspace", "monorepo", "crate", "package", "module", "directory", "layout"],
+			build: ["cargo", "npm", "pip", "gradle", "cmake", "makefile", "build", "compile"],
+			modules: ["library", "app", "binary", "core", "foundation", "model", "render", "engine"],
+		},
+		systemsBase: 3,
+		modifiersDefault: [],
+		splitStrategy: ["Foundation/core module", "Domain modules (parallel)", "Application integration"],
+	},
+	multi_module_library: {
+		name: "Multi-Module Library",
+		description: "Building a library or framework with interdependent modules/crates/packages",
+		keywords: [
+			"library", "framework", "crate", "package", "module", "api", "sdk",
+			"trait", "interface", "abstraction", "export", "publish", "public api",
+			"dependency", "workspace", "monorepo", "multi-crate", "multi-package",
+		],
+		requiredAny: ["library", "framework", "crate", "sdk", "multi-crate", "multi-package"],
+		expectedComponents: {
+			modules: ["crate", "package", "module", "workspace", "monorepo"],
+			api: ["trait", "interface", "abstraction", "export", "public", "api"],
+			build: ["cargo", "npm", "pip", "gradle", "build", "compile", "link"],
+		},
+		systemsBase: 2,
+		modifiersDefault: [],
+		splitStrategy: ["Core traits/interfaces", "Module implementations (parallel)", "Integration + public API"],
+	},
+	application_bootstrap: {
+		name: "Application Bootstrap",
+		description: "Setting up a new application with its full architecture (UI, document model, rendering, etc.)",
+		keywords: [
+			"application", "app", "gui", "tui", "cli", "desktop", "web app", "mobile",
+			"document model", "rendering", "pipeline", "event loop", "main loop",
+			"window", "canvas", "layout", "state management", "architecture",
+			"egui", "iced", "tauri", "electron", "react", "svelte",
+		],
+		requiredAny: ["application", "app", "gui", "tui", "desktop", "web app"],
+		expectedComponents: {
+			ui: ["gui", "tui", "window", "canvas", "component", "layout", "render", "egui", "iced"],
+			model: ["model", "state", "document", "data", "store", "management"],
+			infra: ["event", "loop", "pipeline", "architecture", "main", "entry"],
+		},
+		systemsBase: 3,
+		modifiersDefault: ["state_coordination"],
+		splitStrategy: ["Core data model", "Rendering/UI layer", "Event handling + state management", "Application shell"],
+	},
 	refactor: {
 		name: "Refactor",
 		description: "Replace or rewrite implementation while preserving behavior",
@@ -240,7 +296,7 @@ export function estimateSystems(directive: string): number {
 }
 
 /**
- * Match directive against the 9 core patterns.
+ * Match directive against the 12 core patterns.
  *
  * Confidence scoring:
  * - Base 0.55 for having a required keyword
@@ -419,11 +475,16 @@ export function assessDirective(
 		return result;
 	}
 
-	// No pattern matched — heuristic fallback
+	// No pattern matched — heuristic fallback.
+	// If complexity exceeds threshold, recommend cleave rather than
+	// needs_assessment. A high-complexity directive without a matching
+	// pattern still benefits from decomposition.
 	const detectedModifiers = detectModifiers(directive);
 	const estimatedSystems = estimateSystems(directive);
 	const complexity = calculateComplexity(estimatedSystems, detectedModifiers);
 	const effComplexity = effectiveComplexity(complexity, validate);
+
+	const decision = effComplexity > threshold ? "cleave" : "needs_assessment";
 
 	return {
 		complexity,
@@ -432,11 +493,12 @@ export function assessDirective(
 		method: "heuristic",
 		pattern: null,
 		confidence: 0,
-		decision: "needs_assessment",
+		decision,
 		reasoning:
 			`No pattern matched with sufficient confidence. ` +
 			`Heuristic estimate: ${estimatedSystems} systems, ${detectedModifiers.length} modifiers. ` +
-			`Complexity: ${complexity}, effective: ${effComplexity}.`,
+			`Complexity: ${complexity}, effective: ${effComplexity}.` +
+			(decision === "cleave" ? ` Exceeds threshold ${threshold} — recommending decomposition.` : ""),
 		skipInterrogation: false,
 	};
 }

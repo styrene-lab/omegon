@@ -20,8 +20,8 @@ import {
 // ─── Pattern Library ────────────────────────────────────────────────────────
 
 describe("PATTERNS", () => {
-	it("should have 9 patterns", () => {
-		assert.equal(Object.keys(PATTERNS).length, 9);
+	it("should have 12 patterns", () => {
+		assert.equal(Object.keys(PATTERNS).length, 12);
 	});
 
 	it("every pattern has required fields", () => {
@@ -89,6 +89,39 @@ describe("matchPattern", () => {
 
 		assert.deepEqual(r1, r2);
 		assert.deepEqual(r2, r3);
+	});
+
+	it("matches greenfield project directive", () => {
+		const m = matchPattern(
+			"Create a new project from scratch with a Rust workspace, core library crate, and binary application",
+		);
+		assert.ok(m, "Should match a greenfield pattern");
+		assert.equal(m.name, "Greenfield Project");
+		assert.ok(m.confidence >= 0.80);
+	});
+
+	it("matches multi-module library directive", () => {
+		const m = matchPattern(
+			"Build a multi-crate Rust library with public API traits, workspace layout, and cargo build configuration",
+		);
+		assert.ok(m, "Should match multi-module library pattern");
+		assert.equal(m.name, "Multi-Module Library");
+	});
+
+	it("matches application bootstrap directive", () => {
+		const m = matchPattern(
+			"Bootstrap a desktop GUI application with egui, document model, and rendering pipeline",
+		);
+		assert.ok(m, "Should match application bootstrap pattern");
+		assert.equal(m.name, "Application Bootstrap");
+	});
+
+	it("matches scaffold/init directives to greenfield", () => {
+		const m = matchPattern(
+			"Scaffold a new project with proper directory layout and build configuration",
+		);
+		assert.ok(m, "Should match greenfield pattern");
+		assert.equal(m.name, "Greenfield Project");
 	});
 
 	it("is consistent when called with different directives in sequence", () => {
@@ -244,11 +277,23 @@ describe("assessDirective", () => {
 		assert.equal(r.method, "fast-path");
 	});
 
-	it("returns needs_assessment for unrecognized directives", () => {
+	it("returns needs_assessment for simple unrecognized directives", () => {
 		const r = assessDirective("do something interesting with the project");
-		assert.equal(r.decision, "needs_assessment");
 		assert.equal(r.method, "heuristic");
 		assert.equal(r.pattern, null);
+		// Simple directive — low complexity, may be needs_assessment or cleave
+		// depending on detected systems
+	});
+
+	it("returns cleave for complex unrecognized directives exceeding threshold", () => {
+		// This directive has multiple system signals but no pattern match
+		const r = assessDirective(
+			"build a streaming analytics pipeline with real-time websocket frontend, backend API microservice, database schema, and monitoring telemetry dashboard",
+		);
+		assert.equal(r.method, "heuristic");
+		assert.equal(r.pattern, null);
+		assert.equal(r.decision, "cleave", "High-complexity heuristic should recommend cleave, not needs_assessment");
+		assert.ok(r.systems >= 3, `Expected >= 3 systems, got ${r.systems}`);
 	});
 
 	it("respects custom threshold", () => {

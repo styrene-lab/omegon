@@ -1,13 +1,13 @@
 /**
- * Tests for cleave/dispatcher — AsyncSemaphore concurrency control.
+ * Tests for cleave/dispatcher — AsyncSemaphore and result section parsing.
  *
  * We can't easily test the full dispatch pipeline (requires pi subprocess),
- * but the semaphore is the critical fix and is testable in isolation.
+ * but the semaphore and status harvesting are testable in isolation.
  */
 
 import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
-import { AsyncSemaphore } from "./dispatcher.js";
+import { AsyncSemaphore, extractResultSection } from "./dispatcher.js";
 
 // ─── AsyncSemaphore ─────────────────────────────────────────────────────────
 
@@ -134,5 +134,134 @@ describe("AsyncSemaphore", () => {
 		assert.equal(completed.length, 20, "All 20 tasks should complete");
 		assert.ok(maxConcurrent <= 3, `Max concurrent was ${maxConcurrent}, expected <= 3`);
 		assert.equal(currentConcurrent, 0, "All tasks should be done");
+	});
+});
+
+// ─── extractResultSection ───────────────────────────────────────────────────
+
+describe("extractResultSection", () => {
+	const TASK_FILE_WITH_CONTRACT = `# Task: foundation
+
+> Build a Rust application
+
+## Mission
+
+Set up the project foundation.
+
+## Scope
+
+- src/lib.rs
+- Cargo.toml
+
+## Contract
+
+1. Only work on files within your scope
+2. Update the Result section below when done
+3. Commit your work with clear messages — do not push
+4. If the task is too complex, set status to NEEDS_DECOMPOSITION
+
+## Result
+
+**Status:** SUCCESS
+
+**Summary:** Built the foundation module.
+
+**Artifacts:**
+- \`src/lib.rs\`
+- \`Cargo.toml\`
+
+**Decisions Made:**
+- Used workspace layout
+
+**Assumptions:**
+
+**Interfaces Published:**
+
+**Verification:**
+- Command: \`cargo test\`
+- Output: 12 tests passed
+`;
+
+	it("extracts only the Result section, excluding Contract", () => {
+		const result = extractResultSection(TASK_FILE_WITH_CONTRACT);
+		assert.ok(result.includes("**Status:** SUCCESS"));
+		assert.ok(result.includes("Built the foundation module"));
+		// Must NOT contain the Contract section instruction text
+		assert.ok(!result.includes("If the task is too complex"));
+		assert.ok(!result.includes("## Contract"));
+	});
+
+	it("does not false-positive on NEEDS_DECOMPOSITION in Contract section", () => {
+		const result = extractResultSection(TASK_FILE_WITH_CONTRACT);
+		// The Result section says SUCCESS, not NEEDS_DECOMPOSITION
+		assert.ok(!result.includes("NEEDS_DECOMPOSITION"));
+	});
+
+	it("correctly detects NEEDS_DECOMPOSITION when child actually set it", () => {
+		const content = `## Contract
+
+4. If the task is too complex, set status to NEEDS_DECOMPOSITION
+
+## Result
+
+**Status:** NEEDS_DECOMPOSITION
+
+**Summary:** Task too complex for single child.
+`;
+		const result = extractResultSection(content);
+		assert.ok(result.includes("**Status:** NEEDS_DECOMPOSITION"));
+	});
+
+	it("correctly detects FAILED status in Result section", () => {
+		const content = `## Contract
+
+4. If the task is too complex, set status to NEEDS_DECOMPOSITION
+
+## Result
+
+**Status:** FAILED
+
+**Summary:** Compilation errors.
+`;
+		const result = extractResultSection(content);
+		assert.ok(result.includes("**Status:** FAILED"));
+	});
+
+	it("returns empty string when no Result section exists", () => {
+		const content = `## Contract
+
+Some instructions here.
+`;
+		assert.equal(extractResultSection(content), "");
+	});
+
+	it("handles Result section at end of file (no trailing heading)", () => {
+		const content = `## Contract
+
+Instructions.
+
+## Result
+
+**Status:** SUCCESS
+
+**Summary:** Done.`;
+		const result = extractResultSection(content);
+		assert.ok(result.includes("**Status:** SUCCESS"));
+		assert.ok(result.includes("Done."));
+	});
+
+	it("stops at the next ## heading after Result", () => {
+		const content = `## Result
+
+**Status:** SUCCESS
+
+## Appendix
+
+Extra stuff with NEEDS_DECOMPOSITION mentioned here.
+`;
+		const result = extractResultSection(content);
+		assert.ok(result.includes("**Status:** SUCCESS"));
+		assert.ok(!result.includes("NEEDS_DECOMPOSITION"));
+		assert.ok(!result.includes("Appendix"));
 	});
 });

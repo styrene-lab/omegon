@@ -24,6 +24,28 @@ import type { ChildState, CleaveState } from "./types.js";
 import { computeDispatchWaves } from "./planner.js";
 import { saveState } from "./workspace.js";
 
+// ─── Result section parsing ─────────────────────────────────────────────────
+
+/**
+ * Extract just the ## Result section from a task file.
+ *
+ * The Contract section contains instructional text like
+ * "set status to NEEDS_DECOMPOSITION" which must NOT be matched
+ * as an actual status. By isolating the Result section, we only
+ * match status strings the child agent actually wrote.
+ *
+ * Returns the content from "## Result" to the next "##" heading or EOF.
+ * Returns empty string if no Result section found.
+ */
+export function extractResultSection(content: string): string {
+	const resultIdx = content.indexOf("## Result");
+	if (resultIdx === -1) return "";
+	const afterResult = content.slice(resultIdx);
+	// Find the next ## heading after the Result heading itself
+	const nextHeading = afterResult.indexOf("\n## ", 1);
+	return nextHeading === -1 ? afterResult : afterResult.slice(0, nextHeading);
+}
+
 // ─── Child prompt construction ──────────────────────────────────────────────
 
 /**
@@ -310,14 +332,21 @@ async function dispatchSingleChild(
 		child.error = result.stderr.slice(0, 2000) || `Exit code ${result.exitCode}`;
 	}
 
-	// Re-read the task file to check if the child updated the status
+	// Re-read the task file to check if the child updated the status.
+	// IMPORTANT: Only parse the ## Result section to avoid false positives
+	// from the Contract section boilerplate which mentions NEEDS_DECOMPOSITION
+	// as an instruction (not as an actual status).
 	try {
 		const updatedContent = readFileSync(taskFilePath, "utf-8");
-		if (updatedContent.includes("NEEDS_DECOMPOSITION")) {
+		const resultSection = extractResultSection(updatedContent);
+		if (resultSection.includes("**Status:** NEEDS_DECOMPOSITION")) {
 			child.status = "needs_decomposition";
-		} else if (child.status === "completed" && updatedContent.includes("**Status:** FAILED")) {
+		} else if (resultSection.includes("**Status:** FAILED")) {
 			child.status = "failed";
 			child.error = "Child reported FAILED in task file";
+		} else if (resultSection.includes("**Status:** SUCCESS") || resultSection.includes("**Status:** PARTIAL")) {
+			// Child explicitly reported success — trust the task file over exit code
+			child.status = "completed";
 		}
 	} catch {
 		// Task file not readable — keep whatever status we have

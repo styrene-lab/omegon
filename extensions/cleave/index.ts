@@ -1096,11 +1096,16 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			if (openspecCtx && openspecCtx.specScenarios.length > 0 && mergeFailures.length === 0) {
 				specVerification = formatSpecVerification(openspecCtx);
 			}
-			if (mergeFailures.length === 0) {
+			if (mergeResults.length > 0 && mergeFailures.length === 0) {
+				// All merges succeeded — safe to clean up worktrees and branches
 				await cleanupWorktrees(pi, repoPath);
+			} else if (mergeResults.length === 0) {
+				// No merges attempted (e.g., all children misclassified or failed).
+				// Preserve branches — they may contain committed work.
+				// Only prune worktree directories to reclaim disk space.
+				await pruneWorktreeDirs(pi, repoPath);
 			} else {
-				// Prune worktree directories (they're copies) but keep the branches
-				// for manual conflict resolution
+				// Partial merge failure — preserve branches for manual resolution
 				await pruneWorktreeDirs(pi, repoPath);
 			}
 
