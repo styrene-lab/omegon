@@ -427,17 +427,20 @@ export default function (pi: ExtensionAPI) {
       // globalStore stays null — global features degrade gracefully
     }
 
-    // Auto-import: if facts.jsonl exists and is newer than facts.db, merge it in.
-    // This enables cross-machine sync — pull facts.jsonl via git, rebuild local db.
+    // Auto-import: always merge facts.jsonl into DB on startup.
+    // importFromJsonl deduplicates by content_hash — existing facts get reinforced,
+    // new facts get inserted. This is safe to run every session because it's additive.
+    //
+    // Previous mtime-based gating was broken: new FactStore() creates/opens the DB
+    // (setting mtime=NOW) before this check runs, so jsonlMtime > dbMtime was always
+    // false for fresh DBs, silently skipping import and then overwriting the JSONL
+    // on shutdown with only the current session's facts.
     const jsonlPath = path.join(memoryDir, "facts.jsonl");
     try {
       const fsSync = await import("node:fs");
       if (fsSync.existsSync(jsonlPath)) {
-        const jsonlMtime = fsSync.statSync(jsonlPath).mtime;
-        const dbMtime = store.getDbMtime();
-        // Import if db is fresh (just created) or jsonl is newer
-        if (!dbMtime || jsonlMtime > dbMtime) {
-          const jsonl = fsSync.readFileSync(jsonlPath, "utf8");
+        const jsonl = fsSync.readFileSync(jsonlPath, "utf8");
+        if (jsonl.trim()) {
           const result = store.importFromJsonl(jsonl);
           if (ctx.hasUI && (result.factsAdded > 0 || result.edgesAdded > 0)) {
             ctx.ui.notify(

@@ -1338,25 +1338,29 @@ export class FactStore {
               mindsCreated++;
             }
 
-            // Dedup by content hash
+            // Dedup by content hash — check ALL statuses to avoid resurrecting
+            // archived or superseded facts from stale JSONL snapshots.
             const hash = record.content_hash ?? contentHash(record.content);
-            const existing = this.db.prepare(
-              `SELECT id FROM facts WHERE mind = ? AND content_hash = ? AND status = 'active'`
-            ).get(mind, hash);
+            const existingAny = this.db.prepare(
+              `SELECT id, status FROM facts WHERE mind = ? AND content_hash = ?`
+            ).get(mind, hash) as { id: string; status: string } | undefined;
 
-            if (existing) {
-              // Reinforce, take higher reinforcement count
-              const existingFact = this.getFact(existing.id);
-              if (existingFact && record.reinforcement_count > existingFact.reinforcement_count) {
-                this.db.prepare(`
-                  UPDATE facts SET reinforcement_count = ?, last_reinforced = ?, confidence = 1.0
-                  WHERE id = ?
-                `).run(record.reinforcement_count, record.last_reinforced ?? new Date().toISOString(), existing.id);
-              } else {
-                this.reinforceFact(existing.id);
+            if (existingAny) {
+              if (existingAny.status === "active") {
+                // Reinforce, take higher reinforcement count
+                const existingFact = this.getFact(existingAny.id);
+                if (existingFact && record.reinforcement_count > existingFact.reinforcement_count) {
+                  this.db.prepare(`
+                    UPDATE facts SET reinforcement_count = ?, last_reinforced = ?, confidence = 1.0
+                    WHERE id = ?
+                  `).run(record.reinforcement_count, record.last_reinforced ?? new Date().toISOString(), existingAny.id);
+                } else {
+                  this.reinforceFact(existingAny.id);
+                }
+                factsReinforced++;
               }
-              factIdMap.set(record.id, existing.id);
-              factsReinforced++;
+              // Archived/superseded facts: skip silently (don't resurrect)
+              factIdMap.set(record.id, existingAny.id);
             } else {
               const id = nanoid();
               const now = new Date().toISOString();
