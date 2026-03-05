@@ -7,3 +7,4 @@ package-lock.json
 bin/rg
 bin/fd
 .claude/
+.DS_Store
