@@ -11,7 +11,7 @@
  * 4. Assumption Violation — contradicts sibling's decision
  */
 
-import type { Conflict, TaskResult } from "./types.js";
+import type { Conflict, TaskResult } from "./types.ts";
 
 // ─── Task result parsing ────────────────────────────────────────────────────
 

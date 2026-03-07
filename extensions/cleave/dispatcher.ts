@@ -21,10 +21,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { sharedState } from "../shared-state.ts";
-import type { ChildState, CleaveState, ModelTier } from "./types.js";
-import { computeDispatchWaves } from "./planner.js";
-import { executeWithReview, type ReviewConfig, type ReviewExecutor, DEFAULT_REVIEW_CONFIG } from "./review.js";
-import { saveState } from "./workspace.js";
+import type { ChildState, CleaveState, ModelTier } from "./types.ts";
+import { computeDispatchWaves } from "./planner.ts";
+import { executeWithReview, type ReviewConfig, type ReviewExecutor, DEFAULT_REVIEW_CONFIG } from "./review.ts";
+import { saveState } from "./workspace.ts";
 
 // ─── Result section parsing ─────────────────────────────────────────────────
 

@@ -28,7 +28,7 @@ import {
   parseCommand,
   extractSecretRefs,
   AUTH_REMEDIATION,
-} from "./lib.js";
+} from "./lib.ts";
 
 // ---------------------------------------------------------------------------
 // Runtime types

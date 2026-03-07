@@ -17,8 +17,8 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
-import { SECTIONS, type SectionName } from "./template.js";
-import { cosineSimilarity, vectorToBlob, blobToVector } from "./embeddings.js";
+import { SECTIONS, type SectionName } from "./template.ts";
+import { cosineSimilarity, vectorToBlob, blobToVector } from "./embeddings.ts";
 
 /**
  * Resolve the SQLite database constructor.

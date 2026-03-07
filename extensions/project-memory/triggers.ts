@@ -2,7 +2,7 @@
  * Extraction trigger logic — determines when background extraction should run.
  */
 
-import type { MemoryConfig } from "./types.js";
+import type { MemoryConfig } from "./types.ts";
 
 export interface ExtractionTriggerState {
   lastExtractedTokens: number;

@@ -11,8 +11,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ChildPlan, CleaveState, SplitPlan } from "./types.js";
-import type { OpenSpecContext } from "./openspec.js";
+import type { ChildPlan, CleaveState, SplitPlan } from "./types.ts";
+import type { OpenSpecContext } from "./openspec.ts";
 
 // ─── Skill Directives ──────────────────────────────────────────────────────
 

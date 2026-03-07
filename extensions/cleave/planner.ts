@@ -10,7 +10,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { ChildPlan, SplitPlan } from "./types.js";
+import type { ChildPlan, SplitPlan } from "./types.ts";
 
 /**
  * Build the planning prompt.

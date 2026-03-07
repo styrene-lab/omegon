@@ -5,7 +5,7 @@
  * Pure functions with zero runtime dependencies.
  */
 
-import type { AssessmentFlags, AssessmentResult, PatternDefinition, PatternMatch } from "./types.js";
+import type { AssessmentFlags, AssessmentResult, PatternDefinition, PatternMatch } from "./types.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PATTERN LIBRARY — 12 domain patterns for fast-path assessment

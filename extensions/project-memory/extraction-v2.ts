@@ -13,8 +13,8 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import type { MemoryConfig } from "./types.js";
-import type { Fact, Edge } from "./factstore.js";
+import type { MemoryConfig } from "./types.ts";
+import type { Fact, Edge } from "./factstore.ts";
 
 // ---------------------------------------------------------------------------
 // Shared subprocess runner

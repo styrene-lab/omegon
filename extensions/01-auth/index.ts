@@ -41,7 +41,7 @@ import {
 	type AuthStatus,
 	type AuthResult,
 	type AuthProvider,
-} from "./auth.js";
+} from "./auth.ts";
 
 // Re-export types for backward compatibility
 export type { AuthStatus, AuthResult, AuthProvider };
@@ -274,4 +274,4 @@ export {
 	formatResults,
 	findProvider,
 	checkAllProviders,
-} from "./auth.js";
+} from "./auth.ts";

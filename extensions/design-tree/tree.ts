@@ -15,8 +15,8 @@ import type {
 	FileScope,
 	NodeStatus,
 	ResearchEntry,
-} from "./types.js";
-import { VALID_STATUSES, SECTION_HEADINGS } from "./types.js";
+} from "./types.ts";
+import { VALID_STATUSES, SECTION_HEADINGS } from "./types.ts";
 
 // ─── Frontmatter Parsing ─────────────────────────────────────────────────────
 

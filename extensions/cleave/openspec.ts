@@ -19,7 +19,7 @@
 
 import { existsSync, readFileSync, readdirSync, writeFileSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
-import type { ChildPlan, SplitPlan } from "./types.js";
+import type { ChildPlan, SplitPlan } from "./types.ts";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

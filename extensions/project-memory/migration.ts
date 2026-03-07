@@ -10,8 +10,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { FactStore, type StoreFactOptions } from "./factstore.js";
-import { SECTIONS, type SectionName } from "./template.js";
+import { FactStore, type StoreFactOptions } from "./factstore.ts";
+import { SECTIONS, type SectionName } from "./template.ts";
 
 interface MigrationResult {
   factsImported: number;

@@ -18,7 +18,7 @@ import type {
 	Scenario,
 	SpecFile,
 	SpecSection,
-} from "./types.js";
+} from "./types.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 

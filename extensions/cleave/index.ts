@@ -19,10 +19,10 @@ import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "
 import { Type } from "@sinclair/typebox";
 
 import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
-import { assessDirective, PATTERNS } from "./assessment.js";
-import { detectConflicts, parseTaskResult } from "./conflicts.js";
-import { dispatchChildren, resolveExecuteModel } from "./dispatcher.js";
-import { DEFAULT_REVIEW_CONFIG, type ReviewConfig } from "./review.js";
+import { assessDirective, PATTERNS } from "./assessment.ts";
+import { detectConflicts, parseTaskResult } from "./conflicts.ts";
+import { dispatchChildren, resolveExecuteModel } from "./dispatcher.ts";
+import { DEFAULT_REVIEW_CONFIG, type ReviewConfig } from "./review.ts";
 import {
 	detectOpenSpec,
 	findExecutableChanges,
@@ -31,17 +31,17 @@ import {
 	writeBackTaskCompletion,
 	getActiveChangesStatus,
 	type OpenSpecContext,
-} from "./openspec.js";
-import { buildPlannerPrompt, getRepoTree, parsePlanResponse } from "./planner.js";
+} from "./openspec.ts";
+import { buildPlannerPrompt, getRepoTree, parsePlanResponse } from "./planner.ts";
 import {
 	matchSkillsToAllChildren,
 	resolveSkillPaths,
 	getPreferredTier,
-} from "./skills.js";
-import type { CleaveState, ChildState, SplitPlan } from "./types.js";
-import { DEFAULT_CONFIG } from "./types.js";
-import { initWorkspace, readTaskFiles, saveState } from "./workspace.js";
-import type { SkillDirective } from "./workspace.js";
+} from "./skills.ts";
+import type { CleaveState, ChildState, SplitPlan } from "./types.ts";
+import { DEFAULT_CONFIG } from "./types.ts";
+import { initWorkspace, readTaskFiles, saveState } from "./workspace.ts";
+import type { SkillDirective } from "./workspace.ts";
 import {
 	cleanupWorktrees,
 	createWorktree,
@@ -49,7 +49,7 @@ import {
 	getCurrentBranch,
 	mergeBranch,
 	pruneWorktreeDirs,
-} from "./worktree.js";
+} from "./worktree.ts";
 
 // ─── Dashboard state emitter ────────────────────────────────────────────────
 

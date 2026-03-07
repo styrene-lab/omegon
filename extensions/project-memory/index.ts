@@ -47,17 +47,17 @@ import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "../lib/typebox-helpers";
 import { Type } from "@sinclair/typebox";
 import { Container, type SelectItem, SelectList, Text } from "@mariozechner/pi-tui";
-import { FactStore, parseExtractionOutput, GLOBAL_DECAY, type MindRecord, type Fact } from "./factstore.js";
-import { embed, isEmbeddingAvailable, MODEL_DIMS } from "./embeddings.js";
-import { DEFAULT_CONFIG, type MemoryConfig } from "./types.js";
+import { FactStore, parseExtractionOutput, GLOBAL_DECAY, type MindRecord, type Fact } from "./factstore.ts";
+import { embed, isEmbeddingAvailable, MODEL_DIMS } from "./embeddings.ts";
+import { DEFAULT_CONFIG, type MemoryConfig } from "./types.ts";
 import {
   type ExtractionTriggerState,
   createTriggerState,
   shouldExtract,
-} from "./triggers.js";
-import { runExtractionV2, runGlobalExtraction, killActiveExtraction, killAllSubprocesses, generateEpisode } from "./extraction-v2.js";
-import { migrateToFactStore, needsMigration, markMigrated } from "./migration.js";
-import { SECTIONS } from "./template.js";
+} from "./triggers.ts";
+import { runExtractionV2, runGlobalExtraction, killActiveExtraction, killAllSubprocesses, generateEpisode } from "./extraction-v2.ts";
+import { migrateToFactStore, needsMigration, markMigrated } from "./migration.ts";
+import { SECTIONS } from "./template.ts";
 import { serializeConversation, convertToLlm } from "@mariozechner/pi-coding-agent";
 import { sharedState } from "../shared-state.ts";
 

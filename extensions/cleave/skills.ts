@@ -15,7 +15,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { ChildPlan } from "./types.js";
+import type { ChildPlan } from "./types.ts";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

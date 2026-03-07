@@ -20,12 +20,12 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { StringEnum } from "../lib/typebox-helpers.js";
+import { StringEnum } from "../lib/typebox-helpers.ts";
 import { Text } from "@mariozechner/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import type { ChangeInfo } from "./types.js";
+import type { ChangeInfo } from "./types.ts";
 import {
 	getOpenSpecDir,
 	listChanges,
@@ -38,9 +38,9 @@ import {
 	countScenarios,
 	summarizeSpecs,
 	generateSpecFile,
-} from "./spec.js";
+} from "./spec.ts";
 import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
-import { transitionDesignNodesOnArchive } from "./archive-gate.js";
+import { transitionDesignNodesOnArchive } from "./archive-gate.ts";
 
 // ─── Dashboard State Emitter ─────────────────────────────────────────────────
 

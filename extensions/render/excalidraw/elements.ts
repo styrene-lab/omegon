@@ -45,7 +45,7 @@ import {
 	type Roundness,
 	type SemanticPurpose,
 	type TextLevel,
-} from "./types.js";
+} from "./types.ts";
 
 // Re-export types for consumers
 export type {

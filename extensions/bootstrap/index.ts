@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { DEPS, checkAll, formatReport, bestInstallCmd, sortByRequires, type DepStatus, type DepTier } from "./deps.js";
+import { DEPS, checkAll, formatReport, bestInstallCmd, sortByRequires, type DepStatus, type DepTier } from "./deps.ts";
 
 const AGENT_DIR = join(homedir(), ".pi", "agent");
 const MARKER_PATH = join(AGENT_DIR, "pi-kit-bootstrap-done");

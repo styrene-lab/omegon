@@ -3,7 +3,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { scanDesignDocs, writeNodeDocument, getNodeSections } from "../design-tree/tree.js";
+import { scanDesignDocs, writeNodeDocument, getNodeSections } from "../design-tree/tree.ts";
 
 /**
  * Scan the design tree for nodes whose openspec_change matches the archived
