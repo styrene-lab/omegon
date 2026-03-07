@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { resolveUri, loadConfig, osc8Link } from "./uri-resolver.js";
+import { getMdservePort } from "../vault/index.ts";
 
 // ---------------------------------------------------------------------------
 // Format classification
@@ -547,7 +548,7 @@ export default function (pi: ExtensionAPI) {
 			const filePath = parts[0];
 			const page = parts[1] ? parseInt(parts[1], 10) : undefined;
 
-			const mdservePort = (pi as any).sharedState?.get?.("mdserve.port") as number | undefined;
+			const mdservePort = getMdservePort() ?? undefined;
 			const result = viewFile(filePath, page, { mdservePort });
 			const textParts = result.content.filter(c => c.type === "text").map(c => (c as any).text).join("\n");
 			const imageParts = result.content.filter(c => c.type === "image");
@@ -679,7 +680,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const filePath = params.path.startsWith("@") ? params.path.slice(1) : params.path;
-			const mdservePort = (pi as any).sharedState?.get?.("mdserve.port") as number | undefined;
+			const mdservePort = getMdservePort() ?? undefined;
 			return viewFile(filePath, params.page, { mdservePort });
 		},
 	});

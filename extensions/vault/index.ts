@@ -23,7 +23,11 @@ const BINARY_NAME = "mdserve";
 let mdserveProcess: ChildProcess | null = null;
 let mdservePort: number | null = null;
 let mdserveDir: string | null = null;
-let piInstance: ExtensionAPI | null = null;
+
+/** Get the current mdserve port, or null if not running. Used by uri-resolver. */
+export function getMdservePort(): number | null {
+	return mdservePort;
+}
 
 function hasBinary(): boolean {
 	try {
@@ -41,15 +45,7 @@ function openBrowser(url: string): void {
 	} catch { /* user can open manually */ }
 }
 
-function updateSharedState(): void {
-	if (piInstance) {
-		if (mdservePort) {
-			piInstance.sharedState.set("mdserve.port", mdservePort);
-		} else {
-			piInstance.sharedState.set("mdserve.port", undefined);
-		}
-	}
-}
+// No shared state update needed — getMdservePort() is the public API
 
 function stopMdserve(): string {
 	if (mdserveProcess) {
@@ -59,7 +55,7 @@ function stopMdserve(): string {
 		const msg = `Stopped mdserve (PID ${pid}, was serving ${mdserveDir} on port ${mdservePort})`;
 		mdservePort = null;
 		mdserveDir = null;
-		updateSharedState();
+		
 		return msg;
 	}
 	return "mdserve is not running.";
@@ -83,13 +79,13 @@ function spawnMdserve(dir: string, port: number, options?: { silent?: boolean })
 	mdserveProcess = child;
 	mdservePort = port;
 	mdserveDir = dir;
-	updateSharedState();
+	
 
 	child.stdout?.on("data", (data: Buffer) => {
 		const match = data.toString().match(/using (\d+) instead/);
 		if (match) {
 			mdservePort = parseInt(match[1], 10);
-			updateSharedState();
+			
 		}
 	});
 
@@ -98,7 +94,7 @@ function spawnMdserve(dir: string, port: number, options?: { silent?: boolean })
 			mdserveProcess = null;
 			mdservePort = null;
 			mdserveDir = null;
-			updateSharedState();
+			
 		}
 	});
 
@@ -116,7 +112,7 @@ function spawnMdserve(dir: string, port: number, options?: { silent?: boolean })
 const NOT_INSTALLED = "`mdserve` is not installed. Run `/bootstrap` to set up pi-kit dependencies.";
 
 export default function (pi: ExtensionAPI) {
-	piInstance = pi;
+	
 
 	// Auto-start mdserve on session start if binary is available
 	pi.on("session_start", () => {
@@ -131,7 +127,7 @@ export default function (pi: ExtensionAPI) {
 			mdserveProcess = null;
 			mdservePort = null;
 			mdserveDir = null;
-			updateSharedState();
+			
 		}
 	});
 
