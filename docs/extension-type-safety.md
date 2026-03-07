@@ -1,7 +1,7 @@
 ---
 id: extension-type-safety
 title: Extension Type Safety — Preventing API Hallucinations
-status: implementing
+status: implemented
 tags: [dx, quality, guardrails]
 open_questions: []
 branches: ["feature/extension-type-safety"]
