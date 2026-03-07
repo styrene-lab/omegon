@@ -788,6 +788,18 @@ const VALID_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
  * uppercase, spaces, and empty strings.
  * Returns null if valid, or an error message string if invalid.
  */
+/** Validate a git branch name — reject shell metacharacters and invalid git ref chars */
+export function sanitizeBranchName(name: string): string | null {
+	if (!name || name.length > 200) return null;
+	// Only allow: alphanumeric, hyphens, underscores, dots, forward slashes
+	if (!/^[a-zA-Z0-9][a-zA-Z0-9._\-/]*[a-zA-Z0-9]$/.test(name)) return null;
+	// Reject: consecutive dots, slash-dot, dot-slash, double slash, @{, backslash, space, ~, ^, :, ?, *, [
+	if (/\.{2}|\/\.|\.\/|\/\/|@\{|\\|\s|[~^:?*[\]]/.test(name)) return null;
+	// Reject .lock suffix on any component
+	if (/\.lock(\/|$)/.test(name)) return null;
+	return name;
+}
+
 export function validateNodeId(id: string): string | null {
 	if (!id) return "Node ID cannot be empty";
 	if (id.length > 80) return "Node ID too long (max 80 characters)";
@@ -833,7 +845,7 @@ export function matchBranchToNode(tree: DesignTree, branchName: string): DesignN
 	let bestMatchLength = 0;
 
 	for (const node of tree.nodes.values()) {
-		if (node.status !== "implementing" && node.status !== "implemented") continue;
+		if (node.status !== "implementing") continue;
 
 		const nodeIdParts = node.id.split("-");
 

@@ -37,6 +37,7 @@ import {
 	matchBranchToNode,
 	appendBranch,
 	readGitBranch,
+	sanitizeBranchName,
 } from "./tree.js";
 
 import { VALID_STATUSES, STATUS_ICONS, STATUS_COLORS } from "./types.js";
@@ -910,12 +911,11 @@ describe("matchBranchToNode", () => {
 		assert.equal(match, null);
 	});
 
-	it("matches implemented nodes (branch created after status transition)", () => {
+	it("does not match implemented nodes (association stops after completion)", () => {
 		createNode(docsDir, { id: "done-feature", title: "Done Feature", status: "implemented" });
 		const tree = scanDesignDocs(docsDir);
 		const match = matchBranchToNode(tree, "feature/done-feature");
-		assert.ok(match);
-		assert.equal(match.id, "done-feature");
+		assert.equal(match, null);
 	});
 
 	it("returns null for main branch", () => {
@@ -1123,7 +1123,7 @@ describe("implementing and implemented statuses", () => {
 	});
 
 	it("have STATUS_COLORS entries", () => {
-		assert.equal(STATUS_COLORS.implementing, "info");
+		assert.equal(STATUS_COLORS.implementing, "accent");
 		assert.equal(STATUS_COLORS.implemented, "success");
 	});
 });
@@ -1322,5 +1322,104 @@ describe("implement flow: status transition + frontmatter update", () => {
 
 		const tree2 = scanDesignDocs(tmpDir);
 		assert.equal(tree2.nodes.get("archive-gate")!.status, "implemented");
+	});
+});
+
+// ─── sanitizeBranchName ──────────────────────────────────────────────────────
+
+describe("sanitizeBranchName", () => {
+	it("accepts valid branch names", () => {
+		assert.equal(sanitizeBranchName("feature/auth-strategy"), "feature/auth-strategy");
+		assert.equal(sanitizeBranchName("fix/skill-aware-dispatch-rbac"), "fix/skill-aware-dispatch-rbac");
+		assert.equal(sanitizeBranchName("refactor/auth"), "refactor/auth");
+		assert.equal(sanitizeBranchName("main"), "main");
+		assert.equal(sanitizeBranchName("v1.2.3"), "v1.2.3");
+	});
+
+	it("rejects empty and null-ish", () => {
+		assert.equal(sanitizeBranchName(""), null);
+	});
+
+	it("rejects shell metacharacters", () => {
+		assert.equal(sanitizeBranchName("feature/foo; rm -rf /"), null);
+		assert.equal(sanitizeBranchName("feature/foo && echo pwned"), null);
+		assert.equal(sanitizeBranchName("feature/foo | cat /etc/passwd"), null);
+		assert.equal(sanitizeBranchName("feature/foo$(whoami)"), null);
+		assert.equal(sanitizeBranchName("feature/foo`id`"), null);
+	});
+
+	it("rejects git check-ref-format violations", () => {
+		assert.equal(sanitizeBranchName("feature/foo..bar"), null);   // consecutive dots
+		assert.equal(sanitizeBranchName("feature/foo.lock"), null);   // .lock suffix
+		assert.equal(sanitizeBranchName("feature//double"), null);    // double slash
+		assert.equal(sanitizeBranchName("feature/foo@{bar"), null);   // @{ sequence
+		assert.equal(sanitizeBranchName(".hidden"), null);            // starts with dot
+		assert.equal(sanitizeBranchName("feature/foo~1"), null);      // tilde
+		assert.equal(sanitizeBranchName("feature/foo^2"), null);      // caret
+		assert.equal(sanitizeBranchName("feature/foo:bar"), null);    // colon
+		assert.equal(sanitizeBranchName("feature/foo?bar"), null);    // question mark
+		assert.equal(sanitizeBranchName("feature/foo*bar"), null);    // asterisk
+		assert.equal(sanitizeBranchName("feature/foo[0]"), null);     // bracket
+	});
+
+	it("rejects names over 200 chars", () => {
+		assert.equal(sanitizeBranchName("a".repeat(201)), null);
+	});
+
+	it("accepts names at exactly 200 chars", () => {
+		const name = "a".repeat(200);
+		assert.equal(sanitizeBranchName(name), name);
+	});
+});
+
+// ─── transitionDesignNodesOnArchive ──────────────────────────────────────────
+
+import { transitionDesignNodesOnArchive } from "../openspec/archive-gate.js";
+
+describe("transitionDesignNodesOnArchive", () => {
+	let tmpDir: string;
+
+	before(() => {
+		tmpDir = makeTmpDir();
+	});
+	after(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("transitions implementing node with matching openspec_change", () => {
+		const docsDir = path.join(tmpDir, "docs");
+		const node = createNode(docsDir, { id: "gate-test", title: "Gate Test", status: "implementing" });
+		let content = fs.readFileSync(node.filePath, "utf-8");
+		content = content.replace(/^(---\n[\s\S]*?)(---\n)/m, `$1openspec_change: gate-test\n$2`);
+		fs.writeFileSync(node.filePath, content);
+
+		const transitioned = transitionDesignNodesOnArchive(tmpDir, "gate-test");
+		assert.deepEqual(transitioned, ["gate-test"]);
+
+		const tree = scanDesignDocs(docsDir);
+		assert.equal(tree.nodes.get("gate-test")!.status, "implemented");
+	});
+
+	it("does not transition decided nodes", () => {
+		const docsDir = path.join(tmpDir, "docs");
+		const node = createNode(docsDir, { id: "decided-gate", title: "Decided Gate", status: "decided" });
+		let content = fs.readFileSync(node.filePath, "utf-8");
+		content = content.replace(/^(---\n[\s\S]*?)(---\n)/m, `$1openspec_change: decided-gate\n$2`);
+		fs.writeFileSync(node.filePath, content);
+
+		const transitioned = transitionDesignNodesOnArchive(tmpDir, "decided-gate");
+		assert.deepEqual(transitioned, []);
+	});
+
+	it("returns empty for non-matching change name", () => {
+		const transitioned = transitionDesignNodesOnArchive(tmpDir, "nonexistent-change");
+		assert.deepEqual(transitioned, []);
+	});
+
+	it("handles missing docs directory", () => {
+		const emptyDir = makeTmpDir();
+		const transitioned = transitionDesignNodesOnArchive(emptyDir, "anything");
+		assert.deepEqual(transitioned, []);
+		fs.rmSync(emptyDir, { recursive: true, force: true });
 	});
 });

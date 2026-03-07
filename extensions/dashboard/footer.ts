@@ -145,7 +145,7 @@ export class DashboardFooter implements Component {
     if (dt && dt.nodeCount > 0) {
       const statusParts: string[] = [];
       if (dt.decidedCount > 0) statusParts.push(theme.fg("success", `${dt.decidedCount} decided`));
-      if (dt.implementingCount > 0) statusParts.push(theme.fg("warning", `${dt.implementingCount} implementing`));
+      if (dt.implementingCount > 0) statusParts.push(theme.fg("accent", `${dt.implementingCount} implementing`));
       if (dt.implementedCount > 0) statusParts.push(theme.fg("success", `${dt.implementedCount} implemented`));
       if (dt.exploringCount > 0) statusParts.push(theme.fg("accent", `${dt.exploringCount} exploring`));
       if (dt.blockedCount > 0) statusParts.push(theme.fg("error", `${dt.blockedCount} blocked`));
@@ -155,7 +155,7 @@ export class DashboardFooter implements Component {
 
       if (dt.focusedNode) {
         const statusIcon = dt.focusedNode.status === "decided" ? theme.fg("success", "●")
-          : dt.focusedNode.status === "implementing" ? theme.fg("warning", "⚙")
+          : dt.focusedNode.status === "implementing" ? theme.fg("accent", "⚙")
           : dt.focusedNode.status === "implemented" ? theme.fg("success", "✔")
           : dt.focusedNode.status === "exploring" ? theme.fg("accent", "◐")
           : dt.focusedNode.status === "blocked" ? theme.fg("error", "✕")
@@ -177,7 +177,7 @@ export class DashboardFooter implements Component {
       if (dt.implementingNodes && dt.implementingNodes.length > 0 && !dt.focusedNode) {
         for (const n of dt.implementingNodes.slice(0, 3)) {
           const branchSuffix = n.branch ? theme.fg("dim", ` → ${n.branch}`) : "";
-          lines.push(`  ${theme.fg("warning", "⚙")} ${n.title}${branchSuffix}`);
+          lines.push(`  ${theme.fg("accent", "⚙")} ${n.title}${branchSuffix}`);
         }
       }
     }

@@ -22,7 +22,7 @@ export const STATUS_COLORS: Record<NodeStatus, string> = {
 	seed: "muted",
 	exploring: "accent",
 	decided: "success",
-	implementing: "info",
+	implementing: "accent",
 	implemented: "success",
 	blocked: "error",
 	deferred: "warning",
