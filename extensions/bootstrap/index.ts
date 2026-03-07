@@ -123,7 +123,7 @@ export default function (pi: ExtensionAPI) {
 					rmSync(jitiCacheDir, { recursive: true, force: true });
 				} catch { /* best-effort */ }
 			}
-			ctx.say(cleared > 0
+			ctx.ui.notify(cleared > 0
 				? `Cleared ${cleared} cached transpilations. Reloading…`
 				: "No transpilation cache found. Reloading…");
 			await ctx.reload();
@@ -135,7 +135,7 @@ async function interactiveSetup(ctx: CommandContext): Promise<void> {
 	const statuses = checkAll();
 	const missing = statuses.filter((s) => !s.available);
 
-	ctx.say(formatReport(statuses));
+	ctx.ui.notify(formatReport(statuses));
 
 	if (missing.length === 0) {
 		markDone();
@@ -143,7 +143,7 @@ async function interactiveSetup(ctx: CommandContext): Promise<void> {
 	}
 
 	if (!ctx.hasUI || !ctx.ui) {
-		ctx.say("\nRun individual install commands above, or use `/bootstrap install` to install all core + recommended deps.");
+		ctx.ui.notify("\nRun individual install commands above, or use `/bootstrap install` to install all core + recommended deps.");
 		return;
 	}
 
@@ -174,7 +174,7 @@ async function interactiveSetup(ctx: CommandContext): Promise<void> {
 	}
 
 	if (optMissing.length > 0) {
-		ctx.say(
+		ctx.ui.notify(
 			`\n${optMissing.length} optional dep${optMissing.length > 1 ? "s" : ""} not installed: ${optMissing.map((s) => s.dep.name).join(", ")}.\n` +
 			`Install individually when needed — see \`/bootstrap status\` for commands.`,
 		);
@@ -184,10 +184,10 @@ async function interactiveSetup(ctx: CommandContext): Promise<void> {
 	const stillMissing = recheck.filter((s) => !s.available && (s.dep.tier === "core" || s.dep.tier === "recommended"));
 
 	if (stillMissing.length === 0) {
-		ctx.say("\n🎉 Setup complete! All core and recommended dependencies are available.");
+		ctx.ui.notify("\n🎉 Setup complete! All core and recommended dependencies are available.");
 		markDone();
 	} else {
-		ctx.say(
+		ctx.ui.notify(
 			`\n⚠️  ${stillMissing.length} dep${stillMissing.length > 1 ? "s" : ""} still missing. ` +
 			`Run \`/bootstrap\` again after installing manually.`,
 		);
@@ -201,7 +201,7 @@ async function installMissing(ctx: CommandContext, tiers: DepTier[]): Promise<vo
 	);
 
 	if (toInstall.length === 0) {
-		ctx.say("All core and recommended dependencies are already installed. ✅");
+		ctx.ui.notify("All core and recommended dependencies are already installed. ✅");
 		markDone();
 		return;
 	}
@@ -213,15 +213,15 @@ async function installMissing(ctx: CommandContext, tiers: DepTier[]): Promise<vo
 		(s) => !s.available && tiers.includes(s.dep.tier),
 	);
 	if (stillMissing.length === 0) {
-		ctx.say("\n🎉 All core and recommended dependencies installed!");
+		ctx.ui.notify("\n🎉 All core and recommended dependencies installed!");
 		markDone();
 	} else {
-		ctx.say(
+		ctx.ui.notify(
 			`\n⚠️  ${stillMissing.length} dep${stillMissing.length > 1 ? "s" : ""} failed to install:`,
 		);
 		for (const s of stillMissing) {
 			const cmd = bestInstallCmd(s.dep);
-			ctx.say(`  ❌ ${s.dep.name}: try manually → \`${cmd}\``);
+			ctx.ui.notify(`  ❌ ${s.dep.name}: try manually → \`${cmd}\``);
 		}
 	}
 }
@@ -263,36 +263,36 @@ async function installDeps(ctx: CommandContext, deps: DepStatus[]): Promise<void
 				return reqDep ? !reqDep.check() : false;
 			});
 			if (unmet.length > 0) {
-				ctx.say(`\n⚠️  Skipping ${dep.name} — requires ${unmet.join(", ")} (not available)`);
+				ctx.ui.notify(`\n⚠️  Skipping ${dep.name} — requires ${unmet.join(", ")} (not available)`);
 				continue;
 			}
 		}
 
 		const cmd = bestInstallCmd(dep);
 		if (!cmd) {
-			ctx.say(`\n⚠️  No install command available for ${dep.name} on this platform`);
+			ctx.ui.notify(`\n⚠️  No install command available for ${dep.name} on this platform`);
 			continue;
 		}
 
-		ctx.say(`\n📦 Installing ${dep.name}...`);
-		ctx.say(`   → \`${cmd}\``);
+		ctx.ui.notify(`\n📦 Installing ${dep.name}...`);
+		ctx.ui.notify(`   → \`${cmd}\``);
 
 		const exitCode = await runAsync(cmd);
 
 		if (exitCode === 0 && dep.check()) {
-			ctx.say(`   ✅ ${dep.name} installed successfully`);
+			ctx.ui.notify(`   ✅ ${dep.name} installed successfully`);
 		} else if (exitCode === 124) {
-			ctx.say(`   ❌ ${dep.name} install timed out (5 min limit)`);
+			ctx.ui.notify(`   ❌ ${dep.name} install timed out (5 min limit)`);
 		} else if (exitCode === 0) {
-			ctx.say(`   ⚠️  Command succeeded but ${dep.name} not found on PATH. You may need to restart your shell.`);
+			ctx.ui.notify(`   ⚠️  Command succeeded but ${dep.name} not found on PATH. You may need to restart your shell.`);
 		} else {
-			ctx.say(`   ❌ Failed to install ${dep.name} (exit code ${exitCode})`);
+			ctx.ui.notify(`   ❌ Failed to install ${dep.name} (exit code ${exitCode})`);
 			const hints = dep.install.filter((o) => o.cmd !== cmd);
 			if (hints.length > 0) {
-				ctx.say(`   Alternative: \`${hints[0].cmd}\``);
+				ctx.ui.notify(`   Alternative: \`${hints[0].cmd}\``);
 			}
 			if (dep.url) {
-				ctx.say(`   Manual install: ${dep.url}`);
+				ctx.ui.notify(`   Manual install: ${dep.url}`);
 			}
 		}
 	}
