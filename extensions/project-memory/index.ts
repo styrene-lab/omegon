@@ -139,8 +139,8 @@ const EMBEDDING_MODEL_PATTERN = /embed|embedding/i;
 
 /** Preferred models for summarization, in priority order */
 const PREFERRED_CHAT_MODELS = [
-  "devstral-small-2:24b", "qwen3:30b", "nemotron-3-nano:30b",
-  "devstral-small", "qwen3", "nemotron",
+  "qwen3:32b", "devstral-small-2:24b", "qwen3:30b", "nemotron-3-nano:30b",
+  "qwen3", "devstral-small", "nemotron",
 ];
 
 /**

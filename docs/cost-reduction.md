@@ -118,6 +118,20 @@ Assuming current weekly spend breakdown (estimated from usage patterns):
 
 **Adding tier discipline and tool profiles gets us over 50%**.
 
+### Local model ranking for this harness (M1 Max 64GB)
+
+Key harness requirements that thin out local candidates: reliable structured JSON tool calls (24+ schemas), multi-step orchestration, 16-32K effective context with memory injection, strict instruction following, Rust+TS code quality.
+
+Role-specific recommendations (fit in 64GB unified memory):
+- **Daily driver / sonnet-tier orchestration**: Qwen3 32B Q8 (~35GB) — community #1 for agentic tool use, 128K ctx, thinking-mode toggle
+- **Deep reasoning / opus-tier**: Qwen2.5 72B Q5_K_M (~48GB) — more capacity, but ~10-15 tok/s on M1, noticeable latency on multi-call loops
+- **Leaf/child tasks in cleave**: Qwen2.5-Coder 32B Q8 (~35GB) — purpose-built for code + function calling, better Rust/TS output, weaker as root orchestrator
+
+Even Tier 1 local is ~60-70% of Sonnet on complex orchestration. Failure modes: malformed tool JSON (occasional even with Qwen3), missed system-prompt directives, repetitive tool loops, speed.
+
+Models that don't fit: Mistral Large 2 123B Q4 (~65-70GB, too tight with KV cache), Llama 3.3 70B Q8 (~75GB).
+Models already wired (offline-driver): nemotron-3-nano:30b, devstral-small-2:24b, qwen3:30b — all functional for leaf tasks, insufficient for complex orchestration.
+
 ## Decisions
 
 ### Decision: Switch extractionModel to local immediately

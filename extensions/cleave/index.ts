@@ -1148,7 +1148,17 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 					if (ollamaResult.code === 0) {
 						const models = JSON.parse(ollamaResult.stdout);
 						if (Array.isArray(models?.models) && models.models.length > 0) {
-							localModel = models.models[0].name;
+							// Prefer code-optimised models for leaf tasks; fall back in order
+							const available = models.models.map((m: { name: string }) => m.name);
+							const preferredCodeModels = [
+								"qwen2.5-coder:32b",
+								"qwen3:32b",
+								"devstral-small-2:24b",
+								"qwen3:30b",
+								"nemotron-3-nano:30b",
+							];
+							localModel =
+								preferredCodeModels.find((id) => available.includes(id)) ?? available[0];
 							localModelAvailable = true;
 						}
 					}

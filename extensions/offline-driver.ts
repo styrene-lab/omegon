@@ -17,15 +17,26 @@ import { Type } from "@sinclair/typebox";
 const OLLAMA_URL = process.env.LOCAL_INFERENCE_URL || "http://localhost:11434";
 const PROVIDER_NAME = "local";
 
-// Known models with metadata for ranking and display
+// Known models with metadata for ranking and display.
+// Preferred ordering: Qwen3 32B is the best all-round local driver for this harness
+// (reliable tool-call JSON, 128K ctx, thinking-mode toggle, fits in 64GB at Q8).
+// Qwen2.5-Coder 32B is preferred for code-focused leaf tasks.
+// Qwen2.5 72B provides the most reasoning depth but is slower (~10-15 tok/s on M1).
 const KNOWN_MODELS: Record<string, { label: string; icon: string; contextWindow: number; maxTokens: number }> = {
-  "nemotron-3-nano:30b": { label: "Nemotron 3 Nano 30B", icon: "🏔️", contextWindow: 1048576, maxTokens: 32768 },
-  "devstral-small-2:24b": { label: "Devstral Small 2 24B", icon: "🔧", contextWindow: 393216, maxTokens: 32768 },
-  "qwen3:30b": { label: "Qwen3 30B", icon: "🐉", contextWindow: 262144, maxTokens: 32768 },
+  "qwen3:32b":             { label: "Qwen3 32B",              icon: "🐉", contextWindow: 131072,  maxTokens: 32768 },
+  "qwen2.5-coder:32b":     { label: "Qwen2.5-Coder 32B",      icon: "🔧", contextWindow: 131072,  maxTokens: 32768 },
+  "qwen2.5:72b":           { label: "Qwen2.5 72B",            icon: "🧠", contextWindow: 131072,  maxTokens: 32768 },
+  "nemotron-3-nano:30b":   { label: "Nemotron 3 Nano 30B",    icon: "🏔️", contextWindow: 1048576, maxTokens: 32768 },
+  "devstral-small-2:24b":  { label: "Devstral Small 2 24B",   icon: "⚙️", contextWindow: 393216,  maxTokens: 32768 },
+  "qwen3:30b":             { label: "Qwen3 30B",              icon: "🐲", contextWindow: 262144,  maxTokens: 32768 },
 };
 
-// Preferred offline models in priority order
-const PREFERRED_ORDER = ["nemotron-3-nano:30b", "devstral-small-2:24b", "qwen3:30b"];
+// Preferred offline driver in priority order (general orchestration).
+// Qwen3 32B leads — best tool-call reliability for the harness on M1 Max 64GB.
+export const PREFERRED_ORDER = ["qwen3:32b", "nemotron-3-nano:30b", "devstral-small-2:24b", "qwen2.5-coder:32b", "qwen3:30b"];
+
+// Preferred models for code-focused child tasks (cleave leaf workers).
+export const PREFERRED_ORDER_CODE = ["qwen2.5-coder:32b", "qwen3:32b", "devstral-small-2:24b", "qwen3:30b"];
 
 // State
 let savedCloudModel: string | null = null;
@@ -299,7 +310,7 @@ export default function (pi: ExtensionAPI) {
       preferred_model: Type.Optional(
         Type.String({
           description:
-            "Optional: specific model ID to use (nemotron-3-nano:30b, devstral-small-2:24b, qwen3:30b)",
+            "Optional: specific model ID to use (qwen3:32b, qwen2.5-coder:32b, qwen2.5:72b, nemotron-3-nano:30b, devstral-small-2:24b, qwen3:30b)",
         })
       ),
     }),
