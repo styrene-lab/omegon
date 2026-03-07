@@ -81,7 +81,7 @@ export default function versionCheck(pi: ExtensionAPI) {
     timer = setInterval(check, CHECK_INTERVAL_MS);
   });
 
-  pi.on("session_end", async () => {
+  pi.on("session_shutdown", async () => {
     if (timer) {
       clearInterval(timer);
       timer = null;

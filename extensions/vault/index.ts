@@ -95,45 +95,45 @@ function startMdserve(dir: string, port: number): string {
 const NOT_INSTALLED = "`mdserve` is not installed. Run `/bootstrap` to set up pi-kit dependencies.";
 
 export default function (pi: ExtensionAPI) {
-	pi.on("session_end", () => {
+	pi.on("session_shutdown", () => {
 		if (mdserveProcess) {
 			mdserveProcess.kill("SIGTERM");
 			mdserveProcess = null;
 		}
 	});
 
-	pi.addCommand({
-		name: "vault",
+	pi.registerCommand("vault", {
 		description: "Markdown viewport — serve project docs with wikilinks and graph view",
-		execute: async (ctx, args) => {
+		handler: async (args, ctx) => {
 			const subcommand = args.trim().split(/\s+/)[0]?.toLowerCase() || "";
 
 			switch (subcommand) {
 				case "stop":
-					ctx.say(stopMdserve());
+					ctx.ui.notify(stopMdserve(), "info");
 					return;
 
 				case "status":
 					if (mdserveProcess) {
-						ctx.say(
+						ctx.ui.notify(
 							`mdserve is running at http://127.0.0.1:${mdservePort}\n` +
 							`Serving: ${mdserveDir}`,
+							"info",
 						);
 					} else if (!hasBinary()) {
-						ctx.say(NOT_INSTALLED);
+						ctx.ui.notify(NOT_INSTALLED, "warning");
 					} else {
-						ctx.say("mdserve is not running. Use `/vault` to start.");
+						ctx.ui.notify("mdserve is not running. Use /vault to start.", "info");
 					}
 					return;
 
 				case "graph":
-					if (!hasBinary()) { ctx.say(NOT_INSTALLED); return; }
+					if (!hasBinary()) { ctx.ui.notify(NOT_INSTALLED, "warning"); return; }
 					if (mdserveProcess && mdservePort) {
 						openBrowser(`http://127.0.0.1:${mdservePort}/graph`);
-						ctx.say(`Opened graph view at http://127.0.0.1:${mdservePort}/graph`);
+						ctx.ui.notify(`Opened graph view at http://127.0.0.1:${mdservePort}/graph`, "info");
 					} else {
 						const dir = process.cwd();
-						ctx.say(startMdserve(dir, DEFAULT_PORT));
+						ctx.ui.notify(startMdserve(dir, DEFAULT_PORT), "info");
 						setTimeout(() => {
 							if (mdservePort) openBrowser(`http://127.0.0.1:${mdservePort}/graph`);
 						}, 1000);
@@ -141,9 +141,9 @@ export default function (pi: ExtensionAPI) {
 					return;
 
 				default: {
-					if (!hasBinary()) { ctx.say(NOT_INSTALLED); return; }
+					if (!hasBinary()) { ctx.ui.notify(NOT_INSTALLED, "warning"); return; }
 					const dir = subcommand || process.cwd();
-					ctx.say(startMdserve(dir, DEFAULT_PORT));
+					ctx.ui.notify(startMdserve(dir, DEFAULT_PORT), "info");
 					return;
 				}
 			}

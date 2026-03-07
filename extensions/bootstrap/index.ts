@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { checkAll, formatReport, bestInstallCmd, sortByRequires, type DepStatus, type DepTier } from "./deps.js";
+import { DEPS, checkAll, formatReport, bestInstallCmd, sortByRequires, type DepStatus, type DepTier } from "./deps.js";
 
 const AGENT_DIR = join(homedir(), ".pi", "agent");
 const MARKER_PATH = join(AGENT_DIR, "pi-kit-bootstrap-done");
@@ -47,7 +47,7 @@ interface CommandContext {
 	hasUI?: boolean;
 	ui?: {
 		notify: (msg: string, level: string) => void;
-		confirm: (msg: string) => Promise<boolean>;
+		confirm: (title: string, message: string) => Promise<boolean>;
 	};
 }
 
@@ -80,24 +80,31 @@ export default function (pi: ExtensionAPI) {
 		ctx.ui.notify(msg, coreMissing.length > 0 ? "warning" : "info");
 	});
 
-	pi.addCommand({
-		name: "bootstrap",
+	pi.registerCommand("bootstrap", {
 		description: "First-time setup — check and install pi-kit external dependencies",
-		execute: async (ctx, args) => {
+		handler: async (args, ctx) => {
 			const sub = args.trim().toLowerCase();
+			const cmdCtx: CommandContext = {
+				say: (msg: string) => ctx.ui.notify(msg, "info"),
+				hasUI: true,
+				ui: {
+					notify: (msg: string, level: string) => ctx.ui.notify(msg, level as "info"),
+					confirm: (title: string, message: string) => ctx.ui.confirm(title, message),
+				},
+			};
 
 			if (sub === "status") {
 				const statuses = checkAll();
-				ctx.say(formatReport(statuses));
+				cmdCtx.say(formatReport(statuses));
 				return;
 			}
 
 			if (sub === "install") {
-				await installMissing(ctx as unknown as CommandContext, ["core", "recommended"]);
+				await installMissing(cmdCtx, ["core", "recommended"]);
 				return;
 			}
 
-			await interactiveSetup(ctx as unknown as CommandContext);
+			await interactiveSetup(cmdCtx);
 		},
 	});
 }
@@ -123,8 +130,10 @@ async function interactiveSetup(ctx: CommandContext): Promise<void> {
 	const optMissing = missing.filter((s) => s.dep.tier === "optional");
 
 	if (coreMissing.length > 0) {
+		const names = coreMissing.map((s) => s.dep.name).join(", ");
 		const proceed = await ctx.ui.confirm(
-			`Install ${coreMissing.length} missing core dep${coreMissing.length > 1 ? "s" : ""}? (${coreMissing.map((s) => s.dep.name).join(", ")})`,
+			"Install core dependencies?",
+			`${coreMissing.length} missing: ${names}`,
 		);
 		if (proceed) {
 			await installDeps(ctx, coreMissing);
@@ -132,8 +141,10 @@ async function interactiveSetup(ctx: CommandContext): Promise<void> {
 	}
 
 	if (recMissing.length > 0) {
+		const names = recMissing.map((s) => s.dep.name).join(", ");
 		const proceed = await ctx.ui.confirm(
-			`Install ${recMissing.length} recommended dep${recMissing.length > 1 ? "s" : ""}? (${recMissing.map((s) => s.dep.name).join(", ")})`,
+			"Install recommended dependencies?",
+			`${recMissing.length} missing: ${names}`,
 		);
 		if (proceed) {
 			await installDeps(ctx, recMissing);
@@ -223,17 +234,11 @@ async function installDeps(ctx: CommandContext, deps: DepStatus[]): Promise<void
 	const sorted = sortByRequires(deps);
 
 	for (const { dep } of sorted) {
-		// Check prerequisites
+		// Check prerequisites — re-verify availability live (not from stale array)
 		if (dep.requires?.length) {
 			const unmet = dep.requires.filter((reqId) => {
-				const reqDep = deps.find((s) => s.dep.id === reqId);
-				// If it wasn't in our install list, check if it's globally available
-				if (!reqDep) {
-					const { DEPS } = require("./deps.js");
-					const globalDep = DEPS.find((d: any) => d.id === reqId);
-					return globalDep && !globalDep.check();
-				}
-				return false;
+				const reqDep = DEPS.find((d) => d.id === reqId);
+				return reqDep ? !reqDep.check() : false;
 			});
 			if (unmet.length > 0) {
 				ctx.say(`\n⚠️  Skipping ${dep.name} — requires ${unmet.join(", ")} (not available)`);
