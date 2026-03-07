@@ -16,7 +16,6 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { OverlayHandle } from "@mariozechner/pi-tui";
-import type { GuardrailResult } from "../cleave/guardrails.ts";
 import { DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
 import { DashboardFooter } from "./footer.ts";
 import { DashboardOverlay, showDashboardOverlay } from "./overlay.ts";
@@ -293,21 +292,32 @@ export default function (pi: ExtensionAPI) {
       tui?.requestRender();
     });
 
-    // Non-blocking guardrail health check
+    // Non-blocking guardrail health check — runs each check in a child process
+    // to avoid blocking the event loop (execSync freezes the TUI).
     setTimeout(async () => {
       try {
-        const { discoverGuardrails, runGuardrails } = await import("../cleave/guardrails.ts");
+        const { discoverGuardrails } = await import("../cleave/guardrails.ts");
+        const { exec } = await import("node:child_process");
         const checks = discoverGuardrails(ctx.cwd);
         if (checks.length === 0) return;
-        const suite = runGuardrails(ctx.cwd, checks);
-        if (!suite.allPassed) {
-          const failures = suite.results.filter((r: GuardrailResult) => !r.passed);
-          const msg = failures
-            .map((f: GuardrailResult) =>
-              `${f.check.name}: ${f.exitCode !== 0 ? f.output.split("\n").length + " errors" : "failed"}`,
-            )
-            .join(", ");
-          ctx.ui.notify(`⚠ Guardrail check failed: ${msg}`, "warning");
+
+        const failures: string[] = [];
+        let pending = checks.length;
+
+        for (const check of checks) {
+          const timeoutMs = (check.timeout ?? 30) * 1000;
+          exec(check.cmd, { cwd: ctx.cwd, timeout: timeoutMs, encoding: "utf-8" }, (err) => {
+            if (err) {
+              const code = (err as any).code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" ? "output overflow" :
+                (err as any).killed ? `timeout after ${check.timeout}s` :
+                `${(err as any).status ?? "?"}`;
+              failures.push(`${check.name}: ${code}`);
+            }
+            pending--;
+            if (pending === 0 && failures.length > 0) {
+              ctx.ui.notify(`Guardrails: ${failures.join(", ")}`, "info");
+            }
+          });
         }
       } catch {
         /* non-fatal */
