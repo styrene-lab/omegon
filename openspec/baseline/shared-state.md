@@ -1,0 +1,1 @@
+# Shared State Data Contract
