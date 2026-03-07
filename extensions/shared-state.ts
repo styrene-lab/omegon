@@ -7,15 +7,48 @@
  * Keep this minimal — only data that genuinely needs cross-extension sharing.
  */
 
+import type {
+  DesignTreeDashboardState,
+  OpenSpecDashboardState,
+  CleaveState,
+} from "./dashboard/types.ts";
+
+// Re-export dashboard types for consumer convenience
+export type {
+  DesignTreeDashboardState,
+  DesignTreeFocusedNode,
+  OpenSpecDashboardState,
+  OpenSpecChangeEntry,
+  CleaveState,
+  CleaveChildState,
+  CleaveStatus,
+  DashboardMode,
+  FooterState,
+} from "./dashboard/types.ts";
+
+/** Event channel fired by producers after writing dashboard state. */
+export const DASHBOARD_UPDATE_EVENT = "dashboard:update" as const;
+
 const SHARED_KEY = Symbol.for("pi-kit-shared-state");
 
 interface SharedState {
   /** Approximate token count of the last memory injection into context.
    *  Written by project-memory, read by status-bar for the context gauge. */
   memoryTokenEstimate: number;
+
+  /** Design tree summary state. Written by design-tree extension. */
+  designTree?: DesignTreeDashboardState;
+
+  /** OpenSpec changes summary. Written by openspec/cleave extension. */
+  openspec?: OpenSpecDashboardState;
+
+  /** Cleave execution state. Written by cleave extension. */
+  cleave?: CleaveState;
 }
 
-// Initialize once on first import, reuse thereafter via global symbol
+// Initialize once on first import, reuse thereafter via global symbol.
+// New dashboard properties are intentionally omitted — they start as undefined
+// and are populated when each producer extension loads.
 if (!(globalThis as any)[SHARED_KEY]) {
   (globalThis as any)[SHARED_KEY] = {
     memoryTokenEstimate: 0,
