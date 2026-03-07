@@ -132,6 +132,27 @@ export default function (pi: ExtensionAPI) {
       debug("dashboard", "microtask:render", { tuiSet: !!tui });
       tui?.requestRender();
     });
+
+    // Non-blocking guardrail health check
+    setTimeout(async () => {
+      try {
+        const { discoverGuardrails, runGuardrails } = await import("../cleave/guardrails.ts");
+        const checks = discoverGuardrails(ctx.cwd);
+        if (checks.length === 0) return;
+        const suite = runGuardrails(ctx.cwd, checks);
+        if (!suite.allPassed) {
+          const failures = suite.results.filter((r: { passed: boolean }) => !r.passed);
+          const msg = failures
+            .map((f: { check: { name: string }; exitCode: number; output: string }) =>
+              `${f.check.name}: ${f.exitCode !== 0 ? f.output.split("\n").length + " errors" : "failed"}`,
+            )
+            .join(", ");
+          ctx.ui.notify(`⚠ Guardrail check failed: ${msg}`, "warning");
+        }
+      } catch {
+        /* non-fatal */
+      }
+    }, 2000);
   });
 
   // ── Session shutdown: cleanup ─────────────────────────────────

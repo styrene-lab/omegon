@@ -39,6 +39,7 @@ import {
 	resolveSkillPaths,
 	getPreferredTier,
 } from "./skills.ts";
+import { discoverGuardrails, runGuardrails, formatGuardrailResults } from "./guardrails.ts";
 import type { CleaveState, ChildState, SplitPlan } from "./types.ts";
 import { DEFAULT_CONFIG } from "./types.ts";
 import { initWorkspace, readTaskFiles, saveState } from "./workspace.ts";
@@ -432,6 +433,16 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 						display: true,
 					});
 
+					// Run guardrails before building the review prompt
+					let guardrailPreamble = "";
+					try {
+						const checks = discoverGuardrails(ctx.cwd);
+						if (checks.length > 0) {
+							const suite = runGuardrails(ctx.cwd, checks);
+							guardrailPreamble = formatGuardrailResults(suite);
+						}
+					} catch { /* non-fatal */ }
+
 					pi.sendUserMessage(
 						[
 							"## Adversarial Review → Auto-Fix Pipeline",
@@ -439,6 +450,14 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 							"You are doing an adversarial code review of recent changes.",
 							"Your job is to find real issues, then fix them automatically.",
 							"",
+							...(guardrailPreamble ? [
+								"### Deterministic Analysis",
+								"",
+								guardrailPreamble,
+								"",
+								"The above are compiler/linter findings — treat failures as Critical issues.",
+								"",
+							] : []),
 							"### Step 1: Review",
 							"",
 							"Analyze these recent changes for:",
@@ -523,6 +542,16 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 						display: true,
 					});
 
+					// Run guardrails before building the review prompt
+					let diffGuardrailPreamble = "";
+					try {
+						const diffChecks = discoverGuardrails(ctx.cwd);
+						if (diffChecks.length > 0) {
+							const diffSuite = runGuardrails(ctx.cwd, diffChecks);
+							diffGuardrailPreamble = formatGuardrailResults(diffSuite);
+						}
+					} catch { /* non-fatal */ }
+
 					pi.sendUserMessage(
 						[
 							`## Code Review: diff since \`${ref}\``,
@@ -530,6 +559,14 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 							"Do an adversarial code review of these changes.",
 							"Find bugs, fragile patterns, missing edge cases, and style issues.",
 							"",
+							...(diffGuardrailPreamble ? [
+								"### Deterministic Analysis",
+								"",
+								diffGuardrailPreamble,
+								"",
+								"The above are compiler/linter findings — treat failures as Critical issues.",
+								"",
+							] : []),
 							"Categorize findings as:",
 							"- **C1, C2...** Critical (logic errors, security, data loss)",
 							"- **W1, W2...** Warning (fragile, misleading, missing cases)",
@@ -1267,6 +1304,29 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			if (openspecCtx && openspecCtx.specScenarios.length > 0 && mergeFailures.length === 0) {
 				specVerification = formatSpecVerification(openspecCtx);
 			}
+			// ── POST-MERGE GUARDRAILS ──────────────────────────────────
+			let guardrailReport: string | null = null;
+			if (mergeFailures.length === 0) {
+				try {
+					const checks = discoverGuardrails(repoPath);
+					if (checks.length > 0) {
+						const suite = runGuardrails(repoPath, checks);
+						if (suite.allPassed) {
+							guardrailReport = "### Static Analysis\n\n✅ All deterministic checks passed after merge";
+						} else {
+							const failures = suite.results.filter((r) => !r.passed);
+							const lines = ["### Static Analysis", "", "⚠ **Post-merge regressions detected**", ""];
+							for (const f of failures) {
+								const capped = f.output.split("\n").slice(0, 20).join("\n");
+								lines.push(`**${f.check.name}** (exit ${f.exitCode}, ${f.durationMs}ms):`);
+								lines.push("```", capped, "```", "");
+							}
+							guardrailReport = lines.join("\n");
+						}
+					}
+				} catch { /* non-fatal */ }
+			}
+
 			if (mergeResults.length > 0 && mergeFailures.length === 0) {
 				// All merges succeeded — safe to clean up worktrees and branches
 				await cleanupWorktrees(pi, repoPath);
@@ -1349,6 +1409,11 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			// Spec verification (post-merge)
 			if (specVerification) {
 				reportLines.push("", specVerification);
+			}
+
+			// Post-merge guardrail results
+			if (guardrailReport) {
+				reportLines.push("", guardrailReport);
 			}
 
 			// Task write-back status
