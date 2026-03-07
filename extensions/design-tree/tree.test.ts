@@ -991,7 +991,7 @@ describe("branches and openspec_change frontmatter", () => {
 			branches: ["feature/impl-test", "cleave/test-0"],
 		};
 		const fm = generateFrontmatter(node);
-		assert.ok(fm.includes("branches: [feature/impl-test, cleave/test-0]"));
+		assert.ok(fm.includes('branches: ["feature/impl-test", "cleave/test-0"]'));
 	});
 
 	it("generateFrontmatter omits branches when empty", () => {

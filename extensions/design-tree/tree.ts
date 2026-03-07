@@ -86,7 +86,7 @@ export function parseFrontmatter(content: string): Record<string, unknown> | nul
 
 /** Quote a YAML value if it contains special characters */
 export function yamlQuote(value: string): string {
-	if (/[:#\[\]{}&*!|>'"%@`]/.test(value) || value.startsWith("- ")) {
+	if (/[:#\[\]{}&*!|>'"%@`/]/.test(value) || value.startsWith("- ")) {
 		return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 	}
 	return value;
@@ -116,7 +116,7 @@ export function generateFrontmatter(node: Omit<DesignNode, "filePath" | "lastMod
 		fm += "open_questions: []\n";
 	}
 	if (node.branches && node.branches.length > 0) {
-		fm += `branches: [${node.branches.join(", ")}]\n`;
+		fm += `branches: [${node.branches.map((b) => yamlQuote(b)).join(", ")}]\n`;
 	}
 	if (node.openspec_change) {
 		fm += `openspec_change: ${node.openspec_change}\n`;
