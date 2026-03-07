@@ -342,6 +342,46 @@ The cost is **reimplementing the built-in footer** — that's about 60 lines of 
 
 ---
 
+## Usage Reference
+
+### Keyboard Shortcut
+
+**`Ctrl+Shift+B`** — Dashboard toggle (mnemonic: **B**ar)
+
+| Current State | Action |
+|---|---|
+| Compact (Layer 0) | → Raised (Layer 1) |
+| Raised (Layer 1) | → Interactive Overlay (Layer 2) |
+| Overlay (Layer 2) | Esc → back to Raised |
+
+### Slash Command
+
+| Command | Effect |
+|---|---|
+| `/dashboard` | Toggle compact ↔ raised |
+| `/dashboard compact` | Force compact mode |
+| `/dashboard raised` | Force raised mode |
+| `/dashboard open` | Open interactive overlay |
+
+### Overlay Navigation (Layer 2)
+
+| Key | Action |
+|---|---|
+| `Tab` | Cycle tabs (Design Tree → OpenSpec → Cleave) |
+| `1` / `2` / `3` | Jump to tab directly |
+| `↑` / `↓` | Navigate items |
+| `Enter` / `→` | Expand item |
+| `←` | Collapse item |
+| `Esc` | Close overlay |
+
+### Display Modes
+
+- **Compact (Layer 0):** 3-line footer — status icons, context gauge, token stats, model/thinking indicator
+- **Raised (Layer 1):** Up to 10-line footer — design tree status, openspec changes, cleave dispatch, separator, original footer data
+- **Overlay (Layer 2):** Right-anchored 40% width panel — three navigable tabs with expand/collapse, live refresh via dashboard:update events
+
+---
+
 ## Recommendation
 
 **Approach 2 (emitter) + 4 (footer panel) are compatible and complementary:**

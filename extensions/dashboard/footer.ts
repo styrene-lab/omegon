@@ -49,6 +49,7 @@ export class DashboardFooter implements Component {
 
   /** Cached cumulative token stats — updated incrementally. */
   private cachedTokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+  private cachedThinkingLevel = "off";
   private lastEntryCount = 0;
 
   constructor(
@@ -283,6 +284,9 @@ export class DashboardFooter implements Component {
               this.cachedTokens.cost += usage.cost?.total || 0;
             }
           }
+          if (entry.type === "thinking_level_change" && entry.thinkingLevel) {
+            this.cachedThinkingLevel = entry.thinkingLevel;
+          }
         }
         this.lastEntryCount = entries.length;
       } catch { /* session may not be ready */ }
@@ -320,20 +324,11 @@ export class DashboardFooter implements Component {
       const modelName = model?.id || "no-model";
       let rightSide = modelName;
 
-      // Thinking level — infer from recent entries
+      // Thinking level (cached incrementally alongside token stats)
       if (model?.reasoning) {
-        const entries = ctx.sessionManager.getEntries();
-        let thinkingLevel = "off";
-        for (let i = entries.length - 1; i >= 0; i--) {
-          const e = entries[i] as any;
-          if (e.type === "thinking_level_change" && e.thinkingLevel) {
-            thinkingLevel = e.thinkingLevel;
-            break;
-          }
-        }
-        rightSide = thinkingLevel === "off"
+        rightSide = this.cachedThinkingLevel === "off"
           ? `${modelName} • thinking off`
-          : `${modelName} • ${thinkingLevel}`;
+          : `${modelName} • ${this.cachedThinkingLevel}`;
       }
 
       // Multi-provider indicator
