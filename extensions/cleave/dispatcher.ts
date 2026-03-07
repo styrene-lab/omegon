@@ -20,7 +20,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { sharedState } from "../shared-state.js";
+import { sharedState } from "../shared-state.ts";
 import type { ChildState, CleaveState, ModelTier } from "./types.js";
 import { computeDispatchWaves } from "./planner.js";
 import { executeWithReview, type ReviewConfig, type ReviewExecutor, DEFAULT_REVIEW_CONFIG } from "./review.js";

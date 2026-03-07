@@ -39,7 +39,7 @@ import {
 	summarizeSpecs,
 	generateSpecFile,
 } from "./spec.js";
-import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.js";
+import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
 import { transitionDesignNodesOnArchive } from "./archive-gate.js";
 
 // ─── Dashboard State Emitter ─────────────────────────────────────────────────

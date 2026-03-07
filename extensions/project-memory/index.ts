@@ -59,7 +59,7 @@ import { runExtractionV2, runGlobalExtraction, killActiveExtraction, killAllSubp
 import { migrateToFactStore, needsMigration, markMigrated } from "./migration.js";
 import { SECTIONS } from "./template.js";
 import { serializeConversation, convertToLlm } from "@mariozechner/pi-coding-agent";
-import { sharedState } from "../shared-state.js";
+import { sharedState } from "../shared-state.ts";
 
 // ---------------------------------------------------------------------------
 // Compaction prompt constants (mirrors pi's internal prompts for local-model fallback)

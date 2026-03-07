@@ -18,7 +18,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
-import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.js";
+import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
 import { assessDirective, PATTERNS } from "./assessment.js";
 import { detectConflicts, parseTaskResult } from "./conflicts.js";
 import { dispatchChildren, resolveExecuteModel } from "./dispatcher.js";
