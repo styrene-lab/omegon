@@ -8,7 +8,7 @@ open_questions:
   - Q3: Can a child request additional skills mid-execution (self-select)?
   - Q4: Should skills be composable (child gets multiple skills) or singular?
   - Q5: How do project-local skills vs pi-kit skills interact?
-  - Q6: How many review iterations before giving up? Fixed cap or adaptive?
+  - Q6: (decided) Severity-gated escalation + diminishing returns guardrail. See D4a/D4b.
   - Q7: Should the review agent run in the same worktree (seeing full state) or get only the diff?
   - Q8: Can the review phase be parallelized across children, or must it be sequential?
 ---
@@ -201,8 +201,68 @@ Plan (opus) → Execute (cheap) → Review (opus) → [pass? → done : Fix (che
 ```
 
 - **Max iterations:** configurable, default 2 (execute → review → fix → review)
-- **Exit conditions:** all scenarios pass, max iterations hit, or child reports NEEDS_DECOMPOSITION
+- **Exit conditions:** all scenarios pass, max iterations hit, child reports NEEDS_DECOMPOSITION, or guardrails trigger
 - **Cost model:** 1 opus plan + N×(cheap execute + opus review). Even with 2 iterations, total opus tokens < running opus for execution
+
+#### D4a: Severity-Gated Escalation (Q6 — decided)
+
+Review verdict includes severity per issue (C=critical, W=warning, N=nit), reusing the `/assess cleave` categorization scheme:
+
+- **All issues `N` (nits only)** → pass, no fix iteration needed
+- **`W` issues only** → auto-fix, 1 iteration max
+- **Any `C` (critical)** → fix gets 2 attempts, then escalate to orchestrator
+- **`C` with security/data-loss tag** → skip fix entirely, escalate immediately
+
+#### D4b: Diminishing Returns Guardrail (Q6 — decided)
+
+Compare review findings between iteration N and N-1. Bail early if:
+- **>50% of issues from iteration N-1 reappear unchanged** — the cheap model can't solve this
+- **Fix diff is churning** — same lines modified back and forth between iterations
+- Detection: hash the issue descriptions, compute Jaccard similarity between rounds
+
+This catches the degenerate case where a haiku/local model goes in circles.
+
+#### D4c: Adversarial Review Agent (decided)
+
+The review phase uses the same adversarial posture as `/assess cleave`. The review agent is explicitly hostile — its job is to find everything wrong, not validate that things look reasonable. The review prompt structure mirrors the existing `/assess` system:
+
+```markdown
+## Adversarial Review
+
+You are a hostile code reviewer. Find everything wrong with this implementation.
+
+### Context
+- **Task:** {child task description}
+- **Spec scenarios:** {acceptance criteria from OpenSpec}
+- **Scope:** {files this child should have touched}
+
+### Changes Made
+{git diff from child's worktree}
+
+### Test Output
+{stdout/stderr from test run, if available}
+
+### Your Job
+
+1. Check every spec scenario — is it actually satisfied?
+2. Check for bugs: logic errors, edge cases, type mismatches, resource leaks
+3. Check for security: injection, hardcoded secrets, insecure defaults
+4. Check for omissions: missing error handling, untested paths
+5. Check scope compliance: did the child modify files outside its scope?
+
+### Output Format
+
+**Verdict:** PASS | FAIL
+
+**Issues** (if FAIL):
+- C1: [critical] {description} — {file}:{line}
+- W1: [warning] {description} — {file}:{line}
+
+**Spec Scenario Results:**
+- [ ] Scenario X: {pass/fail with evidence}
+```
+
+The fix agent then receives the issue list verbatim as its task, scoped to the same worktree. It does not re-read the original task — it works only from the review feedback.
 
 #### Implementation Shape
 
