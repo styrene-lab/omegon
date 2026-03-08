@@ -47,6 +47,8 @@ export default function (pi: ExtensionAPI) {
   let overlayCreated = false;
   /** Whether focus should be applied once the handle arrives (handles async creation) */
   let pendingFocus = false;
+  /** True while the agent is actively streaming — blocks focused overlay to prevent input lockup */
+  let agentRunning = false;
 
   /**
    * Restore persisted dashboard mode from session entries.
@@ -175,8 +177,15 @@ export default function (pi: ExtensionAPI) {
 
   /**
    * Focus the non-capturing overlay for interactive keyboard navigation.
+   * Blocked while the agent is streaming — focusing during active output
+   * causes the TUI input loop to deadlock with the render loop.
    */
   function focusPanel(): void {
+    if (agentRunning) {
+      // Can't safely capture input while agent is streaming — stay as panel
+      state.mode = "panel";
+      return;
+    }
     if (overlayHandle && !overlayHandle.isHidden()) {
       overlayHandle.focus();
     } else {
@@ -341,9 +350,23 @@ export default function (pi: ExtensionAPI) {
     tui = null;
   });
 
+  // ── Agent running state — guards focused overlay during streaming ─────
+
+  pi.on("before_agent_start", async () => {
+    agentRunning = true;
+    // If focus was pending and agent starts before handle arrived, cancel it
+    pendingFocus = false;
+    // If overlay is currently focused, unfocus to avoid input deadlock
+    if (overlayHandle?.isFocused()) {
+      overlayHandle.unfocus();
+      state.mode = "panel";
+    }
+  });
+
   // ── Events that trigger re-render ─────────────────────────────
 
   pi.on("turn_end", async (_event, ctx) => {
+    agentRunning = false;
     state.turns++;
     refresh(ctx);
   });
