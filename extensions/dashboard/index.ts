@@ -308,9 +308,13 @@ export default function (pi: ExtensionAPI) {
           const timeoutMs = (check.timeout ?? 30) * 1000;
           exec(check.cmd, { cwd: ctx.cwd, timeout: timeoutMs, encoding: "utf-8" }, (err) => {
             if (err) {
-              const code = (err as any).code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" ? "output overflow" :
+              const exitCode = (err as any).code;
+              const code = exitCode === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" ? "output overflow" :
                 (err as any).killed ? `timeout after ${check.timeout}s` :
-                `exit ${(err as any).code ?? "?"}`;
+                exitCode === 127 ? "command not found" :
+                exitCode === 126 ? "not executable" :
+                exitCode === 1 ? "errors found" :
+                `exit ${exitCode ?? "?"}`;
               failures.push(`${check.name}: ${code}`);
             }
             pending--;
