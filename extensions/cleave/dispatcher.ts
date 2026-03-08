@@ -25,6 +25,58 @@ import type { ChildState, CleaveState, ModelTier } from "./types.ts";
 import { computeDispatchWaves } from "./planner.ts";
 import { executeWithReview, type ReviewConfig, type ReviewExecutor, DEFAULT_REVIEW_CONFIG } from "./review.ts";
 import { saveState } from "./workspace.ts";
+import { resolveTier, getDefaultPolicy, type ProviderRoutingPolicy, type RegistryModel } from "../lib/model-routing.ts";
+
+// ─── Large-run threshold ────────────────────────────────────────────────────
+
+/**
+ * Number of children at or above which a run is considered "large".
+ * When session policy requirePreflightForLargeRuns is true and this threshold
+ * is exceeded, the operator is asked for their preferred provider before dispatch.
+ *
+ * Also triggers for runs with review enabled where children >= 3.
+ */
+export const LARGE_RUN_THRESHOLD = 4;
+
+// ─── Explicit model resolution ──────────────────────────────────────────────
+
+/**
+ * Resolve an abstract tier to a concrete model ID string using the session
+ * routing policy and the available model registry.
+ *
+ * This is the replacement for mapModelTierToFlag() — it produces explicit model
+ * IDs rather than fuzzy aliases, satisfying the design decision:
+ * "Prefer explicit model IDs over fuzzy tier aliases at execution time".
+ *
+ * @param tier        Abstract tier (local|haiku|sonnet|opus)
+ * @param models      Snapshot of the pi model registry
+ * @param policy      Session routing policy
+ * @param localModel  Local model name (for "local" tier fallback)
+ * @returns           Explicit model ID to pass to --model, or undefined
+ */
+export function resolveModelIdForTier(
+	tier: ModelTier,
+	models: RegistryModel[],
+	policy: ProviderRoutingPolicy,
+	localModel?: string,
+): string | undefined {
+	// "local" tier: use the provided local model name directly
+	if (tier === "local") {
+		return localModel;
+	}
+
+	// Use the shared resolver to get an explicit model ID
+	const resolved = resolveTier(tier, models, policy);
+	if (resolved) {
+		return resolved.modelId;
+	}
+
+	// Fallback: if resolver found nothing (empty registry, no API keys),
+	// return undefined for sonnet (pi's default) or the tier name as alias
+	// for other tiers so callers still get something to pass.
+	if (tier === "sonnet") return undefined;
+	return tier;
+}
 
 // ─── Result section parsing ─────────────────────────────────────────────────
 
@@ -182,6 +234,10 @@ export function resolveExecuteModel(
 
 /**
  * Map a model tier name to the --model flag value for the pi CLI.
+ *
+ * @deprecated Use resolveModelIdForTier() instead, which returns explicit model
+ * IDs via the shared resolver rather than fuzzy tier aliases. This function is
+ * kept for backward compatibility and testing purposes.
  *
  * Returns undefined for "sonnet" — pi's default model, no --model flag needed.
  * "haiku" and "opus" are passed as bare strings; pi's model resolver does
@@ -408,6 +464,51 @@ export async function dispatchChildren(
 	onProgress?: (msg: string) => void,
 	reviewConfig?: ReviewConfig,
 ): Promise<void> {
+	// ── Large-run preflight ──────────────────────────────────────────────────
+	// Before dispatching, check if this run qualifies as "large" and the session
+	// policy requires operator input before committing to a provider.
+	const policy: ProviderRoutingPolicy = (sharedState as any).routingPolicy ?? getDefaultPolicy();
+	const childCount = state.children.length;
+	const reviewEnabled = reviewConfig?.enabled ?? false;
+	const isLargeRun =
+		childCount >= LARGE_RUN_THRESHOLD ||
+		(reviewEnabled && childCount >= LARGE_RUN_THRESHOLD - 1);
+
+	if (isLargeRun && policy.requirePreflightForLargeRuns) {
+		onProgress?.(
+			`Preflight: ${childCount} children${reviewEnabled ? " + review" : ""} — asking operator for provider preference…`,
+		);
+		try {
+			// pi.ui.input() is available at runtime but not typed on ExtensionAPI
+			const answer = await (pi as any).ui?.input(
+				`🗂️  Large Cleave run (${childCount} children${reviewEnabled ? ", review on" : ""}). ` +
+				`Which provider should be favored?\n` +
+				`  [1] anthropic  [2] openai  [3] local  [Enter] keep current (${policy.providerOrder[0] ?? "anthropic"}): `,
+			) as string | undefined;
+			const trimmed = (answer ?? "").trim();
+			let chosenProvider: string | undefined;
+			if (trimmed === "1" || trimmed.toLowerCase() === "anthropic") chosenProvider = "anthropic";
+			else if (trimmed === "2" || trimmed.toLowerCase() === "openai") chosenProvider = "openai";
+			else if (trimmed === "3" || trimmed.toLowerCase() === "local") chosenProvider = "local";
+
+			if (chosenProvider) {
+				// Update the session-wide routing policy: move chosen provider to front
+				const newOrder = [
+					chosenProvider as any,
+					...policy.providerOrder.filter((p) => p !== chosenProvider),
+				];
+				policy.providerOrder = newOrder;
+				(sharedState as any).routingPolicy = policy;
+				onProgress?.(`Provider order updated: ${newOrder.join(" → ")}`);
+			} else {
+				onProgress?.(`Keeping current provider order: ${policy.providerOrder.join(" → ")}`);
+			}
+		} catch {
+			// pi.input() may not be available in --no-session mode; proceed with defaults
+			onProgress?.("Preflight skipped (input not available in non-interactive mode)");
+		}
+	}
+
 	const waves = computeDispatchWaves(
 		state.children.map((c) => ({ label: c.label, dependsOn: c.dependsOn })),
 	);
@@ -473,11 +574,17 @@ async function dispatchSingleChild(
 		cleaveState.children[child.childId].status = "running";
 	}
 
-	// Resolve the actual --model flag from the child's tier
-	const modelFlag = mapModelTierToFlag(
-		(child.executeModel as ModelTier) ?? "sonnet",
-		localModel,
-	);
+	// Resolve an explicit model ID for this child using the shared resolver.
+	// This replaces the old mapModelTierToFlag() fuzzy-alias approach.
+	const effectiveTier = (child.executeModel as ModelTier) ?? "sonnet";
+	const activePolicy: ProviderRoutingPolicy = (sharedState as any).routingPolicy ?? getDefaultPolicy();
+	let registryModels: RegistryModel[] = [];
+	try {
+		registryModels = (pi as any).modelRegistry?.getAll() ?? [];
+	} catch {
+		// modelRegistry not available (e.g. test environment) — resolver will fallback gracefully
+	}
+	const modelFlag = resolveModelIdForTier(effectiveTier, registryModels, activePolicy, localModel);
 	child.backend = child.executeModel === "local" ? "local" : "cloud";
 
 	// Read the task file
@@ -503,8 +610,9 @@ async function dispatchSingleChild(
 			return spawnChild(execPrompt, execCwd, timeoutMs, signal, execModelFlag);
 		},
 		review: async (reviewPrompt: string, reviewCwd: string) => {
-			// Reviews always use opus (D4: highest available tier)
-			return spawnChild(reviewPrompt, reviewCwd, timeoutMs, signal, "opus");
+			// Reviews always use opus (D4: highest available tier) — resolve to explicit ID
+			const reviewModelId = resolveModelIdForTier("opus", registryModels, activePolicy, localModel);
+			return spawnChild(reviewPrompt, reviewCwd, timeoutMs, signal, reviewModelId);
 		},
 		readFile: (path: string) => readFileSync(path, "utf-8"),
 	};

@@ -7,7 +7,15 @@
 
 import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
-import { AsyncSemaphore, extractResultSection } from "./dispatcher.ts";
+import {
+	AsyncSemaphore,
+	extractResultSection,
+	resolveModelIdForTier,
+	LARGE_RUN_THRESHOLD,
+	mapModelTierToFlag,
+} from "./dispatcher.ts";
+import type { RegistryModel } from "../lib/model-routing.ts";
+import { getDefaultPolicy } from "../lib/model-routing.ts";
 
 // ─── AsyncSemaphore ─────────────────────────────────────────────────────────
 
@@ -263,5 +271,130 @@ Extra stuff with NEEDS_DECOMPOSITION mentioned here.
 		assert.ok(result.includes("**Status:** SUCCESS"));
 		assert.ok(!result.includes("NEEDS_DECOMPOSITION"));
 		assert.ok(!result.includes("Appendix"));
+	});
+});
+
+// ─── resolveModelIdForTier ──────────────────────────────────────────────────
+
+describe("resolveModelIdForTier", () => {
+	// Minimal mock registry with Anthropic + OpenAI models
+	const mockModels: RegistryModel[] = [
+		{ id: "claude-opus-4-6", provider: "anthropic" },
+		{ id: "claude-sonnet-4-5", provider: "anthropic" },
+		{ id: "claude-haiku-3-5", provider: "anthropic" },
+		{ id: "gpt-5.4", provider: "openai" },
+		{ id: "gpt-4o", provider: "openai" },
+		{ id: "qwen3:32b", provider: "local" },
+	];
+	const defaultPolicy = getDefaultPolicy();
+	const openaiFirstPolicy = {
+		...defaultPolicy,
+		providerOrder: ["openai" as const, "anthropic" as const, "local" as const],
+	};
+
+	it("'opus' tier resolves to explicit Anthropic model ID with Anthropic-first policy", () => {
+		const result = resolveModelIdForTier("opus", mockModels, defaultPolicy);
+		// Anthropic first → claude-opus-4-6
+		assert.equal(result, "claude-opus-4-6");
+	});
+
+	it("'opus' tier resolves to explicit OpenAI model ID with OpenAI-first policy", () => {
+		const result = resolveModelIdForTier("opus", mockModels, openaiFirstPolicy);
+		// OpenAI first → gpt-5.4
+		assert.equal(result, "gpt-5.4");
+	});
+
+	it("'sonnet' tier resolves to explicit model ID (not undefined) when registry has models", () => {
+		const result = resolveModelIdForTier("sonnet", mockModels, defaultPolicy);
+		// Should return explicit ID, not undefined
+		assert.ok(result !== undefined, "Expected explicit model ID for sonnet tier");
+		assert.ok(result!.length > 0, "Expected non-empty model ID");
+	});
+
+	it("'sonnet' tier returns undefined when registry is empty (pi default)", () => {
+		const result = resolveModelIdForTier("sonnet", [], defaultPolicy);
+		// Empty registry → fallback returns undefined (sonnet is pi's default)
+		assert.equal(result, undefined);
+	});
+
+	it("'local' tier returns the localModel parameter directly", () => {
+		const result = resolveModelIdForTier("local", mockModels, defaultPolicy, "qwen3:32b");
+		assert.equal(result, "qwen3:32b");
+	});
+
+	it("'local' tier returns undefined when no localModel provided", () => {
+		const result = resolveModelIdForTier("local", mockModels, defaultPolicy);
+		assert.equal(result, undefined);
+	});
+
+	it("'haiku' tier resolves to explicit Anthropic haiku model", () => {
+		const result = resolveModelIdForTier("haiku", mockModels, defaultPolicy);
+		assert.equal(result, "claude-haiku-3-5");
+	});
+
+	it("review model resolves opus explicitly (spec: Review model also resolves explicitly)", () => {
+		// Simulating the review model resolution path in dispatchSingleChild
+		const reviewModelId = resolveModelIdForTier("opus", mockModels, defaultPolicy);
+		// Must not be the bare alias "opus" — must be an explicit ID
+		assert.notEqual(reviewModelId, "opus");
+		assert.ok(reviewModelId?.includes("claude-opus") || reviewModelId?.includes("gpt-5"), 
+			`Expected explicit model ID, got: ${reviewModelId}`);
+	});
+
+	it("does not pass bare 'opus' alias (spec: Child execution passes resolved model ID)", () => {
+		// The old mapModelTierToFlag returned "opus" (fuzzy alias)
+		// resolveModelIdForTier must NOT return bare "opus" when registry has models
+		const oldFuzzy = mapModelTierToFlag("opus");
+		const newExplicit = resolveModelIdForTier("opus", mockModels, defaultPolicy);
+		assert.equal(oldFuzzy, "opus"); // old behavior still works
+		assert.notEqual(newExplicit, "opus"); // new behavior is explicit
+	});
+
+	it("avoids avoided providers and falls back (spec: Session policy can avoid a provider)", () => {
+		const lowBudgetPolicy = {
+			...defaultPolicy,
+			providerOrder: ["openai" as const, "anthropic" as const],
+			avoidProviders: ["anthropic" as const],
+		};
+		// Should resolve to OpenAI opus (avoid Anthropic in first pass)
+		const result = resolveModelIdForTier("opus", mockModels, lowBudgetPolicy);
+		assert.equal(result, "gpt-5.4");
+	});
+});
+
+// ─── LARGE_RUN_THRESHOLD ────────────────────────────────────────────────────
+
+describe("LARGE_RUN_THRESHOLD", () => {
+	it("is defined and is a positive integer >= 2", () => {
+		assert.ok(typeof LARGE_RUN_THRESHOLD === "number");
+		assert.ok(LARGE_RUN_THRESHOLD >= 2);
+		assert.equal(LARGE_RUN_THRESHOLD, Math.floor(LARGE_RUN_THRESHOLD));
+	});
+
+	it("small run does not exceed threshold (spec: Small run does not interrupt with preflight)", () => {
+		const smallChildCount = 2;
+		const isLargeRun = smallChildCount >= LARGE_RUN_THRESHOLD;
+		assert.equal(isLargeRun, false, "2 children should not be a large run");
+	});
+
+	it("large run meets or exceeds threshold (spec: Large run triggers preflight prompt)", () => {
+		const largeChildCount = LARGE_RUN_THRESHOLD;
+		const isLargeRun = largeChildCount >= LARGE_RUN_THRESHOLD;
+		assert.equal(isLargeRun, true, `${LARGE_RUN_THRESHOLD} children should be a large run`);
+	});
+
+	it("review + 3 children also qualifies as large run", () => {
+		const childCount = LARGE_RUN_THRESHOLD - 1;
+		const reviewEnabled = true;
+		const isLargeRun = childCount >= LARGE_RUN_THRESHOLD || (reviewEnabled && childCount >= LARGE_RUN_THRESHOLD - 1);
+		assert.equal(isLargeRun, true, "Review + N-1 children should be large run");
+	});
+
+	it("review + 1 child does NOT qualify as large run", () => {
+		const childCount = 1;
+		const reviewEnabled = true;
+		const isLargeRun = childCount >= LARGE_RUN_THRESHOLD || (reviewEnabled && childCount >= LARGE_RUN_THRESHOLD - 1);
+		// With LARGE_RUN_THRESHOLD=4, LARGE_RUN_THRESHOLD-1=3, childCount=1 < 3
+		assert.equal(isLargeRun, false, "Review + 1 child should not be large run");
 	});
 });
