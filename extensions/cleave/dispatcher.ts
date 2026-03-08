@@ -232,35 +232,6 @@ export function resolveExecuteModel(
 	return applyEffortFloor(classified);
 }
 
-/**
- * Map a model tier name to the --model flag value for the pi CLI.
- *
- * @deprecated Use resolveModelIdForTier() instead, which returns explicit model
- * IDs via the shared resolver rather than fuzzy tier aliases. This function is
- * kept for backward compatibility and testing purposes.
- *
- * Returns undefined for "sonnet" — pi's default model, no --model flag needed.
- * "haiku" and "opus" are passed as bare strings; pi's model resolver does
- * fuzzy matching (e.g. "opus" → "claude-opus-4-..."). This works with pi's
- * built-in Anthropic models but may mismatch with custom registries.
- */
-function mapModelTierToFlag(
-	tier: ModelTier,
-	localModel?: string,
-): string | undefined {
-	switch (tier) {
-		case "local":
-			return localModel;
-		case "haiku":
-			return "haiku";
-		case "opus":
-			return "opus";
-		case "sonnet":
-		default:
-			return undefined; // default — no --model flag
-	}
-}
-
 // ─── Child prompt construction ──────────────────────────────────────────────
 
 /**
@@ -589,9 +560,16 @@ async function dispatchSingleChild(
 	const activePolicy: ProviderRoutingPolicy = (sharedState as any).routingPolicy ?? getDefaultPolicy();
 	let registryModels: RegistryModel[] = [];
 	try {
-		registryModels = (pi as any).modelRegistry?.getAll() ?? [];
-	} catch {
-		// modelRegistry not available (e.g. test environment) — resolver will fallback gracefully
+		const registry = (pi as any).modelRegistry;
+		if (registry != null) {
+			registryModels = registry.getAll();
+		}
+		// If modelRegistry is absent (e.g. test environment), registryModels stays []
+		// and resolveTier will use policy-based fallbacks.
+	} catch (err) {
+		// getAll() threw — log and continue with empty registry so resolver can still
+		// apply policy-based fallbacks rather than silently passing no --model flag.
+		console.warn("[cleave] modelRegistry.getAll() threw:", err);
 	}
 	const modelFlag = resolveModelIdForTier(effectiveTier, registryModels, activePolicy, localModel);
 	child.backend = child.executeModel === "local" ? "local" : "cloud";

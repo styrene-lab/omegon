@@ -14,7 +14,7 @@ import {
 	LARGE_RUN_THRESHOLD,
 	dispatchChildren,
 } from "./dispatcher.ts";
-import type { RegistryModel } from "../lib/model-routing.ts";
+import type { RegistryModel, ProviderRoutingPolicy } from "../lib/model-routing.ts";
 import { getDefaultPolicy } from "../lib/model-routing.ts";
 
 // ─── AsyncSemaphore ─────────────────────────────────────────────────────────
@@ -379,6 +379,63 @@ describe("resolveModelIdForTier", () => {
 	});
 });
 
+// ─── ProviderRoutingPolicy structure (spec: Session policy stores provider order and flags) ──
+
+describe("ProviderRoutingPolicy structure", () => {
+	// Spec scenario: "Session policy stores provider order and flags"
+	// Verifies that the correct field names exist and are honoured by getDefaultPolicy().
+	// This catches phantom-field bugs (e.g. preferCheapCloud vs cheapCloudPreferredOverLocal).
+
+	it("getDefaultPolicy returns providerOrder array (spec: provider order stored)", () => {
+		const policy = getDefaultPolicy();
+		assert.ok(Array.isArray(policy.providerOrder), "providerOrder must be an array");
+		assert.ok(policy.providerOrder.length > 0, "providerOrder must be non-empty");
+	});
+
+	it("getDefaultPolicy returns cheapCloudPreferredOverLocal flag (spec: cheap-cloud-over-local flag stored)", () => {
+		const policy = getDefaultPolicy();
+		assert.ok(
+			Object.prototype.hasOwnProperty.call(policy, "cheapCloudPreferredOverLocal"),
+			"Policy must have cheapCloudPreferredOverLocal field (not preferCheapCloud)",
+		);
+		assert.equal(typeof policy.cheapCloudPreferredOverLocal, "boolean");
+	});
+
+	it("getDefaultPolicy returns requirePreflightForLargeRuns flag (spec: large-run preflight flag stored)", () => {
+		const policy = getDefaultPolicy();
+		assert.ok(
+			Object.prototype.hasOwnProperty.call(policy, "requirePreflightForLargeRuns"),
+			"Policy must have requirePreflightForLargeRuns field",
+		);
+		assert.equal(typeof policy.requirePreflightForLargeRuns, "boolean");
+	});
+
+	it("policy with cheapCloudPreferredOverLocal=true is structurally valid (no phantom fields)", () => {
+		const policy: ProviderRoutingPolicy = {
+			providerOrder: ["anthropic", "openai", "local"],
+			cheapCloudPreferredOverLocal: true,
+			requirePreflightForLargeRuns: false,
+			avoidProviders: [],
+		};
+		// cheapCloudPreferredOverLocal must be the canonical field name — TypeScript
+		// compile would fail if the field name were wrong (no 'any' cast here).
+		assert.equal(policy.cheapCloudPreferredOverLocal, true);
+		assert.deepEqual(policy.providerOrder, ["anthropic", "openai", "local"]);
+	});
+
+	it("policy avoidProviders field stores avoided provider list (spec: Session policy can avoid a provider)", () => {
+		const policy: ProviderRoutingPolicy = {
+			providerOrder: ["openai", "anthropic", "local"],
+			cheapCloudPreferredOverLocal: false,
+			requirePreflightForLargeRuns: false,
+			avoidProviders: ["anthropic"],
+		};
+		assert.deepEqual(policy.avoidProviders, ["anthropic"]);
+		// Future resolution should skip Anthropic — tested via resolveModelIdForTier
+		// in the "avoids avoided providers" test above.
+	});
+});
+
 // ─── LARGE_RUN_THRESHOLD ────────────────────────────────────────────────────
 
 describe("LARGE_RUN_THRESHOLD", () => {
@@ -405,6 +462,16 @@ describe("LARGE_RUN_THRESHOLD", () => {
 		const reviewEnabled = true;
 		const isLargeRun = childCount >= LARGE_RUN_THRESHOLD || (reviewEnabled && childCount >= LARGE_RUN_THRESHOLD - 1);
 		assert.equal(isLargeRun, true, "Review + N-1 children should be large run");
+	});
+
+	it("review + 2 children does NOT qualify as large run (spec: boundary — below LARGE_RUN_THRESHOLD-1)", () => {
+		// With LARGE_RUN_THRESHOLD=4, the secondary condition is: review && childCount >= 3.
+		// So review + 2 children (childCount=2 < 3) must NOT trigger preflight.
+		const childCount = 2;
+		const reviewEnabled = true;
+		const isLargeRun = childCount >= LARGE_RUN_THRESHOLD || (reviewEnabled && childCount >= LARGE_RUN_THRESHOLD - 1);
+		// LARGE_RUN_THRESHOLD - 1 = 3; childCount 2 < 3 → not large
+		assert.equal(isLargeRun, false, "Review + 2 children should not be large run (boundary: below LARGE_RUN_THRESHOLD-1)");
 	});
 
 	it("review + 1 child does NOT qualify as large run", () => {
@@ -488,7 +555,7 @@ describe("dispatchChildren preflight — integration (spec: Large/Small run trig
 		try {
 			(sharedState as any).routingPolicy = {
 				providerOrder: ["anthropic", "openai", "local"],
-				preferCheapCloud: false,
+				cheapCloudPreferredOverLocal: false,
 				requirePreflightForLargeRuns: true,
 				avoidProviders: [],
 			};
@@ -516,7 +583,7 @@ describe("dispatchChildren preflight — integration (spec: Large/Small run trig
 		try {
 			(sharedState as any).routingPolicy = {
 				providerOrder: ["anthropic", "openai", "local"],
-				preferCheapCloud: false,
+				cheapCloudPreferredOverLocal: false,
 				requirePreflightForLargeRuns: true,
 				avoidProviders: [],
 			};
@@ -539,7 +606,7 @@ describe("dispatchChildren preflight — integration (spec: Large/Small run trig
 		try {
 			(sharedState as any).routingPolicy = {
 				providerOrder: ["anthropic", "openai", "local"],
-				preferCheapCloud: false,
+				cheapCloudPreferredOverLocal: false,
 				requirePreflightForLargeRuns: false,  // preflight disabled
 				avoidProviders: [],
 			};
@@ -561,7 +628,7 @@ describe("dispatchChildren preflight — integration (spec: Large/Small run trig
 		try {
 			(sharedState as any).routingPolicy = {
 				providerOrder: ["anthropic"],
-				preferCheapCloud: false,
+				cheapCloudPreferredOverLocal: false,
 				requirePreflightForLargeRuns: true,
 				avoidProviders: [],
 			};
