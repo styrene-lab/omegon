@@ -14,6 +14,7 @@ import type {
 } from "./dashboard/types.ts";
 
 import type { EffortState } from "./effort/types.ts";
+import type { ProviderRoutingPolicy } from "./lib/model-routing.ts";
 
 // Re-export dashboard types for consumer convenience
 export type {
@@ -27,6 +28,9 @@ export type {
   DashboardMode,
   DashboardState,
 } from "./dashboard/types.ts";
+
+// Re-export routing types for consumer convenience
+export type { ProviderRoutingPolicy, ResolvedTierModel, ModelTier, ProviderName } from "./lib/model-routing.ts";
 
 // Re-export effort types for consumer convenience
 export type {
@@ -59,6 +63,9 @@ interface SharedState {
 
   /** Effort tier state. Written by effort extension, read by model-budget and cleave. */
   effort?: EffortState;
+
+  /** Session routing policy. Written by operator/preflight, read by cleave and model-budget. */
+  routingPolicy?: ProviderRoutingPolicy;
 }
 
 // Initialize once on first import, reuse thereafter via global symbol.
