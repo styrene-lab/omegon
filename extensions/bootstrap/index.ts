@@ -3,10 +3,11 @@
  *
  * On first session start after install, presents a friendly checklist of
  * external dependencies grouped by tier (core / recommended / optional).
- * Offers interactive installation for missing deps.
+ * Offers interactive installation for missing deps and captures a safe
+ * operator capability profile for routing/fallback defaults.
  *
  * Commands:
- *   /bootstrap          — Run interactive setup (install missing deps)
+ *   /bootstrap          — Run interactive setup (install missing deps + profile)
  *   /bootstrap status   — Show dependency checklist without installing
  *   /bootstrap install  — Install all missing core + recommended deps
  *
@@ -21,11 +22,65 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { checkAllProviders, type AuthResult } from "../01-auth/auth.ts";
+import { loadPiConfig, savePiConfig } from "../lib/model-preferences.ts";
 import { DEPS, checkAll, formatReport, bestInstallCmd, sortByRequires, type DepStatus, type DepTier } from "./deps.ts";
 
 const AGENT_DIR = join(homedir(), ".pi", "agent");
 const MARKER_PATH = join(AGENT_DIR, "pi-kit-bootstrap-done");
-const MARKER_VERSION = "1"; // bump to re-trigger bootstrap after adding new core deps
+const MARKER_VERSION = "2"; // bump to re-trigger bootstrap after adding operator profile capture
+const OPERATOR_PROFILE_VERSION = 1;
+
+export type ProviderPreference = "prefer" | "allow" | "avoid";
+export type LocalFallbackPolicy = "allow" | "ask" | "deny";
+
+export interface OperatorCapabilityProfile {
+	version: number;
+	setupComplete: boolean;
+	setupState: "guided" | "skipped-default";
+	providerOrder: Array<"anthropic" | "openai" | "local">;
+	providerPreferences: {
+		anthropic: ProviderPreference;
+		openai: ProviderPreference;
+		local: ProviderPreference;
+	};
+	fallbackPolicy: {
+		sameRoleCrossProvider: "allow" | "ask" | "deny";
+		crossSource: "allow" | "ask" | "deny";
+		heavyLocal: LocalFallbackPolicy;
+		unknownLocalPerformance: LocalFallbackPolicy;
+	};
+}
+
+interface PiConfigWithProfile {
+	operatorProfile?: unknown;
+	[key: string]: unknown;
+}
+
+interface ProviderReadinessSummary {
+	ready: string[];
+	authAttention: string[];
+	missing: string[];
+}
+
+interface SetupAnswers {
+	primaryProvider: "anthropic" | "openai" | "no-preference";
+	allowCloudCrossProviderFallback: boolean;
+	automaticLightLocalFallback: boolean;
+	heavyLocalFallback: LocalFallbackPolicy;
+}
+
+interface CommandContext {
+	say: (msg: string) => void;
+	hasUI: boolean;
+	cwd?: string;
+	ui: {
+		notify: (msg: string, level?: string) => void;
+		confirm: (title: string, message: string) => Promise<boolean>;
+		input?: (label: string, initial?: string) => Promise<string>;
+		select?: (title: string, options: string[]) => Promise<string | undefined>;
+	};
+}
 
 function isFirstRun(): boolean {
 	if (!existsSync(MARKER_PATH)) return true;
@@ -42,13 +97,194 @@ function markDone(): void {
 	writeFileSync(MARKER_PATH, MARKER_VERSION + "\n", "utf8");
 }
 
-interface CommandContext {
-	say: (msg: string) => void;
-	hasUI: boolean;
-	ui: {
-		notify: (msg: string, level?: string) => void;
-		confirm: (title: string, message: string) => Promise<boolean>;
+function parseOperatorProfile(value: unknown): OperatorCapabilityProfile | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const record = value as Record<string, unknown>;
+	if (record.version !== OPERATOR_PROFILE_VERSION) return undefined;
+	if (typeof record.setupComplete !== "boolean") return undefined;
+	if (record.setupState !== "guided" && record.setupState !== "skipped-default") return undefined;
+	if (!Array.isArray(record.providerOrder) || record.providerOrder.some((item) => item !== "anthropic" && item !== "openai" && item !== "local")) {
+		return undefined;
+	}
+	const providerPreferences = record.providerPreferences;
+	const fallbackPolicy = record.fallbackPolicy;
+	if (!providerPreferences || typeof providerPreferences !== "object" || Array.isArray(providerPreferences)) return undefined;
+	if (!fallbackPolicy || typeof fallbackPolicy !== "object" || Array.isArray(fallbackPolicy)) return undefined;
+
+	const prefs = providerPreferences as Record<string, unknown>;
+	const fallback = fallbackPolicy as Record<string, unknown>;
+	const validPreference = (valueToCheck: unknown): valueToCheck is ProviderPreference => valueToCheck === "prefer" || valueToCheck === "allow" || valueToCheck === "avoid";
+	const validPolicy = (valueToCheck: unknown): valueToCheck is LocalFallbackPolicy => valueToCheck === "allow" || valueToCheck === "ask" || valueToCheck === "deny";
+	if (!validPreference(prefs.anthropic) || !validPreference(prefs.openai) || !validPreference(prefs.local)) return undefined;
+	if (!validPolicy(fallback.sameRoleCrossProvider) || !validPolicy(fallback.crossSource)
+		|| !validPolicy(fallback.heavyLocal) || !validPolicy(fallback.unknownLocalPerformance)) return undefined;
+
+	return record as unknown as OperatorCapabilityProfile;
+}
+
+export function loadOperatorProfile(root: string): OperatorCapabilityProfile | undefined {
+	const config = loadPiConfig(root) as PiConfigWithProfile;
+	return parseOperatorProfile(config.operatorProfile);
+}
+
+export function needsOperatorProfileSetup(root: string): boolean {
+	const profile = loadOperatorProfile(root);
+	return !profile;
+}
+
+export function summarizeProviderReadiness(results: AuthResult[]): ProviderReadinessSummary {
+	const summary: ProviderReadinessSummary = { ready: [], authAttention: [], missing: [] };
+	for (const result of results) {
+		if (result.provider !== "github" && result.provider !== "gitlab" && result.provider !== "aws") continue;
+		if (result.status === "ok") summary.ready.push(result.provider);
+		else if (result.status === "missing") summary.missing.push(result.provider);
+		else summary.authAttention.push(result.provider);
+	}
+	return summary;
+}
+
+export function synthesizeSafeDefaultProfile(readiness?: AuthResult[]): OperatorCapabilityProfile {
+	const summary = readiness ? summarizeProviderReadiness(readiness) : { ready: [], authAttention: [], missing: [] };
+	const preferredCloud: Array<"anthropic" | "openai"> = [];
+	if (summary.ready.includes("github")) preferredCloud.push("anthropic");
+	if (summary.ready.includes("aws") || summary.ready.includes("gitlab")) preferredCloud.push("openai");
+	for (const provider of ["anthropic", "openai"] as const) {
+		if (!preferredCloud.includes(provider)) preferredCloud.push(provider);
+	}
+
+	return {
+		version: OPERATOR_PROFILE_VERSION,
+		setupComplete: false,
+		setupState: "skipped-default",
+		providerOrder: [...preferredCloud, "local"],
+		providerPreferences: {
+			anthropic: preferredCloud[0] === "anthropic" ? "prefer" : "allow",
+			openai: preferredCloud[0] === "openai" ? "prefer" : "allow",
+			local: "avoid",
+		},
+		fallbackPolicy: {
+			sameRoleCrossProvider: "allow",
+			crossSource: "ask",
+			heavyLocal: "ask",
+			unknownLocalPerformance: "ask",
+		},
 	};
+}
+
+export function buildGuidedProfile(answers: SetupAnswers): OperatorCapabilityProfile {
+	const providerOrder: Array<"anthropic" | "openai" | "local"> =
+		answers.primaryProvider === "anthropic"
+			? ["anthropic", "openai", "local"]
+			: answers.primaryProvider === "openai"
+				? ["openai", "anthropic", "local"]
+				: ["anthropic", "openai", "local"];
+
+	return {
+		version: OPERATOR_PROFILE_VERSION,
+		setupComplete: true,
+		setupState: "guided",
+		providerOrder,
+		providerPreferences: {
+			anthropic: answers.primaryProvider === "anthropic" ? "prefer" : "allow",
+			openai: answers.primaryProvider === "openai" ? "prefer" : "allow",
+			local: answers.automaticLightLocalFallback ? "allow" : "avoid",
+		},
+		fallbackPolicy: {
+			sameRoleCrossProvider: answers.allowCloudCrossProviderFallback ? "allow" : "ask",
+			crossSource: answers.automaticLightLocalFallback ? "ask" : "deny",
+			heavyLocal: answers.heavyLocalFallback,
+			unknownLocalPerformance: "ask",
+		},
+	};
+}
+
+export function saveOperatorProfile(root: string, profile: OperatorCapabilityProfile): void {
+	const config = loadPiConfig(root) as PiConfigWithProfile;
+	config.operatorProfile = profile;
+	savePiConfig(root, config);
+}
+
+function formatProviderSetupSummary(results: AuthResult[]): string {
+	const summary = summarizeProviderReadiness(results);
+	const parts: string[] = [];
+	if (summary.ready.length > 0) parts.push(`ready: ${summary.ready.join(", ")}`);
+	if (summary.authAttention.length > 0) parts.push(`needs auth: ${summary.authAttention.join(", ")}`);
+	if (summary.missing.length > 0) parts.push(`missing CLI: ${summary.missing.join(", ")}`);
+	return parts.length > 0 ? parts.join(" · ") : "No cloud providers detected yet";
+}
+
+function getConfigRoot(ctx: { cwd?: string }): string {
+	return ctx.cwd || process.cwd();
+}
+
+async function ensureOperatorProfile(pi: ExtensionAPI, ctx: CommandContext): Promise<OperatorCapabilityProfile> {
+	const root = getConfigRoot(ctx);
+	const existing = loadOperatorProfile(root);
+	if (existing) return existing;
+
+	const readiness = await checkAllProviders(pi);
+	if (!ctx.hasUI || !ctx.ui.confirm || !ctx.ui.select) {
+		const fallback = synthesizeSafeDefaultProfile(readiness);
+		saveOperatorProfile(root, fallback);
+		return fallback;
+	}
+
+	ctx.ui.notify(`Operator capability setup — ${formatProviderSetupSummary(readiness)}`, "info");
+	const proceed = await ctx.ui.confirm(
+		"Configure operator capability profile?",
+		"This captures cloud/local fallback preferences so pi-kit avoids unsafe automatic model switches.",
+	);
+	if (!proceed) {
+		const fallback = synthesizeSafeDefaultProfile(readiness);
+		saveOperatorProfile(root, fallback);
+		ctx.ui.notify("Saved a conservative default operator profile. You can rerun /bootstrap later to customize it.", "info");
+		return fallback;
+	}
+
+	const primarySelection = await ctx.ui.select(
+		"Preferred cloud provider for normal work:",
+		[
+			"Anthropic first",
+			"OpenAI first",
+			"No preference",
+		],
+	);
+	const primaryProvider = primarySelection === "OpenAI first"
+		? "openai"
+		: primarySelection === "No preference"
+			? "no-preference"
+			: "anthropic";
+	const allowCloudCrossProviderFallback = await ctx.ui.confirm(
+		"Allow same-role cloud fallback?",
+		"If your preferred cloud provider is unavailable, may pi-kit retry the same capability role with another cloud provider?",
+	);
+	const automaticLightLocalFallback = await ctx.ui.confirm(
+		"Allow automatic light local fallback?",
+		"Allow pi-kit to use local models automatically for lightweight work when cloud options are unavailable?",
+	);
+	const heavyLocalSelection = await ctx.ui.select(
+		"Heavy local fallback policy:",
+		[
+			"Ask before heavy local fallback",
+			"Deny heavy local fallback",
+			"Allow heavy local fallback",
+		],
+	);
+	const heavyLocalFallback = heavyLocalSelection === "Deny heavy local fallback"
+		? "deny"
+		: heavyLocalSelection === "Allow heavy local fallback"
+			? "allow"
+			: "ask";
+
+	const profile = buildGuidedProfile({
+		primaryProvider,
+		allowCloudCrossProviderFallback,
+		automaticLightLocalFallback,
+		heavyLocalFallback,
+	});
+	saveOperatorProfile(root, profile);
+	ctx.ui.notify("Saved operator capability profile to .pi/config.json", "info");
+	return profile;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -59,8 +295,9 @@ export default function (pi: ExtensionAPI) {
 
 		const statuses = checkAll();
 		const missing = statuses.filter((s) => !s.available);
+		const needsProfile = needsOperatorProfileSetup(getConfigRoot(ctx));
 
-		if (missing.length === 0) {
+		if (missing.length === 0 && !needsProfile) {
 			markDone();
 			return;
 		}
@@ -75,36 +312,47 @@ export default function (pi: ExtensionAPI) {
 		if (recMissing.length > 0) {
 			msg += `${recMissing.length} recommended dep${recMissing.length > 1 ? "s" : ""} missing. `;
 		}
+		if (needsProfile) {
+			msg += "Operator capability setup is still pending. ";
+		}
 		msg += "Run /bootstrap to set up.";
 
 		ctx.ui.notify(msg, coreMissing.length > 0 ? "warning" : "info");
 	});
 
 	pi.registerCommand("bootstrap", {
-		description: "First-time setup — check and install pi-kit external dependencies",
+		description: "First-time setup — check/install pi-kit dependencies and capture operator fallback preferences",
 		handler: async (args, ctx) => {
 			const sub = args.trim().toLowerCase();
 			const cmdCtx: CommandContext = {
 				say: (msg: string) => ctx.ui.notify(msg, "info"),
 				hasUI: true,
+				cwd: ctx.cwd,
 				ui: {
 					notify: (msg: string, level?: string) => ctx.ui.notify(msg, (level ?? "info") as "info"),
 					confirm: (title: string, message: string) => ctx.ui.confirm(title, message),
+					input: ctx.ui.input ? async (label: string, initial?: string) => (await ctx.ui.input(label, initial)) ?? "" : undefined,
+					select: ctx.ui.select ? (title: string, options: string[]) => ctx.ui.select(title, options) : undefined,
 				},
 			};
 
 			if (sub === "status") {
 				const statuses = checkAll();
 				cmdCtx.say(formatReport(statuses));
+				const profile = loadOperatorProfile(getConfigRoot(cmdCtx));
+				cmdCtx.say(profile
+					? `\nOperator capability profile: ${profile.setupComplete ? "configured" : "defaulted"}`
+					: "\nOperator capability profile: not configured");
 				return;
 			}
 
 			if (sub === "install") {
 				await installMissing(cmdCtx, ["core", "recommended"]);
+				await ensureOperatorProfile(pi, cmdCtx);
 				return;
 			}
 
-			await interactiveSetup(cmdCtx);
+			await interactiveSetup(pi, cmdCtx);
 		},
 	});
 
@@ -131,19 +379,20 @@ export default function (pi: ExtensionAPI) {
 	});
 }
 
-async function interactiveSetup(ctx: CommandContext): Promise<void> {
+async function interactiveSetup(pi: ExtensionAPI, ctx: CommandContext): Promise<void> {
 	const statuses = checkAll();
 	const missing = statuses.filter((s) => !s.available);
 
 	ctx.ui.notify(formatReport(statuses));
 
-	if (missing.length === 0) {
+	if (missing.length === 0 && !needsOperatorProfileSetup(getConfigRoot(ctx))) {
 		markDone();
 		return;
 	}
 
 	if (!ctx.hasUI || !ctx.ui) {
 		ctx.ui.notify("\nRun individual install commands above, or use `/bootstrap install` to install all core + recommended deps.");
+		await ensureOperatorProfile(pi, ctx);
 		return;
 	}
 
@@ -175,10 +424,12 @@ async function interactiveSetup(ctx: CommandContext): Promise<void> {
 
 	if (optMissing.length > 0) {
 		ctx.ui.notify(
-			`\n${optMissing.length} optional dep${optMissing.length > 1 ? "s" : ""} not installed: ${optMissing.map((s) => s.dep.name).join(", ")}.\n` +
-			`Install individually when needed — see \`/bootstrap status\` for commands.`,
+			`\n${optMissing.length} optional dep${optMissing.length > 1 ? "s" : ""} not installed: ${optMissing.map((s) => s.dep.name).join(", ")}.\n`
+			+ "Install individually when needed — see `/bootstrap status` for commands.",
 		);
 	}
+
+	await ensureOperatorProfile(pi, ctx);
 
 	const recheck = checkAll();
 	const stillMissing = recheck.filter((s) => !s.available && (s.dep.tier === "core" || s.dep.tier === "recommended"));
@@ -188,8 +439,8 @@ async function interactiveSetup(ctx: CommandContext): Promise<void> {
 		markDone();
 	} else {
 		ctx.ui.notify(
-			`\n⚠️  ${stillMissing.length} dep${stillMissing.length > 1 ? "s" : ""} still missing. ` +
-			`Run \`/bootstrap\` again after installing manually.`,
+			`\n⚠️  ${stillMissing.length} dep${stillMissing.length > 1 ? "s" : ""} still missing. `
+			+ "Run `/bootstrap` again after installing manually.",
 		);
 	}
 }
@@ -202,7 +453,6 @@ async function installMissing(ctx: CommandContext, tiers: DepTier[]): Promise<vo
 
 	if (toInstall.length === 0) {
 		ctx.ui.notify("All core and recommended dependencies are already installed. ✅");
-		markDone();
 		return;
 	}
 
@@ -214,7 +464,6 @@ async function installMissing(ctx: CommandContext, tiers: DepTier[]): Promise<vo
 	);
 	if (stillMissing.length === 0) {
 		ctx.ui.notify("\n🎉 All core and recommended dependencies installed!");
-		markDone();
 	} else {
 		ctx.ui.notify(
 			`\n⚠️  ${stillMissing.length} dep${stillMissing.length > 1 ? "s" : ""} failed to install:`,
