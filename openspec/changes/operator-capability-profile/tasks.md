@@ -10,13 +10,13 @@ Dependencies:
 ## 1. Profile schema + config/runtime persistence
 <!-- specs: models/profile -->
 
-- [ ] 1.1 Add operator profile types and defaults in a new `extensions/lib/operator-profile.ts`
-- [ ] 1.2 Define the full public role ladder: `archmagos`, `magos`, `adept`, `servitor`, `servoskull`
-- [ ] 1.3 Define structured candidate objects with `id`, `provider`, `source`, `weight`, and `maxThinking`
-- [ ] 1.4 Define fallback policy enums using `allow | ask | deny`, with comments leaving room for future values like `allow_once` and `background_only`
-- [ ] 1.5 Load and save durable operator profile state through `.pi/config.json` without regressing existing `lastUsedModel` behavior
-- [ ] 1.6 Add a separate runtime-state helper for transient machine/provider availability and cooldown data
-- [ ] 1.7 Add tests for profile parsing, conservative default synthesis, and config round-tripping
+- [x] 1.1 Add operator profile types and defaults in a new `extensions/lib/operator-profile.ts`
+- [x] 1.2 Define the full public role ladder: `archmagos`, `magos`, `adept`, `servitor`, `servoskull`
+- [x] 1.3 Define structured candidate objects with `id`, `provider`, `source`, `weight`, and `maxThinking`
+- [x] 1.4 Define fallback policy enums using `allow | ask | deny`, with comments leaving room for future values like `allow_once` and `background_only`
+- [x] 1.5 Load and save durable operator profile state through `.pi/config.json` without regressing existing `lastUsedModel` behavior
+- [x] 1.6 Add a separate runtime-state helper for transient machine/provider availability and cooldown data
+- [x] 1.7 Add tests for profile parsing, conservative default synthesis, and config round-tripping
 
 ## 2. Role resolver + selection policy
 <!-- specs: models/profile -->

@@ -6,8 +6,9 @@ export interface PersistedDriverSelection {
   modelId: string;
 }
 
-interface PiConfig {
+export interface PiConfig {
   lastUsedModel?: PersistedDriverSelection;
+  operatorProfile?: unknown;
   [key: string]: unknown;
 }
 
@@ -21,7 +22,7 @@ export function loadPiConfig(root: string): PiConfig {
     if (!existsSync(path)) return {};
     const raw = readFileSync(path, "utf-8");
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed as PiConfig : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as PiConfig : {};
   } catch {
     return {};
   }
