@@ -14,7 +14,7 @@ Dependencies:
 - [x] 1.3 Define allowlist metadata for bridged commands, including `agentCallable`, side-effect classification, and confirmation requirements
 - [x] 1.4 Refuse commands that are not explicitly allowlisted as agent-callable
 - [x] 1.5 Add or extend typings in `extensions/types.d.ts` for structured command execution metadata/contracts
-- [ ] 1.6 Register a harness-facing tool entrypoint that executes bridged slash commands through the shared metadata/allowlist path
+- [x] 1.6 Register a harness-facing tool entrypoint that executes bridged slash commands through the shared metadata/allowlist path
 - [x] 1.7 Add tests for allowlisted execution, blocked execution, and confirmation-required responses
 
 ## 2. Refactor `/assess` to structured shared executors
@@ -33,7 +33,7 @@ Dependencies:
 - [x] 3.1 Update `extensions/openspec/index.ts` to consume structured assessment outcomes where lifecycle reconciliation is needed
 - [x] 3.2 Surface reopened-work / reconciliation signals in machine-readable form for OpenSpec follow-up flows
 - [x] 3.3 Update `extensions/design-tree/index.ts` only as needed to consume structured reopen/update signals instead of prose parsing
-- [ ] 3.4 Confirm the v1 bridged allowlist includes `/assess spec`, `/assess diff`, and `/assess cleave`
+- [x] 3.4 Confirm the v1 bridged allowlist includes `/assess spec`, `/assess diff`, and `/assess cleave`
 - [x] 3.5 Add tests proving an agent can determine pass vs reopen behavior from structured bridge results alone
 
 ## 4. Docs, safety, and rollout validation

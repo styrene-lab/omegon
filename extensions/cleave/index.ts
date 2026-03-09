@@ -21,6 +21,7 @@ import { Type } from "@sinclair/typebox";
 import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
 import { debug } from "../debug.ts";
 import { emitOpenSpecState } from "../openspec/dashboard-state.ts";
+import { createSlashCommandBridge, buildSlashCommandResult } from "../lib/slash-command-bridge.ts";
 import {
 	assessDirective,
 	PATTERNS,
@@ -821,65 +822,92 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 		{ value: "complexity", label: "complexity", description: "Assess directive complexity (cleave_assess)" },
 	];
 	const assessExecutors = createAssessStructuredExecutors(pi);
+	const slashCommandBridge = createSlashCommandBridge();
+	const toBridgeAssessResult = (result: AssessStructuredResult): ReturnType<typeof buildSlashCommandResult> =>
+		buildSlashCommandResult(result.command, result.args.split(/\s+/).filter(Boolean), {
+			ok: result.ok,
+			summary: result.summary,
+			humanText: result.humanText,
+			data: {
+				subcommand: result.subcommand,
+				data: result.data,
+				lifecycle: result.lifecycle,
+			},
+			effects: {
+				sideEffectClass: result.subcommand === "cleave" ? "workspace-write" : "read",
+				lifecycleTouched: result.lifecycle ? [result.lifecycle.changeName] : undefined,
+			},
+			nextSteps: result.nextSteps.map((step) => ({ label: step })),
+		});
 
-	pi.registerCommand("assess", {
+	slashCommandBridge.register(pi, {
+		name: "assess",
 		description: "Adversarial review + auto-fix (default), or: /assess <diff|spec|complexity> [args]",
+		bridge: {
+			agentCallable: true,
+			sideEffectClass: "workspace-write",
+			resultContract: "cleave.assess.v1",
+			summary: "Lifecycle-safe assessment commands for spec, diff, cleave, and complexity",
+		},
 		getArgumentCompletions: (prefix: string) => {
 			const parts = prefix.split(" ");
 			if (parts.length <= 1) {
-				// First argument: complete subcommand names
 				const partial = parts[0] || "";
 				const filtered = ASSESS_SUBS.filter((s) => s.value.startsWith(partial));
 				return filtered.length > 0 ? filtered : null;
 			}
-			// After subcommand, no further completions
 			return null;
 		},
-		handler: async (args, ctx) => {
+		structuredExecutor: async (args, ctx) => {
 			const trimmed = (args || "").trim();
-
-			// Bare /assess → adversarial session review (no auto-fix)
 			if (!trimmed) {
+				return buildSlashCommandResult("assess", [], {
+					ok: false,
+					summary: "/assess requires an explicit bridged subcommand",
+					humanText: "Bare /assess remains interactive-only in v1. Use one of: /assess spec, /assess diff, /assess cleave, or /assess complexity.",
+					data: { supportedSubcommands: ASSESS_SUBS.map((sub) => sub.value) },
+					effects: { sideEffectClass: "workspace-write" },
+					nextSteps: ASSESS_SUBS.map((sub) => ({ label: `Run /assess ${sub.value}` })),
+				});
+			}
+
+			const parts = trimmed.split(/\s+/);
+			const sub = parts[0] || "";
+			const rest = parts.slice(1).join(" ");
+			switch (sub) {
+				case "cleave":
+					return toBridgeAssessResult(await assessExecutors.cleave(rest, { cwd: ctx.cwd }));
+				case "diff":
+					return toBridgeAssessResult(await assessExecutors.diff(rest, { cwd: ctx.cwd }));
+				case "spec":
+					return toBridgeAssessResult(await assessExecutors.spec(rest, { cwd: ctx.cwd }));
+				case "complexity":
+					return toBridgeAssessResult(await assessExecutors.complexity(rest));
+				default:
+					return buildSlashCommandResult("assess", parts, {
+						ok: false,
+						summary: `Unsupported bridged /assess target: ${sub}`,
+						humanText: `Bridged /assess currently supports only: ${ASSESS_SUBS.map((item) => item.value).join(", ")}. Freeform adversarial review remains interactive-only in v1.`,
+						data: { supportedSubcommands: ASSESS_SUBS.map((item) => item.value) },
+						effects: { sideEffectClass: "workspace-write" },
+						nextSteps: ASSESS_SUBS.map((item) => ({ label: `Run /assess ${item.value}` })),
+					});
+			}
+		},
+		interactiveHandler: async (result, args) => {
+			const trimmed = (args || "").trim();
+			const sub = trimmed.split(/\s+/)[0] || "";
+			if (!trimmed || !ASSESS_SUBS.some((item) => item.value === sub)) {
 				pi.sendUserMessage([
 					"# Adversarial Assessment",
 					"",
-					"You are now operating as a hostile reviewer. Your job is to find everything wrong with the work completed in this session. Do not be polite. Do not hedge. If something is broken, say it's broken.",
+					trimmed
+						? "You are now operating as a hostile reviewer. Your job is to find everything wrong with the work completed in this session."
+						: "You are now operating as a hostile reviewer. Your job is to find everything wrong with the work completed in this session. Do not be polite. Do not hedge. If something is broken, say it's broken.",
+					...(trimmed ? ["", "**User instructions:** " + trimmed] : []),
 					"",
-					"## Procedure",
-					"",
-					"1. **Reconstruct scope** — Review the full conversation to identify every change made: files created, files edited, commands run, architectural decisions taken. Build a complete manifest.",
-					"",
-					"2. **Static analysis** — For every file touched, read the current state and check for:",
-					"   - Syntax errors, type mismatches, undefined references",
-					"   - Logic errors: off-by-ones, wrong operators, inverted conditions, unreachable branches",
-					"   - Unhandled edge cases: nil/null/empty inputs, boundary values, concurrent access",
-					"   - Resource leaks: unclosed handles, missing cleanup, unbounded growth",
-					"   - Security: injection vectors, hardcoded secrets, insecure defaults, path traversal",
-					"   - Dependency issues: missing imports, version conflicts, circular dependencies",
-					"",
-					"3. **Behavioral analysis** — Trace actual execution paths:",
-					"   - Does the happy path work end-to-end?",
-					"   - What happens on every error path? Are errors swallowed, misclassified, or leaked?",
-					"   - Race conditions, deadlocks, TOCTOU bugs?",
-					"   - State consistency across all paths?",
-					"",
-					"4. **Design critique** — Evaluate structural decisions:",
-					"   - Does the solution solve the *actual* problem or a simplified version?",
-					"   - Unnecessary abstractions, premature generalizations, gold-plating?",
-					"   - Does it violate existing codebase conventions?",
-					"   - Will it be maintainable by someone who didn't write it?",
-					"",
-					"5. **Test coverage** — If tests were written or modified:",
-					"   - Do tests assert the right things or just exercise code?",
-					"   - Missing negative tests, boundary tests, integration tests?",
-					"   - Could tests pass with a broken implementation (tautological)?",
-					"   - If no tests were written, should there have been?",
-					"",
-					"6. **Omission audit** — What was *not* done that should have been:",
-					"   - Missing error handling, logging, observability",
-					"   - Missing migrations, config changes, documentation",
-					"   - Missing cleanup of dead code, stale references",
-					"   - Incomplete implementation that was hand-waved",
+					"Follow the user's instructions above for tone and scope, but still perform a thorough review.",
+					"Read every file that was changed. Be specific. Cite line numbers.",
 					"",
 					"## Output Format",
 					"",
@@ -887,93 +915,29 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 					"One of: `PASS` | `PASS WITH CONCERNS` | `NEEDS REWORK` | `REJECT`",
 					"",
 					"### Critical Issues",
-					"Problems that will cause failures, data loss, or security vulnerabilities. Each with file path, line number, and concrete description.",
-					"",
 					"### Warnings",
-					"Problems that won't immediately break but indicate fragility or future risk.",
-					"",
 					"### Nitpicks",
-					"Style, naming, or structural issues that are suboptimal but functional.",
-					"",
 					"### Omissions",
-					"Things that should exist but don't.",
-					"",
 					"### What Actually Worked",
-					"Brief acknowledgment of what was done correctly.",
-					"",
-					"---",
-					"",
-					"Do NOT ask clarifying questions. Do NOT skip files because they're \"probably fine.\" Read everything that was changed. Be thorough. Be specific. Cite line numbers.",
 				].join("\n"));
 				return;
 			}
-
-			const parts = trimmed.split(/\s+/);
-			const sub = parts[0] || "";
-			const rest = parts.slice(1).join(" ");
-
-			switch (sub) {
-				// ── /assess cleave ──────────────────────────────────────
-				// Adversarial review of recent work → produce categorized
-				// issue list → immediately dispatch cleave to fix everything.
-				case "cleave": {
-					const result = await assessExecutors.cleave(rest, { cwd: ctx.cwd });
-					applyAssessEffects(pi, result);
-					return;
-				}
-
-				// ── /assess diff [ref] ─────────────────────────────────
-				// Assess a specific diff range for issues (review only, no auto-fix)
-				case "diff": {
-					const result = await assessExecutors.diff(rest, { cwd: ctx.cwd });
-					applyAssessEffects(pi, result);
-					return;
-				}
-
-				// ── /assess spec [change] ──────────────────────────────
-				// Review implementation against OpenSpec spec scenarios.
-				// Uses Given/When/Then as the assessment criteria.
-				case "spec": {
-					const result = await assessExecutors.spec(rest, { cwd: ctx.cwd });
-					applyAssessEffects(pi, result);
-					return;
-				}
-
-				// ── /assess complexity <directive> ─────────────────────
-				case "complexity": {
-					const result = await assessExecutors.complexity(rest);
-					applyAssessEffects(pi, result);
-					return;
-				}
-
-				// ── /assess <freeform> — adversarial review with custom instructions
-				default: {
-					pi.sendUserMessage([
-						"# Adversarial Assessment",
-						"",
-						"You are now operating as a hostile reviewer. Your job is to find everything wrong with the work completed in this session.",
-						"",
-						"**User instructions:** " + trimmed,
-						"",
-						"Follow the user's instructions above for tone and scope, but still perform a thorough review.",
-						"Read every file that was changed. Be specific. Cite line numbers.",
-						"",
-						"## Output Format",
-						"",
-						"### Verdict",
-						"One of: `PASS` | `PASS WITH CONCERNS` | `NEEDS REWORK` | `REJECT`",
-						"",
-						"### Critical Issues",
-						"### Warnings",
-						"### Nitpicks",
-						"### Omissions",
-						"### What Actually Worked",
-					].join("\n"));
-					return;
-				}
-			}
+			const assessResult: AssessStructuredResult = {
+				command: "assess",
+				subcommand: (result.data as any)?.subcommand ?? "diff",
+				args: trimmed,
+				ok: result.ok,
+				summary: result.summary,
+				humanText: result.humanText,
+				data: (result.data as any)?.data,
+				effects: [],
+				nextSteps: (result.nextSteps ?? []).map((step) => step.label),
+				lifecycle: (result.data as any)?.lifecycle,
+			};
+			applyAssessEffects(pi, assessResult);
 		},
 	});
+	pi.registerTool(slashCommandBridge.createToolDefinition());
 
 	// ── /cleave command ──────────────────────────────────────────────────
 	pi.registerCommand("cleave", {
