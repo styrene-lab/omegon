@@ -590,3 +590,109 @@ describe("archiveChange rejects invalid names", () => {
 		assert.equal(result.archived, false);
 	});
 });
+
+describe("assessment artifacts", () => {
+	let tmpDir: string;
+	let otherChangePath: string;
+
+	before(() => {
+		tmpDir = makeTmpDir();
+		createChange(tmpDir, "my-change", "My Change", "Track assessment state");
+		const other = createChange(tmpDir, "other-change", "Other Change", "Separate state");
+		otherChangePath = other.changePath;
+		fs.writeFileSync(path.join(tmpDir, "openspec", "changes", "my-change", "tasks.md"), "## 1. Demo\n- [x] 1.1 Done\n");
+		fs.writeFileSync(path.join(tmpDir, "openspec", "changes", "my-change", "design.md"), [
+			"# design",
+			"",
+			"## File Changes",
+			"",
+			"- `src/demo.ts`",
+		].join("\n"));
+		fs.mkdirSync(path.join(tmpDir, "src"), { recursive: true });
+		fs.writeFileSync(path.join(tmpDir, "src", "demo.ts"), "export const demo = 1;\n");
+	});
+
+	after(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+	it("writes and reads a per-change assessment record", async () => {
+		const {
+			computeAssessmentSnapshot,
+			writeAssessmentRecord,
+			readAssessmentRecord,
+			getAssessmentArtifactPath,
+		} = await import("./spec.ts");
+		const snapshot = computeAssessmentSnapshot(tmpDir, "my-change");
+		assert.ok(snapshot);
+		const artifactPath = writeAssessmentRecord(tmpDir, "my-change", {
+			changeName: "my-change",
+			assessmentKind: "spec",
+			outcome: "pass",
+			timestamp: "2026-03-09T12:00:00.000Z",
+			snapshot,
+			reconciliation: {
+				reopen: false,
+				changedFiles: [],
+				constraints: [],
+				recommendedAction: null,
+			},
+		});
+
+		assert.equal(artifactPath, getAssessmentArtifactPath(path.join(tmpDir, "openspec", "changes", "my-change")));
+		const record = readAssessmentRecord(tmpDir, "my-change");
+		assert.ok(record);
+		assert.equal(record!.schemaVersion, 1);
+		assert.equal(record!.changeName, "my-change");
+		assert.equal(record!.assessmentKind, "spec");
+		assert.equal(record!.snapshot.fingerprint, snapshot.fingerprint);
+	});
+
+	it("keeps persisted assessment state scoped to the requested change", async () => {
+		const { computeAssessmentSnapshot, writeAssessmentRecord, readAssessmentRecord } = await import("./spec.ts");
+		const snapshot = computeAssessmentSnapshot(tmpDir, "my-change");
+		assert.ok(snapshot);
+		writeAssessmentRecord(tmpDir, "my-change", {
+			changeName: "my-change",
+			assessmentKind: "spec",
+			outcome: "pass",
+			timestamp: "2026-03-09T12:00:00.000Z",
+			snapshot,
+			reconciliation: {
+				reopen: false,
+				changedFiles: [],
+				constraints: [],
+				recommendedAction: null,
+			},
+		});
+
+		assert.equal(readAssessmentRecord(tmpDir, "other-change"), null);
+		assert.equal(fs.existsSync(path.join(otherChangePath, "assessment.json")), false);
+	});
+
+	it("reports current vs stale snapshot freshness", async () => {
+		const { computeAssessmentSnapshot, writeAssessmentRecord, getAssessmentStatus } = await import("./spec.ts");
+		const snapshot = computeAssessmentSnapshot(tmpDir, "my-change");
+		assert.ok(snapshot);
+		writeAssessmentRecord(tmpDir, "my-change", {
+			changeName: "my-change",
+			assessmentKind: "spec",
+			outcome: "pass",
+			timestamp: "2026-03-09T12:00:00.000Z",
+			snapshot,
+			reconciliation: {
+				reopen: false,
+				changedFiles: [],
+				constraints: [],
+				recommendedAction: null,
+			},
+		});
+
+		const current = getAssessmentStatus(tmpDir, "my-change");
+		assert.equal(current.freshness.current, true);
+		assert.deepEqual(current.freshness.reasons, []);
+
+		fs.appendFileSync(path.join(tmpDir, "src", "demo.ts"), "export const demo2 = 2;\n");
+		const stale = getAssessmentStatus(tmpDir, "my-change");
+		assert.equal(stale.freshness.current, false);
+		assert.match(stale.freshness.reasons.join("\n"), /fingerprint differs/i);
+	});
+});

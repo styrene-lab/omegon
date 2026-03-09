@@ -215,7 +215,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 	}
 
 	function collectSnapshotFingerprint(changePath: string): string {
-		const targets = ["design.md", "tasks.md", "proposal.md", "specs", "assessment.json"];
+		const targets = ["design.md", "tasks.md", "proposal.md", "specs"];
 		const stamps: string[] = [];
 		const walk = (basePath: string): void => {
 			for (const entry of fs.readdirSync(basePath, { withFileTypes: true })) {

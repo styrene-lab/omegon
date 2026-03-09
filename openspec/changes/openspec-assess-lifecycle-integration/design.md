@@ -84,6 +84,9 @@ The exact snapshot signal can evolve, but it must let OpenSpec determine whether
 - `docs/openspec-assess-lifecycle-integration.md` (modified) — Document OpenSpec-owned assessment artifacts, verify behavior, and archive fail-closed policy
 - `openspec/changes/*/tasks.md` (modified) — Reflect assessment and reconciliation checkpoints more explicitly in lifecycle guidance where appropriate
 - `openspec/changes/*/assessment.json` (new) — Per-change durable latest assessment artifact used by verify/archive gating
+- `extensions/openspec/spec.test.ts` (modified) — Cover assessment artifact persistence, per-change scoping, and snapshot freshness checks
+- `extensions/openspec/lifecycle-integration.test.ts` (new) — Verify refresh/reuse behavior and archive refusal/success gates at the command layer
+- `extensions/lib/slash-command-bridge.test.ts` (modified) — Prove bridged command envelopes preserve nested lifecycle assessment metadata
 
 ## Constraints
 

@@ -13,52 +13,166 @@ openspec_change: openspec-assess-lifecycle-integration
 
 ## Overview
 
-Harden OpenSpec and cleave lifecycle workflows so verify, archive, and reconciliation steps consume structured assessment results directly instead of depending on operator-only command sequencing or human-readable assessment text.
+OpenSpec now owns the durable assessment state that gates lifecycle progression. Instead of depending on operator memory or human-readable `/assess` output, each active change persists its latest structured assessment in `openspec/changes/<change>/assessment.json`. Verify, reconciliation, and archive all consume that same record.
+
+The result is a fail-closed lifecycle:
+
+`implement → assess → persist assessment → reconcile → verify/archive`
 
 ## Research
 
 ### Why this hardening is needed
 
-Bridging `/assess` solves command reachability, but the lifecycle remains soft if `/opsx:verify`, `/opsx:archive`, and follow-up reconciliation still depend on prose conventions or operator memory. OpenSpec should be able to consume structured assessment outcomes directly so pass/reopen/ambiguous states are explicit and machine-actionable.
+Bridging `/assess` solved command reachability, but it did not make lifecycle state authoritative. Before this change, `/opsx:verify` and `/opsx:archive` still relied on operator sequencing and prose interpretation. That left room for stale or ambiguous review outcomes to slip through.
 
-### Desired workflow shape
+### OpenSpec-first lifecycle model
 
-The hardened workflow should look like: implement → bridged `/assess spec` (or equivalent structured verifier) → structured result consumed by OpenSpec reconciliation → `/opsx:verify` and `/opsx:archive` operate on explicit assessment state instead of assuming the operator interpreted the prior command correctly. Cleave review and diff review should participate in the same model when they reopen work or alter file scope/constraints.
+OpenSpec is the workflow authority, so assessment state now lives beside the rest of the change artifacts:
 
-### OpenSpec-first architecture implication
+- `proposal.md`
+- `design.md`
+- `tasks.md`
+- `specs/**`
+- `assessment.json`
 
-If OpenSpec is the lifecycle authority, then assessment should be treated as an OpenSpec artifact class rather than an external note. Design-tree, cleave, and command bridging may produce or consume assessment results, but the authoritative persisted state for workflow gating should live with the OpenSpec change so every workflow component reads from the same source of truth.
+That keeps lifecycle evidence co-located, inspectable, and scoped to one change.
 
-### Recommended v1 artifact shape
+## Persisted assessment artifact
 
-A practical v1 shape is an assessment record file under each change directory, for example `openspec/changes/<name>/assessment.json`, containing the latest relevant structured assessment plus snapshot metadata. OpenSpec commands can update and read this file directly. Later versions could add a history log, but v1 only needs a durable latest-known-state artifact for gating and reconciliation.
+### Location
+
+Each active change stores its latest lifecycle-relevant assessment at:
+
+`openspec/changes/<change-name>/assessment.json`
+
+### Record shape
+
+The persisted record captures both the outcome and the implementation snapshot it applies to.
+
+```json
+{
+  "schemaVersion": 1,
+  "changeName": "openspec-assess-lifecycle-integration",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-09T16:12:00.000Z",
+  "snapshot": {
+    "gitHead": "78a4c60...",
+    "fingerprint": "5f3d...",
+    "dirty": false,
+    "scopedPaths": [
+      "extensions/openspec/index.ts",
+      "docs/openspec-assess-lifecycle-integration.md"
+    ],
+    "files": []
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
+```
+
+### Snapshot semantics
+
+The snapshot exists to answer one question: _does this assessment still describe the current implementation?_ OpenSpec computes freshness from:
+
+- git HEAD
+- working tree cleanliness
+- a content fingerprint covering scoped implementation files and change artifacts
+
+If any of those signals drift, the persisted assessment becomes stale.
+
+## Verify behavior
+
+### `/opsx:verify` is an active checkpoint
+
+`/opsx:verify <change>` no longer acts like a passive reminder. It now evaluates persisted state against the current snapshot.
+
+- If the persisted assessment is **current**, verify reuses it and shows an operator-facing summary.
+- If the assessment is **missing** or **stale**, verify prompts a fresh `/assess spec <change>` run and instructs the harness to persist the resulting structured outcome.
+
+### Refresh flow
+
+The intended loop is:
+
+1. Run `/opsx:verify <change>`
+2. If verify reports stale or missing state, run `/assess spec <change>`
+3. Persist the structured result through `openspec_manage` reconciliation
+4. Re-run `/opsx:verify` or proceed to archive when the state is current and passing
+
+## Reconciliation behavior
+
+`openspec_manage` action `reconcile_after_assess` now serves two roles:
+
+1. apply lifecycle reconciliation effects such as reopening work or appending constraints
+2. persist the structured assessment record for the change snapshot
+
+That means reconciliation is no longer just a prose-follow-up step. It also refreshes the authoritative lifecycle artifact used by later gates.
+
+## Archive gate behavior
+
+### Fail-closed policy
+
+`/opsx:archive` and the `openspec_manage archive` action now refuse to continue when the latest relevant assessment is:
+
+- missing
+- stale for the current snapshot
+- `ambiguous`
+- `reopen`
+
+Archive only proceeds when the latest persisted assessment for the current implementation snapshot explicitly reports `pass`.
+
+### Operator-facing UX
+
+The gate still explains itself in human terms. Refusals include a readable reason plus the persisted assessment summary when one exists. The workflow stays understandable for operators while remaining machine-actionable for the harness.
+
+## Representative workflow
+
+### Happy path
+
+1. Implement the change
+2. Run `/assess spec <change>`
+3. Call `openspec_manage` with `action: reconcile_after_assess`, the assessment kind/outcome, and any follow-up hints
+4. Run `/opsx:verify <change>` to confirm the persisted record is current
+5. Run `/opsx:archive <change>`
+
+### Reopened work
+
+1. `/assess spec <change>` reports remaining issues
+2. Reconciliation persists outcome `reopen`
+3. OpenSpec reopens lifecycle state and archive refuses to proceed
+4. Finish the work, reassess, and persist a fresh `pass`
+
+## Validation coverage
+
+Regression coverage for this integration now checks:
+
+- per-change `assessment.json` persistence and scoping
+- snapshot freshness detection for current vs stale assessment records
+- bridged slash-command metadata preservation for lifecycle fields
+- `/opsx:verify` reuse of current state vs refresh prompting for stale state
+- `/opsx:archive` refusal on missing, stale, ambiguous, and reopened assessment state
+- `/opsx:archive` success on a current explicit pass
 
 ## Decisions
 
 ### Decision: OpenSpec is the lifecycle authority and must own persisted assessment state
 
-**Status:** decided
-**Rationale:** OpenSpec is the underpinning workflow framework for design-tree, cleave, assess, and adjacent operations. Assessment outcomes that affect lifecycle progression therefore belong to OpenSpec, not as ephemeral command output only. OpenSpec should persist the latest structured assessment state per active change so verify, archive, reconciliation, dashboarding, and future workflow tools can all read the same authoritative lifecycle record.
-
-### Decision: Persist the latest structured assessment result inside each OpenSpec change
-
-**Status:** decided
-**Rationale:** Assessment state must be attributable to a specific change, review kind, and implementation snapshot. The simplest durable v1 design is for each active change to carry its own assessment artifact or metadata file inside the change directory, rather than storing it in transient process memory or a separate global cache. This keeps lifecycle state co-located with proposal/design/spec/tasks and makes archive gating inspectable and reproducible.
+**Status:** decided  
+**Rationale:** Lifecycle gates need one source of truth. Putting assessment state inside each change keeps verify, reconciliation, and archive aligned.
 
 ### Decision: `/opsx:verify` should execute or refresh structured assessment, not only render cached state
 
-**Status:** decided
-**Rationale:** Verification is an active lifecycle checkpoint, not just a reporting view. `/opsx:verify` should invoke the relevant structured assessment path or confirm that an equivalent assessment result is current for the present implementation snapshot, then render the outcome for humans and expose it for agents. Cached assessment state is useful, but verify should not silently trust stale results.
+**Status:** decided  
+**Rationale:** Verification is meaningful only if it is current for the implementation snapshot being evaluated.
 
 ### Decision: Archive must fail closed on missing, stale, ambiguous, or reopened assessment state
 
-**Status:** decided
-**Rationale:** Because OpenSpec is the lifecycle authority, archive cannot rely on best-effort operator sequencing. If the latest relevant assessment is absent, predates implementation changes, reports ambiguity, or explicitly reopens work, archive should refuse to proceed and point the operator/agent to verify and reconcile first. Only explicit pass state for the current implementation snapshot should satisfy the archive gate.
-
-### Decision: Assessment records should capture implementation snapshot and lifecycle relevance
-
-**Status:** decided
-**Rationale:** To decide whether assessment state is current, OpenSpec needs more than pass/fail. Persisted records should include assessment kind (`spec`, `diff`, `cleave`), target change, outcome (`pass`, `reopen`, `ambiguous`), timestamp, implementation snapshot signal (such as git HEAD and/or changed-file fingerprint), and any reconciliation hints (file-scope drift, new constraints, recommended `reconcile_after_assess`). That gives archive and verify a reliable basis for gating.
+**Status:** decided  
+**Rationale:** Archive is the lifecycle commit point. It must reject uncertain or outdated state instead of relying on best effort.
 
 ## Open Questions
 
@@ -68,26 +182,17 @@ A practical v1 shape is an assessment record file under each change directory, f
 
 ### File Scope
 
-- `extensions/openspec/index.ts` (modified) — Consume structured assessment outcomes in verify/archive/reconcile flows and surface lifecycle gates
-- `extensions/cleave/index.ts` (modified) — Ensure assess structured results expose the lifecycle fields OpenSpec needs consistently
-- `extensions/cleave/assessment.ts` (modified) — Tighten assessment result contracts for pass/reopen/ambiguous and reconciliation metadata
-- `extensions/lib/slash-command-bridge.ts` (modified) — Preserve structured command result metadata needed by lifecycle consumers
-- `openspec/changes/*/tasks.md` (modified) — Potentially reflect assessment/reconciliation checkpoints more explicitly in lifecycle guidance
-- `docs/openspec-assess-lifecycle-integration.md` (modified) — Document the hardened lifecycle model and archive/verify gates
-- `extensions/openspec/index.ts` (modified) — Make verify execute or refresh structured assessment, persist assessment records, and enforce archive gates from assessment state
-- `extensions/openspec/spec.ts` (modified) — Add helpers for reading/writing per-change assessment artifacts and computing stale/current state against implementation snapshot
-- `extensions/cleave/index.ts` (modified) — Ensure bridged assess results include change name, outcome, snapshot, and reconciliation hints in a form OpenSpec can persist directly
-- `extensions/cleave/assessment.ts` (modified) — Normalize lifecycle-oriented assessment record schema and outcome vocabulary
-- `docs/openspec-assess-lifecycle-integration.md` (modified) — Document OpenSpec-owned assessment artifacts, verify behavior, and archive fail-closed policy
-- `openspec/changes/*/assessment.json` (new) — Per-change durable latest assessment artifact used by verify/archive gating
+- `extensions/openspec/spec.ts` — persisted assessment artifact helpers and freshness evaluation
+- `extensions/openspec/index.ts` — verify/archive lifecycle gates and reconciliation persistence
+- `extensions/cleave/index.ts` — structured assessment payloads for OpenSpec persistence
+- `extensions/lib/slash-command-bridge.ts` — preservation of structured assessment metadata
+- `extensions/openspec/spec.test.ts` — artifact persistence and freshness regression tests
+- `extensions/openspec/lifecycle-integration.test.ts` — verify/archive lifecycle command regression tests
+- `extensions/lib/slash-command-bridge.test.ts` — structured bridge metadata regression test
 
 ### Constraints
 
-- Archive should fail closed when the relevant assessment state is missing, stale, ambiguous, or explicitly reopened.
-- Assessment state consumed by OpenSpec must be machine-readable and attributable to a specific change and assessment kind.
-- Verification and archive flows should not require parsing prior human-readable terminal output.
-- Reconciliation hooks must preserve the existing operator UX while enabling autonomous lifecycle progression in the harness.
-- OpenSpec-owned assessment state is authoritative for lifecycle gating even if produced by assess/cleave tooling.
-- `/opsx:verify` must execute or refresh assessment for the current implementation snapshot rather than trusting stale cached output.
-- Archive must fail closed unless the latest relevant assessment for the current snapshot is an explicit pass.
-- Persisted assessment records must include change name, assessment kind, outcome, timestamp, snapshot identity, and reconciliation hints.
+- Archive must fail closed unless the latest persisted assessment is a current explicit `pass`.
+- Lifecycle gating must not parse prior human-readable assessment text.
+- Persisted assessment state must remain scoped to one OpenSpec change.
+- Operator UX should remain readable even though lifecycle decisions are now driven by structured state.

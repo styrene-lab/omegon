@@ -189,4 +189,66 @@ describe("slash-command-bridge", () => {
     assert.equal(response.details.availableCommands[0].bridge.resultContract, "demo.inspect.v1");
     assert.equal(response.content[0].type, "text");
   });
+
+  it("preserves nested lifecycle assessment metadata through bridged execution", async () => {
+    const bridge = createSlashCommandBridge();
+    const pi = makeFakePi();
+
+    bridge.register(pi as any, {
+      name: "assess",
+      description: "Structured assessment",
+      bridge: {
+        agentCallable: true,
+        sideEffectClass: "read",
+        resultContract: "assess.lifecycle.v1",
+      },
+      structuredExecutor: async () => buildSlashCommandResult("assess", ["spec", "my-change"], {
+        ok: true,
+        summary: "Assessment recorded",
+        humanText: "Assessment recorded",
+        data: {
+          changeName: "my-change",
+          assessmentKind: "spec",
+          outcome: "pass",
+          snapshot: {
+            gitHead: "abc123",
+            fingerprint: "fingerprint",
+            dirty: false,
+          },
+          reconciliation: {
+            reopen: false,
+            changedFiles: ["extensions/openspec/index.ts"],
+            constraints: ["Archive stays fail-closed"],
+            recommendedAction: null,
+          },
+        },
+        effects: {
+          sideEffectClass: "read",
+          filesChanged: ["openspec/changes/my-change/assessment.json"],
+          lifecycleTouched: ["openspec"],
+        },
+      }),
+    } satisfies BridgedSlashCommand);
+
+    const result = await bridge.execute({ command: "assess" }, {} as any);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.data, {
+      changeName: "my-change",
+      assessmentKind: "spec",
+      outcome: "pass",
+      snapshot: {
+        gitHead: "abc123",
+        fingerprint: "fingerprint",
+        dirty: false,
+      },
+      reconciliation: {
+        reopen: false,
+        changedFiles: ["extensions/openspec/index.ts"],
+        constraints: ["Archive stays fail-closed"],
+        recommendedAction: null,
+      },
+    });
+    assert.deepEqual(result.effects.filesChanged, ["openspec/changes/my-change/assessment.json"]);
+    assert.deepEqual(result.effects.lifecycleTouched, ["openspec"]);
+  });
 });
