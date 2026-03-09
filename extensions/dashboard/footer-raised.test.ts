@@ -66,7 +66,7 @@ describe("DashboardFooter raised mode polish", () => {
     };
   });
 
-  it("uses a soft gutter instead of a literal center divider in wide raised mode", () => {
+  it("keeps wide raised mode stacked instead of bleeding multiple sections across one row", () => {
     (sharedState as any).cleave = {
       status: "dispatching",
       updatedAt: Date.now(),
@@ -85,6 +85,7 @@ describe("DashboardFooter raised mode polish", () => {
     assert.ok(lines.some((line) => line.includes("◈ Design Tree")));
     assert.ok(lines.some((line) => line.includes("◎ OpenSpec")));
     assert.ok(lines.every((line) => !line.includes(" │ ")));
+    assert.ok(lines.every((line) => !(line.includes("◈ Design Tree") && line.includes("◎ OpenSpec"))), lines.join("\n"));
   });
 
   it("hides stale failed cleave state after it ages out", () => {

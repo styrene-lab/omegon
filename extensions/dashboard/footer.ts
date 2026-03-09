@@ -298,11 +298,6 @@ export class DashboardFooter implements Component {
   private renderRaised(width: number): string[] {
     const theme = this.theme;
 
-    // At wide widths, use multi-column layout
-    if (width >= 120) {
-      return this.renderRaisedColumns(width);
-    }
-
     const lines: string[] = [];
 
     // Design tree section
