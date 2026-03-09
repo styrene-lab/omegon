@@ -1201,17 +1201,31 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 			}
 		}
 
+		const implemented = Array.from(tree.nodes.values()).filter((n) => n.status === "implemented").length;
+		const implementing = Array.from(tree.nodes.values()).filter((n) => n.status === "implementing").length;
 		const decided = Array.from(tree.nodes.values()).filter((n) => n.status === "decided").length;
 		const exploring = Array.from(tree.nodes.values()).filter(
 			(n) => n.status === "exploring" || n.status === "seed",
 		).length;
+		const blocked = Array.from(tree.nodes.values()).filter((n) => n.status === "blocked").length;
+		const deferred = Array.from(tree.nodes.values()).filter((n) => n.status === "deferred").length;
 		const totalQ = getAllOpenQuestions(tree).length;
+		const summaryParts = [
+			`${tree.nodes.size} nodes`,
+			`${implemented} implemented`,
+			`${implementing} implementing`,
+			`${decided} decided`,
+			`${exploring} exploring`,
+			`${totalQ} open questions`,
+		];
+		if (blocked > 0) summaryParts.push(`${blocked} blocked`);
+		if (deferred > 0) summaryParts.push(`${deferred} deferred`);
 
 		return {
 			message: {
 				customType: "design-context",
 				content:
-					`[Design Tree: ${tree.nodes.size} nodes — ${decided} decided, ${exploring} exploring, ${totalQ} open questions]\n` +
+					`[Design Tree: ${summaryParts.join(" — ")}]\n` +
 					`Use the design_tree tool to query the design space and design_tree_update to modify it.`,
 				display: false,
 			},

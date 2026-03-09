@@ -42,6 +42,7 @@ export class DashboardOverlay {
   private selectedIndex = 0;
   private flatItems: ListItem[] = [];
   private expandedKeys = new Set<string>();
+  private statusMessage: string | null = null;
 
   /** Event unsubscribe handle for live refresh. */
   private unsubscribe: (() => void) | null = null;
@@ -61,9 +62,23 @@ export class DashboardOverlay {
     });
   }
 
+  private selectFirstOpenableItem(): void {
+    const firstOpenable = this.flatItems.findIndex((item) => !!item.openUri);
+    if (firstOpenable >= 0) {
+      this.selectedIndex = firstOpenable;
+    }
+  }
+
   private openSelectedItem(): void {
     const item = this.flatItems[this.selectedIndex];
-    if (!item?.openUri) return;
+    if (!item?.openUri) {
+      this.statusMessage = "Selected row has nothing to open";
+      this.tui.requestRender();
+      return;
+    }
+
+    this.statusMessage = "Opening selected item…";
+    this.tui.requestRender();
 
     try {
       if (process.platform === "darwin") {
@@ -74,6 +89,8 @@ export class DashboardOverlay {
         spawn("xdg-open", [item.openUri], { stdio: "ignore", detached: true }).unref();
       }
     } catch {
+      this.statusMessage = "Open failed";
+      this.tui.requestRender();
       // Best effort only; clickable OSC 8 links remain the primary path.
     }
   }
@@ -91,7 +108,9 @@ export class DashboardOverlay {
       const idx = TABS.findIndex((t) => t.id === this.activeTab);
       this.activeTab = TABS[(idx + 1) % TABS.length]!.id;
       this.selectedIndex = 0;
+      this.statusMessage = null;
       this.rebuild();
+      this.selectFirstOpenableItem();
       this.tui.requestRender();
       return;
     }
@@ -100,7 +119,9 @@ export class DashboardOverlay {
       if (data === tab.shortcut) {
         this.activeTab = tab.id;
         this.selectedIndex = 0;
+        this.statusMessage = null;
         this.rebuild();
+        this.selectFirstOpenableItem();
         this.tui.requestRender();
         return;
       }
@@ -111,11 +132,13 @@ export class DashboardOverlay {
 
     if (matchesKey(data, "up")) {
       this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+      this.statusMessage = null;
       this.tui.requestRender();
       return;
     }
     if (matchesKey(data, "down")) {
       this.selectedIndex = Math.min(this.flatItems.length - 1, this.selectedIndex + 1);
+      this.statusMessage = null;
       this.tui.requestRender();
       return;
     }
@@ -129,8 +152,11 @@ export class DashboardOverlay {
         } else {
           this.expandedKeys.add(item.key);
         }
+        this.statusMessage = null;
         this.rebuild();
         this.tui.requestRender();
+      } else if (item?.openUri) {
+        this.openSelectedItem();
       }
       return;
     }
@@ -139,6 +165,7 @@ export class DashboardOverlay {
       const item = this.flatItems[this.selectedIndex];
       if (item && this.expandedKeys.has(item.key)) {
         this.expandedKeys.delete(item.key);
+        this.statusMessage = null;
         this.rebuild();
         this.tui.requestRender();
       }
@@ -191,8 +218,11 @@ export class DashboardOverlay {
 
     // Footer with key hints
     lines.push(border("├" + "─".repeat(innerW) + "┤"));
-    lines.push(border("│") + pad(th.fg("dim", " click links or press o to open  ↑↓ navigate  ←→/↵ expand")) + border("│"));
-    lines.push(border("│") + pad(th.fg("dim", " Tab switch  Esc close")) + border("│"));
+    const footerPrimary = this.statusMessage
+      ? th.fg("warning", ` ${this.statusMessage}`)
+      : th.fg("dim", " ↵/o open selected item  ↑↓ navigate  ←→ expand/collapse");
+    lines.push(border("│") + pad(footerPrimary) + border("│"));
+    lines.push(border("│") + pad(th.fg("dim", " Tab switch  Esc close  items with ↗ are openable")) + border("│"));
     lines.push(border("╰" + "─".repeat(innerW) + "╯"));
 
     return lines;
@@ -218,8 +248,9 @@ export class DashboardOverlay {
       }
 
       const itemLines = item.lines(thFn, innerW - 4 - item.depth * 2);
+      const openMarker = item.openUri ? th.fg("accent", "↗ ") : "";
       if (itemLines.length > 0) {
-        lines.push(`${cursor}${indent}${expandIcon}${itemLines[0]}`);
+        lines.push(`${cursor}${indent}${expandIcon}${openMarker}${itemLines[0]}`);
         for (let j = 1; j < itemLines.length; j++) {
           lines.push(`  ${indent}  ${itemLines[j]}`);
         }
@@ -234,6 +265,9 @@ export class DashboardOverlay {
   private rebuild(): void {
     this.flatItems = rebuildItems(this.activeTab, this.expandedKeys);
     this.selectedIndex = clampIndex(this.selectedIndex, this.flatItems.length);
+    if (this.flatItems.length > 0 && !this.flatItems[this.selectedIndex]?.openUri && this.selectedIndex === 0) {
+      this.selectFirstOpenableItem();
+    }
   }
 
   // ── Component lifecycle ───────────────────────────────────────

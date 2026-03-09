@@ -3,6 +3,21 @@
 All notable changes to pi-kit are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-03-09
+
+### Changed
+
+- **Dashboard overlay openability UX** — openable rows are now visibly marked and the overlay selects the first openable item instead of the non-openable summary row.
+  - `extensions/dashboard/overlay.ts` adds a `↗` marker for rows with `openUri`, lets `Enter` open non-expandable items, and surfaces inline status feedback when a row cannot be opened.
+  - Footer copy now accurately describes open behavior and no longer implies every row is clickable.
+- **Design tree context summary clarity** — the generic design-tree session summary now reports implemented and implementing counts instead of implying only `decided` nodes matter.
+  - `extensions/design-tree/index.ts` now emits summaries like `implemented — implementing — decided — exploring — open questions`.
+
+### Fixed
+
+- Dashboard open behavior no longer appears broken when focus starts on the summary row.
+- Design-tree summary text no longer hides implemented nodes.
+
 ## [0.3.0] - 2026-03-08
 
 ### Added

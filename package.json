@@ -1,6 +1,6 @@
 {
   "name": "pi-kit",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "scripts": {
     "test": "npx tsx --test extensions/*.test.ts extensions/**/*.test.ts",
     "typecheck": "tsc --noEmit",
