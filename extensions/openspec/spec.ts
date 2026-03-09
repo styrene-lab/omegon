@@ -7,8 +7,11 @@
  * - Lifecycle stage computation
  * - Spec scaffolding from proposals and design nodes
  * - Archive operations
+ * - Per-change assessment artifact persistence and freshness checks
  */
 
+import { execFileSync } from "node:child_process";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type {
@@ -26,6 +29,48 @@ const OPENSPEC_DIR = "openspec";
 const CHANGES_DIR = "changes";
 const ARCHIVE_DIR = "archive";
 const BASELINE_DIR = "baseline";
+const ASSESSMENT_FILE = "assessment.json";
+const ASSESSMENT_SCHEMA_VERSION = 1;
+
+export type AssessmentKind = "spec" | "cleave" | "diff";
+export type AssessmentOutcome = "pass" | "reopen" | "ambiguous";
+
+export interface AssessmentSnapshotFile {
+	path: string;
+	exists: boolean;
+	size: number;
+	sha256: string | null;
+}
+
+export interface AssessmentSnapshot {
+	gitHead: string | null;
+	fingerprint: string;
+	dirty: boolean;
+	scopedPaths: string[];
+	files: AssessmentSnapshotFile[];
+}
+
+export interface AssessmentReconciliationHints {
+	reopen: boolean;
+	changedFiles: string[];
+	constraints: string[];
+	recommendedAction: string | null;
+}
+
+export interface AssessmentRecord {
+	schemaVersion: 1;
+	changeName: string;
+	assessmentKind: AssessmentKind;
+	outcome: AssessmentOutcome;
+	timestamp: string;
+	snapshot: AssessmentSnapshot;
+	reconciliation: AssessmentReconciliationHints;
+}
+
+export interface AssessmentFreshness {
+	current: boolean;
+	reasons: string[];
+}
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -160,6 +205,316 @@ export function computeStage(
 	if (hasTasks) return "planned";
 	if (hasSpecs) return "specified";
 	return "proposed";
+}
+
+// ─── Assessment Artifact Helpers ────────────────────────────────────────────
+
+function getChangePath(repoPath: string, changeName: string): string | null {
+	const nameError = validateChangeName(changeName);
+	if (nameError) return null;
+
+	const openspecDir = getOpenSpecDir(repoPath);
+	if (!openspecDir) return null;
+
+	const changePath = path.join(openspecDir, CHANGES_DIR, changeName);
+	return fs.existsSync(changePath) ? changePath : null;
+}
+
+export function getAssessmentArtifactPath(changePath: string): string {
+	return path.join(changePath, ASSESSMENT_FILE);
+}
+
+function isAssessmentKind(value: unknown): value is AssessmentKind {
+	return value === "spec" || value === "cleave" || value === "diff";
+}
+
+function isAssessmentOutcome(value: unknown): value is AssessmentOutcome {
+	return value === "pass" || value === "reopen" || value === "ambiguous";
+}
+
+function parseStringArray(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return value.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.trim()).filter(Boolean);
+}
+
+function normalizeSnapshot(input: unknown): AssessmentSnapshot | null {
+	if (!input || typeof input !== "object") return null;
+	const candidate = input as Record<string, unknown>;
+	if (typeof candidate.fingerprint !== "string" || !candidate.fingerprint) return null;
+
+	const filesRaw = Array.isArray(candidate.files) ? candidate.files : [];
+	const files: AssessmentSnapshotFile[] = filesRaw.flatMap((entry) => {
+		if (!entry || typeof entry !== "object") return [];
+		const file = entry as Record<string, unknown>;
+		if (typeof file.path !== "string") return [];
+		if (typeof file.exists !== "boolean") return [];
+		if (typeof file.size !== "number") return [];
+		if (file.sha256 !== null && typeof file.sha256 !== "string") return [];
+		return [{
+			path: file.path,
+			exists: file.exists,
+			size: file.size,
+			sha256: file.sha256,
+		}];
+	});
+
+	return {
+		gitHead: typeof candidate.gitHead === "string" ? candidate.gitHead : null,
+		fingerprint: candidate.fingerprint,
+		dirty: candidate.dirty === true,
+		scopedPaths: parseStringArray(candidate.scopedPaths),
+		files,
+	};
+}
+
+function normalizeReconciliation(input: unknown, outcome: AssessmentOutcome): AssessmentReconciliationHints {
+	if (!input || typeof input !== "object") {
+		return {
+			reopen: outcome === "reopen",
+			changedFiles: [],
+			constraints: [],
+			recommendedAction: outcome === "reopen" ? "Run openspec_manage reconcile_after_assess before archive." : null,
+		};
+	}
+
+	const candidate = input as Record<string, unknown>;
+	const changedFiles = parseStringArray(candidate.changedFiles);
+	const constraints = parseStringArray(candidate.constraints);
+	const recommendedAction = typeof candidate.recommendedAction === "string" && candidate.recommendedAction.trim()
+		? candidate.recommendedAction.trim()
+		: outcome === "reopen"
+			? "Run openspec_manage reconcile_after_assess before archive."
+			: null;
+
+	return {
+		reopen: typeof candidate.reopen === "boolean" ? candidate.reopen : outcome === "reopen",
+		changedFiles,
+		constraints,
+		recommendedAction,
+	};
+}
+
+function normalizeAssessmentRecord(input: unknown): AssessmentRecord | null {
+	if (!input || typeof input !== "object") return null;
+	const candidate = input as Record<string, unknown>;
+	if (candidate.schemaVersion !== ASSESSMENT_SCHEMA_VERSION) return null;
+	if (typeof candidate.changeName !== "string" || !candidate.changeName) return null;
+	if (!isAssessmentKind(candidate.assessmentKind)) return null;
+	if (!isAssessmentOutcome(candidate.outcome)) return null;
+	if (typeof candidate.timestamp !== "string" || !candidate.timestamp) return null;
+
+	const snapshot = normalizeSnapshot(candidate.snapshot);
+	if (!snapshot) return null;
+
+	return {
+		schemaVersion: ASSESSMENT_SCHEMA_VERSION,
+		changeName: candidate.changeName,
+		assessmentKind: candidate.assessmentKind,
+		outcome: candidate.outcome,
+		timestamp: candidate.timestamp,
+		snapshot,
+		reconciliation: normalizeReconciliation(candidate.reconciliation, candidate.outcome),
+	};
+}
+
+function safeReadGit(repoPath: string, args: readonly string[]): string | null {
+	try {
+		return execFileSync("git", args, {
+			cwd: repoPath,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim() || null;
+	} catch {
+		return null;
+	}
+}
+
+function detectGitDirty(repoPath: string): boolean {
+	const output = safeReadGit(repoPath, ["status", "--short"]);
+	return output !== null && output.length > 0;
+}
+
+function parseDesignFileScope(changePath: string): string[] {
+	const designPath = path.join(changePath, "design.md");
+	if (!fs.existsSync(designPath)) return [];
+
+	const content = fs.readFileSync(designPath, "utf-8");
+	const fileChangesSection = content.match(/##\s+File Changes\s*\n([\s\S]*?)(?=\n##\s|$)/i);
+	if (!fileChangesSection) return [];
+
+	const scoped = new Set<string>();
+	for (const line of fileChangesSection[1].split("\n")) {
+		const match = line.match(/-\s+`([^`]+)`/);
+		if (match && match[1].trim()) scoped.add(match[1].trim());
+	}
+	return Array.from(scoped).sort();
+}
+
+function listChangeArtifactPaths(changePath: string): string[] {
+	const collected: string[] = [];
+	const stack = [changePath];
+
+	while (stack.length > 0) {
+		const dir = stack.pop();
+		if (!dir) continue;
+		const entries = fs.readdirSync(dir, { withFileTypes: true });
+		for (const entry of entries) {
+			const fullPath = path.join(dir, entry.name);
+			if (entry.isDirectory()) {
+				stack.push(fullPath);
+				continue;
+			}
+			collected.push(fullPath);
+		}
+	}
+
+	return collected.sort();
+}
+
+function buildSnapshotFile(repoPath: string, relativeFilePath: string): AssessmentSnapshotFile {
+	const absolutePath = path.join(repoPath, relativeFilePath);
+	if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) {
+		return {
+			path: relativeFilePath,
+			exists: false,
+			size: 0,
+			sha256: null,
+		};
+	}
+
+	const content = fs.readFileSync(absolutePath);
+	return {
+		path: relativeFilePath,
+		exists: true,
+		size: content.length,
+		sha256: crypto.createHash("sha256").update(content).digest("hex"),
+	};
+}
+
+export function computeAssessmentSnapshot(repoPath: string, changeName: string): AssessmentSnapshot | null {
+	const changePath = getChangePath(repoPath, changeName);
+	if (!changePath) return null;
+
+	const scopedPaths = parseDesignFileScope(changePath);
+	const artifactRelativePaths = listChangeArtifactPaths(changePath)
+		.map((filePath) => path.relative(repoPath, filePath))
+		.filter((filePath) => filePath !== path.join(OPENSPEC_DIR, CHANGES_DIR, changeName, ASSESSMENT_FILE));
+
+	const snapshotPaths = Array.from(new Set([
+		...scopedPaths,
+		...artifactRelativePaths,
+	])).sort();
+	const files = snapshotPaths.map((filePath) => buildSnapshotFile(repoPath, filePath));
+	const gitHead = safeReadGit(repoPath, ["rev-parse", "HEAD"]);
+	const dirty = detectGitDirty(repoPath);
+
+	const fingerprintSeed = JSON.stringify({
+		changeName,
+		gitHead,
+		dirty,
+		files,
+	});
+
+	return {
+		gitHead,
+		fingerprint: crypto.createHash("sha256").update(fingerprintSeed).digest("hex"),
+		dirty,
+		scopedPaths,
+		files,
+	};
+}
+
+export function readAssessmentRecord(repoPath: string, changeName: string): AssessmentRecord | null {
+	const changePath = getChangePath(repoPath, changeName);
+	if (!changePath) return null;
+
+	const artifactPath = getAssessmentArtifactPath(changePath);
+	if (!fs.existsSync(artifactPath)) return null;
+
+	try {
+		const parsed = JSON.parse(fs.readFileSync(artifactPath, "utf-8")) as unknown;
+		const record = normalizeAssessmentRecord(parsed);
+		if (!record || record.changeName !== changeName) return null;
+		return record;
+	} catch {
+		return null;
+	}
+}
+
+export function writeAssessmentRecord(
+	repoPath: string,
+	changeName: string,
+	record: Omit<AssessmentRecord, "schemaVersion">,
+): string {
+	const changePath = getChangePath(repoPath, changeName);
+	if (!changePath) {
+		throw new Error(`OpenSpec change '${changeName}' not found`);
+	}
+	if (record.changeName !== changeName) {
+		throw new Error(`Assessment record change '${record.changeName}' does not match requested change '${changeName}'`);
+	}
+
+	const normalized: AssessmentRecord = {
+		schemaVersion: ASSESSMENT_SCHEMA_VERSION,
+		changeName,
+		assessmentKind: record.assessmentKind,
+		outcome: record.outcome,
+		timestamp: record.timestamp,
+		snapshot: record.snapshot,
+		reconciliation: normalizeReconciliation(record.reconciliation, record.outcome),
+	};
+
+	const artifactPath = getAssessmentArtifactPath(changePath);
+	fs.writeFileSync(artifactPath, JSON.stringify(normalized, null, 2) + "\n", "utf-8");
+	return artifactPath;
+}
+
+export function evaluateAssessmentFreshness(
+	record: AssessmentRecord | null,
+	currentSnapshot: AssessmentSnapshot | null,
+): AssessmentFreshness {
+	if (!record) {
+		return { current: false, reasons: ["Missing assessment record"] };
+	}
+	if (!currentSnapshot) {
+		return { current: false, reasons: ["Current implementation snapshot unavailable"] };
+	}
+
+	const reasons: string[] = [];
+	if (record.snapshot.fingerprint !== currentSnapshot.fingerprint) {
+		reasons.push("Implementation snapshot fingerprint differs from the persisted assessment record");
+	}
+	if (record.snapshot.gitHead !== currentSnapshot.gitHead) {
+		reasons.push("Git HEAD differs from the persisted assessment record");
+	}
+	if (record.snapshot.dirty !== currentSnapshot.dirty) {
+		reasons.push("Working tree cleanliness differs from the persisted assessment record");
+	}
+	if (record.outcome !== "pass") {
+		reasons.push(`Assessment outcome is '${record.outcome}', not 'pass'`);
+	}
+	if (record.reconciliation.reopen) {
+		reasons.push("Assessment record indicates lifecycle reconciliation is still open");
+	}
+
+	return {
+		current: reasons.length === 0,
+		reasons,
+	};
+}
+
+export function getAssessmentStatus(repoPath: string, changeName: string): {
+	record: AssessmentRecord | null;
+	snapshot: AssessmentSnapshot | null;
+	freshness: AssessmentFreshness;
+} {
+	const record = readAssessmentRecord(repoPath, changeName);
+	const snapshot = computeAssessmentSnapshot(repoPath, changeName);
+	return {
+		record,
+		snapshot,
+		freshness: evaluateAssessmentFreshness(record, snapshot),
+	};
 }
 
 // ─── Spec Parsing ────────────────────────────────────────────────────────────
