@@ -20,7 +20,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import type { EffortLevel, EffortState, EffortModelTier } from "./types.ts";
+import type { EffortLevel, EffortState, EffortModelTier, ThinkingLevel } from "./types.ts";
 import { EFFORT_NAMES } from "./types.ts";
 import { tierConfig, parseTierName, DEFAULT_EFFORT_LEVEL, TIER_NAMES } from "./tiers.ts";
 import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
@@ -28,6 +28,7 @@ import {
   resolveTier,
   getTierDisplayLabel,
   getDefaultPolicy,
+  clampThinkingLevel,
   type ModelTier,
   type RegistryModel,
 } from "../lib/model-routing.ts";
@@ -61,7 +62,7 @@ async function switchDriverModel(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   driver: EffortModelTier,
-): Promise<RegistryModel | null> {
+): Promise<{ model: RegistryModel; maxThinking?: ThinkingLevel } | null> {
   // Snapshot the registry once; both resolveTier and the model lookup use it
   const all = ctx.modelRegistry.getAll() as unknown as RegistryModel[];
   // Build O(1) index over the same snapshot — no second linear scan (C3)
@@ -73,7 +74,7 @@ async function switchDriverModel(
   const model = byKey.get(`${resolved.provider}/${resolved.modelId}`);
   if (!model) return null;
   const success = await pi.setModel(model as any);
-  return success ? model : null;
+  return success ? { model, maxThinking: resolved.maxThinking as ThinkingLevel | undefined } : null;
 }
 
 async function restoreLastUsedModel(
@@ -238,18 +239,22 @@ export default function (pi: ExtensionAPI) {
     const restoredModel = await restoreLastUsedModel(pi, ctx);
     const driverModel = restoredModel ?? await switchDriverModel(pi, ctx, state.driver);
 
-    // Set thinking level
-    pi.setThinkingLevel(state.thinking as any);
+    // Set thinking level, respecting candidate ceilings when the effort-driven
+    // model switch produced a structured resolver result.
+    const effectiveThinking = driverModel?.maxThinking
+      ? clampThinkingLevel(state.thinking, driverModel.maxThinking)
+      : state.thinking;
+    pi.setThinkingLevel(effectiveThinking as any);
 
     // Notify operator
     const icon = TIER_ICONS[state.level];
     const modelNote = restoredModel
       ? ` → restored ${restoredModel.provider}/${restoredModel.id}`
       : driverModel
-        ? ` → ${driverModel.provider}/${driverModel.id}`
+        ? ` → ${driverModel.model.provider}/${driverModel.model.id}`
         : " (driver model unavailable)";
     ctx.ui.notify(
-      `${icon} Effort: ${state.name} (${state.driver}/${state.thinking})${modelNote}`,
+      `${icon} Effort: ${state.name} (${state.driver}/${effectiveThinking})${modelNote}`,
       driverModel ? "info" : "warning",
     );
   });
@@ -353,18 +358,21 @@ export default function (pi: ExtensionAPI) {
       // Switch driver model
       const driverModel = await switchDriverModel(pi, ctx, state.driver);
       if (driverModel) {
-        writeLastUsedModel(ctx.cwd, { provider: driverModel.provider, modelId: driverModel.id });
+        writeLastUsedModel(ctx.cwd, { provider: driverModel.model.provider, modelId: driverModel.model.id });
       }
 
       // Set thinking level
-      pi.setThinkingLevel(state.thinking as any);
+      const effectiveThinking = driverModel?.maxThinking
+        ? clampThinkingLevel(state.thinking, driverModel.maxThinking)
+        : state.thinking;
+      pi.setThinkingLevel(effectiveThinking as any);
 
       const icon = TIER_ICONS[state.level];
       const modelNote = driverModel
-        ? ` → ${driverModel.provider}/${driverModel.id}`
+        ? ` → ${driverModel.model.provider}/${driverModel.model.id}`
         : " (driver model unavailable)";
       ctx.ui.notify(
-        `${icon} Switched to ${state.name} (${state.driver}/${state.thinking})${modelNote}`,
+        `${icon} Switched to ${state.name} (${state.driver}/${effectiveThinking})${modelNote}`,
         driverModel ? "info" : "warning",
       );
     },

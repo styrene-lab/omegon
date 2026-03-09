@@ -19,12 +19,10 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { Model } from "@mariozechner/pi-ai";
-import { Type } from "@sinclair/typebox";
-import { StringEnum } from "./lib/typebox-helpers";
 import { sharedState } from "./shared-state.ts";
 import { tierConfig } from "./effort/tiers.ts";
 import type { EffortLevel } from "./effort/types.ts";
-import { resolveTier, getTierDisplayLabel, getDefaultPolicy } from "./lib/model-routing.ts";
+import { resolveTier, getTierDisplayLabel, getDefaultPolicy, clampThinkingLevel } from "./lib/model-routing.ts";
 import type { ModelTier, RegistryModel } from "./lib/model-routing.ts";
 import { writeLastUsedModel } from "./lib/model-preferences.ts";
 
@@ -119,6 +117,11 @@ async function switchTo(tier: TierName, pi: ExtensionAPI, ctx: ExtensionContext)
   const success = await pi.setModel(model as unknown as Model<any>);
   if (success) {
     writeLastUsedModel(ctx.cwd, { provider: model.provider, modelId: model.id });
+    const currentThinking = pi.getThinkingLevel() as ThinkingLevelName;
+    const clampedThinking = clampThinkingLevel(currentThinking, resolved.maxThinking ?? "high");
+    if (clampedThinking !== currentThinking) {
+      pi.setThinkingLevel(clampedThinking as any);
+    }
     return model;
   }
   return null;
@@ -141,6 +144,40 @@ export default function (pi: ExtensionAPI) {
   // session_start model selection is handled by the effort extension.
   // model-budget only provides the set_model_tier / set_thinking_level tools.
 
+  const modelTierParameters = {
+    type: "object",
+    properties: {
+      tier: {
+        type: "string",
+        enum: ["local", "haiku", "sonnet", "opus"],
+        description: "Target model tier",
+      },
+      reason: {
+        type: "string",
+        description: "Brief explanation for the tier change",
+      },
+    },
+    required: ["tier", "reason"],
+    additionalProperties: false,
+  } as const;
+
+  const thinkingLevelParameters = {
+    type: "object",
+    properties: {
+      level: {
+        type: "string",
+        enum: ["off", "minimal", "low", "medium", "high"],
+        description: "Thinking level — higher = more reasoning tokens, slower, more expensive",
+      },
+      reason: {
+        type: "string",
+        description: "Brief explanation for the thinking level change",
+      },
+    },
+    required: ["level", "reason"],
+    additionalProperties: false,
+  } as const;
+
   // --- Model Tier Tool ---
   pi.registerTool({
     name: "set_model_tier",
@@ -152,14 +189,7 @@ export default function (pi: ExtensionAPI) {
       "Upgrade to opus when encountering architecture decisions, complex debugging, or multi-step planning",
       "Use haiku for simple lookups, formatting, and boilerplate generation",
     ],
-    parameters: Type.Object({
-      tier: StringEnum(["local", "haiku", "sonnet", "opus"], {
-        description: "Target model tier",
-      }),
-      reason: Type.String({
-        description: "Brief explanation for the tier change",
-      }),
-    }),
+    parameters: modelTierParameters as any,
     execute: async (
       _toolCallId,
       params: { tier: string; reason: string },
@@ -225,14 +255,7 @@ export default function (pi: ExtensionAPI) {
       "Increase thinking for: debugging, architecture decisions, complex refactors, multi-file changes",
       "Combine with model tier: sonnet+high is cheaper than opus+medium for moderate reasoning tasks",
     ],
-    parameters: Type.Object({
-      level: StringEnum(["off", "minimal", "low", "medium", "high"], {
-        description: "Thinking level — higher = more reasoning tokens, slower, more expensive",
-      }),
-      reason: Type.String({
-        description: "Brief explanation for the thinking level change",
-      }),
-    }),
+    parameters: thinkingLevelParameters as any,
     execute: async (
       _toolCallId,
       params: { level: string; reason: string },

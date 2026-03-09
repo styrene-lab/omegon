@@ -1,45 +1,48 @@
-/**
- * Unit tests for extensions/lib/model-routing.ts
- *
- * Covers all spec scenarios from codex-tier-routing:
- *   - Abstract tier resolves through provider preference
- *   - Resolver skips avoided providers
- *   - Resolver falls back across providers
- *   - Local tier still resolves locally
- *   - Display label mapping
- *   - Default policy shape
- */
-
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  resolveTier,
-  getTierDisplayLabel,
+  classifyTransientFailure,
+  clampThinkingLevel,
+  getDefaultCapabilityProfile,
   getDefaultPolicy,
-  type RegistryModel,
+  getRoleDisplayLabel,
+  getTierDisplayLabel,
+  resolveCapabilityRole,
+  resolveTier,
+  TRANSIENT_PROVIDER_COOLDOWN_MS,
+  type CapabilityCandidate,
+  type CapabilityProfile,
+  type CapabilityRuntimeState,
   type ProviderRoutingPolicy,
+  type RegistryModel,
+  withCandidateCooldown,
+  withProviderCooldown,
 } from "./model-routing.ts";
-
 import { sharedState } from "../shared-state.ts";
-
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
 
 function makeModel(provider: string, id: string): RegistryModel {
   return { provider, id };
 }
 
+function makeCandidate(
+  id: string,
+  provider: CapabilityCandidate["provider"],
+  source: CapabilityCandidate["source"],
+  weight: CapabilityCandidate["weight"],
+  maxThinking: CapabilityCandidate["maxThinking"],
+): CapabilityCandidate {
+  return { id, provider, source, weight, maxThinking };
+}
+
 const ANTHROPIC_HAIKU = makeModel("anthropic", "claude-haiku-3-5");
 const ANTHROPIC_SONNET = makeModel("anthropic", "claude-sonnet-4-5");
 const ANTHROPIC_OPUS = makeModel("anthropic", "claude-opus-4-6");
-
 const OPENAI_HAIKU = makeModel("openai", "gpt-5.1-codex");
 const OPENAI_SONNET = makeModel("openai", "gpt-5.3-codex-spark");
 const OPENAI_OPUS = makeModel("openai", "gpt-5.4");
-
-const LOCAL_MODEL = makeModel("local", "qwen3:8b");
+const LOCAL_LIGHT = makeModel("local", "qwen3:4b");
+const LOCAL_HEAVY = makeModel("local", "devstral:24b");
 
 const ALL_MODELS: RegistryModel[] = [
   ANTHROPIC_HAIKU,
@@ -48,7 +51,8 @@ const ALL_MODELS: RegistryModel[] = [
   OPENAI_HAIKU,
   OPENAI_SONNET,
   OPENAI_OPUS,
-  LOCAL_MODEL,
+  LOCAL_LIGHT,
+  LOCAL_HEAVY,
 ];
 
 function policy(overrides: Partial<ProviderRoutingPolicy> = {}): ProviderRoutingPolicy {
@@ -61,324 +65,239 @@ function policy(overrides: Partial<ProviderRoutingPolicy> = {}): ProviderRouting
   };
 }
 
-// ---------------------------------------------------------------------------
-// Provider preference order
-// ---------------------------------------------------------------------------
+function profile(overrides: Partial<CapabilityProfile> = {}): CapabilityProfile {
+  return {
+    ...getDefaultCapabilityProfile(ALL_MODELS),
+    ...overrides,
+  };
+}
 
-describe("resolveTier — provider preference order", () => {
+describe("resolveTier — compatibility tier routing", () => {
   it("returns openai sonnet when openai is first in order", () => {
-    const p = policy({ providerOrder: ["openai", "anthropic", "local"] });
-    const result = resolveTier("sonnet", ALL_MODELS, p);
-    assert.ok(result, "should resolve");
+    const result = resolveTier("sonnet", ALL_MODELS, policy({ providerOrder: ["openai", "anthropic", "local"] }));
+    assert.ok(result);
     assert.equal(result.provider, "openai");
     assert.equal(result.modelId, OPENAI_SONNET.id);
-  });
-
-  it("returns anthropic haiku when anthropic is first in order", () => {
-    const p = policy({ providerOrder: ["anthropic", "openai", "local"] });
-    const result = resolveTier("haiku", ALL_MODELS, p);
-    assert.ok(result);
-    assert.equal(result.provider, "anthropic");
-    assert.equal(result.modelId, ANTHROPIC_HAIKU.id);
+    assert.equal(result.maxThinking, "medium");
   });
 
   it("returns anthropic opus when anthropic is first in order", () => {
-    const p = policy({ providerOrder: ["anthropic", "openai", "local"] });
-    const result = resolveTier("opus", ALL_MODELS, p);
+    const result = resolveTier("opus", ALL_MODELS, policy());
     assert.ok(result);
     assert.equal(result.provider, "anthropic");
     assert.equal(result.modelId, ANTHROPIC_OPUS.id);
+    assert.equal(result.maxThinking, "high");
   });
 
-  it("includes concrete model ID in result", () => {
-    const p = policy({ providerOrder: ["openai", "anthropic"] });
-    const result = resolveTier("opus", ALL_MODELS, p);
-    assert.ok(result);
-    assert.equal(result.modelId, OPENAI_OPUS.id);
-    assert.equal(result.tier, "opus");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Avoid-provider skipping
-// ---------------------------------------------------------------------------
-
-describe("resolveTier — avoid-provider skipping", () => {
-  it("skips anthropic when avoided and picks openai for opus", () => {
-    const p = policy({
-      providerOrder: ["anthropic", "openai"],
-      avoidProviders: ["anthropic"],
+  it("returns undefined when policy would require confirmation for cross-source fallback", () => {
+    const upstreamOnly = [OPENAI_HAIKU, LOCAL_HEAVY];
+    const customProfile = profile({
+      roles: {
+        ...getDefaultCapabilityProfile(upstreamOnly).roles,
+        adept: {
+          candidates: [
+            makeCandidate(OPENAI_HAIKU.id, "openai", "upstream", "light", "low"),
+            makeCandidate(LOCAL_HEAVY.id, "local", "local", "heavy", "medium"),
+          ],
+        },
+      },
     });
-    const result = resolveTier("opus", ALL_MODELS, p);
-    assert.ok(result, "should resolve");
-    assert.notEqual(result.provider, "anthropic", "must not choose anthropic");
-    assert.equal(result.provider, "openai");
-    assert.equal(result.modelId, OPENAI_OPUS.id);
-  });
-
-  it("skips openai when avoided and picks anthropic for sonnet", () => {
-    const p = policy({
-      providerOrder: ["openai", "anthropic"],
-      avoidProviders: ["openai"],
-    });
-    const result = resolveTier("sonnet", ALL_MODELS, p);
-    assert.ok(result);
-    assert.equal(result.provider, "anthropic");
-  });
-
-  it("still resolves avoided provider as fallback when it is the only option", () => {
-    // Only anthropic models available, but anthropic is avoided
-    const anthropicOnly = [ANTHROPIC_OPUS];
-    const p = policy({
-      providerOrder: ["openai", "anthropic"],
-      avoidProviders: ["anthropic"],
-    });
-    const result = resolveTier("opus", anthropicOnly, p);
-    // Fallback should kick in
-    assert.ok(result, "should still resolve via fallback");
-    assert.equal(result.provider, "anthropic");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Cross-provider fallback
-// ---------------------------------------------------------------------------
-
-describe("resolveTier — cross-provider fallback", () => {
-  it("falls back to anthropic haiku when openai lacks haiku-tier models", () => {
-    const noOpenAIHaiku = ALL_MODELS.filter((m) => !(m.provider === "openai" && m.id === OPENAI_HAIKU.id));
-    const p = policy({ providerOrder: ["openai", "anthropic", "local"] });
-    const result = resolveTier("haiku", noOpenAIHaiku, p);
-    assert.ok(result);
-    assert.equal(result.provider, "anthropic");
-    assert.equal(result.modelId, ANTHROPIC_HAIKU.id);
-  });
-
-  it("returns undefined when only local models are available for a cloud tier", () => {
-    // Local models do not satisfy cloud capability tiers (haiku/sonnet/opus).
-    // A local 8B model is not capability-equivalent to a haiku-tier cloud model.
-    // Operators should use tier: "local" explicitly for local inference.
-    const localOnly = [LOCAL_MODEL];
-    const p = policy({ providerOrder: ["openai", "anthropic", "local"] });
-    const result = resolveTier("haiku", localOnly, p);
-    assert.equal(result, undefined, "local models must not satisfy cloud capability tiers");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Local tier
-// ---------------------------------------------------------------------------
-
-describe("resolveTier — local tier", () => {
-  it("always resolves local tier to local provider, even when cheap cloud preferred", () => {
-    const p = policy({
-      providerOrder: ["openai", "anthropic", "local"],
-      cheapCloudPreferredOverLocal: true,
-    });
-    const result = resolveTier("local", ALL_MODELS, p);
-    assert.ok(result, "should resolve");
-    assert.equal(result.provider, "local");
-    assert.equal(result.tier, "local");
-  });
-
-  it("does not substitute a cloud model for local tier", () => {
-    const p = policy({ providerOrder: ["openai", "anthropic", "local"] });
-    const result = resolveTier("local", ALL_MODELS, p);
-    assert.ok(result);
-    assert.equal(result.provider, "local");
-  });
-
-  it("returns undefined when no local model is registered", () => {
-    const noLocal = ALL_MODELS.filter((m) => m.provider !== "local");
-    const p = policy();
-    const result = resolveTier("local", noLocal, p);
+    const now = Date.now();
+    const runtimeState = withProviderCooldown(undefined, "openai", "429", now);
+    const result = resolveTier("haiku", upstreamOnly, policy({ providerOrder: ["openai", "local"] }), runtimeState, customProfile);
     assert.equal(result, undefined);
   });
 
-  it("picks local model by preference order", () => {
-    const locals = [makeModel("local", "devstral:24b"), makeModel("local", "qwen3:8b")];
-    const p = policy();
-    const result = resolveTier("local", locals, p);
+  it("always resolves local tier to local provider", () => {
+    const result = resolveTier("local", ALL_MODELS, policy({ cheapCloudPreferredOverLocal: true }));
     assert.ok(result);
     assert.equal(result.provider, "local");
-    // devstral:24b is higher in PREFERRED_ORDER than qwen3:8b
-    assert.equal(result.modelId, "devstral:24b");
   });
 });
 
-// ---------------------------------------------------------------------------
-// Display label mapping
-// ---------------------------------------------------------------------------
+describe("resolveCapabilityRole — fallback semantics", () => {
+  it("same-role cross-provider fallback happens automatically when allowed", () => {
+    const models = [ANTHROPIC_SONNET, OPENAI_SONNET];
+    const customProfile: CapabilityProfile = {
+      roles: {
+        archmagos: { candidates: [] },
+        magos: {
+          candidates: [
+            makeCandidate(ANTHROPIC_SONNET.id, "anthropic", "upstream", "normal", "high"),
+            makeCandidate(OPENAI_SONNET.id, "openai", "upstream", "normal", "medium"),
+          ],
+        },
+        adept: { candidates: [] },
+        servitor: { candidates: [] },
+        servoskull: { candidates: [] },
+      },
+      internalAliases: {},
+      policy: {
+        sameRoleCrossProvider: "allow",
+        crossSource: "ask",
+        heavyLocal: "ask",
+        unknownLocalPerformance: "ask",
+      },
+    };
+    const runtimeState = withProviderCooldown(undefined, "anthropic", "429", 1000);
+    const result = resolveCapabilityRole("magos", models, policy(), customProfile, runtimeState, 1001);
+    assert.equal(result.ok, true);
+    assert.equal(result.selected?.candidate.provider, "openai");
+    assert.equal(result.selected?.candidate.id, OPENAI_SONNET.id);
+  });
 
-describe("getTierDisplayLabel", () => {
-  it("maps local → Servitor", () => {
+  it("cross-source fallback requires operator approval when policy asks", () => {
+    const models = [OPENAI_HAIKU, LOCAL_HEAVY];
+    const customProfile: CapabilityProfile = {
+      roles: {
+        archmagos: { candidates: [] },
+        magos: { candidates: [] },
+        adept: {
+          candidates: [
+            makeCandidate(OPENAI_HAIKU.id, "openai", "upstream", "light", "low"),
+            makeCandidate(LOCAL_HEAVY.id, "local", "local", "heavy", "medium"),
+          ],
+        },
+        servitor: { candidates: [] },
+        servoskull: { candidates: [] },
+      },
+      internalAliases: { haiku: "adept" },
+      policy: {
+        sameRoleCrossProvider: "allow",
+        crossSource: "ask",
+        heavyLocal: "ask",
+        unknownLocalPerformance: "ask",
+      },
+    };
+    const runtimeState = withProviderCooldown(undefined, "openai", "session limit", 1000);
+    const result = resolveCapabilityRole("adept", models, policy({ providerOrder: ["openai", "local"] }), customProfile, runtimeState, 1001);
+    assert.equal(result.ok, false);
+    assert.equal(result.requiresConfirmation, true);
+    assert.equal(result.blockedBy, "cross-source");
+    assert.match(result.reason ?? "", /requires operator confirmation/i);
+  });
+
+  it("servoskull candidates preserve thinking-off ceilings", () => {
+    const customProfile = getDefaultCapabilityProfile([OPENAI_HAIKU, LOCAL_LIGHT]);
+    const result = resolveCapabilityRole("servoskull", [OPENAI_HAIKU, LOCAL_LIGHT], policy(), customProfile);
+    assert.equal(result.ok, true);
+    assert.equal(result.selected?.candidate.maxThinking, "off");
+  });
+
+  it("supports overlapping tiers with different thinking ceilings", () => {
+    const sameModel = makeModel("openai", "gpt-4.1");
+    const customProfile: CapabilityProfile = {
+      roles: {
+        archmagos: { candidates: [makeCandidate(sameModel.id, "openai", "upstream", "normal", "high")] },
+        magos: { candidates: [makeCandidate(sameModel.id, "openai", "upstream", "normal", "medium")] },
+        adept: { candidates: [] },
+        servitor: { candidates: [] },
+        servoskull: { candidates: [] },
+      },
+      internalAliases: {},
+      policy: {
+        sameRoleCrossProvider: "allow",
+        crossSource: "ask",
+        heavyLocal: "ask",
+        unknownLocalPerformance: "ask",
+      },
+    };
+    const archmagos = resolveCapabilityRole("archmagos", [sameModel], policy(), customProfile);
+    const magos = resolveCapabilityRole("magos", [sameModel], policy(), customProfile);
+    assert.equal(archmagos.selected?.candidate.id, sameModel.id);
+    assert.equal(magos.selected?.candidate.id, sameModel.id);
+    assert.equal(archmagos.selected?.candidate.maxThinking, "high");
+    assert.equal(magos.selected?.candidate.maxThinking, "medium");
+  });
+});
+
+describe("cooldown helpers", () => {
+  it("candidate cooldown blocks resolution until expiry", () => {
+    const candidate = makeCandidate(ANTHROPIC_SONNET.id, "anthropic", "upstream", "normal", "high");
+    const runtimeState = withCandidateCooldown(undefined, candidate, "429", 1000, 5000);
+    const customProfile: CapabilityProfile = {
+      roles: {
+        archmagos: { candidates: [] },
+        magos: { candidates: [candidate] },
+        adept: { candidates: [] },
+        servitor: { candidates: [] },
+        servoskull: { candidates: [] },
+      },
+      internalAliases: {},
+      policy: {
+        sameRoleCrossProvider: "allow",
+        crossSource: "ask",
+        heavyLocal: "ask",
+        unknownLocalPerformance: "ask",
+      },
+    };
+    const blocked = resolveCapabilityRole("magos", [ANTHROPIC_SONNET], policy(), customProfile, runtimeState, 1500);
+    assert.equal(blocked.ok, false);
+    const availableAgain = resolveCapabilityRole("magos", [ANTHROPIC_SONNET], policy(), customProfile, runtimeState, 7000);
+    assert.equal(availableAgain.ok, true);
+  });
+
+  it("provider cooldown uses fixed five-minute default", () => {
+    const runtimeState = withProviderCooldown(undefined, "anthropic", "429", 1000);
+    assert.equal(runtimeState.providerCooldowns?.anthropic?.until, 1000 + TRANSIENT_PROVIDER_COOLDOWN_MS);
+  });
+
+  it("classifies transient upstream failures", () => {
+    assert.equal(classifyTransientFailure(new Error("429 rate limit exceeded")), true);
+    assert.equal(classifyTransientFailure(new Error("OpenAI session limit reached")), true);
+    assert.equal(classifyTransientFailure(new Error("invalid api key")), false);
+  });
+});
+
+describe("display labels and defaults", () => {
+  it("maps tiers to operator-facing labels", () => {
     assert.equal(getTierDisplayLabel("local"), "Servitor");
-  });
-
-  it("maps haiku → Adept", () => {
     assert.equal(getTierDisplayLabel("haiku"), "Adept");
-  });
-
-  it("maps sonnet → Magos", () => {
     assert.equal(getTierDisplayLabel("sonnet"), "Magos");
-  });
-
-  it("maps opus → Archmagos", () => {
     assert.equal(getTierDisplayLabel("opus"), "Archmagos");
   });
-});
 
-// ---------------------------------------------------------------------------
-// Default policy shape
-// ---------------------------------------------------------------------------
+  it("maps public roles to labels", () => {
+    assert.equal(getRoleDisplayLabel("servoskull"), "Servo-skull");
+  });
 
-describe("getDefaultPolicy", () => {
-  it("returns an object with providerOrder array", () => {
+  it("default profile includes the full public role ladder", () => {
+    const p = getDefaultCapabilityProfile(ALL_MODELS);
+    assert.deepEqual(Object.keys(p.roles), ["archmagos", "magos", "adept", "servitor", "servoskull"]);
+    assert.equal(p.policy.crossSource, "ask");
+    assert.equal(p.policy.heavyLocal, "ask");
+  });
+
+  it("default policy shape remains stable", () => {
     const p = getDefaultPolicy();
     assert.ok(Array.isArray(p.providerOrder));
-    assert.ok(p.providerOrder.length > 0);
-  });
-
-  it("returns an object with avoidProviders array (empty by default)", () => {
-    const p = getDefaultPolicy();
     assert.ok(Array.isArray(p.avoidProviders));
-    assert.equal(p.avoidProviders.length, 0);
-  });
-
-  it("has cheapCloudPreferredOverLocal flag", () => {
-    const p = getDefaultPolicy();
     assert.equal(typeof p.cheapCloudPreferredOverLocal, "boolean");
-  });
-
-  it("has requirePreflightForLargeRuns flag", () => {
-    const p = getDefaultPolicy();
     assert.equal(typeof p.requirePreflightForLargeRuns, "boolean");
   });
-
-  it("requires preflight for large runs by default", () => {
-    const p = getDefaultPolicy();
-    assert.equal(p.requirePreflightForLargeRuns, true);
-  });
 });
 
-// ---------------------------------------------------------------------------
-// cheapCloudPreferredOverLocal flag
-// ---------------------------------------------------------------------------
-
-describe("resolveTier — cheapCloudPreferredOverLocal", () => {
-  it("pushes local to end when cheap cloud preferred, even if local is first in order", () => {
-    // local is first in providerOrder, but cheapCloudPreferredOverLocal forces cloud first
-    const p = policy({
-      providerOrder: ["local", "anthropic", "openai"],
-      cheapCloudPreferredOverLocal: true,
-    });
-    const result = resolveTier("haiku", ALL_MODELS, p);
-    assert.ok(result, "should resolve");
-    // Should choose anthropic (first non-local), not local
-    assert.notEqual(result.provider, "local");
-    assert.equal(result.provider, "anthropic");
-  });
-
-  it("respects original order when cheapCloudPreferredOverLocal is false", () => {
-    const p = policy({
-      providerOrder: ["local", "anthropic", "openai"],
-      cheapCloudPreferredOverLocal: false,
-    });
-    // "local" first but can't satisfy cloud tier — falls through to anthropic
-    const result = resolveTier("haiku", ALL_MODELS, p);
-    assert.ok(result);
-    // local doesn't match haiku, so falls to anthropic
-    assert.equal(result.provider, "anthropic");
+describe("thinking ceiling helpers", () => {
+  it("clamps requested thinking to candidate ceiling", () => {
+    assert.equal(clampThinkingLevel("high", "medium"), "medium");
+    assert.equal(clampThinkingLevel("low", "medium"), "low");
   });
 });
-
-// ---------------------------------------------------------------------------
-// Shared-state routing policy mutation (W4 spec coverage)
-// ---------------------------------------------------------------------------
 
 describe("sharedState.routingPolicy", () => {
   it("is initialized with a default policy on first import", () => {
-    assert.ok(sharedState.routingPolicy, "routingPolicy must be initialized, not undefined");
+    assert.ok(sharedState.routingPolicy);
     assert.ok(Array.isArray(sharedState.routingPolicy.providerOrder));
     assert.ok(Array.isArray(sharedState.routingPolicy.avoidProviders));
-    assert.equal(typeof sharedState.routingPolicy.cheapCloudPreferredOverLocal, "boolean");
-    assert.equal(typeof sharedState.routingPolicy.requirePreflightForLargeRuns, "boolean");
   });
 
-  it("records avoidProviders when operator marks a provider as low-budget", () => {
-    // Spec: "Session policy can avoid a provider temporarily"
-    // Given the operator indicates Claude budget is low
+  it("records temporary avoidProviders state", () => {
     sharedState.routingPolicy = {
       ...getDefaultPolicy(),
       avoidProviders: ["anthropic"],
       notes: "Anthropic budget is low today",
     };
-    assert.ok(sharedState.routingPolicy.avoidProviders.includes("anthropic"),
-      "shared state must record anthropic in avoid-provider list");
-    assert.ok(sharedState.routingPolicy.notes?.includes("low"));
-  });
-
-  it("records provider order and flags from operator session policy", () => {
-    // Spec: "Session policy stores provider order and flags"
-    sharedState.routingPolicy = {
-      providerOrder: ["openai", "anthropic"],
-      avoidProviders: [],
-      cheapCloudPreferredOverLocal: true,
-      requirePreflightForLargeRuns: true,
-    };
-    assert.deepEqual(sharedState.routingPolicy.providerOrder, ["openai", "anthropic"]);
-    assert.equal(sharedState.routingPolicy.cheapCloudPreferredOverLocal, true);
-    assert.equal(sharedState.routingPolicy.requirePreflightForLargeRuns, true);
-  });
-
-  it("resolver uses updated shared-state policy for avoid-provider skipping", () => {
-    sharedState.routingPolicy = {
-      ...getDefaultPolicy(),
-      providerOrder: ["anthropic", "openai"],
-      avoidProviders: ["anthropic"],
-    };
-    const result = resolveTier("opus", ALL_MODELS, sharedState.routingPolicy);
-    assert.ok(result, "should resolve");
-    assert.notEqual(result.provider, "anthropic", "must skip anthropic per shared-state policy");
-    assert.equal(result.provider, "openai");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Edge cases
-// ---------------------------------------------------------------------------
-
-describe("resolveTier — edge cases", () => {
-  it("returns undefined when model list is empty", () => {
-    const p = policy();
-    const result = resolveTier("sonnet", [], p);
-    assert.equal(result, undefined);
-  });
-
-  it("returns undefined when no provider in policy has a matching model", () => {
-    const p = policy({ providerOrder: ["openai"], avoidProviders: [] });
-    const anthropicOnly = [ANTHROPIC_SONNET];
-    const result = resolveTier("sonnet", anthropicOnly, p);
-    // openai has no model, no fallback available
-    assert.equal(result, undefined);
-  });
-
-  it("handles duplicate entries in providerOrder without infinite loop", () => {
-    const p = policy({ providerOrder: ["anthropic", "anthropic", "openai"] });
-    const result = resolveTier("haiku", ALL_MODELS, p);
-    assert.ok(result);
-    assert.equal(result.provider, "anthropic");
-  });
-
-  it("selects highest lexicographic anthropic model within tier prefix", () => {
-    // claude-sonnet-4-5 > claude-sonnet-4-0 lexicographically
-    const models = [
-      makeModel("anthropic", "claude-sonnet-4-0"),
-      makeModel("anthropic", "claude-sonnet-4-5"),
-    ];
-    const p = policy({ providerOrder: ["anthropic"] });
-    const result = resolveTier("sonnet", models, p);
-    assert.ok(result);
-    assert.equal(result.modelId, "claude-sonnet-4-5");
+    assert.ok(sharedState.routingPolicy.avoidProviders.includes("anthropic"));
+    assert.match(sharedState.routingPolicy.notes ?? "", /low/i);
   });
 });

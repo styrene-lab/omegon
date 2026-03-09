@@ -1,13 +1,9 @@
 /**
  * Shared provider-aware model resolver for pi-kit.
  *
- * Keeps canonical tier semantics (local|haiku|sonnet|opus) stable while
- * resolving to concrete provider+model at runtime based on a session policy.
- *
- * Design decisions followed:
- * - Tiers stay abstract; provider choice is a session policy concern
- * - Explicit model IDs are preferred over fuzzy tier aliases at execution time
- * - Phase 1 keeps internal tier keys; UX adopts Servitor/Adept/Magos/Archmagos
+ * Keeps canonical compatibility tiers (local|haiku|sonnet|opus) stable while
+ * also supporting public operator capability roles
+ * (archmagos|magos|adept|servitor|servoskull).
  */
 
 import { PREFERRED_ORDER } from "./local-models.ts";
@@ -18,6 +14,11 @@ import { PREFERRED_ORDER } from "./local-models.ts";
 
 export type ModelTier = "local" | "haiku" | "sonnet" | "opus";
 export type ProviderName = "openai" | "anthropic" | "local";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
+export type CapabilityRole = "archmagos" | "magos" | "adept" | "servitor" | "servoskull";
+export type CandidateSource = "upstream" | "local";
+export type CandidateWeight = "light" | "normal" | "heavy" | "unknown";
+export type FallbackDisposition = "allow" | "ask" | "deny";
 
 /**
  * Operator-driven session routing policy.
@@ -36,6 +37,41 @@ export interface ProviderRoutingPolicy {
   notes?: string;
 }
 
+export interface CapabilityCandidate {
+  id: string;
+  provider: ProviderName;
+  source: CandidateSource;
+  weight: CandidateWeight;
+  maxThinking: ThinkingLevel;
+}
+
+export interface RoleProfile {
+  candidates: CapabilityCandidate[];
+}
+
+export interface CapabilityProfilePolicy {
+  sameRoleCrossProvider: FallbackDisposition;
+  crossSource: FallbackDisposition;
+  heavyLocal: FallbackDisposition;
+  unknownLocalPerformance: FallbackDisposition;
+}
+
+export interface CapabilityProfile {
+  roles: Record<CapabilityRole, RoleProfile>;
+  internalAliases: Record<string, CapabilityRole>;
+  policy: CapabilityProfilePolicy;
+}
+
+export interface CooldownEntry {
+  until: number;
+  reason?: string;
+}
+
+export interface CapabilityRuntimeState {
+  candidateCooldowns?: Record<string, CooldownEntry>;
+  providerCooldowns?: Partial<Record<ProviderName, CooldownEntry>>;
+}
+
 /**
  * Resolved concrete model for a requested tier.
  */
@@ -43,6 +79,21 @@ export interface ResolvedTierModel {
   tier: ModelTier;
   provider: ProviderName;
   modelId: string;
+  maxThinking?: ThinkingLevel;
+}
+
+export interface ResolvedCapabilityCandidate {
+  role: CapabilityRole;
+  candidate: CapabilityCandidate;
+}
+
+export interface RoleResolution {
+  ok: boolean;
+  role: CapabilityRole;
+  selected?: ResolvedCapabilityCandidate;
+  blockedBy?: "cross-source" | "heavy-local" | "unknown-local-performance" | "denied";
+  requiresConfirmation?: boolean;
+  reason?: string;
 }
 
 /**
@@ -55,7 +106,43 @@ export interface RegistryModel {
 }
 
 // ---------------------------------------------------------------------------
-// Anthropic tier matchers
+// Constants
+// ---------------------------------------------------------------------------
+
+export const TRANSIENT_PROVIDER_COOLDOWN_MS = 5 * 60 * 1000;
+
+const THINKING_ORDER: Record<ThinkingLevel, number> = {
+  off: 0,
+  minimal: 1,
+  low: 2,
+  medium: 3,
+  high: 4,
+};
+
+const ROLE_COMPATIBILITY_MAP: Record<ModelTier, CapabilityRole> = {
+  local: "servitor",
+  haiku: "adept",
+  sonnet: "magos",
+  opus: "archmagos",
+};
+
+const TIER_DISPLAY_LABELS: Record<ModelTier, string> = {
+  local: "Servitor",
+  haiku: "Adept",
+  sonnet: "Magos",
+  opus: "Archmagos",
+};
+
+const ROLE_DISPLAY_LABELS: Record<CapabilityRole, string> = {
+  archmagos: "Archmagos",
+  magos: "Magos",
+  adept: "Adept",
+  servitor: "Servitor",
+  servoskull: "Servo-skull",
+};
+
+// ---------------------------------------------------------------------------
+// Anthropic/OpenAI defaults
 // ---------------------------------------------------------------------------
 
 const ANTHROPIC_TIER_PREFIXES: Record<Exclude<ModelTier, "local">, string[]> = {
@@ -64,10 +151,16 @@ const ANTHROPIC_TIER_PREFIXES: Record<Exclude<ModelTier, "local">, string[]> = {
   opus: ["claude-opus"],
 };
 
-/**
- * Parse trailing numeric version segments from a model ID.
- * e.g. "claude-opus-4-6" → [4, 6], "claude-opus-10-0" → [10, 0]
- */
+const OPENAI_TIER_MODELS: Record<Exclude<ModelTier, "local">, string[]> = {
+  haiku: ["gpt-5.1-codex", "gpt-4o-mini", "gpt-4.1-mini"],
+  sonnet: ["gpt-5.3-codex-spark", "gpt-4.1", "gpt-4o"],
+  opus: ["gpt-5.4", "gpt-4.5", "o3"],
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function parseModelVersion(id: string): number[] {
   const parts = id.split("-");
   const versions: number[] = [];
@@ -79,10 +172,6 @@ function parseModelVersion(id: string): number[] {
   return versions;
 }
 
-/**
- * Compare two model IDs by their trailing numeric versions (descending).
- * Handles multi-segment versions correctly: 10-0 > 4-9 > 4-6.
- */
 function compareModelVersionsDesc(a: string, b: string): number {
   const va = parseModelVersion(a);
   const vb = parseModelVersion(b);
@@ -104,31 +193,12 @@ function matchAnthropicTier(models: RegistryModel[], tier: Exclude<ModelTier, "l
   return undefined;
 }
 
-// ---------------------------------------------------------------------------
-// OpenAI tier matchers
-// ---------------------------------------------------------------------------
-
-/**
- * Explicit OpenAI model IDs per tier (most preferred first).
- * Mapping follows the design spec:
- *   haiku  → gpt-5.1-codex
- *   sonnet → gpt-5.3-codex-spark
- *   opus   → gpt-5.4
- */
-const OPENAI_TIER_MODELS: Record<Exclude<ModelTier, "local">, string[]> = {
-  haiku: ["gpt-5.1-codex", "gpt-4o-mini", "gpt-4.1-mini"],
-  sonnet: ["gpt-5.3-codex-spark", "gpt-4.1", "gpt-4o"],
-  opus: ["gpt-5.4", "gpt-4.5", "o3"],
-};
-
 function matchOpenAITier(models: RegistryModel[], tier: Exclude<ModelTier, "local">): RegistryModel | undefined {
   const exactIds = OPENAI_TIER_MODELS[tier];
   for (const modelId of exactIds) {
     const match = models.find((m) => m.provider === "openai" && m.id === modelId);
     if (match) return match;
   }
-  // Fallback: prefix scan for models not already covered by the exact-ID list.
-  // Use distinct prefixes that don't duplicate entries in exactIds.
   const exactIdSet = new Set(exactIds);
   const prefixFallbacks: Record<string, string[]> = {
     haiku: ["gpt-4o-mini-", "gpt-4.1-mini-"],
@@ -144,14 +214,9 @@ function matchOpenAITier(models: RegistryModel[], tier: Exclude<ModelTier, "loca
   return undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Local tier matcher
-// ---------------------------------------------------------------------------
-
 function matchLocalTier(models: RegistryModel[]): RegistryModel | undefined {
   const locals = models.filter((m) => m.provider === "local");
   if (locals.length === 0) return undefined;
-  // Respect preference order from local-models registry
   for (const preferred of PREFERRED_ORDER) {
     const match = locals.find((m) => m.id === preferred);
     if (match) return match;
@@ -159,78 +224,7 @@ function matchLocalTier(models: RegistryModel[]): RegistryModel | undefined {
   return locals[0];
 }
 
-// ---------------------------------------------------------------------------
-// Core resolver
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve an abstract tier to a concrete {provider, modelId} using the
- * session routing policy and the available model registry.
- *
- * @param tier      The abstract tier requested (local|haiku|sonnet|opus)
- * @param models    Snapshot of the pi model registry (modelRegistry.getAll())
- * @param policy    Session routing policy (from sharedState.routingPolicy)
- * @returns         Resolved model or undefined if nothing matched
- */
-export function resolveTier(
-  tier: ModelTier,
-  models: RegistryModel[],
-  policy: ProviderRoutingPolicy,
-): ResolvedTierModel | undefined {
-  // "local" is always satisfied locally — policy cannot redirect it to cloud.
-  if (tier === "local") {
-    const local = matchLocalTier(models);
-    if (!local) return undefined;
-    return { tier, provider: "local", modelId: local.id };
-  }
-
-  // Build effective provider order: avoid-list providers go last (as fallback),
-  // not completely excluded — we still try them if no other option exists.
-  let ordered = dedupeProviderOrder(policy.providerOrder, policy.avoidProviders);
-
-  // When cheapCloudPreferredOverLocal is set, ensure cloud providers take
-  // priority over local regardless of where the operator placed "local" in
-  // providerOrder. Move "local" to the end of the effective order.
-  if (policy.cheapCloudPreferredOverLocal) {
-    ordered = [...ordered.filter((p) => p !== "local"), ...ordered.filter((p) => p === "local")];
-  }
-
-  for (const provider of ordered) {
-    if (policy.avoidProviders.includes(provider)) continue; // skip in first pass
-    const resolved = tryProvider(tier, provider, models);
-    if (resolved) return { tier, provider, modelId: resolved.id };
-  }
-
-  // Fallback: try avoided providers before giving up
-  for (const provider of policy.avoidProviders) {
-    const resolved = tryProvider(tier, provider, models);
-    if (resolved) return { tier, provider, modelId: resolved.id };
-  }
-
-  return undefined;
-}
-
-function tryProvider(
-  tier: Exclude<ModelTier, "local">,
-  provider: ProviderName,
-  models: RegistryModel[],
-): RegistryModel | undefined {
-  if (provider === "anthropic") return matchAnthropicTier(models, tier);
-  if (provider === "openai") return matchOpenAITier(models, tier);
-  // "local" cannot satisfy a cloud capability tier (haiku/sonnet/opus).
-  // A local 8B model is not capability-equivalent to a sonnet-tier model.
-  // Operators should request tier: "local" explicitly for local inference.
-  return undefined;
-}
-
-/**
- * Produce a deduplicated provider order that guarantees all providers appear
- * (avoided ones at the end, in their original relative order).
- */
-function dedupeProviderOrder(
-  order: ProviderName[],
-  avoided: ProviderName[],
-): ProviderName[] {
+function dedupeProviderOrder(order: ProviderName[], avoided: ProviderName[]): ProviderName[] {
   const seen = new Set<ProviderName>();
   const result: ProviderName[] = [];
   for (const p of order) {
@@ -239,7 +233,6 @@ function dedupeProviderOrder(
       result.push(p);
     }
   }
-  // Append any avoided providers not already in the list
   for (const p of avoided) {
     if (!seen.has(p)) {
       seen.add(p);
@@ -249,40 +242,348 @@ function dedupeProviderOrder(
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Display labels
-// ---------------------------------------------------------------------------
+function getCandidateKey(candidate: CapabilityCandidate): string {
+  return `${candidate.provider}/${candidate.id}`;
+}
 
-const TIER_DISPLAY_LABELS: Record<ModelTier, string> = {
-  local: "Servitor",
-  haiku: "Adept",
-  sonnet: "Magos",
-  opus: "Archmagos",
-};
+function isCandidateCooledDown(
+  candidate: CapabilityCandidate,
+  runtimeState: CapabilityRuntimeState | undefined,
+  now: number,
+): boolean {
+  const candidateCooldown = runtimeState?.candidateCooldowns?.[getCandidateKey(candidate)];
+  if (candidateCooldown && candidateCooldown.until > now) return true;
+  const providerCooldown = runtimeState?.providerCooldowns?.[candidate.provider];
+  return Boolean(providerCooldown && providerCooldown.until > now);
+}
+
+function registryHasCandidate(candidate: CapabilityCandidate, models: RegistryModel[]): boolean {
+  return models.some((m) => m.provider === candidate.provider && m.id === candidate.id);
+}
+
+function applyProviderPolicyOrder(
+  candidates: CapabilityCandidate[],
+  policy: ProviderRoutingPolicy,
+): CapabilityCandidate[] {
+  const providerOrder = dedupeProviderOrder(policy.providerOrder, policy.avoidProviders);
+  const providerRank = new Map(providerOrder.map((provider, index) => [provider, index]));
+  return [...candidates].sort((a, b) => {
+    const aRank = providerRank.get(a.provider) ?? Number.MAX_SAFE_INTEGER;
+    const bRank = providerRank.get(b.provider) ?? Number.MAX_SAFE_INTEGER;
+    if (aRank !== bRank) return aRank - bRank;
+    return candidates.indexOf(a) - candidates.indexOf(b);
+  });
+}
+
+function fallbackDispositionForCandidate(
+  firstCandidate: CapabilityCandidate | undefined,
+  candidate: CapabilityCandidate,
+  profilePolicy: CapabilityProfilePolicy,
+): { blockedBy?: RoleResolution["blockedBy"]; disposition: FallbackDisposition } {
+  if (!firstCandidate) return { disposition: "allow" };
+  if (candidate.source !== firstCandidate.source) {
+    return { blockedBy: "cross-source", disposition: profilePolicy.crossSource };
+  }
+  if (candidate.provider !== firstCandidate.provider) {
+    return { disposition: profilePolicy.sameRoleCrossProvider };
+  }
+  if (candidate.source === "local" && candidate.weight === "heavy") {
+    return { blockedBy: "heavy-local", disposition: profilePolicy.heavyLocal };
+  }
+  if (candidate.source === "local" && candidate.weight === "unknown") {
+    return { blockedBy: "unknown-local-performance", disposition: profilePolicy.unknownLocalPerformance };
+  }
+  return { disposition: "allow" };
+}
+
+function explainBlockedResolution(
+  role: CapabilityRole,
+  candidate: CapabilityCandidate,
+  blockedBy: NonNullable<RoleResolution["blockedBy"]>,
+  disposition: FallbackDisposition,
+): string {
+  const roleLabel = getRoleDisplayLabel(role);
+  const target = `${candidate.provider}/${candidate.id}`;
+  const reason = blockedBy === "cross-source"
+    ? `cross-source fallback to ${candidate.source}`
+    : blockedBy === "heavy-local"
+      ? "heavy local fallback"
+      : blockedBy === "unknown-local-performance"
+        ? "unknown local performance"
+        : "policy";
+  if (disposition === "ask") {
+    return `${roleLabel} resolution requires operator confirmation before ${reason} via ${target}.`;
+  }
+  return `${roleLabel} resolution blocked by policy: ${reason} via ${target} is not permitted.`;
+}
+
+function synthesizeCandidate(tier: ModelTier, models: RegistryModel[]): CapabilityCandidate | undefined {
+  if (tier === "local") {
+    const local = matchLocalTier(models);
+    if (!local) return undefined;
+    return {
+      id: local.id,
+      provider: "local",
+      source: "local",
+      weight: inferWeightFromModel(local),
+      maxThinking: "high",
+    };
+  }
+
+  const anthropic = matchAnthropicTier(models, tier);
+  if (anthropic) {
+    return {
+      id: anthropic.id,
+      provider: "anthropic",
+      source: "upstream",
+      weight: tier === "opus" ? "heavy" : "normal",
+      maxThinking: tier === "opus" ? "high" : tier === "sonnet" ? "medium" : "low",
+    };
+  }
+
+  const openai = matchOpenAITier(models, tier);
+  if (openai) {
+    return {
+      id: openai.id,
+      provider: "openai",
+      source: "upstream",
+      weight: tier === "opus" ? "heavy" : "normal",
+      maxThinking: tier === "opus" ? "high" : tier === "sonnet" ? "medium" : "low",
+    };
+  }
+
+  return undefined;
+}
+
+function inferWeightFromModel(model: RegistryModel): CandidateWeight {
+  const id = model.id.toLowerCase();
+  if (id.includes("70b") || id.includes("72b") || id.includes("30b") || id.includes("32b") || id.includes("24b")) {
+    return "heavy";
+  }
+  if (id.includes("14b") || id.includes("8b")) return "normal";
+  return "light";
+}
+
+export function clampThinkingLevel(requested: ThinkingLevel, maxThinking: ThinkingLevel): ThinkingLevel {
+  return THINKING_ORDER[requested] <= THINKING_ORDER[maxThinking] ? requested : maxThinking;
+}
+
+export function classifyTransientFailure(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return [
+    "429",
+    "rate limit",
+    "rate-limit",
+    "too many requests",
+    "session limit",
+    "temporarily unavailable",
+    "overloaded",
+    "try again later",
+  ].some((needle) => message.includes(needle));
+}
+
+export function withProviderCooldown(
+  runtimeState: CapabilityRuntimeState | undefined,
+  provider: ProviderName,
+  reason: string,
+  now: number = Date.now(),
+  cooldownMs: number = TRANSIENT_PROVIDER_COOLDOWN_MS,
+): CapabilityRuntimeState {
+  return {
+    candidateCooldowns: { ...(runtimeState?.candidateCooldowns ?? {}) },
+    providerCooldowns: {
+      ...(runtimeState?.providerCooldowns ?? {}),
+      [provider]: { until: now + cooldownMs, reason },
+    },
+  };
+}
+
+export function withCandidateCooldown(
+  runtimeState: CapabilityRuntimeState | undefined,
+  candidate: CapabilityCandidate,
+  reason: string,
+  now: number = Date.now(),
+  cooldownMs: number = TRANSIENT_PROVIDER_COOLDOWN_MS,
+): CapabilityRuntimeState {
+  return {
+    candidateCooldowns: {
+      ...(runtimeState?.candidateCooldowns ?? {}),
+      [getCandidateKey(candidate)]: { until: now + cooldownMs, reason },
+    },
+    providerCooldowns: { ...(runtimeState?.providerCooldowns ?? {}) },
+  };
+}
+
+export function getDefaultCapabilityProfile(models: RegistryModel[] = []): CapabilityProfile {
+  const archmagosCandidates: CapabilityCandidate[] = [];
+  const magosCandidates: CapabilityCandidate[] = [];
+  const adeptCandidates: CapabilityCandidate[] = [];
+  const servitorCandidates: CapabilityCandidate[] = [];
+  const servoskullCandidates: CapabilityCandidate[] = [];
+
+  const anthropicOpus = matchAnthropicTier(models, "opus");
+  const openaiOpus = matchOpenAITier(models, "opus");
+  const anthropicSonnet = matchAnthropicTier(models, "sonnet");
+  const openaiSonnet = matchOpenAITier(models, "sonnet");
+  const anthropicHaiku = matchAnthropicTier(models, "haiku");
+  const openaiHaiku = matchOpenAITier(models, "haiku");
+  const local = matchLocalTier(models);
+
+  if (anthropicOpus) archmagosCandidates.push({ id: anthropicOpus.id, provider: "anthropic", source: "upstream", weight: "heavy", maxThinking: "high" });
+  if (openaiOpus) archmagosCandidates.push({ id: openaiOpus.id, provider: "openai", source: "upstream", weight: "heavy", maxThinking: "high" });
+
+  if (anthropicSonnet) magosCandidates.push({ id: anthropicSonnet.id, provider: "anthropic", source: "upstream", weight: "normal", maxThinking: "high" });
+  if (openaiSonnet) magosCandidates.push({ id: openaiSonnet.id, provider: "openai", source: "upstream", weight: "normal", maxThinking: "medium" });
+
+  if (openaiHaiku) adeptCandidates.push({ id: openaiHaiku.id, provider: "openai", source: "upstream", weight: "light", maxThinking: "low" });
+  if (anthropicHaiku) adeptCandidates.push({ id: anthropicHaiku.id, provider: "anthropic", source: "upstream", weight: "light", maxThinking: "low" });
+
+  if (anthropicHaiku) servitorCandidates.push({ id: anthropicHaiku.id, provider: "anthropic", source: "upstream", weight: "light", maxThinking: "low" });
+  if (openaiHaiku) servitorCandidates.push({ id: openaiHaiku.id, provider: "openai", source: "upstream", weight: "light", maxThinking: "low" });
+  if (local) servitorCandidates.push({ id: local.id, provider: "local", source: "local", weight: inferWeightFromModel(local), maxThinking: "medium" });
+
+  if (local) servoskullCandidates.push({ id: local.id, provider: "local", source: "local", weight: inferWeightFromModel(local), maxThinking: "off" });
+  if (openaiHaiku) servoskullCandidates.push({ id: openaiHaiku.id, provider: "openai", source: "upstream", weight: "light", maxThinking: "off" });
+
+  return {
+    roles: {
+      archmagos: { candidates: archmagosCandidates },
+      magos: { candidates: magosCandidates },
+      adept: { candidates: adeptCandidates },
+      servitor: { candidates: servitorCandidates },
+      servoskull: { candidates: servoskullCandidates },
+    },
+    internalAliases: {
+      opus: "archmagos",
+      sonnet: "magos",
+      haiku: "adept",
+      local: "servitor",
+      review: "archmagos",
+      planning: "archmagos",
+      compaction: "servitor",
+      extraction: "servitor",
+      "cleave.leaf": "adept",
+      summary: "servoskull",
+      background: "servoskull",
+    },
+    policy: {
+      sameRoleCrossProvider: "allow",
+      crossSource: "ask",
+      heavyLocal: "ask",
+      unknownLocalPerformance: "ask",
+    },
+  };
+}
+
+export function resolveCapabilityRole(
+  requestedRole: CapabilityRole | string,
+  models: RegistryModel[],
+  policy: ProviderRoutingPolicy,
+  profile: CapabilityProfile = getDefaultCapabilityProfile(models),
+  runtimeState?: CapabilityRuntimeState,
+  now: number = Date.now(),
+): RoleResolution {
+  const role = (profile.internalAliases[requestedRole] ?? requestedRole) as CapabilityRole;
+  const roleProfile = profile.roles[role];
+  if (!roleProfile) {
+    return {
+      ok: false,
+      role: "servitor",
+      blockedBy: "denied",
+      reason: `Unknown capability role: ${requestedRole}`,
+    };
+  }
+
+  const orderedCandidates = applyProviderPolicyOrder(roleProfile.candidates, policy);
+  const firstCandidate = orderedCandidates[0];
+
+  for (const candidate of orderedCandidates) {
+    if (!registryHasCandidate(candidate, models)) continue;
+    if (isCandidateCooledDown(candidate, runtimeState, now)) continue;
+
+    const fallback = fallbackDispositionForCandidate(firstCandidate, candidate, profile.policy);
+    if (fallback.disposition === "deny") {
+      return {
+        ok: false,
+        role,
+        blockedBy: fallback.blockedBy ?? "denied",
+        reason: explainBlockedResolution(role, candidate, fallback.blockedBy ?? "denied", fallback.disposition),
+      };
+    }
+    if (fallback.disposition === "ask") {
+      return {
+        ok: false,
+        role,
+        blockedBy: fallback.blockedBy ?? "denied",
+        requiresConfirmation: true,
+        reason: explainBlockedResolution(role, candidate, fallback.blockedBy ?? "denied", fallback.disposition),
+      };
+    }
+
+    return {
+      ok: true,
+      role,
+      selected: { role, candidate },
+    };
+  }
+
+  return {
+    ok: false,
+    role,
+    blockedBy: "denied",
+    reason: `No viable candidate available for ${getRoleDisplayLabel(role)}.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Core compatibility resolver
+// ---------------------------------------------------------------------------
 
 /**
- * Get the operator-facing display label for an abstract tier.
- *
- * local   → Servitor
- * haiku   → Adept
- * sonnet  → Magos
- * opus    → Archmagos
+ * Resolve an abstract tier to a concrete {provider, modelId} using the
+ * session routing policy and the available model registry.
  */
+export function resolveTier(
+  tier: ModelTier,
+  models: RegistryModel[],
+  policy: ProviderRoutingPolicy,
+  runtimeState?: CapabilityRuntimeState,
+  profile?: CapabilityProfile,
+): ResolvedTierModel | undefined {
+  if (tier === "local") {
+    const local = matchLocalTier(models);
+    if (!local) return undefined;
+    return { tier, provider: "local", modelId: local.id, maxThinking: "high" };
+  }
+
+  const resolution = resolveCapabilityRole(
+    ROLE_COMPATIBILITY_MAP[tier],
+    models,
+    policy,
+    profile ?? getDefaultCapabilityProfile(models),
+    runtimeState,
+  );
+  if (!resolution.ok || !resolution.selected) return undefined;
+  return {
+    tier,
+    provider: resolution.selected.candidate.provider,
+    modelId: resolution.selected.candidate.id,
+    maxThinking: resolution.selected.candidate.maxThinking,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Display labels + defaults
+// ---------------------------------------------------------------------------
+
 export function getTierDisplayLabel(tier: ModelTier): string {
   return TIER_DISPLAY_LABELS[tier];
 }
 
-// ---------------------------------------------------------------------------
-// Default policy
-// ---------------------------------------------------------------------------
+export function getRoleDisplayLabel(role: CapabilityRole): string {
+  return ROLE_DISPLAY_LABELS[role];
+}
 
-/**
- * Sensible defaults for a fresh session:
- * - Try Anthropic first (typical paid-subscription setup), then OpenAI, then local
- * - Avoid nothing by default
- * - Do not prefer cheap cloud over local (operator can opt-in)
- * - Require preflight for large runs
- */
 export function getDefaultPolicy(): ProviderRoutingPolicy {
   return {
     providerOrder: ["anthropic", "openai", "local"],

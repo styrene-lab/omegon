@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { buildSetModelTierDescription, buildTierCommandDescription } from "./model-budget.ts";
+import { clampThinkingLevel } from "./lib/model-routing.ts";
 
 describe("model-budget copy", () => {
   it("describes set_model_tier as provider-aware", () => {
@@ -21,5 +22,9 @@ describe("model-budget copy", () => {
     const description = buildTierCommandDescription("opus");
     assert.match(description, /Archmagos \[opus\]/);
     assert.match(description, /deep reasoning tier/i);
+  });
+
+  it("can clamp thinking to a selected candidate ceiling", () => {
+    assert.equal(clampThinkingLevel("high", "medium"), "medium");
   });
 });
