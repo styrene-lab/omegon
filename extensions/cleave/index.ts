@@ -421,6 +421,22 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 						return;
 					}
 
+					let postAssessInstruction: string[] = [];
+					const activeOpenSpec = getActiveChangesStatus(ctx.cwd)
+						.filter((s) => s.totalTasks > 0)
+						.sort((a, b) => b.lastModifiedMs - a.lastModifiedMs);
+					if (activeOpenSpec.length > 0) {
+						const targetChange = activeOpenSpec[0].name;
+						postAssessInstruction = [
+							"",
+							`After review/fixes/tests, call \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${targetChange}\`, assessment_kind \`cleave\`, and outcome:`,
+							"- `pass` if all Critical/Warning work is resolved cleanly",
+							"- `reopen` if remaining work or follow-up fixes reopen implementation",
+							"- `ambiguous` if you cannot safely map reviewer findings back to task state",
+							"Include `changed_files` for any follow-up fix files and `constraints` for new implementation constraints discovered during review.",
+						];
+					}
+
 					pi.sendMessage({
 						customType: "view",
 						content: [
@@ -497,6 +513,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 							"",
 							"After all fixes, run the test suite to verify nothing broke.",
 							"Then commit with a conventional commit message summarizing all fixes.",
+							...postAssessInstruction,
 						].join("\n"),
 						{ deliverAs: "followUp" },
 					);
@@ -744,6 +761,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 							"3. Summarize with a count: N/M scenarios passing",
 							"4. For any FAIL items, explain what's wrong and suggest fixes",
 							"5. Do NOT auto-fix — this is assessment only",
+							`6. After the assessment, if the result reopens work or reveals new constraints/file-scope drift, call \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${target.name}\`, assessment_kind \`spec\`, and outcome \`reopen\` or \`ambiguous\` as appropriate. If all scenarios pass cleanly, call it with outcome \`pass\` to refresh lifecycle state.`,
 							...(diffContent ? [
 								"",
 								"### Recent Changes (for context)",
