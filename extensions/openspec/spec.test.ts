@@ -29,6 +29,8 @@ import {
 	validateDomain,
 	getAssessmentStatus,
 	resolveVerificationStatus,
+	resolveLifecycleSummary,
+	type LifecycleSummary,
 } from "./spec.ts";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -797,5 +799,135 @@ describe("assessment artifacts", () => {
 		});
 		assert.equal(ready.substate, "archive-ready");
 		assert.match(ready.nextAction ?? "", /\/opsx:archive my-change/);
+	});
+});
+
+// ─── Canonical Lifecycle Resolver ────────────────────────────────────────────
+
+describe("lifecycle/resolver", () => {
+	it("resolver computes shared lifecycle summary for a change", async () => {
+		const { computeAssessmentSnapshot, writeAssessmentRecord } = await import("./spec.ts");
+		const tmpDir = makeTmpDir();
+		try {
+			// Set up a change with tasks and specs
+			const changePath = path.join(tmpDir, "openspec", "changes", "my-feature");
+			fs.mkdirSync(changePath, { recursive: true });
+			fs.writeFileSync(path.join(changePath, "proposal.md"), "# My Feature\n");
+			fs.mkdirSync(path.join(changePath, "specs"), { recursive: true });
+			fs.writeFileSync(path.join(changePath, "specs", "spec.md"), SAMPLE_SPEC);
+			// All tasks done → stage = verifying
+			fs.writeFileSync(path.join(changePath, "tasks.md"), "- [x] task 1\n- [x] task 2\n");
+			// Scoped path for snapshot
+			fs.mkdirSync(path.join(tmpDir, "src"), { recursive: true });
+			fs.writeFileSync(path.join(tmpDir, "src", "feature.ts"), "export const x = 1;\n");
+
+			const snapshot = computeAssessmentSnapshot(tmpDir, "my-feature");
+			assert.ok(snapshot, "snapshot should be computable");
+			writeAssessmentRecord(tmpDir, "my-feature", {
+				changeName: "my-feature",
+				assessmentKind: "spec",
+				outcome: "pass",
+				timestamp: new Date().toISOString(),
+				snapshot: snapshot!,
+				reconciliation: { reopen: false, changedFiles: [], constraints: [], recommendedAction: null },
+			});
+
+			const assessment = getAssessmentStatus(tmpDir, "my-feature");
+			const summary: LifecycleSummary = resolveLifecycleSummary({
+				change: { name: "my-feature", stage: "verifying", totalTasks: 2, doneTasks: 2 },
+				record: assessment.record,
+				freshness: assessment.freshness,
+				archiveBlocked: false,
+				archiveBlockedReason: null,
+				archiveBlockedIssueCodes: [],
+			});
+
+			// All required fields present
+			assert.equal(typeof summary.stage, "string", "stage must be present");
+			assert.equal(typeof summary.archiveReady, "boolean", "archiveReady must be present");
+			assert.equal(typeof summary.bindingStatus, "string", "bindingStatus must be present");
+			assert.equal(summary.bindingStatus, "unknown", "bindingStatus is unknown when no missing_design_binding issue code is present");
+			assert.equal(typeof summary.totalTasks, "number", "totalTasks must be present");
+			assert.equal(typeof summary.doneTasks, "number", "doneTasks must be present");
+			assert.ok(summary.assessmentFreshness !== undefined, "assessmentFreshness must be present");
+
+			// Field values
+			assert.equal(summary.stage, "verifying");
+			assert.equal(summary.totalTasks, 2);
+			assert.equal(summary.doneTasks, 2);
+			assert.equal(summary.archiveReady, true);
+			assert.equal(summary.verificationSubstate, "archive-ready");
+		} finally {
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+
+	it("resolver preserves existing coarse stage semantics", () => {
+		// task-complete change with a concrete verification substate
+		const summary: LifecycleSummary = resolveLifecycleSummary({
+			change: { name: "test-change", stage: "verifying", totalTasks: 5, doneTasks: 5 },
+			record: null,
+			freshness: null,
+			archiveBlocked: false,
+			archiveBlockedReason: null,
+			archiveBlockedIssueCodes: [],
+		});
+
+		// Coarse stage must remain 'verifying'
+		assert.equal(summary.stage, "verifying", "coarse stage must be 'verifying'");
+		// Fine-grained substate attached without changing the stage
+		assert.ok(summary.verificationSubstate !== null, "verificationSubstate must be non-null in verifying stage");
+		assert.equal(summary.verificationSubstate, "missing-assessment", "no record → missing-assessment substate");
+	});
+
+	it("resolver returns null substate for non-verifying stages", () => {
+		for (const stage of ["proposed", "specified", "planned", "implementing"] as const) {
+			const summary = resolveLifecycleSummary({
+				change: { name: "x", stage, totalTasks: 0, doneTasks: 0 },
+				record: null,
+				freshness: null,
+				archiveBlocked: false,
+				archiveBlockedReason: null,
+				archiveBlockedIssueCodes: [],
+			});
+			assert.equal(summary.stage, stage);
+			assert.equal(summary.verificationSubstate, null, `substate must be null for stage '${stage}'`);
+			assert.equal(summary.archiveReady, false, `archiveReady must be false for stage '${stage}'`);
+		}
+	});
+
+	it("resolver reflects missing-binding when design binding is absent", () => {
+		const summary = resolveLifecycleSummary({
+			change: { name: "unbound-change", stage: "verifying", totalTasks: 3, doneTasks: 3 },
+			record: null,
+			freshness: null,
+			archiveBlocked: true,
+			archiveBlockedReason: "No design-tree binding found",
+			archiveBlockedIssueCodes: ["missing_design_binding"],
+		});
+
+		assert.equal(summary.stage, "verifying");
+		assert.equal(summary.bindingStatus, "unbound");
+		assert.equal(summary.archiveReady, false);
+	});
+
+	it("resolver surfaces assessment freshness from input", () => {
+		const freshness = { current: false, reasons: ["source file changed"] };
+		const summary = resolveLifecycleSummary({
+			change: { name: "stale-change", stage: "verifying", totalTasks: 1, doneTasks: 1 },
+			record: { schemaVersion: 1, changeName: "stale-change", assessmentKind: "spec", outcome: "pass",
+				timestamp: "2026-01-01T00:00:00.000Z",
+				snapshot: { gitHead: null, fingerprint: "abc", dirty: false, scopedPaths: [], files: [] },
+				reconciliation: { reopen: false, changedFiles: [], constraints: [], recommendedAction: null },
+			},
+			freshness,
+			archiveBlocked: false,
+			archiveBlockedReason: null,
+			archiveBlockedIssueCodes: [],
+		});
+
+		assert.deepEqual(summary.assessmentFreshness, freshness);
+		assert.equal(summary.verificationSubstate, "stale-assessment");
+		assert.equal(summary.archiveReady, false);
 	});
 });
