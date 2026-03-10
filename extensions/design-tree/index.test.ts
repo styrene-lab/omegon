@@ -78,14 +78,25 @@ describe("design-tree lifecycle metadata", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
+	interface NodeLifecycle {
+		boundToOpenSpec: boolean;
+		bindingStatus: "bound" | "unbound" | "unknown";
+		implementationPhase?: boolean;
+		archiveReady: boolean | null;
+		nextAction: string | null;
+		reopenSignalTarget?: string;
+		openspecStage?: string | null;
+		verificationSubstate?: string | null;
+	}
+
 	async function runTool(params: Record<string, unknown>) {
 		const tool = pi.tools.find((entry) => entry.name === "design_tree");
 		assert.ok(tool, "missing design_tree tool");
 		const result = await tool.execute("tool-1", params, {} as never, () => {}, { cwd: tmpDir });
 		return result as {
 			details: {
-				nodes: Array<{ lifecycle: { boundToOpenSpec: boolean } }>;
-				node: { lifecycle: { boundToOpenSpec: boolean; reopenSignalTarget: string } };
+				nodes: Array<{ lifecycle: NodeLifecycle }>;
+				node: { lifecycle: NodeLifecycle };
 			};
 		};
 	}
@@ -97,5 +108,67 @@ describe("design-tree lifecycle metadata", () => {
 		const nodeResult = await runTool({ action: "node", node_id: "my-change" });
 		assert.equal(nodeResult.details.node.lifecycle.boundToOpenSpec, true);
 		assert.equal(nodeResult.details.node.lifecycle.reopenSignalTarget, "my-change");
+	});
+
+	it("list action exposes canonical bindingStatus from lifecycle resolver", async () => {
+		const listResult = await runTool({ action: "list" });
+		const node = listResult.details.nodes[0];
+		// boundToOpenSpec should remain true (backward-compat)
+		assert.equal(node.lifecycle.boundToOpenSpec, true);
+		// bindingStatus should be the normalized string form
+		assert.ok(
+			["bound", "unbound", "unknown"].includes(node.lifecycle.bindingStatus),
+			`bindingStatus must be canonical, got: ${node.lifecycle.bindingStatus}`,
+		);
+		// archiveReady and nextAction fields must be present (may be null for a proposal-only change)
+		assert.ok("archiveReady" in node.lifecycle, "archiveReady must be present in list lifecycle");
+		assert.ok("nextAction" in node.lifecycle, "nextAction must be present in list lifecycle");
+	});
+
+	it("node action exposes full canonical lifecycle fields", async () => {
+		const nodeResult = await runTool({ action: "node", node_id: "my-change" });
+		const lc = nodeResult.details.node.lifecycle;
+
+		// Backward-compat fields preserved
+		assert.equal(lc.boundToOpenSpec, true);
+		assert.equal(lc.reopenSignalTarget, "my-change");
+
+		// Canonical fields from resolveLifecycleSummary
+		assert.ok(
+			["bound", "unbound", "unknown"].includes(lc.bindingStatus),
+			`bindingStatus must be canonical, got: ${lc.bindingStatus}`,
+		);
+		assert.ok("archiveReady" in lc, "archiveReady must be present");
+		assert.ok("verificationSubstate" in lc, "verificationSubstate must be present");
+		assert.ok("nextAction" in lc, "nextAction must be present");
+		assert.ok("openspecStage" in lc, "openspecStage must be present");
+	});
+
+	it("unbound node reports unbound bindingStatus without lifecycle summary", async () => {
+		// Create a node that has no matching openspec change directory
+		const docsDir = path.join(tmpDir, "docs");
+		const node: DesignNode = {
+			id: "orphan-node",
+			title: "Orphan",
+			status: "decided",
+			dependencies: [],
+			related: [],
+			tags: [],
+			open_questions: [],
+			branches: [],
+			filePath: path.join(docsDir, "orphan-node.md"),
+			lastModified: Date.now(),
+		};
+		const { generateFrontmatter } = await import("./tree.ts");
+		const content = `${generateFrontmatter(node)}\n# Orphan\n\n## Overview\n\nNo openspec change.\n`;
+		fs.writeFileSync(node.filePath, content);
+
+		const nodeResult = await runTool({ action: "node", node_id: "orphan-node" });
+		const lc = nodeResult.details.node.lifecycle;
+		assert.equal(lc.boundToOpenSpec, false, "orphan should not be bound");
+		assert.equal(lc.bindingStatus, "unbound", "orphan bindingStatus should be 'unbound'");
+		assert.equal(lc.archiveReady, null, "archiveReady should be null when no lifecycle summary");
+		assert.equal(lc.verificationSubstate, null, "verificationSubstate should be null when no lifecycle summary");
+		assert.equal(lc.nextAction, null, "nextAction should be null when no lifecycle summary");
 	});
 });

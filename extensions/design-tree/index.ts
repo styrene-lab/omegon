@@ -30,6 +30,9 @@ import { sharedState } from "../shared-state.ts";
 import { emitDesignTreeState } from "./dashboard-state.ts";
 import { emitConstraintCandidates, emitDecisionCandidates } from "./lifecycle-emitter.ts";
 import { resolveNodeOpenSpecBinding } from "../openspec/archive-gate.ts";
+import { resolveLifecycleSummary, getAssessmentStatus, getChange } from "../openspec/spec.ts";
+import { evaluateLifecycleReconciliation } from "../openspec/reconcile.ts";
+import type { LifecycleSummary } from "../openspec/spec.ts";
 
 import type { DesignNode, DesignTree, NodeStatus } from "./types.ts";
 import { VALID_STATUSES, STATUS_ICONS, STATUS_COLORS } from "./types.ts";
@@ -110,6 +113,45 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 			});
 		} catch {
 			// Best effort only — unsupported platforms simply fall back to command/tool-driven emits.
+		}
+	}
+
+	// ─── Canonical lifecycle summary helper ──────────────────────────────
+
+	/**
+	 * Compute a normalized LifecycleSummary for a design node when it is bound
+	 * to an OpenSpec change. Returns null when the node has no binding.
+	 *
+	 * Routes through resolveLifecycleSummary so all callers share a single
+	 * lifecycle truth rather than deriving stage/binding/readiness independently.
+	 */
+	function resolveNodeLifecycleSummary(cwd: string, node: DesignNode): LifecycleSummary | null {
+		const binding = resolveNodeOpenSpecBinding(cwd, node);
+		if (!binding.bound || !binding.changeName) return null;
+
+		try {
+			const assessment = getAssessmentStatus(cwd, binding.changeName);
+			const reconciliation = evaluateLifecycleReconciliation(cwd, binding.changeName);
+			const archiveBlocked = reconciliation.issues.length > 0;
+			const archiveBlockedReason = archiveBlocked
+				? reconciliation.issues.map((i) => i.message).join("; ")
+				: null;
+			const archiveBlockedIssueCodes = reconciliation.issues.map((i) => i.code);
+
+			const change = getChange(cwd, binding.changeName);
+			if (!change) return null;
+
+			return resolveLifecycleSummary({
+				change,
+				record: assessment.record,
+				freshness: assessment.freshness,
+				archiveBlocked,
+				archiveBlockedReason,
+				archiveBlockedIssueCodes,
+			});
+		} catch {
+			// Non-fatal — return null if OpenSpec data is unavailable
+			return null;
 		}
 	}
 
@@ -210,6 +252,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 				case "list": {
 					const nodes = Array.from(tree.nodes.values()).map((n) => {
 						const binding = resolveNodeOpenSpecBinding(ctx.cwd, n);
+						const lifecycleSummary = resolveNodeLifecycleSummary(ctx.cwd, n);
 						return {
 							id: n.id,
 							title: n.title,
@@ -221,8 +264,13 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 							branches: n.branches,
 							openspec_change: n.openspec_change ?? null,
 							lifecycle: {
+								// Normalized binding status from canonical resolver when available;
+								// falls back to boolean from archive-gate for unbound nodes.
 								boundToOpenSpec: binding.bound,
+								bindingStatus: lifecycleSummary?.bindingStatus ?? (binding.bound ? "bound" : "unbound"),
 								implementationPhase: n.status === "implementing" || n.status === "implemented",
+								archiveReady: lifecycleSummary?.archiveReady ?? null,
+								nextAction: lifecycleSummary?.nextAction ?? null,
 							},
 						};
 					});
@@ -244,6 +292,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					const children = getChildren(tree, node.id).map((c) => ({ id: c.id, title: c.title, status: c.status }));
 
 					const binding = resolveNodeOpenSpecBinding(ctx.cwd, node);
+					const lifecycleSummary = resolveNodeLifecycleSummary(ctx.cwd, node);
 					const result = {
 						id: node.id,
 						title: node.title,
@@ -267,10 +316,18 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 							extraSections: sections.extraSections.map((s) => s.heading),
 						},
 						lifecycle: {
+							// Backward-compatible boolean for existing callers
 							boundToOpenSpec: binding.bound,
+							// Normalized binding status from canonical resolver
+							bindingStatus: lifecycleSummary?.bindingStatus ?? (binding.bound ? "bound" : "unbound"),
 							canImplement: node.status === "decided",
 							isImplementationPhase: node.status === "implementing" || node.status === "implemented",
 							reopenSignalTarget: binding.changeName ?? node.openspec_change ?? node.id,
+							// Canonical lifecycle fields from resolveLifecycleSummary when available
+							archiveReady: lifecycleSummary?.archiveReady ?? null,
+							verificationSubstate: lifecycleSummary?.verificationSubstate ?? null,
+							nextAction: lifecycleSummary?.nextAction ?? null,
+							openspecStage: lifecycleSummary?.stage ?? null,
 							implementationNoteCounts: {
 								fileScope: sections.implementationNotes.fileScope.length,
 								constraints: sections.implementationNotes.constraints.length,
