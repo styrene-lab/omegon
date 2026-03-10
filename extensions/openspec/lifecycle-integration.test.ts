@@ -128,27 +128,25 @@ describe("openspec lifecycle integration", () => {
     return { notifications, sentMessages: pi.sentMessages };
   }
 
+  async function runTool(params: Record<string, unknown>, cwd = tmpDir) {
+    const tool = pi.tools.find((entry: any) => entry.name === "openspec_manage");
+    assert.ok(tool, "missing openspec_manage tool");
+    return await tool.execute("tool-1", params, {} as any, () => {}, { cwd });
+  }
+
   async function persistAssessment(
     outcome: "pass" | "reopen" | "ambiguous",
     options?: { cwd?: string; summary?: string; changedFiles?: string[]; constraints?: string[] },
   ) {
-    const tool = pi.tools.find((entry: any) => entry.name === "openspec_manage");
-    assert.ok(tool, "missing openspec_manage tool");
-    return await tool.execute(
-      "tool-1",
-      {
-        action: "reconcile_after_assess",
-        change_name: "my-change",
-        assessment_kind: "spec",
-        outcome,
-        summary: options?.summary,
-        changed_files: options?.changedFiles,
-        constraints: options?.constraints,
-      },
-      {} as any,
-      () => {},
-      { cwd: options?.cwd ?? tmpDir },
-    );
+    return await runTool({
+      action: "reconcile_after_assess",
+      change_name: "my-change",
+      assessment_kind: "spec",
+      outcome,
+      summary: options?.summary,
+      changed_files: options?.changedFiles,
+      constraints: options?.constraints,
+    }, options?.cwd ?? tmpDir);
   }
 
   it("reuses current persisted assessment during /opsx:verify", async () => {
@@ -160,6 +158,29 @@ describe("openspec lifecycle integration", () => {
     assert.match(result.notifications[0].text, /Verification state for 'my-change' is current/);
     assert.match(result.notifications[0].text, /Outcome: pass/);
     assert.equal(result.notifications[0].level, "info");
+  });
+
+  it("surfaces verification substates in lifecycle status and get output", async () => {
+    let status = await runTool({ action: "status" });
+    const missingText = status.content[0].text as string;
+    assert.match(missingText, /\(verifying\)/);
+    assert.match(missingText, /Verification: missing-assessment/);
+    assert.match(missingText, /Next: \/assess spec my-change/);
+    assert.equal(status.details.changes[0].verificationSubstate, "missing-assessment");
+
+    await persistAssessment("pass");
+    status = await runTool({ action: "status" });
+    const readyText = status.content[0].text as string;
+    assert.match(readyText, /Verification: archive-ready/);
+    assert.match(readyText, /Next: \/opsx:archive my-change/);
+    assert.equal(status.details.changes[0].stage, "verifying");
+    assert.equal(status.details.changes[0].verificationStage, "verifying");
+    assert.equal(status.details.changes[0].verificationSubstate, "archive-ready");
+
+    const getResult = await runTool({ action: "get", change_name: "my-change" });
+    const getText = getResult.content[0].text as string;
+    assert.match(getText, /\*\*Verification substate:\*\* archive-ready/);
+    assert.match(getText, /Next: \/opsx:archive my-change/);
   });
 
   it("requests refreshed assessment during /opsx:verify when persisted state is stale", async () => {

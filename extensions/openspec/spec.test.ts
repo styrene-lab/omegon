@@ -27,6 +27,8 @@ import {
 	summarizeSpecs,
 	validateChangeName,
 	validateDomain,
+	getAssessmentStatus,
+	resolveVerificationStatus,
 } from "./spec.ts";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -669,7 +671,7 @@ describe("assessment artifacts", () => {
 	});
 
 	it("reports current vs stale snapshot freshness", async () => {
-		const { computeAssessmentSnapshot, writeAssessmentRecord, getAssessmentStatus } = await import("./spec.ts");
+		const { computeAssessmentSnapshot, writeAssessmentRecord } = await import("./spec.ts");
 		const snapshot = computeAssessmentSnapshot(tmpDir, "my-change");
 		assert.ok(snapshot);
 		writeAssessmentRecord(tmpDir, "my-change", {
@@ -694,5 +696,94 @@ describe("assessment artifacts", () => {
 		const stale = getAssessmentStatus(tmpDir, "my-change");
 		assert.equal(stale.freshness.current, false);
 		assert.match(stale.freshness.reasons.join("\n"), /fingerprint differs/i);
+	});
+
+	it("classifies verification substates while preserving coarse verifying stage", async () => {
+		const { computeAssessmentSnapshot, writeAssessmentRecord } = await import("./spec.ts");
+		const missing = resolveVerificationStatus({
+			stage: "verifying",
+			record: null,
+			freshness: { current: false, reasons: ["Missing assessment record"] },
+			changeName: "my-change",
+		});
+		assert.equal(missing.coarseStage, "verifying");
+		assert.equal(missing.substate, "missing-assessment");
+		assert.match(missing.nextAction ?? "", /\/assess spec my-change/);
+
+		const snapshot = computeAssessmentSnapshot(tmpDir, "my-change");
+		assert.ok(snapshot);
+		writeAssessmentRecord(tmpDir, "my-change", {
+			changeName: "my-change",
+			assessmentKind: "spec",
+			outcome: "reopen",
+			timestamp: "2026-03-09T12:00:00.000Z",
+			summary: "Follow-up work remains",
+			snapshot,
+			reconciliation: {
+				reopen: true,
+				changedFiles: [],
+				constraints: [],
+				recommendedAction: "Run openspec_manage reconcile_after_assess before archive.",
+			},
+		});
+		const reopenedRecord = getAssessmentStatus(tmpDir, "my-change").record;
+		assert.ok(reopenedRecord);
+		const reopened = resolveVerificationStatus({
+			stage: "verifying",
+			record: reopenedRecord,
+			freshness: { current: false, reasons: ["Assessment outcome is 'reopen', not 'pass'"] },
+			changeName: "my-change",
+		});
+		assert.equal(reopened.substate, "reopened-work");
+
+		writeAssessmentRecord(tmpDir, "my-change", {
+			changeName: "my-change",
+			assessmentKind: "spec",
+			outcome: "pass",
+			timestamp: "2026-03-09T12:05:00.000Z",
+			snapshot,
+			reconciliation: {
+				reopen: false,
+				changedFiles: [],
+				constraints: [],
+				recommendedAction: null,
+			},
+		});
+		fs.appendFileSync(path.join(tmpDir, "src", "demo.ts"), "export const demo3 = 3;\n");
+		const staleAssessment = getAssessmentStatus(tmpDir, "my-change");
+		const stale = resolveVerificationStatus({
+			stage: "verifying",
+			record: staleAssessment.record,
+			freshness: staleAssessment.freshness,
+			changeName: "my-change",
+		});
+		assert.equal(stale.substate, "stale-assessment");
+		assert.match(stale.nextAction ?? "", /current implementation snapshot/i);
+
+		const readySnapshot = computeAssessmentSnapshot(tmpDir, "my-change");
+		assert.ok(readySnapshot);
+		writeAssessmentRecord(tmpDir, "my-change", {
+			changeName: "my-change",
+			assessmentKind: "spec",
+			outcome: "pass",
+			timestamp: "2026-03-09T12:10:00.000Z",
+			snapshot: readySnapshot,
+			reconciliation: {
+				reopen: false,
+				changedFiles: [],
+				constraints: [],
+				recommendedAction: null,
+			},
+		});
+		const readyAssessment = getAssessmentStatus(tmpDir, "my-change");
+		const ready = resolveVerificationStatus({
+			stage: "verifying",
+			record: readyAssessment.record,
+			freshness: readyAssessment.freshness,
+			archiveBlocked: false,
+			changeName: "my-change",
+		});
+		assert.equal(ready.substate, "archive-ready");
+		assert.match(ready.nextAction ?? "", /\/opsx:archive my-change/);
 	});
 });

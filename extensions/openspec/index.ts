@@ -39,6 +39,15 @@ import {
 	countScenarios,
 	summarizeSpecs,
 	generateSpecFile,
+	computeAssessmentSnapshot,
+	readAssessmentRecord,
+	writeAssessmentRecord,
+	getAssessmentStatus,
+	resolveVerificationStatus,
+	type AssessmentKind,
+	type AssessmentOutcome,
+	type AssessmentRecord,
+	type VerificationStatus,
 } from "./spec.ts";
 import { transitionDesignNodesOnArchive } from "./archive-gate.ts";
 import { emitOpenSpecState } from "./dashboard-state.ts";
@@ -52,29 +61,8 @@ import { emitDesignTreeState } from "../design-tree/dashboard-state.ts";
 import { emitArchiveCandidates, emitReconcileCandidates } from "./lifecycle-emitter.ts";
 import { sharedState } from "../shared-state.ts";
 
-interface AssessmentSnapshot {
-	gitHead: string | null;
-	fingerprint: string;
-}
-
-interface PersistedAssessmentRecord {
-	changeName: string;
-	assessmentKind: "spec" | "cleave";
-	outcome: "pass" | "reopen" | "ambiguous";
-	timestamp: string;
-	summary?: string;
-	snapshot: AssessmentSnapshot;
-	reconciliation: {
-		reopen: boolean;
-		changedFiles: string[];
-		constraints: string[];
-		recommendedAction: "reconcile_after_assess" | null;
-	};
-}
-
 interface AssessmentState {
-	record: PersistedAssessmentRecord | null;
-	currentSnapshot: AssessmentSnapshot | null;
+	record: AssessmentRecord | null;
 	status: "missing" | "current" | "stale";
 	reason: string;
 }
@@ -197,101 +185,24 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 		}
 	}
 
-	function getAssessmentPath(changePath: string): string {
-		return path.join(changePath, "assessment.json");
-	}
-
-	function stableJson(value: unknown): string {
-		return JSON.stringify(value, null, 2) + "\n";
-	}
-
-	async function readGitHead(cwd: string): Promise<string | null> {
-		try {
-			const result = await pi.exec("git", ["rev-parse", "--short", "HEAD"], { cwd, timeout: 5_000 });
-			return result.code === 0 ? result.stdout.trim() || null : null;
-		} catch {
-			return null;
-		}
-	}
-
-	function collectSnapshotFingerprint(changePath: string): string {
-		const targets = ["design.md", "tasks.md", "proposal.md", "specs"];
-		const stamps: string[] = [];
-		const walk = (basePath: string): void => {
-			for (const entry of fs.readdirSync(basePath, { withFileTypes: true })) {
-				const entryPath = path.join(basePath, entry.name);
-				if (entry.isDirectory()) {
-					walk(entryPath);
-					continue;
-				}
-				if (!entry.isFile()) continue;
-				const entryStat = fs.statSync(entryPath);
-				stamps.push(`${path.relative(changePath, entryPath)}:${entryStat.mtimeMs}`);
-			}
-		};
-		for (const target of targets) {
-			const targetPath = path.join(changePath, target);
-			if (!fs.existsSync(targetPath)) continue;
-			const stat = fs.statSync(targetPath);
-			if (stat.isDirectory()) {
-				walk(targetPath);
-				continue;
-			}
-			stamps.push(`${target}:${stat.mtimeMs}`);
-		}
-		return stamps.sort().join("|");
-	}
-
-	async function computeAssessmentSnapshot(changePath: string, cwd: string): Promise<AssessmentSnapshot> {
-		return {
-			gitHead: await readGitHead(cwd),
-			fingerprint: collectSnapshotFingerprint(changePath),
-		};
-	}
-
-	function readAssessmentRecord(changePath: string): PersistedAssessmentRecord | null {
-		const assessmentPath = getAssessmentPath(changePath);
-		if (!fs.existsSync(assessmentPath)) return null;
-		try {
-			const parsed = JSON.parse(fs.readFileSync(assessmentPath, "utf-8")) as PersistedAssessmentRecord;
-			return parsed.changeName && parsed.snapshot ? parsed : null;
-		} catch {
-			return null;
-		}
-	}
-
-	function writeAssessmentRecord(changePath: string, record: PersistedAssessmentRecord): string {
-		const assessmentPath = getAssessmentPath(changePath);
-		fs.writeFileSync(assessmentPath, stableJson(record), "utf-8");
-		return assessmentPath;
-	}
-
-	function snapshotsMatch(left: AssessmentSnapshot, right: AssessmentSnapshot): boolean {
-		return left.gitHead === right.gitHead && left.fingerprint === right.fingerprint;
-	}
-
 	async function getAssessmentState(cwd: string, change: ChangeInfo): Promise<AssessmentState> {
-		const record = readAssessmentRecord(change.path);
-		const currentSnapshot = await computeAssessmentSnapshot(change.path, cwd);
-		if (!record) {
+		const assessment = getAssessmentStatus(cwd, change.name);
+		if (!assessment.record) {
 			return {
 				record: null,
-				currentSnapshot,
 				status: "missing",
 				reason: "No persisted assessment record found for this change.",
 			};
 		}
-		if (!snapshotsMatch(record.snapshot, currentSnapshot)) {
+		if (!assessment.freshness.current) {
 			return {
-				record,
-				currentSnapshot,
+				record: assessment.record,
 				status: "stale",
 				reason: "The persisted assessment does not match the current implementation snapshot.",
 			};
 		}
 		return {
-			record,
-			currentSnapshot,
+			record: assessment.record,
 			status: "current",
 			reason: "The persisted assessment matches the current implementation snapshot.",
 		};
@@ -307,12 +218,6 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				message: `Archive refused for '${changeName}' because no persisted assessment record exists. Run /opsx:verify ${changeName} first.`,
 			};
 		}
-		if (state.status === "stale") {
-			return {
-				ok: false,
-				message: `Archive refused for '${changeName}' because the latest assessment is stale for the current implementation snapshot. Run /opsx:verify ${changeName} to refresh it.`,
-			};
-		}
 		if (state.record.outcome === "ambiguous") {
 			return {
 				ok: false,
@@ -325,10 +230,16 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				message: `Archive refused for '${changeName}' because the latest structured assessment reopened work. Finish the follow-up work, then verify again.`,
 			};
 		}
+		if (state.status === "stale") {
+			return {
+				ok: false,
+				message: `Archive refused for '${changeName}' because the latest assessment is stale for the current implementation snapshot. Run /opsx:verify ${changeName} to refresh it.`,
+			};
+		}
 		return { ok: true, message: "Assessment gate satisfied." };
 	}
 
-	function formatAssessmentSummary(record: PersistedAssessmentRecord): string[] {
+	function formatAssessmentSummary(record: AssessmentRecord): string[] {
 		return [
 			`Assessment kind: ${record.assessmentKind}`,
 			`Outcome: ${record.outcome}`,
@@ -337,6 +248,22 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			`Recommended action: ${record.reconciliation.recommendedAction ?? "none"}`,
 			...(record.summary ? [`Summary: ${record.summary}`] : []),
 		];
+	}
+
+	function getVerificationStatus(cwd: string, change: ChangeInfo): VerificationStatus {
+		const assessment = getAssessmentStatus(cwd, change.name);
+		const reconciliation = evaluateLifecycleReconciliation(cwd, change.name);
+		const archiveBlockedReason = reconciliation.issues.length > 0
+			? reconciliation.issues.map((issue) => issue.suggestedAction).join(" ")
+			: null;
+		return resolveVerificationStatus({
+			stage: change.stage,
+			record: assessment.record,
+			freshness: assessment.freshness,
+			archiveBlocked: reconciliation.issues.length > 0,
+			archiveBlockedReason,
+			changeName: change.name,
+		});
 	}
 
 	// ─── Tool: openspec_manage ───────────────────────────────────────
@@ -413,19 +340,32 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 					}
 
 					const lines = changes.map((c) => {
-						return `${formatChangeStatus(c)}\n  ${nextStepHint(c)}`;
+						const verification = getVerificationStatus(cwd, c);
+						const verificationLine = verification.substate
+							? `\n  Verification: ${verification.substate}`
+							: "";
+						const nextLine = verification.nextAction
+							? `\n  Next: ${verification.nextAction}`
+							: `\n  ${nextStepHint(c)}`;
+						return `${formatChangeStatus(c)}${verificationLine}${nextLine}`;
 					});
 
 					return {
 						content: [{ type: "text", text: lines.join("\n\n") }],
 						details: {
-							changes: changes.map((c) => ({
-								name: c.name,
-								stage: c.stage,
-								totalTasks: c.totalTasks,
-								doneTasks: c.doneTasks,
-								specCount: countScenarios(c.specs),
-							})),
+							changes: changes.map((c) => {
+								const verification = getVerificationStatus(cwd, c);
+								return {
+									name: c.name,
+									stage: c.stage,
+									verificationStage: verification.coarseStage,
+									verificationSubstate: verification.substate,
+									nextAction: verification.nextAction,
+									totalTasks: c.totalTasks,
+									doneTasks: c.doneTasks,
+									specCount: countScenarios(c.specs),
+								};
+							}),
 						},
 					};
 				}
@@ -461,7 +401,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 						}
 					}
 
-					const assessmentRecord = readAssessmentRecord(change.path);
+					const assessmentRecord = readAssessmentRecord(cwd, change.name);
 					if (assessmentRecord) {
 						lines.push("", "**Assessment:**");
 						for (const line of formatAssessmentSummary(assessmentRecord)) {
@@ -469,7 +409,13 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 						}
 					}
 
-					lines.push("", nextStepHint(change));
+					const verification = getVerificationStatus(cwd, change);
+					if (verification.substate) {
+						lines.push("", `**Verification substate:** ${verification.substate}`);
+						if (verification.reason) lines.push(`**Why:** ${verification.reason}`);
+					}
+
+					lines.push("", verification.nextAction ? `Next: ${verification.nextAction}` : nextStepHint(change));
 
 					// Include proposal content if it exists
 					if (change.hasProposal) {
@@ -695,12 +641,12 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 						changedFiles: params.changed_files,
 						constraints: params.constraints,
 					});
-					const snapshot = change ? await computeAssessmentSnapshot(change.path, cwd) : null;
+					const snapshot = change ? computeAssessmentSnapshot(cwd, params.change_name) : null;
 					const assessmentPath = change && snapshot
-						? writeAssessmentRecord(change.path, {
+						? writeAssessmentRecord(cwd, params.change_name, {
 							changeName: params.change_name,
-							assessmentKind: params.assessment_kind,
-							outcome: params.outcome,
+							assessmentKind: params.assessment_kind as AssessmentKind,
+							outcome: params.outcome as AssessmentOutcome,
 							timestamp: new Date().toISOString(),
 							summary: params.summary,
 							snapshot,
@@ -708,7 +654,7 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 								reopen: params.outcome === "reopen",
 								changedFiles: params.changed_files ?? [],
 								constraints: params.constraints ?? [],
-								recommendedAction: params.outcome === "pass" ? null : "reconcile_after_assess",
+								recommendedAction: params.outcome === "pass" ? null : "Run openspec_manage reconcile_after_assess before archive.",
 							},
 						})
 						: null;
@@ -1021,7 +967,12 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				return;
 			}
 
-			const lines = changes.map((c) => `${formatChangeStatus(c)}\n  → ${nextStepHint(c)}`);
+			const lines = changes.map((c) => {
+				const verification = getVerificationStatus(ctx.cwd, c);
+				const verificationLine = verification.substate ? `\n  Verification: ${verification.substate}` : "";
+				const nextLine = verification.nextAction ? `\n  → ${verification.nextAction}` : `\n  → ${nextStepHint(c)}`;
+				return `${formatChangeStatus(c)}${verificationLine}${nextLine}`;
+			});
 			ctx.ui.notify(lines.join("\n\n"), "info");
 		},
 	});

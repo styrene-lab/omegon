@@ -63,6 +63,7 @@ export interface AssessmentRecord {
 	assessmentKind: AssessmentKind;
 	outcome: AssessmentOutcome;
 	timestamp: string;
+	summary?: string;
 	snapshot: AssessmentSnapshot;
 	reconciliation: AssessmentReconciliationHints;
 }
@@ -70,6 +71,20 @@ export interface AssessmentRecord {
 export interface AssessmentFreshness {
 	current: boolean;
 	reasons: string[];
+}
+
+export type VerificationSubstate =
+	| "missing-assessment"
+	| "stale-assessment"
+	| "reopened-work"
+	| "archive-ready"
+	| "awaiting-reconciliation";
+
+export interface VerificationStatus {
+	coarseStage: ChangeStage;
+	substate: VerificationSubstate | null;
+	nextAction: string | null;
+	reason: string | null;
 }
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -312,6 +327,7 @@ function normalizeAssessmentRecord(input: unknown): AssessmentRecord | null {
 		assessmentKind: candidate.assessmentKind,
 		outcome: candidate.outcome,
 		timestamp: candidate.timestamp,
+		...(typeof candidate.summary === "string" && candidate.summary.trim() ? { summary: candidate.summary.trim() } : {}),
 		snapshot,
 		reconciliation: normalizeReconciliation(candidate.reconciliation, candidate.outcome),
 	};
@@ -329,8 +345,9 @@ function safeReadGit(repoPath: string, args: readonly string[]): string | null {
 	}
 }
 
-function detectGitDirty(repoPath: string): boolean {
-	const output = safeReadGit(repoPath, ["status", "--short"]);
+function detectGitDirty(repoPath: string, scopedPaths: readonly string[]): boolean {
+	if (scopedPaths.length === 0) return false;
+	const output = safeReadGit(repoPath, ["status", "--short", "--", ...scopedPaths]);
 	return output !== null && output.length > 0;
 }
 
@@ -406,7 +423,7 @@ export function computeAssessmentSnapshot(repoPath: string, changeName: string):
 	])).sort();
 	const files = snapshotPaths.map((filePath) => buildSnapshotFile(repoPath, filePath));
 	const gitHead = safeReadGit(repoPath, ["rev-parse", "HEAD"]);
-	const dirty = detectGitDirty(repoPath);
+	const dirty = detectGitDirty(repoPath, snapshotPaths);
 
 	const fingerprintSeed = JSON.stringify({
 		changeName,
@@ -460,6 +477,7 @@ export function writeAssessmentRecord(
 		assessmentKind: record.assessmentKind,
 		outcome: record.outcome,
 		timestamp: record.timestamp,
+		...(record.summary ? { summary: record.summary } : {}),
 		snapshot: record.snapshot,
 		reconciliation: normalizeReconciliation(record.reconciliation, record.outcome),
 	};
@@ -514,6 +532,69 @@ export function getAssessmentStatus(repoPath: string, changeName: string): {
 		record,
 		snapshot,
 		freshness: evaluateAssessmentFreshness(record, snapshot),
+	};
+}
+
+export function resolveVerificationStatus(input: {
+	stage: ChangeStage;
+	record: AssessmentRecord | null;
+	freshness: AssessmentFreshness;
+	archiveBlocked?: boolean;
+	archiveBlockedReason?: string | null;
+	changeName: string;
+}): VerificationStatus {
+	if (input.stage !== "verifying") {
+		return {
+			coarseStage: input.stage,
+			substate: null,
+			nextAction: null,
+			reason: null,
+		};
+	}
+
+	if (!input.record) {
+		return {
+			coarseStage: input.stage,
+			substate: "missing-assessment",
+			nextAction: `/assess spec ${input.changeName}`,
+			reason: "No persisted assessment record exists for this task-complete change.",
+		};
+	}
+
+	if (input.record.outcome === "reopen" || input.record.reconciliation.reopen) {
+		return {
+			coarseStage: input.stage,
+			substate: "reopened-work",
+			nextAction: `Complete follow-up work for ${input.changeName}, reconcile lifecycle artifacts, then re-run /assess spec ${input.changeName}`,
+			reason: "The latest persisted assessment reopened work.",
+		};
+	}
+
+	if (!input.freshness.current || input.record.outcome === "ambiguous") {
+		return {
+			coarseStage: input.stage,
+			substate: "stale-assessment",
+			nextAction: `Refresh /assess spec ${input.changeName} for the current implementation snapshot`,
+			reason: input.record.outcome === "ambiguous"
+				? "The latest persisted assessment is ambiguous and must be refreshed before archive."
+				: input.freshness.reasons.join(" "),
+		};
+	}
+
+	if (input.archiveBlocked) {
+		return {
+			coarseStage: input.stage,
+			substate: "awaiting-reconciliation",
+			nextAction: input.archiveBlockedReason ?? `Reconcile lifecycle artifacts for ${input.changeName} before archive`,
+			reason: input.archiveBlockedReason ?? "Lifecycle reconciliation is still blocking archive.",
+		};
+		}
+
+	return {
+		coarseStage: input.stage,
+		substate: "archive-ready",
+		nextAction: `/opsx:archive ${input.changeName}`,
+		reason: "Assessment passed for the current snapshot and archive gates are clear.",
 	};
 }
 
