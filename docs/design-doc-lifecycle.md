@@ -1,7 +1,7 @@
 ---
 id: design-doc-lifecycle
 title: Design Doc Lifecycle — Closing the Loop from Exploration to Reference Documentation
-status: decided
+status: implemented
 tags: [documentation, design-tree, lifecycle, architecture, dx]
 open_questions: []
 ---
