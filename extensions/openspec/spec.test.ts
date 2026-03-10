@@ -776,6 +776,17 @@ describe("assessment artifacts", () => {
 			},
 		});
 		const readyAssessment = getAssessmentStatus(tmpDir, "my-change");
+		const awaitingReconciliation = resolveVerificationStatus({
+			stage: "verifying",
+			record: readyAssessment.record,
+			freshness: readyAssessment.freshness,
+			archiveBlocked: true,
+			archiveBlockedReason: "Bind the design node before archive",
+			changeName: "my-change",
+		});
+		assert.equal(awaitingReconciliation.substate, "awaiting-reconciliation");
+		assert.match(awaitingReconciliation.nextAction ?? "", /Bind the design node before archive/);
+
 		const ready = resolveVerificationStatus({
 			stage: "verifying",
 			record: readyAssessment.record,

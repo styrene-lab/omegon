@@ -149,13 +149,14 @@ describe("openspec lifecycle integration", () => {
     }, options?.cwd ?? tmpDir);
   }
 
-  it("reuses current persisted assessment during /opsx:verify", async () => {
+  it("surfaces archive-ready during /opsx:verify when assessment and lifecycle state are current", async () => {
     await persistAssessment("pass");
 
     const result = await runCommand("opsx:verify", "my-change");
     assert.equal(result.sentMessages.length, 0);
     assert.equal(result.notifications.length, 1);
-    assert.match(result.notifications[0].text, /Verification state for 'my-change' is current/);
+    assert.match(result.notifications[0].text, /Verification state for 'my-change': archive-ready/);
+    assert.match(result.notifications[0].text, /Next: \/opsx:archive my-change/);
     assert.match(result.notifications[0].text, /Outcome: pass/);
     assert.equal(result.notifications[0].level, "info");
   });
@@ -187,12 +188,44 @@ describe("openspec lifecycle integration", () => {
     await persistAssessment("pass");
 
     fs.appendFileSync(path.join(tmpDir, "openspec", "changes", "my-change", "tasks.md"), "- [x] 1.2 Still done\n");
+    pi.sentMessages.length = 0;
 
     const result = await runCommand("opsx:verify", "my-change");
     assert.equal(result.notifications.length, 0);
     assert.equal(result.sentMessages.length, 1);
-    assert.match(result.sentMessages[0].content, /does not match the current implementation snapshot/);
+    assert.match(result.sentMessages[0].content, /Verification state: stale-assessment/);
+    assert.match(result.sentMessages[0].content, /Implementation snapshot fingerprint differs/);
     assert.match(result.sentMessages[0].content, /Run `\/assess spec my-change` now/);
+  });
+
+  it("surfaces reopened-work during /opsx:verify instead of collapsing to a rerun prompt", async () => {
+    await persistAssessment("reopen", { summary: "Follow-up work remains" });
+    pi.sentMessages.length = 0;
+
+    const result = await runCommand("opsx:verify", "my-change");
+    assert.equal(result.sentMessages.length, 0);
+    assert.equal(result.notifications.length, 1);
+    assert.match(result.notifications[0].text, /Verification state for 'my-change': reopened-work/);
+    assert.match(result.notifications[0].text, /Complete follow-up work for my-change/);
+    assert.match(result.notifications[0].text, /Outcome: reopen/);
+    assert.equal(result.notifications[0].level, "warning");
+  });
+
+  it("keeps /opsx:verify blocked on awaiting-reconciliation when lifecycle bindings are stale", async () => {
+    await persistAssessment("pass");
+    fs.rmSync(path.join(tmpDir, "docs", "my-change.md"));
+
+    const status = await runTool({ action: "status" });
+    const statusText = status.content[0].text as string;
+    assert.match(statusText, /Verification: awaiting-reconciliation/);
+
+    pi.sentMessages.length = 0;
+    const result = await runCommand("opsx:verify", "my-change");
+    assert.equal(result.sentMessages.length, 0);
+    assert.equal(result.notifications.length, 1);
+    assert.match(result.notifications[0].text, /Verification state for 'my-change': awaiting-reconciliation/);
+    assert.match(result.notifications[0].text, /Bind the change to a decided\/implementing design node before archive/);
+    assert.equal(result.notifications[0].level, "warning");
   });
 
   it("refuses /opsx:archive when assessment is missing and succeeds on current explicit pass", async () => {

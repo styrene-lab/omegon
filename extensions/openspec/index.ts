@@ -998,22 +998,46 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 			}
 
 			const assessmentState = await getAssessmentState(ctx.cwd, change);
-			if (assessmentState.status === "current" && assessmentState.record) {
+			const verification = getVerificationStatus(ctx.cwd, change);
+			const effectiveSubstate = verification.substate
+				?? (assessmentState.record?.outcome === "reopen" ? "reopened-work" : null);
+			const effectiveReason = verification.reason
+				?? (effectiveSubstate === "reopened-work" ? "The latest persisted assessment reopened work." : null);
+			const effectiveNextAction = verification.nextAction
+				?? (effectiveSubstate === "reopened-work"
+					? `Complete follow-up work for ${changeName}, reconcile lifecycle artifacts, then re-run /assess spec ${changeName}`
+					: null);
+			if (effectiveSubstate === "archive-ready" && assessmentState.record) {
 				ctx.ui.notify([
-					`Verification state for '${changeName}' is current:`,
+					`Verification state for '${changeName}': ${effectiveSubstate}`,
+					...(effectiveReason ? [`Why: ${effectiveReason}`] : []),
+					...(effectiveNextAction ? [`Next: ${effectiveNextAction}`] : []),
+					"",
 					...formatAssessmentSummary(assessmentState.record),
-				].join("\n"), assessmentState.record.outcome === "pass" ? "info" : "warning");
+				].join("\n"), "info");
+				return;
+			}
+			if ((effectiveSubstate === "reopened-work" || effectiveSubstate === "awaiting-reconciliation") && assessmentState.record) {
+				ctx.ui.notify([
+					`Verification state for '${changeName}': ${effectiveSubstate}`,
+					...(effectiveReason ? [`Why: ${effectiveReason}`] : []),
+					...(effectiveNextAction ? [`Next: ${effectiveNextAction}`] : []),
+					"",
+					...formatAssessmentSummary(assessmentState.record),
+				].join("\n"), "warning");
 				return;
 			}
 
 			const refreshReason = assessmentState.status === "missing"
 				? "No persisted assessment exists yet."
-				: assessmentState.reason;
+				: effectiveReason ?? assessmentState.reason;
 			pi.sendMessage({
 				customType: "openspec-verify",
 				content: [
 					`[OpenSpec: Verify \`${changeName}\`]`,
 					"",
+					`Verification state: ${effectiveSubstate ?? verification.substate ?? change.stage}`,
+					...(effectiveReason ? [effectiveReason, ""] : []),
 					`${refreshReason}`,
 					"",
 					`Run \`/assess spec ${changeName}\` now and persist the resulting structured lifecycle state by calling \`openspec_manage\` with action \`reconcile_after_assess\`, change_name \`${changeName}\`, assessment_kind \`spec\`, and the appropriate outcome.`,
