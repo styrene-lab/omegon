@@ -1183,11 +1183,7 @@ export function resolveLifecycleSummary(input: {
 
 	const bindingStatus: LifecycleSummary["bindingStatus"] = archiveBlockedIssueCodes.includes("missing_design_binding")
 		? "unbound"
-		: archiveBlockedIssueCodes.includes("missing_design_binding") === false && change.stage === "verifying"
-			? record !== null
-				? "bound"
-				: "unknown"
-			: "unknown";
+		: "unknown";
 
 	return {
 		stage: change.stage,
