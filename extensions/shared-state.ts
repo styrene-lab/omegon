@@ -120,6 +120,12 @@ interface SharedState {
   /** Dashboard-friendly recovery summary derived from the latest recovery event. */
   recovery?: RecoveryDashboardState;
 
+  /** Current dashboard display mode. Written by dashboard extension. */
+  dashboardMode?: string;
+
+  /** Number of conversation turns in the current session. Written by dashboard extension. */
+  dashboardTurns?: number;
+
   /** Per-request retry ledger for bounded recovery decisions across core and extension-driven retries. */
   recoveryRetryCounts?: Record<string, number>;
 }
