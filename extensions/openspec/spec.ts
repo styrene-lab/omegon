@@ -1108,6 +1108,99 @@ function deltaToBaseline(delta: string): string {
 	return lines.join("\n");
 }
 
+// ─── Canonical Lifecycle Resolver ────────────────────────────────────────────
+
+/**
+ * Normalized lifecycle summary for an OpenSpec change.
+ *
+ * This is the single source of truth for a change's lifecycle state.
+ * All consumers (status surfaces, archive gates, dashboard, design-tree)
+ * should derive their display from this shape rather than recomputing
+ * stage/substate/readiness independently.
+ */
+export interface LifecycleSummary {
+	/** Coarse lifecycle stage. Preserves historical stage contract. */
+	stage: ChangeStage;
+
+	/**
+	 * Fine-grained verification substate. Only non-null when stage === 'verifying'.
+	 * Adds precision without changing the coarse stage contract.
+	 */
+	verificationSubstate: VerificationSubstate | null;
+
+	/** Whether the change is safe to archive. */
+	archiveReady: boolean;
+
+	/** Whether a design-tree binding exists for this change. */
+	bindingStatus: "bound" | "unbound" | "unknown";
+
+	/** Total number of tasks (0 if no tasks.md). */
+	totalTasks: number;
+
+	/** Number of completed tasks. */
+	doneTasks: number;
+
+	/**
+	 * Assessment freshness. Null when no assessment record has been written.
+	 */
+	assessmentFreshness: AssessmentFreshness | null;
+
+	/** Suggested next action for the operator. */
+	nextAction: string | null;
+}
+
+/**
+ * Canonical lifecycle resolver.
+ *
+ * Accepts the raw artifact state and derived assessment/reconciliation data,
+ * and returns one normalized LifecycleSummary through a single implementation
+ * path. All callers must route through this function — no separate stage or
+ * substate derivations.
+ */
+export function resolveLifecycleSummary(input: {
+	change: Pick<ChangeInfo, "name" | "stage" | "totalTasks" | "doneTasks">;
+	record: AssessmentRecord | null;
+	freshness: AssessmentFreshness | null;
+	archiveBlocked: boolean;
+	archiveBlockedReason: string | null;
+	archiveBlockedIssueCodes: readonly string[];
+}): LifecycleSummary {
+	const { change, record, freshness, archiveBlocked, archiveBlockedReason, archiveBlockedIssueCodes } = input;
+
+	// Derive verification status via existing resolveVerificationStatus — preserving
+	// the historical substate contract without duplicating its logic.
+	const vs = resolveVerificationStatus({
+		stage: change.stage,
+		record,
+		freshness: freshness ?? { current: false, reasons: ["No assessment record"] },
+		archiveBlocked,
+		archiveBlockedReason,
+		archiveBlockedIssueCodes,
+		changeName: change.name,
+	});
+
+	const archiveReady = vs.substate === "archive-ready";
+
+	const bindingStatus: LifecycleSummary["bindingStatus"] = archiveBlockedIssueCodes.includes("missing_design_binding")
+		? "unbound"
+		: archiveBlockedIssueCodes.includes("missing_design_binding") === false && change.stage === "verifying"
+			? record !== null
+				? "bound"
+				: "unknown"
+			: "unknown";
+
+	return {
+		stage: change.stage,
+		verificationSubstate: vs.substate,
+		archiveReady,
+		bindingStatus,
+		totalTasks: change.totalTasks,
+		doneTasks: change.doneTasks,
+		assessmentFreshness: freshness,
+		nextAction: vs.nextAction,
+	};
+}
+
 // ─── Spec Summary ────────────────────────────────────────────────────────────
 
 /**
