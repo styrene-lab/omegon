@@ -1,10 +1,10 @@
 ---
 id: pikit-web-ui-hosting
 title: pi-kit self-hosted web UI
-status: decided
+status: implemented
 parent: repo-consolidation-hardening
-open_questions:
-  - How could pi-kit host its own web UI for status, lifecycle visibility, and operator control?
+openspec_change: localhost-web-ui-mvp
+open_questions: []
 ---
 
 # pi-kit self-hosted web UI
@@ -14,7 +14,7 @@ open_questions:
 > Parent: [Repo Consolidation, Security Hardening, and Lifecycle Normalization](repo-consolidation-hardening.md)
 > Spawned from: "How could pi-kit host its own web UI for status, lifecycle visibility, and operator control?"
 
-*To be explored.*
+Implement a first-party localhost-only, read-only web UI for pi-kit that exposes a versioned control-plane snapshot and a lightweight polling dashboard shell without adding mutation routes or a separate persistence layer.
 
 ## Research
 
@@ -54,12 +54,12 @@ The MVP should bind only to `127.0.0.1` by default, choose a configurable high p
 
 ### Decision: Explore a localhost read-only web dashboard first
 
-**Status:** exploring
+**Status:** decided
 **Rationale:** The repo already has enough structured state to power a browser UI, but not yet a hardened command-authorization layer for remote mutation. Starting with a read-only localhost dashboard minimizes risk, reuses existing dashboard/lifecycle data, and forces normalization of a canonical state model before adding write operations.
 
 ### Decision: Use a first-party localhost HTTP extension instead of extending mdserve
 
-**Status:** exploring
+**Status:** decided
 **Rationale:** mdserve proves the companion-process pattern but is optimized for document rendering, not control-plane APIs or live status composition. A first-party localhost HTTP extension keeps pi-kit in control of the API contract, security defaults, and browser UI evolution while still allowing docs to link out to mdserve where helpful.
 
 ### Decision: Adopt a versioned ControlPlaneState and read-only HTTP surface for MVP
@@ -74,24 +74,28 @@ The MVP should bind only to `127.0.0.1` by default, choose a configurable high p
 
 ## Open Questions
 
-- How could pi-kit host its own web UI for status, lifecycle visibility, and operator control?
+*No open questions.*
 
 ## Implementation Notes
 
 ### File Scope
 
-- `extensions/web-ui/index.ts` (new) — Register localhost web UI commands/tooling and manage server lifecycle
-- `extensions/web-ui/state.ts` (new) — Build versioned ControlPlaneState snapshots from shared state and on-demand scans
-- `extensions/web-ui/server.ts` (new) — Implement localhost-only HTTP server and read-only routes
-- `extensions/web-ui/static/` (new) — Serve minimal built-in HTML/CSS/JS dashboard shell
-- `extensions/shared-state.ts` (modified) — Optionally expose small additional metadata needed by normalized web snapshot
-- `package.json` (modified) — Register the new web-ui extension in pi.extensions
+- `extensions/web-ui/types.ts` (new) — Define the versioned `ControlPlaneState` contract and slice types
+- `extensions/web-ui/state.ts` (new) — Build normalized snapshots and slices from shared state, OpenSpec, and design-tree scans
+- `extensions/web-ui/server.ts` (new) — Implement the localhost-only HTTP server, dashboard shell delivery, and read-only route handling
+- `extensions/web-ui/static/index.html` (new) — Serve the minimal polling-first HTML dashboard shell
+- `extensions/web-ui/http.test.ts` (new) — Cover state, slices, mutation refusal, polling semantics, and 404 behavior
+- `extensions/web-ui/server.test.ts` (new) — Cover server lifecycle and localhost binding
+- `extensions/web-ui/state.test.ts` (new) — Cover snapshot schema and live-state derivation
+- `extensions/web-ui/index.ts` (new) — Register `/web-ui` command lifecycle actions and browser-open behavior
+- `extensions/web-ui/index.test.ts` (new) — Cover command surface behavior and shutdown cleanup
+- `package.json` (modified) — Register the new `web-ui` extension in `pi.extensions`
 - `README.md` (modified) — Document localhost web UI commands, routes, and security defaults
 
 ### Constraints
 
-- Bind to 127.0.0.1 by default; no LAN exposure in MVP.
+- Bind to `127.0.0.1` only; no LAN exposure in the MVP.
 - Expose read-only routes only in v1; no command execution or mutating endpoints.
-- Use a versioned ControlPlaneState schema and normalize internal state before serialization.
+- Use a versioned `ControlPlaneState` schema and normalize internal state before serialization.
 - Prefer polling over SSE/WebSocket for the first implementation.
 - Avoid introducing a second persistence layer for browser history or session timelines.

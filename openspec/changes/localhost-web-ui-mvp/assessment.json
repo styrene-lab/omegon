@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "changeName": "localhost-web-ui-mvp",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-10T21:02:12.407Z",
+  "summary": "Validated localhost-web-ui-mvp against the implemented localhost-only, read-only web UI behavior: typecheck passes, npm test passes, the web UI server binds to 127.0.0.1 only, serves the polling HTML shell and versioned ControlPlaneState/slice routes, and refuses unsupported mutation methods.",
+  "snapshot": {
+    "gitHead": "b85677e3902b3b52c13f989e206b48998f9dd3c1",
+    "fingerprint": "aa4a690cd6987d61e225f0d226fa24aa19cf9fc6778d562d447ffee5d0017529",
+    "dirty": false,
+    "scopedPaths": [
+      "README.md",
+      "extensions/web-ui/http.test.ts",
+      "extensions/web-ui/index.test.ts",
+      "extensions/web-ui/index.ts",
+      "extensions/web-ui/server.test.ts",
+      "extensions/web-ui/server.ts",
+      "extensions/web-ui/state.test.ts",
+      "extensions/web-ui/state.ts",
+      "extensions/web-ui/static/index.html",
+      "extensions/web-ui/types.ts",
+      "package.json"
+    ],
+    "files": [
+      {
+        "path": "README.md",
+        "exists": true,
+        "size": 13413,
+        "sha256": "0a1fb93c50416aa94e202a22cd75774d040008d3101db1c8d19f8ce1f17d5ea1"
+      },
+      {
+        "path": "extensions/web-ui/http.test.ts",
+        "exists": true,
+        "size": 7047,
+        "sha256": "8cf678ffdd0b727742d0258f9155c295426267d228e582eea138266603b8f911"
+      },
+      {
+        "path": "extensions/web-ui/index.test.ts",
+        "exists": true,
+        "size": 3278,
+        "sha256": "43ae43cb8131138da88d7e485eb6220639acea0915cef408d82b2dbe4e3e0b44"
+      },
+      {
+        "path": "extensions/web-ui/index.ts",
+        "exists": true,
+        "size": 2934,
+        "sha256": "a055a055df33a9cb3b2525c76aacac65e9be33eb12f1b8b9c717b33f3f30eec0"
+      },
+      {
+        "path": "extensions/web-ui/server.test.ts",
+        "exists": true,
+        "size": 3419,
+        "sha256": "ef34e339340736a562ced66f0192ebfcb108fcf934c070a302b08a4a158c82af"
+      },
+      {
+        "path": "extensions/web-ui/server.ts",
+        "exists": true,
+        "size": 9233,
+        "sha256": "33d577ff9ab627b21fc450cf846d46145e1db3be6371e37eb3fea7b2894a8f68"
+      },
+      {
+        "path": "extensions/web-ui/state.test.ts",
+        "exists": true,
+        "size": 12580,
+        "sha256": "0446c96c549a085c3c76f97c5f57edf85ead5676b5d3b414c342a6e33b1248a8"
+      },
+      {
+        "path": "extensions/web-ui/state.ts",
+        "exists": true,
+        "size": 9059,
+        "sha256": "e3986b139da2e673c6d152815d2864eed7a9bfe81177ca713452e10fb1acc0df"
+      },
+      {
+        "path": "extensions/web-ui/static/index.html",
+        "exists": true,
+        "size": 3975,
+        "sha256": "2fa26560812f96cc0625c9f895ae96ddeba9333c975d755351274ec0a9bd30fd"
+      },
+      {
+        "path": "extensions/web-ui/types.ts",
+        "exists": true,
+        "size": 5904,
+        "sha256": "4737ffb77f7628c20ba1ca3563c1d25744694b76db1f10877c8705645907b717"
+      },
+      {
+        "path": "openspec/changes/localhost-web-ui-mvp/design.md",
+        "exists": true,
+        "size": 2052,
+        "sha256": "2dc6699bd48372b531b9afba5d01eb54423c78c47589e5cdf0df8e44e90689ad"
+      },
+      {
+        "path": "openspec/changes/localhost-web-ui-mvp/proposal.md",
+        "exists": true,
+        "size": 450,
+        "sha256": "f579e38d72da817034edbbc3f70d9911bd64e89bfe2fd9ce800ec93517dafd7f"
+      },
+      {
+        "path": "openspec/changes/localhost-web-ui-mvp/specs/web-ui.md",
+        "exists": true,
+        "size": 4907,
+        "sha256": "93072e03c953854f2d6173457456536773cd7e04144b1329b90541ddab5be2e0"
+      },
+      {
+        "path": "openspec/changes/localhost-web-ui-mvp/tasks.md",
+        "exists": true,
+        "size": 1409,
+        "sha256": "bfbf06c62aec08356ba105b6c6f4eaa80d42b7e9fbb68e41c92f567e91b5928a"
+      },
+      {
+        "path": "package.json",
+        "exists": true,
+        "size": 1909,
+        "sha256": "9ca9898632c155414b39fd716b6ed3f3f038352d3bdaa3f1d4803820c0d8292d"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "extensions/web-ui/types.ts",
+      "extensions/web-ui/state.ts",
+      "extensions/web-ui/server.ts",
+      "extensions/web-ui/static/index.html",
+      "extensions/web-ui/http.test.ts",
+      "extensions/web-ui/server.test.ts",
+      "extensions/web-ui/state.test.ts",
+      "extensions/web-ui/index.ts",
+      "extensions/web-ui/index.test.ts",
+      "package.json",
+      "README.md"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
