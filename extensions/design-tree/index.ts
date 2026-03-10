@@ -574,7 +574,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 
 					reload(ctx.cwd);
 					focusedNode = params.node_id;
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 
 					return {
 						content: [{ type: "text", text: `Created design node '${node.title}' (${node.status}) at ${node.filePath}` }],
@@ -598,7 +598,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					const oldStatus = node.status;
 					const updated = setNodeStatus(node, newStatus);
 					tree.nodes.set(updated.id, updated);
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 
 					let text = `${STATUS_ICONS[newStatus]} '${node.title}': ${oldStatus} → ${newStatus}`;
 
@@ -635,7 +635,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					}
 					const updated = addOpenQuestion(node, params.question);
 					tree.nodes.set(updated.id, updated);
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 					return {
 						content: [{ type: "text", text: `Added question to '${node.title}': ${params.question}` }],
 						details: { id: node.id, question: params.question, totalQuestions: updated.open_questions.length },
@@ -653,7 +653,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					}
 					const updated = removeOpenQuestion(node, params.question);
 					tree.nodes.set(updated.id, updated);
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 					return {
 						content: [{ type: "text", text: `Removed question from '${node.title}'` }],
 						details: { id: node.id, remainingQuestions: updated.open_questions.length },
@@ -670,6 +670,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						return { content: [{ type: "text", text: `Node '${params.node_id}' not found` }], details: {}, isError: true };
 					}
 					addResearch(node, params.heading, params.content);
+					emitCurrentState();
 					return {
 						content: [{ type: "text", text: `Added research '${params.heading}' to '${node.title}'` }],
 						details: { id: node.id, heading: params.heading },
@@ -704,6 +705,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 							candidates: decisionCandidates,
 						});
 					}
+					emitCurrentState();
 					return {
 						content: [{ type: "text", text: `Added decision '${params.decision_title}' (${dStatus}) to '${node.title}'` }],
 						details: { id: node.id, decision: params.decision_title, status: dStatus, emittedCandidates: decisionCandidates.length },
@@ -724,6 +726,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					}
 					const updated = addDependency(node, params.target_id);
 					tree.nodes.set(updated.id, updated);
+					emitCurrentState();
 					return {
 						content: [{ type: "text", text: `Added dependency: '${node.title}' depends on '${params.target_id}'` }],
 						details: { id: node.id, dependency: params.target_id },
@@ -745,6 +748,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					}
 					const updated = addRelated(node, params.target_id, targetNode);
 					tree.nodes.set(updated.id, updated);
+					emitCurrentState();
 					return {
 						content: [{ type: "text", text: `Added related: '${node.title}' ↔ '${targetNode.title}' (bidirectional)` }],
 						details: { id: node.id, related: params.target_id },
@@ -778,6 +782,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 							candidates: constraintCandidates,
 						});
 					}
+					emitCurrentState();
 					return {
 						content: [{ type: "text", text: `Added implementation notes to '${node.title}': ${added.join(", ")}` }],
 						details: { id: node.id, emittedCandidates: constraintCandidates.length },
@@ -799,7 +804,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 
 					reload(ctx.cwd);
 					focusedNode = childId;
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 
 					return {
 						content: [{
@@ -829,7 +834,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						tree.nodes.set(updated.id, updated);
 					}
 
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 					return {
 						content: [{ type: "text", text: `Focused on '${node.title}'. Context will be injected on next turn.` }],
 						details: { focusedNode: params.node_id },
@@ -838,7 +843,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 
 				case "unfocus": {
 					focusedNode = null;
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 					return {
 						content: [{ type: "text", text: "Design focus cleared." }],
 						details: { focusedNode: null },
@@ -868,7 +873,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 
 					const implResult = executeImplement(ctx.cwd, node);
 					reload(ctx.cwd);
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 
 					return {
 						content: [{ type: "text", text: implResult.message }],
@@ -1005,7 +1010,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 							ctx.ui.notify(`${node.title}: seed → exploring`, "info");
 						}
 					}
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 
 					const node = tree.nodes.get(focusedNode!)!;
 					const openQ = node.open_questions.length > 0
@@ -1025,7 +1030,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 
 				case "unfocus": {
 					focusedNode = null;
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 					ctx.ui.notify("Design focus cleared", "info");
 					break;
 				}
@@ -1051,7 +1056,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					setNodeStatus(node, newStatus);
 					if (subcommand === "explore") focusedNode = id;
 					reload(ctx.cwd);
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 					ctx.ui.notify(`${STATUS_ICONS[newStatus]} '${node.title}' → ${newStatus}`, "info");
 					break;
 				}
@@ -1068,7 +1073,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						const match = choice.match(/^\[([^\]]+)\]/);
 						if (match) {
 							focusedNode = match[1];
-							emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+							emitCurrentState();
 							const node = tree.nodes.get(match[1])!;
 							const question = choice.replace(/^\[[^\]]+\]\s*/, "");
 							pi.sendMessage(
@@ -1117,7 +1122,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					branchFromQuestion(tree, nodeId, selected, newId, newTitle);
 					reload(ctx.cwd);
 					focusedNode = newId;
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 					ctx.ui.notify(`Created ${newId}.md — branched from ${node.title}`, "info");
 					break;
 				}
@@ -1137,7 +1142,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					createNode(docsDir(ctx.cwd), { id, title });
 					reload(ctx.cwd);
 					focusedNode = id;
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 					ctx.ui.notify(`Created ${id}.md`, "info");
 					break;
 				}
@@ -1167,7 +1172,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						if (!question) return;
 						addOpenQuestion(node, question);
 						reload(ctx.cwd);
-						emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+						emitCurrentState();
 						ctx.ui.notify(`Added question to ${node.title}`, "info");
 					} else if (action === "Remove open question") {
 						if (node.open_questions.length === 0) {
@@ -1178,7 +1183,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						if (!toRemove) return;
 						removeOpenQuestion(node, toRemove);
 						reload(ctx.cwd);
-						emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+						emitCurrentState();
 						ctx.ui.notify(`Removed question from ${node.title}`, "info");
 					} else if (action === "Add dependency") {
 						const otherNodes = Array.from(tree.nodes.keys()).filter(
@@ -1196,7 +1201,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						if (!choice) return;
 						addDependency(node, choice.split(" — ")[0]);
 						reload(ctx.cwd);
-						emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+						emitCurrentState();
 						ctx.ui.notify(`Added dependency: ${choice.split(" — ")[0]}`, "info");
 					} else if (action === "Add related node") {
 						const otherNodes = Array.from(tree.nodes.keys()).filter(
@@ -1216,7 +1221,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						const targetNode = tree.nodes.get(relatedId);
 						addRelated(node, relatedId, targetNode);
 						reload(ctx.cwd);
-						emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+						emitCurrentState();
 						ctx.ui.notify(`Added related: ${relatedId} (bidirectional)`, "info");
 					}
 					break;
@@ -1243,7 +1248,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 
 					const implResult = executeImplement(ctx.cwd, node);
 					reload(ctx.cwd);
-					emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+					emitCurrentState();
 					ctx.ui.notify(implResult.message, implResult.ok ? "info" : "error");
 					break;
 				}
@@ -1402,7 +1407,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 		if (matched && !matched.branches.includes(branch)) {
 			const updated = appendBranch(matched, branch);
 			tree.nodes.set(updated.id, updated);
-			emitDesignTreeState(pi, tree, focusedNode ? tree.nodes.get(focusedNode) ?? null : null);
+			emitCurrentState();
 		}
 	}
 

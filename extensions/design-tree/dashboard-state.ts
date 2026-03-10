@@ -7,6 +7,7 @@ import type { DesignTreeDashboardState } from "../shared-state.ts";
 import { debug } from "../debug.ts";
 
 export function emitDesignTreeState(pi: ExtensionAPI, dt: DesignTree, focused: DesignNode | null): void {
+	if (dt.nodes.size === 0) return;
 	const allNodes = Array.from(dt.nodes.values());
 	// Exclude implemented/deferred nodes from the active dashboard view — they're archived journals
 	const nodes = allNodes.filter((n) => n.status !== "implemented" && n.status !== "deferred");
