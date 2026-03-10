@@ -51,6 +51,7 @@ import { FactStore, parseExtractionOutput, GLOBAL_DECAY, type MindRecord, type F
 import { embed, isEmbeddingAvailable, MODEL_DIMS, type EmbeddingProvider } from "./embeddings.ts";
 import { DEFAULT_CONFIG, type MemoryConfig, type LifecycleMemoryCandidate } from "./types.ts";
 import { sanitizeCompactionText, shouldInterceptCompaction } from "./compaction-policy.ts";
+import { writeJsonlIfChanged } from "./jsonl-io.ts";
 import {
   createMemoryInjectionMetrics,
   estimateTokensFromChars,
@@ -876,7 +877,7 @@ export default function (pi: ExtensionAPI) {
         const fsSync = await import("node:fs");
         const jsonlPath = path.join(memoryDir, "facts.jsonl");
         const jsonl = store.exportToJsonl();
-        fsSync.writeFileSync(jsonlPath, jsonl, "utf8");
+        writeJsonlIfChanged(fsSync, jsonlPath, jsonl);
       } catch {
         // Best effort — don't block shutdown
       }

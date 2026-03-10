@@ -92,7 +92,7 @@ function runDirtyTreePreflightScenario(mode: "clean" | "volatile-only" | "checkp
   const answersByMode = {
     clean: [],
     'volatile-only': [],
-    checkpoint: ['checkpoint', '', 'y'],
+    checkpoint: ['checkpoint', ''],
     generic: ['proceed-without-cleave'],
     unknowns: ['stash-unrelated'],
   };
@@ -195,10 +195,12 @@ describe("dirty-tree preflight acceptance coverage", () => {
 	it("volatile-only dirt does not block cleave by default", () => {
 		const result = runDirtyTreePreflightScenario("volatile-only");
 		const summary = result.updates[0]?.content?.[0]?.text ?? "";
+		const autoSummary = result.updates[1]?.content?.[0]?.text ?? "";
 		assert.equal(result.result, "continue");
 		assert.match(summary, /volatile artifacts/i);
+		assert.match(autoSummary, /stashed volatile artifacts automatically/i);
 		assert.doesNotMatch(summary, /interactive input is unavailable/i);
-		assert.equal(result.commands.filter((command: string[]) => command[1] === "stash").length, 0);
+		assert.equal(result.commands.filter((command: string[]) => command[1] === "stash").length, 1);
 	});
 
 	it("low-confidence unknown files are excluded from checkpoint scope by default", () => {

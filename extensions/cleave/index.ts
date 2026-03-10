@@ -248,13 +248,20 @@ async function checkpointRelatedChanges(
 		throw new Error("Checkpoint requires interactive approval, but input is unavailable.");
 	}
 	const suggested = checkpointMessage ?? "chore(cleave): checkpoint before cleave";
-	const commitMessage = (await ui.input("Checkpoint commit message:", suggested))?.trim() || suggested;
-	const approval = (await ui.input(
-		`Commit ${classification.checkpointFiles.length} related file(s) with message \`${commitMessage}\`? [y/N]`,
-	))?.trim().toLowerCase();
-	if (approval !== "y" && approval !== "yes") {
+	const response = (await ui.input(
+		[
+			`Checkpoint ${classification.checkpointFiles.length} related file(s).`,
+			`Press Enter to approve the suggested message, type a custom commit message to approve with edits, or type 'cancel' to decline.`,
+			`Suggested message: ${suggested}`,
+		].join("\n"),
+		suggested,
+	))?.trim();
+	if (!response) {
+		// Accept the suggested message when the operator confirms with Enter.
+	} else if (response.toLowerCase() === "cancel") {
 		throw new Error("Checkpoint cancelled before commit approval.");
 	}
+	const commitMessage = response && response.length > 0 ? response : suggested;
 	const addResult = await pi.exec("git", ["add", "--", ...classification.checkpointFiles], { cwd: repoPath, timeout: 15_000 });
 	if (addResult.code !== 0) throw new Error(addResult.stderr.trim() || "Failed to stage checkpoint files.");
 	const commitResult = await pi.exec("git", ["commit", "-m", commitMessage, "--", ...classification.checkpointFiles], {
@@ -291,6 +298,13 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 	options.onUpdate?.({ content: [{ type: "text", text: summary }], details: { phase: "preflight" } });
 
 	if (gitState.nonVolatile.length === 0) {
+		if (classification.volatile.length > 0) {
+			await stashPaths(pi, options.repoPath, "cleave-preflight-volatile", classification.volatile);
+			options.onUpdate?.({
+				content: [{ type: "text", text: "Volatile-only dirty tree detected — stashed volatile artifacts automatically before cleave." }],
+				details: { phase: "preflight", autoResolved: "volatile_only_stash" },
+			});
+		}
 		return "continue";
 	}
 
