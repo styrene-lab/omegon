@@ -19,6 +19,42 @@ import type { MemoryInjectionMetrics } from "./project-memory/injection-metrics.
 import type { LifecycleMemoryMessage } from "./project-memory/types.ts";
 import { getDefaultPolicy } from "./lib/model-routing.ts";
 
+export type RecoveryFailureClassification =
+  | "transient_server_error"
+  | "rate_limited"
+  | "quota_exhausted"
+  | "authentication_failed"
+  | "malformed_output"
+  | "context_overflow"
+  | "unknown_upstream";
+
+export type RecoveryDisposition =
+  | "retry_same_model"
+  | "cooldown_and_failover"
+  | "guidance_only"
+  | "handled_elsewhere"
+  | "escalate";
+
+export interface RecoveryEvent {
+  provider: string;
+  model: string;
+  turnIndex: number;
+  classification: RecoveryFailureClassification;
+  originalErrorSummary: string;
+  retryable: boolean;
+  disposition: RecoveryDisposition;
+  retryAttempted: boolean;
+  retryCount: number;
+  maxRetries: number;
+  guidance: string;
+  cooldownApplied?: boolean;
+  alternateCandidate?: {
+    provider: string;
+    model: string;
+  };
+  timestamp: number;
+}
+
 // Re-export dashboard types for consumer convenience
 export type {
   DesignTreeDashboardState,
@@ -75,6 +111,12 @@ interface SharedState {
 
   /** Pending structured lifecycle candidates waiting for project-memory ingestion. */
   lifecycleCandidateQueue?: LifecycleMemoryMessage[];
+
+  /** Latest upstream recovery event for dashboard/harness visibility. */
+  latestRecoveryEvent?: RecoveryEvent;
+
+  /** Per-turn retry ledger for bounded recovery decisions. */
+  recoveryRetryCounts?: Record<string, number>;
 }
 
 // Initialize once on first import, reuse thereafter via global symbol.

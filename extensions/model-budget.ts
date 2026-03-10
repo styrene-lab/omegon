@@ -19,7 +19,8 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { Model } from "@mariozechner/pi-ai";
-import { sharedState } from "./shared-state.ts";
+import { DASHBOARD_UPDATE_EVENT, sharedState } from "./shared-state.ts";
+import type { RecoveryEvent, RecoveryFailureClassification } from "./shared-state.ts";
 import { tierConfig } from "./effort/tiers.ts";
 import type { EffortLevel } from "./effort/types.ts";
 import { resolveTier, getTierDisplayLabel, getDefaultPolicy, clampThinkingLevel } from "./lib/model-routing.ts";
@@ -125,6 +126,116 @@ function getAssistantErrorMessage(message: unknown): string | undefined {
   return record.errorMessage;
 }
 
+function summarizeErrorMessage(errorMessage: string): string {
+  return errorMessage.replace(/\s+/g, " ").trim().slice(0, 240);
+}
+
+export function classifyRecoveryFailure(errorMessage: string): {
+  classification: RecoveryFailureClassification;
+  retryable: boolean;
+  guidance: string;
+} {
+  const message = errorMessage.toLowerCase();
+
+  if (["context window", "context length", "too long", "maximum context", "prompt is too long"].some((needle) => message.includes(needle))) {
+    return {
+      classification: "context_overflow",
+      retryable: false,
+      guidance: "Context overflow is handled separately; compact context or reduce prompt size before retrying.",
+    };
+  }
+
+  if (["invalid api key", "authentication", "unauthorized", "forbidden", "permission denied", "auth"].some((needle) => message.includes(needle))) {
+    return {
+      classification: "authentication_failed",
+      retryable: false,
+      guidance: "Authentication failed; refresh credentials or switch to a provider with a valid session.",
+    };
+  }
+
+  if (["quota", "insufficient credits", "billing", "usage limit", "credit balance"].some((needle) => message.includes(needle))) {
+    return {
+      classification: "quota_exhausted",
+      retryable: false,
+      guidance: "Quota exhaustion is not retryable; switch models/providers or restore quota before retrying.",
+    };
+  }
+
+  if (["schema", "json", "malformed", "invalid tool", "parse", "structured output"].some((needle) => message.includes(needle))) {
+    return {
+      classification: "malformed_output",
+      retryable: false,
+      guidance: "Malformed output should not use generic retry; adjust the prompt/schema or switch models explicitly.",
+    };
+  }
+
+  if (["429", "rate limit", "rate-limit", "too many requests", "session limit", "try again later", "backoff"].some((needle) => message.includes(needle))) {
+    return {
+      classification: "rate_limited",
+      retryable: false,
+      guidance: "Rate limiting/backoff should cool down the failing route and prefer an alternate candidate instead of blind retry.",
+    };
+  }
+
+  if (["server_error", "server error", " 500", " 502", " 503", " 504", "overloaded", "temporarily unavailable", "timeout", "timed out", "connection reset", "econnreset", "socket hang up"].some((needle) => message.includes(needle))) {
+    return {
+      classification: "transient_server_error",
+      retryable: true,
+      guidance: "Obvious upstream flakiness can retry once on the same provider/model before escalation.",
+    };
+  }
+
+  return {
+    classification: "unknown_upstream",
+    retryable: false,
+    guidance: "Upstream failure was not safely classified for automatic retry; surface it and ask the operator to choose the next route.",
+  };
+}
+
+function getRetryLedgerKey(provider: string, model: string, turnIndex: number): string {
+  return `${turnIndex}:${provider}/${model}`;
+}
+
+export function buildRecoveryEvent(params: {
+  provider: string;
+  model: string;
+  turnIndex: number;
+  errorMessage: string;
+  retryCount: number;
+  guidance: string;
+  alternateCandidate?: { provider: string; id: string };
+  cooldownApplied?: boolean;
+}): RecoveryEvent {
+  const classified = classifyRecoveryFailure(params.errorMessage);
+  const retryAttempted = classified.retryable && params.retryCount < 1;
+  return {
+    provider: params.provider,
+    model: params.model,
+    turnIndex: params.turnIndex,
+    classification: classified.classification,
+    originalErrorSummary: summarizeErrorMessage(params.errorMessage),
+    retryable: classified.retryable,
+    disposition: classified.classification === "context_overflow"
+      ? "handled_elsewhere"
+      : retryAttempted
+        ? "retry_same_model"
+        : params.cooldownApplied || classified.classification === "rate_limited"
+          ? "cooldown_and_failover"
+          : classified.retryable
+            ? "escalate"
+            : "guidance_only",
+    retryAttempted,
+    retryCount: retryAttempted ? params.retryCount + 1 : params.retryCount,
+    maxRetries: classified.retryable ? 1 : 0,
+    guidance: params.guidance || classified.guidance,
+    cooldownApplied: params.cooldownApplied,
+    alternateCandidate: params.alternateCandidate
+      ? { provider: params.alternateCandidate.provider, model: params.alternateCandidate.id }
+      : undefined,
+    timestamp: Date.now(),
+  };
+}
+
 async function switchTo(tier: TierName, pi: ExtensionAPI, ctx: ExtensionContext): Promise<RegistryModel | null> {
   const all = ctx.modelRegistry.getAll() as unknown as RegistryModel[];
   const { policy, profile, runtimeState } = getResolverInputs(ctx);
@@ -164,30 +275,67 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("turn_end", async (event, ctx) => {
     const errorMessage = getAssistantErrorMessage(event.message);
-    if (!errorMessage || !ctx.model || !ctx.hasUI) return;
+    if (!errorMessage || !ctx.model) return;
+
+    const provider = ctx.model.provider;
+    const ledgerKey = getRetryLedgerKey(provider, ctx.model.id, event.turnIndex);
+    const retryCounts = sharedState.recoveryRetryCounts ?? {};
+    const priorRetryCount = retryCounts[ledgerKey] ?? 0;
 
     const runtimeState = recordTransientFailureForModel(ctx.cwd, ctx.model, errorMessage);
-    if (!runtimeState) return;
-
     const { policy, profile } = getResolverInputs(ctx);
     const models = ctx.modelRegistry.getAll() as unknown as RegistryModel[];
-    const guidance = buildFallbackGuidance(ctx.model, models, policy, profile, runtimeState);
-    const provider = ctx.model.provider;
+    const guidance = runtimeState
+      ? buildFallbackGuidance(ctx.model, models, policy, profile, runtimeState)
+      : undefined;
 
-    if (guidance?.ok && guidance.alternateCandidate) {
+    const recoveryEvent = buildRecoveryEvent({
+      provider,
+      model: ctx.model.id,
+      turnIndex: event.turnIndex,
+      errorMessage,
+      retryCount: priorRetryCount,
+      guidance: guidance?.reason
+        ?? (guidance?.ok && guidance.alternateCandidate
+          ? `Fail over to ${guidance.alternateCandidate.provider}/${guidance.alternateCandidate.id} for ${guidance.role}.`
+          : classifyRecoveryFailure(errorMessage).guidance),
+      alternateCandidate: guidance?.ok ? guidance.alternateCandidate : undefined,
+      cooldownApplied: Boolean(runtimeState),
+    });
+
+    sharedState.latestRecoveryEvent = recoveryEvent;
+    sharedState.recoveryRetryCounts = {
+      ...retryCounts,
+      [ledgerKey]: recoveryEvent.retryCount,
+    };
+    pi.events.emit(DASHBOARD_UPDATE_EVENT, { source: "model-budget", recoveryEvent });
+
+    if (!ctx.hasUI) return;
+
+    if (recoveryEvent.disposition === "retry_same_model") {
       ctx.ui.notify(
-        `${provider} hit a transient failure and is cooled down for 5 minutes. Future resolution will prefer ${guidance.alternateCandidate.provider}/${guidance.alternateCandidate.id} for ${guidance.role}.`,
+        `${provider}/${ctx.model.id} failed with ${recoveryEvent.classification}; recovery marked a single same-model retry opportunity for turn ${event.turnIndex}.`,
         "warning",
       );
       return;
     }
 
-    if (guidance?.reason) {
-      ctx.ui.notify(guidance.reason, guidance.requiresConfirmation ? "warning" : "error");
+    if (guidance?.ok && guidance.alternateCandidate) {
+      ctx.ui.notify(
+        `${provider} hit ${recoveryEvent.classification} and is cooled down for 5 minutes. Future resolution will prefer ${guidance.alternateCandidate.provider}/${guidance.alternateCandidate.id} for ${guidance.role}.`,
+        "warning",
+      );
       return;
     }
 
-    ctx.ui.notify(`${provider} hit a transient failure and is cooled down for 5 minutes.`, "warning");
+    const level = recoveryEvent.disposition === "handled_elsewhere"
+      ? "info"
+      : guidance?.requiresConfirmation
+        ? "warning"
+        : recoveryEvent.retryable
+          ? "warning"
+          : "error";
+    ctx.ui.notify(recoveryEvent.guidance, level);
   });
 
   const modelTierParameters = {
