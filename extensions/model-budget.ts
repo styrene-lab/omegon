@@ -181,6 +181,12 @@ function mapRecoveryFailureClassification(classification: UpstreamFailureClassif
         retryable: false,
         guidance: "The API rejected the request (e.g. image too large, malformed payload). Fix the request content before retrying.",
       };
+    case "user-abort":
+      return {
+        classification: "unknown_upstream",
+        retryable: false,
+        guidance: "Operation was cancelled by the user; no recovery action needed.",
+      };
     default:
       return {
         classification: "unknown_upstream",
@@ -458,6 +464,19 @@ export default function (pi: ExtensionAPI) {
       }
       return;
     }
+
+    // User-initiated aborts (Esc / SIGINT / AbortSignal) must never enter the
+    // upstream recovery pipeline.  They are not API failures.
+    const abortClassification = classifyUpstreamFailure(errorMessage);
+    if (abortClassification.class === "user-abort") {
+      // Clear any stale recovery state so the dashboard doesn't linger on the
+      // previous recovery notice.
+      sharedState.recovery = undefined;
+      sharedState.latestRecoveryEvent = undefined;
+      pi.events.emit(DASHBOARD_UPDATE_EVENT, { source: "model-budget", recovery: undefined });
+      return;
+    }
+
     if (!ctx.model) return;
 
     const provider = ctx.model.provider;

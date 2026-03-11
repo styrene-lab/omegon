@@ -28,6 +28,7 @@ export type UpstreamFailureClass =
   | "tool-output"
   | "context-overflow"
   | "invalid-request"
+  | "user-abort"
   | "non-retryable";
 export type UpstreamRecoveryAction = "retry-same-model" | "failover" | "surface" | "handled-elsewhere";
 
@@ -354,6 +355,21 @@ function classifyFailureMessage(message: string): UpstreamFailureClassification 
     match: boolean;
     classification: UpstreamFailureClassification;
   }> = [
+    {
+      // User-initiated cancellation: Esc in pi, SIGINT, AbortController.abort(), etc.
+      // These are NOT upstream API failures and must never surface as recovery events.
+      match: ["operation aborted", "command aborted", "user aborted", "abortederror", "request aborted", "abort was called"].some((needle) => normalized.includes(needle))
+        || normalized === "aborted",
+      classification: {
+        class: "user-abort",
+        recoveryAction: "handled-elsewhere",
+        summary: "user-initiated abort",
+        reason: "The operation was cancelled by the user (Esc / SIGINT / AbortSignal). No upstream failure occurred.",
+        retryable: false,
+        cooldownProvider: false,
+        cooldownCandidate: false,
+      },
+    },
     {
       match: ["context window", "context length", "too many tokens", "maximum context", "prompt is too long"].some((needle) => normalized.includes(needle)),
       classification: {

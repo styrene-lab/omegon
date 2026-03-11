@@ -304,6 +304,27 @@ describe("upstream failure classification", () => {
     assert.equal(classifyTransientFailure(new Error("invalid api key")), false);
     assert.equal(classifyTransientFailure(new Error("maximum context length exceeded")), false);
   });
+
+  it("classifies user-initiated aborts as user-abort with handled-elsewhere recovery", () => {
+    const cases = [
+      "Operation aborted",
+      "Command aborted",
+      "user aborted",
+      "AbortedError",
+      "request aborted by client",
+      "abort was called",
+      "aborted",
+    ];
+    for (const msg of cases) {
+      const c = classifyUpstreamFailure(new Error(msg));
+      assert.equal(c.class, "user-abort", `Expected user-abort for: ${msg}`);
+      assert.equal(c.recoveryAction, "handled-elsewhere", `Expected handled-elsewhere for: ${msg}`);
+      assert.equal(c.retryable, false, `Expected non-retryable for: ${msg}`);
+    }
+    // user-abort must never be treated as a transient (retryable) failure
+    assert.equal(classifyTransientFailure(new Error("Operation aborted")), false);
+    assert.equal(classifyTransientFailure(new Error("Command aborted")), false);
+  });
 });
 
 describe("display labels and defaults", () => {
