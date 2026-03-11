@@ -21,7 +21,7 @@ import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { Theme } from "@mariozechner/pi-coding-agent";
 import type { TUI } from "@mariozechner/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-import { DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
+import { DASHBOARD_UPDATE_EVENT, sharedState } from "../shared-state.ts";
 import {
   TABS,
   MAX_CONTENT_LINES,
@@ -83,13 +83,12 @@ export class DashboardOverlay {
    * The ticker drives the live elapsed counter without needing a shared-state event.
    */
   private syncTicker(): void {
-    const { sharedState } = require("../shared-state.ts");
     const cl = sharedState.cleave;
     const anyRunning = cl?.children?.some((c: { status: string }) => c.status === "running") ?? false;
 
     if (anyRunning && !this.tickerInterval) {
       this.tickerInterval = setInterval(() => {
-        // Only re-render if we're on the cleave tab and still have running children
+        // Only re-render if still have running children
         const cl2 = sharedState.cleave;
         if (cl2?.children?.some((c: { status: string }) => c.status === "running")) {
           this.tui.requestRender();

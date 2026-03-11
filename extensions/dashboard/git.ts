@@ -10,6 +10,19 @@ import * as path from "node:path";
 import { visibleWidth } from "@mariozechner/pi-tui";
 import type { Theme } from "@mariozechner/pi-coding-agent";
 
+// Shared ASCII-compat flag — same logic as footer.ts
+const useAscii = (() => {
+  if (process.env["PI_ASCII"] === "1") return true;
+  if (process.env["TERM"] === "dumb") return true;
+  const locale = (process.env["LC_ALL"] ?? process.env["LC_CTYPE"] ?? process.env["LANG"] ?? "").toUpperCase();
+  if (locale && !locale.includes("UTF")) return true;
+  return false;
+})();
+
+const T = useAscii
+  ? { single: "---", fork: "-+-", mid: "+-", last: "+-", ann: "# " }
+  : { single: " ─── ", fork: " ─┬─ ", mid: "├─ ", last: "└─ ", ann: "  ◈ " };
+
 // ── Branch reader ──────────────────────────────────────────────────────────────
 
 /**
@@ -104,7 +117,7 @@ function branchAnnotation(
   if (!designNodes) return "";
   const node = designNodes.find((n) => n.branches?.includes(b));
   if (!node) return "";
-  return "  " + theme.fg("dim", "◈ " + node.title);
+  return "  " + theme.fg("dim", T.ann + node.title);
 }
 
 /**
@@ -137,30 +150,29 @@ export function buildBranchTreeLines(params: BranchTreeParams, theme: Theme): st
   }
 
   if (ordered.length === 1) {
-    const b = ordered[0];
+    const b = ordered[0]!;
     const isCurrent = b === currentBranch;
     const annotation = branchAnnotation(b, designNodes, theme);
-    return [repoName + " ─── " + styledBranch(b, isCurrent, theme) + annotation];
+    return [repoName + T.single + styledBranch(b, isCurrent, theme) + annotation];
   }
 
-  // Multiple branches
-  // indent = spaces equal to visibleWidth of "repoName + " ─""
-  const indentWidth = visibleWidth(repoName + " ─");
+  // Multiple branches — indent aligned to just after the fork connector
+  const indentWidth = visibleWidth(repoName + (useAscii ? "-" : " ─"));
   const indent = " ".repeat(indentWidth);
 
   const lines: string[] = [];
   for (let i = 0; i < ordered.length; i++) {
-    const b = ordered[i];
+    const b = ordered[i]!;
     const isCurrent = b === currentBranch;
     const styled = styledBranch(b, isCurrent, theme);
     const annotation = branchAnnotation(b, designNodes, theme);
 
     if (i === 0) {
-      lines.push(repoName + " ─┬─ " + styled + annotation);
+      lines.push(repoName + T.fork + styled + annotation);
     } else if (i < ordered.length - 1) {
-      lines.push(indent + "├─ " + styled + annotation);
+      lines.push(indent + T.mid + styled + annotation);
     } else {
-      lines.push(indent + "└─ " + styled + annotation);
+      lines.push(indent + T.last + styled + annotation);
     }
   }
 

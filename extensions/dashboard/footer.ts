@@ -26,6 +26,26 @@ import { formatMemoryAuditSummary } from "./memory-audit.ts";
 import { buildContextGaugeModel } from "./context-gauge.ts";
 
 /**
+ * Box-drawing character set.
+ *
+ * When `TERM=dumb`, `PI_ASCII=1`, or `LC_ALL`/`LANG` indicates a non-UTF-8
+ * locale, fall back to plain ASCII characters that render on every terminal.
+ * Otherwise use the Unicode rounded-box set that looks nice in modern emulators.
+ */
+const useAsciiBoxChars = (() => {
+  if (process.env["PI_ASCII"] === "1") return true;
+  if (process.env["TERM"] === "dumb") return true;
+  // Basic locale check: if LANG/LC_ALL/LC_CTYPE doesn't mention UTF, fall back.
+  const locale = (process.env["LC_ALL"] ?? process.env["LC_CTYPE"] ?? process.env["LANG"] ?? "").toUpperCase();
+  if (locale && !locale.includes("UTF")) return true;
+  return false;
+})();
+
+const BOX = useAsciiBoxChars
+  ? { tl: "+", tr: "+", bl: "+", br: "+", h: "-", v: "|", vr: "+", vl: "+", hd: "+", hu: "+" }
+  : { tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│", vr: "├", vl: "┤", hd: "┬", hu: "┴" };
+
+/**
  * Format token counts to compact display (e.g. 1.2k, 45k, 1.3M)
  */
 function formatTokens(count: number): string {
@@ -376,16 +396,16 @@ export class DashboardFooter implements Component {
     const b = (s: string) => theme.fg("border", s);
 
     const wrapLine = (line: string) =>
-      b("│") + " " + padRight(truncateToWidth(line, innerWidth, "…"), innerWidth) + " " + b("│");
+      b(BOX.v) + " " + padRight(truncateToWidth(line, innerWidth, "…"), innerWidth) + " " + b(BOX.v);
 
     const topPad = Math.max(0, width - 5 - visibleWidth(topLineContent));
-    const topBorder = b("╭") + b("─") + " " + topLineContent + " " + b("─".repeat(topPad)) + b("╮");
+    const topBorder = b(BOX.tl) + b(BOX.h) + " " + topLineContent + " " + b(BOX.h.repeat(topPad)) + b(BOX.tr);
 
-    const separator = b("├") + b("─".repeat(width - 2)) + b("┤");
+    const separator = b(BOX.vr) + b(BOX.h.repeat(width - 2)) + b(BOX.vl);
 
     const dashHint = " /dash to compact ";
     const botPad = Math.max(0, width - 2 - visibleWidth(dashHint));
-    const bottomBorder = b("╰") + theme.fg("dim", dashHint) + b("─".repeat(botPad)) + b("╯");
+    const bottomBorder = b(BOX.bl) + theme.fg("dim", dashHint) + b(BOX.h.repeat(botPad)) + b(BOX.br);
 
     // Compute how many blank padding lines we need in the content area so the
     // total rendered box reaches targetHeight.
@@ -434,7 +454,10 @@ export class DashboardFooter implements Component {
 
     // Target: fill as much of the terminal as possible, leaving ~3 rows for
     // pi's editor/input area. Minimum = whatever the content naturally needs.
-    const termRows = process.stdout.rows || 24;
+    // Use tui.terminal.rows (authoritative, updated on SIGWINCH) rather than
+    // process.stdout.rows which lags and gives the wrong value inside multiplexers.
+    // Fall back to process.stdout.rows → 24 for test environments where tui is mocked.
+    const termRows = (this.tui as any)?.terminal?.rows || process.stdout.rows || 24;
     const targetHeight = Math.max(0, termRows - 3);
 
     return this.renderBoxed(contentLines, this.buildFooterZone(innerWidth), topLine, width, targetHeight);
@@ -450,7 +473,7 @@ export class DashboardFooter implements Component {
     const innerWidth = width - 4;
     const leftColWidth = Math.floor((innerWidth - 1) / 2);
     const rightColWidth = innerWidth - leftColWidth - 1;
-    const colDivider = this.theme.fg("dim", "│");
+    const colDivider = this.theme.fg("dim", BOX.v);
 
     const branchLines = this.buildBranchTree(innerWidth);
     const [topLine = "", ...extraBranchLines] = branchLines;
@@ -472,7 +495,7 @@ export class DashboardFooter implements Component {
         : []),
     ];
 
-    const termRows = process.stdout.rows || 24;
+    const termRows = (this.tui as any)?.terminal?.rows || process.stdout.rows || 24;
     const targetHeight = Math.max(0, termRows - 3);
 
     return this.renderBoxed(contentLines, this.buildFooterZone(innerWidth), topLine, width, targetHeight);
