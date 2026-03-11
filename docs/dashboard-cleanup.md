@@ -46,7 +46,7 @@ Inspection of `extensions/dashboard/footer.ts` shows the apparent duplicate foot
 
 ### Decision: Raised dashboard should stop re-rendering redundant inherited footer data
 
-**Status:** exploring
+**Status:** decided
 **Rationale:** The current custom footer already renders context gauge, driver/model, and memory-oriented metadata in the dashboard-specific rows. Re-appending the generic footer-data block below `/dash to compact` creates the appearance of a duplicate footer and wastes vertical space without adding enough operator value.
 
 ### Decision: Reserve a fixed bottom metadata block in raised mode

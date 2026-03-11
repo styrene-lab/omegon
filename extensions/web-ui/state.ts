@@ -28,6 +28,7 @@ import {
   type MemorySnapshot,
   type HealthSnapshot,
   type RecoverySnapshot,
+  type OperatorMetadataSnapshot,
 } from "./types.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -67,6 +68,18 @@ function buildSession(repoRoot: string): SessionSnapshot {
   };
 }
 
+/**
+ * Recovery actions that require operator attention — the web UI should treat
+ * these as "actionable" and may surface prompts, alerts, or indicators.
+ */
+const ACTIONABLE_RECOVERY_ACTIONS = new Set([
+  "escalate",
+  "retry",
+  "switch_candidate",
+  "switch_offline",
+  "cooldown",
+]);
+
 function buildDashboard(): DashboardSnapshot {
 
   let recovery: RecoverySnapshot | null = null;
@@ -81,15 +94,34 @@ function buildDashboard(): DashboardSnapshot {
       retryCount: r.retryCount ?? null,
       timestamp: r.timestamp,
       escalated: r.escalated ?? false,
+      // Structural actionability flag — avoids web consumers parsing action strings.
+      actionable:
+        (r.escalated ?? false) || ACTIONABLE_RECOVERY_ACTIONS.has(r.action),
     };
   }
 
-  const effortLevel =
-    sharedState.effort?.name ?? null;
+  const effort = sharedState.effort;
+  const effortLevel = effort?.name ?? null;
 
   const routingPolicy = sharedState.routingPolicy
     ? (sharedState.routingPolicy as unknown as Record<string, unknown>)
     : null;
+
+  const inj = sharedState.lastMemoryInjection;
+  const operatorMetadata: OperatorMetadataSnapshot = {
+    effortName: effort?.name ?? null,
+    effortLevel: effort?.level ?? null,
+    driverTier: effort?.driver ?? null,
+    thinkingLevel: effort?.thinking ?? null,
+    effortCapped: effort?.capped ?? false,
+    memoryTokenEstimate: sharedState.memoryTokenEstimate,
+    workingMemoryCount: inj?.workingMemoryFactCount ?? null,
+    totalFactCount: inj
+      ? (inj.projectFactCount ?? 0) +
+        (inj.globalFactCount ?? 0) +
+        (inj.workingMemoryFactCount ?? 0)
+      : null,
+  };
 
   return {
     mode: sharedState.dashboardMode ?? "compact",
@@ -98,6 +130,7 @@ function buildDashboard(): DashboardSnapshot {
     routingPolicy,
     effortLevel,
     recovery,
+    operatorMetadata,
   };
 }
 

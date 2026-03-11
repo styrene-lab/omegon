@@ -39,6 +39,12 @@ export interface DashboardSnapshot {
   effortLevel: string | null;
   /** Latest harness recovery event summary, if any. */
   recovery: RecoverySnapshot | null;
+  /**
+   * Pinned operator-context metadata mirroring the raised-mode dashboard block.
+   * Exposes context/model/thinking and memory-oriented state structurally so
+   * web UI consumers do not need to parse footer or display text.
+   */
+  operatorMetadata: OperatorMetadataSnapshot;
 }
 
 export interface RecoverySnapshot {
@@ -50,6 +56,37 @@ export interface RecoverySnapshot {
   retryCount: number | null;
   timestamp: number;
   escalated: boolean;
+  /**
+   * True when the recovery event represents a condition that may require
+   * operator attention or UI-level action (e.g. escalation, hard failover).
+   * False for passive/observe-only recovery events.
+   * Web UI consumers should use this flag instead of parsing action strings.
+   */
+  actionable: boolean;
+}
+
+/**
+ * Pinned operator-context metadata exposed by the raised-mode dashboard.
+ * Groups the context/model/thinking indicators and memory-oriented state so
+ * web UI consumers do not need to reverse-engineer values from footer text.
+ */
+export interface OperatorMetadataSnapshot {
+  /** Active effort tier name (e.g. "Ruthless"), or null if effort extension is inactive. */
+  effortName: string | null;
+  /** Numeric effort level 1-7, or null. */
+  effortLevel: number | null;
+  /** Driver model tier (e.g. "sonnet", "opus"), or null. */
+  driverTier: string | null;
+  /** Extended thinking level (e.g. "medium", "high"), or null. */
+  thinkingLevel: string | null;
+  /** Whether the effort level is ceiling-locked by an operator cap. */
+  effortCapped: boolean;
+  /** Approximate token count of the last memory injection. */
+  memoryTokenEstimate: number;
+  /** Number of facts in working memory during the last injection. */
+  workingMemoryCount: number | null;
+  /** Total fact count from the last injection (project + global + working). */
+  totalFactCount: number | null;
 }
 
 // ── Design Tree ───────────────────────────────────────────────────────────────
