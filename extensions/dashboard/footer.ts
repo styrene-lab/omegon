@@ -69,6 +69,8 @@ function summarizeCooldown(cooldowns: RecoveryCooldownSummary[] | undefined): st
 }
 
 const CLEAVE_STALE_MS = 30_000;
+/** Recovery notices auto-suppress in compact mode after this many ms with no new error. */
+const RECOVERY_STALE_MS = 45_000;
 
 type PrioritySegment = {
   text: string;
@@ -497,6 +499,10 @@ export class DashboardFooter implements Component {
     const recovery = getRecoveryState();
     if (!recovery) return "";
 
+    // Auto-suppress stale recovery notices in compact mode — they outlive their
+    // usefulness quickly and crowd out model/driver/thinking info.
+    if (Date.now() - recovery.timestamp > RECOVERY_STALE_MS) return "";
+
     const actionColor: ThemeColor = recovery.action === "retry" ? "warning"
       : recovery.action === "switch_candidate" || recovery.action === "switch_offline" ? "accent"
       : recovery.action === "cooldown" ? "warning"
@@ -508,13 +514,13 @@ export class DashboardFooter implements Component {
       : recovery.action === "cooldown" ? "cooldown"
       : recovery.action === "escalate" ? "escalate"
       : "recovery";
-    const summary = wide
-      ? sanitizeStatusText(recovery.summary)
-      : `${recovery.provider}/${recovery.modelId}`;
+    // Compact mode: keep to a terse badge — never render the full error string.
+    // Wide gets provider/model; narrow just the action label is enough.
+    const summary = wide ? `${recovery.provider}/${recovery.modelId}` : "";
     const cooldown = summarizeCooldown(recovery.cooldowns);
     return composePrimaryMetaLine(width,
       theme.fg(actionColor, `↺ ${actionLabel}`),
-      [theme.fg("dim", summary), cooldown ? theme.fg("dim", cooldown) : ""],
+      [summary ? theme.fg("dim", summary) : "", cooldown ? theme.fg("dim", cooldown) : ""].filter(Boolean),
     );
   }
 

@@ -89,9 +89,11 @@ describe("dashboard recovery state", () => {
     footer.setContext(makeContext() as any);
 
     const [line] = footer.render(160);
+    // Compact mode shows only the terse action badge + provider/model, not the full error string.
     assert.match(line, /↺ offline/);
-    assert.match(line, /Anthropic rate limited the last assistant turn\./);
+    assert.match(line, /anthropic\/claude-sonnet-4-5/);
     assert.match(line, /anthropic 1m/);
+    assert.doesNotMatch(line, /Anthropic rate limited the last assistant turn\./);
   });
 
   it("renders raised recovery section with action, target, and cooldown", () => {

@@ -462,6 +462,13 @@ export default function (pi: ExtensionAPI) {
       if (sharedState.recoveryRetryCounts && Object.keys(sharedState.recoveryRetryCounts).length > 0) {
         sharedState.recoveryRetryCounts = {};
       }
+      // Clear stale recovery state on a successful turn so the banner doesn't
+      // linger indefinitely in the compact footer.
+      if (sharedState.recovery || sharedState.latestRecoveryEvent) {
+        sharedState.recovery = undefined;
+        sharedState.latestRecoveryEvent = undefined;
+        pi.events.emit(DASHBOARD_UPDATE_EVENT, { source: "model-budget", recovery: undefined });
+      }
       return;
     }
 
