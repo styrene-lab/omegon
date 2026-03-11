@@ -252,7 +252,10 @@ async function checkpointRelatedChanges(
 	ui?: { input?: (prompt: string, initial?: string) => Promise<string | undefined> },
 ): Promise<void> {
 	if (classification.checkpointFiles.length === 0) {
-		throw new Error("Checkpoint requested, but no related files were confidently classified.");
+		throw new Error(
+			"Checkpoint scope is empty — no related files were confidently classified as checkpointable. " +
+			"The checkpoint would produce no commit. Resolve remaining dirty files manually or choose a different preflight action.",
+		);
 	}
 	if (typeof ui?.input !== "function") {
 		throw new Error("Checkpoint requires interactive approval, but input is unavailable.");
@@ -273,12 +276,22 @@ async function checkpointRelatedChanges(
 	}
 	const commitMessage = response && response.length > 0 ? response : suggested;
 	const addResult = await pi.exec("git", ["add", "--", ...classification.checkpointFiles], { cwd: repoPath, timeout: 15_000 });
-	if (addResult.code !== 0) throw new Error(addResult.stderr.trim() || "Failed to stage checkpoint files.");
+	if (addResult.code !== 0) {
+		throw new Error(
+			`git add failed during checkpoint — ${addResult.stderr.trim() || "unknown error staging checkpoint files"}. ` +
+			"The checkpoint was not created. Choose a different preflight action or resolve the staging error first.",
+		);
+	}
 	const commitResult = await pi.exec("git", ["commit", "-m", commitMessage, "--", ...classification.checkpointFiles], {
 		cwd: repoPath,
 		timeout: 20_000,
 	});
-	if (commitResult.code !== 0) throw new Error(commitResult.stderr.trim() || "Failed to create checkpoint commit.");
+	if (commitResult.code !== 0) {
+		throw new Error(
+			`git commit failed during checkpoint — ${commitResult.stderr.trim() || "unknown error creating checkpoint commit"}. ` +
+			"The checkpoint was not created. Resolve the git error and try again.",
+		);
+	}
 }
 
 export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTreePreflightOptions): Promise<"continue" | "skip_cleave" | "cancelled"> {
@@ -303,8 +316,10 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 		changeName,
 		openspecContext,
 	});
-	const checkpointPlan = buildCheckpointPlan(classification, { changeName, openspecContext });
-	const summary = formatDirtyTreeSummary(classification, checkpointPlan.message);
+	// Compute initial checkpoint plan for the summary display only.
+	// The plan is rebuilt from currentClassification inside the loop on each attempt (C4).
+	const initialCheckpointPlan = buildCheckpointPlan(classification, { changeName, openspecContext });
+	const summary = formatDirtyTreeSummary(classification, initialCheckpointPlan.message);
 	options.onUpdate?.({ content: [{ type: "text", text: summary }], details: { phase: "preflight" } });
 
 	if (gitState.nonVolatile.length === 0) {
@@ -322,20 +337,74 @@ export async function runDirtyTreePreflight(pi: ExtensionAPI, options: DirtyTree
 		throw new Error(summary + "\n\nInteractive input is unavailable, so cleave cannot resolve the dirty tree automatically.");
 	}
 
+	// Mutable classification — refreshed after each checkpoint attempt (C1/W1).
+	let currentClassification = classification;
+
 	while (true) {
 		const answer = normalizePreflightInput(await options.ui.input(
 			"Dirty tree action [checkpoint|stash-unrelated|stash-volatile|proceed-without-cleave|cancel]:",
 		))?.toLowerCase();
 		try {
 			switch (answer) {
-				case "checkpoint":
-					await checkpointRelatedChanges(pi, options.repoPath, classification, checkpointPlan.message, options.ui);
-					return "continue";
+				case "checkpoint": {
+					// Rebuild the checkpoint plan from the current (possibly refreshed) classification (C4).
+					const currentCheckpointPlan = buildCheckpointPlan(currentClassification, { changeName, openspecContext });
+					const committedFiles = new Set(currentClassification.checkpointFiles);
+					await checkpointRelatedChanges(pi, options.repoPath, currentClassification, currentCheckpointPlan.message, options.ui);
+					// Re-verify cleanliness after the checkpoint commit.
+					const postCheckpointStatus = await pi.exec("git", ["status", "--porcelain"], {
+						cwd: options.repoPath,
+						timeout: 5_000,
+					});
+					const postState = inspectGitState(postCheckpointStatus.stdout);
+					if (postState.entries.length === 0) {
+						// Tree is clean — checkpoint fully resolved the dirty tree.
+						return "continue";
+					}
+
+					// Re-derive classification from the post-checkpoint state (C1).
+					currentClassification = classifyPreflightDirtyPaths(
+						postState.entries.map((e) => e.path),
+						{ changeName, openspecContext },
+					);
+
+					// C2: If only volatile files remain, auto-stash and continue.
+					if (postState.nonVolatile.length === 0 && currentClassification.volatile.length > 0) {
+						await stashPaths(pi, options.repoPath, "cleave-preflight-volatile", currentClassification.volatile);
+						options.onUpdate?.({
+							content: [{ type: "text", text: "Checkpoint succeeded. Remaining volatile artifacts stashed automatically — cleave continuing." }],
+							details: { phase: "preflight", autoResolved: "volatile_only_stash" },
+						});
+						return "continue";
+					}
+
+					// Remaining dirty files — emit precise diagnosis (W1: distinguish committed-but-still-dirty vs excluded-from-scope).
+					const remainingPaths = postState.entries.map((e) => e.path);
+					const diagnosisLines = [
+						"Checkpoint committed successfully, but dirty files remain — cleave cannot continue yet:",
+						...currentClassification.related.map((f) =>
+							committedFiles.has(f.path)
+								? `  • ${f.path}  [was committed but remains dirty — file may have been modified after staging or only partially staged]`
+								: `  • ${f.path}  [related but excluded from checkpoint scope — confidence too low to commit automatically]`
+						),
+						...currentClassification.unrelated.map((f) => `  • ${f.path}  [unrelated: ${f.reason}]`),
+						...currentClassification.unknown.map((f) => `  • ${f.path}  [unknown — not in change scope, was not checkpointed]`),
+						...currentClassification.volatile.map((f) => `  • ${f.path}  [volatile artifact — will be auto-stashed]`),
+						"",
+						"Choose another preflight action to resolve the remaining files.",
+					];
+					options.onUpdate?.({
+						content: [{ type: "text", text: diagnosisLines.join("\n") }],
+						details: { phase: "preflight", postCheckpointDirty: remainingPaths },
+					});
+					break;
+				}
 				case "stash-unrelated":
-					await stashPaths(pi, options.repoPath, "cleave-preflight-unrelated", [...classification.unrelated, ...classification.unknown]);
+					// C1: Use currentClassification (refreshed after checkpoint) not the stale original.
+					await stashPaths(pi, options.repoPath, "cleave-preflight-unrelated", [...currentClassification.unrelated, ...currentClassification.unknown]);
 					return "continue";
 				case "stash-volatile":
-					await stashPaths(pi, options.repoPath, "cleave-preflight-volatile", classification.volatile);
+					await stashPaths(pi, options.repoPath, "cleave-preflight-volatile", currentClassification.volatile);
 					return "continue";
 				case "proceed-without-cleave":
 					return "skip_cleave";

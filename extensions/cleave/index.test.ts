@@ -82,7 +82,7 @@ function runAssessSpecScenario(mode: "bridged" | "interactive" | "reopen") {
 	return runJsonScript(script);
 }
 
-function runDirtyTreePreflightScenario(mode: "clean" | "volatile-only" | "checkpoint" | "checkpoint-clipboard" | "generic" | "unknowns") {
+function runDirtyTreePreflightScenario(mode: "clean" | "volatile-only" | "checkpoint" | "checkpoint-clipboard" | "generic" | "unknowns" | "checkpoint-post-dirty" | "checkpoint-commit-fail" | "checkpoint-empty-scope") {
 	const script = String.raw`
 (async () => {
   const { runDirtyTreePreflight } = await import('./extensions/cleave/index.ts');
@@ -92,38 +92,78 @@ function runDirtyTreePreflightScenario(mode: "clean" | "volatile-only" | "checkp
   const answersByMode = {
     clean: [],
     'volatile-only': [],
+    // checkpoint: first input selects action, second approves commit message (empty = use suggested).
+    // The post-checkpoint git status returns clean, so the loop exits after one successful checkpoint.
     checkpoint: ['checkpoint', ''],
+    // Same as checkpoint but commit message response is a transient clipboard path — should be treated as empty.
     'checkpoint-clipboard': ['checkpoint', '/var/folders/vl/w3m4rq616c9gv9cmbj99kz_80000gn/T/pi-clipboard-9b123c74-47d4-4fd6-8185-c57d16f4433a.png'],
     generic: ['proceed-without-cleave'],
     unknowns: ['stash-unrelated'],
+    // checkpoint-post-dirty: first checkpoint attempt leaves excluded files dirty,
+    // operator then stashes unrelated files to resolve.
+    'checkpoint-post-dirty': ['checkpoint', '', 'stash-unrelated'],
+    // checkpoint-commit-fail: git commit fails, error surfaces in preflight, operator cancels.
+    'checkpoint-commit-fail': ['checkpoint', '', 'cancel'],
+    // checkpoint-empty-scope: no related/checkpointable files — checkpoint throws, operator cancels.
+    'checkpoint-empty-scope': ['checkpoint', 'cancel'],
   };
   const inputs = [...answersByMode[mode]];
+
+  // Stateful git status call counter — enables per-call sequence responses (W2).
+  // Some modes need "dirty on call 1, clean on call 2" to exercise post-checkpoint re-verification.
+  let statusCallCount = 0;
+
+  // Per-mode status sequences: each element is the stdout for that status call (0-indexed).
+  // If a call index exceeds the array, the last element is reused.
+  const dirtyCheckpointStatus = ' M openspec/changes/cleave-dirty-tree-checkpointing/tasks.md\n?? docs/cleave-dirty-tree-checkpointing.md\n';
+  const statusSequencesByMode = {
+    clean: [''],
+    'volatile-only': [' M .pi/memory/facts.jsonl\n'],
+    // call 0: initial dirty check; call 1: post-checkpoint re-verify → clean (C1 fix)
+    checkpoint: [dirtyCheckpointStatus, ''],
+    'checkpoint-clipboard': [dirtyCheckpointStatus, ''],
+    generic: [' M README.md\n'],
+    unknowns: [' M openspec/changes/other-change/tasks.md\n?? scratch/notes.md\n'],
+    // call 0: initial dirty; call 1: post-checkpoint still dirty (excluded file remains); call 2+: operator resolves via stash
+    'checkpoint-post-dirty': [dirtyCheckpointStatus, '?? docs/cleave-dirty-tree-checkpointing.md\n'],
+    // commit-fail: status always dirty (commit never actually happens)
+    'checkpoint-commit-fail': [dirtyCheckpointStatus],
+    // empty-scope: only untracked docs file — no related/tracked files to checkpoint
+    'checkpoint-empty-scope': ['?? docs/cleave-dirty-tree-checkpointing.md\n'],
+  };
+
   const pi = {
     exec: async (cmd, args) => {
       commands.push([cmd, ...args]);
       if (cmd !== 'git') return { code: 0, stdout: '', stderr: '' };
       if (args[0] === 'status') {
-        const stdoutByMode = {
-          clean: '',
-          'volatile-only': ' M .pi/memory/facts.jsonl\n',
-          checkpoint: ' M openspec/changes/cleave-dirty-tree-checkpointing/tasks.md\n?? docs/cleave-dirty-tree-checkpointing.md\n',
-          'checkpoint-clipboard': ' M openspec/changes/cleave-dirty-tree-checkpointing/tasks.md\n?? docs/cleave-dirty-tree-checkpointing.md\n',
-          generic: ' M README.md\n',
-          unknowns: ' M openspec/changes/other-change/tasks.md\n?? scratch/notes.md\n',
-        };
-        return { code: 0, stdout: stdoutByMode[mode], stderr: '' };
+        const seq = statusSequencesByMode[mode] ?? [''];
+        const stdout = seq[Math.min(statusCallCount, seq.length - 1)];
+        statusCallCount++;
+        return { code: 0, stdout, stderr: '' };
       }
-      if (args[0] === 'add' || args[0] === 'commit' || args[0] === 'stash') {
+      if (args[0] === 'add') {
+        return { code: 0, stdout: '', stderr: '' };
+      }
+      if (args[0] === 'commit') {
+        if (mode === 'checkpoint-commit-fail') {
+          return { code: 1, stdout: '', stderr: 'error: nothing to commit, working tree clean' };
+        }
+        return { code: 0, stdout: '', stderr: '' };
+      }
+      if (args[0] === 'stash') {
         return { code: 0, stdout: '', stderr: '' };
       }
       return { code: 0, stdout: '', stderr: '' };
     },
   };
+
+  const noUiModes = new Set(['clean', 'volatile-only']);
   const result = await runDirtyTreePreflight(pi, {
     repoPath: process.cwd(),
     openspecChangePath: mode === 'generic' ? undefined : 'openspec/changes/cleave-dirty-tree-checkpointing',
     onUpdate: (payload) => updates.push(payload),
-    ui: mode === 'clean' || mode === 'volatile-only'
+    ui: noUiModes.has(mode)
       ? undefined
       : { input: async (_prompt, initial) => inputs.shift() ?? initial ?? '' },
   });
@@ -245,5 +285,49 @@ describe("dirty-tree preflight acceptance coverage", () => {
 		assert.ok(commitCommand, "expected git commit after checkpoint approval");
 		assert.match(String(commitCommand[3] ?? ""), /checkpoint/i);
 		assert.ok(!commitCommand.includes("/var/folders/vl/w3m4rq616c9gv9cmbj99kz_80000gn/T/pi-clipboard-9b123c74-47d4-4fd6-8185-c57d16f4433a.png"));
+	});
+
+	it("post-checkpoint diagnosis names remaining dirty paths when excluded files still exist after commit", () => {
+		// Spec: "checkpoint leaves excluded files dirty" — the unrelated docs file was never in checkpoint
+		// scope, so it remains dirty. Preflight must emit explicit diagnosis and NOT return success yet.
+		const result = runDirtyTreePreflightScenario("checkpoint-post-dirty");
+		// After the first checkpoint attempt, a diagnosis update fires before the operator resolves remaining files.
+		const diagnosisUpdate = result.updates.find((u: { content: Array<{ text: string }> }) =>
+			/checkpoint committed successfully.*dirty files remain/i.test(u.content?.[0]?.text ?? "")
+		);
+		assert.ok(diagnosisUpdate, "expected post-checkpoint diagnosis naming remaining dirty paths");
+		const diagText: string = diagnosisUpdate.content[0].text;
+		assert.match(diagText, /docs\/cleave-dirty-tree-checkpointing\.md/);
+		// Operator stashes unrelated files in the second loop iteration — cleave must continue.
+		assert.equal(result.result, "continue");
+	});
+
+	it("git commit failure during checkpoint surfaces the error in preflight rather than pretending success", () => {
+		// Spec: "git commit fails during checkpoint creation"
+		const result = runDirtyTreePreflightScenario("checkpoint-commit-fail");
+		// A preflight error update must contain the git failure reason.
+		const errorUpdate = result.updates.find((u: { content: Array<{ text: string }> }) =>
+			/preflight action failed/i.test(u.content?.[0]?.text ?? "")
+		);
+		assert.ok(errorUpdate, "expected preflight error update for git commit failure");
+		const errorText: string = errorUpdate.content[0].text;
+		assert.match(errorText, /git commit failed/i);
+		assert.match(errorText, /nothing to commit/i);
+		// Operator cancels after failure — must not return "continue".
+		assert.equal(result.result, "cancelled");
+	});
+
+	it("empty checkpoint scope reports that no files are stageable rather than exiting preflight as success", () => {
+		// Spec: "no approved checkpoint files remain stageable"
+		const result = runDirtyTreePreflightScenario("checkpoint-empty-scope");
+		// The checkpoint attempt must throw and be caught as a preflight error.
+		const errorUpdate = result.updates.find((u: { content: Array<{ text: string }> }) =>
+			/preflight action failed/i.test(u.content?.[0]?.text ?? "")
+		);
+		assert.ok(errorUpdate, "expected preflight error update for empty checkpoint scope");
+		const errorText: string = errorUpdate.content[0].text;
+		assert.match(errorText, /checkpoint scope is empty/i);
+		// Operator cancels — must not return "continue".
+		assert.equal(result.result, "cancelled");
 	});
 });
