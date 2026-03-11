@@ -16,7 +16,7 @@ import type { ReadonlyFooterDataProvider } from "@mariozechner/pi-coding-agent";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { TUI } from "@mariozechner/pi-tui";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-import { leftRight, mergeColumns } from "./render-utils.ts";
+import { leftRight, mergeColumns, padRight } from "./render-utils.ts";
 import { buildBranchTreeLines, readLocalBranches } from "./git.ts";
 import type { DashboardState, RecoveryCooldownSummary, RecoveryDashboardState } from "./types.ts";
 import { sharedState } from "../shared-state.ts";
@@ -348,41 +348,77 @@ export class DashboardFooter implements Component {
   }
 
   /**
-   * Stacked layout for narrow terminals (<120 cols).
-   * All sections rendered full-width, top to bottom.
+   * Render content + footer lines inside a rounded box with a top border label
+   * and a `/dash to compact` hint embedded in the bottom border.
    */
-  private renderRaisedStacked(width: number): string[] {
-    const lines: string[] = [];
+  private renderBoxed(
+    contentLines: string[],
+    footerLines: string[],
+    topLineContent: string,
+    width: number,
+  ): string[] {
+    const theme = this.theme;
+    const innerWidth = width - 4; // 2 for │ borders + 2 for padding spaces
 
-    lines.push(...this.buildBranchTree(width));
-    lines.push(...this.buildDesignTreeLines(width));
-    lines.push(...this.buildOpenSpecLines(width));
-    lines.push(...this.buildRecoveryLines(width));
-    lines.push(...this.buildCleaveLines(width));
-    lines.push(...this.buildFooterZone(width));
+    const b = (s: string) => theme.fg("border", s);
 
+    const wrapLine = (line: string) =>
+      b("│") + " " + padRight(truncateToWidth(line, innerWidth, "…"), innerWidth) + " " + b("│");
+
+    const topPad = Math.max(0, width - 5 - visibleWidth(topLineContent));
+    const topBorder = b("╭") + b("─") + " " + topLineContent + " " + b("─".repeat(topPad)) + b("╮");
+
+    const separator = b("├") + b("─".repeat(width - 2)) + b("┤");
+
+    const dashHint = " /dash to compact ";
+    const botPad = Math.max(0, width - 2 - visibleWidth(dashHint));
+    const bottomBorder = b("╰") + theme.fg("dim", dashHint) + b("─".repeat(botPad)) + b("╯");
+
+    const lines: string[] = [topBorder];
+    for (const line of contentLines) lines.push(wrapLine(line));
+    if (footerLines.length > 0) {
+      lines.push(separator);
+      for (const line of footerLines) lines.push(wrapLine(line));
+    }
+    lines.push(bottomBorder);
     return lines;
   }
 
   /**
-   * Wide layout (≥120 cols) — 3-zone:
-   *   Zone A: Git branch tree — full width
-   *   Zone B: mergeColumns — Design tree + Recovery + Cleave left │ OpenSpec right
-   *   Zone C: Shared footer (meta, memory audit, separator, hint, footer data)
+   * Stacked layout for narrow terminals (<120 cols).
+   * All sections rendered full-width inside a corner-bounded box.
+   */
+  private renderRaisedStacked(width: number): string[] {
+    const innerWidth = width - 4;
+    const branchLines = this.buildBranchTree(innerWidth);
+    const [topLine = "", ...extraBranchLines] = branchLines;
+
+    const contentLines = [
+      ...extraBranchLines,
+      ...this.buildDesignTreeLines(innerWidth),
+      ...this.buildOpenSpecLines(innerWidth),
+      ...this.buildRecoveryLines(innerWidth),
+      ...this.buildCleaveLines(innerWidth),
+    ];
+
+    return this.renderBoxed(contentLines, this.buildFooterZone(innerWidth), topLine, width);
+  }
+
+  /**
+   * Wide layout (≥120 cols) — two-column content inside a corner-bounded box.
+   *   Left:  Design tree + Recovery + Cleave (active work context)
+   *   Right: OpenSpec (spec/task progress)
+   *   Footer zone: shared meta, memory, footer data
    */
   private renderRaisedWide(width: number): string[] {
-    const divider = "│";
-    const leftColWidth = Math.floor((width - divider.length) / 2);
-    const rightColWidth = width - leftColWidth - divider.length;
+    const innerWidth = width - 4;
+    const leftColWidth = Math.floor((innerWidth - 1) / 2);
+    const rightColWidth = innerWidth - leftColWidth - 1;
+    const colDivider = this.theme.fg("dim", "│");
 
-    const lines: string[] = [];
+    const branchLines = this.buildBranchTree(innerWidth);
+    const [topLine = "", ...extraBranchLines] = branchLines;
 
-    // Zone A — git branch tree full-width
-    lines.push(...this.buildBranchTree(width));
-
-    // Zone B — two-column split:
-    //   left  = design tree + recovery + cleave (active work context)
-    //   right = openspec (spec/task progress)
     const leftLines = [
       ...this.buildDesignTreeLines(leftColWidth),
       ...this.buildRecoveryLines(leftColWidth),
@@ -390,14 +426,14 @@ export class DashboardFooter implements Component {
     ];
     const rightLines = this.buildOpenSpecLines(rightColWidth);
 
-    if (leftLines.length > 0 || rightLines.length > 0) {
-      lines.push(...mergeColumns(leftLines, rightLines, leftColWidth, rightColWidth, divider));
-    }
+    const contentLines: string[] = [
+      ...extraBranchLines,
+      ...(leftLines.length > 0 || rightLines.length > 0
+        ? mergeColumns(leftLines, rightLines, leftColWidth, rightColWidth, colDivider)
+        : []),
+    ];
 
-    // Zone C — shared footer
-    lines.push(...this.buildFooterZone(width));
-
-    return lines;
+    return this.renderBoxed(contentLines, this.buildFooterZone(innerWidth), topLine, width);
   }
 
   // ── Footer Zone (shared by stacked + wide layouts) ────────────
@@ -407,19 +443,13 @@ export class DashboardFooter implements Component {
    * and the original footer data lines.
    */
   private buildFooterZone(width: number): string[] {
-    const theme = this.theme;
     const zone: string[] = [];
 
     const raisedMeta = this.buildRaisedMetaLine(width);
     if (raisedMeta) zone.push(raisedMeta);
 
-    const memoryAuditLine = this.buildMemoryAuditLine(width);
-    if (memoryAuditLine) zone.push(memoryAuditLine);
-
-    const ruleLen = Math.max(2, width - 2);
-    zone.push(theme.fg("dim", "╶" + "─".repeat(ruleLen) + "╴"));
-
-    zone.push(truncateToWidth(theme.fg("dim", "/dash to compact"), width, "…"));
+    const memLine = this.buildConsolidatedMemoryLine(width);
+    if (memLine) zone.push(memLine);
 
     zone.push(...this.renderFooterData(width));
 
@@ -704,6 +734,38 @@ export class DashboardFooter implements Component {
     return truncateToWidth(theme.fg("dim", summary), width, "…");
   }
 
+  /**
+   * Consolidated memory line: combines total stored fact count (from "memory"
+   * extension status) with live injection metrics from sharedState.
+   * Format: ⌗ N total · M injected · wm:X · ep:X · global:X · ~Xtok
+   */
+  private buildConsolidatedMemoryLine(width: number): string {
+    const theme = this.theme;
+    const extStatuses = this.footerData.getExtensionStatuses();
+    const memStatus = extStatuses.get("memory") ?? "";
+    const totalMatch = memStatus.match(/(\d+)\s+facts/);
+    const totalFacts = totalMatch ? parseInt(totalMatch[1], 10) : null;
+
+    const metrics = sharedState.lastMemoryInjection;
+    if (!metrics && totalFacts === null) return "";
+
+    const parts: string[] = [];
+    if (totalFacts !== null) {
+      parts.push(theme.fg("accent", "⌗") + theme.fg("dim", ` ${totalFacts} total`));
+    }
+    if (metrics) {
+      parts.push(theme.fg("dim", `${metrics.projectFactCount} injected`));
+      if (metrics.workingMemoryFactCount > 0) parts.push(theme.fg("dim", `wm:${metrics.workingMemoryFactCount}`));
+      if (metrics.episodeCount > 0) parts.push(theme.fg("dim", `ep:${metrics.episodeCount}`));
+      if (metrics.globalFactCount > 0) parts.push(theme.fg("dim", `global:${metrics.globalFactCount}`));
+      parts.push(theme.fg("dim", `~${metrics.estimatedTokens} tok`));
+    } else {
+      parts.push(theme.fg("dim", "pending injection"));
+    }
+
+    return truncateToWidth(parts.join(theme.fg("dim", " · ")), width, "…");
+  }
+
   // ── Context Gauge (from status-bar) ───────────────────────────
 
   private buildContextGauge(barWidth: number): string {
@@ -876,6 +938,7 @@ export class DashboardFooter implements Component {
       const extensionStatuses = this.footerData.getExtensionStatuses();
       if (extensionStatuses.size > 0) {
         const sortedStatuses = Array.from(extensionStatuses.entries())
+          .filter(([name]) => name !== "memory")  // covered by consolidated memory line
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([_name, text]) => {
             const cleanText = sanitizeStatusText(text);
