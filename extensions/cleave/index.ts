@@ -62,7 +62,9 @@ import { DEFAULT_CONFIG } from "./types.ts";
 import {
 	buildCheckpointPlan,
 	classifyDirtyPaths as classifyPreflightDirtyPaths,
+	findIncompleteRuns,
 	initWorkspace,
+	loadState,
 	readTaskFiles,
 	saveState,
 	type ClassifiedDirtyPath,
@@ -1822,6 +1824,140 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 				].join("\n"),
 				{ deliverAs: "followUp" },
 			);
+		},
+	});
+
+	// ── /cleave resume command ────────────────────────────────────────
+	/**
+	 * Resume an interrupted cleave run.
+	 *
+	 * When a cleave session is killed before the harvest/merge phase the
+	 * workspace state file is left with `phase: "dispatch"` and some children
+	 * still `pending`.  This command:
+	 *
+	 *   1. Finds the most recent interrupted run for the current repo.
+	 *   2. Re-dispatches pending children (dispatchChildren skips completed ones).
+	 *   3. Runs the harvest/merge phase and cleans up worktrees.
+	 *
+	 * The full harvest is intentionally the same code path as cleave_run
+	 * (minus OpenSpec write-back which requires the original change path).
+	 */
+	pi.registerCommand("cleave resume", {
+		description: "Resume an interrupted cleave run — re-dispatch pending children and complete the harvest/merge phase",
+		handler: async (_args, ctx) => {
+			const repoPath = ctx.cwd;
+			const signal: AbortSignal | undefined = (ctx as any).signal;
+
+			const incomplete = findIncompleteRuns(repoPath);
+			if (incomplete.length === 0) {
+				pi.sendMessage({
+					customType: "view",
+					content: "**Cleave Resume** — no interrupted runs found for this repository.",
+					display: true,
+				});
+				return;
+			}
+
+			const state = incomplete[0]!;
+
+			const emit = (text: string) => pi.sendMessage({ customType: "view", content: text, display: true });
+
+			const completedBefore = state.children.filter((c) => c.status === "completed").length;
+			const pendingChildren = state.children.filter(
+				(c) => c.status !== "completed" && c.status !== "failed",
+			);
+
+			const header = [
+				`**Cleave Resume** — \`${state.runId}\``,
+				`Directive: ${state.directive}`,
+				`Base branch: \`${state.baseBranch}\``,
+				"",
+				...state.children.map((c) => {
+					const icon = c.status === "completed" ? "✅" : c.status === "failed" ? "❌" : "⏳";
+					return `  ${icon} [${c.childId}] \`${c.label}\` — ${c.status}`;
+				}),
+				"",
+				`${completedBefore} already completed, ${pendingChildren.length} to dispatch`,
+			].join("\n");
+			emit(header);
+
+			// ── Re-dispatch any pending children ──────────────────────
+			if (pendingChildren.length > 0) {
+				emit(`Resuming dispatch for ${pendingChildren.length} pending child(ren)…`);
+				emitCleaveState(pi, "dispatching", state.runId, state.children);
+				await dispatchChildren(
+					pi,
+					state,
+					4, // maxParallel
+					120 * 60 * 1000,
+					undefined,
+					signal,
+					(msg) => emit(msg),
+					DEFAULT_REVIEW_CONFIG,
+				);
+				saveState(state);
+			}
+
+			// ── Harvest + merge ────────────────────────────────────────
+			emitCleaveState(pi, "merging", state.runId, state.children);
+			state.phase = "harvest";
+			saveState(state);
+
+			const taskContents = readTaskFiles(state.workspacePath);
+			const taskResults = [...taskContents.entries()].map(([id, content]) =>
+				parseTaskResult(content, `${id}-task.md`),
+			);
+			const conflicts = detectConflicts(taskResults);
+
+			state.phase = "reunify";
+			saveState(state);
+
+			const completedChildren2 = state.children.filter((c) => c.status === "completed");
+			const mergeResults: Array<{ label: string; branch: string; success: boolean; conflicts: string[] }> = [];
+
+			for (const child of completedChildren2) {
+				const result = await mergeBranch(pi, repoPath, child.branch, state.baseBranch);
+				mergeResults.push({ label: child.label, branch: child.branch, success: result.success, conflicts: result.conflictFiles });
+				if (!result.success) break;
+			}
+
+			const mergeFailures = mergeResults.filter((m) => !m.success);
+
+			if (mergeResults.length > 0 && mergeFailures.length === 0) {
+				await cleanupWorktrees(pi, repoPath);
+			} else {
+				await pruneWorktreeDirs(pi, repoPath);
+			}
+
+			// ── Finalise state ─────────────────────────────────────────
+			const allOk =
+				state.children.every((c) => c.status === "completed") &&
+				mergeResults.every((m) => m.success) &&
+				conflicts.length === 0;
+
+			state.phase = allOk ? "complete" : "failed";
+			state.completedAt = new Date().toISOString();
+			state.totalDurationSec = Math.round(
+				(new Date(state.completedAt).getTime() - new Date(state.createdAt).getTime()) / 1000,
+			);
+			emitCleaveState(pi, allOk ? "done" : "failed", state.runId, state.children);
+			saveState(state);
+
+			const completedCount = state.children.filter((c) => c.status === "completed").length;
+			const failedCount = state.children.filter((c) => c.status === "failed").length;
+
+			const report = [
+				`## Cleave Resume Report: ${state.runId}`,
+				"",
+				`**Status:** ${allOk ? "✓ COMPLETE" : "✗ ISSUES"}`,
+				`**Children:** ${completedCount} completed, ${failedCount} failed of ${state.children.length}`,
+				`**Merges:** ${mergeResults.filter((m) => m.success).length} succeeded, ${mergeFailures.length} failed`,
+				conflicts.length > 0 ? `\n${formatConflicts(conflicts)}` : "",
+				mergeFailures.length > 0
+					? `\n**Merge failures:**\n${mergeFailures.map((m) => `  • \`${m.branch}\`: ${m.conflicts.join(", ") || "unknown error"}`).join("\n")}`
+					: "",
+			].filter(Boolean).join("\n");
+			emit(report);
 		},
 	});
 

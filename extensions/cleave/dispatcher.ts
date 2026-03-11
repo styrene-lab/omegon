@@ -577,8 +577,10 @@ async function dispatchSingleChild(
 	signal?: AbortSignal,
 	reviewConfig?: ReviewConfig,
 ): Promise<void> {
-	// Skip children that already failed (e.g., worktree creation failure)
-	if (child.status === "failed") return;
+	// Skip children that are already settled — idempotent on resume.
+	// "completed" covers a successful prior run; "failed" covers worktree
+	// creation failures or a previous dispatch that returned non-zero.
+	if (child.status === "completed" || child.status === "failed") return;
 
 	child.status = "running";
 	child.startedAt = new Date().toISOString();

@@ -8,7 +8,7 @@
  * Workspaces live outside the target repo to avoid polluting the working tree.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ChildPlan, CleaveState, SplitPlan } from "./types.ts";
@@ -147,6 +147,34 @@ export function loadState(workspacePath: string): CleaveState {
 		throw new Error(`State file not found: ${statePath}`);
 	}
 	return JSON.parse(readFileSync(statePath, "utf-8"));
+}
+
+/**
+ * Scan ~/.pi/cleave/ for workspaces whose phase is still "dispatch" — i.e.
+ * runs that were interrupted before the harvest/merge phase completed.
+ *
+ * If `repoPath` is provided only runs matching that repo are returned.
+ * Results are sorted newest-first by `createdAt`.
+ */
+export function findIncompleteRuns(repoPath?: string): CleaveState[] {
+	if (!existsSync(CLEAVE_HOME)) return [];
+	const entries = readdirSync(CLEAVE_HOME, { withFileTypes: true });
+	const results: CleaveState[] = [];
+	for (const entry of entries) {
+		if (!entry.isDirectory()) continue;
+		const statePath = join(CLEAVE_HOME, entry.name, "state.json");
+		if (!existsSync(statePath)) continue;
+		try {
+			const state: CleaveState = JSON.parse(readFileSync(statePath, "utf-8"));
+			if (state.phase !== "dispatch" && state.phase !== "harvest") continue;
+			if (repoPath && state.repoPath !== repoPath) continue;
+			results.push(state);
+		} catch {
+			// Corrupt state — skip
+		}
+	}
+	results.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+	return results;
 }
 
 /**
