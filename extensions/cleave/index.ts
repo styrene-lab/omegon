@@ -1737,6 +1737,23 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			threshold: Type.Optional(Type.Number({ description: "Complexity threshold (default: 2.0)" })),
 		}),
 
+		renderCall(params) {
+			const dir = params.directive.length > 60
+				? params.directive.slice(0, 57) + "…"
+				: params.directive;
+			return `◊ assess ${dir}`;
+		},
+
+		renderResult(_params, result) {
+			if (!result?.details) return undefined;
+			const d = result.details as { complexity?: number; decision?: string };
+			const decisionIcon =
+				d.decision === "execute" ? "✓ execute"
+				: d.decision === "cleave" ? "⚡ cleave"
+				: "? needs_assessment";
+			return `◊ assess complexity=${d.complexity?.toFixed(2) ?? "?"} → ${decisionIcon}`;
+		},
+
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			const assessment = assessDirective(params.directive, params.threshold ?? DEFAULT_CONFIG.threshold);
 			const text = formatAssessment(assessment);
@@ -2295,6 +2312,58 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 				}),
 			),
 		}),
+
+		renderCall(params) {
+			const plan = (() => {
+				try { return JSON.parse(params.plan_json); } catch { return null; }
+			})();
+			const n = Array.isArray(plan?.children) ? plan.children.length : "?";
+			const dir = params.directive.length > 50
+				? params.directive.slice(0, 47) + "…"
+				: params.directive;
+			return `⚡ cleave ${n} children — ${dir}`;
+		},
+
+		renderResult(params, result, isPartial) {
+			if (isPartial) {
+				// Phase-aware child table from details
+				const d = result?.details as {
+					children?: Array<{ label: string; status: string }>;
+					phase?: string;
+				} | undefined;
+				const children = d?.children ?? [];
+				if (children.length === 0) return undefined;
+				const done = children.filter((c) => c.status === "completed").length;
+				const running = children.filter((c) => c.status === "running").length;
+				const failed = children.filter((c) => c.status === "failed").length;
+				const total = children.length;
+				const rows = children.map((c) => {
+					const icon =
+						c.status === "completed" ? "✓"
+						: c.status === "running" ? "⟳"
+						: c.status === "failed" ? "✕"
+						: "○";
+					return `  ${icon} ${c.label}`;
+				});
+				const summary = `⚡ cleave ${done + running}/${total} active · ${failed} failed`;
+				return [summary, ...rows].join("\n");
+			}
+			// Final result
+			const d = result?.details as {
+				success?: boolean;
+				childrenCompleted?: number;
+				childrenFailed?: number;
+			} | undefined;
+			const n = (d?.childrenCompleted ?? 0) + (d?.childrenFailed ?? 0);
+			const total = n;
+			const dir = params.directive.length > 40
+				? params.directive.slice(0, 37) + "…"
+				: params.directive;
+			if (d?.success) {
+				return `⚡ cleave ✓ done ${d.childrenCompleted}/${total} merged — ${dir}`;
+			}
+			return `⚡ cleave ✗ ${d?.childrenFailed ?? "?"} failed of ${total} — ${dir}`;
+		},
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			// Parse the plan

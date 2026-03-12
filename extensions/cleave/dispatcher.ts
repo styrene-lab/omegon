@@ -585,7 +585,7 @@ export async function dispatchChildren(
 		const childRange = childStart === childEnd ? `${childStart}` : `${childStart}-${childEnd}`;
 
 		onProgress?.(
-			`Wave ${waveIdx + 1}/${waves.length} (child ${childRange}/${totalChildren}): dispatching ${waveChildren.map((c) => c.label).join(", ")}`,
+			`dispatching ${waveChildren.map((c) => c.label).join(", ")}`,
 		);
 		childrenDispatched += waveChildren.length;
 
