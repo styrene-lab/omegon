@@ -211,21 +211,21 @@ describe("openspec lifecycle integration", () => {
     assert.equal(result.notifications[0].level, "warning");
   });
 
-  it("surfaces missing-binding when lifecycle bindings are stale", async () => {
+  it("surfaces archive-ready (not missing-binding) when lifecycle bindings are stale — binding is now informational", async () => {
     await persistAssessment("pass");
     fs.rmSync(path.join(tmpDir, "docs", "my-change.md"));
 
     const status = await runTool({ action: "status" });
     const statusText = status.content[0].text as string;
-    assert.match(statusText, /Verification: missing-binding/);
+    // missing_design_binding is now isError:false (informational) — no longer blocks archive
+    assert.match(statusText, /Verification: archive-ready/);
 
     pi.sentMessages.length = 0;
     const result = await runCommand("opsx:verify", "my-change");
     assert.equal(result.sentMessages.length, 0);
     assert.equal(result.notifications.length, 1);
-    assert.match(result.notifications[0].text, /Verification state for 'my-change': missing-binding/);
-    assert.match(result.notifications[0].text, /Bind the change to a decided\/implementing design node before archive/);
-    assert.equal(result.notifications[0].level, "warning");
+    assert.match(result.notifications[0].text, /Verification state for 'my-change': archive-ready/);
+    assert.equal(result.notifications[0].level, "info");
   });
 
   it("refuses /opsx:archive when assessment is missing and succeeds on current explicit pass", async () => {

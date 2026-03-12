@@ -84,7 +84,7 @@ describe("DashboardFooter raised mode polish", () => {
 
     const lines = footer.render(160);
     assert.ok(lines.some((line) => line.includes("◈ Design Tree")));
-    assert.ok(lines.some((line) => line.includes("◎ OpenSpec")));
+    assert.ok(lines.some((line) => line.includes("◎ Implementation")));
     // In wide mode design tree (left col) and OpenSpec (right col) are zipped
     // by mergeColumns — their headers land on the same output row separated by │.
     // Verify at least one │ divider row exists (confirms two-column layout).
@@ -157,7 +157,7 @@ describe("DashboardFooter raised mode polish", () => {
     const dtLine = lines.find((l) => l.includes("◈ Design Tree"));
     assert.ok(dtLine, `expected ◈ Design Tree line; got:\n${lines.join("\n")}`);
     // OpenSpec header should exist somewhere in the output
-    assert.ok(lines.some((l) => l.includes("◎ OpenSpec")), `expected ◎ OpenSpec line; got:\n${lines.join("\n")}`);
+    assert.ok(lines.some((l) => l.includes("◎ Implementation")), `expected ◎ Implementation line; got:\n${lines.join("\n")}`);
 
     // There must be a row containing the divider (│) — confirms two-column layout
     const dividerRow = lines.find((l) => l.includes("│"));

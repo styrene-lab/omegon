@@ -262,12 +262,12 @@ export class DashboardFooter implements Component {
             : "";
           const icon = allDone ? theme.fg("success", " ✓") : "";
           dashParts.push({
-            text: theme.fg("accent", `◎ Spec`) +
+            text: theme.fg("accent", `◎ Impl`) +
               theme.fg("dim", ` ${active.length} change${active.length > 1 ? "s" : ""}`) +
               progress + icon,
           });
         } else {
-          dashParts.push({ text: theme.fg("accent", `◎ OS:${active.length}`) });
+          dashParts.push({ text: theme.fg("accent", `◎ Impl:${active.length}`) });
         }
       }
     }
@@ -475,7 +475,7 @@ export class DashboardFooter implements Component {
   /**
    * Wide layout (≥120 cols) — two-column content inside a corner-bounded box.
    *   Left:  Design tree + Recovery + Cleave (active work context)
-   *   Right: OpenSpec (spec/task progress)
+   *   Right: Implementation (spec/task progress)
    *   Footer zone: shared meta, memory, footer data
    */
   private renderRaisedWide(width: number): string[] {
