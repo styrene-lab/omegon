@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "changeName": "dash-raised-layout",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-12T12:45:42.970Z",
+  "summary": "All 8 task groups complete, 1499 tests passing, 0 failures. Cross-cutting constraints verified: no renderRaisedColumns, no slice caps in raised functions, all padding through render-utils primitives. Wide layout (≥120), stacked layout, branch tree renderer, render-utils, and git.ts all tested.",
+  "snapshot": {
+    "gitHead": "f4f1cdca28de7d7c2f6f0bcf2d88ad37b808a34b",
+    "fingerprint": "c03e5eeffc3ff129dc8104770b736d6cc063eca56a71e9bdf66dc67b88fb7808",
+    "dirty": false,
+    "scopedPaths": [
+      "extensions/dashboard/footer-raised.test.ts",
+      "extensions/dashboard/footer.ts",
+      "extensions/dashboard/types.ts",
+      "extensions/design-tree/dashboard-state.ts"
+    ],
+    "files": [
+      {
+        "path": "extensions/dashboard/footer-raised.test.ts",
+        "exists": true,
+        "size": 22506,
+        "sha256": "1710d6cb659261f99e0c4a78d5e5a3cb12c7d5623715469ac688cd906d3662c2"
+      },
+      {
+        "path": "extensions/dashboard/footer.ts",
+        "exists": true,
+        "size": 41863,
+        "sha256": "42f9b78216ac4ef3b2a21d47aea7fa738e32ea570685725b37536fe674b73622"
+      },
+      {
+        "path": "extensions/dashboard/types.ts",
+        "exists": true,
+        "size": 3993,
+        "sha256": "1c76818a831e574f852fef6709eced93c3b7944b4883daddcb0e153304ed7d57"
+      },
+      {
+        "path": "extensions/design-tree/dashboard-state.ts",
+        "exists": true,
+        "size": 2219,
+        "sha256": "1ff4d680c947a43a10b74355a14cf38b78c37b60603575ce6ee219980ab055fc"
+      },
+      {
+        "path": "openspec/changes/dash-raised-layout/design.md",
+        "exists": true,
+        "size": 10861,
+        "sha256": "037f2d2f8a2c9bf6a201dfa7f2a06e8ff3f3ccc4635ba728209c4aa4c6cb4926"
+      },
+      {
+        "path": "openspec/changes/dash-raised-layout/proposal.md",
+        "exists": true,
+        "size": 586,
+        "sha256": "a2a097f4168f00ffd659f7e5f732e0b7f1e705ef400fe7285831e1ad384f7fc2"
+      },
+      {
+        "path": "openspec/changes/dash-raised-layout/tasks.md",
+        "exists": true,
+        "size": 6623,
+        "sha256": "b3fe824c85093099c0cd235655c65ad2b56a79b313282a17a7259731d296ea55"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

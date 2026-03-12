@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "changeName": "repo-consolidation-hardening",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-12T12:47:16.052Z",
+  "summary": "Umbrella change — filled in Scope and Success Criteria in proposal.md. All 5 child slices individually archived. Design node implemented. Nothing to verify at the umbrella level.",
+  "snapshot": {
+    "gitHead": "f4f1cdca28de7d7c2f6f0bcf2d88ad37b808a34b",
+    "fingerprint": "91fa89920a5759b79b66a2ecc7ca5830da13136cf85e269ebd1d25792cb73194",
+    "dirty": true,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/repo-consolidation-hardening/proposal.md",
+        "exists": true,
+        "size": 1172,
+        "sha256": "70bede318f1fce1c647ec3d18a1977707a2ac3ad01d79465a73b223dab089954"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
