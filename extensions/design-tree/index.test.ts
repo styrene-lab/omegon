@@ -1039,3 +1039,170 @@ describe("design-spec-gates: set_status(decided) and implement", () => {
 		);
 	});
 });
+
+describe("design-spec-scaffold: set_status(exploring) triggers scaffolding", () => {
+	let tmpDir: string;
+	let pi: ReturnType<typeof createFakePi>;
+
+	type ToolResult = { content: Array<{ type: string; text?: string }>; details: Record<string, unknown>; isError?: boolean };
+
+	async function runUpdateTool(params: Record<string, unknown>): Promise<ToolResult> {
+		const tool = pi.tools.find((entry) => entry.name === "design_tree_update");
+		assert.ok(tool, "missing design_tree_update tool");
+		return tool.execute("tool-1", params, {} as never, () => {}, { cwd: tmpDir }) as Promise<ToolResult>;
+	}
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "design-tree-scaffold-"));
+		const docsDir = path.join(tmpDir, "docs");
+		fs.mkdirSync(docsDir, { recursive: true });
+
+		// Write a seed node
+		const seedNode: DesignNode = {
+			id: "scaffold-node",
+			title: "Scaffold Node",
+			status: "seed",
+			dependencies: [],
+			related: [],
+			tags: [],
+			open_questions: ["What is the right approach?"],
+			branches: [],
+			filePath: path.join(docsDir, "scaffold-node.md"),
+			lastModified: Date.now(),
+		};
+		const content = `${generateFrontmatter(seedNode)}\n# ${seedNode.title}\n\n## Overview\n\nTest.\n\n## Open Questions\n\n- What is the right approach?\n`;
+		fs.writeFileSync(seedNode.filePath, content);
+
+		pi = createFakePi();
+		designTreeExtension(pi as unknown as ExtensionAPI);
+	});
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("set_status(exploring) creates openspec/design/<node-id>/ with proposal.md, spec.md, tasks.md", async () => {
+		const result = await runUpdateTool({ action: "set_status", node_id: "scaffold-node", status: "exploring" });
+		assert.ok(!result.isError, `should not error: ${result.content[0]?.text}`);
+
+		const designDir = path.join(tmpDir, "openspec", "design", "scaffold-node");
+		assert.ok(fs.existsSync(designDir), "openspec/design/scaffold-node/ should be created");
+		assert.ok(fs.existsSync(path.join(designDir, "proposal.md")), "proposal.md should be scaffolded");
+		assert.ok(fs.existsSync(path.join(designDir, "spec.md")), "spec.md should be scaffolded");
+		assert.ok(fs.existsSync(path.join(designDir, "tasks.md")), "tasks.md should be scaffolded");
+	});
+
+	it("set_status(exploring) is idempotent — does not overwrite existing scaffold", async () => {
+		// Pre-create the design dir with a custom proposal.md
+		const designDir = path.join(tmpDir, "openspec", "design", "scaffold-node");
+		fs.mkdirSync(designDir, { recursive: true });
+		fs.writeFileSync(path.join(designDir, "proposal.md"), "# Custom proposal\n");
+
+		const result = await runUpdateTool({ action: "set_status", node_id: "scaffold-node", status: "exploring" });
+		assert.ok(!result.isError, "should not error on idempotent call");
+
+		// Custom content should be preserved
+		const content = fs.readFileSync(path.join(designDir, "proposal.md"), "utf8");
+		assert.match(content, /Custom proposal/, "existing proposal.md should not be overwritten");
+	});
+
+	it("set_status(exploring) mirrors open questions to tasks.md", async () => {
+		await runUpdateTool({ action: "set_status", node_id: "scaffold-node", status: "exploring" });
+
+		const tasksContent = fs.readFileSync(
+			path.join(tmpDir, "openspec", "design", "scaffold-node", "tasks.md"),
+			"utf8",
+		);
+		assert.match(tasksContent, /What is the right approach\?/, "tasks.md should contain the open question");
+	});
+});
+
+describe("design-spec-mirror: add/remove_question mirrors to tasks.md", () => {
+	let tmpDir: string;
+	let pi: ReturnType<typeof createFakePi>;
+
+	type ToolResult = { content: Array<{ type: string; text?: string }>; details: Record<string, unknown>; isError?: boolean };
+
+	async function runUpdateTool(params: Record<string, unknown>): Promise<ToolResult> {
+		const tool = pi.tools.find((entry) => entry.name === "design_tree_update");
+		assert.ok(tool, "missing design_tree_update tool");
+		return tool.execute("tool-1", params, {} as never, () => {}, { cwd: tmpDir }) as Promise<ToolResult>;
+	}
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "design-tree-mirror-"));
+		const docsDir = path.join(tmpDir, "docs");
+		fs.mkdirSync(docsDir, { recursive: true });
+
+		// Write an exploring node
+		const node: DesignNode = {
+			id: "mirror-node",
+			title: "Mirror Node",
+			status: "exploring",
+			dependencies: [],
+			related: [],
+			tags: [],
+			open_questions: [],
+			branches: [],
+			filePath: path.join(docsDir, "mirror-node.md"),
+			lastModified: Date.now(),
+		};
+		const content = `${generateFrontmatter(node)}\n# ${node.title}\n\n## Overview\n\nTest.\n`;
+		fs.writeFileSync(node.filePath, content);
+
+		// Pre-create the design spec directory with tasks.md
+		const designDir = path.join(tmpDir, "openspec", "design", "mirror-node");
+		fs.mkdirSync(designDir, { recursive: true });
+		fs.writeFileSync(path.join(designDir, "tasks.md"), "# Mirror Node — Design Tasks\n\n## 1. Design exploration\n\n- [ ] 1.1 Explore and decide: Mirror Node\n");
+
+		pi = createFakePi();
+		designTreeExtension(pi as unknown as ExtensionAPI);
+	});
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("add_question mirrors the new question to tasks.md", async () => {
+		await runUpdateTool({ action: "add_question", node_id: "mirror-node", question: "How should we handle auth?" });
+
+		const tasks = fs.readFileSync(
+			path.join(tmpDir, "openspec", "design", "mirror-node", "tasks.md"),
+			"utf8",
+		);
+		assert.match(tasks, /How should we handle auth\?/, "tasks.md should contain the new question");
+	});
+
+	it("remove_question removes the question from tasks.md", async () => {
+		// First add, then remove
+		await runUpdateTool({ action: "add_question", node_id: "mirror-node", question: "Q to remove" });
+		await runUpdateTool({ action: "remove_question", node_id: "mirror-node", question: "Q to remove" });
+
+		const tasks = fs.readFileSync(
+			path.join(tmpDir, "openspec", "design", "mirror-node", "tasks.md"),
+			"utf8",
+		);
+		assert.doesNotMatch(tasks, /Q to remove/, "tasks.md should no longer contain the removed question");
+	});
+
+	it("mirror is a no-op when no design spec directory exists", async () => {
+		// Use a node without a design dir
+		const node2: DesignNode = {
+			id: "no-design-node",
+			title: "No Design Node",
+			status: "exploring",
+			dependencies: [],
+			related: [],
+			tags: [],
+			open_questions: [],
+			branches: [],
+			filePath: path.join(tmpDir, "docs", "no-design-node.md"),
+			lastModified: Date.now(),
+		};
+		fs.writeFileSync(node2.filePath, `${generateFrontmatter(node2)}\n# No Design Node\n`);
+
+		// Should not throw even without a design spec
+		const result = await runUpdateTool({ action: "add_question", node_id: "no-design-node", question: "A question" });
+		assert.ok(!result.isError, "add_question should succeed even without a design spec directory");
+	});
+});

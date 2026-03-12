@@ -1498,10 +1498,11 @@ async function executeAssessDesign(
 	args: string,
 ): Promise<AssessStructuredResult> {
 	const cwd = ctx.cwd;
-	const nodeId = args.trim() || null;
+	// Resolve: explicit arg → focused node → error
+	const nodeId = args.trim() || sharedState.designTree?.focusedNode?.id || null;
 
 	if (!nodeId) {
-		const humanText = "Usage: `/assess design <node-id>`\n\nProvide a design-tree node ID. Set a focused node via `design_tree_update` with action 'focus', then run `/assess design` without arguments.";
+		const humanText = "Usage: `/assess design <node-id>`\n\nProvide a design-tree node ID, or set a focused node via `design_tree_update` with action 'focus' and run `/assess design` without arguments.";
 		return makeAssessResult({
 			subcommand: "design",
 			args,
@@ -1628,10 +1629,14 @@ async function executeAssessDesign(
 
 async function writeDesignAssessment(cwd: string, nodeId: string, result: DesignAssessmentResult): Promise<void> {
 	try {
-		const { mkdir, writeFile } = await import("node:fs/promises");
+		const { writeFile } = await import("node:fs/promises");
 		const { join } = await import("node:path");
+		const { existsSync } = await import("node:fs");
 		const dir = join(cwd, "openspec", "design", nodeId);
-		await mkdir(dir, { recursive: true });
+		// Do NOT create the directory — if it doesn't exist the node has no design change
+		// scaffolded yet, and creating assessment.json here would trigger the "active not
+		// archived" gate on set_status(decided) and implement. Write only if already scaffolded.
+		if (!existsSync(dir)) return;
 		await writeFile(join(dir, "assessment.json"), JSON.stringify(result, null, 2), "utf8");
 	} catch {
 		// non-fatal — assessment result still returned to caller

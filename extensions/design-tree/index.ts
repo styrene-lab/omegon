@@ -55,6 +55,8 @@ import {
 	toSlug,
 	validateNodeId,
 	scaffoldOpenSpecChange,
+	scaffoldDesignOpenSpecChange,
+	mirrorOpenQuestionsToDesignSpec,
 	matchBranchToNode,
 	appendBranch,
 	readGitBranch,
@@ -468,11 +470,34 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					// Nodes explicitly blocked OR whose dependencies are not yet 'implemented'
 					// OR whose design-phase OpenSpec change is missing/not-archived.
 
-					// Pre-compute spec bindings once for all decided nodes to avoid double I/O.
+					// Pre-compute spec bindings once for all decided nodes to avoid repeated I/O.
+					// Scan openspec/design-archive/ once to build a set of archived node IDs,
+					// avoiding O(n) readdirSync calls (one per decided node) on the same dir.
+					const designArchiveDir = path.join(ctx.cwd, "openspec", "design-archive");
+					const archivedDesignIds = new Set<string>();
+					if (fs.existsSync(designArchiveDir)) {
+						for (const entry of fs.readdirSync(designArchiveDir, { withFileTypes: true })) {
+							if (!entry.isDirectory()) continue;
+							const m = entry.name.match(/^\d{4}-\d{2}-\d{2}-(.+)$/);
+							if (m) archivedDesignIds.add(m[1]);
+						}
+					}
+
 					const specBindingCache = new Map<string, ReturnType<typeof resolveDesignSpecBinding>>();
 					for (const n of tree.nodes.values()) {
 						if (n.status === "decided") {
-							specBindingCache.set(n.id, resolveDesignSpecBinding(ctx.cwd, n.id));
+							// Use pre-scanned archivedDesignIds to avoid a second readdirSync per node.
+							const designDir = path.join(ctx.cwd, "openspec", "design", n.id);
+							const active =
+								fs.existsSync(designDir) &&
+								fs.statSync(designDir).isDirectory() &&
+								fs.readdirSync(designDir).length > 0;
+							const archivedInSet = archivedDesignIds.has(n.id);
+							specBindingCache.set(n.id, {
+								active,
+								archived: archivedInSet && !active,
+								missing: !active && !archivedInSet,
+							});
 						}
 					}
 
@@ -769,6 +794,16 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 
 					let text = `${STATUS_ICONS[newStatus]} '${node.title}': ${oldStatus} → ${newStatus}`;
 
+					// If transitioning to exploring, scaffold design OpenSpec change (idempotent)
+					if (newStatus === "exploring") {
+						const scaffoldResult = scaffoldDesignOpenSpecChange(ctx.cwd, updated);
+						if (scaffoldResult.created) {
+							text += `\n\nScaffolded design spec at openspec/design/${node.id}/\n` +
+								`  - proposal.md, spec.md, tasks.md\n\n` +
+								`Fill in ## Acceptance Criteria in the node doc (Scenarios / Falsifiability / Constraints) before running /assess design.`;
+						}
+					}
+
 					// If transitioning to decided, check for OpenSpec bridge opportunity
 					if (newStatus === "decided") {
 						const sections = getNodeSections(node);
@@ -818,6 +853,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 							},
 						}],
 					});
+					mirrorOpenQuestionsToDesignSpec(ctx.cwd, updated);
 					emitCurrentState();
 					return {
 						content: [{ type: "text", text: `Added question to '${node.title}': ${params.question}` }],
@@ -846,6 +882,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						.filter((c) => c.section === "Specs" && c.content === factContentPrefix);
 					const factWasEmitted = emittedFacts.length > 0;
 					(sharedState.factArchiveQueue ??= []).push(factContentPrefix);
+					mirrorOpenQuestionsToDesignSpec(ctx.cwd, updated);
 					emitCurrentState();
 					return {
 						content: [
