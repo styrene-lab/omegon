@@ -22,6 +22,7 @@ import type { DashboardState, RecoveryCooldownSummary, RecoveryDashboardState } 
 import { sharedState } from "../shared-state.ts";
 import { debug } from "../debug.ts";
 import { linkDashboardFile, linkOpenSpecArtifact, linkOpenSpecChange } from "./uri-helper.ts";
+import { designSpecBadge } from "./overlay-data.ts";
 import { buildContextGaugeModel } from "./context-gauge.ts";
 
 /**
@@ -840,6 +841,22 @@ export class DashboardFooter implements Component {
 
     lines.push(theme.fg("accent", "◈ Design Tree") + "  " + statusParts.join(" · "));
 
+    // Pipeline funnel row
+    if (dt.designPipeline) {
+      const p = dt.designPipeline;
+      const funnelParts: string[] = [];
+      if (p.designing > 0)    funnelParts.push(theme.fg("accent", `${p.designing} designing`));
+      if (p.decided > 0)      funnelParts.push(theme.fg("success", `${p.decided} decided`));
+      if (p.implementing > 0) funnelParts.push(theme.fg("warning", `${p.implementing} implementing`));
+      if (p.done > 0)         funnelParts.push(theme.fg("success", `${p.done} done`));
+      if (funnelParts.length > 0) {
+        lines.push(theme.fg("dim", "  → ") + funnelParts.join(theme.fg("dim", " · ")));
+      }
+      if (p.needsSpec > 0) {
+        lines.push(theme.fg("dim", "  ") + theme.fg("warning", `✦ ${p.needsSpec} need spec`));
+      }
+    }
+
     // Focused node gets priority display
     if (dt.focusedNode) {
       const statusIcon = this.nodeStatusIcon(dt.focusedNode.status);
@@ -885,12 +902,15 @@ export class DashboardFooter implements Component {
       const MAX_NODES = 6;
       for (const n of dt.nodes.slice(0, MAX_NODES)) {
         const icon = this.nodeStatusIcon(n.status);
+        const badge = designSpecBadge(n.designSpec, n.assessmentResult, (c, t) => theme.fg(c as any, t));
+        const badgeSep = badge ? " " : "";
         const linkedId = linkDashboardFile(theme.fg("dim", n.id), n.filePath);
         const qSuffix = n.questionCount > 0 ? theme.fg("dim", ` (${n.questionCount}?)`) : "";
+        const linkSuffix = n.openspecChange ? theme.fg("dim", " &") : "";
         lines.push(composePrimaryMetaLine(
           width,
-          `  ${icon} ${linkedId}`,
-          [qSuffix],
+          `  ${icon}${badgeSep}${badge} ${linkedId}`,
+          [qSuffix + linkSuffix],
         ));
       }
       if (dt.nodes.length > MAX_NODES) {

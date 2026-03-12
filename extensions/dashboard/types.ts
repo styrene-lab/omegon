@@ -10,6 +10,41 @@
 
 // ── Design Tree ──────────────────────────────────────────────
 
+/** Mirrors DesignSpecBinding from openspec/archive-gate.ts for dashboard consumers. */
+export interface DesignSpecBindingState {
+  active: boolean;
+  archived: boolean;
+  missing: boolean;
+}
+
+/** Acceptance-criteria counts derived from a design node's AC section. */
+export interface AcSummary {
+  scenarios: number;
+  falsifiability: number;
+  constraints: number;
+}
+
+/** Outcome of an /assess spec run persisted in openspec/design/<id>/assessment.json. */
+export interface DesignAssessmentResult {
+  outcome: "pass" | "reopen" | "ambiguous";
+  timestamp: string;
+  summary?: string;
+}
+
+/** Per-status counts across the design pipeline for funnel rendering. */
+export interface DesignPipelineCounts {
+  /** seed/exploring nodes without a spec binding */
+  needsSpec: number;
+  /** seed/exploring nodes with an active or archived spec binding */
+  designing: number;
+  /** nodes in 'decided' status */
+  decided: number;
+  /** nodes in 'implementing' status */
+  implementing: number;
+  /** nodes in 'implemented' status */
+  done: number;
+}
+
 export interface DesignTreeFocusedNode {
   id: string;
   title: string;
@@ -31,9 +66,26 @@ export interface DesignTreeDashboardState {
   openQuestionCount: number;
   focusedNode: DesignTreeFocusedNode | null;
   /** All nodes for overlay list view */
-  nodes?: Array<{ id: string; title: string; status: string; questionCount: number; filePath?: string; branches?: string[] }>;
+  nodes?: Array<{
+    id: string;
+    title: string;
+    status: string;
+    questionCount: number;
+    filePath?: string;
+    branches?: string[];
+    /** OpenSpec design-phase binding state (undefined for seed nodes) */
+    designSpec?: DesignSpecBindingState;
+    /** Acceptance-criteria counts (undefined if no AC section) */
+    acSummary?: AcSummary | null;
+    /** Last /assess spec result (undefined if no assessment.json) */
+    assessmentResult?: DesignAssessmentResult | null;
+    /** Name of linked openspec implementation change (set by design-tree on emit) */
+    openspecChange?: string | null;
+  }>;
   /** Implementing nodes shown in raised mode with branch associations */
   implementingNodes?: Array<{ id: string; title: string; branch?: string; filePath?: string }>;
+  /** Design pipeline funnel counts */
+  designPipeline?: DesignPipelineCounts;
 }
 
 // ── OpenSpec ─────────────────────────────────────────────────

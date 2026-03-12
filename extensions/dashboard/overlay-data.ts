@@ -6,7 +6,7 @@
  */
 
 import { sharedState } from "../shared-state.ts";
-import type { CleaveState, DesignTreeDashboardState, OpenSpecDashboardState } from "./types.ts";
+import type { CleaveState, DesignAssessmentResult, DesignSpecBindingState, DesignTreeDashboardState, OpenSpecDashboardState } from "./types.ts";
 import type { ProviderRoutingPolicy } from "../lib/model-routing.ts";
 import {
   getDashboardFileUri,
@@ -67,6 +67,36 @@ export function statusIcon(status: string, th: ThemeFn): string {
   return th("dim", "○");
 }
 
+// ── Design spec badge helper ────────────────────────────────────
+
+/**
+ * Returns a colored badge character based on spec binding state and last
+ * assessment outcome.
+ *
+ * ✓  active spec + passed assessment (success)
+ * ✦  active spec + no assessment yet, or needs spec (warning)
+ * ◐  active spec + ambiguous/reopen assessment (accent)
+ * ●  archived spec (muted)
+ * '' no binding (seed/unlinked node)
+ */
+export function designSpecBadge(
+  binding: DesignSpecBindingState | undefined,
+  assessmentResult: DesignAssessmentResult | null | undefined,
+  th: ThemeFn,
+): string {
+  if (!binding || binding.missing) return "";
+  if (binding.archived) return th("muted", "●");
+  if (!binding.active) return "";
+  // active binding
+  if (!assessmentResult) return th("warning", "✦");
+  switch (assessmentResult.outcome) {
+    case "pass":     return th("success", "✓");
+    case "reopen":   return th("accent", "◐");
+    case "ambiguous": return th("accent", "◐");
+    default:         return th("warning", "✦");
+  }
+}
+
 // ── Data Builders ───────────────────────────────────────────────
 
 export function buildDesignItems(
@@ -76,6 +106,26 @@ export function buildDesignItems(
   if (!dt) return [];
 
   const items: ListItem[] = [];
+
+  // Pipeline funnel row (collapsed by default, shows counts at top level)
+  if (dt.designPipeline) {
+    const p = dt.designPipeline;
+    const pKey = "dt-pipeline";
+    items.push({
+      key: pKey,
+      depth: 0,
+      expandable: false,
+      lines: (th) => {
+        const parts: string[] = [];
+        if (p.designing > 0)    parts.push(th("accent", `${p.designing} designing`));
+        if (p.decided > 0)      parts.push(th("success", `${p.decided} decided`));
+        if (p.implementing > 0) parts.push(th("warning", `${p.implementing} implementing`));
+        if (p.done > 0)         parts.push(th("success", `${p.done} done`));
+        if (p.needsSpec > 0)    parts.push(th("warning", `✦ ${p.needsSpec} need spec`));
+        return [th("dim", "→ ") + (parts.join(th("dim", " · ")) || th("dim", "empty pipeline"))];
+      },
+    });
+  }
 
   // Summary
   items.push({
@@ -106,6 +156,7 @@ export function buildDesignItems(
         const icon = statusIcon(focused.status, th);
         const linkedTitle = linkDashboardFile(focused.title, focused.filePath);
         const label = th("accent", " (focused)");
+        // focused node from DesignTreeFocusedNode — no designSpec/assessmentResult fields
         return [`${icon} ${linkedTitle}${label}`];
       },
     });
@@ -135,11 +186,16 @@ export function buildDesignItems(
         openUri: getDashboardFileUri(node.filePath),
         lines: (th) => {
           const icon = statusIcon(node.status, th);
+          const badge = designSpecBadge(node.designSpec, node.assessmentResult, th);
+          const badgeSep = badge ? " " : "";
           const linkedTitle = linkDashboardFile(node.title, node.filePath);
           const qLabel = node.questionCount > 0
             ? th("warning", ` (${node.questionCount}?)`)
             : "";
-          return [`${icon} ${linkedTitle}${qLabel}`];
+          const linkSuffix = node.openspecChange
+            ? th("dim", " &")
+            : "";
+          return [`${icon}${badgeSep}${badge} ${linkedTitle}${qLabel}${linkSuffix}`];
         },
       });
     }
@@ -176,6 +232,11 @@ export function buildOpenSpecItems(
     const hasDetails = change.stage !== undefined || change.tasksTotal > 0;
     const key = `os-change-${change.name}`;
 
+    // Check if any design node links to this change (for & suffix)
+    const linkedToDesign = sharedState.designTree?.nodes?.some(
+      (n) => n.openspecChange === change.name,
+    ) ?? false;
+
     items.push({
       key,
       depth: 0,
@@ -187,7 +248,8 @@ export function buildOpenSpecItems(
         const progress = change.tasksTotal > 0
           ? th(done ? "success" : "dim", ` ${change.tasksDone}/${change.tasksTotal}`)
           : "";
-        return [`${icon} ${linkedName}${progress}`];
+        const designLink = linkedToDesign ? th("dim", " &") : "";
+        return [`${icon} ${linkedName}${progress}${designLink}`];
       },
     });
 
