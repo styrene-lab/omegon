@@ -662,3 +662,144 @@ describe("acceptance criteria in list and node responses", () => {
 		assert.equal(ac!.scenarios[1].title, "Scenario 2", "second scenario should be Scenario 2");
 	});
 });
+
+describe("design-spec-gates: set_status(decided) and implement", () => {
+	let tmpDir: string;
+	let pi: ReturnType<typeof createFakePi>;
+
+	type ToolResult = { content: Array<{ type: string; text?: string }>; details: Record<string, unknown>; isError?: boolean };
+
+	async function runUpdateTool(params: Record<string, unknown>): Promise<ToolResult> {
+		const tool = pi.tools.find((entry) => entry.name === "design_tree_update");
+		assert.ok(tool, "missing design_tree_update tool");
+		return tool.execute("tool-1", params, {} as never, () => {}, { cwd: tmpDir }) as Promise<ToolResult>;
+	}
+
+	function writeExploringNode(docsDir: string, id: string): void {
+		const node: DesignNode = {
+			id,
+			title: `Node ${id}`,
+			status: "exploring",
+			dependencies: [],
+			related: [],
+			tags: [],
+			open_questions: [],
+			branches: [],
+			filePath: path.join(docsDir, `${id}.md`),
+			lastModified: Date.now(),
+		};
+		const content = `${generateFrontmatter(node)}\n# ${node.title}\n\n## Overview\n\nTest.\n`;
+		fs.writeFileSync(node.filePath, content);
+	}
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "design-tree-spec-gates-"));
+		const docsDir = path.join(tmpDir, "docs");
+		fs.mkdirSync(docsDir, { recursive: true });
+		writeExploringNode(docsDir, "my-node");
+
+		pi = createFakePi();
+		designTreeExtension(pi as unknown as ExtensionAPI);
+	});
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	// ── set_status(decided) gates ─────────────────────────────────────────
+
+	it("set_status(decided) is blocked when design spec is missing", async () => {
+		// No openspec/design/my-node/ and no openspec/design-archive/ entry
+		const result = await runUpdateTool({ action: "set_status", node_id: "my-node", status: "decided" });
+		assert.ok(result.isError, "should be blocked when design spec is missing");
+		assert.match(
+			result.content[0]?.text ?? "",
+			/scaffold design spec first/i,
+			"error message should mention scaffolding a design spec",
+		);
+	});
+
+	it("set_status(decided) is blocked when design spec is active (not yet archived)", async () => {
+		// Create openspec/design/my-node/ to simulate an active design change
+		fs.mkdirSync(path.join(tmpDir, "openspec", "design", "my-node"), { recursive: true });
+		fs.writeFileSync(path.join(tmpDir, "openspec", "design", "my-node", "proposal.md"), "# Design proposal\n");
+
+		const result = await runUpdateTool({ action: "set_status", node_id: "my-node", status: "decided" });
+		assert.ok(result.isError, "should be blocked when design spec is still active");
+		assert.match(
+			result.content[0]?.text ?? "",
+			/archive.*design change/i,
+			"error message should mention archiving the design change",
+		);
+	});
+
+	it("set_status(decided) succeeds when design spec is archived", async () => {
+		// Create openspec/design-archive/2026-03-12-my-node/
+		fs.mkdirSync(path.join(tmpDir, "openspec", "design-archive", "2026-03-12-my-node"), { recursive: true });
+
+		const result = await runUpdateTool({ action: "set_status", node_id: "my-node", status: "decided" });
+		assert.ok(!result.isError, `should succeed when design spec is archived, got: ${result.content[0]?.text}`);
+		assert.match(result.content[0]?.text ?? "", /decided/, "success message should mention decided");
+
+		// W3: verify the status was actually written to disk
+		const raw = fs.readFileSync(path.join(tmpDir, "docs", "my-node.md"), "utf8");
+		assert.match(raw, /status:\s*decided/, "node status should be persisted as 'decided' on disk");
+	});
+
+	// ── implement gates ───────────────────────────────────────────────────
+
+	it("implement is blocked when design spec is missing", async () => {
+		// Manually set node to decided to bypass set_status gate
+		const filePath = path.join(tmpDir, "docs", "my-node.md");
+		const raw = fs.readFileSync(filePath, "utf8");
+		fs.writeFileSync(filePath, raw.replace("status: exploring", "status: decided"));
+
+		const result = await runUpdateTool({ action: "implement", node_id: "my-node" });
+		assert.ok(result.isError, "implement should be blocked when design spec is missing");
+		assert.match(
+			result.content[0]?.text ?? "",
+			/scaffold design spec first/i,
+			"error message should mention scaffolding a design spec",
+		);
+	});
+
+	it("implement is blocked when design spec is active (not yet archived)", async () => {
+		// Set node to decided directly in the file
+		const filePath = path.join(tmpDir, "docs", "my-node.md");
+		const raw = fs.readFileSync(filePath, "utf8");
+		fs.writeFileSync(filePath, raw.replace("status: exploring", "status: decided"));
+
+		// Create active design change
+		fs.mkdirSync(path.join(tmpDir, "openspec", "design", "my-node"), { recursive: true });
+		fs.writeFileSync(path.join(tmpDir, "openspec", "design", "my-node", "proposal.md"), "# Design\n");
+
+		const result = await runUpdateTool({ action: "implement", node_id: "my-node" });
+		assert.ok(result.isError, "implement should be blocked when design spec is active");
+		assert.match(
+			result.content[0]?.text ?? "",
+			/archive.*design change/i,
+			"error message should mention archiving the design change",
+		);
+	});
+
+	it("implement succeeds when design spec is archived", async () => {
+		// Set node to decided directly in the file
+		const filePath = path.join(tmpDir, "docs", "my-node.md");
+		const raw = fs.readFileSync(filePath, "utf8");
+		fs.writeFileSync(filePath, raw.replace("status: exploring", "status: decided"));
+
+		// Create archived design change
+		fs.mkdirSync(path.join(tmpDir, "openspec", "design-archive", "2026-03-12-my-node"), { recursive: true });
+
+		const result = await runUpdateTool({ action: "implement", node_id: "my-node" });
+		assert.ok(!result.isError, `implement should succeed when design spec is archived, got: ${result.content[0]?.text}`);
+
+		// W4: verify scaffoldOpenSpecChange side-effect — proposal.md should be created
+		const changeDir = path.join(tmpDir, "openspec", "changes", "my-node");
+		assert.ok(fs.existsSync(changeDir), "openspec/changes/<node-id>/ directory should be created");
+		assert.ok(
+			fs.existsSync(path.join(changeDir, "proposal.md")),
+			"proposal.md should be scaffolded in the change directory",
+		);
+	});
+});

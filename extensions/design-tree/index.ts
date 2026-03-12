@@ -29,7 +29,7 @@ import { sharedState } from "../shared-state.ts";
 
 import { emitDesignTreeState } from "./dashboard-state.ts";
 import { emitConstraintCandidates, emitDecisionCandidates } from "./lifecycle-emitter.ts";
-import { resolveNodeOpenSpecBinding } from "../openspec/archive-gate.ts";
+import { resolveNodeOpenSpecBinding, resolveDesignSpecBinding } from "../openspec/archive-gate.ts";
 import { resolveLifecycleSummary, getAssessmentStatus, getChange } from "../openspec/spec.ts";
 import { evaluateLifecycleReconciliation } from "../openspec/reconcile.ts";
 import type { LifecycleSummary } from "../openspec/spec.ts";
@@ -698,6 +698,31 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					if (!newStatus || !VALID_STATUSES.includes(newStatus)) {
 						return { content: [{ type: "text", text: `Invalid status '${params.status}'. Valid: ${VALID_STATUSES.join(", ")}` }], details: {}, isError: true };
 					}
+					// Hard gate: design-phase spec must be archived before a node can be decided.
+					if (newStatus === "decided") {
+						const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
+						if (designSpec.active) {
+							return {
+								content: [{
+									type: "text",
+									text: "Run /assess spec then /opsx:archive the design change before marking decided",
+								}],
+								details: {},
+								isError: true,
+							};
+						}
+						if (designSpec.missing) {
+							return {
+								content: [{
+									type: "text",
+									text: "Scaffold design spec first via set_status(exploring)",
+								}],
+								details: {},
+								isError: true,
+							};
+						}
+					}
+
 					const oldStatus = node.status;
 					const updated = setNodeStatus(node, newStatus);
 					tree.nodes.set(updated.id, updated);
@@ -980,6 +1005,29 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 								type: "text",
 								text: `Node '${node.title}' is '${node.status}', not 'decided'. ` +
 									`Resolve open questions and set status to 'decided' before implementing.`,
+							}],
+							details: {},
+							isError: true,
+						};
+					}
+
+					// Hard gate: design-phase spec must be archived before implementation.
+					const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
+					if (!designSpec.archived) {
+						if (designSpec.active) {
+							return {
+								content: [{
+									type: "text",
+									text: "Run /assess spec then /opsx:archive the design change before marking decided",
+								}],
+								details: {},
+								isError: true,
+							};
+						}
+						return {
+							content: [{
+								type: "text",
+								text: "Scaffold design spec first via set_status(exploring)",
 							}],
 							details: {},
 							isError: true,
