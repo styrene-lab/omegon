@@ -6,11 +6,13 @@
 /**
  * render — Visual rendering extension for pi
  *
- * Provides four tools:
+ * Provides six tools:
  *   - generate_image_local: AI image generation via FLUX.1 (mflux, Apple Silicon MLX)
  *   - render_diagram: D2 diagram rendering via d2 CLI
  *   - render_native_diagram: constrained motif-based JSON → native SVG (optionally PNG)
  *   - render_excalidraw: Excalidraw JSON → PNG via Playwright + headless Chromium
+ *   - render_composition_still: React composition → single PNG frame via Satori + resvg
+ *   - render_composition_video: React composition → animated GIF/MP4 via Satori + gifenc/FFmpeg
  *
  * All tools save output to ~/.pi/visuals/ for persistence across sessions.
  *
@@ -30,11 +32,11 @@
  *     - First-time setup: cd <EXCALIDRAW_RENDER_DIR> && uv sync && uv run playwright install chromium
  */
 
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, basename } from "node:path";
+import { join, basename, resolve, isAbsolute } from "node:path";
 import { StringEnum } from "../lib/typebox-helpers";
 import {
 	NATIVE_DIAGRAM_DIRECTIONS,
@@ -83,6 +85,9 @@ const DIFFUSION_CLI_DIR = process.env.DIFFUSION_CLI_DIR || join(homedir(), "diff
 // Excalidraw renderer lives alongside this extension.
 const EXCALIDRAW_RENDER_DIR = process.env.EXCALIDRAW_RENDER_DIR ||
 	join(import.meta.dirname ?? __dirname, "excalidraw-renderer");
+
+// Composition renderer: Satori + resvg + gifenc pipeline
+const COMPOSITION_DIR = join(import.meta.dirname ?? __dirname, "composition");
 
 const PRESETS = ["schnell", "dev", "dev-fast", "diagram", "portrait", "wide"] as const;
 
@@ -497,6 +502,296 @@ export default function renderExtension(pi: ExtensionAPI) {
 				}
 				throw new Error(`Excalidraw render failed: ${message}`);
 			}
+		},
+	});
+
+	// ------------------------------------------------------------------
+	// render_composition_still — Satori-based React composition → PNG
+	// ------------------------------------------------------------------
+	pi.registerTool({
+		name: "render_composition_still",
+		label: "Render Composition Still",
+		description: [
+			"Render a single frame from a React composition using Satori + resvg.",
+			"The composition file must export a default React functional component.",
+			"Returns the rendered PNG inline when ≤1MB; otherwise returns only the file path.",
+			"",
+			"**CSS subset (Satori limitations)**:",
+			"  - Layout: Flexbox ONLY. CSS Grid is not supported.",
+			"  - Unsupported: box-shadow, CSS animations/transitions, CSS variables,",
+			"    :pseudo-classes, most CSS filters, overflow: scroll.",
+			"  - Supported: flexbox, position (absolute/relative), border, borderRadius,",
+			"    padding, margin, color, background, fontSize, fontWeight, lineHeight,",
+			"    letterSpacing, textAlign, opacity, transform (translate/rotate/scale).",
+			"",
+			"**FrameProps contract**:",
+			"  The component receives a `frame` prop (current frame number, 0-indexed)",
+			"  and any additional props passed via the `props` parameter.",
+			"  Type: { frame: number; width: number; height: number; [key: string]: unknown }",
+			"",
+			"**Available fonts**:",
+			"  - Tomorrow (monospace) — Regular and Bold weights",
+			"  - Inter (sans-serif) — Regular and Bold weights",
+			"  Reference fonts by family name in CSS: fontFamily: 'Tomorrow' or 'Inter'.",
+			"",
+			"Output is saved to ~/.pi/visuals/ for persistence.",
+			"Requires Node.js with the composition renderer set up in extensions/render/composition/.",
+		].join("\n"),
+		promptSnippet: "Render a single frame from a React composition to PNG using Satori + resvg",
+		promptGuidelines: [
+			"Composition uses Flexbox only — CSS Grid, box-shadow, and animations are NOT supported",
+			"Component receives FrameProps: { frame, width, height, ...props }",
+			"Fonts: Tomorrow (mono) and Inter (sans) are bundled",
+			"Returns inline PNG if ≤1MB, otherwise returns file path",
+		],
+		parameters: Type.Object({
+			composition_path: Type.String({
+				description: "Path to the composition file (.tsx or .jsx). Absolute or relative to cwd.",
+			}),
+			frame:  Type.Optional(Type.Number({ description: "Frame number to render (default: 0)" })),
+			width:  Type.Optional(Type.Number({ description: "Output width in pixels (default: 1920)" })),
+			height: Type.Optional(Type.Number({ description: "Output height in pixels (default: 1080)" })),
+			props:  Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
+				description: "Additional props to pass to the composition component",
+			})),
+		}),
+
+		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+			const compositionPath = isAbsolute(params.composition_path)
+				? params.composition_path
+				: resolve(process.cwd(), params.composition_path);
+
+			if (!existsSync(compositionPath)) {
+				throw new Error(`Composition file not found: ${compositionPath}`);
+			}
+
+			const frame  = params.frame  ?? 0;
+			const width  = params.width  ?? 1920;
+			const height = params.height ?? 1080;
+			const outPath = visualsPath(`${timestamp()}_still_f${frame}.png`);
+
+			const args = [
+				join(COMPOSITION_DIR, "render.mjs"),
+				"--mode",        "still",
+				"--composition", compositionPath,
+				"--frame",       String(frame),
+				"--width",       String(width),
+				"--height",      String(height),
+				"--output",      outPath,
+			];
+			if (params.props && Object.keys(params.props).length > 0) {
+				args.push("--props", JSON.stringify(params.props));
+			}
+
+			onUpdate?.({
+				content: [{ type: "text", text: `Rendering still frame ${frame} from ${basename(compositionPath)}…` }],
+				details: { compositionPath, frame, width, height },
+			});
+
+			const result = await pi.exec("node", args, {
+				signal,
+				timeout: 60_000,
+				cwd: COMPOSITION_DIR,
+			});
+
+			if (result.code !== 0) {
+				const stderr = result.stderr || result.stdout || "";
+				throw new Error(`render.mjs failed (exit ${result.code}):\n${stderr.slice(-2000)}`);
+			}
+
+			// Parse JSON result from render.mjs stdout
+			let renderResult: { path: string; sizeBytes: number };
+			try {
+				renderResult = JSON.parse(result.stdout?.trim() || "{}");
+			} catch {
+				throw new Error(`render.mjs returned invalid JSON: ${result.stdout?.slice(-500)}`);
+			}
+
+			const ONE_MB = 1_048_576;
+			if (renderResult.sizeBytes <= ONE_MB) {
+				const imageBuffer = await readFile(renderResult.path);
+				const base64Data = imageBuffer.toString("base64");
+				return {
+					content: [
+						{ type: "text", text: `Still rendered — frame ${frame} · ${width}×${height} · ${(renderResult.sizeBytes / 1024).toFixed(1)} KB · Saved: ${renderResult.path}` },
+						{ type: "image", data: base64Data, mimeType: "image/png" },
+					],
+					details: { path: renderResult.path, frame, width, height, sizeBytes: renderResult.sizeBytes, inline: true },
+				};
+			} else {
+				return {
+					content: [
+						{ type: "text", text: `Still rendered — frame ${frame} · ${width}×${height} · ${(renderResult.sizeBytes / 1024 / 1024).toFixed(2)} MB (too large for inline) · Saved: ${renderResult.path}` },
+					],
+					details: { path: renderResult.path, frame, width, height, sizeBytes: renderResult.sizeBytes, inline: false },
+				};
+			}
+		},
+	});
+
+	// ------------------------------------------------------------------
+	// render_composition_video — Satori + gifenc/FFmpeg → GIF and/or MP4
+	// ------------------------------------------------------------------
+	pi.registerTool({
+		name: "render_composition_video",
+		label: "Render Composition Video",
+		description: [
+			"Render a React composition as an animated GIF and/or MP4 video.",
+			"Each frame is rendered via Satori + resvg; GIF encoding uses gifenc (pure Node, always available).",
+			"MP4 output requires FFmpeg installed on PATH.",
+			"",
+			"**CSS subset (Satori limitations)**:",
+			"  - Layout: Flexbox ONLY. CSS Grid is not supported.",
+			"  - Unsupported: box-shadow, CSS animations/transitions, CSS variables,",
+			"    :pseudo-classes, most CSS filters, overflow: scroll.",
+			"  - Supported: flexbox, position (absolute/relative), border, borderRadius,",
+			"    padding, margin, color, background, fontSize, fontWeight, lineHeight,",
+			"    letterSpacing, textAlign, opacity, transform (translate/rotate/scale).",
+			"",
+			"**FrameProps contract**:",
+			"  The component receives a `frame` prop (current frame number, 0-indexed)",
+			"  and any additional props passed via the `props` parameter.",
+			"  Type: { frame: number; width: number; height: number; [key: string]: unknown }",
+			"  Use the `frame` prop to drive animations: const progress = frame / totalFrames.",
+			"",
+			"**Available fonts**:",
+			"  - Tomorrow (monospace) — Regular and Bold weights",
+			"  - Inter (sans-serif) — Regular and Bold weights",
+			"  Reference fonts by family name in CSS: fontFamily: 'Tomorrow' or 'Inter'.",
+			"",
+			"Output is saved to ~/.pi/visuals/<timestamp>.[gif|mp4].",
+			"Returns an object with gif_path, mp4_path (if applicable), frames, and duration_seconds.",
+		].join("\n"),
+		promptSnippet: "Render a React composition to animated GIF and/or MP4 via Satori + gifenc",
+		promptGuidelines: [
+			"Composition uses Flexbox only — CSS Grid, box-shadow, and animations are NOT supported",
+			"Component receives FrameProps: { frame, width, height, ...props } — use frame to drive animation",
+			"Fonts: Tomorrow (mono) and Inter (sans) are bundled",
+			"GIF always available; MP4 requires FFmpeg on PATH",
+			"format='gif' for web/preview, format='mp4' for quality, format='both' for both",
+		],
+		parameters: Type.Object({
+			composition_path:    Type.String({
+				description: "Path to the composition file (.tsx or .jsx). Absolute or relative to cwd.",
+			}),
+			duration_in_frames:  Type.Number({ description: "Total number of frames to render (required)" }),
+			fps:                 Type.Optional(Type.Number({ description: "Frames per second (default: 30)" })),
+			width:               Type.Optional(Type.Number({ description: "Output width in pixels (default: 1920)" })),
+			height:              Type.Optional(Type.Number({ description: "Output height in pixels (default: 1080)" })),
+			props:               Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
+				description: "Additional props to pass to the composition component",
+			})),
+			format:              Type.Optional(StringEnum(["gif", "mp4", "both"] as const, {
+				description: "Output format: gif (default), mp4, or both. MP4 requires FFmpeg.",
+			})),
+		}),
+
+		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+			const compositionPath = isAbsolute(params.composition_path)
+				? params.composition_path
+				: resolve(process.cwd(), params.composition_path);
+
+			if (!existsSync(compositionPath)) {
+				throw new Error(`Composition file not found: ${compositionPath}`);
+			}
+
+			const fps             = params.fps    ?? 30;
+			const width           = params.width  ?? 1920;
+			const height          = params.height ?? 1080;
+			const format          = params.format ?? "gif";
+			const frames          = params.duration_in_frames;
+			const durationSeconds = frames / fps;
+			const ts              = timestamp();
+
+			const wantGif = format === "gif" || format === "both";
+			const wantMp4 = format === "mp4" || format === "both";
+
+			if (wantMp4 && !hasCmd("ffmpeg")) {
+				if (format === "mp4") {
+					throw new Error("MP4 output requires FFmpeg. Install it via `brew install ffmpeg` or `nix profile install nixpkgs#ffmpeg`.");
+				}
+				// format === "both": warn and fall back to GIF only
+				onUpdate?.({
+					content: [{ type: "text", text: `⚠️  FFmpeg not found — producing GIF only.` }],
+					details: {},
+				});
+			}
+
+			const gifPath = wantGif ? visualsPath(`${ts}.gif`) : undefined;
+			const mp4Path = (wantMp4 && hasCmd("ffmpeg")) ? visualsPath(`${ts}.mp4`) : undefined;
+
+			const outputs: string[] = [];
+			if (gifPath) outputs.push("gif");
+			if (mp4Path) outputs.push("mp4");
+
+			onUpdate?.({
+				content: [{ type: "text", text: `Rendering ${frames} frames at ${fps}fps → ${outputs.join(" + ")} (${durationSeconds.toFixed(2)}s)…` }],
+				details: { compositionPath, frames, fps, width, height, format },
+			});
+
+			const baseArgs = [
+				join(COMPOSITION_DIR, "render.mjs"),
+				"--mode",              "video",
+				"--composition",       compositionPath,
+				"--duration-in-frames", String(frames),
+				"--fps",               String(fps),
+				"--width",             String(width),
+				"--height",            String(height),
+			];
+			if (params.props && Object.keys(params.props).length > 0) {
+				baseArgs.push("--props", JSON.stringify(params.props));
+			}
+
+			const results: { gif_path?: string; mp4_path?: string } = {};
+
+			// Render GIF
+			if (gifPath) {
+				const gifArgs = [...baseArgs, "--output-gif", gifPath];
+				const gifResult = await pi.exec("node", gifArgs, {
+					signal,
+					timeout: 600_000,
+					cwd: COMPOSITION_DIR,
+				});
+				if (gifResult.code !== 0) {
+					const stderr = gifResult.stderr || gifResult.stdout || "";
+					throw new Error(`render.mjs GIF failed (exit ${gifResult.code}):\n${stderr.slice(-2000)}`);
+				}
+				results.gif_path = gifPath;
+			}
+
+			// Render MP4
+			if (mp4Path) {
+				const mp4Args = [...baseArgs, "--output-mp4", mp4Path];
+				const mp4Result = await pi.exec("node", mp4Args, {
+					signal,
+					timeout: 600_000,
+					cwd: COMPOSITION_DIR,
+				});
+				if (mp4Result.code !== 0) {
+					const stderr = mp4Result.stderr || mp4Result.stdout || "";
+					throw new Error(`render.mjs MP4 failed (exit ${mp4Result.code}):\n${stderr.slice(-2000)}`);
+				}
+				results.mp4_path = mp4Path;
+			}
+
+			const parts: string[] = [
+				`Composition rendered: ${frames} frames @ ${fps}fps = ${durationSeconds.toFixed(2)}s`,
+				`Resolution: ${width}×${height}`,
+			];
+			if (results.gif_path) parts.push(`GIF: ${results.gif_path}`);
+			if (results.mp4_path) parts.push(`MP4: ${results.mp4_path}`);
+
+			return {
+				content: [{ type: "text", text: parts.join("  ·  ") }],
+				details: {
+					...results,
+					frames,
+					duration_seconds: durationSeconds,
+					fps,
+					width,
+					height,
+				},
+			};
 		},
 	});
 
