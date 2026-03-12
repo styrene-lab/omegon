@@ -207,10 +207,18 @@ describe("design-tree dashboard refresh helper", () => {
 		};
 	}
 
-	async function runUpdateTool(params: Record<string, unknown>) {
+	type ToolResult = { content: Array<{ type: string; text?: string }>; details: Record<string, unknown>; isError?: boolean };
+
+	async function runUpdateTool(params: Record<string, unknown>): Promise<ToolResult> {
 		const tool = pi.tools.find((entry) => entry.name === "design_tree_update");
 		assert.ok(tool, "missing design_tree_update tool");
-		return tool.execute("tool-1", params, {} as never, () => {}, { cwd: tmpDir });
+		return tool.execute("tool-1", params, {} as never, () => {}, { cwd: tmpDir }) as Promise<ToolResult>;
+	}
+
+	async function runQueryTool(params: Record<string, unknown>): Promise<ToolResult> {
+		const tool = pi.tools.find((entry) => entry.name === "design_tree");
+		assert.ok(tool, "missing design_tree tool");
+		return tool.execute("tool-1", params, {} as never, () => {}, { cwd: tmpDir }) as Promise<ToolResult>;
 	}
 
 	beforeEach(() => {
@@ -295,6 +303,76 @@ describe("design-tree dashboard refresh helper", () => {
 		await runUpdateTool({ action: "add_question", node_id: "alpha-node", question: "What is the best approach?" });
 		const dashboardEmits = emitCalls.slice(before).filter((c) => c.channel === "dashboard:update");
 		assert.ok(dashboardEmits.length >= 1, "expected at least one dashboard:update event after add_question");
+	});
+
+	it("set_priority persists priority to frontmatter and returns success", async () => {
+		const result = await runUpdateTool({ action: "set_priority", node_id: "alpha-node", priority: 2 });
+		assert.ok(!result.isError, `set_priority should succeed, got: ${result.content[0]?.text}`);
+		assert.match(result.content[0]?.text ?? "", /priority.*2|2.*priority/i);
+
+		// Verify frontmatter was written
+		const filePath = path.join(tmpDir, "docs", "alpha-node.md");
+		const raw = fs.readFileSync(filePath, "utf8");
+		assert.match(raw, /priority:\s*2/);
+	});
+
+	it("set_priority rejects out-of-range value", async () => {
+		const result = await runUpdateTool({ action: "set_priority", node_id: "alpha-node", priority: 6 });
+		assert.ok(result.isError, "set_priority should fail for priority 6");
+	});
+
+	it("set_priority rejects missing priority", async () => {
+		const result = await runUpdateTool({ action: "set_priority", node_id: "alpha-node" });
+		assert.ok(result.isError, "set_priority should fail when priority is missing");
+	});
+
+	it("set_priority fails for unknown node", async () => {
+		const result = await runUpdateTool({ action: "set_priority", node_id: "no-such-node", priority: 1 });
+		assert.ok(result.isError, "set_priority should fail for unknown node");
+	});
+
+	it("set_issue_type persists issue_type to frontmatter and returns success", async () => {
+		const result = await runUpdateTool({ action: "set_issue_type", node_id: "alpha-node", issue_type: "feature" });
+		assert.ok(!result.isError, `set_issue_type should succeed, got: ${result.content[0]?.text}`);
+		assert.match(result.content[0]?.text ?? "", /feature/i);
+
+		const filePath = path.join(tmpDir, "docs", "alpha-node.md");
+		const raw = fs.readFileSync(filePath, "utf8");
+		assert.match(raw, /issue_type:\s*feature/);
+	});
+
+	it("set_issue_type rejects invalid issue type", async () => {
+		const result = await runUpdateTool({ action: "set_issue_type", node_id: "alpha-node", issue_type: "invalid-type" });
+		assert.ok(result.isError, "set_issue_type should fail for invalid type");
+	});
+
+	it("set_issue_type fails for unknown node", async () => {
+		const result = await runUpdateTool({ action: "set_issue_type", node_id: "no-such-node", issue_type: "bug" });
+		assert.ok(result.isError, "set_issue_type should fail for unknown node");
+	});
+
+	it("list action includes priority and issue_type fields", async () => {
+		await runUpdateTool({ action: "set_priority", node_id: "alpha-node", priority: 3 });
+		await runUpdateTool({ action: "set_issue_type", node_id: "alpha-node", issue_type: "task" });
+
+		const result = await runQueryTool({ action: "list" });
+		const nodes = JSON.parse(result.content[0]?.text ?? "[]");
+		const alpha = nodes.find((n: { id: string }) => n.id === "alpha-node");
+		assert.ok(alpha, "alpha-node should appear in list");
+		assert.equal(alpha.priority, 3, "list should include priority");
+		assert.equal(alpha.issue_type, "task", "list should include issue_type");
+	});
+
+	it("node action includes priority and issue_type fields", async () => {
+		await runUpdateTool({ action: "set_priority", node_id: "alpha-node", priority: 1 });
+		await runUpdateTool({ action: "set_issue_type", node_id: "alpha-node", issue_type: "bug" });
+
+		const result = await runQueryTool({ action: "node", node_id: "alpha-node" });
+		const raw = result.content[0]?.text ?? "";
+		const jsonPart = raw.split("--- Document Content ---")[0].trim();
+		const nodeData = JSON.parse(jsonPart);
+		assert.equal(nodeData.priority, 1, "node action should include priority");
+		assert.equal(nodeData.issue_type, "bug", "node action should include issue_type");
 	});
 });
 

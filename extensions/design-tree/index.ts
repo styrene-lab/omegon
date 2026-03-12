@@ -34,8 +34,8 @@ import { resolveLifecycleSummary, getAssessmentStatus, getChange } from "../open
 import { evaluateLifecycleReconciliation } from "../openspec/reconcile.ts";
 import type { LifecycleSummary } from "../openspec/spec.ts";
 
-import type { DesignNode, DesignTree, NodeStatus } from "./types.ts";
-import { VALID_STATUSES, STATUS_ICONS, STATUS_COLORS } from "./types.ts";
+import type { DesignNode, DesignTree, NodeStatus, IssueType, Priority } from "./types.ts";
+import { VALID_STATUSES, STATUS_ICONS, STATUS_COLORS, VALID_ISSUE_TYPES } from "./types.ts";
 import {
 	scanDesignDocs,
 	getChildren,
@@ -266,6 +266,8 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 							dependencies: n.dependencies,
 							branches: n.branches,
 							openspec_change: n.openspec_change ?? null,
+							priority: n.priority ?? null,
+							issue_type: n.issue_type ?? null,
 							lifecycle: {
 								// Normalized binding status from canonical resolver when available.
 								// The fallback (binding.bound ? "bound" : "unbound") is an explicit safety
@@ -309,6 +311,8 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						tags: node.tags,
 						branches: node.branches,
 						openspecChange: node.openspec_change ?? null,
+						priority: node.priority ?? null,
+						issue_type: node.issue_type ?? null,
 						children,
 						sections: {
 							overview: sections.overview,
@@ -572,7 +576,9 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 			"- branch: Create a child node from a parent's open question\n" +
 			"- focus: Set the focused design node for context injection\n" +
 			"- unfocus: Clear the focused node\n" +
-			"- implement: Bridge a decided node to OpenSpec — scaffold a change directory",
+			"- implement: Bridge a decided node to OpenSpec — scaffold a change directory\n" +
+			"- set_priority: Set the priority (1-5) on a node\n" +
+			"- set_issue_type: Set the issue type (epic/feature/task/bug/chore) on a node",
 		promptSnippet:
 			"Mutate the design tree — create nodes, set status, add research/decisions/questions, branch, implement",
 		promptGuidelines: [
@@ -585,12 +591,15 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 			"Use 'focus' to set which node's context gets injected into the conversation.",
 			"Use 'implement' on a decided node to generate an OpenSpec change directory for cleave execution.",
 			"When an OpenSpec change exists for a decided node, suggest `/cleave` to parallelize the implementation.",
+			"Use 'set_priority' to assign a priority 1 (critical) to 5 (trivial) to a node.",
+			"Use 'set_issue_type' to classify a node as epic/feature/task/bug/chore.",
 		],
 		parameters: Type.Object({
 			action: StringEnum([
 				"create", "set_status", "add_question", "remove_question",
 				"add_research", "add_decision", "add_dependency", "add_related",
 				"add_impl_notes", "branch", "focus", "unfocus", "implement",
+				"set_priority", "set_issue_type",
 			] as const),
 			node_id: Type.Optional(Type.String({ description: "Target node ID (required for most actions)" })),
 			// create params
@@ -625,6 +634,10 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 				),
 			),
 			constraints: Type.Optional(Type.Array(Type.String(), { description: "Constraints (for add_impl_notes)" })),
+			// set_priority params
+			priority: Type.Optional(Type.Number({ description: "Priority 1 (critical) to 5 (trivial) (for set_priority)" })),
+			// set_issue_type params
+			issue_type: Type.Optional(Type.String({ description: "epic|feature|task|bug|chore (for set_issue_type)" })),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -966,6 +979,60 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 							? { changePath: implResult.changePath, files: implResult.files, branch: implResult.branch }
 							: {},
 						isError: !implResult.ok,
+					};
+				}
+
+				// ── set_priority ──────────────────────────────────────────
+				case "set_priority": {
+					if (!params.node_id) {
+						return { content: [{ type: "text", text: "Error: node_id required" }], details: {}, isError: true };
+					}
+					const node = tree.nodes.get(params.node_id);
+					if (!node) {
+						return { content: [{ type: "text", text: `Node '${params.node_id}' not found` }], details: {}, isError: true };
+					}
+					const p = params.priority !== undefined ? Math.round(params.priority) : undefined;
+					if (p === undefined || p < 1 || p > 5) {
+						return { content: [{ type: "text", text: "Error: priority must be an integer 1–5" }], details: {}, isError: true };
+					}
+					const updatedNode = { ...node, priority: p as Priority };
+					const sections = getNodeSections(node);
+					writeNodeDocument(updatedNode, sections);
+					tree.nodes.set(updatedNode.id, updatedNode);
+					reload(ctx.cwd);
+					emitCurrentState();
+					return {
+						content: [{ type: "text", text: `Priority set to ${p} on '${node.title}'` }],
+						details: { node_id: node.id, priority: p },
+					};
+				}
+
+				// ── set_issue_type ────────────────────────────────────────
+				case "set_issue_type": {
+					if (!params.node_id) {
+						return { content: [{ type: "text", text: "Error: node_id required" }], details: {}, isError: true };
+					}
+					const node = tree.nodes.get(params.node_id);
+					if (!node) {
+						return { content: [{ type: "text", text: `Node '${params.node_id}' not found` }], details: {}, isError: true };
+					}
+					const it = params.issue_type as IssueType | undefined;
+					if (!it || !VALID_ISSUE_TYPES.includes(it)) {
+						return {
+							content: [{ type: "text", text: `Error: issue_type must be one of: ${VALID_ISSUE_TYPES.join(", ")}` }],
+							details: {},
+							isError: true,
+						};
+					}
+					const updatedNode = { ...node, issue_type: it };
+					const sections = getNodeSections(node);
+					writeNodeDocument(updatedNode, sections);
+					tree.nodes.set(updatedNode.id, updatedNode);
+					reload(ctx.cwd);
+					emitCurrentState();
+					return {
+						content: [{ type: "text", text: `Issue type set to '${it}' on '${node.title}'` }],
+						details: { node_id: node.id, issue_type: it },
 					};
 				}
 			}
