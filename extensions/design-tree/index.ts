@@ -29,7 +29,7 @@ import { sharedState } from "../shared-state.ts";
 
 import { emitDesignTreeState } from "./dashboard-state.ts";
 import { emitConstraintCandidates, emitDecisionCandidates } from "./lifecycle-emitter.ts";
-import { resolveNodeOpenSpecBinding, resolveDesignSpecBinding, type DesignSpecBinding } from "../openspec/archive-gate.ts";
+import { resolveNodeOpenSpecBinding, resolveDesignSpecBinding } from "../openspec/archive-gate.ts";
 import { resolveLifecycleSummary, getAssessmentStatus, getChange, getOpenSpecDir } from "../openspec/spec.ts";
 import { evaluateLifecycleReconciliation } from "../openspec/reconcile.ts";
 import type { LifecycleSummary } from "../openspec/spec.ts";
@@ -41,7 +41,6 @@ import {
 	getChildren,
 	getAllOpenQuestions,
 	getDocBody,
-	countAcceptanceCriteria,
 	getNodeSections,
 	createNode,
 	setNodeStatus,
@@ -56,26 +55,15 @@ import {
 	toSlug,
 	validateNodeId,
 	scaffoldOpenSpecChange,
-	scaffoldDesignOpenSpecChange,
-	mirrorOpenQuestionsToDesignSpec,
 	matchBranchToNode,
 	appendBranch,
 	readGitBranch,
 	sanitizeBranchName,
 	writeNodeDocument,
 	parseFrontmatter,
+	countAcceptanceCriteria,
 } from "./tree.ts";
 import { getSharedBridge, buildSlashCommandResult } from "../lib/slash-command-bridge.ts";
-
-// ─── Design Spec Archive Gate ─────────────────────────────────────────────────
-
-/**
- * Result of checking whether a node's design-phase OpenSpec change is archived.
- *
- * - archived: true  → change exists in openspec/archive/<ts>-<name>/
- * - archived: false, active: true → change exists in openspec/changes/<name>/
- * - archived: false, active: false → no change found in either location
- */
 
 // ─── Extension ───────────────────────────────────────────────────────────────
 
@@ -754,47 +742,32 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					if (!newStatus || !VALID_STATUSES.includes(newStatus)) {
 						return { content: [{ type: "text", text: `Invalid status '${params.status}'. Valid: ${VALID_STATUSES.join(", ")}` }], details: {}, isError: true };
 					}
-					// Hard gate: design-phase spec must be archived before a node can be decided.
+					const oldStatus = node.status;
+
+					// Hard gate: set_status(decided) requires archived design spec.
 					if (newStatus === "decided") {
 						const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
-						if (designSpec.active) {
+						if (designSpec.missing) {
 							return {
-								content: [{
-									type: "text",
-									text: "Run /assess spec then /opsx:archive the design change before marking decided",
-								}],
-								details: {},
+								content: [{ type: "text", text: `Cannot mark '${node.title}' decided: scaffold design spec first via set_status(exploring).` }],
+								details: { id: node.id, blockedBy: "design-openspec-missing" },
 								isError: true,
 							};
 						}
-						if (designSpec.missing) {
+						if (designSpec.active && !designSpec.archived) {
 							return {
-								content: [{
-									type: "text",
-									text: "Scaffold design spec first via set_status(exploring)",
-								}],
-								details: {},
+								content: [{ type: "text", text: `Cannot mark '${node.title}' decided: run /assess design then archive the design change before marking decided.` }],
+								details: { id: node.id, blockedBy: "design-openspec-not-archived" },
 								isError: true,
 							};
 						}
 					}
 
-					const oldStatus = node.status;
 					const updated = setNodeStatus(node, newStatus);
 					tree.nodes.set(updated.id, updated);
 					emitCurrentState();
 
 					let text = `${STATUS_ICONS[newStatus]} '${node.title}': ${oldStatus} → ${newStatus}`;
-
-					// If transitioning to exploring, scaffold design OpenSpec change (idempotent)
-					if (newStatus === "exploring") {
-						const result = scaffoldDesignOpenSpecChange(ctx.cwd, node);
-						if (result.created) {
-							text += `\n\nScaffolded design spec at openspec/design/${node.id}/\n` +
-								`  - proposal.md, spec.md, tasks.md\n\n` +
-								`Fill in spec.md with Given/When/Then scenarios that must be true before deciding.`;
-						}
-					}
 
 					// If transitioning to decided, check for OpenSpec bridge opportunity
 					if (newStatus === "decided") {
@@ -846,7 +819,6 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						}],
 					});
 					emitCurrentState();
-					mirrorOpenQuestionsToDesignSpec(ctx.cwd, updated);
 					return {
 						content: [{ type: "text", text: `Added question to '${node.title}': ${params.question}` }],
 						details: { id: node.id, question: params.question, totalQuestions: updated.open_questions.length },
@@ -875,7 +847,6 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					const factWasEmitted = emittedFacts.length > 0;
 					(sharedState.factArchiveQueue ??= []).push(factContentPrefix);
 					emitCurrentState();
-					mirrorOpenQuestionsToDesignSpec(ctx.cwd, updated);
 					return {
 						content: [
 							{
@@ -1101,26 +1072,22 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					}
 
 					// Hard gate: design-phase spec must be archived before implementation.
-					const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
-					if (!designSpec.archived) {
-						if (designSpec.active) {
+					{
+						const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
+						if (designSpec.missing) {
 							return {
-								content: [{
-									type: "text",
-									text: "Run /assess spec then /opsx:archive the design change before marking decided",
-								}],
-								details: {},
+								content: [{ type: "text", text: "Scaffold design spec first via set_status(exploring)" }],
+								details: { id: node.id, blockedBy: "design-openspec-missing" },
 								isError: true,
 							};
 						}
-						return {
-							content: [{
-								type: "text",
-								text: "Scaffold design spec first via set_status(exploring)",
-							}],
-							details: {},
-							isError: true,
-						};
+						if (designSpec.active && !designSpec.archived) {
+							return {
+								content: [{ type: "text", text: `Cannot implement '${node.title}': archive the design change first (/opsx:archive on the design change).` }],
+								details: { id: node.id, blockedBy: "design-openspec-not-archived" },
+								isError: true,
+							};
+						}
 					}
 
 					const implResult = executeImplement(ctx.cwd, node);

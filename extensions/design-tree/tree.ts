@@ -889,6 +889,12 @@ export function removeOpenQuestion(
 	const body = extractBody(content);
 	const sections = parseSections(body);
 
+	// Seed body sections from node's in-memory merged state when body has no Open Questions
+	// section yet (e.g. frontmatter-only nodes). Keeps body + frontmatter in sync.
+	if (sections.openQuestions.length === 0 && node.open_questions.length > 0) {
+		sections.openQuestions = [...node.open_questions];
+	}
+
 	if (typeof questionOrIndex === "number") {
 		if (questionOrIndex >= 0 && questionOrIndex < sections.openQuestions.length) {
 			sections.openQuestions.splice(questionOrIndex, 1);
@@ -1484,7 +1490,22 @@ export function scaffoldDesignOpenSpecChange(
 
 	fs.mkdirSync(changePath, { recursive: true });
 
-	const sections = getNodeSections(node);
+	// C4: guard against missing file (e.g. freshly-created node not yet flushed)
+	let sections: DocumentSections;
+	try {
+		sections = getNodeSections(node);
+	} catch {
+		// Fall back to empty sections so scaffold can still proceed
+		sections = {
+			overview: "",
+			research: [],
+			decisions: [],
+			openQuestions: node.open_questions ?? [],
+			implementationNotes: { fileScope: [], constraints: [], rawContent: "" },
+			acceptanceCriteria: { scenarios: [], falsifiability: [], constraints: [] },
+			extraSections: [],
+		};
+	}
 	const docRelPath = `docs/${node.id}.md`;
 
 	// ── proposal.md ──────────────────────────────────────────────
@@ -1514,11 +1535,11 @@ export function scaffoldDesignOpenSpecChange(
 		"",
 		"## Scenarios",
 		"",
-		"<!-- Add scenarios here. Example:",
-		"Given [context]",
-		"When [action or condition]",
-		"Then [observable outcome]",
-		"-->",
+		"### Scenario 1 (replace with a real scenario)",
+		"",
+		"Given this node is in the exploring state",
+		"When the design questions are answered and a decision is recorded",
+		"Then the node can be transitioned to decided",
 		"",
 		"## Falsifiability",
 		"",
@@ -1576,7 +1597,11 @@ export function mirrorOpenQuestionsToDesignSpec(cwd: string, node: DesignNode): 
 	const tasksPath = path.join(cwd, "openspec", "design", node.id, "tasks.md");
 	if (!fs.existsSync(tasksPath)) return;
 
-	const sections = getNodeSections(node);
-	const content = buildDesignTasksContent(node, sections);
+	// W1: use node.open_questions directly — avoids redundant disk read and
+	// potential race if the file write from add/removeOpenQuestion hasn't flushed.
+	const syntheticSections: Pick<DocumentSections, "openQuestions"> = {
+		openQuestions: node.open_questions ?? [],
+	};
+	const content = buildDesignTasksContent(node, syntheticSections as DocumentSections);
 	fs.writeFileSync(tasksPath, content);
 }
