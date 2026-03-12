@@ -297,3 +297,141 @@ describe("design-tree dashboard refresh helper", () => {
 		assert.ok(dashboardEmits.length >= 1, "expected at least one dashboard:update event after add_question");
 	});
 });
+
+describe("design-tree ready and blocked query actions", () => {
+	let tmpDir: string;
+	let pi: ReturnType<typeof createFakePi>;
+
+	function writeFrontmatterDoc(docsDir: string, node: Partial<DesignNode> & { id: string; title: string }): void {
+		const full: DesignNode = {
+			status: "seed",
+			dependencies: [],
+			related: [],
+			tags: [],
+			open_questions: [],
+			branches: [],
+			filePath: path.join(docsDir, `${node.id}.md`),
+			lastModified: Date.now(),
+			...node,
+		};
+		const content = `${generateFrontmatter(full)}\n# ${full.title}\n\n## Overview\n\nTest.\n`;
+		fs.writeFileSync(full.filePath, content);
+	}
+
+	async function runQueryTool(params: Record<string, unknown>) {
+		const tool = pi.tools.find((e) => e.name === "design_tree");
+		assert.ok(tool, "missing design_tree tool");
+		return tool.execute("tool-1", params, {} as never, () => {}, { cwd: tmpDir }) as Promise<{
+			details: Record<string, unknown>;
+			content: Array<{ type: string; text: string }>;
+		}>;
+	}
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "design-tree-ready-blocked-"));
+		const docsDir = path.join(tmpDir, "docs");
+		fs.mkdirSync(docsDir, { recursive: true });
+
+		// dep-a: implemented (satisfies dependencies)
+		writeFrontmatterDoc(docsDir, { id: "dep-a", title: "Dep A", status: "implemented" });
+		// dep-b: decided (NOT implemented — creates a blocker)
+		writeFrontmatterDoc(docsDir, { id: "dep-b", title: "Dep B", status: "decided" });
+		// ready-node: decided + all deps implemented
+		writeFrontmatterDoc(docsDir, { id: "ready-node", title: "Ready Node", status: "decided", dependencies: ["dep-a"], priority: 2, issue_type: "feature" });
+		// blocked-by-dep: decided + has unimplemented dep
+		writeFrontmatterDoc(docsDir, { id: "blocked-by-dep", title: "Blocked By Dep", status: "decided", dependencies: ["dep-b"] });
+		// explicitly-blocked: status=blocked
+		writeFrontmatterDoc(docsDir, { id: "explicitly-blocked", title: "Explicitly Blocked", status: "blocked" });
+		// no-deps: decided with no deps (should appear in ready)
+		writeFrontmatterDoc(docsDir, { id: "no-deps", title: "No Deps", status: "decided", priority: 1 });
+
+		pi = createFakePi();
+		designTreeExtension(pi as unknown as ExtensionAPI);
+	});
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("ready action returns decided nodes with all deps implemented", async () => {
+		const result = await runQueryTool({ action: "ready" });
+		const ready = result.details.ready as Array<{ id: string }>;
+		const ids = ready.map((n) => n.id);
+		assert.ok(ids.includes("ready-node"), "ready-node should appear (decided, dep implemented)");
+		assert.ok(ids.includes("no-deps"), "no-deps should appear (decided, no dependencies)");
+		assert.ok(!ids.includes("blocked-by-dep"), "blocked-by-dep should NOT appear (dep not implemented)");
+		assert.ok(!ids.includes("dep-a"), "dep-a should NOT appear (status=implemented, not decided)");
+		assert.ok(!ids.includes("explicitly-blocked"), "explicitly-blocked should NOT appear (status=blocked)");
+	});
+
+	it("ready action sorts by priority ascending (lower number = higher priority)", async () => {
+		const result = await runQueryTool({ action: "ready" });
+		const ready = result.details.ready as Array<{ id: string; priority: number | null }>;
+		const priorities = ready.map((n) => n.priority ?? 5);
+		for (let i = 1; i < priorities.length; i++) {
+			assert.ok(priorities[i - 1] <= priorities[i], `priority order violated at index ${i}: ${priorities[i - 1]} > ${priorities[i]}`);
+		}
+	});
+
+	it("ready action includes priority, issue_type, tags, and openspec_change fields", async () => {
+		const result = await runQueryTool({ action: "ready" });
+		const ready = result.details.ready as Array<{ id: string; priority: number | null; issue_type: string | null; tags: string[]; openspec_change: string | null }>;
+		const rn = ready.find((n) => n.id === "ready-node");
+		assert.ok(rn, "ready-node must be present");
+		assert.equal(rn!.priority, 2);
+		assert.equal(rn!.issue_type, "feature");
+		assert.ok(Array.isArray(rn!.tags), "tags must be an array");
+		assert.equal(rn!.openspec_change, null);
+	});
+
+	it("blocked action returns explicitly blocked nodes", async () => {
+		const result = await runQueryTool({ action: "blocked" });
+		const blocked = result.details.blocked as Array<{ id: string; blocking_deps: Array<{ id: string; status: string }> }>;
+		const ids = blocked.map((n) => n.id);
+		assert.ok(ids.includes("explicitly-blocked"), "explicitly-blocked must appear");
+	});
+
+	it("blocked action returns nodes with unimplemented dependencies", async () => {
+		const result = await runQueryTool({ action: "blocked" });
+		const blocked = result.details.blocked as Array<{ id: string; blocking_deps: Array<{ id: string; title: string; status: string }> }>;
+		const bn = blocked.find((n) => n.id === "blocked-by-dep");
+		assert.ok(bn, "blocked-by-dep must appear");
+		assert.equal(bn!.blocking_deps.length, 1);
+		assert.equal(bn!.blocking_deps[0].id, "dep-b");
+		assert.equal(bn!.blocking_deps[0].status, "decided");
+	});
+
+	it("blocked action does not include implemented nodes", async () => {
+		const result = await runQueryTool({ action: "blocked" });
+		const blocked = result.details.blocked as Array<{ id: string }>;
+		const ids = blocked.map((n) => n.id);
+		assert.ok(!ids.includes("dep-a"), "dep-a (implemented) should not appear in blocked");
+	});
+
+	it("blocked action includes priority, issue_type, and blocking_deps fields on each entry", async () => {
+		const result = await runQueryTool({ action: "blocked" });
+		const blocked = result.details.blocked as Array<{
+			id: string;
+			priority: number | null;
+			issue_type: string | null;
+			tags: string[];
+			openspec_change: string | null;
+			blocking_deps: unknown[];
+		}>;
+		for (const entry of blocked) {
+			assert.ok("priority" in entry, `${entry.id}: missing priority`);
+			assert.ok("issue_type" in entry, `${entry.id}: missing issue_type`);
+			assert.ok("tags" in entry, `${entry.id}: missing tags`);
+			assert.ok("openspec_change" in entry, `${entry.id}: missing openspec_change`);
+			assert.ok(Array.isArray(entry.blocking_deps), `${entry.id}: blocking_deps must be an array`);
+		}
+	});
+
+	it("explicitly blocked node has empty blocking_deps array when it has no dependencies", async () => {
+		const result = await runQueryTool({ action: "blocked" });
+		const blocked = result.details.blocked as Array<{ id: string; blocking_deps: unknown[] }>;
+		const eb = blocked.find((n) => n.id === "explicitly-blocked");
+		assert.ok(eb, "explicitly-blocked must appear");
+		assert.equal(eb!.blocking_deps.length, 0, "no dependencies so blocking_deps should be empty");
+	});
+});

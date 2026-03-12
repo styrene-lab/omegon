@@ -239,9 +239,11 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 			"After a design discussion converges, use design_tree_update with action 'set_status' to mark the node as decided",
 			"When discussion reveals new sub-topics, use design_tree_update with action 'branch' to create child nodes",
 			"Use action 'node' to read the full structured content (research, decisions, implementation notes)",
+			"Use action 'ready' to find nodes that are decided and have all dependencies implemented — work queue for sprint planning",
+			"Use action 'blocked' to find nodes that are explicitly blocked or have unresolved dependency blockers — shows exactly which dep is blocking each node",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["list", "node", "frontier", "dependencies", "children"] as const),
+			action: StringEnum(["list", "node", "frontier", "dependencies", "children", "ready", "blocked"] as const),
 			node_id: Type.Optional(
 				Type.String({ description: "Node ID (required for node, dependencies, children)" }),
 			),
@@ -413,6 +415,83 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					return {
 						content: [{ type: "text", text: `Children of ${params.node_id}:\n${JSON.stringify(children, null, 2)}` }],
 						details: { children },
+					};
+				}
+
+				case "ready": {
+					// Nodes with status='decided' where every dependency is 'implemented'
+					const readyNodes = Array.from(tree.nodes.values())
+						.filter((n) => {
+							if (n.status !== "decided") return false;
+							return n.dependencies.every((depId) => {
+								const dep = tree.nodes.get(depId);
+								return dep?.status === "implemented";
+							});
+						})
+						.sort((a, b) => {
+							// Lower priority number = higher urgency (1=critical, 5=trivial)
+							// Nodes without priority sort last (treated as 5)
+							const pa = a.priority ?? 5;
+							const pb = b.priority ?? 5;
+							return pa - pb;
+						})
+						.map((n) => ({
+							id: n.id,
+							title: n.title,
+							status: n.status,
+							priority: n.priority ?? null,
+							issue_type: n.issue_type ?? null,
+							tags: n.tags,
+							openspec_change: n.openspec_change ?? null,
+						}));
+
+					return {
+						content: [{ type: "text", text: `${readyNodes.length} node(s) ready to implement:\n\n${JSON.stringify(readyNodes, null, 2)}` }],
+						details: { ready: readyNodes },
+					};
+				}
+
+				case "blocked": {
+					// Nodes explicitly blocked OR whose dependencies are not yet 'implemented'
+					const blockedNodes = Array.from(tree.nodes.values())
+						.filter((n) => {
+							if (n.status === "implemented") return false;
+							if (n.status === "blocked") return true;
+							// Non-implemented nodes that have at least one non-implemented dependency
+							return n.dependencies.some((depId) => {
+								const dep = tree.nodes.get(depId);
+								return !dep || dep.status !== "implemented";
+							});
+						})
+						.map((n) => {
+							const blockingDeps = n.dependencies
+								.filter((depId) => {
+									const dep = tree.nodes.get(depId);
+									return !dep || dep.status !== "implemented";
+								})
+								.map((depId) => {
+									const dep = tree.nodes.get(depId);
+									return {
+										id: depId,
+										title: dep?.title ?? "(unknown)",
+										status: dep?.status ?? "missing",
+									};
+								});
+							return {
+								id: n.id,
+								title: n.title,
+								status: n.status,
+								priority: n.priority ?? null,
+								issue_type: n.issue_type ?? null,
+								tags: n.tags,
+								openspec_change: n.openspec_change ?? null,
+								blocking_deps: blockingDeps,
+							};
+						});
+
+					return {
+						content: [{ type: "text", text: `${blockedNodes.length} node(s) blocked:\n\n${JSON.stringify(blockedNodes, null, 2)}` }],
+						details: { blocked: blockedNodes },
 					};
 				}
 			}
