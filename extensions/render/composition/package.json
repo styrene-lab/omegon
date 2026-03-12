@@ -1,0 +1,22 @@
+{
+  "name": "@pi-kit/composition",
+  "version": "0.1.0",
+  "description": "Browser-free React → video/image renderer using Satori + resvg + gifenc",
+  "type": "module",
+  "main": "render.mjs",
+  "scripts": {
+    "install-fonts": "node -e \"console.log('Fonts should be present in fonts/ directory')\""
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "gifenc": "^1.0.3",
+    "jiti": "^2.4.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "satori": "^0.11.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1"
+  }
+}
