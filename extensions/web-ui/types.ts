@@ -8,7 +8,7 @@
 // ── Schema version ────────────────────────────────────────────────────────────
 
 /** Bumped when the shape of ControlPlaneState changes in a breaking way. */
-export const SCHEMA_VERSION = 1 as const;
+export const SCHEMA_VERSION = 2 as const;
 export type SchemaVersion = typeof SCHEMA_VERSION;
 
 // ── Session ───────────────────────────────────────────────────────────────────
@@ -91,6 +91,23 @@ export interface OperatorMetadataSnapshot {
 
 // ── Design Tree ───────────────────────────────────────────────────────────────
 
+/**
+ * Design pipeline funnel counts — mirrors DesignPipelineCounts in dashboard/types.ts
+ * but lives here so the web-UI contract is self-contained.
+ */
+export interface DesignPipelineSnapshot {
+  /** Nodes with no design-phase spec change yet. */
+  needsSpec: number;
+  /** Nodes actively being designed (spec change exists but not decided). */
+  designing: number;
+  /** Nodes whose design is decided but implementation has not started. */
+  decided: number;
+  /** Nodes currently being implemented. */
+  implementing: number;
+  /** Nodes fully implemented and archived. */
+  done: number;
+}
+
 export interface DesignTreeSnapshot {
   /** Total node count. */
   nodeCount: number;
@@ -102,6 +119,8 @@ export interface DesignTreeSnapshot {
   focusedNode: DesignNodeSummary | null;
   /** Summary of every node in the tree. */
   nodes: DesignNodeSummary[];
+  /** Design pipeline funnel counts, present when dual-lifecycle is active. */
+  designPipeline?: DesignPipelineSnapshot;
 }
 
 export interface DesignNodeSummary {
