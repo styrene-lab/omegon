@@ -141,6 +141,11 @@ Key invariants enforced:
 - `extensions/openspec/archive-gate.ts` (modified) — missing_design_binding becomes informational only — binding now guaranteed by construction
 - `extensions/dashboard/index.ts` (modified) — Rename OpenSpec section label to Implementation in footer/overlay
 - `openspec/design/` (new) — New directory for design-phase OpenSpec changes (if separate subtree approach chosen)
+- `extensions/design-tree/types.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/cleave/assessment.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/cleave/bridge.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `extensions/cleave/index.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
+- `docs/design-tree.md` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 

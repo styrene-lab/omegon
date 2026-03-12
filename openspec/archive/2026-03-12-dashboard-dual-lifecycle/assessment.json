@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "changeName": "dashboard-dual-lifecycle",
+  "assessmentKind": "cleave",
+  "outcome": "pass",
+  "timestamp": "2026-03-12T23:32:58.516Z",
+  "summary": "All 28 tasks completed across 5 groups: dashboard types extended (DesignSpecBindingState, AcSummary, DesignAssessmentResult, DesignPipelineCounts), emitDesignTreeState wired with per-node design spec binding, overlay-data buildDesignItems with spec badge + & suffix + pipeline funnel, footer raised-mode pipeline row + needsSpec warning, listDesignChanges in spec.ts, web-ui SCHEMA_VERSION=2 with designPipeline snapshot and /api/design-pipeline slice. 1585 tests passing.",
+  "snapshot": {
+    "gitHead": "b7a712aa0a6ae4ce7e09342427310ace37693ba1",
+    "fingerprint": "358b1409fe6e43276b36bac94aeda38140b75d758a0b71a535c8ae8ed5f98571",
+    "dirty": true,
+    "scopedPaths": [
+      "extensions/dashboard/footer.ts",
+      "extensions/dashboard/overlay-data.ts",
+      "extensions/dashboard/types.ts",
+      "extensions/design-tree/dashboard-state.ts",
+      "extensions/openspec/spec.ts",
+      "extensions/web-ui/server.ts",
+      "extensions/web-ui/state.ts",
+      "extensions/web-ui/types.ts"
+    ],
+    "files": [
+      {
+        "path": "extensions/dashboard/footer.ts",
+        "exists": true,
+        "size": 45095,
+        "sha256": "adb0664609debf0420a0e44585b76cfb7882fba81df1a477347c9a2b60c15216"
+      },
+      {
+        "path": "extensions/dashboard/overlay-data.ts",
+        "exists": true,
+        "size": 23946,
+        "sha256": "933c1c5f9c272adc2ec5f07525c215debc1489e863e75b80cf2ca907b08bdb67"
+      },
+      {
+        "path": "extensions/dashboard/types.ts",
+        "exists": true,
+        "size": 5606,
+        "sha256": "c202ca4150e68bd07c9c3eb34ee517da2e5519264654e116c19d2e061a38e166"
+      },
+      {
+        "path": "extensions/design-tree/dashboard-state.ts",
+        "exists": true,
+        "size": 6293,
+        "sha256": "28a3ef8ff7d0615417f294df00752056f119c9c222a43a00963b638501ac6f0d"
+      },
+      {
+        "path": "extensions/openspec/spec.ts",
+        "exists": true,
+        "size": 44871,
+        "sha256": "8eee762ad36a5870e79af50850cac021e7f7e0226ecc92256c586f1a1a881a6a"
+      },
+      {
+        "path": "extensions/web-ui/server.ts",
+        "exists": true,
+        "size": 9318,
+        "sha256": "dbdc128887c21b2a35941015e383aa4c25f0eb80a239c8a1501835c885d7c374"
+      },
+      {
+        "path": "extensions/web-ui/state.ts",
+        "exists": true,
+        "size": 15127,
+        "sha256": "fae642a8624204af8872b53ea035ae6421c407691341c9614ceccc1f063876ae"
+      },
+      {
+        "path": "extensions/web-ui/types.ts",
+        "exists": true,
+        "size": 10244,
+        "sha256": "bc9bf6db5464ec637c44e90ec943adb3629a5efe1c1ad7c45621aff884248b2a"
+      },
+      {
+        "path": "openspec/changes/dashboard-dual-lifecycle/design.md",
+        "exists": true,
+        "size": 14447,
+        "sha256": "6987c90f89f6fc3c04564441bc2817c4f621c1e30f95dcb0553fa7a3b20d9f82"
+      },
+      {
+        "path": "openspec/changes/dashboard-dual-lifecycle/proposal.md",
+        "exists": true,
+        "size": 484,
+        "sha256": "41462eecd426f9c8d3c5b7daefaf1ef51662a88c0d26fdb2e8e1a0ab115eda88"
+      },
+      {
+        "path": "openspec/changes/dashboard-dual-lifecycle/tasks.md",
+        "exists": true,
+        "size": 6728,
+        "sha256": "8d0cb82b7e12e6461830e7def4b92a9bb9a2576d98fa1d198507819af7e99d43"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "extensions/dashboard/types.ts",
+      "extensions/design-tree/dashboard-state.ts",
+      "extensions/dashboard/overlay-data.ts",
+      "extensions/dashboard/footer.ts",
+      "extensions/openspec/spec.ts",
+      "extensions/web-ui/types.ts",
+      "extensions/web-ui/state.ts",
+      "extensions/web-ui/server.ts"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

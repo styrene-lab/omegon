@@ -1,7 +1,7 @@
 ---
 id: dashboard-dual-lifecycle
 title: "Dashboard: Surface Dual-Lifecycle State"
-status: implementing
+status: implemented
 tags: [dashboard, openspec, design-tree, web-ui]
 open_questions: []
 branches: ["feature/dashboard-dual-lifecycle"]

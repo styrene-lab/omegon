@@ -1,7 +1,7 @@
 ---
 id: tool-call-renderer
 title: Enriched Tool Call Rendering
-status: implementing
+status: implemented
 tags: [dashboard, tui, ux, cleave, design-tree]
 open_questions: []
 branches: ["feature/tool-call-renderer"]
@@ -187,6 +187,7 @@ Alternative: A dedicated `tool-renderer.ts` extension that uses `pi.on("tool_cal
 - `extensions/design-tree/index.ts` (modified) — Add renderCall + renderResult to both design_tree and design_tree_update registerTool() calls. renderCall: action-semantic header with icon, action name, node_id, key param (status/question/heading/decision_title). renderResult collapsed: one-liner from details (oldStatus→newStatus, question + remainingCount, decision title, etc.). renderResult expanded: full existing text. renderResult isError: red icon + error line.
 - `extensions/cleave/index.ts` (modified) — Add renderCall + renderResult to cleave_run registerTool(). renderCall: directive truncated to 60 chars + child count from parsed plan_json. renderResult isPartial: phase-aware — dispatch shows per-child status table (✓/⟳/○/✕ + elapsed for done) + done/total count matching tab; merge shows merging N/N; review shows review round info. renderResult final: ✓ done N/N merged Xs, or ⚠ conflicts summary. Add renderCall + renderResult to cleave_assess. Simplify dispatcher.ts onUpdate text to remove wave/child counters (now redundant with renderResult table).
 - `extensions/openspec/index.ts` (modified) — Add renderCall + renderResult to openspec_manage registerTool(). renderCall: action-specific header (◎ propose name, ◎ add_spec domain, ◎ archive name). renderResult: stage transition or confirmation (◎ → specified name N scenarios, ◎ archived name).
+- `extensions/cleave/dispatcher.ts` (modified) — Post-assess reconciliation delta — touched during follow-up fixes
 
 ### Constraints
 

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "changeName": "tool-call-renderer",
+  "assessmentKind": "cleave",
+  "outcome": "pass",
+  "timestamp": "2026-03-12T23:32:34.256Z",
+  "summary": "All 14 tasks completed: renderCall/renderResult added to design_tree, design_tree_update, cleave_run, cleave_assess, and openspec_manage. Dispatcher wave-counter text simplified. TypeScript clean. 1585 tests passing. No spec scenarios were defined for this change (UX-only, no behavioral contracts).",
+  "snapshot": {
+    "gitHead": "b7a712aa0a6ae4ce7e09342427310ace37693ba1",
+    "fingerprint": "197edde20fdec6708667be6d295a9af3644d1cae684bc95193583411a6a9a50f",
+    "dirty": true,
+    "scopedPaths": [
+      "extensions/cleave/index.ts",
+      "extensions/design-tree/index.ts",
+      "extensions/openspec/index.ts"
+    ],
+    "files": [
+      {
+        "path": "extensions/cleave/index.ts",
+        "exists": true,
+        "size": 108982,
+        "sha256": "a883a7153cda104c02dd1688f8dc0df6c2ff724723c372ad8e70a0c53b6297a5"
+      },
+      {
+        "path": "extensions/design-tree/index.ts",
+        "exists": true,
+        "size": 81801,
+        "sha256": "e287c91fb5715985071ac85a3e760bd2c3d33a6533e3ee2f2a496eed0ef25007"
+      },
+      {
+        "path": "extensions/openspec/index.ts",
+        "exists": true,
+        "size": 70301,
+        "sha256": "814040184bda9b58db9b6fe43379ef53321b646204b6d466c0f6dc39fdef2277"
+      },
+      {
+        "path": "openspec/changes/tool-call-renderer/design.md",
+        "exists": true,
+        "size": 11981,
+        "sha256": "f4d20e411da78df4bd59a4614b2addaaaaf4b133c1e898dec3f42fbd79c79425"
+      },
+      {
+        "path": "openspec/changes/tool-call-renderer/proposal.md",
+        "exists": true,
+        "size": 626,
+        "sha256": "e2063ad3a28e9dabf8ed61dd81021ea430f5e61e9a267ba9f506fab0ef75d6d2"
+      },
+      {
+        "path": "openspec/changes/tool-call-renderer/tasks.md",
+        "exists": true,
+        "size": 2487,
+        "sha256": "93dc141b223eb913c18f0cc33da602aa56638797041efdbdb88d7114544ef196"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "extensions/design-tree/index.ts",
+      "extensions/cleave/index.ts",
+      "extensions/cleave/dispatcher.ts",
+      "extensions/openspec/index.ts"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

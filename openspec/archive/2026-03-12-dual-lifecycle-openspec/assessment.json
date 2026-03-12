@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "changeName": "dual-lifecycle-openspec",
+  "assessmentKind": "cleave",
+  "outcome": "pass",
+  "timestamp": "2026-03-12T23:33:40.621Z",
+  "summary": "All 34 tasks completed across 7 groups: AC types + parser in design-tree, design OpenSpec scaffold + mirror (scaffoldDesignOpenSpecChange, mirrorOpenQuestionsToDesignSpec), archive gate in archive-gate.ts (resolveDesignSpecBinding), set_status/implement hard gates, ready/blocked query extensions, memory emission on add/remove_question, /assess design subcommand (buildDesignAssessmentPrompt, parseDesignAssessmentFindings, writeDesignAssessment in assessment.ts + bridge wiring), Implementation label rename in dashboard. 1585 tests passing. 5 issues found and fixed post-review (C1 dead export wiring, C2 premature mkdir guard, C3 /assess design fallback, W2 O(n) readdir). openspec/design/ and openspec/design-archive/ directories created.",
+  "snapshot": {
+    "gitHead": "b7a712aa0a6ae4ce7e09342427310ace37693ba1",
+    "fingerprint": "2dc766a23c4cd4b16fc4e1af557f3d6a204f7c16397c6f40fd0f111fe0349bfc",
+    "dirty": true,
+    "scopedPaths": [
+      "extensions/dashboard/index.ts",
+      "extensions/design-tree/index.ts",
+      "extensions/design-tree/tree.ts",
+      "extensions/openspec/archive-gate.ts",
+      "extensions/openspec/index.ts",
+      "extensions/openspec/spec.ts",
+      "openspec/design/"
+    ],
+    "files": [
+      {
+        "path": "extensions/dashboard/index.ts",
+        "exists": true,
+        "size": 16807,
+        "sha256": "ad950361134dd3003e7e385e6772dac55d10907b871cfc02b24ed4137ee515af"
+      },
+      {
+        "path": "extensions/design-tree/index.ts",
+        "exists": true,
+        "size": 81801,
+        "sha256": "e287c91fb5715985071ac85a3e760bd2c3d33a6533e3ee2f2a496eed0ef25007"
+      },
+      {
+        "path": "extensions/design-tree/tree.ts",
+        "exists": true,
+        "size": 53578,
+        "sha256": "7eb5e7f6f6d5b028e625c0a82c778c14c6cd083a59d2f59d512e905b13f66c52"
+      },
+      {
+        "path": "extensions/openspec/archive-gate.ts",
+        "exists": true,
+        "size": 5470,
+        "sha256": "b54acc9d826371dcb768fd30ae5de9c0039aaba1591e58ac8b326c0d408653fd"
+      },
+      {
+        "path": "extensions/openspec/index.ts",
+        "exists": true,
+        "size": 70301,
+        "sha256": "814040184bda9b58db9b6fe43379ef53321b646204b6d466c0f6dc39fdef2277"
+      },
+      {
+        "path": "extensions/openspec/spec.ts",
+        "exists": true,
+        "size": 44871,
+        "sha256": "8eee762ad36a5870e79af50850cac021e7f7e0226ecc92256c586f1a1a881a6a"
+      },
+      {
+        "path": "openspec/changes/dual-lifecycle-openspec/design.md",
+        "exists": true,
+        "size": 10997,
+        "sha256": "9a934b2110f5c03ac819dfe6bd3ffcf84f6a7c16ff6b5c36031ab66eef47610c"
+      },
+      {
+        "path": "openspec/changes/dual-lifecycle-openspec/proposal.md",
+        "exists": true,
+        "size": 728,
+        "sha256": "cd7b3a9bd2ad847274f3305f5312481760ef796347d6065f79dbd5452becfe54"
+      },
+      {
+        "path": "openspec/changes/dual-lifecycle-openspec/tasks.md",
+        "exists": true,
+        "size": 7381,
+        "sha256": "f01f3ac2b9278a24760410662611ed45aeb4b5256ab183b6910c990f21a150e4"
+      },
+      {
+        "path": "openspec/design/",
+        "exists": false,
+        "size": 0,
+        "sha256": null
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "extensions/design-tree/types.ts",
+      "extensions/design-tree/tree.ts",
+      "extensions/design-tree/index.ts",
+      "extensions/openspec/archive-gate.ts",
+      "extensions/cleave/assessment.ts",
+      "extensions/cleave/bridge.ts",
+      "extensions/cleave/index.ts",
+      "extensions/dashboard/index.ts",
+      "extensions/openspec/index.ts",
+      "docs/design-tree.md"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
