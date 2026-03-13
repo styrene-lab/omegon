@@ -8,17 +8,17 @@
 		"fg": "#c4d8e4",
 		"mutedFg": "#607888",
 		"dimFg": "#405870",
-		"bg": "#0d1420",
-		"cardBg": "#131d2c",
-		"surfaceBg": "#192536",
+		"bg": "#080c16",
+		"cardBg": "#0e1626",
+		"surfaceBg": "#141f30",
 		"borderColor": "#1a4458",
-		"borderDim": "#122030",
+		"borderDim": "#0c1828",
 		"green": "#1ab878",
 		"red": "#c83030",
 		"orange": "#c86418",
 		"yellow": "#78b820",
-		"selectedBg": "#102030",
-		"toolErrorBg": "#140810",
+		"selectedBg": "#0c1a28",
+		"toolErrorBg": "#0e0610",
 		"syntaxComment": "#344858",
 		"syntaxType": "#5aa8e0",
 		"thinkingMedium": "#1a5878"
@@ -77,8 +77,8 @@
 		"bashMode": "yellow"
 	},
 	"export": {
-		"pageBg": "#0d1420",
-		"cardBg": "#131d2c",
-		"infoBg": "#122030"
+		"pageBg": "#080c16",
+		"cardBg": "#0e1626",
+		"infoBg": "#0c1828"
 	}
 }
