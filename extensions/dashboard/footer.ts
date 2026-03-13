@@ -518,16 +518,15 @@ export class DashboardFooter implements Component {
   // ── HUD Footer Zone (raised mode) ────────────────────────────
 
   /**
-   * Dim dashed section divider with a lowercase label flush-left.
-   * Fills the remaining inner width with ╌ chars so it reads as a
-   * scan-line separator without competing with the solid box borders.
+   * Dim section divider with a lowercase label flush-left.
+   * Fills the remaining inner width with ─ chars.
    *
-   *   ╌╌ context ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+   *   ── context ────────────────────────────────────────────
    */
   private buildHudSectionDivider(label: string, innerWidth: number): string {
-    const prefix = `╌╌ ${label} `;
+    const prefix = `── ${label} `;
     const fill = Math.max(0, innerWidth - visibleWidth(prefix));
-    return this.theme.fg("dim", prefix + "╌".repeat(fill));
+    return this.theme.fg("dim", prefix + "─".repeat(fill));
   }
 
   /**

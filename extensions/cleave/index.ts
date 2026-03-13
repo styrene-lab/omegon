@@ -2951,8 +2951,8 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 					const lines: string[] = [];
 					const child = children[selected];
 					const divFill = (label: string) => {
-						const prefix = `  ╌╌ ${label} `;
-						return theme.fg("dim", prefix + "╌".repeat(Math.max(0, width - prefix.length)));
+						const prefix = `  ── ${label} `;
+						return theme.fg("dim", prefix + "─".repeat(Math.max(0, width - prefix.length)));
 					};
 
 					// ── Header ──────────────────────────────────────────────

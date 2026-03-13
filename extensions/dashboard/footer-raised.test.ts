@@ -124,7 +124,7 @@ describe("DashboardFooter raised mode polish", () => {
     const lines = footer.render(160);
     // HUD memory section: divider line labels the section, data line uses terse "inj" label.
     // ⌗ appears only when the memory extension reports a fact count in its status text.
-    const memDivider = lines.find((l) => l.includes("╌╌ memory"));
+    const memDivider = lines.find((l) => l.includes("── memory"));
     assert.ok(memDivider, `expected HUD "memory" section divider; got:\n${lines.join("\n")}`);
     const memDataLine = lines.find((line) => line.includes("inj "));
     assert.ok(memDataLine, `expected memory data line with "inj" label; got:\n${lines.join("\n")}`);
