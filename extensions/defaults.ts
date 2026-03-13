@@ -53,7 +53,7 @@ function contentHash(content: string): string {
  * All other modern terminals (iTerm2, WezTerm, Alacritty, foot, VTE, xterm) respect these.
  */
 const ALPHARIUS_FG = "#c4d8e4";
-const ALPHARIUS_BG = "#04060c";
+const ALPHARIUS_BG = "#02030a";
 
 function emitOsc10_11(fg: string, bg: string): void {
   process.stdout.write(`\x1b]10;${fg}\x07\x1b]11;${bg}\x07`);
