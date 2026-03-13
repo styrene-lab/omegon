@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { sharedState } from "./shared-state.ts";
+import { sharedState } from "../extensions/shared-state.ts";
 
 describe("sharedState lifecycle candidate queue", () => {
   it("supports lightweight lifecycle candidate queue entries", () => {

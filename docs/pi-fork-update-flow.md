@@ -1,7 +1,7 @@
 ---
 id: pi-fork-update-flow
 title: "Pi Fork Update & Deploy Flow"
-status: exploring
+status: implemented
 tags: [dx, tooling, pi-mono, workflow]
 open_questions: []
 ---

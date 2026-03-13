@@ -1,4 +1,12 @@
 node_modules/
+# pi install drops packages here; pi writes its own * .gitignore on first install,
+# but we pre-ignore it so nothing is ever accidentally staged.
+git/
+# per-install user state — theme choice, flags, etc.
+settings.json
+# submodule build artifacts and runtime state
+vendor/pi-mono/node_modules/
+vendor/pi-mono/packages/*/dist/
 package-lock.json
 *.db
 *.db-wal
@@ -8,3 +16,4 @@ bin/rg
 bin/fd
 .claude/
 .DS_Store
+auth.json

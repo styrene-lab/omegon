@@ -1,13 +1,16 @@
 {
 	"name": "omegon",
 	"version": "0.6.0",
+	"bin": {
+		"pi": "./bin/pi"
+	},
 	"scripts": {
-		"test": "npx tsx --test extensions/*.test.ts extensions/**/*.test.ts",
+		"test": "npx tsx --test tests/*.test.ts extensions/**/*.test.ts",
 		"typecheck": "tsc --noEmit",
 		"check:lifecycle": "npx tsx extensions/openspec/lifecycle-files.ts",
 		"check": "tsc --noEmit && npm run check:lifecycle && npx tsx --test extensions/*.test.ts extensions/**/*.test.ts",
-		"build:pi": "cd ../pi-mono && npm run build",
-		"deploy:pi-dev": "scripts/deploy-pi-dev.sh"
+		"build:pi": "cd vendor/pi-mono && npm run build",
+		"postinstall": "git submodule update --init --recursive && cd vendor/pi-mono && npm install && npm run build"
 	},
 	"description": "Omegon — agent-native software engineering platform: lifecycle management, memory, orchestration, and visualization for the pi coding agent",
 	"keywords": [

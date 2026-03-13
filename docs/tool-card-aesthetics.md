@@ -1,7 +1,7 @@
 ---
 id: tool-card-aesthetics
 title: Tool Card Aesthetic Overhaul
-status: decided
+status: implemented
 parent: tool-call-renderer
 tags: [tui, ux, theme, pi-mono]
 open_questions: []

@@ -8,8 +8,8 @@ import {
   classifyRecoveryFailure,
   piCoreAutoRetryLikelyHandles,
   shouldUseExtensionRetryFallback,
-} from "./model-budget.ts";
-import { clampThinkingLevel } from "./lib/model-routing.ts";
+} from "../extensions/model-budget.ts";
+import { clampThinkingLevel } from "../extensions/lib/model-routing.ts";
 
 describe("model-budget copy", () => {
   it("describes set_model_tier as provider-aware", () => {

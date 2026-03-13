@@ -14,10 +14,22 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type { ExtensionAPI } from "@cwilson613/pi-coding-agent";
 
-const AGENT_DIR = path.join(
-  process.env.HOME || process.env.USERPROFILE || "~",
-  ".pi", "agent",
-);
+/**
+ * Resolve the agent directory the same way pi's getAgentDir() does.
+ * In standalone mode (PI_CODING_AGENT_DIR set to omegon root) this points
+ * directly at the omegon repo, so theme/AGENTS.md deployment becomes
+ * identity copies and is skipped by the content-equality guards.
+ */
+const home = process.env.HOME || process.env.USERPROFILE || "~";
+const AGENT_DIR = (() => {
+  const env = process.env.PI_CODING_AGENT_DIR;
+  if (env) {
+    if (env === "~") return home;
+    if (env.startsWith("~/")) return path.join(home, env.slice(2));
+    return env;
+  }
+  return path.join(home, ".pi", "agent");
+})();
 
 const SETTINGS_PATH = path.join(AGENT_DIR, "settings.json");
 const GLOBAL_AGENTS_PATH = path.join(AGENT_DIR, "AGENTS.md");
