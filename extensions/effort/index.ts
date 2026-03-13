@@ -41,9 +41,9 @@ import { readOperatorProfile, loadOperatorRuntimeState, toCapabilityProfile, toC
 const TIER_ICONS: Record<EffortLevel, string> = {
   1: "○",
   2: "●",
-  3: "🗡️",
-  4: "⚔️",
-  5: "☠️",
+  3: "†",
+  4: "⚔",
+  5: "☠",
   6: "💀",
   7: "🤖",
 };
