@@ -98,7 +98,12 @@ export interface BranchTreeParams {
  * Style a branch name according to its type and whether it is current.
  */
 function styledBranch(b: string, isCurrent: boolean, theme: Theme): string {
-  const label = isCurrent ? "● " + b : b;
+  // Use ASCII "*" rather than "●" (U+25CF): the Black Circle glyph is
+  // "ambiguous width" in Unicode East Asian metrics and many terminals
+  // (e.g. iTerm2 on macOS) render it as 2 cells.  pi-tui's visibleWidth()
+  // counts it as 1, causing a 1-char overflow in the top-border of the
+  // raised dashboard box and a TUI crash at exactly-full-width terminals.
+  const label = isCurrent ? "* " + b : b;
   if (isCurrent) return theme.fg("success", label);
   if (b.startsWith("feature/")) return theme.fg("accent", b);
   if (b.startsWith("fix/") || b.startsWith("hotfix/")) return theme.fg("warning", b);
