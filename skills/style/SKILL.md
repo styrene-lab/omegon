@@ -119,37 +119,32 @@ group: Infrastructure {
 
 ---
 
-## Terminal Alignment
+## Kitty Compatibility
 
-Pi uses 24-bit RGB (`COLORTERM=truecolor`) for all its own output, so Kitty's palette doesn't affect pi rendering directly. However, the **naked terminal background** between pi regions, the shell prompt (oh-my-bash), `ls`, `git diff`, and Kitty's tab bar all pull from the terminal palette. Without alignment, the void background is wrong and the brass/gold contrast breaks.
+Pi renders everything in 24-bit RGB — Kitty's ANSI palette does **not** affect pi's own output. `themes/alpharius.conf` is a *compatibility layer*, not a full mirror. It sets only what matters:
 
-### Kitty theme file
+| What | Why it must match |
+|------|-------------------|
+| `background` / `foreground` | Seamless blend between pi regions and naked terminal |
+| `cursor` | On-palette feel in the editor |
+| `selection_background` | Readable text selection |
+| Tab bar / borders | Kitty chrome the agent can't control |
+| ANSI signal colours (red/green/yellow) | Shell prompt, `ls`, `git diff` use these; matching alpharius values avoids jarring contrast |
 
-`themes/alpharius.conf` is a ready-to-use Kitty conf snippet. Include it in `kitty.conf`:
+Everything else (the remaining ANSI slots) uses reasonable dark-theme defaults that won't clash. They do not need to be exact alpharius values.
+
+### Install
 
 ```conf
+# in kitty.conf:
 include /path/to/omegon/themes/alpharius.conf
 ```
 
-Or copy it to `~/.config/kitty/current-theme.conf`.
-
-If the palette changes, regenerate with:
+Regenerate after changing `background`, `foreground`, `cursor`, or border vars:
 
 ```bash
 npx tsx scripts/export-kitty-theme.ts
 ```
-
-### What it sets
-
-| Key | Value | Why |
-|-----|-------|-----|
-| `background` | `#06080e` | Seamless void around pi rendering regions |
-| `foreground` | `#c4d8e4` | Silver-white — pi's primary text colour |
-| `cursor` | `#2ab4c8` | Ceramite teal — matches pi's accent/focus colour |
-| `selection_background` | `#102030` | Matches pi's `selectedBg` |
-| `color0–7` | Alpharius semantic palette | Normal ANSI slots |
-| `color8–15` | Bright variants | Bright ANSI slots |
-| Tab bar / borders | Alpharius card/border tones | Kitty chrome integration |
 
 ---
 
