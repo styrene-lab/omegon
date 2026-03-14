@@ -462,14 +462,48 @@ export default function (pi: ExtensionAPI) {
   async function backgroundIndexFacts(ctx: ExtensionContext): Promise<void> {
     if (!embeddingAvailable || !store) return;
     const mind = activeMind();
+    const totalActive = store.countActiveFacts(mind);
     const missing = store.getFactsMissingVectors(mind);
+
+    // Health check: warn if coverage has degraded significantly
+    if (totalActive > 0) {
+      const coverage = 1 - missing.length / totalActive;
+      if (coverage < 0.5) {
+        console.error(`[project-memory] WARNING: vector coverage critically low: ${Math.round(coverage * 100)}% (${missing.length}/${totalActive} facts missing vectors)`);
+      } else if (coverage < 0.9 && missing.length > 10) {
+        console.warn(`[project-memory] vector coverage: ${Math.round(coverage * 100)}% — indexing ${missing.length} facts`);
+      }
+    }
+
     if (missing.length === 0) return;
 
     let indexed = 0;
+    let failed = 0;
+    let consecutiveFailures = 0;
     for (const factId of missing) {
       if (!sessionActive) break; // Stop if session is shutting down
       const ok = await embedFact(factId);
-      if (ok) indexed++;
+      if (ok) {
+        indexed++;
+        consecutiveFailures = 0;
+      } else {
+        failed++;
+        consecutiveFailures++;
+        // If 5 consecutive failures, the embedding provider is likely down.
+        // Stop early to avoid burning time on a dead service.
+        if (consecutiveFailures >= 5) {
+          console.error(`[project-memory] embedding indexer: 5 consecutive failures, stopping early (indexed ${indexed}, failed ${failed} of ${missing.length})`);
+          break;
+        }
+      }
+    }
+
+    if (indexed > 0 || failed > 0) {
+      const finalVecs = store.countFactVectors(mind);
+      const finalCoverage = totalActive > 0 ? Math.round((finalVecs / totalActive) * 100) : 100;
+      if (failed > 0) {
+        console.warn(`[project-memory] background indexing: ${indexed} indexed, ${failed} failed, coverage ${finalCoverage}%`);
+      }
     }
 
     // Also index global store facts
@@ -623,12 +657,27 @@ export default function (pi: ExtensionAPI) {
     // which fires before ours (effort is registered earlier in package.json).
     config = { ...DEFAULT_CONFIG };
 
-    // Auto-detect embedding provider from env vars (Voyage > OpenAI > custom > FTS5)
+    // Auto-detect embedding provider (Custom > Voyage > OpenAI > Ollama > FTS5 fallback)
+    // Auto-detect embedding provider from env vars or local inference.
     // MEMORY_EMBEDDING_PROVIDER can override if user wants to force a specific provider.
     const envEmbeddingProvider = process.env.MEMORY_EMBEDDING_PROVIDER as EmbeddingProvider | undefined;
     if (envEmbeddingProvider === "voyage" || envEmbeddingProvider === "openai" || envEmbeddingProvider === "openai-compatible" || envEmbeddingProvider === "ollama") {
       config.embeddingProvider = envEmbeddingProvider;
+      // When provider is explicitly set but model isn't, use provider-appropriate defaults
+      // instead of keeping DEFAULT_CONFIG's voyage model for a non-voyage provider.
+      if (!process.env.MEMORY_EMBEDDING_MODEL) {
+        const providerDefaults: Record<string, string> = {
+          voyage: "voyage-3-lite",
+          openai: "text-embedding-3-small",
+          ollama: "qwen3-embedding:0.6b",
+          "openai-compatible": "text-embedding-3-small",
+        };
+        config.embeddingModel = providerDefaults[envEmbeddingProvider] ?? config.embeddingModel;
+      }
     } else {
+      // Auto-detect: resolveEmbeddingProvider checks env vars and falls back to Ollama.
+      // Always returns a candidate (Ollama is the unconditional fallback);
+      // isEmbeddingAvailable() validates below with a real healthcheck request.
       const detected = resolveEmbeddingProvider();
       if (detected) {
         config.embeddingProvider = detected.provider;
@@ -673,7 +722,9 @@ export default function (pi: ExtensionAPI) {
           globalStore.purgeStaleVectors(expectedDims);
         }
         // Fire-and-forget background indexing — don't block session start
-        backgroundIndexFacts(ctx).catch(() => {});
+        backgroundIndexFacts(ctx).catch((err) => {
+          console.error(`[project-memory] background indexer error:`, err?.message ?? err);
+        });
       }
     } catch {
       embeddingAvailable = false;

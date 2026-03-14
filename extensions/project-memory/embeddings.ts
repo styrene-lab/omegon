@@ -6,7 +6,9 @@
  *      (covers LM Studio, Mistral, Together, any /v1/embeddings-compatible server)
  *   2. Voyage AI — if VOYAGE_API_KEY is set (default model: voyage-3-lite)
  *   3. OpenAI — if OPENAI_API_KEY is set (default model: text-embedding-3-small)
- *   4. FTS5 keyword search — graceful degradation when no provider is available
+ *   4. Ollama — local inference at OLLAMA_HOST or localhost:11434 (default model: qwen3-embedding:0.6b)
+ *      Always returns a candidate; isEmbeddingAvailable() validates at startup.
+ *   5. FTS5 keyword search — graceful degradation when no provider passes healthcheck
  *
  * Voyage AI is preferred over OpenAI when both keys are present because:
  *   - Anthropic-backed, aligned with pi's primary provider
@@ -40,6 +42,13 @@ export const MODEL_DIMS: Record<string, number> = {
   "text-embedding-3-small": 1536,
   "text-embedding-3-large": 3072,
   "text-embedding-ada-002": 1536,
+  // Ollama local models
+  "qwen3-embedding:0.6b": 1024,
+  "qwen3-embedding": 1024,
+  "nomic-embed-text": 768,
+  "mxbai-embed-large": 1024,
+  "all-minilm": 384,
+  "snowflake-arctic-embed": 1024,
 };
 
 export interface EmbeddingResult {
@@ -171,7 +180,11 @@ function resolveOpts(opts?: EmbeddingOptions): {
   }
 
   if (provider === "ollama") {
-    const ollamaHost = process.env.OLLAMA_HOST ?? "http://localhost:11434";
+    let ollamaHost = process.env.OLLAMA_HOST ?? "http://localhost:11434";
+    // OLLAMA_HOST is commonly set without a scheme (e.g., "localhost:11434")
+    if (!/^https?:\/\//i.test(ollamaHost)) {
+      ollamaHost = `http://${ollamaHost}`;
+    }
     const baseUrl = `${ollamaHost.replace(/\/$/, "")}/v1`;
     const model = opts?.model ?? process.env.MEMORY_EMBEDDING_MODEL ?? "qwen3-embedding:0.6b";
     // Ollama doesn't require an API key but the OpenAI-compatible endpoint
