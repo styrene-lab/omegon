@@ -605,10 +605,19 @@ export default function (pi: ExtensionAPI) {
     // at runtime with biometric/password auth and doesn't leak on disk.
     //
     // Skip in CI environments where env vars are the expected mechanism.
+    // Exempt tokens managed by their own CLI credential stores (e.g.
+    // GH_TOKEN set by `gh auth login`, GITHUB_TOKEN from gh, COPILOT_GITHUB_TOKEN
+    // from the Copilot extension) — these are already secured by the tool.
     const isCI = !!(process.env.CI || process.env.GITHUB_ACTIONS || process.env.GITLAB_CI);
     if (!isCI) {
+      // Tokens managed by CLI tools that handle their own credential storage
+      const CLI_MANAGED_TOKENS = new Set([
+        "GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN",  // gh auth login
+        "GITLAB_TOKEN",     // glab auth login
+        "AWS_PROFILE",      // aws configure / SSO profile name (not a secret)
+      ]);
       const bareEnvSecrets = Object.keys(KNOWN_SECRETS).filter(name =>
-        resolvedCache.has(name) && !recipes[name]
+        resolvedCache.has(name) && !recipes[name] && !CLI_MANAGED_TOKENS.has(name)
       );
       if (bareEnvSecrets.length > 0) {
         // Show at most 3 names to avoid wall-of-text, never show values
@@ -616,7 +625,7 @@ export default function (pi: ExtensionAPI) {
         const more = bareEnvSecrets.length > 3 ? ` (+${bareEnvSecrets.length - 3} more)` : "";
         ctx.ui.notify(
           `🔓 ${bareEnvSecrets.length} secret${bareEnvSecrets.length !== 1 ? "s" : ""} loaded from plain env vars: ${examples}${more}\n` +
-          `Run \`/secrets configure <name>\` to migrate to Keychain (macOS) or 1Password.`,
+          `Run \`/secrets configure <name>\` to migrate to a secure backend.`,
           "warning"
         );
       }
@@ -875,7 +884,7 @@ export default function (pi: ExtensionAPI) {
                   ? "⚠️  literal value (insecure — run /secrets configure to migrate)"
                   : `env: ${recipe}`
               : resolved
-                ? "🔓 plain env var (insecure — run /secrets configure to use Keychain)"
+                ? "🔓 plain env var (run /secrets configure to use a secure backend)"
                 : "not configured";
 
             const status = resolved ? "✅" : "❌";
