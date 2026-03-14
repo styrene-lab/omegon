@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+
 // @secret ANTHROPIC_API_KEY "Anthropic API key for Claude models"
 // @secret ANTHROPIC_OAUTH_TOKEN "Anthropic OAuth token (takes precedence over API key)"
 // @secret OPENAI_API_KEY "OpenAI API key for GPT models"
@@ -136,10 +140,20 @@ export function isProviderEnvConfigured(provider: string): boolean {
   const entry = PROVIDER_ENV_VARS[provider];
   if (!entry) return false;
 
-  // google-vertex ADC requires credentials + project + location (conjunction)
+  // google-vertex ADC requires credentials + project + location (conjunction).
+  // Credentials can come from GOOGLE_APPLICATION_CREDENTIALS env var OR from the
+  // default ADC path (~/.config/gcloud/application_default_credentials.json) written
+  // by `gcloud auth application-default login`. Matches pi-ai's hasVertexAdcCredentials().
   if (provider === "google-vertex") {
     if (process.env.GOOGLE_CLOUD_API_KEY) return true;
-    const hasAdc = !!(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    const hasAdcEnv = !!(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    let hasAdcFile = false;
+    if (!hasAdcEnv) {
+      try {
+        hasAdcFile = existsSync(join(homedir(), ".config", "gcloud", "application_default_credentials.json"));
+      } catch {}
+    }
+    const hasAdc = hasAdcEnv || hasAdcFile;
     const hasProject = !!(process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT);
     const hasLocation = !!(process.env.GOOGLE_CLOUD_LOCATION);
     return hasAdc && hasProject && hasLocation;

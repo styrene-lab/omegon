@@ -263,8 +263,11 @@ export default function (pi: ExtensionAPI) {
         : state.thinking;
     pi.setThinkingLevel(effectiveThinking as any);
 
-    // Notify operator
+    // Notify operator — suppress the "no model" warning during first-run
+    // (bootstrap handles consolidated guidance), but always show when a model
+    // is resolved so the operator knows what's driving their session.
     const icon = TIER_ICONS[state.level];
+    const hasModel = !!(restoredModel || switchedDriver || retainedModel);
     const modelNote = restoredModel
       ? ` → restored ${restoredModel.provider}/${restoredModel.id}`
       : switchedDriver
@@ -272,10 +275,12 @@ export default function (pi: ExtensionAPI) {
         : retainedModel
           ? ` → kept ${retainedModel.provider}/${retainedModel.id} (preferred ${state.driver} unavailable)`
           : " (driver model unavailable)";
-    ctx.ui.notify(
-      `${icon} Effort: ${state.name} (${state.driver}/${effectiveThinking})${modelNote}`,
-      restoredModel || switchedDriver || retainedModel ? "info" : "warning",
-    );
+    if (hasModel || !sharedState.bootstrapPending) {
+      ctx.ui.notify(
+        `${icon} Effort: ${state.name} (${state.driver}/${effectiveThinking})${modelNote}`,
+        hasModel ? "info" : "warning",
+      );
+    }
 
     // Provider summary — show what tiers are available
     try {
