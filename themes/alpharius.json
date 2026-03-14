@@ -14,11 +14,11 @@
 		"borderColor": "#1a4458",
 		"borderDim": "#050a18",
 		"green": "#1ab878",
-		"red": "#c83030",
+		"red": "#e04848",
 		"orange": "#c86418",
 		"yellow": "#78b820",
 		"selectedBg": "#040810",
-		"toolErrorBg": "#0e0610",
+		"toolErrorBg": "#1a0a10",
 		"syntaxComment": "#344858",
 		"syntaxType": "#5aa8e0",
 		"thinkingMedium": "#1a5878"
