@@ -45,6 +45,10 @@ The operator may start a session on a desktop, close it, and resume on a laptop 
 
 Given: index not copy, under 1K tokens, git-portable, all references are IDs/names.\n\nThe manifest answers three questions:\n1. **What was being done?** — goals, focused design node, active openspec changes\n2. **What's the state?** — branch, dirty count, design transitions, memory delta\n3. **What's next?** — explicit next steps from the session\n\nMinimal schema:\n```json\n{\n  \"v\": 1,\n  \"id\": \"uuid\",\n  \"ts\": \"2026-03-14T14:30:00Z\",\n  \"cwd\": \"/Users/cwilson/workspace/ai/omegon\",\n  \"branch\": \"main\",\n  \"dirty\": 0,\n  \"episode\": \"Published omegon@0.6.3, implemented model degradation...\",\n  \"focus\": \"omegon-session\",\n  \"active\": [\"dash-raised-layout\", \"nix-deps\"],\n  \"next\": [\"Implement cross-tier degradation\", \"Explore nix-deps\"],\n  \"commits\": [\"a3a6534 feat(design-tree): add resolved status\", \"582fc10 feat(sci-ui): exit card\"],\n  \"facts\": { \"created\": 3, \"archived\": 1, \"total\": 1462 }\n}\n```\n\nThat's ~400 bytes of JSON. The resume injection would be even terser:\n\n```\nPrevious session (2026-03-14, 2h):\nPublished omegon@0.6.3, implemented model degradation.\nFocused on: omegon-session (exploring, 5 open questions)\nActive: dash-raised-layout, nix-deps\nCommits: feat(design-tree): add resolved status, feat(sci-ui): exit card\nNext: Implement cross-tier degradation. Explore nix-deps.\n```\n\nThat's ~80 tokens. Well under budget. The design tree focus injection and memory injection add the substance — this just provides the temporal bridge.
 
+### Git worktrees are local-only — implications for remote execution
+
+Git worktrees (`git worktree add`) create local filesystem directories that share the object store via symlinks into `.git/worktrees/`. They cannot span machines — the symlinks and lock files are local paths.\n\nThis means:\n- Cleave's parallel execution model is strictly local (same machine, same filesystem)\n- Remote/distributed execution (omega Level 3+) cannot use worktrees as the isolation primitive\n- The session manifest is portable (JSON in git), but the execution context it describes may reference worktrees that only exist locally\n\nFor session resumption this is fine: the manifest records that worktrees existed (as signal that cleave was active), but doesn't depend on them being present on the resuming machine. If machine B resumes and the worktrees don't exist, that just means cleave work completed or needs re-running — the merged results are in git history either way.\n\nFor omega: distributed execution will need a different isolation primitive than worktrees. Candidates: full clones on remote machines, container-isolated builds, or bare repos with sparse checkout. This is an omega-level concern, not a session-level concern. Worth flagging on the omega design node.
+
 ## Decisions
 
 ### Decision: Manifest is an index over existing artifacts, not a copy
@@ -86,6 +90,21 @@ Given: index not copy, under 1K tokens, git-portable, all references are IDs/nam
 
 **Status:** exploring
 **Rationale:** When omega coordinates multiple agents, one agent's exit manifest becomes another's resume context. The manifest is already provider-agnostic and git-portable — it's a natural message format for inter-agent handoff. Cleave child processes are a local prototype: they receive a prompt (analogous to a manifest) and produce results that get merged. The manifest schema should be designed to work both as a file (.pi/session.json) and as a message payload in an omega coordination protocol. Not blocking Level 1 on this — just ensuring the schema doesn't preclude it.
+
+### Decision: Auto-resume with staleness: same branch = resume, different branch or >7d = skip
+
+**Status:** decided
+**Rationale:** If .pi/session.json exists, the current branch matches the manifest's branch, and the timestamp is within 7 days — inject automatically. Different branch suggests the operator moved on. Over 7 days suggests stale context that memory facts already cover better. /fresh command to explicitly skip. No interactive prompt — just a brief notification showing what was resumed.
+
+### Decision: Worktree references in manifest are informational, not required for resume
+
+**Status:** decided
+**Rationale:** The manifest may note that cleave worktrees were active, but resume does not depend on them existing. Worktrees are local-only (symlinks into .git/worktrees/). Cross-machine resume gracefully degrades — if worktrees are gone, merged results are in git history. Distributed execution isolation is an omega concern, not a session concern.
+
+### Decision: Manifest schema designed as both file and message — omega-ready without omega dependency
+
+**Status:** decided
+**Rationale:** The manifest is plain JSON with no filesystem assumptions (paths are context, not requirements). It works as .pi/session.json for local resume and as a payload in a future coordination protocol. Local-only state (worktrees, embedding vectors) is informational — resume never depends on it. This means Level 1 implementation doesn't need to anticipate omega's protocol, just avoid precluding it.
 
 ## Open Questions
 
