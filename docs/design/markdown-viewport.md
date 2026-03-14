@@ -2,6 +2,7 @@
 id: markdown-viewport
 title: "Omegon Rendering Engine — Lifecycle Visualization & Project Intelligence Layer"
 status: decided
+related: [omega]
 tags: [rendering, rust, visualization, design-tree, openspec, lifecycle, dashboard, project-intelligence]
 open_questions: []
 issue_type: epic

@@ -3,8 +3,7 @@ id: design-change-reopen
 title: Design Change Re-open — revisiting an archived design decision
 status: implemented
 parent: dual-lifecycle-openspec
-open_questions:
-  - When a design decision needs revisiting after archive (decided → re-exploring), what happens to the archived design OpenSpec change? Re-open it (breaks archive immutability), create a new revision change, or treat the node re-open as a new design cycle with a new change?
+open_questions: []
 ---
 
 # Design Change Re-open — revisiting an archived design decision
@@ -31,7 +30,7 @@ open_questions:
 
 ## Open Questions
 
-- When a design decision needs revisiting after archive (decided → re-exploring), what happens to the archived design OpenSpec change? Re-open it (breaks archive immutability), create a new revision change, or treat the node re-open as a new design cycle with a new change?
+*No open questions.*
 
 ## Option A — Re-open the archived change (move back to active)
 

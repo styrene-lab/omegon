@@ -1,7 +1,7 @@
 ---
 id: omegon-install
 title: "Omegon Installation & Distribution"
-status: decided
+status: implemented
 tags: [distribution, dx, packaging]
 open_questions: []
 ---
@@ -78,6 +78,21 @@ Engineers should be able to install omegon with a single command — no git clon
 
 **Status:** decided
 **Rationale:** User wants auto-publish. Will use GitHub Actions with npm publish on main push, version bump via conventional commits or timestamp suffix.
+
+### Decision: OIDC Trusted Publishing for CI (no tokens)
+
+**Status:** decided
+**Rationale:** npm granular tokens still require OTP even with "bypass 2FA" in some configurations. Trusted Publishing via GitHub Actions OIDC (Node 24, npm ≥11.5.1) eliminates all token management. Requires id-token:write permission and trusted publisher config on npmjs.com pointing to styrene-lab/omegon + publish.yml.
+
+### Decision: Repo under styrene-lab GitHub org
+
+**Status:** decided
+**Rationale:** Transferred from cwilson613/omegon to styrene-lab/omegon. GitHub auto-redirects old URLs. npm package stays unscoped `omegon`. version-check.ts REPO_OWNER updated to styrene-lab.
+
+### Decision: Preinstall script removes conflicting pi packages
+
+**Status:** decided
+**Rationale:** scripts/preinstall.sh auto-removes @cwilson613/pi-coding-agent and @mariozechner/pi-coding-agent during global install to prevent EEXIST on the `pi` bin link. Clear messaging about what it does and how to revert. Also registers `omegon` as a conflict-free bin alias.
 
 ## Open Questions
 

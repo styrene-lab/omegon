@@ -1,7 +1,7 @@
 ---
 id: alpharius-theme
 title: Alpharius Theme — Alpha Legion visual identity
-status: decided
+status: implemented
 tags: [theme, design, alpha-legion, warhammer]
 open_questions: []
 ---

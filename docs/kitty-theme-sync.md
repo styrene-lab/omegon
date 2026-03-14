@@ -1,7 +1,7 @@
 ---
 id: kitty-theme-sync
 title: Kitty theme sync — gentle alpharius.conf propagation
-status: exploring
+status: implemented
 parent: alpharius-theme
 tags: [defaults, kitty, theme, ux]
 open_questions: []

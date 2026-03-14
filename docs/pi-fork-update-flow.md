@@ -69,6 +69,11 @@ Replace `/opt/homebrew/.../pi-coding-agent/dist/` with a symlink to `pi-mono/pac
 **Status:** decided
 **Rationale:** A `npm run build:pi` script in omegon's package.json runs `cd ../pi-mono && npm run build` so contributors don't need to know the relative path. Cross-cutting changes become: edit → `npm run build:pi` (if pi-mono changed) → restart pi. Category A changes still need only a restart.
 
+### Decision: Standalone mode: vendor/pi-mono submodule + PI_CODING_AGENT_DIR
+
+**Status:** decided
+**Rationale:** Supersedes the dist-symlink approach. omegon now ships vendor/pi-mono as a git submodule and provides bin/pi which sets PI_CODING_AGENT_DIR to the omegon root before invoking the submodule's cli.js. This makes omegon fully standalone: single clone, npm install, and pi works with all extensions, themes, and core changes unified. Required two pi-mono patches: loader.ts and package-manager.ts both now check agentDir for a pi manifest before auto-scanning agentDir/extensions/.
+
 ## Open Questions
 
 *No open questions.*

@@ -1,7 +1,7 @@
 ---
 id: model-degradation
 title: "Graceful Model Degradation & Provider Resilience"
-status: decided
+status: implemented
 tags: [routing, resilience, architecture]
 open_questions: []
 issue_type: feature
