@@ -4,9 +4,7 @@ title: Omega memory backend — Rust-native fact store and retrieval engine
 status: exploring
 parent: omega
 tags: [rust, memory, sqlite, embeddings, architecture]
-open_questions:
-  - Does the JSONL git-sync format stay identical in Rust (same field names, same date format, same section names) for zero-migration compatibility with existing facts.jsonl files, or do we take a breaking schema version here and add a conversion tool?
-  - "For the vector store: use SQLite BLOB (current approach, portable, no extra dep) vs. a dedicated vector index (usearch, hnswlib via FFI, or sqlite-vec extension)? At 1335 facts the linear scan is fast enough. At what fact count does the scan cost become noticeable and require an HNSW index?"
+open_questions: []
 ---
 
 # Omega memory backend — Rust-native fact store and retrieval engine
@@ -101,6 +99,26 @@ Create `extensions/project-memory/api-types.ts` with the full HTTP request/respo
 **6. Cap the extraction subagent output to typed ExtractionAction[]**
 `parseExtractionOutput` (factstore.ts:1924) already returns `ExtractionAction[]`, but its input is free-form LLM text. Add a schema validator (zod or manual) so malformed extraction output is rejected rather than silently stored as a garbage fact.
 
+### Six additional architectural issues surfaced under deep analysis
+
+**Issue 7: Git-sync conflict resolution is broken for archive/supersede (CRITICAL)**
+Union merge + dedup-by-reinforcement_count resurrects archived facts when a concurrent reinforcement has higher reinforcement_count. Fix: Lamport timestamp — higher version always wins, regardless of reinforcement_count. This is the motivation for adding version to the JSONL format. See decision above.
+
+**Issue 8: Access patterns don't influence decay — only time and explicit reinforcement**
+A fact retrieved by memory_recall 3 turns ago is demonstrably relevant but its confidence continues decaying as if untouched. Fix: `last_accessed: Option<DateTime>` column. Effective decay uses `max(last_reinforced, last_accessed)` as the time reference. This is a soft reinforcement — doesn't increment reinforcement_count or extend half-life, just resets the decay timer.
+
+**Issue 9: Extraction subagent has no debounce — can fire multiple times per turn**
+Rapid tool-call sequences can trigger multiple extraction runs in one turn. Each is a full LLM round-trip. contentHash dedup prevents duplicate storage but the calls are wasted. Fix: 60-second session-local debounce timer in TS. Trivial to implement.
+
+**Issue 10: Context injection has no budget parameter — always renders to section caps**
+The injection renders up to section cap regardless of remaining context budget. If context is 80% full, 12,000 chars of memory can push it over. Fix: ContextRequest includes max_chars; Omega renders and measures, stopping when budget exhausted while maintaining priority ordering (working_memory > semantic_hits > recent_architecture_facts).
+
+**Issue 11: Episodes are opaque text blobs — structurally unqueryable**
+Episodes have no metadata beyond date+title+narrative. You can't ask "which sessions touched the omega design node?" Fix: add affected_nodes, affected_changes, files_changed, tags, tool_calls_count to EpisodeRecord. The extraction subagent can populate these from conversation context. Already reflected in api-types.ts::EpisodeRecord.
+
+**Issue 12: Global DB has no concurrent migration guard**
+Multiple Omega instances opening ~/.pi/memory/global.db simultaneously (different project sessions starting at the same time) can race on schema migration. Fix: advisory fcntl file lock on ~/.pi/memory/global.lock acquired before checking PRAGMA user_version. Hold time is milliseconds. Standard Rust fs2::FileExt::lock_exclusive().
+
 ## Decisions
 
 ### Decision: Decay profile stored as an enum column on each fact — not inferred at read time
@@ -118,10 +136,24 @@ Create `extensions/project-memory/api-types.ts` with the full HTTP request/respo
 **Status:** decided
 **Rationale:** computeConfidence, cosineSimilarity, vectorToBlob/blobToVector, contentHash have zero pi/Node/DB dependencies. Extracting them to core.ts (TS) now lets us write tests against them in isolation, then port those exact tests as the Rust test suite. The behavioral spec travels with the code. During the migration window, both TS and Rust implementations run the same tests against the same inputs — behavioral equivalence is verified before the DB layer switches over.
 
+### Decision: JSONL format stays identical; Lamport version field added as optional with default 0 on import
+
+**Status:** decided
+**Rationale:** Vectors are not in the JSONL (DB-local only), so embedding_metadata adds zero JSONL impact. decay_profile is additive with default "standard". The one meaningful addition is `version: u64` (Lamport logical timestamp) which fixes the git-sync conflict resolution bug: when union-merge produces competing mutations (e.g., one machine archives a fact, another reinforces it), higher version wins unconditionally. Without version, the dedup logic resurrects archived facts by comparing reinforcement_count — a correctness bug for multi-machine operators. version defaults to 0 on import from old files; Lamport clock initializes to MAX(version)+1 after each import. No breaking change, no conversion tool.
+
+### Decision: SQLite BLOB + Rust linear scan permanently — no HNSW index, no sqlite-vec
+
+**Status:** decided
+**Rationale:** At 384 dims, linear scan of 1335 facts takes 0.018ms vs. 100-500ms for Ollama embedding generation — 5,000-25,000x faster than the prerequisite step. Break-even requires ~7.4M facts (384-dim) or ~3.7M facts (768-dim). A prolific operator storing 50 facts/day accumulates 182,500 facts after 10 years; scan time at that scale is 2.5ms. HNSW is the wrong tool: it trades recall for speed at millions of vectors and cannot express our composite scoring function (similarity × decay-adjusted confidence requires per-fact decay parameters, which a pure distance metric cannot encode). sqlite-vec fails the same test and adds a C FFI dependency. LLVM auto-vectorizes Rust f32 slice iteration — we get SIMD for free.
+
+### Decision: api-types.ts is the canonical migration contract — Rust Axum handlers must satisfy it exactly
+
+**Status:** decided
+**Rationale:** extensions/project-memory/api-types.ts defines all /api/memory/* HTTP request/response envelope types. Field names are snake_case to match Rust serde conventions. The Rust structs derive Serialize+Deserialize with field names identical to these TypeScript interfaces. Any deviation is a bug in the Rust port. The file also defines JsonlRecord (JSONL wire format discriminated union), EmbeddingMetadata, and ExtractionAction — the full set of types crossing the TS/Rust boundary.
+
 ## Open Questions
 
-- Does the JSONL git-sync format stay identical in Rust (same field names, same date format, same section names) for zero-migration compatibility with existing facts.jsonl files, or do we take a breaking schema version here and add a conversion tool?
-- For the vector store: use SQLite BLOB (current approach, portable, no extra dep) vs. a dedicated vector index (usearch, hnswlib via FFI, or sqlite-vec extension)? At 1335 facts the linear scan is fast enough. At what fact count does the scan cost become noticeable and require an HNSW index?
+*No open questions.*
 
 ## Implementation Notes
 
