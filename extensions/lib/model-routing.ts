@@ -13,7 +13,12 @@ import { PREFERRED_ORDER } from "./local-models.ts";
 // ---------------------------------------------------------------------------
 
 export type ModelTier = "local" | "retribution" | "victory" | "gloriana";
-export type ProviderName = "openai" | "anthropic" | "local";
+/**
+ * Well-known provider names for routing policy ordering and preference.
+ * Any string is accepted at runtime (unknown providers participate in
+ * capability-based matching) but these have explicit routing support.
+ */
+export type ProviderName = "anthropic" | "openai" | "github-copilot" | "google" | "amazon-bedrock" | "azure-openai-responses" | "xai" | "groq" | "mistral" | "openrouter" | "local" | (string & {});
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
 export type CapabilityRole = "archmagos" | "magos" | "adept" | "servitor" | "servoskull";
 export type CandidateSource = "upstream" | "local";
@@ -164,9 +169,53 @@ const ROLE_DISPLAY_LABELS: Record<CapabilityRole, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Anthropic/OpenAI defaults
+// Universal model-to-tier classification (provider-transparent)
+// ---------------------------------------------------------------------------
+// These patterns match model IDs regardless of provider. A github-copilot
+// model "claude-opus-4-6" matches the same rules as anthropic's.
+// Order within each tier matters — earlier entries are preferred.
 // ---------------------------------------------------------------------------
 
+interface TierRule {
+  exact?: string;
+  prefix?: string;
+  weight: CandidateWeight;
+  maxThinking: ThinkingLevel;
+  source: CandidateSource;
+}
+
+const TIER_RULES: Record<Exclude<ModelTier, "local">, TierRule[]> = {
+  gloriana: [
+    { prefix: "claude-opus", weight: "heavy", maxThinking: "high", source: "upstream" },
+    { exact: "gpt-5.4", weight: "heavy", maxThinking: "high", source: "upstream" },
+    { prefix: "gpt-5.4-", weight: "heavy", maxThinking: "high", source: "upstream" },
+    { prefix: "gemini-3-pro", weight: "heavy", maxThinking: "high", source: "upstream" },
+    { prefix: "gemini-3.1-pro", weight: "heavy", maxThinking: "high", source: "upstream" },
+  ],
+  victory: [
+    { prefix: "claude-sonnet", weight: "normal", maxThinking: "high", source: "upstream" },
+    { prefix: "gpt-5.3-codex", weight: "normal", maxThinking: "medium", source: "upstream" },
+    { exact: "gpt-5.3", weight: "normal", maxThinking: "medium", source: "upstream" },
+    { prefix: "gpt-5.2-codex", weight: "normal", maxThinking: "medium", source: "upstream" },
+    { exact: "gpt-5.2", weight: "normal", maxThinking: "medium", source: "upstream" },
+    { prefix: "gemini-3-flash", weight: "normal", maxThinking: "medium", source: "upstream" },
+    { prefix: "gemini-2.5-pro", weight: "normal", maxThinking: "medium", source: "upstream" },
+    { prefix: "grok-", weight: "normal", maxThinking: "medium", source: "upstream" },
+  ],
+  retribution: [
+    { prefix: "claude-haiku", weight: "light", maxThinking: "low", source: "upstream" },
+    { prefix: "gpt-5.1-codex", weight: "light", maxThinking: "low", source: "upstream" },
+    { exact: "gpt-5.1", weight: "light", maxThinking: "low", source: "upstream" },
+    { prefix: "gpt-5-mini", weight: "light", maxThinking: "low", source: "upstream" },
+    { prefix: "gpt-5-nano", weight: "light", maxThinking: "low", source: "upstream" },
+    { prefix: "gemini-2.0-flash", weight: "light", maxThinking: "low", source: "upstream" },
+    { prefix: "mistral-large", weight: "light", maxThinking: "low", source: "upstream" },
+    { prefix: "codestral", weight: "light", maxThinking: "low", source: "upstream" },
+  ],
+};
+
+// Legacy aliases — used only by matchAnthropicTier/matchOpenAITier for
+// backward compat with operator profiles that reference these constants.
 const ANTHROPIC_TIER_PREFIXES: Record<Exclude<ModelTier, "local">, string[]> = {
   retribution: ["claude-haiku"],
   victory: ["claude-sonnet"],
@@ -180,9 +229,11 @@ const DEPRECATED_MODELS = new Set([
   "gpt-4o", "gpt-4o-mini",
   "gpt-4-turbo", "gpt-4",
   "gpt-3.5-turbo",
-  "gpt-4.1", "gpt-4.1-mini",
+  "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
   "o4-mini",
   "gpt-5", "gpt-5-instant", "gpt-5-thinking",  // retired Feb 13 2026
+  "claude-3-haiku-20240307", "claude-3-sonnet-20240229", "claude-3-opus-20240229",
+  "claude-3-5-sonnet-20240620",  // ancient snapshots
 ]);
 
 // o3 is a specialized reasoning model — not suitable as a general-purpose
@@ -282,6 +333,60 @@ function matchLocalTier(models: RegistryModel[]): RegistryModel | undefined {
     if (match) return match;
   }
   return locals[0];
+}
+
+// ---------------------------------------------------------------------------
+// Provider-transparent tier matching
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a model into a tier using TIER_RULES.
+ * Returns the matching rule or undefined if no rule matches.
+ */
+export function classifyModelTier(modelId: string): { tier: Exclude<ModelTier, "local">; rule: TierRule } | undefined {
+  for (const tier of ["gloriana", "victory", "retribution"] as const) {
+    for (const rule of TIER_RULES[tier]) {
+      if (rule.exact && modelId === rule.exact) return { tier, rule };
+      if (rule.prefix && modelId.startsWith(rule.prefix)) return { tier, rule };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Match ALL viable models to a tier, across every provider.
+ * Returns candidates sorted by TIER_RULES preference order (earlier rules = preferred).
+ * Within the same rule, models are sorted by version descending (newest first).
+ */
+function matchTierUniversal(
+  models: RegistryModel[],
+  tier: Exclude<ModelTier, "local">,
+): Array<{ model: RegistryModel; rule: TierRule }> {
+  const rules = TIER_RULES[tier];
+  const results: Array<{ model: RegistryModel; rule: TierRule; ruleIndex: number }> = [];
+
+  for (const model of models) {
+    if (model.provider === "local") continue; // local handled separately
+    if (DEPRECATED_MODELS.has(model.id)) continue;
+    for (let i = 0; i < rules.length; i++) {
+      const rule = rules[i];
+      const matches = rule.exact
+        ? model.id === rule.exact
+        : rule.prefix ? model.id.startsWith(rule.prefix) : false;
+      if (matches) {
+        results.push({ model, rule, ruleIndex: i });
+        break; // first matching rule wins for this model
+      }
+    }
+  }
+
+  // Sort: rule priority first, then newest version within same rule
+  results.sort((a, b) => {
+    if (a.ruleIndex !== b.ruleIndex) return a.ruleIndex - b.ruleIndex;
+    return compareModelVersionsDesc(a.model.id, b.model.id);
+  });
+
+  return results.map(({ model, rule }) => ({ model, rule }));
 }
 
 function dedupeProviderOrder(order: ProviderName[], avoided: ProviderName[]): ProviderName[] {
@@ -579,35 +684,48 @@ export function withCandidateCooldown(
 }
 
 export function getDefaultCapabilityProfile(models: RegistryModel[] = []): CapabilityProfile {
-  const archmagosCandidates: CapabilityCandidate[] = [];
-  const magosCandidates: CapabilityCandidate[] = [];
-  const adeptCandidates: CapabilityCandidate[] = [];
-  const servitorCandidates: CapabilityCandidate[] = [];
-  const servoskullCandidates: CapabilityCandidate[] = [];
-
-  const anthropicOpus = matchAnthropicTier(models, "gloriana");
-  const openaiOpus = matchOpenAITier(models, "gloriana");
-  const anthropicSonnet = matchAnthropicTier(models, "victory");
-  const openaiSonnet = matchOpenAITier(models, "victory");
-  const anthropicHaiku = matchAnthropicTier(models, "retribution");
-  const openaiHaiku = matchOpenAITier(models, "retribution");
   const local = matchLocalTier(models);
 
-  if (anthropicOpus) archmagosCandidates.push({ id: anthropicOpus.id, provider: "anthropic", source: "upstream", weight: "heavy", maxThinking: "high" });
-  if (openaiOpus) archmagosCandidates.push({ id: openaiOpus.id, provider: "openai", source: "upstream", weight: "heavy", maxThinking: "high" });
+  // Build candidate lists from ALL available models using universal tier rules.
+  // Deduplicate by model ID — a model may appear from multiple providers
+  // (e.g. claude-opus-4-6 via both 'anthropic' and 'github-copilot'),
+  // but we want each unique provider+id pair as a separate candidate so the
+  // policy engine can prefer one provider over another.
+  function buildCandidates(tier: Exclude<ModelTier, "local">): CapabilityCandidate[] {
+    const matches = matchTierUniversal(models, tier);
+    const seen = new Set<string>();
+    const candidates: CapabilityCandidate[] = [];
+    for (const { model, rule } of matches) {
+      const key = `${model.provider}/${model.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      candidates.push({
+        id: model.id,
+        provider: model.provider as ProviderName,
+        source: rule.source,
+        weight: rule.weight,
+        maxThinking: rule.maxThinking,
+      });
+    }
+    return candidates;
+  }
 
-  if (anthropicSonnet) magosCandidates.push({ id: anthropicSonnet.id, provider: "anthropic", source: "upstream", weight: "normal", maxThinking: "high" });
-  if (openaiSonnet) magosCandidates.push({ id: openaiSonnet.id, provider: "openai", source: "upstream", weight: "normal", maxThinking: "medium" });
+  const archmagosCandidates = buildCandidates("gloriana");
+  const magosCandidates = buildCandidates("victory");
+  const adeptCandidates = buildCandidates("retribution");
 
-  if (openaiHaiku) adeptCandidates.push({ id: openaiHaiku.id, provider: "openai", source: "upstream", weight: "light", maxThinking: "low" });
-  if (anthropicHaiku) adeptCandidates.push({ id: anthropicHaiku.id, provider: "anthropic", source: "upstream", weight: "light", maxThinking: "low" });
-
-  if (anthropicHaiku) servitorCandidates.push({ id: anthropicHaiku.id, provider: "anthropic", source: "upstream", weight: "light", maxThinking: "low" });
-  if (openaiHaiku) servitorCandidates.push({ id: openaiHaiku.id, provider: "openai", source: "upstream", weight: "light", maxThinking: "low" });
+  // Servitor: reuse adept candidates (cheapest cloud) + local
+  const servitorCandidates: CapabilityCandidate[] = [
+    ...adeptCandidates.map((c) => ({ ...c, maxThinking: "low" as ThinkingLevel })),
+  ];
   if (local) servitorCandidates.push({ id: local.id, provider: "local", source: "local", weight: inferWeightFromModel(local), maxThinking: "medium" });
 
+  // Servoskull: local first, then cheapest cloud
+  const servoskullCandidates: CapabilityCandidate[] = [];
   if (local) servoskullCandidates.push({ id: local.id, provider: "local", source: "local", weight: inferWeightFromModel(local), maxThinking: "off" });
-  if (openaiHaiku) servoskullCandidates.push({ id: openaiHaiku.id, provider: "openai", source: "upstream", weight: "light", maxThinking: "off" });
+  servoskullCandidates.push(
+    ...adeptCandidates.map((c) => ({ ...c, maxThinking: "off" as ThinkingLevel })),
+  );
 
   return {
     roles: {
@@ -750,7 +868,7 @@ export function getRoleDisplayLabel(role: CapabilityRole): string {
 
 export function getDefaultPolicy(): ProviderRoutingPolicy {
   return {
-    providerOrder: ["anthropic", "openai", "local"],
+    providerOrder: ["anthropic", "openai", "github-copilot", "google", "xai", "groq", "mistral", "amazon-bedrock", "azure-openai-responses", "openrouter", "local"],
     avoidProviders: [],
     cheapCloudPreferredOverLocal: false,
     requirePreflightForLargeRuns: true,
