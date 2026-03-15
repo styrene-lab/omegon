@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "changeName": "version-check-downgrade-guard",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T07:51:45.660Z",
+  "summary": "Spec verification now passes after updating both the vendored pi interactive checker and Omegon's extension-level version checker to compare suffix-bearing version segments numerically; all tasks are complete.",
+  "snapshot": {
+    "gitHead": "ea200a4a6584049f5969a2cbff3e1026a36d9117",
+    "fingerprint": "2109d71ed13ba1f3224ffa62817c852acdc3b6b553271bfb347cb1bc0c995bc2",
+    "dirty": true,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/version-check-downgrade-guard/design.md",
+        "exists": true,
+        "size": 831,
+        "sha256": "84008ab42989c6d71a9f522d2e34abf171757b07a91e71afbbd7e85dc5fea204"
+      },
+      {
+        "path": "openspec/changes/version-check-downgrade-guard/proposal.md",
+        "exists": true,
+        "size": 283,
+        "sha256": "6ab196ecff8c3787700c189ddf25ba7ff35897b6de10f294757b5fd1e750ede9"
+      },
+      {
+        "path": "openspec/changes/version-check-downgrade-guard/specs/version-check.md",
+        "exists": true,
+        "size": 755,
+        "sha256": "87fa27f69a6d41945838c59ef73c69129d1b6fd16b53943756a3c135040af3a9"
+      },
+      {
+        "path": "openspec/changes/version-check-downgrade-guard/tasks.md",
+        "exists": true,
+        "size": 730,
+        "sha256": "44f1865a7e61bac643d16bff6fd0b6dbdbf3e666b8028eaf771ae5c8ddb66cf9"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "vendor/pi-mono/packages/coding-agent/src/modes/interactive/interactive-mode.ts",
+      "vendor/pi-mono/packages/coding-agent/test/interactive-mode-status.test.ts",
+      "extensions/version-check.ts",
+      "tests/version-check.test.ts",
+      "openspec/changes/version-check-downgrade-guard/design.md",
+      "openspec/changes/version-check-downgrade-guard/tasks.md"
+    ],
+    "constraints": [
+      "Suffix-bearing versions must compare by numeric segments so older suffix builds do not trigger downgrade prompts while newer suffix builds still notify."
+    ],
+    "recommendedAction": null
+  }
+}

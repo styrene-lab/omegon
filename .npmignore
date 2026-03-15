@@ -10,6 +10,7 @@ scripts/install-pi.sh
 scripts/deploy-pi-dev.sh
 scripts/export-kitty-theme.ts
 config/
+sessions/
 .git/
 .github/
 .gitmodules

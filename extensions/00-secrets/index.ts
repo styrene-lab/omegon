@@ -15,8 +15,9 @@
  */
 
 import type { ExtensionAPI } from "@cwilson613/pi-coding-agent";
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync } from "fs";
-import { join, resolve } from "path";
+import { existsSync, readFileSync, realpathSync, writeFileSync, appendFileSync, mkdirSync, readdirSync } from "fs";
+import { dirname, join, resolve } from "path";
+import { fileURLToPath } from "url";
 import { homedir } from "os";
 import { execSync, execFileSync } from "child_process";
 
@@ -51,17 +52,33 @@ function scanAnnotations(): {
   const secretPattern = /^\/\/\s*@secret\s+([A-Z_][A-Z0-9_]*)\s+"([^"]+)"/;
   const configPattern = /^\/\/\s*@config\s+([A-Z_][A-Z0-9_]*)\s+"([^"]+)"(?:\s+\[default:\s*([^\]]*)\])?/;
 
-  // Extension directories to scan
-  const extensionDirs = [
-    join(homedir(), ".pi", "agent", "extensions"),
-    join(homedir(), ".pi", "agent", "git"),  // Omegon and other git packages
-  ];
+  // Extension directories to scan (deduplicated by realpath to avoid
+  // double-walking when dev checkout overlaps with git-installed package)
+  const seen = new Set<string>();
+  const extensionDirs: string[] = [];
+  function addDir(dir: string) {
+    try {
+      const real = realpathSync(dir);
+      if (!seen.has(real)) { seen.add(real); extensionDirs.push(dir); }
+    } catch {
+      // realpathSync fails if dir doesn't exist — skip silently
+    }
+  }
+
+  addDir(join(homedir(), ".pi", "agent", "extensions"));
+  addDir(join(homedir(), ".pi", "agent", "git"));  // Omegon and other git packages
+
+  // Scan the package's own extensions/ directory (where this file lives).
+  // Covers both dev (repo checkout) and npm-installed modes.
+  try {
+    const thisDir = dirname(fileURLToPath(import.meta.url));
+    addDir(resolve(thisDir, ".."));  // 00-secrets/ → extensions/
+  } catch {}
 
   // Also scan project-local extensions
   try {
     const cwd = process.cwd();
-    const projectDir = join(cwd, ".pi", "extensions");
-    if (existsSync(projectDir)) extensionDirs.push(projectDir);
+    addDir(join(cwd, ".pi", "extensions"));
   } catch {}
 
   function scanFile(filePath: string) {
@@ -367,11 +384,17 @@ const SECRET_ACCESS_PATTERNS = [
   /\bvault\s+(read|kv\s+get)\b/i,
 
   // ── Environment variable dumping ──
-  // Targeted env access with secret-adjacent keywords
-  /\benv\b.*\b(key|token|secret|password|credential)/i,
-  /\bprintenv\b.*\b(key|token|secret|password|credential)/i,
-  // Echo/printf of known secret env vars
-  /\b(echo|printf)\s+.*\$[A-Z_]*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/i,
+  // Targeted env/printenv commands with secret-adjacent keywords.
+  // Match only the standalone `env` or `printenv` command, not the substring
+  // "env" in filenames like "env-api-keys.ts" or words like "environment".
+  /(?:^|\||\;|&&|\|\|)\s*env\s+.*\b(key|token|secret|password|credential)/i,
+  /(?:^|\||\;|&&|\|\|)\s*printenv\s+.*\b(key|token|secret|password|credential)/i,
+  // Bare `env` piped to grep/filter for secrets (full dump → filter pattern).
+  // Use looser keyword matching (no leading \b) since env var names use
+  // underscores: API_KEY, _TOKEN, etc. where \b won't match mid-identifier.
+  /(?:^|\||\;|&&|\|\|)\s*env\s*\|.*(key|token|secret|password|credential)/i,
+  // Echo/printf of known secret env vars (literal $VAR references, not prose)
+  /\b(echo|printf)\s+.*\$[A-Z_]*(API_KEY|_TOKEN|_SECRET|_PASSWORD|_CREDENTIAL)\b/i,
   // Full env dumps (these can leak all injected secrets)
   /\bnode\s+-e\s+.*process\.env/i,
   /\bpython[23]?\s+-c\s+.*os\.environ/i,
@@ -379,12 +402,18 @@ const SECRET_ACCESS_PATTERNS = [
   /\bperl\s+-e\s+.*%ENV/i,
 
   // ── File readers on sensitive paths ──
-  // cat/less/more/head/tail/bat on secret-adjacent files
-  /\b(cat|less|more|head|tail|bat|batcat)\b.*(secrets?\.json|\bcredentials?\b|\.env\b)/i,
+  // cat/less/more/head/tail/bat on actual secret/credential files.
+  // Match files like "secrets.json", "credentials", ".env" — but not source code
+  // files that happen to contain the word "credential" (e.g. provider-env.ts).
+  // The path must look like a config/data file, not a .ts/.js/.py source file.
+  /\b(cat|less|more|head|tail|bat|batcat)\s+\S*secrets?\.json\b/i,
+  /\b(cat|less|more|head|tail|bat|batcat)\s+\S*credentials\s*$/im,
+  /\b(cat|less|more|head|tail|bat|batcat)\s+\S*\.env(\.[a-z]+)?\s*$/im,
   // jq on secret files
-  /\bjq\b.*\b(secrets?\.json|credentials?)\b/i,
-  // sed/awk/grep reading secret files
-  /\b(sed|awk|grep)\b.*\b(secrets?\.json|credentials?)\b/i,
+  /\bjq\b.*\b(secrets?\.json)\b/i,
+  /\bjq\b\s+\S+\s+\S*credentials\s*$/im,
+  // sed/awk/grep on actual secret data files (not source code containing the word)
+  /\b(sed|awk|grep)\b.*\bsecrets?\.json\b/i,
   // Our own secrets file — match the specific path
   /\.pi\/agent\/secrets\.json/i,
   // Writing to secrets file (via tee, redirect, etc.)
@@ -393,8 +422,9 @@ const SECRET_ACCESS_PATTERNS = [
   /\b(cat|less|more|head|tail)\b.*\.(aws|gcloud)\/(credentials|config)/i,
 
   // ── Command wrapping (shell indirection) ──
-  // sh/bash/zsh -c wrapping with secret-adjacent content
-  /\b(sh|bash|zsh)\s+-c\s+.*\b(security|op\s+read|pass\s+show|vault\s+read|keychain|credential|secret)/i,
+  // sh/bash/zsh -c wrapping with actual secret store tool invocations.
+  // Narrow: only match specific tool commands, not prose containing "secret".
+  /\b(sh|bash|zsh)\s+-c\s+.*\b(security\s+find|op\s+(read|get|item)|pass\s+show|vault\s+(read|kv\s+get)|keychain)/i,
   // Python/Ruby/Node/Perl subprocess wrappers accessing secret stores
   /\b(python[23]?|ruby|node|perl)\b.*\b(security\s+find|op\s+read|find-generic-password|secrets?\.json)/i,
   // Base64 decode piped to shell (obfuscation technique)
@@ -579,6 +609,39 @@ export default function (pi: ExtensionAPI) {
         `Run /secrets configure <name> to migrate to Keychain or another secure backend.`,
         "error"
       );
+    }
+
+    // Warn about secrets resolved from bare env vars (no recipe — set in
+    // .bashrc/.zshrc or shell profile). These are insecure: visible in
+    // /proc/*/environ, inherited by every child process, persisted in
+    // dotfile repos and shell history. A keychain-backed recipe resolves
+    // at runtime with biometric/password auth and doesn't leak on disk.
+    //
+    // Skip in CI environments where env vars are the expected mechanism.
+    // Exempt tokens managed by their own CLI credential stores (e.g.
+    // GH_TOKEN set by `gh auth login`, GITHUB_TOKEN from gh, COPILOT_GITHUB_TOKEN
+    // from the Copilot extension) — these are already secured by the tool.
+    const isCI = !!(process.env.CI || process.env.GITHUB_ACTIONS || process.env.GITLAB_CI);
+    if (!isCI) {
+      // Tokens managed by CLI tools that handle their own credential storage
+      const CLI_MANAGED_TOKENS = new Set([
+        "GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN",  // gh auth login
+        "GITLAB_TOKEN",     // glab auth login
+        "AWS_PROFILE",      // aws configure / SSO profile name (not a secret)
+      ]);
+      const bareEnvSecrets = Object.keys(KNOWN_SECRETS).filter(name =>
+        resolvedCache.has(name) && !recipes[name] && !CLI_MANAGED_TOKENS.has(name)
+      );
+      if (bareEnvSecrets.length > 0) {
+        // Show at most 3 names to avoid wall-of-text, never show values
+        const examples = bareEnvSecrets.slice(0, 3).join(", ");
+        const more = bareEnvSecrets.length > 3 ? ` (+${bareEnvSecrets.length - 3} more)` : "";
+        ctx.ui.notify(
+          `🔓 ${bareEnvSecrets.length} secret${bareEnvSecrets.length !== 1 ? "s" : ""} loaded from plain env vars: ${examples}${more}\n` +
+          `Run \`/secrets configure <name>\` to migrate to a secure backend.`,
+          "warning"
+        );
+      }
     }
   });
 
@@ -824,36 +887,60 @@ export default function (pi: ExtensionAPI) {
         case "list": {
           const lines: string[] = ["Secret recipes (~/.pi/agent/secrets.json):", ""];
 
+          function describeSource(name: string, recipe: string | undefined, resolved: boolean): string {
+            if (recipe) {
+              if (recipe.startsWith("!")) return `command: ${recipe.slice(1, 40)}${recipe.length > 41 ? "..." : ""}`;
+              if (recipe.startsWith("literal:")) return "⚠️  literal value (insecure — run /secrets configure to migrate)";
+              return `env: ${recipe}`;
+            }
+            if (resolved) return "🔓 plain env var (run /secrets configure to use a secure backend)";
+            return "not configured";
+          }
+
+          // Split into resolved and unresolved for cleaner display
+          const resolvedEntries: Array<[string, string]> = [];
+          const unresolvedEntries: Array<[string, string]> = [];
           for (const [name, desc] of Object.entries(KNOWN_SECRETS)) {
+            const resolved = resolvedCache.has(name);
+            if (resolved || recipes[name]) {
+              resolvedEntries.push([name, desc]);
+            } else {
+              unresolvedEntries.push([name, desc]);
+            }
+          }
+
+          // Show resolved/configured secrets first
+          for (const [name, desc] of resolvedEntries) {
             const recipe = recipes[name];
             const resolved = resolvedCache.has(name);
-            const source = recipe
-              ? recipe.startsWith("!")
-                ? `command: ${recipe.slice(1, 40)}${recipe.length > 41 ? "..." : ""}`
-                : recipe.startsWith("literal:")
-                  ? "⚠️  literal value (insecure — run /secrets configure to migrate)"
-                  : `env: ${recipe}`
-              : resolved
-                ? "env (auto-detected)"
-                : "not configured";
-
             const status = resolved ? "✅" : "❌";
             lines.push(`  ${status} ${name}`);
             lines.push(`     ${desc}`);
-            lines.push(`     Source: ${source}`);
+            lines.push(`     Source: ${describeSource(name, recipe, resolved)}`);
             lines.push("");
           }
 
-          // Show any non-known secrets
+          // Show any non-known custom secrets
           for (const name of Object.keys(recipes)) {
             if (name in KNOWN_SECRETS) continue;
             const recipe = recipes[name];
             const resolved = resolvedCache.has(name);
             const status = resolved ? "✅" : "❌";
             lines.push(`  ${status} ${name} (custom)`);
-            lines.push(
-              `     Source: ${recipe.startsWith("!") ? `command: ${recipe.slice(1, 40)}` : recipe.startsWith("literal:") ? "⚠️  literal (insecure)" : `env: ${recipe}`}`
-            );
+            lines.push(`     Source: ${describeSource(name, recipe, resolved)}`);
+            lines.push("");
+          }
+
+          // Unconfigured secrets: collapsed summary instead of a wall
+          if (unresolvedEntries.length > 0) {
+            const names = unresolvedEntries.map(([n]) => n);
+            if (names.length <= 5) {
+              lines.push(`  Not configured: ${names.join(", ")}`);
+            } else {
+              const shown = names.slice(0, 5).join(", ");
+              lines.push(`  Not configured: ${shown} (+${names.length - 5} more)`);
+            }
+            lines.push(`  Run /secrets configure <name> to set up any of these.`);
             lines.push("");
           }
 
@@ -1032,14 +1119,34 @@ export default function (pi: ExtensionAPI) {
           saveRecipes(recipes);
 
           // Verify it actually resolves — this is the moment of truth
+          // Note: resolveSecret checks process.env FIRST (for CI compat), so if the
+          // env var is still set from the user's shell profile, it shadows the recipe.
+          // We detect this and warn the user to remove the export.
           resolvedCache.delete(secretName);
-          const value = resolveSecret(secretName);
+          const envShadowed = !!process.env[secretName];
+          // Temporarily clear env to test the recipe in isolation
+          const savedEnv = process.env[secretName];
+          if (envShadowed) delete process.env[secretName];
+          const recipeValue = resolveSecret(secretName);
+          // Restore env (it'll be the active source until user removes it)
+          if (savedEnv !== undefined) {
+            process.env[secretName] = savedEnv;
+            resolvedCache.delete(secretName);
+            resolvedCache.set(secretName, savedEnv);
+          }
+          const value = recipeValue || savedEnv;
           if (value) {
             process.env[secretName] = value;
             const masked = value.length > 8
               ? value.slice(0, 4) + "•".repeat(Math.min(value.length - 4, 16)) + ` (${value.length} chars)`
               : "•".repeat(value.length) + ` (${value.length} chars)`;
-            ctx.ui.notify(`✅ ${secretName} configured and verified: ${masked}`, "info");
+            let msg = `✅ ${secretName} configured and verified: ${masked}`;
+            if (envShadowed && recipeValue) {
+              msg += `\n\n⚠️  Note: \$${secretName} is also set in your shell environment.` +
+                `\nRemove the \`export ${secretName}=...\` from your shell profile` +
+                `\nso the secure backend is used instead of the plain env var.`;
+            }
+            ctx.ui.notify(msg, "info");
           } else {
             // Don't just warn — this is a failure. Remove the broken recipe.
             delete recipes[secretName];

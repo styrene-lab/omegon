@@ -28,7 +28,7 @@
 import type { ExtensionAPI } from "@cwilson613/pi-coding-agent";
 import { Text } from "@cwilson613/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { sciCall, sciOk, sciErr, sciExpanded } from "../sci-ui.ts";
+import { sciCall, sciOk, sciErr, sciExpanded } from "../lib/sci-ui.ts";
 
 // Import domain logic from auth.ts (testable without pi-tui dependency)
 import {

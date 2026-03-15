@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@cwilson613/pi-coding-agent";
 
-import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
-import { debug } from "../debug.ts";
+import { sharedState, DASHBOARD_UPDATE_EVENT } from "../lib/shared-state.ts";
+import { debug } from "../lib/debug.ts";
 import { listChanges } from "./spec.ts";
 import { buildLifecycleSummary } from "./lifecycle.ts";
 

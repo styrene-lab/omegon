@@ -19,7 +19,7 @@ import {
   withCandidateCooldown,
   withProviderCooldown,
 } from "./model-routing.ts";
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "./shared-state.ts";
 
 function makeModel(provider: string, id: string): RegistryModel {
   return { provider, id };

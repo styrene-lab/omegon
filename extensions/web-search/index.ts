@@ -176,7 +176,10 @@ Only providers with configured API keys are available.`,
         "info"
       );
     } else {
-      ctx.ui.notify("Web Search: No API keys configured", "warning");
+      const { sharedState } = await import("../lib/shared-state.ts");
+      if (!sharedState.bootstrapPending) {
+        ctx.ui.notify("Web Search: No API keys configured", "warning");
+      }
     }
   });
 }

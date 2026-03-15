@@ -5,7 +5,7 @@
  * All rendering/theme concerns are abstracted via the ThemeFn callback.
  */
 
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "../lib/shared-state.ts";
 import type { CleaveState, DesignAssessmentResult, DesignSpecBindingState, DesignTreeDashboardState, OpenSpecDashboardState } from "./types.ts";
 import type { ProviderRoutingPolicy } from "../lib/model-routing.ts";
 import {

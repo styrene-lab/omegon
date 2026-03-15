@@ -25,10 +25,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { shouldRefreshDesignTreeForPath } from "../dashboard/file-watch.ts";
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "../lib/shared-state.ts";
 
 import { emitDesignTreeState } from "./dashboard-state.ts";
-import { sciCall, sciLoading, sciOk, sciErr, sciExpanded, sciBanner } from "../sci-ui.ts";
+import { sciCall, sciLoading, sciOk, sciErr, sciExpanded, sciBanner } from "../lib/sci-ui.ts";
 import { SciDesignCard, buildCardDetails } from "./design-card.ts";
 import type { DesignCardDetails } from "./design-card.ts";
 import { emitConstraintCandidates, emitDecisionCandidates } from "./lifecycle-emitter.ts";
@@ -338,7 +338,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 							boundToOpenSpec: binding.bound,
 							// Normalized binding status from canonical resolver
 							bindingStatus: lifecycleSummary?.bindingStatus ?? (binding.bound ? "bound" : "unbound"),
-							canImplement: node.status === "decided",
+							canImplement: node.status === "decided" || node.status === "resolved",
 							isImplementationPhase: node.status === "implementing" || node.status === "implemented",
 							reopenSignalTarget: binding.changeName ?? node.openspec_change ?? node.id,
 							// Canonical lifecycle fields from resolveLifecycleSummary when available
@@ -435,7 +435,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					// AND design-phase OpenSpec change is archived.
 					const readyNodes = Array.from(tree.nodes.values())
 						.filter((n) => {
-							if (n.status !== "decided") return false;
+							if (n.status !== "decided" && n.status !== "resolved") return false;
 							// Hard gate: design spec must be archived
 							const specBinding = resolveDesignSpecBinding(ctx.cwd, n.id);
 							if (!specBinding.archived) return false;
@@ -668,7 +668,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 			"set focus, or bridge to OpenSpec for implementation.\n\n" +
 			"Actions:\n" +
 			"- create: Create a new design node (id, title required; parent, status, tags, overview optional)\n" +
-			"- set_status: Change node status (seed/exploring/decided/blocked/deferred)\n" +
+			"- set_status: Change node status (seed/exploring/resolved/decided/blocked/deferred)\n" +
 			"- add_question: Add an open question to a node\n" +
 			"- remove_question: Remove an open question by text\n" +
 			"- add_research: Add a research entry (heading + content)\n" +
@@ -686,7 +686,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 			"Mutate the design tree — create nodes, set status, add research/decisions/questions, branch, implement",
 		promptGuidelines: [
 			"Use 'create' to start a new design exploration. Status defaults to 'seed'.",
-			"Use 'set_status' to transition nodes: seed → exploring → decided. Use 'blocked' or 'deferred' as needed.",
+			"Use 'set_status' to transition nodes: seed → exploring → resolved → decided. Use 'resolved' when design questions are answered but the formal lifecycle gate hasn't cleared. Use 'blocked' or 'deferred' as needed.",
 			"Use 'add_question' when discussion reveals unknowns. Use 'remove_question' when questions are answered.",
 			"Use 'add_research' to record findings with a heading and content.",
 			"Use 'add_decision' to crystallize choices with title, status (exploring/decided/rejected), and rationale.",
@@ -799,21 +799,31 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					const oldStatus = node.status;
 
 					// Hard gate: set_status(decided) requires archived design spec.
+					// Exception: bug/chore/task nodes with no open questions can skip
+					// the design-phase ceremony — the decision IS the diagnosis.
 					if (newStatus === "decided") {
-						const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
-						if (designSpec.missing) {
-							return {
-								content: [{ type: "text", text: `Cannot mark '${node.title}' decided: scaffold design spec first via set_status(exploring).` }],
-								details: { id: node.id, blockedBy: "design-openspec-missing" },
-								isError: true,
-							};
-						}
-						if (designSpec.active && !designSpec.archived) {
-							return {
-								content: [{ type: "text", text: `Cannot mark '${node.title}' decided: run /assess design then archive the design change before marking decided.` }],
-								details: { id: node.id, blockedBy: "design-openspec-not-archived" },
-								isError: true,
-							};
+						const lightweightTypes = new Set(["bug", "chore", "task"]);
+						const isLightweight = node.issue_type && lightweightTypes.has(node.issue_type);
+						const hasOpenQuestions = (node.open_questions?.length ?? 0) > 0;
+
+						// Lightweight nodes: allow decided if no open questions remain,
+						// regardless of design-phase spec state.
+						if (!(isLightweight && !hasOpenQuestions)) {
+							const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
+							if (designSpec.missing) {
+								return {
+									content: [{ type: "text", text: `Cannot mark '${node.title}' decided: scaffold design spec first via set_status(exploring).` }],
+									details: { id: node.id, blockedBy: "design-openspec-missing" },
+									isError: true,
+								};
+							}
+							if (designSpec.active && !designSpec.archived) {
+								return {
+									content: [{ type: "text", text: `Cannot mark '${node.title}' decided: run \`/assess design ${node.id}\` then archive the design change before marking decided.` }],
+									details: { id: node.id, blockedBy: "design-openspec-not-archived" },
+									isError: true,
+								};
+							}
 						}
 					}
 
@@ -1125,12 +1135,12 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					if (!node) {
 						return { content: [{ type: "text", text: `Node '${params.node_id}' not found` }], details: {}, isError: true };
 					}
-					if (node.status !== "decided") {
+					if (node.status !== "decided" && node.status !== "resolved") {
 						return {
 							content: [{
 								type: "text",
-								text: `Node '${node.title}' is '${node.status}', not 'decided'. ` +
-									`Resolve open questions and set status to 'decided' before implementing.`,
+								text: `Node '${node.title}' is '${node.status}', not 'decided' or 'resolved'. ` +
+									`Resolve open questions and set status to 'decided' (or 'resolved') before implementing.`,
 							}],
 							details: {},
 							isError: true,
@@ -1138,21 +1148,31 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					}
 
 					// Hard gate: design-phase spec must be archived before implementation.
+					// Exception: bug/chore/task nodes that are already decided with no
+					// open questions can proceed directly — they don't need a design-phase
+					// spec because the decision is the bug diagnosis itself.
 					{
-						const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
-						if (designSpec.missing) {
-							return {
-								content: [{ type: "text", text: "Scaffold design spec first via set_status(exploring)" }],
-								details: { id: node.id, blockedBy: "design-openspec-missing" },
-								isError: true,
-							};
-						}
-						if (designSpec.active && !designSpec.archived) {
-							return {
-								content: [{ type: "text", text: `Cannot implement '${node.title}': archive the design change first (/opsx:archive on the design change).` }],
-								details: { id: node.id, blockedBy: "design-openspec-not-archived" },
-								isError: true,
-							};
+						const lightweightTypes = new Set(["bug", "chore", "task"]);
+						const isLightweight = node.issue_type && lightweightTypes.has(node.issue_type);
+						const hasOpenQuestions = (node.open_questions?.length ?? 0) > 0;
+						const skipDesignGate = isLightweight && !hasOpenQuestions && (node.status === "decided" || node.status === "resolved");
+
+						if (!skipDesignGate) {
+							const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
+							if (designSpec.missing) {
+								return {
+									content: [{ type: "text", text: "Scaffold design spec first via set_status(exploring)" }],
+									details: { id: node.id, blockedBy: "design-openspec-missing" },
+									isError: true,
+								};
+							}
+							if (designSpec.active && !designSpec.archived) {
+								return {
+									content: [{ type: "text", text: `Cannot implement '${node.title}': archive the design change first (\`/opsx:archive\` on the design change).` }],
+									details: { id: node.id, blockedBy: "design-openspec-not-archived" },
+									isError: true,
+								};
+							}
 						}
 					}
 
@@ -1367,7 +1387,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						return;
 					}
 					const total = tree.nodes.size;
-					const decided = Array.from(tree.nodes.values()).filter((n) => n.status === "decided").length;
+					const decided = Array.from(tree.nodes.values()).filter((n) => n.status === "decided" || n.status === "resolved").length;
 					const exploring = Array.from(tree.nodes.values()).filter(
 						(n) => n.status === "exploring" || n.status === "seed",
 					).length;
@@ -1658,9 +1678,9 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						ctx.ui.notify(`Node '${id}' not found`, "error");
 						return;
 					}
-					if (node.status !== "decided") {
+					if (node.status !== "decided" && node.status !== "resolved") {
 						ctx.ui.notify(
-							`'${node.title}' is '${node.status}', not 'decided'. Resolve questions first.`,
+							`'${node.title}' is '${node.status}', not 'decided'/'resolved'. Resolve questions first.`,
 							"warning",
 						);
 						return;
@@ -1765,7 +1785,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 
 		const implemented = Array.from(tree.nodes.values()).filter((n) => n.status === "implemented").length;
 		const implementing = Array.from(tree.nodes.values()).filter((n) => n.status === "implementing").length;
-		const decided = Array.from(tree.nodes.values()).filter((n) => n.status === "decided").length;
+		const decided = Array.from(tree.nodes.values()).filter((n) => n.status === "decided" || n.status === "resolved").length;
 		const exploring = Array.from(tree.nodes.values()).filter(
 			(n) => n.status === "exploring" || n.status === "seed",
 		).length;
@@ -1956,7 +1976,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 			if (status === "implemented" || status === "deferred") {
 				toMigrate.push(entry);
 			} else {
-				// seed, exploring, decided, blocked — leave in docs/
+				// seed, exploring, resolved, decided, blocked — leave in docs/
 				activeExplorations.push(entry);
 			}
 		}

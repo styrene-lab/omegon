@@ -154,7 +154,7 @@ export function transitionDesignNodesOnArchive(cwd: string, changeName: string):
 	const transitioned: string[] = [];
 
 	for (const node of resolveBoundDesignNodes(cwd, changeName)) {
-		const transitionable = node.status === "implementing" || node.status === "decided";
+		const transitionable = node.status === "implementing" || node.status === "decided" || node.status === "resolved";
 		if (!transitionable) continue;
 		const sections = getNodeSections(node);
 		writeNodeDocument({ ...node, status: "implemented" }, sections);

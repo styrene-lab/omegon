@@ -45,6 +45,7 @@ import * as os from "node:os";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext, SessionMessageEntry } from "@cwilson613/pi-coding-agent";
 import { DynamicBorder } from "@cwilson613/pi-coding-agent";
 import { sciCall, sciOk, sciErr, sciExpanded, sciLoading } from "./sci-renderers.ts";
+import { sciExitCard, type ExitCardData } from "../lib/sci-ui.ts";
 import { StringEnum } from "../lib/typebox-helpers";
 import { Type } from "@sinclair/typebox";
 import { Container, type SelectItem, SelectList, Text } from "@cwilson613/pi-tui";
@@ -69,7 +70,7 @@ import { runExtractionV2, runGlobalExtraction, killActiveExtraction, killAllSubp
 import { migrateToFactStore, needsMigration, markMigrated } from "./migration.ts";
 import { SECTIONS } from "./template.ts";
 import { serializeConversation, convertToLlm } from "@cwilson613/pi-coding-agent";
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "../lib/shared-state.ts";
 import {
   ingestLifecycleCandidate,
   ingestLifecycleCandidatesBatch,
@@ -3311,6 +3312,11 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerMessageRenderer("session-exit", (_message, _options, theme) => {
+    const data = (_message.details ?? {}) as ExitCardData;
+    return sciExitCard(data, theme);
+  });
+
   pi.registerCommand("exit", {
     description: "Run memory extraction and exit gracefully (avoids /reload terminal corruption)",
     handler: async (_args, ctx) => {
@@ -3397,22 +3403,28 @@ export default function (pi: ExtensionAPI) {
         exitEpisodeDone = true;
       }
 
-      // Build session-end summary from shared state
-      const summaryLines: string[] = [];
+      // Build session-end card data
+      const exitData: ExitCardData = {
+        factCount: factsAfter,
+        factDelta: delta,
+        embeddingAvailable,
+      };
 
       // Git state
       try {
         const branchResult = await pi.exec("git", ["branch", "--show-current"], { timeout: 3_000, cwd: ctx.cwd });
         const statusResult = await pi.exec("git", ["status", "--short"], { timeout: 3_000, cwd: ctx.cwd });
-        const branchName = branchResult.stdout.trim();
-        const dirtyCount = statusResult.stdout.trim().split("\n").filter(Boolean).length;
-        summaryLines.push(`🔀 ${branchName}${dirtyCount > 0 ? ` · ${dirtyCount} dirty` : " · clean"}`);
+        exitData.branch = branchResult.stdout.trim();
+        exitData.dirtyCount = statusResult.stdout.trim().split("\n").filter(Boolean).length;
       } catch { /* ignore */ }
 
       // Design tree
       const dt = sharedState.designTree;
       if (dt && dt.nodeCount > 0) {
-        summaryLines.push(`🌳 Design: ${dt.nodeCount} nodes (${dt.decidedCount} decided, ${dt.exploringCount} exploring)`);
+        exitData.designNodes = dt.nodeCount;
+        exitData.designImplemented = dt.implementedCount;
+        exitData.designDecided = dt.decidedCount;
+        exitData.designExploring = dt.exploringCount;
       }
 
       // OpenSpec
@@ -3420,30 +3432,26 @@ export default function (pi: ExtensionAPI) {
       if (os && os.changes.length > 0) {
         const active = os.changes.filter(c => c.stage !== "archived");
         if (active.length > 0) {
-          summaryLines.push(`📋 OpenSpec: ${active.length} active — ${active.map(c => c.name).join(", ")}`);
+          exitData.openspecActive = active.map(c => c.name);
         }
       }
 
-      // Memory + embedding coverage
-      const vecCount = store ? store.countFactVectors(mind) : 0;
-      const coveragePct = factsAfter > 0 ? Math.round((vecCount / factsAfter) * 100) : 100;
-      const embeddingInfo = embeddingAvailable
-        ? ` · ${coveragePct}% indexed`
-        : " · semantic search off";
-      const memLine = delta > 0
-        ? `🧠 ${factsAfter} facts (+${delta} new)${embeddingInfo}`
-        : `🧠 ${factsAfter} facts${embeddingInfo}`;
-      summaryLines.push(memLine);
-
-      if (summaryLines.length > 0) {
-        ctx.ui.notify(summaryLines.join("\n"), "info");
-        await new Promise(r => setTimeout(r, 300));
+      // Embedding coverage
+      if (store && embeddingAvailable) {
+        const vecCount = store.countFactVectors(mind);
+        exitData.embeddingPct = factsAfter > 0 ? Math.round((vecCount / factsAfter) * 100) : 100;
       }
 
-      ctx.ui.notify("Goodbye!", "info");
+      // Render as a proper sci-ui card in the conversation
+      pi.sendMessage({
+        customType: "session-exit",
+        content: "Session ended.",
+        details: exitData,
+        display: true,
+      });
 
-      // Small delay so the notification renders
-      await new Promise(r => setTimeout(r, 200));
+      // Let the card render before shutdown tears down the TUI
+      await new Promise(r => setTimeout(r, 500));
 
       // ctx.shutdown() is fire-and-forget internally (sets shutdownRequested flag
       // and calls void this.shutdown() in interactive mode). We must keep this

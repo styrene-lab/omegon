@@ -8,7 +8,7 @@ import type { ExtensionAPI } from "@cwilson613/pi-coding-agent";
 import designTreeExtension from "./index.ts";
 import { generateFrontmatter } from "./tree.ts";
 import type { DesignNode } from "./types.ts";
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "../lib/shared-state.ts";
 
 interface RegisteredTool {
 	name: string;

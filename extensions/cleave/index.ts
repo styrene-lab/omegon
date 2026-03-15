@@ -23,9 +23,9 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 
-import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
-import { sciCall, sciOk, sciErr, sciExpanded } from "../sci-ui.ts";
-import { debug } from "../debug.ts";
+import { sharedState, DASHBOARD_UPDATE_EVENT } from "../lib/shared-state.ts";
+import { sciCall, sciOk, sciErr, sciExpanded } from "../lib/sci-ui.ts";
+import { debug } from "../lib/debug.ts";
 import { emitOpenSpecState } from "../openspec/dashboard-state.ts";
 import { getSharedBridge, buildSlashCommandResult } from "../lib/slash-command-bridge.ts";
 import { buildAssessBridgeResult } from "./bridge.ts";

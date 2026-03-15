@@ -5,11 +5,11 @@ import type { ExtensionAPI } from "@cwilson613/pi-coding-agent";
 
 import type { DesignNode, DesignTree } from "./types.ts";
 import { getAllOpenQuestions, countAcceptanceCriteria } from "./tree.ts";
-import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
-import type { DesignTreeDashboardState } from "../shared-state.ts";
+import { sharedState, DASHBOARD_UPDATE_EVENT } from "../lib/shared-state.ts";
+import type { DesignTreeDashboardState } from "../lib/shared-state.ts";
 import type { DesignAssessmentResult, DesignPipelineCounts } from "../dashboard/types.ts";
 import type { DesignSpecBinding } from "../openspec/archive-gate.ts";
-import { debug } from "../debug.ts";
+import { debug } from "../lib/debug.ts";
 
 /** Read assessment.json from openspec/design/<id>/assessment.json if it exists. */
 function readAssessmentResult(cwd: string, nodeId: string): DesignAssessmentResult | null {
@@ -75,7 +75,7 @@ export function emitDesignTreeState(pi: ExtensionAPI, dt: DesignTree, focused: D
 
 	const enrichedNodes = nodes.map((n) => {
 		const isSeedLike = n.status === "seed";
-		const isActivePhase = ["exploring", "decided", "implementing"].includes(n.status);
+		const isActivePhase = ["exploring", "resolved", "decided", "implementing"].includes(n.status);
 		// W3 fix: deferred/blocked also receive the neutral sentinel (not undefined)
 		const isPassive = n.status === "deferred" || n.status === "blocked";
 
@@ -97,7 +97,7 @@ export function emitDesignTreeState(pi: ExtensionAPI, dt: DesignTree, focused: D
 
 		// Accumulate pipeline counts
 		// C3 fix: deferred/blocked fall into needsSpec so funnel totals reconcile
-		if (n.status === "decided") {
+		if (n.status === "decided" || n.status === "resolved") {
 			pipelineCounts.decided++;
 		} else if (n.status === "implementing") {
 			pipelineCounts.implementing++;

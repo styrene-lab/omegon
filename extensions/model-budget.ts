@@ -20,8 +20,8 @@
 import { createHash } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@cwilson613/pi-coding-agent";
 import type { ImageContent, Model, TextContent } from "@cwilson613/pi-ai";
-import { DASHBOARD_UPDATE_EVENT, sharedState } from "./shared-state.ts";
-import type { RecoveryEvent, RecoveryFailureClassification } from "./shared-state.ts";
+import { DASHBOARD_UPDATE_EVENT, sharedState } from "./lib/shared-state.ts";
+import type { RecoveryEvent, RecoveryFailureClassification } from "./lib/shared-state.ts";
 import type { RecoveryAction, RecoveryCooldownSummary, RecoveryDashboardState, RecoveryTarget } from "./dashboard/types.ts";
 import { tierConfig } from "./effort/tiers.ts";
 import type { EffortLevel } from "./effort/types.ts";

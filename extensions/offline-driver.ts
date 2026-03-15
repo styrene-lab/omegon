@@ -285,7 +285,13 @@ export default function (pi: ExtensionAPI) {
       parts.push("🏠 Ollama: not running");
     }
 
-    ctx.ui.notify(parts.join(" | "), anthropicOk ? "info" : "warning");
+    // Suppress noisy status during first-run — bootstrap handles guidance
+    // Suppress the "unreachable" warning during first-run (bootstrap handles it),
+    // but always show success status so the operator sees their provider state.
+    const { sharedState } = await import("./lib/shared-state.ts");
+    if (anthropicOk || !sharedState.bootstrapPending) {
+      ctx.ui.notify(parts.join(" | "), anthropicOk ? "info" : "warning");
+    }
 
     // Save starting cloud model
     const current = ctx.model;

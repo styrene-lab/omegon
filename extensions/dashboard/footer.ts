@@ -19,8 +19,8 @@ import { truncateToWidth, visibleWidth } from "@cwilson613/pi-tui";
 import { leftRight, mergeColumns, padRight } from "./render-utils.ts";
 import { buildBranchTreeLines, readLocalBranches } from "./git.ts";
 import type { DashboardState, RecoveryCooldownSummary, RecoveryDashboardState } from "./types.ts";
-import { sharedState } from "../shared-state.ts";
-import { debug } from "../debug.ts";
+import { sharedState } from "../lib/shared-state.ts";
+import { debug } from "../lib/debug.ts";
 import { linkDashboardFile, linkOpenSpecArtifact, linkOpenSpecChange } from "./uri-helper.ts";
 import { designSpecBadge } from "./overlay-data.ts";
 import { buildContextGaugeModel } from "./context-gauge.ts";
@@ -221,7 +221,8 @@ export class DashboardFooter implements Component {
     if (dt && dt.nodeCount > 0) {
       if (ultraWide && dt.focusedNode) {
         // Ultra-wide: show focused node title inline
-        const statusIcon = dt.focusedNode.status === "decided" ? "●"
+        const statusIcon = dt.focusedNode.status === "resolved" ? "◉"
+          : dt.focusedNode.status === "decided" ? "●"
           : dt.focusedNode.status === "implementing" ? "⚙"
           : dt.focusedNode.status === "exploring" ? "◐"
           : "○";
@@ -938,6 +939,7 @@ export class DashboardFooter implements Component {
   private nodeStatusIcon(status: string): string {
     const theme = this.theme;
     switch (status) {
+      case "resolved": return theme.fg("success", "◉");
       case "decided": return theme.fg("success", "●");
       case "implementing": return theme.fg("accent", "⚙");
       case "implemented": return theme.fg("success", "✓");

@@ -45,15 +45,19 @@ async function fetchLatestRelease(): Promise<string | null> {
   }
 }
 
-/** Simple semver comparison. Returns true if latest > current. */
-function isNewer(latest: string, current: string): boolean {
-  const parse = (v: string) => v.split(".").map((n) => parseInt(n, 10) || 0);
-  const l = parse(latest);
-  const c = parse(current);
-  for (let i = 0; i < 3; i++) {
-    if ((l[i] ?? 0) > (c[i] ?? 0)) return true;
-    if ((l[i] ?? 0) < (c[i] ?? 0)) return false;
+/** Compare dotted numeric version parts, including fork/prerelease suffix digits. */
+export function isNewer(latest: string, current: string): boolean {
+  const latestParts = latest.match(/\d+/g)?.map((part) => Number.parseInt(part, 10)) ?? [];
+  const currentParts = current.match(/\d+/g)?.map((part) => Number.parseInt(part, 10)) ?? [];
+  const length = Math.max(latestParts.length, currentParts.length);
+
+  for (let i = 0; i < length; i += 1) {
+    const latestPart = latestParts[i] ?? 0;
+    const currentPart = currentParts[i] ?? 0;
+    if (latestPart > currentPart) return true;
+    if (latestPart < currentPart) return false;
   }
+
   return false;
 }
 

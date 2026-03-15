@@ -33,7 +33,7 @@ import {
 	type OperatorCapabilityProfile,
 	type OperatorProfileCandidate,
 } from "../lib/operator-profile.ts";
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "../lib/shared-state.ts";
 import { getDefaultPolicy, type ProviderRoutingPolicy } from "../lib/model-routing.ts";
 import { DEPS, checkAll, formatReport, bestInstallCmd, sortByRequires, type DepStatus, type DepTier } from "./deps.ts";
 
@@ -313,6 +313,9 @@ export default function (pi: ExtensionAPI) {
 		if (!isFirstRun()) return;
 		if (!ctx.hasUI) return;
 
+		// Signal other extensions to suppress redundant "no providers" warnings
+		sharedState.bootstrapPending = true;
+
 		const statuses = checkAll();
 		const missing = statuses.filter((s) => !s.available);
 		const needsProfile = needsOperatorProfileSetup(getConfigRoot(ctx));
@@ -376,122 +379,196 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// --- /update-pi: update the pi binary from the cwilson613 fork ---
-	// Pulls the latest @cwilson613/pi-coding-agent from npm and relaunches.
-	// Useful after a new patch is published without leaving pi.
-	pi.registerCommand("update-pi", {
-		description: "Update the pi binary to the latest @cwilson613/pi-coding-agent release",
+	// --- /update: unified update command ---
+	// Detects dev vs installed mode and runs the appropriate pipeline:
+	//   Dev mode  (.git exists): git pull → submodule update → build → clear cache → reload
+	//   Installed (no .git):     npm install -g omegon@latest → clear cache → reload
+	// Replaces the old /update-pi and /refresh commands.
+	pi.registerCommand("update", {
+		description: "Pull latest code, rebuild, and reload (dev) or install latest from npm (installed)",
 		handler: async (args, ctx) => {
 			const dryRun = args.trim() === "--dry-run";
-			const PKG = "@cwilson613/pi-coding-agent";
+			const omegonRoot = process.env.PI_CODING_AGENT_DIR ?? join(import.meta.dirname ?? ".", "..");
+			const isDevMode = existsSync(join(omegonRoot, ".git"));
 
-			// Resolve the npm registry latest
-			ctx.ui.notify(`Checking latest version of ${PKG}…`, "info");
-			let latestVersion: string;
-			try {
-				latestVersion = await new Promise<string>((resolve, reject) => {
-					let out = "";
-					const child = spawn("npm", ["view", PKG, "version", "--json"], {
-						stdio: ["ignore", "pipe", "pipe"],
-					});
-					child.stdout.on("data", (d: Buffer) => { out += d.toString(); });
-					child.on("close", (code: number) => {
-						if (code !== 0) return reject(new Error("npm view failed"));
-						resolve(JSON.parse(out.trim()));
-					});
-				});
-			} catch {
-				ctx.ui.notify(`Failed to query npm registry. Are you online?`, "warning");
-				return;
+			if (isDevMode) {
+				await updateDevMode(omegonRoot, dryRun, ctx);
+			} else {
+				await updateInstalledMode(dryRun, ctx);
 			}
-
-			// Determine installed version
-			let installedVersion = "unknown";
-			try {
-				installedVersion = await new Promise<string>((resolve) => {
-					let out = "";
-					const child = spawn("npm", ["list", "-g", PKG, "--json", "--depth=0"], {
-						stdio: ["ignore", "pipe", "pipe"],
-					});
-					child.stdout.on("data", (d: Buffer) => { out += d.toString(); });
-					child.on("close", () => {
-						try {
-							const data = JSON.parse(out);
-							resolve(data.dependencies?.[PKG]?.version ?? "unknown");
-						} catch {
-							resolve("unknown");
-						}
-					});
-				});
-			} catch { /* ignore */ }
-
-			if (installedVersion === latestVersion) {
-				ctx.ui.notify(`Already on latest: ${PKG}@${latestVersion} ✅`, "info");
-				return;
-			}
-
-			ctx.ui.notify(
-				`Update available: ${installedVersion} → ${latestVersion}\n` +
-				(dryRun ? "(dry run — not installing)" : "Installing…"),
-				"info"
-			);
-
-			if (dryRun) return;
-
-			const confirmed = await ctx.ui.confirm(
-				"Update pi binary?",
-				`Install ${PKG}@${latestVersion} globally via npm?\n\nThis will replace the currently running binary. Restart pi after the update completes.`
-			);
-			if (!confirmed) {
-				ctx.ui.notify("Update cancelled.", "info");
-				return;
-			}
-
-			await new Promise<void>((resolve, reject) => {
-				let stderr = "";
-				const child = spawn("npm", ["install", "-g", `${PKG}@${latestVersion}`], {
-					stdio: ["ignore", "pipe", "pipe"],
-				});
-				child.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
-				child.on("close", (code: number) => {
-					if (code !== 0) {
-						ctx.ui.notify(`npm install failed:\n${stderr}`, "warning");
-						reject(new Error("install failed"));
-					} else {
-						resolve();
-					}
-				});
-			}).catch(() => { /* error already notified */ return; });
-
-			ctx.ui.notify(
-				`✅ Updated to ${PKG}@${latestVersion}.\n` +
-				"Restart pi to use the new version (/exit, then pi).",
-				"info"
-			);
 		},
 	});
 
-	// --- /refresh: clear jiti transpilation cache + reload ---
-	// jiti's fs cache uses path-based hashing, so source changes aren't
-	// detected on /reload. /refresh clears the cache first.
+	// --- /refresh: alias for /update with just cache clear + reload ---
 	pi.registerCommand("refresh", {
-		description: "Clear transpilation cache and reload extensions",
+		description: "Clear transpilation cache and reload extensions (quick /update)",
 		handler: async (_args, ctx) => {
-			const jitiCacheDir = join(tmpdir(), "jiti");
-			let cleared = 0;
-			if (existsSync(jitiCacheDir)) {
-				try {
-					const files = readdirSync(jitiCacheDir);
-					cleared = files.length;
-					rmSync(jitiCacheDir, { recursive: true, force: true });
-				} catch { /* best-effort */ }
-			}
-			ctx.ui.notify(cleared > 0
-				? `Cleared ${cleared} cached transpilations. Reloading…`
-				: "No transpilation cache found. Reloading…", "info");
+			clearJitiCache(ctx);
 			await ctx.reload();
 		},
 	});
+}
+
+// ── /update helpers ──────────────────────────────────────────────────────
+
+/** Run a command, collect stdout+stderr, resolve with exit code. */
+function run(
+	cmd: string, args: string[], opts?: { cwd?: string },
+): Promise<{ code: number; stdout: string; stderr: string }> {
+	return new Promise((resolve) => {
+		let stdout = "", stderr = "";
+		const child = spawn(cmd, args, { cwd: opts?.cwd, stdio: ["ignore", "pipe", "pipe"] });
+		child.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
+		child.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+		child.on("close", (code: number) => resolve({ code: code ?? 1, stdout, stderr }));
+	});
+}
+
+/** Clear jiti transpilation cache. Returns count of cleared entries. */
+function clearJitiCache(_ctx?: unknown): number {
+	const jitiCacheDir = join(tmpdir(), "jiti");
+	let cleared = 0;
+	if (existsSync(jitiCacheDir)) {
+		try {
+			cleared = readdirSync(jitiCacheDir).length;
+			rmSync(jitiCacheDir, { recursive: true, force: true });
+		} catch { /* best-effort */ }
+	}
+	return cleared;
+}
+
+/** Dev mode: git pull → submodule update → build → cache clear → reload. */
+async function updateDevMode(
+	omegonRoot: string,
+	dryRun: boolean,
+	ctx: { ui: CommandContext["ui"]; reload: () => Promise<void> },
+): Promise<void> {
+	const steps: string[] = [];
+
+	// ── Step 1: git pull omegon ──────────────────────────────────────
+	ctx.ui.notify("▸ Pulling omegon…", "info");
+	const pull = await run("git", ["pull", "--ff-only"], { cwd: omegonRoot });
+	if (pull.code !== 0) {
+		// Non-ff merge needed — not fatal, just skip
+		const msg = pull.stderr.includes("fatal")
+			? `git pull failed: ${pull.stderr.trim().split("\n")[0]}`
+			: "git pull: non-fast-forward — skipping (merge manually if needed)";
+		steps.push(`⚠ ${msg}`);
+	} else {
+		const summary = pull.stdout.trim().split("\n").pop() ?? "";
+		const upToDate = pull.stdout.includes("Already up to date");
+		steps.push(upToDate ? "✓ omegon: already up to date" : `✓ omegon: ${summary}`);
+	}
+
+	// ── Step 2: update submodule (pi-mono fork) ──────────────────────
+	ctx.ui.notify("▸ Updating pi-mono submodule…", "info");
+	const sub = await run(
+		"git", ["submodule", "update", "--init", "--recursive"],
+		{ cwd: omegonRoot },
+	);
+	if (sub.code !== 0) {
+		steps.push(`⚠ submodule update failed: ${sub.stderr.trim().split("\n")[0]}`);
+	} else {
+		steps.push("✓ pi-mono submodule synced");
+	}
+
+	// ── Step 3: build pi-mono ────────────────────────────────────────
+	if (dryRun) {
+		steps.push("· build: skipped (dry run)");
+	} else {
+		ctx.ui.notify("▸ Building pi-mono…", "info");
+		const piMonoRoot = join(omegonRoot, "vendor/pi-mono");
+		const build = await run("npm", ["run", "build"], { cwd: piMonoRoot });
+		if (build.code !== 0) {
+			const errLine = build.stderr.trim().split("\n").filter(l => !l.startsWith("npm warn")).pop() ?? "unknown error";
+			steps.push(`✗ build failed: ${errLine}`);
+			ctx.ui.notify(`Update incomplete:\n${steps.join("\n")}`, "warning");
+			return;
+		}
+		steps.push("✓ pi-mono built");
+	}
+
+	// ── Step 4: npm install (pick up any new deps) ───────────────────
+	if (!dryRun) {
+		const inst = await run("npm", ["install", "--install-links=false"], { cwd: omegonRoot });
+		if (inst.code !== 0) {
+			steps.push(`⚠ npm install had issues (non-fatal)`);
+		}
+	}
+
+	// ── Step 5: clear cache + reload ─────────────────────────────────
+	if (dryRun) {
+		steps.push("· reload: skipped (dry run)");
+		ctx.ui.notify(`Dry run:\n${steps.join("\n")}`, "info");
+		return;
+	}
+
+	const cleared = clearJitiCache(ctx);
+	if (cleared > 0) steps.push(`✓ cleared ${cleared} cached transpilations`);
+	steps.push("✓ reloading extensions…");
+	ctx.ui.notify(steps.join("\n"), "info");
+	await ctx.reload();
+}
+
+/** Installed mode: npm install -g omegon@latest → cache clear → reload. */
+async function updateInstalledMode(
+	dryRun: boolean,
+	ctx: { ui: CommandContext["ui"]; reload: () => Promise<void> },
+): Promise<void> {
+	const PKG = "omegon";
+
+	// Check latest version on npm
+	ctx.ui.notify(`Checking latest version of ${PKG}…`, "info");
+	const view = await run("npm", ["view", PKG, "version", "--json"]);
+	if (view.code !== 0) {
+		ctx.ui.notify("Failed to query npm registry. Are you online?", "warning");
+		return;
+	}
+	const latestVersion = JSON.parse(view.stdout.trim());
+
+	// Determine installed version
+	const list = await run("npm", ["list", "-g", PKG, "--json", "--depth=0"]);
+	let installedVersion = "unknown";
+	try {
+		const data = JSON.parse(list.stdout);
+		installedVersion = data.dependencies?.[PKG]?.version ?? "unknown";
+	} catch { /* ignore */ }
+
+	if (installedVersion === latestVersion) {
+		ctx.ui.notify(`Already on latest: ${PKG}@${latestVersion} ✅`, "info");
+		return;
+	}
+
+	ctx.ui.notify(
+		`Update available: ${installedVersion} → ${latestVersion}` +
+		(dryRun ? "\n(dry run — not installing)" : ""),
+		"info"
+	);
+	if (dryRun) return;
+
+	const confirmed = await ctx.ui.confirm(
+		"Update omegon?",
+		`Install ${PKG}@${latestVersion} globally via npm?\n\nThis will update pi core, extensions, themes, and skills.\nRestart pi after the update completes.`,
+	);
+	if (!confirmed) {
+		ctx.ui.notify("Update cancelled.", "info");
+		return;
+	}
+
+	ctx.ui.notify("Installing…", "info");
+	const inst = await run("npm", ["install", "-g", `${PKG}@${latestVersion}`]);
+	if (inst.code !== 0) {
+		ctx.ui.notify(`npm install failed:\n${inst.stderr}`, "warning");
+		return;
+	}
+
+	const cleared = clearJitiCache(ctx);
+	ctx.ui.notify(
+		`✅ Updated to ${PKG}@${latestVersion}.` +
+		(cleared > 0 ? `\nCleared ${cleared} cached transpilations.` : "") +
+		"\nRestart pi to use the new version (/exit, then pi).",
+		"info"
+	);
 }
 
 async function interactiveSetup(pi: ExtensionAPI, ctx: CommandContext): Promise<void> {
@@ -544,13 +621,34 @@ async function interactiveSetup(pi: ExtensionAPI, ctx: CommandContext): Promise<
 		);
 	}
 
+	// API key guidance — check if any cloud provider is configured
+	const providerReadiness = await checkAllProviders(pi);
+	const hasAnyCloudKey = providerReadiness.some(
+		(r: AuthResult) => r.status === "ok" && r.provider !== "local",
+	);
+	if (!hasAnyCloudKey) {
+		ctx.ui.notify(
+			"\n🔑 **No cloud API keys detected.**\n" +
+			"Omegon needs at least one provider key to function. The fastest options:\n" +
+			"  • Anthropic: `/secrets configure ANTHROPIC_API_KEY` (get key at console.anthropic.com)\n" +
+			"  • OpenAI: `/secrets configure OPENAI_API_KEY` (get key at platform.openai.com)\n" +
+			"  • GitHub Copilot: `/login github` (requires Copilot subscription)\n",
+			"warning"
+		);
+	}
+
 	await ensureOperatorProfile(pi, ctx);
 
 	const recheck = checkAll();
 	const stillMissing = recheck.filter((s) => !s.available && (s.dep.tier === "core" || s.dep.tier === "recommended"));
 
-	if (stillMissing.length === 0) {
+	if (stillMissing.length === 0 && hasAnyCloudKey) {
 		ctx.ui.notify("\n🎉 Setup complete! All core and recommended dependencies are available.");
+		markDone();
+	} else if (stillMissing.length === 0) {
+		ctx.ui.notify(
+			"\n✅ Dependencies installed. Configure an API key (see above) to start using Omegon.",
+		);
 		markDone();
 	} else {
 		ctx.ui.notify(

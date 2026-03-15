@@ -11,7 +11,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "../lib/shared-state.ts";
 import { listChanges, listDesignChanges } from "../openspec/spec.ts";
 import { scanDesignDocs, countAcceptanceCriteria } from "../design-tree/tree.ts";
 import {

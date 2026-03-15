@@ -2,7 +2,7 @@ import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { DashboardFooter } from "./footer.ts";
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "../lib/shared-state.ts";
 import type { DashboardState, RecoveryDashboardState } from "./types.ts";
 
 function makeTheme() {

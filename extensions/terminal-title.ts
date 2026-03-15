@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@cwilson613/pi-coding-agent";
 import { basename } from "path";
-import { DASHBOARD_UPDATE_EVENT, sharedState } from "./shared-state.ts";
+import { DASHBOARD_UPDATE_EVENT, sharedState } from "./lib/shared-state.ts";
 import type { CleaveState } from "./dashboard/types.ts";
 
 /**
@@ -65,7 +65,7 @@ export default function (pi: ExtensionAPI) {
   function render() {
     if (!ctx?.ui?.setTitle) return;
 
-    const parts: string[] = [`π ${project}`];
+    const parts: string[] = [`Ω ${project}`];
 
     // Cleave dispatch — takes priority when active
     const cleaveActive = cleaveStatus !== "idle" && cleaveStatus !== "done" && cleaveStatus !== "failed";

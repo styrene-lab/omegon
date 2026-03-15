@@ -302,3 +302,120 @@ export function sciExpanded(lines: string[], footer: string, theme: Theme): SciE
 export function sciBanner(glyph: string, label: string, lines: string[], theme: Theme): SciBanner {
 	return new SciBanner(glyph, label, lines, theme);
 }
+
+// ─── SciExitCard ─────────────────────────────────────────────────────────
+//
+//   ── ⏛ session:end ──────────────────────────────────────────────────
+//   │  main · clean              ◈ 80 nodes · 69 implemented
+//   │  📋 2 active changes       🧠 1462 facts (+3) · 94% indexed
+//   ╰──────────────────────────────────────────────────────────────────
+
+export interface ExitCardData {
+	branch?: string;
+	dirtyCount?: number;
+	designNodes?: number;
+	designImplemented?: number;
+	designDecided?: number;
+	designExploring?: number;
+	openspecActive?: string[];
+	factCount: number;
+	factDelta: number;
+	embeddingPct?: number;
+	embeddingAvailable: boolean;
+}
+
+export class SciExitCard implements SciComponent {
+	data: ExitCardData;
+	theme: Theme;
+
+	constructor(data: ExitCardData, theme: Theme) {
+		this.data = data;
+		this.theme = theme;
+	}
+
+	render(width: number): string[] {
+		const th = this.theme;
+		const d = this.data;
+		const innerW = Math.max(1, width - 4);
+
+		// Header
+		const label = ` ${th.fg("accent", "⏛")} ${th.fg("muted", "session:end")} `;
+		const labelVw = visibleWidth(label);
+		const headerFill = Math.max(0, width - labelVw - 2);
+		const header = th.fg("dim", "──") + label + th.fg("dim", "─".repeat(headerFill));
+		const pipe = th.fg("dim", "  │");
+
+		const lines: string[] = [truncateToWidth(header, width)];
+
+		// Row 1: git + design tree (two columns)
+		const gitPart = d.branch
+			? th.fg("success", d.branch) +
+				th.fg("dim", " · ") +
+				(d.dirtyCount && d.dirtyCount > 0
+					? th.fg("warning", `${d.dirtyCount} dirty`)
+					: th.fg("muted", "clean"))
+			: null;
+
+		const dtPart = d.designNodes && d.designNodes > 0
+			? th.fg("accent", "◈") + " " +
+				th.fg("muted", `${d.designNodes} nodes`) +
+				th.fg("dim", " · ") +
+				th.fg("success", `${d.designImplemented ?? 0}✓`) +
+				(d.designDecided ? th.fg("dim", " · ") + th.fg("muted", `${d.designDecided}●`) : "") +
+				(d.designExploring ? th.fg("dim", " · ") + th.fg("accent", `${d.designExploring}◐`) : "")
+			: null;
+
+		if (gitPart && dtPart) {
+			const gitVw = visibleWidth(gitPart);
+			const dtVw = visibleWidth(dtPart);
+			const gap = Math.max(2, innerW - gitVw - dtVw);
+			lines.push(truncateToWidth(pipe + " " + gitPart + " ".repeat(gap) + dtPart, width));
+		} else if (gitPart) {
+			lines.push(truncateToWidth(pipe + " " + gitPart, width));
+		} else if (dtPart) {
+			lines.push(truncateToWidth(pipe + " " + dtPart, width));
+		}
+
+		// Row 2: openspec + memory (two columns)
+		const osPart = d.openspecActive && d.openspecActive.length > 0
+			? th.fg("muted", `${d.openspecActive.length} active`) +
+				th.fg("dim", " ─ ") +
+				th.fg("muted", d.openspecActive.slice(0, 3).join(", ")) +
+				(d.openspecActive.length > 3 ? th.fg("dim", `…+${d.openspecActive.length - 3}`) : "")
+			: null;
+
+		const deltaStr = d.factDelta > 0
+			? th.fg("success", ` +${d.factDelta}`)
+			: d.factDelta < 0
+				? th.fg("warning", ` ${d.factDelta}`)
+				: "";
+		const idxStr = d.embeddingAvailable && d.embeddingPct !== undefined
+			? th.fg("dim", " · ") + th.fg("muted", `${d.embeddingPct}% indexed`)
+			: !d.embeddingAvailable
+				? th.fg("dim", " · ") + th.fg("muted", "semantic off")
+				: "";
+		const memPart = th.fg("accent", "⌗") + " " +
+			th.fg("muted", `${d.factCount} facts`) + deltaStr + idxStr;
+
+		if (osPart) {
+			const osVw = visibleWidth(osPart);
+			const memVw = visibleWidth(memPart);
+			const gap = Math.max(2, innerW - osVw - memVw);
+			lines.push(truncateToWidth(pipe + " " + osPart + " ".repeat(gap) + memPart, width));
+		} else {
+			lines.push(truncateToWidth(pipe + " " + memPart, width));
+		}
+
+		// Footer rule
+		const footerFill = Math.max(0, width - 5);
+		lines.push(th.fg("dim", "  ╰" + "─".repeat(footerFill)));
+
+		return lines;
+	}
+
+	invalidate(): void {}
+}
+
+export function sciExitCard(data: ExitCardData, theme: Theme): SciExitCard {
+	return new SciExitCard(data, theme);
+}

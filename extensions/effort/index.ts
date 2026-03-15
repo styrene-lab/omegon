@@ -23,7 +23,7 @@ import { join } from "node:path";
 import type { EffortLevel, EffortState, EffortModelTier, ThinkingLevel } from "./types.ts";
 import { EFFORT_NAMES } from "./types.ts";
 import { tierConfig, parseTierName, DEFAULT_EFFORT_LEVEL, TIER_NAMES } from "./tiers.ts";
-import { sharedState, DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
+import { sharedState, DASHBOARD_UPDATE_EVENT } from "../lib/shared-state.ts";
 import {
   resolveTier,
   getTierDisplayLabel,
@@ -37,6 +37,7 @@ import {
 } from "../lib/model-routing.ts";
 import { readLastUsedModel, writeLastUsedModel } from "../lib/model-preferences.ts";
 import { readOperatorProfile, loadOperatorRuntimeState, toCapabilityProfile, toCapabilityRuntimeState } from "../lib/operator-profile.ts";
+import { PROVIDER_ENV_VARS, getProviderRemediationHint } from "../lib/provider-env.ts";
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -250,7 +251,25 @@ export default function (pi: ExtensionAPI) {
     // current startup model rather than warning about an unusable session when
     // a working driver is already present.
     const restoredModel = await restoreLastUsedModel(pi, ctx);
-    const switchedDriver = restoredModel ? null : await switchDriverModel(pi, ctx, state.driver);
+    let switchedDriver = restoredModel ? null : await switchDriverModel(pi, ctx, state.driver);
+
+    // Degradation cascade: if the preferred tier failed, try adjacent tiers
+    // before settling on whatever pi defaulted to (which may be deprecated).
+    // Order: victory→gloriana→retribution, gloriana→victory, retribution→victory.
+    if (!restoredModel && !switchedDriver) {
+      const DEGRADATION_CASCADE: Record<string, ModelTier[]> = {
+        victory: ["gloriana", "retribution"],
+        gloriana: ["victory"],
+        retribution: ["victory"],
+        local: [],
+      };
+      const fallbacks = DEGRADATION_CASCADE[state.driver] ?? [];
+      for (const fallbackTier of fallbacks) {
+        switchedDriver = await switchDriverModel(pi, ctx, fallbackTier);
+        if (switchedDriver) break;
+      }
+    }
+
     const retainedModel = !restoredModel && !switchedDriver && ctx.model ? ctx.model : null;
 
     // Set thinking level, respecting candidate ceilings when the effort-driven
@@ -262,8 +281,11 @@ export default function (pi: ExtensionAPI) {
         : state.thinking;
     pi.setThinkingLevel(effectiveThinking as any);
 
-    // Notify operator
+    // Notify operator — suppress the "no model" warning during first-run
+    // (bootstrap handles consolidated guidance), but always show when a model
+    // is resolved so the operator knows what's driving their session.
     const icon = TIER_ICONS[state.level];
+    const hasModel = !!(restoredModel || switchedDriver || retainedModel);
     const modelNote = restoredModel
       ? ` → restored ${restoredModel.provider}/${restoredModel.id}`
       : switchedDriver
@@ -271,10 +293,12 @@ export default function (pi: ExtensionAPI) {
         : retainedModel
           ? ` → kept ${retainedModel.provider}/${retainedModel.id} (preferred ${state.driver} unavailable)`
           : " (driver model unavailable)";
-    ctx.ui.notify(
-      `${icon} Effort: ${state.name} (${state.driver}/${effectiveThinking})${modelNote}`,
-      restoredModel || switchedDriver || retainedModel ? "info" : "warning",
-    );
+    if (hasModel || !sharedState.bootstrapPending) {
+      ctx.ui.notify(
+        `${icon} Effort: ${state.name} (${state.driver}/${effectiveThinking})${modelNote}`,
+        hasModel ? "info" : "warning",
+      );
+    }
 
     // Provider summary — show what tiers are available
     try {
@@ -283,8 +307,8 @@ export default function (pi: ExtensionAPI) {
       const policy = sharedState.routingPolicy ?? getDefaultPolicy();
       const summary = buildProviderSummary(allModels, viable, policy);
 
-      if (summary.level === 0) {
-        ctx.ui.notify("⚠ No providers configured. Run /bootstrap to set up API keys.", "warning");
+      if (summary.level === 0 && !sharedState.bootstrapPending) {
+        ctx.ui.notify("⚠ No providers configured. Run /bootstrap or /providers for setup hints.", "warning");
       } else if (summary.level < 3) {
         const parts: string[] = [];
         for (const t of summary.tiers) {
@@ -345,7 +369,28 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      lines.push("");
+      // Remediation hints for unconfigured providers that could improve coverage
+      const impairedTiers = summary.tiers.filter(t => t.status === "unavailable" || t.status === "degraded");
+      if (impairedTiers.length > 0 && summary.unauthProviders.length > 0) {
+        const hintLines: string[] = [];
+        const shown = new Set<string>();
+        for (const provider of summary.unauthProviders) {
+          if (shown.size >= 5) break;
+          const hint = getProviderRemediationHint(provider);
+          if (hint && !shown.has(provider)) {
+            shown.add(provider);
+            const entry = PROVIDER_ENV_VARS[provider];
+            const desc = entry?.description ?? provider;
+            hintLines.push(`  ${provider} (${desc}): ${hint}`);
+          }
+        }
+        if (hintLines.length > 0) {
+          lines.push("**To configure providers:**");
+          lines.push(...hintLines);
+          lines.push("");
+        }
+      }
+
       lines.push(`**Headline:** ${summary.headline}`);
 
       pi.sendMessage({

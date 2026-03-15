@@ -161,17 +161,9 @@ export default function (pi: ExtensionAPI) {
       syncKittyTheme(() => {}); // silent in non-UI mode (e.g. pi -p children)
     }
 
-    // --- Terminal tab title branding ---
-    // Replace the core π symbol with Ω in the terminal tab title.
-    // This fires after the core title is set, so it overwrites it.
-    if (ctx.hasUI) {
-      const sessionName = ctx.sessionManager.getSessionName();
-      const cwdBasename = path.basename(ctx.cwd);
-      const title = sessionName
-        ? `Ω - ${sessionName} - ${cwdBasename}`
-        : `Ω - ${cwdBasename}`;
-      ctx.ui.setTitle(title);
-    }
+    // Terminal title is owned entirely by extensions/terminal-title.ts.
+    // Do NOT set title here — it creates a startup flash before the dynamic
+    // title takes over, and the branding prefix was inconsistent (Ω here vs π there).
 
     // --- Theme default ---
     try {

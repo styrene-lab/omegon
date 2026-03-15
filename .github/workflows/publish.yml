@@ -15,6 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
@@ -66,8 +67,15 @@ jobs:
             git push origin --tags
           fi
 
+      - name: Publish pi-mono fork packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bash scripts/publish-pi-mono.sh
+
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Publish
+      - name: Publish omegon
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance

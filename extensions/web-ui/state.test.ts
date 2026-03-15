@@ -9,7 +9,7 @@ import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "../lib/shared-state.ts";
 import { buildControlPlaneState, buildSlice } from "./state.ts";
 import { SCHEMA_VERSION } from "./types.ts";
 

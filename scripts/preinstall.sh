@@ -32,3 +32,19 @@ for pkg in @cwilson613/pi-coding-agent @mariozechner/pi-coding-agent; do
     npm uninstall -g "$pkg" 2>/dev/null || true
   fi
 done
+
+# Handle self-update: if omegon is already installed, its 'pi' and 'omegon'
+# bin links conflict with the new installation. Remove stale links so npm
+# can recreate them cleanly (avoids EEXIST during `pi update`).
+if npm ls -g omegon --depth=0 >/dev/null 2>&1; then
+  prefix="$(npm prefix -g 2>/dev/null)"
+  for bin in pi omegon; do
+    link="$prefix/bin/$bin"
+    if [ -L "$link" ]; then
+      target="$(readlink "$link" 2>/dev/null || true)"
+      case "$target" in
+        *omegon*) rm -f "$link" 2>/dev/null || true ;;
+      esac
+    fi
+  done
+fi

@@ -166,61 +166,19 @@ Multiple Omega instances opening ~/.pi/memory/global.db simultaneously (differen
 **Status:** decided
 **Rationale:** Multiple Omega instances (one per project) share ~/.pi/memory/global.db. If two instances start simultaneously and both find schema version < expected, both attempt migrations — second one fails or corrupts. Fix: acquire advisory fcntl file lock on ~/.pi/memory/global.lock before checking PRAGMA user_version. Released after migration completes. Hold time is milliseconds. Rust: fs2::FileExt::lock_exclusive(). Standard POSIX semantics, works across processes.
 
+### Decision: Hybrid FTS5+embedding retrieval via Reciprocal Rank Fusion
+
+**Status:** decided
+**Rationale:** Neither FTS5 nor embeddings alone is sufficient. FTS5 has 100% coverage, zero latency, and catches identifiers — but returns 0 results for paraphrased queries (AND mode) or low-precision noise (OR mode). Embeddings catch semantic similarity — but have 73% coverage (broken indexer left 562 facts invisible for 5 days), ~80ms latency, and mediocre quality on short factual text (278 chars avg) with a 0.6B model. RRF merge (k=60) boosts facts appearing in both lists and degrades to FTS5-only when embeddings are unavailable — no codepath split needed.
+
+### Decision: Unified 6-tier priority pipeline replaces dual bulk/semantic injection
+
+**Status:** decided
+**Rationale:** The old semantic mode injected ALL Decisions (315 facts, 143K chars, ~36K tokens) because the 'load all Decisions' design was written when there were ~20. The length<30 cap only gated semantic hits, not core facts. Bulk mode capped at 50 facts but had no query relevance. The unified pipeline fixes both: 6 tiers (WM → Decisions top-8 → Arch top-8 → hybrid search → structural fill → recency fill) with a character budget gate (15% of context, floor 4K, ceiling 16K). Priority ordering means highest-value facts always survive budget pressure. When embeddings are down, T4 degrades to FTS5-only — no separate codepath.
+
 ## Open Questions
 
 *No open questions.*
-
-## Acceptance Criteria
-
-### Scenarios
-
-#### All original open questions resolved with decided decisions
-Given the omega-memory-backend node was created with 2 open questions (JSONL format compat, vector store strategy)
-When design analysis completes
-Then each question is removed and replaced by a decided decision with quantitative rationale
-
-#### TS preparatory fixes implemented and type-checked
-Given 3 correctness failures require schema changes (decay_profile, Lamport version, embedding_metadata)
-When schema v3 migration is written
-Then `npm run typecheck` passes with zero errors
-And existing facts receive safe defaults (decay_profile='standard', version=0, last_accessed=NULL)
-And new mutations (store, reinforce, archive, supersede) increment the Lamport clock via MAX(version)+1
-
-#### Wire protocol contract defined
-Given the memory system has two separable concerns (storage engine vs. tool registration)
-When the TS/Rust boundary is defined
-Then api-types.ts exists with typed request/response interfaces for all /api/memory/* endpoints
-And field names use snake_case matching Rust serde conventions
-And every FactRecord includes version (Lamport), decay_profile, and last_accessed fields
-
-#### Pure computation core is dependency-free
-Given computeConfidence, cosineSimilarity, vectorToBlob, contentHash are the Rust port targets
-When core.ts is extracted
-Then the module has zero imports from factstore, index, pi API, or Node builtins
-And factstore.ts and embeddings.ts delegate to core.ts (no duplicated implementations)
-
-#### Vector store strategy justified quantitatively
-Given three vector store options were evaluated (SQLite BLOB, sqlite-vec, HNSW)
-When scan time is computed against embedding generation latency
-Then the decision records concrete numbers (scan time at current scale, break-even fact count)
-And the composite scoring function requirement (similarity × decay-adjusted confidence) is addressed as a disqualifier for HNSW/sqlite-vec
-
-### Falsifiability
-
-- If any open question remains unresolved, the node cannot be decided
-- If api-types.ts is missing or incomplete (fewer than 10 endpoint types), the wire protocol is not defined
-- If schema v3 migration fails to add decay_profile, version, or last_accessed columns, the correctness fixes are incomplete
-- If semanticSearch still uses the store-wide decay profile instead of per-fact decay_profile, the wrong-profile bug persists
-- If storeFact/reinforceFact/archiveFact do not increment the Lamport clock, git-sync conflict resolution remains broken
-
-### Constraints
-
-- JSONL format must remain backward-compatible — new fields additive with defaults on import
-- Lamport version is MAX(version)+1 per mutation — never wall-clock
-- Per-fact decay_profile must be used at read-time, not the store-wide default
-- Dimension mismatch must produce a logged warning, not a silent skip
-- embedding_metadata table must be populated on first storeFactVector call
-- cosine_similarity in Rust must produce bit-identical results to TS for same inputs
 
 ## Implementation Notes
 
@@ -253,3 +211,13 @@ And the composite scoring function requirement (similarity × decay-adjusted con
 - Dimension mismatch must produce a logged warning, not a silent skip
 - Per-fact decay_profile must be used at read-time, not store-wide default
 - embedding_metadata table must be populated on first storeFactVector call
+
+## Acceptance Criteria
+
+### Falsifiability
+
+- This decision is wrong if: If any open question remains unresolved, the node cannot be decided
+- This decision is wrong if: If api-types.ts is missing or incomplete (fewer than 10 endpoint types), the wire protocol is not defined
+- This decision is wrong if: If schema v3 migration fails to add decay_profile, version, or last_accessed columns, the correctness fixes are incomplete
+- This decision is wrong if: If semanticSearch still uses the store-wide decay profile instead of per-fact decay_profile, the wrong-profile bug persists
+- This decision is wrong if: If storeFact/reinforceFact/archiveFact do not increment the Lamport clock, git-sync conflict resolution remains broken

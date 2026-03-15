@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { startWebUIServer, type WebUIServer } from "./server.ts";
 import { _setServer, _setSpawnFn, _getServer } from "./index.ts";
 import { buildControlPlaneState } from "./state.ts";
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "../lib/shared-state.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");

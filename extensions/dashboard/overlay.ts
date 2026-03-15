@@ -21,7 +21,7 @@ import type { ExtensionContext } from "@cwilson613/pi-coding-agent";
 import type { Theme } from "@cwilson613/pi-coding-agent";
 import type { TUI } from "@cwilson613/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@cwilson613/pi-tui";
-import { DASHBOARD_UPDATE_EVENT, sharedState } from "../shared-state.ts";
+import { DASHBOARD_UPDATE_EVENT, sharedState } from "../lib/shared-state.ts";
 import {
   TABS,
   MAX_CONTENT_LINES,

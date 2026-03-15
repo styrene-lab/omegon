@@ -22,8 +22,8 @@ import type { ExtensionAPI, ExtensionContext } from "@cwilson613/pi-coding-agent
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "../lib/typebox-helpers.ts";
 import { Text } from "@cwilson613/pi-tui";
-import { sciCall, sciLoading, sciOk, sciErr, sciExpanded } from "../sci-ui.ts";
-import { sciBanner } from "../sci-ui.ts";
+import { sciCall, sciLoading, sciOk, sciErr, sciExpanded } from "../lib/sci-ui.ts";
+import { sciBanner } from "../lib/sci-ui.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getSharedBridge, buildSlashCommandResult, type BridgedSlashCommand, type SlashCommandExecutionContext } from "../lib/slash-command-bridge.ts";
@@ -63,7 +63,7 @@ import {
 import { scanDesignDocs } from "../design-tree/tree.ts";
 import { emitDesignTreeState } from "../design-tree/dashboard-state.ts";
 import { emitArchiveCandidates, emitReconcileCandidates } from "./lifecycle-emitter.ts";
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "../lib/shared-state.ts";
 
 interface AssessmentState {
 	record: AssessmentRecord | null;

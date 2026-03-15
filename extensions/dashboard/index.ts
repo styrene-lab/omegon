@@ -16,12 +16,12 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@cwilson613/pi-coding-agent";
 import type { OverlayHandle } from "@cwilson613/pi-tui";
-import { DASHBOARD_UPDATE_EVENT } from "../shared-state.ts";
+import { DASHBOARD_UPDATE_EVENT } from "../lib/shared-state.ts";
 import { getSharedBridge, buildSlashCommandResult } from "../lib/slash-command-bridge.ts";
 import { DashboardFooter } from "./footer.ts";
 import { DashboardOverlay, showDashboardOverlay } from "./overlay.ts";
 import type { DashboardState, DashboardMode } from "./types.ts";
-import { debug } from "../debug.ts";
+import { debug } from "../lib/debug.ts";
 
 /** Valid /dashboard subcommands for tab completion (legacy) */
 const DASHBOARD_SUBCOMMANDS = ["compact", "raised", "panel", "focus", "open"];

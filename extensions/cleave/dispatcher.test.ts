@@ -534,7 +534,7 @@ describe("LARGE_RUN_THRESHOLD", () => {
 // pre-failed children so dispatch waves complete immediately without spawning.
 // ────────────────────────────────────────────────────────────────────────────
 
-import { sharedState } from "../shared-state.ts";
+import { sharedState } from "../lib/shared-state.ts";
 import type { CleaveState, ChildState } from "./types.ts";
 
 /** Build a minimal CleaveState with N pre-failed children for test isolation. */

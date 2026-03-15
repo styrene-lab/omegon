@@ -1,7 +1,7 @@
 {
 	"name": "omegon",
 	"version": "0.6.3",
-	"description": "Omegon — an opinionated distribution of pi (by Mario Zechner) with extensions for lifecycle management, memory, orchestration, and visualization",
+	"description": "Omegon \u2014 an opinionated distribution of pi (by Mario Zechner) with extensions for lifecycle management, memory, orchestration, and visualization",
 	"bin": {
 		"omegon": "bin/pi.mjs",
 		"pi": "bin/pi.mjs"
@@ -72,9 +72,10 @@
 		]
 	},
 	"dependencies": {
-		"@cwilson613/pi-coding-agent": "^0.57.1-cwilson613.2",
-		"@cwilson613/pi-ai": "^0.57.1-cwilson613.2",
-		"@cwilson613/pi-tui": "^0.57.1-cwilson613.2",
+		"@cwilson613/pi-coding-agent": "file:./vendor/pi-mono/packages/coding-agent",
+		"@cwilson613/pi-agent-core": "file:./vendor/pi-mono/packages/agent",
+		"@cwilson613/pi-ai": "file:./vendor/pi-mono/packages/ai",
+		"@cwilson613/pi-tui": "file:./vendor/pi-mono/packages/tui",
 		"@modelcontextprotocol/sdk": "^1.12.1",
 		"@resvg/resvg-js": "^2.6.2",
 		"@sinclair/typebox": "^0.34.48",

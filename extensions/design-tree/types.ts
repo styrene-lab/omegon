@@ -4,13 +4,14 @@
 
 // ─── Node Status ─────────────────────────────────────────────────────────────
 
-export type NodeStatus = "seed" | "exploring" | "decided" | "implementing" | "implemented" | "blocked" | "deferred";
+export type NodeStatus = "seed" | "exploring" | "resolved" | "decided" | "implementing" | "implemented" | "blocked" | "deferred";
 
-export const VALID_STATUSES: NodeStatus[] = ["seed", "exploring", "decided", "implementing", "implemented", "blocked", "deferred"];
+export const VALID_STATUSES: NodeStatus[] = ["seed", "exploring", "resolved", "decided", "implementing", "implemented", "blocked", "deferred"];
 
 export const STATUS_ICONS: Record<NodeStatus, string> = {
 	seed: "◌",
 	exploring: "◐",
+	resolved: "◉",
 	decided: "●",
 	implementing: "⚙",
 	implemented: "✓",
@@ -21,6 +22,7 @@ export const STATUS_ICONS: Record<NodeStatus, string> = {
 export const STATUS_COLORS: Record<NodeStatus, string> = {
 	seed: "muted",
 	exploring: "accent",
+	resolved: "success",
 	decided: "success",
 	implementing: "accent",
 	implemented: "success",

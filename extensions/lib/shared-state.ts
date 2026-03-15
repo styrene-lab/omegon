@@ -12,13 +12,13 @@ import type {
   OpenSpecDashboardState,
   CleaveState,
   RecoveryDashboardState,
-} from "./dashboard/types.ts";
+} from "../dashboard/types.ts";
 
-import type { EffortState } from "./effort/types.ts";
-import type { ProviderRoutingPolicy } from "./lib/model-routing.ts";
-import type { MemoryInjectionMetrics } from "./project-memory/injection-metrics.ts";
-import type { LifecycleMemoryMessage } from "./project-memory/types.ts";
-import { getDefaultPolicy } from "./lib/model-routing.ts";
+import type { EffortState } from "../effort/types.ts";
+import type { ProviderRoutingPolicy } from "./model-routing.ts";
+import type { MemoryInjectionMetrics } from "../project-memory/injection-metrics.ts";
+import type { LifecycleMemoryMessage } from "../project-memory/types.ts";
+import { getDefaultPolicy } from "./model-routing.ts";
 
 export type RecoveryFailureClassification =
   | "transient_server_error"
@@ -68,10 +68,10 @@ export type {
   CleaveStatus,
   DashboardMode,
   DashboardState,
-} from "./dashboard/types.ts";
+} from "../dashboard/types.ts";
 
 // Re-export routing types for consumer convenience
-export type { ProviderRoutingPolicy, ResolvedTierModel, ModelTier, ProviderName } from "./lib/model-routing.ts";
+export type { ProviderRoutingPolicy, ResolvedTierModel, ModelTier, ProviderName } from "./model-routing.ts";
 
 // Re-export effort types for consumer convenience
 export type {
@@ -81,7 +81,7 @@ export type {
   EffortModelTier,
   EffortName,
   ThinkingLevel,
-} from "./effort/types.ts";
+} from "../effort/types.ts";
 
 /** Event channel fired by producers after writing dashboard state. */
 export const DASHBOARD_UPDATE_EVENT = "dashboard:update" as const;
@@ -131,6 +131,10 @@ interface SharedState {
 
   /** Per-request retry ledger for bounded recovery decisions across core and extension-driven retries. */
   recoveryRetryCounts?: Record<string, number>;
+
+  /** Set by bootstrap when first-run is detected. Other extensions should suppress
+   *  redundant "no providers" warnings when this is true — bootstrap handles guidance. */
+  bootstrapPending?: boolean;
 }
 
 // Initialize once on first import, reuse thereafter via global symbol.
