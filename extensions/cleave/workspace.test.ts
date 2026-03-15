@@ -5,7 +5,7 @@
 
 import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
-import { matchScenariosToChildren, generateTaskFile, buildSkillSection, buildGuardrailSection } from "./workspace.ts";
+import { matchScenariosToChildren, generateTaskFile, buildSkillSection, buildGuardrailSection, classifyDirtyPaths } from "./workspace.ts";
 import type { SkillDirective } from "./workspace.ts";
 import { buildChildPrompt, resolveExecuteModel, classifyByScope, applyEffortFloor } from "./dispatcher.ts";
 import type { ChildPlan, ModelTier } from "./types.ts";
@@ -203,6 +203,15 @@ describe("matchScenariosToChildren", () => {
 });
 
 // ─── generateTaskFile — Specialist Skills section ───────────────────────────
+
+describe("classifyDirtyPaths", () => {
+	it("treats operator-profile runtime churn as volatile", () => {
+		const result = classifyDirtyPaths([".pi/runtime/operator-profile.json"]);
+		assert.equal(result.volatile.length, 1);
+		assert.equal(result.volatile[0]?.path, ".pi/runtime/operator-profile.json");
+		assert.equal(result.checkpointFiles.length, 0);
+	});
+});
 
 describe("generateTaskFile", () => {
 	it("includes Specialist Skills section when skills are provided", () => {

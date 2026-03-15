@@ -598,7 +598,10 @@ export interface DirtyTreeClassificationOptions {
 	volatileAllowlist?: string[];
 }
 
-export const DEFAULT_VOLATILE_ALLOWLIST = [".pi/memory/facts.jsonl"];
+export const DEFAULT_VOLATILE_ALLOWLIST = [
+	".pi/memory/facts.jsonl",
+	".pi/runtime/operator-profile.json",
+];
 
 /**
  * Classify dirty-tree paths for preflight UX.

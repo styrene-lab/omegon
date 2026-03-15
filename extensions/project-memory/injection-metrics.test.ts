@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  computeMemoryBudgetPolicy,
   createMemoryInjectionMetrics,
   estimateTokensFromChars,
   formatMemoryInjectionMetrics,
@@ -81,5 +82,32 @@ describe("memory injection metrics", () => {
   it("formats undefined metrics for memory stats output", () => {
     const lines = formatMemoryInjectionMetrics(undefined);
     assert.deepEqual(lines, ["Last injection: none recorded this session"]);
+  });
+
+  it("computes a tighter low-signal budget policy", () => {
+    const policy = computeMemoryBudgetPolicy({
+      usedTokens: 12000,
+      usedPercent: 20,
+      userText: "help",
+    });
+
+    assert.deepEqual(policy, {
+      maxChars: 8000,
+      includeStructuralFill: false,
+      includeGlobalFacts: false,
+      includeEpisode: false,
+    });
+  });
+
+  it("enables richer additions only for higher-signal turns", () => {
+    const policy = computeMemoryBudgetPolicy({
+      usedTokens: 6000,
+      usedPercent: 20,
+      userText: "Assess the current memory injection behavior against recent changes and compare it with cross-project patterns.",
+    });
+
+    assert.equal(policy.includeStructuralFill, true);
+    assert.equal(policy.includeGlobalFacts, true);
+    assert.equal(policy.includeEpisode, true);
   });
 });

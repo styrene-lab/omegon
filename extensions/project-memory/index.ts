@@ -55,6 +55,7 @@ import { DEFAULT_CONFIG, type MemoryConfig, type LifecycleMemoryCandidate } from
 import { sanitizeCompactionText, shouldInterceptCompaction } from "./compaction-policy.ts";
 import { writeJsonlIfChanged } from "./jsonl-io.ts";
 import {
+  computeMemoryBudgetPolicy,
   createMemoryInjectionMetrics,
   estimateTokensFromChars,
   formatMemoryInjectionMetrics,
@@ -1501,17 +1502,13 @@ export default function (pi: ExtensionAPI) {
     const usage = ctx.getContextUsage();
 
     // Budget: reserve space for other context (design-tree, system prompt, etc.)
-    // Use 15% of total context as memory budget, with a floor and ceiling.
-    // Estimate total tokens from current usage: tokens / (percent/100).
-    const usedTokens = usage?.tokens ?? 0;
-    const usedPercent = usage?.percent ?? 0;
-    const estimatedTotalTokens = usedPercent > 0
-      ? Math.round(usedTokens / (usedPercent / 100))
-      : 200_000; // safe default
-    const MAX_MEMORY_CHARS = Math.min(
-      Math.max(Math.round(estimatedTotalTokens * 0.15 * 4), 4_000),  // 15% of context, min 4K chars
-      16_000,  // absolute ceiling
-    );
+    // Routine turns should carry a much smaller memory payload by default.
+    const budgetPolicy = computeMemoryBudgetPolicy({
+      usedTokens: usage?.tokens,
+      usedPercent: usage?.percent,
+      userText,
+    });
+    const MAX_MEMORY_CHARS = budgetPolicy.maxChars;
 
     const allFacts = store.getActiveFacts(mind);
     const injectedIds = new Set<string>();
@@ -1578,22 +1575,24 @@ export default function (pi: ExtensionAPI) {
     // Ensures every section has representation even without a matching query.
     // This is what bulk mode got right that old semantic mode missed.
     const FILL_SECTIONS = ["Constraints", "Known Issues", "Patterns & Conventions", "Specs", "Recent Work"] as const;
-    for (const section of FILL_SECTIONS) {
-      if (currentChars >= MAX_MEMORY_CHARS) break;
-      const sectionFacts = allFacts
-        .filter(f => f.section === section)
-        .sort((a, b) => b.confidence - a.confidence)
-        .slice(0, 3);
-      for (const f of sectionFacts) {
-        if (!tryAdd(f)) break;
+    if (budgetPolicy.includeStructuralFill) {
+      for (const section of FILL_SECTIONS) {
+        if (currentChars >= MAX_MEMORY_CHARS) break;
+        const sectionFacts = allFacts
+          .filter(f => f.section === section)
+          .sort((a, b) => b.confidence - a.confidence)
+          .slice(0, 2);
+        for (const f of sectionFacts) {
+          if (!tryAdd(f)) break;
+        }
       }
     }
 
     // --- Tier 6: Recency fill — most recently reinforced not yet included ---
-    if (currentChars < MAX_MEMORY_CHARS) {
+    if (budgetPolicy.includeStructuralFill && currentChars < MAX_MEMORY_CHARS) {
       const recentFacts = [...allFacts]
         .sort((a, b) => new Date(b.last_reinforced).getTime() - new Date(a.last_reinforced).getTime())
-        .slice(0, 20);
+        .slice(0, 12);
       for (const f of recentFacts) {
         if (!tryAdd(f)) break;
       }
@@ -1605,7 +1604,7 @@ export default function (pi: ExtensionAPI) {
     // --- Global knowledge: semantic-gated, only when query is available ---
     let globalSection = "";
     let injectedGlobalFactCount = 0;
-    if (globalStore && userText.length > 10) {
+    if (budgetPolicy.includeGlobalFacts && globalStore && userText.length > 10) {
       const globalMind = globalStore.getActiveMind() ?? "default";
       const globalFactCount = globalStore.countActiveFacts(globalMind);
       if (globalFactCount > 0) {
@@ -1633,7 +1632,7 @@ export default function (pi: ExtensionAPI) {
     let episodeSection = "";
     let injectedEpisodeCount = 0;
     const episodeCount = store.countEpisodes(mind);
-    if (episodeCount > 0) {
+    if (budgetPolicy.includeEpisode && episodeCount > 0) {
       const recentEpisodes = store.getEpisodes(mind, 1);
       if (recentEpisodes.length > 0) {
         injectedEpisodeCount = recentEpisodes.length;

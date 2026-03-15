@@ -17,6 +17,38 @@ export interface MemoryInjectionMetrics {
   estimatedVsObservedDelta?: number | null;
 }
 
+export interface MemoryBudgetPolicy {
+  maxChars: number;
+  includeStructuralFill: boolean;
+  includeGlobalFacts: boolean;
+  includeEpisode: boolean;
+}
+
+export function computeMemoryBudgetPolicy(input: {
+  usedTokens?: number | null;
+  usedPercent?: number | null;
+  userText?: string;
+}): MemoryBudgetPolicy {
+  const usedTokens = input.usedTokens ?? 0;
+  const usedPercent = input.usedPercent ?? 0;
+  const userText = input.userText ?? "";
+  const estimatedTotalTokens = usedPercent > 0
+    ? Math.round(usedTokens / (usedPercent / 100))
+    : 200_000;
+  const maxChars = Math.min(
+    Math.max(Math.round(estimatedTotalTokens * 0.08 * 4), 2_000),
+    8_000,
+  );
+  const trimmed = userText.trim();
+  const signalLength = trimmed.length;
+  const signalWords = trimmed.split(/\s+/).filter(Boolean).length;
+  const includeStructuralFill = signalLength >= 24 || signalWords >= 5;
+  const includeGlobalFacts = signalLength >= 48 || signalWords >= 8;
+  const includeEpisode = signalLength >= 64 || signalWords >= 10;
+
+  return { maxChars, includeStructuralFill, includeGlobalFacts, includeEpisode };
+}
+
 export function estimateTokensFromChars(content: string): number {
   return Math.round(content.length / 4);
 }

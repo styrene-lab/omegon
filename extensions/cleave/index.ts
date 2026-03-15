@@ -20,6 +20,8 @@ import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "
 import { Text } from "@styrene-lab/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { spawn, execFile } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 
@@ -30,12 +32,11 @@ import { emitOpenSpecState } from "../openspec/dashboard-state.ts";
 import { getSharedBridge, buildSlashCommandResult } from "../lib/slash-command-bridge.ts";
 import { buildAssessBridgeResult } from "./bridge.ts";
 import { resolveOmegonSubprocess } from "../lib/omegon-subprocess.ts";
+import { scanDesignDocs, getNodeSections } from "../design-tree/tree.ts";
 import {
 	assessDirective,
 	PATTERNS,
 	runDesignStructuralCheck,
-	buildDesignAssessmentPrompt,
-	parseDesignAssessmentFindings,
 	type AssessCompletion,
 	type AssessEffect,
 	type AssessLifecycleHint,
@@ -1422,119 +1423,6 @@ async function executeAssessComplexity(args: string): Promise<AssessStructuredRe
 	});
 }
 
-async function runDesignAssessmentSubprocess(
-	repoPath: string,
-	nodeId: string,
-	modelId?: string,
-): Promise<{ findings: DesignAssessmentFinding[]; nodeTitle: string; structuralPass: boolean }> {
-	const prompt = [
-		"You are performing a read-only design-tree node assessment.",
-		"Operate in read-only plan mode. Never call edit, write, or any workspace-mutating command.",
-		"",
-		`## Task`,
-		"",
-		`1. Call design_tree with action='node', node_id='${nodeId}' to load the node.`,
-		"2. Run the structural pre-check:",
-		"   - open_questions must be empty — if not, emit a structural finding for each",
-		"   - decisions must have at least one entry — if not, emit a structural finding",
-		"   - acceptanceCriteria must have at least one scenario, falsifiability, or constraint — if not, emit a structural finding",
-		"3. If structural pre-check fails, output ONLY the JSON result below and stop.",
-		"4. Otherwise, evaluate each acceptance criterion against the document body:",
-		"   - For each Scenario (Given/When/Then): does the document body address the Then clause?",
-		"   - For each Falsifiability condition: is it addressed, ruled out, or acknowledged as a known risk?",
-		"   - For each Constraint: is it satisfied by the document content?",
-		"",
-		"## Output Format",
-		"",
-		"Output ONLY a single JSON object (no prose, no markdown, no code blocks):",
-		"{",
-		'  "nodeTitle": "<title from node>",',
-		'  "structuralPass": true|false,',
-		'  "findings": [',
-		'    {"type":"scenario"|"falsifiability"|"constraint"|"structural","index":N,"pass":true|false,"finding":"<reason>"}',
-		"  ]",
-		"}",
-	].join("\n");
-
-	const omegon = resolveOmegonSubprocess();
-	const args = [...omegon.argvPrefix, "--mode", "json", "--plan", "-p", "--no-session"];
-	if (modelId) args.push("--model", modelId);
-
-	return await new Promise<{ findings: DesignAssessmentFinding[]; nodeTitle: string; structuralPass: boolean }>(
-		(resolve, reject) => {
-			const proc = spawn(omegon.command, args, {
-				cwd: repoPath,
-				shell: false,
-				stdio: ["pipe", "pipe", "pipe"],
-				env: { ...process.env, PI_CHILD: "1", TERM: process.env.TERM ?? "dumb" },
-			});
-			let buffer = "";
-			let assistantText = "";
-			let settled = false;
-			const settleReject = (error: Error) => {
-				if (settled) return;
-				settled = true;
-				clearTimeout(timer);
-				reject(error);
-			};
-			const settleResolve = (value: { findings: DesignAssessmentFinding[]; nodeTitle: string; structuralPass: boolean }) => {
-				if (settled) return;
-				settled = true;
-				clearTimeout(timer);
-				resolve(value);
-			};
-			const timer = setTimeout(() => {
-				proc.kill("SIGTERM");
-				setTimeout(() => { if (!proc.killed) proc.kill("SIGKILL"); }, 5_000);
-				settleReject(new Error(`Timed out after 120s while assessing design node ${nodeId}.`));
-			}, 120_000);
-			const processLine = (line: string) => {
-				if (!line.trim()) return;
-				let event: unknown;
-				try { event = JSON.parse(line); } catch { return; }
-				if (!event || typeof event !== "object") return;
-				const typed = event as { type?: string; message?: { role?: string; content?: unknown } };
-				if (typed.type === "message_end" && typed.message?.role === "assistant") {
-					assistantText = extractAssistantText(typed.message.content);
-				}
-			};
-			proc.stdout.on("data", (data) => {
-				buffer += (data as Buffer).toString();
-				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
-				for (const line of lines) processLine(line);
-			});
-			let stderr = "";
-			proc.stderr.on("data", (data) => { stderr += (data as Buffer).toString(); });
-			proc.on("error", (error) => settleReject(error));
-			proc.on("close", (code) => {
-				if (buffer.trim()) processLine(buffer.trim());
-				if ((code ?? 1) !== 0) {
-					settleReject(new Error(stderr.trim() || `Design assessment subprocess exited with code ${code ?? 1}.`));
-					return;
-				}
-				const jsonText = extractJsonObject(assistantText || buffer);
-				if (!jsonText) {
-					settleReject(new Error(`Design assessment subprocess did not return parseable JSON.\n${stderr}`));
-					return;
-				}
-				try {
-					const parsed = JSON.parse(jsonText) as { nodeTitle?: string; structuralPass?: boolean; findings?: DesignAssessmentFinding[] };
-					settleResolve({
-						nodeTitle: parsed.nodeTitle ?? nodeId,
-						structuralPass: parsed.structuralPass ?? true,
-						findings: Array.isArray(parsed.findings) ? parsed.findings : [],
-					});
-				} catch (err) {
-					settleReject(new Error(`Design assessment JSON was invalid: ${String(err)}`));
-				}
-			});
-			proc.stdin.write(prompt + "\n");
-			proc.stdin.end();
-		},
-	);
-}
-
 async function executeAssessDesign(
 	pi: ExtensionAPI,
 	ctx: AssessExecutionContext,
@@ -1604,23 +1492,69 @@ async function executeAssessDesign(
 	}
 
 	// Bridged / subprocess mode
-	let subResult: { findings: DesignAssessmentFinding[]; nodeTitle: string; structuralPass: boolean };
-	try {
-		subResult = await runDesignAssessmentSubprocess(cwd, nodeId, ctx.model?.id);
-	} catch (err) {
-		const msg = `Design assessment subprocess failed: ${String(err)}`;
+	// Prefer an in-process deterministic fallback so design assessment does not depend
+	// on a nested Omegon subprocess successfully loading a second extension graph.
+	const tree = scanDesignDocs(path.join(cwd, "docs"));
+	const node = tree.nodes.get(nodeId);
+	if (!node) {
+		const msg = `Design node '${nodeId}' not found under docs/.`;
 		return makeAssessResult({
 			subcommand: "design",
 			args,
 			ok: false,
 			summary: msg,
 			humanText: msg,
-			data: { reason: "subprocess_failed", nodeId },
+			data: { reason: "node_not_found", nodeId },
 			effects: [{ type: "view", content: msg }],
 		});
 	}
-
-	const { findings, nodeTitle, structuralPass } = subResult;
+	const sections = getNodeSections(node);
+	const structuralFindings = runDesignStructuralCheck(nodeId, sections);
+	const structuralPass = structuralFindings.length === 0;
+	const documentBody = fs.readFileSync(node.filePath, "utf-8").toLowerCase();
+	const normalizeCriterion = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+	const includesCriterion = (value: string) => {
+		const normalized = normalizeCriterion(value);
+		if (!normalized) return true;
+		return documentBody.includes(normalized) || normalized.split(/\s+/).filter(Boolean).every((part) => part.length < 4 || documentBody.includes(part));
+	};
+	const findings: DesignAssessmentFinding[] = [...structuralFindings];
+	if (structuralPass) {
+		sections.acceptanceCriteria.scenarios.forEach((scenario, index) => {
+			const pass = includesCriterion(scenario.then);
+			findings.push({
+				type: "scenario",
+				index,
+				pass,
+				finding: pass
+					? `Document addresses the scenario outcome: ${scenario.then}`
+					: `Document does not clearly address the scenario outcome: ${scenario.then}`,
+			});
+		});
+		sections.acceptanceCriteria.falsifiability.forEach((item, index) => {
+			const pass = includesCriterion(item.condition);
+			findings.push({
+				type: "falsifiability",
+				index,
+				pass,
+				finding: pass
+					? `Document addresses the falsifiability condition: ${item.condition}`
+					: `Document does not clearly address the falsifiability condition: ${item.condition}`,
+			});
+		});
+		sections.acceptanceCriteria.constraints.forEach((item, index) => {
+			const pass = includesCriterion(item.text);
+			findings.push({
+				type: "constraint",
+				index,
+				pass,
+				finding: pass
+					? `Document addresses the constraint: ${item.text}`
+					: `Document does not clearly address the constraint: ${item.text}`,
+			});
+		});
+	}
+	const nodeTitle = node.title;
 	const overallPass = structuralPass && findings.length > 0 && findings.every((f) => f.pass);
 
 	const result: DesignAssessmentResult = { nodeId, pass: overallPass, structuralPass, findings };

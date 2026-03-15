@@ -1,6 +1,6 @@
 {
 	"name": "omegon",
-	"version": "0.6.6",
+	"version": "0.6.7",
 	"description": "Omegon — an opinionated distribution of pi (by Mario Zechner) with extensions for lifecycle management, memory, orchestration, and visualization",
 	"bin": {
 		"omegon": "bin/omegon.mjs",
@@ -32,6 +32,9 @@
 		"url": "https://github.com/styrene-lab/omegon/issues"
 	},
 	"homepage": "https://github.com/styrene-lab/omegon#readme",
+	"engines": {
+		"node": ">=20.0.0"
+	},
 	"pi": {
 		"extensions": [
 			"./extensions/bootstrap",

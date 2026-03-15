@@ -80,9 +80,9 @@ const EXECUTE_PARAMS = Type.Object({
 export type SlashCommandBridgeExecuteParams = Static<typeof EXECUTE_PARAMS>;
 
 function toArgString(args: readonly string[] | undefined): string {
-  // Join args with spaces — executors split on whitespace to extract subcommand and rest.
-  // Individual args containing spaces are unsupported (none currently need them).
-  return (args ?? []).join(" ");
+  // Preserve token boundaries for bridged execution (including args containing spaces).
+  // Structured executors in bridge mode can parse this JSON payload deterministically.
+  return JSON.stringify([...(args ?? [])]);
 }
 
 function summarize(command: string, args: readonly string[] | undefined): string {

@@ -1,4 +1,4 @@
-# 0.6.7 stability step — memory injection budget discipline and Node runtime compatibility — Design
+# 0.6.7 stability step — memory/runtime/tooling stability hardening — Design
 
 ## Architecture Decisions
 
@@ -11,6 +11,16 @@
 
 **Status:** decided
 **Rationale:** The vendored pi-tui dependency already requires Node >=20 and uses /v Unicode regexes that are not parseable on Node 18. The stability fix is to fail early and clearly through package/startup guardrails rather than carrying a bespoke compatibility fork for unsupported runtimes in a patch release.
+
+### Decision: Make `/assess design` deterministic in-process for structural/scenario checks
+
+**Status:** decided
+**Rationale:** The subprocess path can fail before producing parseable JSON when extension loading conflicts occur. For this stability step, design assessment should run in-process against design-tree document sections so assessment remains available even when nested extension graphs are fragile.
+
+### Decision: Treat `.pi/runtime/operator-profile.json` as volatile runtime state for cleave preflight
+
+**Status:** decided
+**Rationale:** Operator profile churn is runtime-local state and should not block clean-room task dispatch. Cleave preflight should classify this path as volatile and exclude it from checkpoint gating.
 
 ## Research Context
 
@@ -25,14 +35,20 @@ Attempted `/assess design stability-step-0-6-7`, but the design-assessment subpr
 ## File Changes
 
 - `extensions/project-memory/index.ts` (modified) — Reduce default memory injection budget and gate structural/global/episode additions based on need and observed cost.
-- `extensions/project-memory/injection-metrics.ts` (modified) — Extend or clarify injection telemetry if needed to validate reduced prompt overhead.
-- `package.json` (modified) — Declare Node engine floor matching vendored runtime requirements.
+- `extensions/project-memory/injection-metrics.ts` (modified) — Add budget-policy helper used to gate low-value additive memory.
+- `extensions/cleave/index.ts` (modified) — Make `/assess design` evaluation deterministic in-process using design-tree scans/sections.
+- `extensions/cleave/workspace.ts` (modified) — Classify `.pi/runtime/operator-profile.json` as volatile in dirty-tree preflight allowlist.
+- `extensions/cleave/workspace.test.ts` (modified) — Add regression coverage for volatile operator-profile classification.
+- `.pi/.gitignore` (modified) — Ignore runtime directory artifacts.
+- `package.json` (modified) — Declare Node engine floor matching vendored runtime requirements and bump to 0.6.7.
 - `scripts/preinstall.sh` (modified) — Fail early with a clear unsupported-Node message before install/build proceeds.
 - `README.md` (modified) — Document supported Node runtime expectations for operators.
-- `vendor/pi-mono/packages/tui/src/utils.ts` (modified) — Only if a minimal upstream-compatible guard or comment is needed; avoid a compatibility fork unless forced.
+- `CHANGELOG.md` (modified) — Record 0.6.7 stability fixes.
 
 ## Constraints
 
 - 0.6.7 must reduce routine prompt bloat without removing high-priority working-memory continuity.
 - Unsupported Node versions must fail early with a clear message rather than crashing later on /v Unicode regex parsing.
 - Prefer aligning Omegon's runtime contract with vendored pi-mono requirements over introducing a Node 18 compatibility fork in a patch release.
+- 0.6.7 must restore usable `/assess design` behavior in the bridged path.
+- Volatile runtime profile churn must not block cleave dispatch preflight.

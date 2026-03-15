@@ -10,6 +10,8 @@ An opinionated distribution of [**pi**](https://github.com/badlogic/pi) — the 
 npm install -g omegon
 ```
 
+**Node requirement:** Omegon requires **Node.js 20+**. Node 18 will fail because bundled pi-tui uses modern Unicode regex features unsupported by older runtimes.
+
 This installs the canonical `omegon` command globally. A legacy `pi` alias may remain available for compatibility, but the supported lifecycle entrypoint is `omegon`. If a standalone pi package is already installed, omegon transparently takes ownership of the lifecycle boundary so startup, update, verification, and restart all stay inside Omegon control. To switch back to standalone pi at any time:
 
 ```bash

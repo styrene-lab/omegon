@@ -27,6 +27,10 @@ Project-memory currently injects a unified semantic payload on every agent turn 
 
 Attempted `/assess design stability-step-0-6-7`, but the design-assessment subprocess failed before producing JSON because the spawned Omegon process loaded duplicate extension roots and then project-memory errored with `no such column: only`. This is an assessment-tooling/runtime issue, not an unresolved design question in this node. Design intent remains clear enough to proceed with tracked implementation: tighten per-turn memory injection defaults and enforce Node 20+ explicitly.
 
+### Expanded stability scope
+
+The 0.6.7 pass is expanded to include two additional stability regressions discovered during execution: (1) `/assess design` subprocesses can load duplicate extension roots and then fail before returning parseable JSON, and (2) `/cleave` dirty-tree preflight is currently tripped by `.pi/runtime/operator-profile.json` churn, preventing child dispatch. These are now part of the release scope alongside memory injection budget discipline and Node 20+ runtime guardrails.
+
 ## Decisions
 
 ### Decision: Tighten memory injection by default and gate low-value additions
@@ -53,9 +57,14 @@ Attempted `/assess design stability-step-0-6-7`, but the design-assessment subpr
 - `scripts/preinstall.sh` (modified) — Fail early with a clear unsupported-Node message before install/build proceeds.
 - `README.md` (modified) — Document supported Node runtime expectations for operators.
 - `vendor/pi-mono/packages/tui/src/utils.ts` (modified) — Only if a minimal upstream-compatible guard or comment is needed; avoid a compatibility fork unless forced.
+- `extensions/cleave/index.ts` (modified) — Fix assess-design subprocess environment/launch behavior so it does not load duplicate extension roots and can return structured JSON reliably.
+- `extensions/cleave/workspace.ts` (modified) — Audit dirty-tree checkpoint/preflight behavior if needed to prevent runtime-only operator-profile churn from blocking cleave dispatch.
+- `.gitignore` (modified) — Ensure volatile .pi/runtime artifacts that should not gate cleave are ignored or otherwise excluded from dirty-tree preflight.
 
 ### Constraints
 
 - 0.6.7 must reduce routine prompt bloat without removing high-priority working-memory continuity.
 - Unsupported Node versions must fail early with a clear message rather than crashing later on /v Unicode regex parsing.
 - Prefer aligning Omegon's runtime contract with vendored pi-mono requirements over introducing a Node 18 compatibility fork in a patch release.
+- 0.6.7 must make `/assess design` usable again in the in-band subprocess path.
+- Volatile `.pi/runtime` churn must not block cleave dispatch or release workflow preflight.

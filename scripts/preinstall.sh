@@ -17,6 +17,16 @@
 #
 # Only acts during global installs (npm_config_global=true).
 
+node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+if [ "$node_major" -lt 20 ]; then
+  echo ""
+  echo "  omegon: Unsupported Node.js runtime detected ($(node -v 2>/dev/null || echo unknown))."
+  echo "  omegon: Omegon requires Node.js 20 or later because bundled pi-tui uses modern Unicode regex features."
+  echo "  omegon: Upgrade Node.js to 20+ and retry the install/update."
+  echo ""
+  exit 1
+fi
+
 if [ "$npm_config_global" != "true" ]; then
   exit 0
 fi
