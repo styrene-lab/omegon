@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# Build pi-mono and ensure `pi` command is linked to omegon.
-#
-# Omegon's bin/pi imports directly from vendor/pi-mono/packages/coding-agent/dist/,
-# so after building, changes are immediately live — no tarball packing or global
-# npm install needed.
+# Build pi-mono, link omegon globally, and verify the active `pi` binary still
+# resolves to Omegon. This is the authoritative dev-mode lifecycle that `/update`
+# should match up to the restart handoff boundary.
 #
 # Usage:
-#   ./scripts/install-pi.sh              # build + link
-#   ./scripts/install-pi.sh --skip-build # link only (assumes dist/ is current)
+#   ./scripts/install-pi.sh              # build + link + verify
+#   ./scripts/install-pi.sh --skip-build # link + verify only (assumes dist/ is current)
 
 set -euo pipefail
 
@@ -23,21 +21,47 @@ else
   echo "▸ Skipping build (--skip-build)"
 fi
 
+# ── Refresh deps ──────────────────────────────────────────────────────────
+echo "▸ Refreshing omegon dependencies..."
+(cd "$ROOT_DIR" && npm install --install-links=false)
+
 # ── Link ──────────────────────────────────────────────────────────────────
-# npm link creates a global symlink: `pi` → omegon/bin/pi → vendor/pi-mono
 echo "▸ Linking omegon globally..."
 (cd "$ROOT_DIR" && npm link --force 2>&1 | grep -v "^npm warn")
 
 # ── Verify ────────────────────────────────────────────────────────────────
-PI_PATH=$(which pi 2>/dev/null || echo "NOT FOUND")
+PI_PATH=$(which pi 2>/dev/null || echo "")
+if [[ -z "$PI_PATH" ]]; then
+  echo "✗ 'pi' command not found on PATH after linking"
+  exit 1
+fi
+
 PI_VERSION=$(pi --version 2>/dev/null || echo "FAILED")
+PI_REALPATH=$(python3 - <<'PY' "$PI_PATH"
+import os, sys
+print(os.path.realpath(sys.argv[1]))
+PY
+)
+PI_WHERE=$(pi --where 2>/dev/null || true)
+
 echo ""
 echo "✓ pi $PI_VERSION"
 echo "  → $PI_PATH"
+echo "  ↳ $PI_REALPATH"
 
-# Verify it points at omegon
-if readlink "$PI_PATH" 2>/dev/null | grep -q "omegon"; then
-  echo "✓ Linked to omegon"
-else
-  echo "⚠ WARNING: pi may not be linked to omegon — check: readlink $(which pi)"
+if [[ -z "$PI_WHERE" ]]; then
+  echo "✗ Active pi binary did not return Omegon runtime metadata"
+  exit 1
 fi
+
+echo "$PI_WHERE"
+
+if echo "$PI_REALPATH" | grep -q 'omegon' && echo "$PI_WHERE" | grep -q '"omegonRoot"'; then
+  echo "✓ Active pi resolves to omegon"
+else
+  echo "✗ Active pi does not appear to resolve to omegon"
+  exit 1
+fi
+
+echo ""
+echo "✓ Lifecycle complete. Restart pi to pick up the rebuilt runtime."

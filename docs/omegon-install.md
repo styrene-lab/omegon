@@ -60,7 +60,18 @@ Engineers should be able to install omegon with a single command — no git clon
 - Pros: npm install works, no submodule
 - Cons: fragile postinstall, enterprise proxy issues
 
-**Recommendation: Option A** — simplest, most standard. The @cwilson613 packages are already published. bin/pi just needs a conditional: use vendor/ if present (dev mode), otherwise use node_modules/ (installed mode).
+**Recommendation: Option A** — simplest, most standard. The @cwilson613 packages are already published. `bin/pi.mjs` uses `vendor/` only in a source checkout (dev mode) and otherwise falls back to `node_modules/` in the installed product.
+
+## Update contract
+
+Omegon is the single installed product boundary. `vendor/pi-mono` is a contributor/dev source of implementation, not a second installed product.
+
+The authoritative update path therefore must:
+- mutate the package/runtime surface (`git pull` + submodule sync + build + dependency refresh + `npm link --force` in dev mode, or `npm install -g omegon@latest` in installed mode)
+- verify the active `pi` binary still resolves to Omegon
+- stop at a deliberate restart handoff
+
+`/refresh` is intentionally narrower: it only clears transient caches and reloads extensions. It is not equivalent to `/update` after package/runtime mutation.
 
 ## Decisions
 

@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "changeName": "singular-package-update-lifecycle",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T12:17:16.503Z",
+  "summary": "Re-ran spec assessment after reconciling tasks.md; singular-package update lifecycle passes 3/3 scenarios and lifecycle artifacts are now current.",
+  "snapshot": {
+    "gitHead": "4fc94a862c3b8ecdf77952ae0b20130198d9d622",
+    "fingerprint": "ec41df4941e38c612495d8687aae30738b213feb5f63e26884638fc364ffae0a",
+    "dirty": true,
+    "scopedPaths": [
+      "README.md",
+      "bin/pi.mjs",
+      "docs/omegon-install.md",
+      "extensions/bootstrap/index.ts",
+      "scripts/install-pi.sh"
+    ],
+    "files": [
+      {
+        "path": "README.md",
+        "exists": true,
+        "size": 17263,
+        "sha256": "b7050dda5f468c351e1a49a139736a8e08090b0ae60db1cc96486ea2263bf26f"
+      },
+      {
+        "path": "bin/pi.mjs",
+        "exists": true,
+        "size": 1382,
+        "sha256": "ffbdebc9f08d66a7a9a788157787ab378ac82f578e9c88f36468ee93fd388919"
+      },
+      {
+        "path": "docs/omegon-install.md",
+        "exists": true,
+        "size": 6248,
+        "sha256": "9b977d4b1013b7d269786682efa8539f4211d08423ab979b6c4576e423aaba8d"
+      },
+      {
+        "path": "extensions/bootstrap/index.ts",
+        "exists": true,
+        "size": 37939,
+        "sha256": "8849aa198d322a1224d22a05ad78e2f1c9c771929278fc81fc9a5983a51b5858"
+      },
+      {
+        "path": "openspec/changes/singular-package-update-lifecycle/design.md",
+        "exists": true,
+        "size": 4596,
+        "sha256": "83e190267b9179fdae3802f36a8bf713514a182392f144fa4782c0896527de3d"
+      },
+      {
+        "path": "openspec/changes/singular-package-update-lifecycle/proposal.md",
+        "exists": true,
+        "size": 530,
+        "sha256": "39f7af62d98fdfb57ab69c5dc10cc8303669ea51c96103ea7ed87b7955749d4f"
+      },
+      {
+        "path": "openspec/changes/singular-package-update-lifecycle/specs/update-lifecycle.md",
+        "exists": true,
+        "size": 1505,
+        "sha256": "44f79bf39bd381d7e3b015283d32a718fbf3dec814f0eb1746c244ef6ed14dc6"
+      },
+      {
+        "path": "openspec/changes/singular-package-update-lifecycle/tasks.md",
+        "exists": true,
+        "size": 2198,
+        "sha256": "d1fd75cee4f390042134af6b75f74268820fb977fd8c7607da3d729390654054"
+      },
+      {
+        "path": "scripts/install-pi.sh",
+        "exists": true,
+        "size": 2583,
+        "sha256": "98ec28b0975c658d730e7af7730c4cee459baf189f578896397a956203e4edba"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "openspec/changes/singular-package-update-lifecycle/tasks.md"
+    ],
+    "constraints": [
+      "/update ends at a verified restart handoff rather than in-process runtime hot swap.",
+      "Both dev and installed update paths verify that the active `pi` binary still resolves to Omegon."
+    ],
+    "recommendedAction": null
+  }
+}

@@ -26,14 +26,15 @@ pi          # start pi in any project directory
 
 ### Keeping up to date
 
-| What to update | How |
-|----------------|-----|
-| **Omegon extensions** | `/update` or `pi update` (tracks `main` branch) |
-| **pi binary** | `/update-pi` — checks npm for latest `@cwilson613/pi-coding-agent`, prompts before installing |
+| Context | How |
+|--------|-----|
+| **Installed Omegon (`npm install -g omegon`)** | Run `/update` from inside pi. Omegon installs the latest package, verifies the active `pi` command still resolves to Omegon, clears caches, then asks you to restart. |
+| **Dev checkout / contributor workflow** | Run `/update` or `./scripts/install-pi.sh`. Both follow the same lifecycle contract: pull/sync, build, refresh dependencies, `npm link --force`, verify the active `pi` target, then stop at an explicit restart handoff. |
+| **Lightweight cache refresh only** | Run `/refresh`. This clears transient caches and reloads extensions, but it is not equivalent to package/runtime replacement. |
 
 > The patched fork syncs from upstream daily via GitHub Actions. Bug fixes and new AI provider support land automatically. If a sync PR has conflicts, they are surfaced for manual review before merging — upstream changes are never silently dropped.
 
-> **Note:** `pi install` and `pi update` track the `main` branch. The version-check extension notifies you when a new Omegon release is available.
+> **Note:** `/update` is the authoritative Omegon update path. It intentionally ends at a verified restart boundary rather than hot-swapping the running process after package/runtime mutation.
 
 ## Architecture
 

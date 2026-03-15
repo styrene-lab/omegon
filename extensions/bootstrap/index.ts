@@ -20,8 +20,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import type { ExtensionAPI } from "@cwilson613/pi-coding-agent";
 import { checkAllProviders, type AuthResult } from "../01-auth/auth.ts";
@@ -380,12 +380,12 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// --- /update: unified update command ---
-	// Detects dev vs installed mode and runs the appropriate pipeline:
-	//   Dev mode  (.git exists): git pull → submodule update → build → clear cache → reload
-	//   Installed (no .git):     npm install -g omegon@latest → clear cache → reload
-	// Replaces the old /update-pi and /refresh commands.
+	// Detects dev vs installed mode and runs the appropriate lifecycle:
+	//   Dev mode  (.git exists): pull → submodule sync → build → dependency refresh → relink → verify → restart handoff
+	//   Installed (no .git):     npm install -g omegon@latest → verify → restart handoff
+	// Replaces the old split update mental model with a singular-package lifecycle.
 	pi.registerCommand("update", {
-		description: "Pull latest code, rebuild, and reload (dev) or install latest from npm (installed)",
+		description: "Run the authoritative Omegon update lifecycle, then hand off to restart",
 		handler: async (args, ctx) => {
 			const dryRun = args.trim() === "--dry-run";
 			const omegonRoot = process.env.PI_CODING_AGENT_DIR ?? join(import.meta.dirname ?? ".", "..");
@@ -399,9 +399,9 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// --- /refresh: alias for /update with just cache clear + reload ---
+	// --- /refresh: lightweight cache clear + reload only ---
 	pi.registerCommand("refresh", {
-		description: "Clear transpilation cache and reload extensions (quick /update)",
+		description: "Clear transpilation cache and reload extensions without package/runtime mutation",
 		handler: async (_args, ctx) => {
 			clearJitiCache(ctx);
 			await ctx.reload();
@@ -437,11 +437,85 @@ function clearJitiCache(_ctx?: unknown): number {
 	return cleared;
 }
 
-/** Dev mode: git pull → submodule update → build → cache clear → reload. */
+export interface PiResolutionInfo {
+	omegonRoot: string;
+	cli: string;
+	resolutionMode: "vendor" | "npm";
+	agentDir: string;
+}
+
+export interface PiBinaryVerification {
+	ok: boolean;
+	piPath: string;
+	realPiPath: string;
+	resolution?: PiResolutionInfo;
+	reason?: string;
+}
+
+export function normalizePiPath(piPath: string): string {
+	if (!piPath) return "";
+	try {
+		return realpathSync(piPath);
+	} catch {
+		return piPath;
+	}
+}
+
+async function getActivePiPath(): Promise<string> {
+	const which = await run("which", ["pi"]);
+	return which.code === 0 ? which.stdout.trim() : "";
+}
+
+export function validatePiBinaryVerification(
+	piPath: string,
+	realPiPath: string,
+	resolution: PiResolutionInfo,
+): PiBinaryVerification {
+	const binaryLooksOwnedByOmegon = /[\\/]omegon[\\/]/.test(realPiPath) || /[\\/]omegon[\\/]bin[\\/]pi(?:\.mjs)?$/.test(realPiPath);
+	if (!/omegon(?:[\\/]|$)/.test(resolution.omegonRoot)) {
+		return { ok: false, piPath, realPiPath, resolution, reason: `active pi resolved to non-Omegon root: ${resolution.omegonRoot}` };
+	}
+	if (!binaryLooksOwnedByOmegon) {
+		return { ok: false, piPath, realPiPath, resolution, reason: `active pi symlink target does not appear to point at Omegon: ${realPiPath}` };
+	}
+	return { ok: true, piPath, realPiPath, resolution };
+}
+
+async function inspectActivePiBinary(): Promise<PiBinaryVerification> {
+	const piPath = await getActivePiPath();
+	if (!piPath) {
+		return { ok: false, piPath: "", realPiPath: "", reason: "`pi` command not found on PATH" };
+	}
+	const realPiPath = normalizePiPath(piPath);
+	const probe = await run(piPath, ["--where"]);
+	if (probe.code !== 0) {
+		return { ok: false, piPath, realPiPath, reason: "active pi binary did not return Omegon resolution metadata" };
+	}
+	try {
+		const resolution = JSON.parse(probe.stdout.trim()) as PiResolutionInfo;
+		return validatePiBinaryVerification(piPath, realPiPath, resolution);
+	} catch {
+		return { ok: false, piPath, realPiPath, reason: "active pi returned invalid verification metadata" };
+	}
+}
+
+function formatVerification(verification: PiBinaryVerification): string {
+	if (!verification.ok || !verification.resolution) {
+		return `✗ pi target verification failed${verification.reason ? `: ${verification.reason}` : ""}`;
+	}
+	return [
+		`✓ active pi: ${verification.piPath}`,
+		`✓ binary target: ${verification.realPiPath}`,
+		`✓ runtime root: ${verification.resolution.omegonRoot}`,
+		`✓ core resolution: ${verification.resolution.resolutionMode} (${verification.resolution.cli})`,
+	].join("\n");
+}
+
+/** Dev mode: git pull → submodule update → build → install deps → relink → verify → restart handoff. */
 async function updateDevMode(
 	omegonRoot: string,
 	dryRun: boolean,
-	ctx: { ui: CommandContext["ui"]; reload: () => Promise<void> },
+	ctx: { ui: { notify: (message: string, type?: "error" | "warning" | "info") => void } },
 ): Promise<void> {
 	const steps: string[] = [];
 
@@ -489,31 +563,62 @@ async function updateDevMode(
 	}
 
 	// ── Step 4: npm install (pick up any new deps) ───────────────────
-	if (!dryRun) {
+	if (dryRun) {
+		steps.push("· npm install: skipped (dry run)");
+	} else {
+		ctx.ui.notify("▸ Refreshing omegon dependencies…", "info");
 		const inst = await run("npm", ["install", "--install-links=false"], { cwd: omegonRoot });
 		if (inst.code !== 0) {
 			steps.push(`⚠ npm install had issues (non-fatal)`);
+		} else {
+			steps.push("✓ omegon dependencies refreshed");
 		}
 	}
 
-	// ── Step 5: clear cache + reload ─────────────────────────────────
+	// ── Step 5: relink omegon globally ───────────────────────────────
 	if (dryRun) {
-		steps.push("· reload: skipped (dry run)");
+		steps.push("· npm link --force: skipped (dry run)");
+	} else {
+		ctx.ui.notify("▸ Relinking omegon globally…", "info");
+		const link = await run("npm", ["link", "--force"], { cwd: omegonRoot });
+		if (link.code !== 0) {
+			steps.push(`✗ npm link failed: ${(link.stderr.trim().split("\n").filter((l) => !l.startsWith("npm warn")).pop() ?? "unknown error")}`);
+			ctx.ui.notify(`Update incomplete:\n${steps.join("\n")}`, "warning");
+			return;
+		}
+		steps.push("✓ omegon relinked globally");
+	}
+
+	// ── Step 6: verify active binary target ──────────────────────────
+	if (dryRun) {
+		steps.push("· pi target verification: skipped (dry run)");
 		ctx.ui.notify(`Dry run:\n${steps.join("\n")}`, "info");
 		return;
 	}
+	const verification = await inspectActivePiBinary();
+	if (!verification.ok) {
+		steps.push(formatVerification(verification));
+		ctx.ui.notify(`Update incomplete:\n${steps.join("\n")}`, "warning");
+		return;
+	}
+	steps.push(formatVerification(verification));
 
+	// ── Step 7: clear cache + explicit restart handoff ───────────────
 	const cleared = clearJitiCache(ctx);
 	if (cleared > 0) steps.push(`✓ cleared ${cleared} cached transpilations`);
-	steps.push("✓ reloading extensions…");
+	steps.push("✓ update complete — restart pi now (/exit, then `pi`) to load the rebuilt runtime");
 	ctx.ui.notify(steps.join("\n"), "info");
-	await ctx.reload();
 }
 
-/** Installed mode: npm install -g omegon@latest → cache clear → reload. */
+/** Installed mode: npm install -g omegon@latest → verify → cache clear → restart handoff. */
 async function updateInstalledMode(
 	dryRun: boolean,
-	ctx: { ui: CommandContext["ui"]; reload: () => Promise<void> },
+	ctx: {
+		ui: {
+			notify: (message: string, type?: "error" | "warning" | "info") => void;
+			confirm: (title: string, message: string) => Promise<boolean>;
+		};
+	},
 ): Promise<void> {
 	const PKG = "omegon";
 
@@ -562,9 +667,19 @@ async function updateInstalledMode(
 		return;
 	}
 
+	const verification = await inspectActivePiBinary();
+	if (!verification.ok) {
+		ctx.ui.notify(
+			`Updated to ${PKG}@${latestVersion}, but post-install verification failed.\n${formatVerification(verification)}\nResolve the binary target before restarting pi.`,
+			"warning",
+		);
+		return;
+	}
+
 	const cleared = clearJitiCache(ctx);
 	ctx.ui.notify(
 		`✅ Updated to ${PKG}@${latestVersion}.` +
+		`\n${formatVerification(verification)}` +
 		(cleared > 0 ? `\nCleared ${cleared} cached transpilations.` : "") +
 		"\nRestart pi to use the new version (/exit, then pi).",
 		"info"

@@ -1,0 +1,67 @@
+{
+  "nodeId": "singular-package-update-lifecycle",
+  "pass": true,
+  "structuralPass": true,
+  "findings": [
+    {
+      "type": "scenario",
+      "index": 0,
+      "pass": true,
+      "finding": "The document body (research sections, decisions, and implementation notes) establishes that /update must cover pull/install, relink, binary-target verification, and restart handoff for both dev and installed modes, directly addressing the Then clause."
+    },
+    {
+      "type": "scenario",
+      "index": 1,
+      "pass": true,
+      "finding": "The research section explicitly compares /update against install-pi.sh, the child-node outcomes summarize the reconciliation, and the decision rationale frames the remaining difference (restart handoff vs hot-swap) as an intentional safe boundary choice rather than an accidental omission."
+    },
+    {
+      "type": "falsifiability",
+      "index": 0,
+      "pass": true,
+      "finding": "The decision and implementation notes explicitly require relink and binary-target verification in /update for dev mode, and the file scope targets extensions/bootstrap/index.ts and bin/pi.mjs for this purpose."
+    },
+    {
+      "type": "falsifiability",
+      "index": 1,
+      "pass": true,
+      "finding": "The research section and singular-package-runtime-boundary child node establish that installed mode resolves forked packages from npm, not from vendor/pi-mono. The decision reinforces vendor/pi-mono as dev-only."
+    },
+    {
+      "type": "falsifiability",
+      "index": 2,
+      "pass": true,
+      "finding": "The decision explicitly states update parity should end with a restart handoff rather than in-process reload, and the implementation constraint confirms package/runtime mutation must not rely on hot reload as the authoritative completion path."
+    },
+    {
+      "type": "constraint",
+      "index": 0,
+      "pass": true,
+      "finding": "All three children (pi-fork-worktree-reconciliation, singular-package-runtime-boundary, update-lifecycle-parity) are status resolved and their conclusions are summarized in the Child-node outcomes research section."
+    },
+    {
+      "type": "constraint",
+      "index": 1,
+      "pass": true,
+      "finding": "Open questions list is empty."
+    },
+    {
+      "type": "constraint",
+      "index": 2,
+      "pass": true,
+      "finding": "Implementation Notes file scope lists 5 files with descriptions and actions."
+    },
+    {
+      "type": "constraint",
+      "index": 3,
+      "pass": true,
+      "finding": "The research section distinguishes /update (full lifecycle) from /refresh (lightweight cache clear + reload alias), and the /update architecture fact in memory confirms this separation."
+    },
+    {
+      "type": "constraint",
+      "index": 4,
+      "pass": true,
+      "finding": "The decision and research consistently frame Omegon as the single installed product boundary with vendor/pi-mono as dev-only implementation source."
+    }
+  ]
+}
