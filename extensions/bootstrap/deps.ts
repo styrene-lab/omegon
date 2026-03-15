@@ -269,13 +269,40 @@ export function checkAll(): DepStatus[] {
 	}));
 }
 
+/**
+ * Detect whether the terminal supports Unicode emoji rendering.
+ *
+ * Returns true for modern terminals (Windows Terminal, VS Code, xterm-256color,
+ * iTerm2, etc.) and false for legacy consoles (Windows conhost.exe) where emoji
+ * render as blank boxes.  Errs on the side of ASCII when uncertain.
+ */
+function supportsEmoji(): boolean {
+	// Windows Terminal sets WT_SESSION; conhost.exe does not
+	if (process.env["WT_SESSION"]) return true;
+	// VS Code integrated terminal
+	if (process.env["TERM_PROGRAM"] === "vscode") return true;
+	// iTerm2, Hyper, and other macOS/Linux terminals advertising 256-color
+	if (process.env["TERM_PROGRAM"] === "iTerm.app") return true;
+	// xterm-256color and similar modern TERM values
+	const term = process.env["TERM"] ?? "";
+	if (term.includes("256color") || term === "xterm-kitty") return true;
+	// COLORTERM=truecolor or 24bit signals a modern terminal
+	const colorterm = process.env["COLORTERM"] ?? "";
+	if (colorterm === "truecolor" || colorterm === "24bit") return true;
+	// CI environments typically render emoji correctly
+	if (process.env["CI"]) return true;
+	// Non-Windows: default to emoji; on Windows without the above signals, use ASCII
+	return process.platform !== "win32";
+}
+
 /** Format a single dep status as a line, with install hint if missing */
 function formatStatus(s: DepStatus): string {
-	const icon = s.available ? "✅" : "❌";
+	const emoji = supportsEmoji();
+	const icon = s.available ? (emoji ? "✅" : "[ok]") : (emoji ? "❌" : "[x]");
 	let line = `${icon}  ${s.dep.name} — ${s.dep.purpose}`;
 	if (!s.available) {
 		const cmd = bestInstallCmd(s.dep);
-		if (cmd) line += `\n      → \`${cmd}\``;
+		if (cmd) line += `\n      -> \`${cmd}\``;
 	}
 	return line;
 }
@@ -303,10 +330,11 @@ export function formatReport(statuses: DepStatus[]): string {
 	}
 
 	const missing = statuses.filter((s) => !s.available);
+	const emoji = supportsEmoji();
 	if (missing.length === 0) {
-		lines.push("🎉 All dependencies are available!");
+		lines.push(emoji ? "🎉 All dependencies are available!" : "[ok] All dependencies are available!");
 	} else {
-		lines.push(`**${missing.length} missing** — run \`/bootstrap\` to install interactively.`);
+		lines.push(`${emoji ? "⚠️ " : "[!] "}**${missing.length} missing** — run \`/bootstrap\` to install interactively.`);
 	}
 
 	return lines.join("\n");

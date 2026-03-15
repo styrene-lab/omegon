@@ -361,11 +361,15 @@ export default function (pi: ExtensionAPI) {
 
 			if (sub === "status") {
 				const statuses = checkAll();
-				cmdCtx.say(formatReport(statuses));
 				const profile = loadOperatorProfile(getConfigRoot(cmdCtx));
-				cmdCtx.say(profile
+				const profileLine = profile
 					? `\nOperator capability profile: ${profile.setupComplete ? "configured" : "defaulted"}`
-					: "\nOperator capability profile: not configured");
+					: "\nOperator capability profile: not configured";
+				// Merge into a single say() call — the pi TUI showStatus() deduplication
+				// pattern replaces the previous notification when two consecutive say()
+				// calls are made synchronously, so splitting these would silently discard
+				// the dependency report.
+				cmdCtx.say(formatReport(statuses) + profileLine);
 				return;
 			}
 
