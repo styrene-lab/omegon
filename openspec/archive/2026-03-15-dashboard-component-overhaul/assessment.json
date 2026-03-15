@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "changeName": "dashboard-component-overhaul",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-15T13:29:23.373Z",
+  "summary": "All dashboard-component-overhaul tasks are now reconciled after the passing spec assessment; tasks.md reflects completed implementation and validation.",
+  "snapshot": {
+    "gitHead": "dea533697e77985cd7563e6c6853f56abba0c226",
+    "fingerprint": "770618dacc9379ed0b9bb4057cf96dbfb33c7245e7755012e7de0e765168920f",
+    "dirty": true,
+    "scopedPaths": [
+      "extensions/dashboard/footer-raised.test.ts",
+      "extensions/dashboard/footer.ts",
+      "extensions/dashboard/index.ts",
+      "extensions/dashboard/overlay-data.ts",
+      "extensions/dashboard/types.ts"
+    ],
+    "files": [
+      {
+        "path": "extensions/dashboard/footer-raised.test.ts",
+        "exists": true,
+        "size": 26842,
+        "sha256": "d218456a488f85784758d936e1449e3f4b5f0c804ba30e122c9de7fad8b8f24d"
+      },
+      {
+        "path": "extensions/dashboard/footer.ts",
+        "exists": true,
+        "size": 52982,
+        "sha256": "59ea92e5886f21b4cadfdaeaeeb8271ccb21525f96e221c1dfc59e5622688f85"
+      },
+      {
+        "path": "extensions/dashboard/index.ts",
+        "exists": true,
+        "size": 16815,
+        "sha256": "a460c2ee34c393cef9e6060c5673a36dedc3e5ffa41426ad1fa12f63a6ad0ec2"
+      },
+      {
+        "path": "extensions/dashboard/overlay-data.ts",
+        "exists": true,
+        "size": 24317,
+        "sha256": "7ce11728045bfb5a2575987ebce852dd08cd2fc13b8d2e571d0b49a7d9c3499a"
+      },
+      {
+        "path": "extensions/dashboard/types.ts",
+        "exists": true,
+        "size": 6407,
+        "sha256": "af1718eefdd68939f45b1747778cccf50fa413121be7491fe20d131c139435b4"
+      },
+      {
+        "path": "openspec/changes/dashboard-component-overhaul/design.md",
+        "exists": true,
+        "size": 9999,
+        "sha256": "50b3772519205bb7a2676319f3a40d4c57cbf0a5403aa13a477c0be811da9428"
+      },
+      {
+        "path": "openspec/changes/dashboard-component-overhaul/proposal.md",
+        "exists": true,
+        "size": 322,
+        "sha256": "a34eb180241f09b33f5fa2d7db362cbc30cdaa51275fa8a2a94b5f68aa0c489a"
+      },
+      {
+        "path": "openspec/changes/dashboard-component-overhaul/specs/dashboard/raised-layout.md",
+        "exists": true,
+        "size": 1448,
+        "sha256": "7590b6a2e7daa7d4a5fc658740ab47d9f8abbe2a568c09512397e055eb09429e"
+      },
+      {
+        "path": "openspec/changes/dashboard-component-overhaul/tasks.md",
+        "exists": true,
+        "size": 3191,
+        "sha256": "d1f037dc1c04ec28439540c94cc3ab39fe138a75127126fd1829e79cb3358d68"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "openspec/changes/dashboard-component-overhaul/tasks.md"
+    ],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

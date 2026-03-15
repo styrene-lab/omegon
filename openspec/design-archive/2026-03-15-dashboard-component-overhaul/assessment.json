@@ -1,0 +1,85 @@
+{
+  "nodeId": "dashboard-component-overhaul",
+  "pass": true,
+  "structuralPass": true,
+  "findings": [
+    {
+      "type": "scenario",
+      "index": 1,
+      "pass": true,
+      "finding": "Research sections 'Current raised footer is still a text report' and 'Proposed responsive layout contract' plus decisions on component cards and width tiers directly address using horizontal card regions instead of vertically stacked HUD sections."
+    },
+    {
+      "type": "scenario",
+      "index": 2,
+      "pass": true,
+      "finding": "Decision 'Model topology must distinguish driver, embeddings, extraction, and fallback state' and 'Model topology card should summarize role, source, and state' explicitly require role-based labels so operators can distinguish driver from embeddings/extraction/offline without ambiguity."
+    },
+    {
+      "type": "scenario",
+      "index": 3,
+      "pass": true,
+      "finding": "Research 'Proposed responsive layout contract' and 'Tier-by-tier layout blueprint' define explicit narrow (<100), medium (100–139), and wide (140+) tiers with intentional reflow rules. Decision 'Narrow tiers should compress card content before dropping card categories' prevents truncation-only degradation."
+    },
+    {
+      "type": "scenario",
+      "index": 4,
+      "pass": true,
+      "finding": "Decision 'Raised footer and focused overlay should share a common information architecture' directly requires shared semantic sections and labels across both surfaces, ensuring consistent role vocabulary even when the raised footer is condensed."
+    },
+    {
+      "type": "falsifiability",
+      "index": 1,
+      "pass": true,
+      "finding": "Addressed by the component-card decision and tier-by-tier blueprint which replace stacked text rows with horizontal card grouping in wide mode."
+    },
+    {
+      "type": "falsifiability",
+      "index": 2,
+      "pass": true,
+      "finding": "Addressed by the model topology decisions requiring explicit role labels (driver/embeddings/extraction/fallback) with source and state metadata per role."
+    },
+    {
+      "type": "falsifiability",
+      "index": 3,
+      "pass": true,
+      "finding": "Addressed by the explicit width-tier contract (narrow/medium/wide) with intentional reflow rules and the decision that narrow tiers compress before dropping categories."
+    },
+    {
+      "type": "falsifiability",
+      "index": 4,
+      "pass": true,
+      "finding": "Addressed by the shared information architecture decision requiring consistent labels and role semantics between overlay and raised footer."
+    },
+    {
+      "type": "constraint",
+      "index": 1,
+      "pass": true,
+      "finding": "Checked. Implementation notes and decisions explicitly require graceful stacked fallback for narrow terminals."
+    },
+    {
+      "type": "constraint",
+      "index": 2,
+      "pass": true,
+      "finding": "Checked. Multiple decisions mandate role-based model topology with driver/embeddings/extraction distinction."
+    },
+    {
+      "type": "constraint",
+      "index": 3,
+      "pass": true,
+      "finding": "Checked. Decision states raised footer is a summary surface; implementation constraint confirms it must not mirror every system-tab detail."
+    },
+    {
+      "type": "constraint",
+      "index": 4,
+      "pass": true,
+      "finding": "Checked. File scope is limited to dashboard/footer.ts, types.ts, index.ts, overlay-data.ts, and test file."
+    },
+    {
+      "type": "constraint",
+      "index": 5,
+      "pass": true,
+      "finding": "Checked. Responsive behavior is an explicit design concern with defined width tiers and reflow rules."
+    }
+  ]
+}

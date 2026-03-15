@@ -527,10 +527,10 @@ function effortItems(effort: any | undefined, expandedKeys: Set<string>): ListIt
   if (!expandedKeys.has(key)) return items;
 
   const fields: Array<[string, string]> = [
-    ["level",    String(effort.level ?? "?")],
-    ["driver",   effort.driverModel ?? "?"],
-    ["extract",  effort.extractionModel ?? "?"],
-    ["thinking", effort.thinkingLevel ?? "?"],
+    ["level",      String(effort.level ?? "?")],
+    ["driver",     effort.driverModel ?? "?"],
+    ["extraction", effort.extractionModel ?? effort.resolvedExtractionModelId ?? "?"],
+    ["thinking",   effort.thinkingLevel ?? "?"],
   ];
   for (const [label, val] of fields) {
     items.push({

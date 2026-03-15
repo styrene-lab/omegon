@@ -295,7 +295,7 @@ describe("DashboardFooter raised mode polish", () => {
     assert.ok(!bareStatsLine, `raised mode must not emit old-style "Context" stats row:\n${lines.join("\n")}`);
   });
 
-  it("narrow raised mode (<120) stays stacked — no inner column │ divider rows", () => {
+  it("narrow raised mode (<100) stays stacked — no inner column │ divider rows", () => {
     (sharedState as any).cleave = {
       status: "dispatching",
       updatedAt: Date.now(),
@@ -310,7 +310,7 @@ describe("DashboardFooter raised mode polish", () => {
     );
     footer.setContext(makeContext() as any);
 
-    const lines = footer.render(100);
+    const lines = footer.render(99);
     // Box borders use │ on left+right of each content line (2 per line max in stacked mode).
     // A column layout would produce 3+ │ chars per line. Ensure no line has more than 2.
     const innerDividerLines = lines.filter((l) => (l.match(/│/g) ?? []).length > 2);
@@ -365,7 +365,7 @@ describe("DashboardFooter raised mode polish", () => {
     );
   });
 
-  it("raised mode does not duplicate context/model stats as a second footer row", () => {
+  it("raised mode keeps context and model topology separated without old generic duplicate stats rows", () => {
     (sharedState as any).cleave = { status: "idle", updatedAt: Date.now(), children: [] };
 
     const footer = new DashboardFooter(
@@ -378,19 +378,35 @@ describe("DashboardFooter raised mode polish", () => {
 
     const lines = footer.render(140);
 
-    // The model name must not appear more than once (no duplicate stats row)
-    const modelLines = lines.filter((l) => l.includes("gpt-5.4"));
-    assert.ok(
-      modelLines.length <= 1,
-      `model name appeared ${modelLines.length} times — raised mode emitted a duplicate stats row:\n${lines.join("\n")}`,
-    );
+    assert.ok(lines.some((l) => l.includes("── context")), `expected context card:\n${lines.join("\n")}`);
+    assert.ok(lines.some((l) => l.includes("── models")), `expected models card:\n${lines.join("\n")}`);
+    assert.ok(lines.some((l) => l.includes("Driver") && l.includes("gpt-5.4")), `expected role-labeled driver line:\n${lines.join("\n")}`);
 
-    // context% also must not appear more than once
-    const ctxLines = lines.filter((l) => l.includes("31%"));
-    assert.ok(
-      ctxLines.length <= 1,
-      `context% appeared ${ctxLines.length} times — raised mode emitted duplicate context rows:\n${lines.join("\n")}`,
+    const legacyStatsLines = lines.filter((l) => l.includes("Context") && l.includes("gpt-5.4") && l.includes("31%"));
+    assert.equal(
+      legacyStatsLines.length,
+      0,
+      `raised mode emitted a legacy generic stats row:\n${lines.join("\n")}`,
     );
+  });
+
+  it("medium raised mode (100–139) uses horizontal summary grouping", () => {
+    (sharedState as any).cleave = { status: "idle", updatedAt: Date.now(), children: [] };
+
+    const footer = new DashboardFooter(
+      {} as any,
+      makeTheme() as any,
+      {
+        ...makeFooterData(),
+        getExtensionStatuses: () => new Map<string, string>([["memory", "Memory: 12 facts · semantic"], ["offline-driver", "🏠 OFFLINE: Devstral Small 2 24B"]]),
+      } as any,
+      { mode: "raised", turns: 0 } satisfies DashboardState,
+    );
+    footer.setContext(makeContext() as any);
+
+    const lines = footer.render(120);
+    assert.ok(lines.some((l) => l.includes("── context") && l.includes("│") && l.includes("── models")), `expected horizontally grouped footer cards:\n${lines.join("\n")}`);
+    assert.ok(lines.some((l) => l.includes("Fallback") && l.includes("offline")), `expected fallback/offline topology line:\n${lines.join("\n")}`);
   });
 
   it("compact hint appears in the pinned footer zone, not below duplicate generic rows", () => {
@@ -415,6 +431,39 @@ describe("DashboardFooter raised mode polish", () => {
 
     // The hint is now embedded in the box's bottom border, which follows all content.
     // Verify it appears somewhere in the output (ordering relative to ⌂ is not checked).
+  });
+
+  it("wide raised mode labels model roles clearly, including local alias normalization", () => {
+    (sharedState as any).cleave = { status: "idle", updatedAt: Date.now(), children: [] };
+    (sharedState as any).effort = {
+      level: 4,
+      name: "Substantial",
+      driver: "victory",
+      thinking: "medium",
+      extraction: "local",
+      compaction: "local",
+      cleavePreferLocal: true,
+      cleaveFloor: "local",
+      reviewModel: "victory",
+      capped: false,
+      resolvedExtractionModelId: "devstral-small-2:24b",
+    };
+
+    const footer = new DashboardFooter(
+      {} as any,
+      makeTheme() as any,
+      {
+        ...makeFooterData(),
+        getExtensionStatuses: () => new Map<string, string>([["memory", "Memory: 12 facts · semantic"], ["offline-driver", "🏠 OFFLINE: Devstral Small 2 24B"]]),
+      } as any,
+      { mode: "raised", turns: 0 } satisfies DashboardState,
+    );
+    footer.setContext(makeContext() as any);
+
+    const lines = footer.render(200);
+    assert.ok(lines.some((l) => l.includes("Driver") && l.includes("gpt-5.4")), `expected driver role line:\n${lines.join("\n")}`);
+    assert.ok(lines.some((l) => l.includes("Extraction") && l.includes("Devstral 24B")), `expected normalized extraction label:\n${lines.join("\n")}`);
+    assert.ok(lines.every((l) => !l.includes("Extraction · devstral-small-2:24b")), `expected canonical extraction label rather than raw alias:\n${lines.join("\n")}`);
   });
 
   it("openspec rows use compact separator — no double-punctuation in progress+stage", () => {

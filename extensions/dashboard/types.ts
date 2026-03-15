@@ -180,6 +180,21 @@ export interface RecoveryDashboardState {
   cooldowns?: RecoveryCooldownSummary[];
 }
 
+// ── Dashboard model-topology summaries ──────────────────────
+
+export type DashboardModelRole = "driver" | "embeddings" | "extraction" | "fallback";
+export type DashboardModelSource = "cloud" | "local" | "mixed" | "unknown";
+export type DashboardModelState = "active" | "ready" | "fallback" | "offline" | "legacy-alias" | "unknown";
+
+export interface DashboardModelRoleSummary {
+  role: DashboardModelRole;
+  label: string;
+  model: string;
+  source: DashboardModelSource;
+  state: DashboardModelState;
+  detail?: string;
+}
+
 // ── Dashboard UI ─────────────────────────────────────────────
 
 export type DashboardMode = "compact" | "raised" | "panel" | "focused";

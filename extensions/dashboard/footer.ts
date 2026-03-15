@@ -18,7 +18,7 @@ import type { TUI } from "@cwilson613/pi-tui";
 import { truncateToWidth, visibleWidth } from "@cwilson613/pi-tui";
 import { leftRight, mergeColumns, padRight } from "./render-utils.ts";
 import { buildBranchTreeLines, readLocalBranches } from "./git.ts";
-import type { DashboardState, RecoveryCooldownSummary, RecoveryDashboardState } from "./types.ts";
+import type { DashboardModelRoleSummary, DashboardState, RecoveryCooldownSummary, RecoveryDashboardState } from "./types.ts";
 import { sharedState } from "../lib/shared-state.ts";
 import { debug } from "../lib/debug.ts";
 import { linkDashboardFile, linkOpenSpecArtifact, linkOpenSpecChange } from "./uri-helper.ts";
@@ -91,6 +91,8 @@ function summarizeCooldown(cooldowns: RecoveryCooldownSummary[] | undefined): st
 const CLEAVE_STALE_MS = 30_000;
 /** Recovery notices auto-suppress in compact mode after this many ms with no new error. */
 const RECOVERY_STALE_MS = 45_000;
+const RAISED_NARROW_WIDTH = 100;
+const RAISED_WIDE_WIDTH = 140;
 
 type PrioritySegment = {
   text: string;
@@ -139,6 +141,16 @@ function composePrimaryMetaLine(
     { text: primary, priority: "high" },
     ...metadata.filter(Boolean).map((text) => ({ text, priority: "low" as const })),
   ], separator);
+}
+
+function normalizeLocalModelLabel(model: string): { canonical: string; alias?: string } {
+  if (model === "devstral-small-2:24b") {
+    return { canonical: "Devstral 24B", alias: "devstral-small-2:24b" };
+  }
+  if (model === "devstral:24b") {
+    return { canonical: "Devstral 24B" };
+  }
+  return { canonical: model };
 }
 
 export class DashboardFooter implements Component {
@@ -353,7 +365,9 @@ export class DashboardFooter implements Component {
   // ── Raised Mode (Layer 1) ─────────────────────────────────────
 
   private renderRaised(width: number): string[] {
-    return width >= 120 ? this.renderRaisedWide(width) : this.renderRaisedStacked(width);
+    if (width < RAISED_NARROW_WIDTH) return this.renderRaisedNarrow(width);
+    if (width < RAISED_WIDE_WIDTH) return this.renderRaisedMedium(width);
+    return this.renderRaisedWide(width);
   }
 
   /**
@@ -452,10 +466,10 @@ export class DashboardFooter implements Component {
   }
 
   /**
-   * Stacked layout for narrow terminals (<120 cols).
-   * All sections rendered full-width inside a corner-bounded box.
+   * Narrow layout for terminals under 100 cols.
+   * Lifecycle/work stays above; lower dashboard uses stacked summary cards.
    */
-  private renderRaisedStacked(width: number): string[] {
+  private renderRaisedNarrow(width: number): string[] {
     const innerWidth = width - 4;
     const branchLines = this.buildBranchTree(innerWidth);
     const [topLine = "", ...extraBranchLines] = branchLines;
@@ -481,12 +495,9 @@ export class DashboardFooter implements Component {
   }
 
   /**
-   * Wide layout (≥120 cols) — two-column content inside a corner-bounded box.
-   *   Left:  Design tree + Recovery + Cleave (active work context)
-   *   Right: Implementation (spec/task progress)
-   *   Footer zone: shared meta, memory, footer data
+   * Medium layout (100–139 cols) — two-column work area with compact summary cards below.
    */
-  private renderRaisedWide(width: number): string[] {
+  private renderRaisedMedium(width: number): string[] {
     const innerWidth = width - 4;
     const leftColWidth = Math.floor((innerWidth - 1) / 2);
     const rightColWidth = innerWidth - leftColWidth - 1;
@@ -513,6 +524,37 @@ export class DashboardFooter implements Component {
     ];
 
     // Same as stacked: natural content height, grows up from footer as needed.
+    return this.renderBoxed(contentLines, this.buildFooterZone(innerWidth), topLine, width);
+  }
+
+  /**
+   * Wide layout (140+ cols) keeps the same work summary above but gives the
+   * lower footer zone enough width to render distinct horizontal summary cards.
+   */
+  private renderRaisedWide(width: number): string[] {
+    const innerWidth = width - 4;
+    const leftColWidth = Math.floor((innerWidth - 1) / 2);
+    const rightColWidth = innerWidth - leftColWidth - 1;
+    const colDivider = this.theme.fg("dim", BOX.v);
+
+    const branchLines = this.buildBranchTree(innerWidth);
+    const [topLine = "", ...extraBranchLines] = branchLines;
+    const alignedBranchLines = extraBranchLines.map((l) => " " + l);
+
+    const leftLines = [
+      ...this.buildDesignTreeLines(leftColWidth),
+      ...this.buildRecoveryLines(leftColWidth),
+      ...this.buildCleaveLines(leftColWidth),
+    ];
+    const rightLines = this.buildOpenSpecLines(rightColWidth);
+
+    const contentLines: string[] = [
+      ...alignedBranchLines,
+      ...(leftLines.length > 0 || rightLines.length > 0
+        ? mergeColumns(leftLines, rightLines, leftColWidth, rightColWidth, colDivider)
+        : []),
+    ];
+
     return this.renderBoxed(contentLines, this.buildFooterZone(innerWidth), topLine, width);
   }
 
@@ -711,35 +753,135 @@ export class DashboardFooter implements Component {
     return lines;
   }
 
-  /**
-   * Assemble the full HUD footer zone from the three named sections.
-   * Sections collapse when they have no data to show.
-   */
+  private buildModelTopologySummaries(): DashboardModelRoleSummary[] {
+    const ctx = this.ctxRef;
+    const summaries: DashboardModelRoleSummary[] = [];
+    const memoryStatus = this.footerData.getExtensionStatuses().get("memory") ?? "";
+    const offlineStatus = this.footerData.getExtensionStatuses().get("offline-driver") ?? "";
+
+    if (ctx?.model) {
+      summaries.push({
+        role: "driver",
+        label: "Driver",
+        model: ctx.model.id,
+        source: ctx.model.provider === "local" ? "local" : "cloud",
+        state: offlineStatus.includes("OFFLINE:") ? "offline" : "active",
+        detail: this.footerData.getAvailableProviderCount() > 1 ? ctx.model.provider : undefined,
+      });
+    }
+
+    const effort = sharedState.effort;
+    if (memoryStatus || effort?.resolvedExtractionModelId) {
+      const extractionModel = effort?.resolvedExtractionModelId ?? effort?.extraction ?? "?";
+      const extractionLocal = extractionModel.includes(":") || effort?.extraction === "local";
+      summaries.push({
+        role: "extraction",
+        label: "Extraction",
+        model: extractionModel,
+        source: extractionLocal ? "local" : "cloud",
+        state: extractionLocal ? "ready" : "active",
+      });
+    }
+
+    if (memoryStatus) {
+      const embedMatch = memoryStatus.match(/semantic/i);
+      summaries.push({
+        role: "embeddings",
+        label: "Embeddings",
+        model: embedMatch ? "semantic retrieval" : "available",
+        source: "unknown",
+        state: "ready",
+      });
+    }
+
+    if (offlineStatus.includes("OFFLINE:")) {
+      const raw = sanitizeStatusText(offlineStatus).replace(/^.*OFFLINE:\s*/i, "");
+      summaries.push({
+        role: "fallback",
+        label: "Fallback",
+        model: raw || "local fallback",
+        source: "local",
+        state: "offline",
+      });
+    }
+
+    return summaries;
+  }
+
+  private formatModelTopologyLine(summary: DashboardModelRoleSummary, width: number, compact = false): string {
+    const theme = this.theme;
+    const sourceBadge = summary.source === "local"
+      ? theme.fg("accent", "local")
+      : summary.source === "cloud"
+        ? theme.fg("muted", "cloud")
+        : theme.fg("dim", summary.source);
+    const stateBadge = summary.state === "active"
+      ? theme.fg("success", "active")
+      : summary.state === "offline"
+        ? theme.fg("warning", "offline")
+        : summary.state === "fallback"
+          ? theme.fg("warning", "fallback")
+          : theme.fg("dim", summary.state);
+    const normalized = normalizeLocalModelLabel(summary.model);
+    const alias = normalized.alias ? theme.fg("dim", `alias ${normalized.alias}`) : "";
+    const primary = compact
+      ? `${theme.fg("accent", summary.label)} ${theme.fg("muted", normalized.canonical)}`
+      : `${theme.fg("accent", summary.label)} ${theme.fg("dim", "·")} ${theme.fg("muted", normalized.canonical)}`;
+    return truncateToWidth(composePrimaryMetaLine(width, primary, [sourceBadge, stateBadge, summary.detail ? theme.fg("dim", summary.detail) : "", alias]), width, "…");
+  }
+
+  private buildSummaryCard(title: string, lines: string[], width: number): string[] {
+    if (lines.length === 0) return [];
+    return [this.buildHudSectionDivider(title, width), ...lines.map((line) => truncateToWidth(`  ${line}`, width, "…"))];
+  }
+
   private buildFooterZone(width: number): string[] {
-    // Keep token cache current (not called in compact mode — intentional).
     this._updateTokenCache();
 
-    const zone: string[] = [];
+    const contextCard = this.buildSummaryCard("context", this.buildHudContextLines(Math.max(1, width - 2)).map((l) => l.trimStart()), width);
+    const modelCard = this.buildSummaryCard(
+      "models",
+      this.buildModelTopologySummaries().map((s) => this.formatModelTopologyLine(s, Math.max(1, width - 2), width < 70)),
+      width,
+    );
+    const memoryCard = this.buildSummaryCard("memory", (() => {
+      const line = this.buildHudMemoryLine(Math.max(1, width - 2));
+      return line ? [line.trimStart()] : [];
+    })(), width);
+    const systemCard = this.buildSummaryCard("system", this.buildHudSystemLines(Math.max(1, width - 2)).map((l) => l.trimStart()), width);
+    const recoveryCard = this.buildSummaryCard("recovery", this.buildRecoveryLines(Math.max(1, width - 2)).map((l) => l.trimStart()), width);
 
-    const contextLines = this.buildHudContextLines(width);
-    if (contextLines.length > 0) {
-      zone.push(this.buildHudSectionDivider("context", width));
-      zone.push(...contextLines);
+    if (width < RAISED_NARROW_WIDTH) {
+      return [
+        ...contextCard,
+        ...modelCard,
+        ...memoryCard,
+        ...(recoveryCard.length > 0 ? recoveryCard : []),
+        ...systemCard,
+      ];
     }
 
-    const memLine = this.buildHudMemoryLine(width);
-    if (memLine) {
-      zone.push(this.buildHudSectionDivider("memory", width));
-      zone.push(memLine);
+    if (width < RAISED_WIDE_WIDTH) {
+      const left = [...contextCard, ...memoryCard];
+      const right = [...modelCard, ...(recoveryCard.length > 0 ? recoveryCard : []), ...systemCard];
+      const colWidth = Math.floor((width - 1) / 2);
+      const rightWidth = width - colWidth - 1;
+      return mergeColumns(left, right, colWidth, rightWidth, this.theme.fg("dim", BOX.v));
     }
 
-    const systemLines = this.buildHudSystemLines(width);
-    if (systemLines.length > 0) {
-      zone.push(this.buildHudSectionDivider("system", width));
-      zone.push(...systemLines);
+    const cards = [contextCard, modelCard, memoryCard, recoveryCard.length > 0 ? recoveryCard : systemCard];
+    const totalCols = cards.length;
+    const colWidth = Math.floor((width - (totalCols - 1)) / totalCols);
+    const divider = this.theme.fg("dim", BOX.v);
+    let merged = cards[0] ?? [];
+    let usedWidth = colWidth;
+    for (let i = 1; i < cards.length; i++) {
+      const remainingCols = totalCols - i;
+      const nextWidth = i === cards.length - 1 ? width - usedWidth - 1 : colWidth;
+      merged = mergeColumns(merged, cards[i] ?? [], usedWidth, nextWidth, divider);
+      usedWidth += 1 + nextWidth;
     }
-
-    return zone;
+    return merged;
   }
 
   // ── Section builders (shared by stacked + wide layouts) ───────
