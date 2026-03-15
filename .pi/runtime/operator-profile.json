@@ -1,0 +1,14 @@
+{
+  "providers": {
+    "anthropic": {
+      "until": "2026-03-15T19:58:10.495Z",
+      "reason": "429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account's rate limit. Please try again later.\"},\"request_id\":\"req_011CZ5T6DwrTeqB26YcqmT45\"}"
+    }
+  },
+  "candidates": {
+    "anthropic/claude-opus-4-6": {
+      "until": "2026-03-15T19:58:10.495Z",
+      "reason": "429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account's rate limit. Please try again later.\"},\"request_id\":\"req_011CZ5T6DwrTeqB26YcqmT45\"}"
+    }
+  }
+}
