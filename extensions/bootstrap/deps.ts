@@ -105,7 +105,11 @@ export const DEPS: Dep[] = [
 		tier: "core",
 		check: () => hasCmd("nix"),
 		install: [
-			{ platform: "any", cmd: "curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm" },
+			// --no-confirm: headless (stdin is closed)
+			// --init none: skip systemd/launchd service setup — required on immutable
+			// distros (Bazzite/Silverblue) where systemd-reload fails, and harmless
+			// elsewhere (nix daemon is started on demand).
+			{ platform: "any", cmd: "curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm --init none" },
 		],
 		url: "https://zero-to-nix.com",
 	},

@@ -1103,12 +1103,17 @@ async function installDeps(ctx: CommandContext, deps: DepStatus[]): Promise<void
 			continue;
 		}
 
-		ctx.ui.notify(`\n${step} 📦 Installing ${dep.name}…`);
-		ctx.ui.notify(`   → \`${cmd}\``);
+		ctx.ui.notify(`\n${step} 📦 Installing ${dep.name}…\n   → \`${cmd}\``);
 
+		// Collect output lines — show progress inline but also keep them
+		// so we can dump a readable block on failure.
+		const outputLines: string[] = [];
 		const exitCode = await runAsync(
 			cmd,
-			(line) => ctx.ui.notify(line),
+			(line) => {
+				outputLines.push(line);
+				ctx.ui.notify(line);
+			},
 		);
 
 		// Patch PATH immediately after installing bootstrapping deps so the rest
@@ -1124,13 +1129,22 @@ async function installDeps(ctx: CommandContext, deps: DepStatus[]): Promise<void
 			ctx.ui.notify(`${step} ✅ ${dep.name} installed successfully`);
 		} else if (exitCode === 124) {
 			ctx.ui.notify(`${step} ❌ ${dep.name} install timed out (10 min limit)`);
-		} else if (exitCode === 0) {
-			ctx.ui.notify(`${step} ⚠️  Command succeeded but ${dep.name} not found on PATH — you may need to open a new shell.`);
 		} else {
-			ctx.ui.notify(`${step} ❌ Failed to install ${dep.name} (exit ${exitCode})`);
-			const hints = dep.install.filter((o) => o.cmd !== cmd);
-			if (hints.length > 0) ctx.ui.notify(`   Alternative: \`${hints[0]!.cmd}\``);
-			if (dep.url) ctx.ui.notify(`   Manual install: ${dep.url}`);
+			// Dump the last N lines of output so the operator can see what went wrong
+			const tail = outputLines.slice(-20).join("\n");
+			const status = exitCode === 0
+				? `Command succeeded but ${dep.name} not found on PATH`
+				: `Failed to install ${dep.name} (exit ${exitCode})`;
+			const block = [
+				`${step} ❌ ${status}`,
+				"",
+				"Output (last 20 lines):",
+				"```",
+				tail,
+				"```",
+				...(dep.url ? [`Manual install: ${dep.url}`] : []),
+			].join("\n");
+			ctx.ui.notify(block);
 		}
 	}
 }
