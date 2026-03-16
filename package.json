@@ -67,6 +67,7 @@
 			"./extensions/project-memory",
 			"./extensions/session-log.ts",
 			"./extensions/spinner-verbs.ts",
+			"./extensions/hints.ts",
 			"./extensions/style.ts",
 			"./extensions/terminal-title.ts",
 			"./extensions/view",
