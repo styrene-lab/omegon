@@ -1,4 +1,4 @@
 [submodule "vendor/pi-mono"]
 	path = vendor/pi-mono
-	url = https://github.com/styrene-lab/pi-mono.git
+	url = https://github.com/willmshepard/pi-mono.git
 	branch = main
