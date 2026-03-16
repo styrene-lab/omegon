@@ -998,11 +998,10 @@ export function runAsync(
 			resolve(code);
 		};
 
-		// Heartbeat — fires every heartbeatMs while the process is running.
-		const heartbeat = setInterval(() => {
-			elapsedSec += heartbeatMs / 1000;
-			onLine(`   ⏳ still running… (${elapsedSec}s)`);
-		}, heartbeatMs);
+		// Heartbeat intentionally omitted — callers that stream output via onLine
+		// already give the user live feedback, making a separate "still running"
+		// tick redundant. The timeout guard below still enforces the 10-min cap.
+		const heartbeat = setInterval(() => { /* no-op */ }, heartbeatMs);
 
 		// Forward captured lines from both streams.
 		const attachStream = (stream: NodeJS.ReadableStream | null) => {
@@ -1102,16 +1101,21 @@ async function installDeps(ctx: CommandContext, deps: DepStatus[]): Promise<void
 			continue;
 		}
 
-		ctx.ui.notify(`\n${step} 📦 Installing ${dep.name}…\n   → \`${cmd}\``);
+		// Stream install output by exploiting showStatus() in-place update:
+		// consecutive notify("info") calls update the same text node rather than
+		// appending, giving live streaming output. A final notify("warning") pins
+		// the completed output permanently so subsequent showStatus() calls cannot
+		// overwrite it. Output lines are also kept for failure diagnosis.
+		let output = `${step} 📦 Installing ${dep.name}…\n   → \`${cmd}\``;
+		ctx.ui.notify(output, "info");
 
-		// Collect output lines — show progress inline but also keep them
-		// so we can dump a readable block on failure.
 		const outputLines: string[] = [];
 		const exitCode = await runAsync(
 			cmd,
 			(line) => {
 				outputLines.push(line);
-				ctx.ui.notify(line);
+				output += `\n${line}`;
+				ctx.ui.notify(output, "info");
 			},
 		);
 
@@ -1125,17 +1129,17 @@ async function installDeps(ctx: CommandContext, deps: DepStatus[]): Promise<void
 		}
 
 		if (exitCode === 0 && dep.check()) {
-			ctx.ui.notify(`${step} ✅ ${dep.name} installed successfully`);
+			output += `\n${step} ✅ ${dep.name} installed successfully`;
 		} else if (exitCode === 124) {
-			ctx.ui.notify(`${step} ❌ ${dep.name} install timed out (10 min limit)`);
+			output += `\n${step} ❌ ${dep.name} install timed out (10 min limit)`;
 		} else {
 			// Dump the last N lines of output so the operator can see what went wrong
 			const tail = outputLines.slice(-20).join("\n");
 			const status = exitCode === 0
 				? `Command succeeded but ${dep.name} not found on PATH`
 				: `Failed to install ${dep.name} (exit ${exitCode})`;
-			const block = [
-				`${step} ❌ ${status}`,
+			output += [
+				`\n${step} ❌ ${status}`,
 				"",
 				"Output (last 20 lines):",
 				"```",
@@ -1143,7 +1147,10 @@ async function installDeps(ctx: CommandContext, deps: DepStatus[]): Promise<void
 				"```",
 				...(dep.url ? [`Manual install: ${dep.url}`] : []),
 			].join("\n");
-			ctx.ui.notify(block);
 		}
+
+		// Pin the completed output permanently so subsequent showStatus() calls
+		// cannot overwrite it.
+		ctx.ui.notify(output, "warning");
 	}
 }
