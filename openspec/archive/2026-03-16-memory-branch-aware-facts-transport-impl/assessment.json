@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "changeName": "memory-branch-aware-facts-transport-impl",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-16T14:08:39.554Z",
+  "summary": "All 4 spec scenarios PASS. 15/15 unit tests pass. Implementation matches design decisions.",
+  "snapshot": {
+    "gitHead": "ba78a5c0d52604b2340327dd9ed7049b38ab21fa",
+    "fingerprint": "e8ee5fa0701f2fbf4955036628727ad83f678033a3b9a198182127bde12a9897",
+    "dirty": false,
+    "scopedPaths": [],
+    "files": [
+      {
+        "path": "openspec/changes/memory-branch-aware-facts-transport-impl/design.md",
+        "exists": true,
+        "size": 610,
+        "sha256": "6dde794818df2a0e298f280b74034ea306e4badcf8966b407514e83509c0a5d9"
+      },
+      {
+        "path": "openspec/changes/memory-branch-aware-facts-transport-impl/proposal.md",
+        "exists": true,
+        "size": 490,
+        "sha256": "45970623c8cbd979599c04d17034888ee1dc45a2409d6cfc35932ac05fba4803"
+      },
+      {
+        "path": "openspec/changes/memory-branch-aware-facts-transport-impl/specs/memory.md",
+        "exists": true,
+        "size": 2707,
+        "sha256": "0181b64a665edb4d6141463afee8835473a96b5859bd3aea99148acc3ffd1177"
+      },
+      {
+        "path": "openspec/changes/memory-branch-aware-facts-transport-impl/tasks.md",
+        "exists": true,
+        "size": 977,
+        "sha256": "7afb4a7f052f26b6b9bb382f441937a6831c83ddb926748b85f8247bb3f4fdbf"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}
