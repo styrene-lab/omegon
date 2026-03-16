@@ -347,20 +347,6 @@ export const DEPS: Dep[] = [
 			{ platform: "any", cmd: "brew install kubectl" },
 		],
 	},
-	{
-		id: "vault",
-		name: "Vault CLI",
-		purpose: "HashiCorp Vault authentication status checking and secret management",
-		usedBy: ["01-auth"],
-		tier: "optional",
-		check: () => hasCmd("vault"),
-		requires: ["nix"],
-		install: [
-			{ platform: "any", cmd: "nix profile install nixpkgs#vault" },
-			{ platform: "any", cmd: "brew install hashicorp/tap/vault" },
-		],
-		url: "https://developer.hashicorp.com/vault/install",
-	},
 ];
 
 export type DepStatus = { dep: Dep; available: boolean };
