@@ -4,7 +4,6 @@ title: Directive-Branch Lifecycle — git branch as the unified task boundary
 status: exploring
 tags: [architecture, lifecycle, git, workflow, design-tree, openspec, cleave]
 open_questions:
-  - "Should `implement` auto-checkout the created branch, or is that too disruptive for operators who prefer to stay on main?"
   - How should OpenSpec change artifacts (proposal.md, specs, tasks.md, assessment.json) travel with the branch — committed on the branch, or kept on main as shared state?
   - What is the right relationship between cleave worktree branches (ephemeral, per-child) and the directive branch (durable, per-task)? Should cleave children branch off the directive branch rather than main?
   - Should archive automatically merge the directive branch to main (or open a PR), or should that remain a separate operator decision?
@@ -160,7 +159,6 @@ The current state produces stale branches, assessment gaps, and work-on-main dri
 
 ## Open Questions
 
-- Should `implement` auto-checkout the created branch, or is that too disruptive for operators who prefer to stay on main?
 - How should OpenSpec change artifacts (proposal.md, specs, tasks.md, assessment.json) travel with the branch — committed on the branch, or kept on main as shared state?
 - What is the right relationship between cleave worktree branches (ephemeral, per-child) and the directive branch (durable, per-task)? Should cleave children branch off the directive branch rather than main?
 - Should archive automatically merge the directive branch to main (or open a PR), or should that remain a separate operator decision?
