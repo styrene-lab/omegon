@@ -42,7 +42,7 @@ omegon      # start Omegon in any project directory
 
 ![Omegon Architecture](docs/img/architecture.png)
 
-Omegon extends `@styrene-lab/pi-coding-agent` with **27 extensions**, **12 skills**, and **4 prompt templates** — loaded automatically on session start.
+Omegon extends `@styrene-lab/pi-coding-agent` with **31 extensions**, **12 skills**, and **4 prompt templates** — loaded automatically on session start.
 
 ### Development Methodology
 
@@ -87,8 +87,10 @@ Structured design exploration with persistent markdown documents — the upstrea
 - **Blocked audit**: `design_tree(action="blocked")` returns all stalled nodes with each blocking dependency's id, title, and status
 - **Priority**: `set_priority` (1 = critical → 5 = trivial) on any node; `ready` auto-sorts by it
 - **Issue types**: `set_issue_type` classifies nodes as `epic | feature | task | bug | chore` — bugs and chores are now first-class tracked work
-- **OpenSpec bridge**: `design_tree_update` with `action: "implement"` scaffolds `openspec/changes/<node-id>/` from a decided node's content; `/cleave` executes it
-- **Full pipeline**: design → decide → implement → `/cleave` → `/assess spec` → archive
+- **Auto-transition**: Adding research or decisions to a `seed` node automatically transitions it to `exploring` and scaffolds the design spec — no manual ceremony
+- **Substance-over-ceremony gates**: `set_status(decided)` checks for open questions and recorded decisions instead of artifact directory existence. Design specs are auto-extracted from doc content and archived
+- **OpenSpec bridge**: `design_tree_update` with `action: "implement"` scaffolds `openspec/changes/<node-id>/` from a decided node's content, auto-checkouts the directive branch, forks a scoped memory mind, and sets design focus; `/cleave` executes it
+- **Full pipeline**: design → decide → implement (auto-checkout + mind fork) → `/cleave` → `/assess spec` → archive (mind merge-back + cleanup)
 
 ### 🧠 Project Memory
 
@@ -98,8 +100,9 @@ Persistent, cross-session knowledge stored in SQLite. Accumulates architectural 
 - **Semantic retrieval**: Embedding-based search via Ollama (`qwen3-embedding`), falls back to FTS5 keyword search
 - **Background extraction**: Auto-discovers facts from tool output without interrupting work
 - **Episodic memory**: Generates session narratives at shutdown for "what happened last time" context
+- **Directive minds**: `implement` forks a scoped memory mind from `default`; all fact reads/writes auto-scope to the directive. `archive` ingests discoveries back to `default` and cleans up. Zero-copy fork with parent-chain inheritance — no fact duplication, parent embeddings and edges are reused
 - **Global knowledge base**: Cross-project facts at `~/.pi/memory/global.db`
-- **Git sync**: Exports to JSONL for version-controlled knowledge sharing across machines
+- **Git sync**: Exports to JSONL for version-controlled knowledge sharing across machines; volatile runtime scoring metadata (confidence, reinforcement counts, decay scores) omitted from exports for stable diffs
 
 ![Memory Lifecycle](docs/img/memory-lifecycle.png)
 
@@ -112,6 +115,7 @@ Live status panel showing design tree, OpenSpec changes, cleave dispatch, and gi
 - **Raised mode**: Full-width expanded view (toggle with `/dash`)
   - Git branch tree rooted at repo name, annotated with linked design nodes
   - Two-column split at ≥120 terminal columns: design tree + cleave left, OpenSpec right
+  - Directive indicator: shows `▸ directive: name ✓` (branch match) or `▸ directive: name ⚠ main` (mismatch) when a directive mind is active
   - Context gauge · model · thinking level in shared footer zone
   - No line cap — renders as much content as needed
 - **Keyboard**: `Ctrl+Shift+B` toggles raised/compact

@@ -170,13 +170,18 @@ The design-tree and OpenSpec work together as two complementary lifecycle layers
 seed → exploring → [design spec scaffolded] → /assess design → decided
                                                                     ↓
                                                            implement gate
-                                                       (design OpenSpec archived)
+                                                   (design OpenSpec archived)
                                                                     ↓
                                                openspec/changes/<id>/ scaffolded
+                                                  + auto-checkout feature/<id>
+                                                  + memory mind forked from default
+                                                  + design focus set
                                                                     ↓
                                                                 /cleave
                                                                     ↓
                                                              /assess spec
+                                                                    ↓
+                                                     archive (mind → default merge)
                                                                     ↓
                                                               implemented
 ```
@@ -247,7 +252,9 @@ The `blocked` query will surface nodes where the design spec gate has not been c
 - **`ready` excludes unresolved deps, not just `blocked` status**: A `decided` node whose dependency is still `exploring` won't appear in the ready list — the dep must be fully `implemented`.
 - **`blocked` excludes `seed`/`deferred`**: Parked nodes aren't blocked — they're intentionally waiting. Surfacing them as blocked would add noise.
 - **Priority sorts `ready`, doesn't gate it**: Priority is advisory. An unprioritized node still appears in the ready list, just sorted last.
-- **`implement` bridges to OpenSpec**: A decided node's decisions, file scope, and constraints are used to scaffold an OpenSpec change directory, creating a seamless design → implementation pipeline.
+- **Auto-transition seed → exploring**: `add_research` and `add_decision` on seed nodes automatically transition to exploring and scaffold the design spec — no manual ceremony required.
+- **Substance-over-ceremony decided gate**: `set_status(decided)` checks for open questions (must be empty) and recorded decisions (must have at least one) rather than requiring artifact directory existence. Design specs are auto-extracted from doc content and archived.
+- **`implement` bridges to OpenSpec + mind fork**: A decided node's decisions, file scope, and constraints scaffold an OpenSpec change directory. `implement` also auto-checkouts the directive branch (`feature/<node-id>`), forks a scoped memory mind from `default`, and sets design focus — all in one action.
 - **Focus context injection**: When a node is focused via `design_tree_update('focus')`, its content is injected into the agent's context on every turn — ensuring design decisions stay visible during implementation.
 - **Scan both `docs/` and `docs/design/`**: After the archive migration, the scanner reads from both directories to maintain visibility of all historical nodes.
 

@@ -14,7 +14,7 @@ openspec_baselines:
   - memory/lifecycle.md
   - memory/models.md
   - project-memory/compaction.md
-last_updated: 2026-03-13
+last_updated: 2026-03-17
 ---
 
 # Project Memory
@@ -32,7 +32,8 @@ Project memory gives agents persistent knowledge across sessions. It operates at
 - **Context injection**: Three-layer proactive startup injection (last 3 episodes + recency window + Architecture/Decisions core) fires before the user's first message. Semantic injection on first message adds task-specific facts on top.
 - **Task-completion facts**: Write/edit tool calls queue `Recent Work` facts with 2-day half-life, capturing mid-term "what was accomplished" continuity.
 - **Structural pruning ceiling**: `computeConfidence()` caps effective half-life at 90 days regardless of reinforcement count. Per-section LLM archival pass fires at session_start when any section exceeds 60 facts.
-- **JSONL sync**: `facts.jsonl` exported for git tracking; `merge=union` gitattribute enables multi-branch fact merging.
+- **Directive minds**: `implement` forks a scoped mind from `default`; all fact reads/writes auto-scope to the directive. `archive` ingests discoveries back to `default` and cleans up. Zero-copy fork with parent-chain inheritance — no fact duplication, parent embeddings and edges are reused.
+- **JSONL sync**: `facts.jsonl` exported for git tracking; `merge=union` gitattribute enables multi-branch fact merging. Volatile runtime scoring metadata (confidence, reinforcement counts, decay scores) omitted from exports for stable diffs.
 - **Global knowledge base**: Cross-project facts stored in `~/.pi/memory/global.db`.
 
 ## Key Files
@@ -45,7 +46,7 @@ Project memory gives agents persistent knowledge across sessions. It operates at
 | `extensions/project-memory/extraction-v2.ts` | Background fact extraction from conversation via subagent |
 | `extensions/project-memory/compaction-policy.ts` | Context pressure detection, auto-compaction triggers |
 | `extensions/project-memory/injection-metrics.ts` | Relevance scoring for context injection |
-| `extensions/project-memory/lifecycle.ts` | Integration with design-tree and OpenSpec status transitions |
+| `extensions/project-memory/lifecycle.ts` | Mind fork/merge lifecycle, integration with design-tree and OpenSpec status transitions |
 | `extensions/project-memory/migration.ts` | Database schema migrations |
 | `extensions/project-memory/triggers.ts` | Event-driven fact extraction triggers |
 | `extensions/project-memory/template.ts` | Memory section templates for context injection |
@@ -64,6 +65,7 @@ Project memory gives agents persistent knowledge across sessions. It operates at
 - **Recent Work section for task-completion**: Write/edit tool calls queue lightweight facts in `Recent Work` with `RECENT_WORK_DECAY` (halfLifeDays=2, reinforcementFactor=1.0 — reinforcement does NOT extend these). Mid-term bridge between architecture facts and ephemeral context.
 - **Episode fallback chain**: Generation tries cloud (haiku → codex-spark) first; Ollama optional. Guaranteed template-floor episode when all models fail — at least date + tool counts + files written.
 - **Cheap models for extraction and embeddings**: Background extraction uses local/GPT models to avoid burning expensive frontier API calls.
+- **Mind-per-directive scoping**: Each directive gets its own mind (memory namespace) forked from `default`. Parent-chain inheritance means child minds see parent facts without duplication. On archive, valuable discoveries are ingested back to `default`. This isolates directive-specific context while preserving project-wide knowledge.
 - **Context pressure auto-compaction**: When context window usage exceeds thresholds, memory triggers compaction. Local (45s) → codex-spark (60s) → haiku (30s) fallback chain.
 
 ## Behavioral Contracts

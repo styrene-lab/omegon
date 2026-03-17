@@ -21,7 +21,7 @@ last_updated: 2026-03-10
 The dashboard extension replaces pi's default footer with a multi-mode persistent display that unifies state from across all Omegon subsystems. It provides four display modes:
 
 - **Compact** (3 lines): Context gauge, token stats, model/thinking indicator, git branch — always-visible summary
-- **Raised** (up to 10 lines): Adds design tree focus, OpenSpec changes, live cleave dispatch progress
+- **Raised** (up to 10 lines): Adds design tree focus, OpenSpec changes, live cleave dispatch progress, directive mind indicator with branch-match status
 - **Panel**: Full overlay with scrollable detail view
 - **Focused**: Single-subsystem deep view
 
@@ -51,6 +51,7 @@ Terminal title (`\x1b]0;...\x07`) mirrors compact dashboard state including clea
 - **Footer raise/lower + overlay**: Two-tier display — footer modes for persistent view, overlay for detail. No external terminal pane (tmux/zellij) required.
 - **`ctrl+\`` keybind**: Chosen after `Ctrl+Shift+D` (shadowed by pi-tui debug handler) and `Ctrl+Shift+B`/`Ctrl+Shift+P` (shadowed by Kitty terminal) were both blocked. `/dash` command is the reliable fallback.
 - **Cleave progress in terminal title**: `emitCleaveChildProgress` updates shared state on child stdout lines; terminal title reflects `[2/4 ██░░]` style progress.
+- **Directive indicator**: When a directive mind is active, raised mode shows `▸ directive: name ✓` (branch match) or `▸ directive: name ⚠ main` (mismatch). Helps operators notice when they've drifted off the directive branch.
 - **Dashboard URI helper for clickable items**: OSC 8 links on design tree nodes, OpenSpec changes, and file paths open in the configured editor.
 
 ## Behavioral Contracts
