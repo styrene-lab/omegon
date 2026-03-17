@@ -237,6 +237,58 @@ export interface ReunificationResult {
 	readyToClose: boolean;
 }
 
+// ─── RPC Child Communication ─────────────────────────────────────────────────
+
+/**
+ * Events received from a child process running in RPC mode.
+ *
+ * This is a discriminated union covering:
+ * - AgentEvent types (agent lifecycle, turn, message, tool execution)
+ * - AgentSessionEvent extensions (auto_compaction, auto_retry)
+ * - RPC response events (command acknowledgements)
+ * - Synthetic pipe_closed event (stdout closed)
+ *
+ * We define this as our own union rather than importing from pi-mono
+ * to avoid pulling in transitive dependencies and to add the synthetic
+ * pipe_closed event.
+ */
+export type RpcChildEvent =
+	// Agent lifecycle
+	| { type: "agent_start" }
+	| { type: "agent_end"; messages: unknown[] }
+	// Turn lifecycle
+	| { type: "turn_start" }
+	| { type: "turn_end"; message: unknown; toolResults: unknown[] }
+	// Message lifecycle
+	| { type: "message_start"; message?: unknown }
+	| { type: "message_update"; message?: unknown; assistantMessageEvent?: unknown }
+	| { type: "message_end"; message?: unknown }
+	// Tool execution
+	| { type: "tool_execution_start"; toolCallId: string; toolName: string; args: unknown }
+	| { type: "tool_execution_update"; toolCallId: string; toolName: string; args: unknown; partialResult: unknown }
+	| { type: "tool_execution_end"; toolCallId: string; toolName: string; result: unknown; isError: boolean }
+	// Session extensions
+	| { type: "auto_compaction_start"; reason: "threshold" | "overflow" }
+	| { type: "auto_compaction_end"; result?: unknown; aborted: boolean; willRetry: boolean; errorMessage?: string }
+	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
+	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
+	// Extension UI requests (from child extensions calling ui.select/ui.confirm)
+	| { type: "extension_ui_request"; requestId: string; extensionId: string; method: string; params: unknown }
+	// RPC command response
+	| { type: "response"; id?: string; command: string; success: boolean; data?: unknown; error?: string }
+	// Synthetic: stdout pipe closed (graceful degradation)
+	| { type: "pipe_closed" };
+
+/**
+ * Structured progress update derived from an RPC child event.
+ * Used by the dashboard to display child status.
+ */
+export interface RpcProgressUpdate {
+	kind: "tool" | "lifecycle" | "error";
+	summary: string;
+	toolName?: string;
+}
+
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 export interface CleaveConfig {
