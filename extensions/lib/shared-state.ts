@@ -139,6 +139,10 @@ interface SharedState {
   /** Pending mind lifecycle operations from design-tree/openspec for project-memory to process.
    *  Written by implement/archive flows, consumed by project-memory on next turn. */
   mindLifecycleQueue?: MindLifecycleRequest[];
+
+  /** Active mind name from factstore. Written by project-memory, read by dashboard.
+   *  null means default mind (no directive active). */
+  activeMind?: string | null;
 }
 
 export type MindLifecycleAction = "fork" | "activate" | "ingest" | "delete";

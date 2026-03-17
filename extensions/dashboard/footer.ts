@@ -674,6 +674,31 @@ export class DashboardFooter implements Component {
     return lines;
   }
 
+  /**
+   * Derive a short directive label from the active mind name.
+   * "directive/my-feature" → "my-feature", null/default → null.
+   */
+  private getDirectiveLabel(): string | null {
+    const mind = sharedState.activeMind;
+    if (!mind || mind === "default") return null;
+    // Strip common prefixes: "directive/", "mind/"
+    const label = mind.replace(/^(?:directive|mind)\//, "");
+    return label || null;
+  }
+
+  /**
+   * Build directive indicator lines for the model card area.
+   * Shows "▸ directive: my-feature" when a directive mind is active.
+   * Returns empty array when no directive is active.
+   */
+  private buildDirectiveIndicatorLines(width: number): string[] {
+    const label = this.getDirectiveLabel();
+    if (!label) return [];
+    const theme = this.theme;
+    const line = `${theme.fg("warning", "▸")} ${theme.fg("dim", "directive:")} ${theme.fg("warning", label)}`;
+    return [truncateToWidth(line, width, "…")];
+  }
+
   private buildModelTopologySummaries(): DashboardModelRoleSummary[] {
     const ctx = this.ctxRef;
     const summaries: DashboardModelRoleSummary[] = [];
@@ -790,7 +815,10 @@ export class DashboardFooter implements Component {
         contextCard: this.buildSummaryCard("context", this.buildHudContextLines(Math.max(1, safeWidth - 2)).map((l) => l.trimStart()), safeWidth),
         modelCard: this.buildSummaryCard(
           "models",
-          this.buildModelTopologySummaries().map((s) => this.formatModelTopologyLine(s, Math.max(1, safeWidth - 2), safeWidth < 44)),
+          [
+            ...this.buildDirectiveIndicatorLines(Math.max(1, safeWidth - 2)),
+            ...this.buildModelTopologySummaries().map((s) => this.formatModelTopologyLine(s, Math.max(1, safeWidth - 2), safeWidth < 44)),
+          ],
           safeWidth,
         ),
         memoryCard: this.buildSummaryCard("memory", (() => {
@@ -852,7 +880,10 @@ export class DashboardFooter implements Component {
       contextCard: this.buildSummaryCardForColumn("context", this.buildHudContextLines(Math.max(1, col1W - 2)).map((l) => l.trimStart()), col1W, col1W),
       modelCard: this.buildSummaryCardForColumn(
         "models",
-        this.buildModelTopologySummaries().map((s) => this.formatModelTopologyLine(s, Math.max(1, col2W - 2), col2W < 44)),
+        [
+          ...this.buildDirectiveIndicatorLines(Math.max(1, col2W - 2)),
+          ...this.buildModelTopologySummaries().map((s) => this.formatModelTopologyLine(s, Math.max(1, col2W - 2), col2W < 44)),
+        ],
         col2W,
         col2W,
       ),
