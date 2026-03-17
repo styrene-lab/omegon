@@ -91,15 +91,21 @@ This status is injected into the agent context (not just displayed).
 ## Complexity Formula
 
 ```
-complexity = (1 + systems) × (1 + 0.5 × modifiers)
+complexity = systems × (1 + 0.5 × modifiers)
 effective  = complexity + 1  (when validation enabled)
 ```
 
-## Patterns (9)
+The formula uses bare `systems` (not `1 + systems`) so that single-system,
+zero-modifier directives score 1.0 (effective 2.0) — at the default threshold
+of 2.0, they get `needs_assessment` rather than being falsely recommended
+for decomposition.
+
+## Patterns (12)
 
 Full-Stack CRUD, Authentication System, External Service Integration,
 Database Migration, Performance Optimization, Breaking API Change,
-Simple Refactor, Bug Fix, Refactor.
+Refactor, Bug Fix, Greenfield Project, Multi-Module Library,
+Application Bootstrap, Infrastructure & Tooling.
 
 ## Adversarial Review Loop
 

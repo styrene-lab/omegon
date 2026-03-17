@@ -194,21 +194,22 @@ export const PATTERNS: Record<string, PatternDefinition> = {
 		modifiersDefault: ["breaking_changes"],
 		splitStrategy: ["New versioned endpoint", "Deprecation + dual-support", "Client migration"],
 	},
-	simple_refactor: {
-		name: "Simple Refactor",
-		description: "Code cleanup, renaming, or structural changes without functional modifications",
+	refactor: {
+		name: "Refactor",
+		description: "Code cleanup, renaming, restructuring, or replacing implementations while preserving behavior",
 		keywords: [
 			"refactor", "rename", "reorganize", "cleanup", "extract", "inline", "move",
-			"restructure", "mechanical", "no functional",
+			"restructure", "mechanical", "no functional", "replace", "rewrite", "improve",
+			"clean", "swap", "substitute", "modernize",
 		],
-		requiredAny: ["refactor", "rename", "cleanup", "extract", "reorganize"],
+		requiredAny: ["refactor", "rename", "cleanup", "extract", "reorganize", "replace", "rewrite", "swap", "substitute"],
 		expectedComponents: {
-			operation: ["rename", "extract", "inline", "move", "reorganize"],
-			scope: ["function", "class", "file", "module", "component", "method"],
+			operation: ["rename", "extract", "inline", "move", "reorganize", "replace", "rewrite", "swap", "substitute"],
+			scope: ["function", "class", "file", "module", "component", "method", "implementation", "approach", "library", "framework", "pattern"],
 		},
 		systemsBase: 1,
 		modifiersDefault: [],
-		splitStrategy: ["By module/scope", "Update tests"],
+		splitStrategy: ["Implement replacement / perform refactor", "Update call sites + tests", "Remove old implementation"],
 	},
 	bug_fix: {
 		name: "Bug Fix",
@@ -282,21 +283,27 @@ export const PATTERNS: Record<string, PatternDefinition> = {
 		modifiersDefault: ["state_coordination"],
 		splitStrategy: ["Core data model", "Rendering/UI layer", "Event handling + state management", "Application shell"],
 	},
-	refactor: {
-		name: "Refactor",
-		description: "Replace or rewrite implementation while preserving behavior",
+	infrastructure_tooling: {
+		name: "Infrastructure & Tooling",
+		description: "Extension development, CLI tooling, internal infrastructure, build systems, or agentic framework work",
 		keywords: [
-			"refactor", "replace", "rewrite", "improve", "clean", "restructure", "reorganize",
-			"swap", "substitute", "modernize",
+			"extension", "plugin", "tool", "command", "cli", "config", "configuration",
+			"pipeline", "build", "deploy", "ci", "cd", "workflow", "script", "hook",
+			"provider", "routing", "dispatch", "handler", "registry", "loader",
+			"prompt", "agent", "model", "inference", "memory", "context",
+			"dashboard", "status", "diagnostic", "telemetry", "logging",
+			"skill", "template", "scaffold", "generate", "emit",
 		],
-		requiredAny: ["replace", "rewrite", "swap", "substitute", "refactor"],
+		requiredAny: ["extension", "plugin", "provider", "routing",
+			"dispatch", "registry", "agent", "skill"],
 		expectedComponents: {
-			operation: ["replace", "rewrite", "swap", "substitute"],
-			target: ["implementation", "approach", "library", "framework", "pattern"],
+			core: ["extension", "plugin", "tool", "command", "handler", "provider", "registry"],
+			integration: ["config", "pipeline", "workflow", "routing", "dispatch", "loader"],
+			surface: ["cli", "dashboard", "status", "prompt", "template", "diagnostic"],
 		},
-		systemsBase: 1.0,
+		systemsBase: 1,
 		modifiersDefault: [],
-		splitStrategy: ["Implement replacement", "Update call sites", "Remove old implementation"],
+		splitStrategy: ["Core implementation", "Integration + wiring", "Tests + documentation"],
 	},
 };
 
@@ -462,11 +469,18 @@ export function detectModifiers(directive: string): string[] {
 }
 
 /**
- * Calculate complexity: (1 + systems) × (1 + 0.5 × modifiers).
+ * Calculate complexity: systems × (1 + 0.5 × modifiers).
+ *
+ * Previous formula was (1 + systems) which gave a floor of 2.0 even for
+ * single-system, zero-modifier directives — making the heuristic path
+ * always exceed the default threshold of 2.0. Using bare `systems`
+ * allows trivial directives (1 system, 0 modifiers) to score 1.0,
+ * so they correctly get `needs_assessment` instead of `cleave`.
+ *
  * Capped at 100.0.
  */
 export function calculateComplexity(systems: number, modifiers: string[]): number {
-	const raw = (1 + systems) * (1 + 0.5 * modifiers.length);
+	const raw = systems * (1 + 0.5 * modifiers.length);
 	return Math.round(Math.min(raw, 100.0) * 10) / 10;
 }
 
@@ -536,7 +550,7 @@ export function assessDirective(
 			reasoning:
 				`Pattern '${match.name}' matched with ${(match.confidence * 100).toFixed(0)}% confidence. ` +
 				`Systems: ${systemsForDisplay}, Modifiers: ${allModifiers.length}. ` +
-				`Formula: (1 + ${systemsForCalc}) × (1 + 0.5 × ${allModifiers.length}) = ${complexity}. ` +
+				`Formula: ${systemsForCalc} × (1 + 0.5 × ${allModifiers.length}) = ${complexity}. ` +
 				`Effective (validate=${validate}): ${effComplexity}`,
 			skipInterrogation: false,
 		};
@@ -545,7 +559,7 @@ export function assessDirective(
 		if (
 			match.confidence >= 0.90 &&
 			effComplexity <= threshold &&
-			match.name === "Simple Refactor"
+			match.name === "Refactor"
 		) {
 			result.skipInterrogation = true;
 		}

@@ -24,6 +24,8 @@ import {
 
 describe("PATTERNS", () => {
 	it("should have 12 patterns", () => {
+		// 12 patterns: 8 original + greenfield + multi_module + app_bootstrap + infra_tooling
+		// (simple_refactor and refactor merged into one "refactor" pattern)
 		assert.equal(Object.keys(PATTERNS).length, 12);
 	});
 
@@ -202,12 +204,18 @@ describe("detectModifiers", () => {
 
 describe("calculateComplexity", () => {
 	it("base case: 0 systems, 0 modifiers", () => {
-		assert.equal(calculateComplexity(0, []), 1);
+		// 0 × 1 = 0
+		assert.equal(calculateComplexity(0, []), 0);
 	});
 
-	it("formula: (1 + systems) × (1 + 0.5 × modifiers)", () => {
-		// (1 + 3) × (1 + 0.5 × 2) = 4 × 2 = 8
-		assert.equal(calculateComplexity(3, ["a", "b"]), 8);
+	it("single system, no modifiers = 1", () => {
+		// 1 × 1 = 1 — this is the critical fix: trivial directives must score low
+		assert.equal(calculateComplexity(1, []), 1);
+	});
+
+	it("formula: systems × (1 + 0.5 × modifiers)", () => {
+		// 3 × (1 + 0.5 × 2) = 3 × 2 = 6
+		assert.equal(calculateComplexity(3, ["a", "b"]), 6);
 	});
 
 	it("caps at 100", () => {
@@ -215,8 +223,8 @@ describe("calculateComplexity", () => {
 	});
 
 	it("rounds to 1 decimal", () => {
-		// (1 + 2) × (1 + 0.5 × 1) = 3 × 1.5 = 4.5
-		assert.equal(calculateComplexity(2, ["a"]), 4.5);
+		// 2 × (1 + 0.5 × 1) = 2 × 1.5 = 3
+		assert.equal(calculateComplexity(2, ["a"]), 3);
 	});
 });
 
@@ -269,6 +277,15 @@ describe("assessDirective", () => {
 		);
 		assert.equal(r.decision, "execute");
 		assert.equal(r.method, "fast-path");
+	});
+
+	it("returns needs_assessment for trivial unrecognized directives", () => {
+		// Single-system, zero-modifier directive should NOT recommend cleave
+		const r = assessDirective("fix the trailing comma in package.json");
+		assert.equal(r.method, "heuristic");
+		assert.equal(r.decision, "needs_assessment",
+			"Trivial directives must not be recommended for decomposition");
+		assert.ok(r.complexity <= 2, `Expected complexity ≤ 2, got ${r.complexity}`);
 	});
 
 	it("returns cleave for complex multi-system task", () => {

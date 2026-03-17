@@ -1586,7 +1586,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			"Every non-trivial code change must include tests in co-located *.test.ts files. Untested code is incomplete — do not commit without tests for new functions and changed behavior.",
 			"Call cleave_assess before starting any multi-system or cross-cutting task to determine if decomposition is needed",
 			"If decision is 'execute', proceed directly. If 'cleave', use /cleave to decompose. If 'needs_assessment', proceed directly — it means no pattern matched but the task is likely simple enough for in-session execution.",
-			"Complexity formula: (1 + systems) × (1 + 0.5 × modifiers). Threshold default: 2.0.",
+			"Complexity formula: systems × (1 + 0.5 × modifiers). Threshold default: 2.0.",
 			"The /assess command provides code assessment: `/assess cleave` (adversarial review + auto-fix), `/assess diff [ref]` (review only), `/assess spec [change]` (validate against OpenSpec scenarios), `/assess design [node-id]` (evaluate design-tree node readiness before set_status(decided)).",
 			"When the repo has openspec/ with active changes, suggest `/assess spec` after implementation and before `/opsx:archive`.",
 			"Run `/assess design <node-id>` before calling design_tree_update with set_status(decided) to verify acceptance criteria are satisfied.",
