@@ -23,8 +23,8 @@ import { SERMON } from "./sermon.js";
 const CHAR_INTERVAL_MS = 67;
 const WORD_PAUSE_MS = 120;
 
-/** Maximum visible characters on the scrawl line. */
-const MAX_VISIBLE = 72;
+/** Minimum visible characters (floor for very narrow terminals). */
+const MIN_VISIBLE = 40;
 
 // Glitch vocabulary — borrowed from the splash CRT noise aesthetic
 const NOISE_CHARS = "▓▒░█▄▀▌▐▊▋▍▎▏◆■□▪◇┼╬╪╫";
@@ -40,15 +40,18 @@ const COMBINING_GLITCH = [
 // Sermon palette — much dimmer than the spinner verb.
 // The sermon is background thought, not actionable signal.
 // Base text is near the noise floor; glitch accents stay subdued.
+// IMPORTANT: glitch colors must return to SERMON_DIM, never RESET (which
+// snaps to terminal default — often bright white, causing flash).
 const SERMON_DIM   = "\x1b[38;2;50;55;65m";     // #323741 — barely visible
-const GLITCH_GLYPH = "\x1b[38;2;55;75;90m";     // #374b5a — noise glyphs, slightly brighter
-const GLITCH_COLOR = "\x1b[38;2;30;100;115m";    // #1e6473 — muted teal shimmer
-const RESET        = "\x1b[0m";
+const GLITCH_GLYPH = "\x1b[38;2;55;70;80m";     // #374650 — noise glyphs, only slightly above base
+const GLITCH_COLOR = "\x1b[38;2;45;80;90m";      // #2d505a — very muted teal, close to base
+const RESET_TO_DIM = SERMON_DIM;                  // return to base after glitch, never full reset
+const RESET        = "\x1b[0m";                   // only for end-of-line
 
-// Glitch probabilities per character per render
-const P_SUBSTITUTE = 0.03;
-const P_COLOR      = 0.05;
-const P_COMBINING  = 0.015;
+// Glitch probabilities per character per render — kept subtle
+const P_SUBSTITUTE = 0.02;
+const P_COLOR      = 0.035;
+const P_COMBINING  = 0.01;
 
 function randomFrom<T>(arr: readonly T[] | string): T | string {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -60,14 +63,14 @@ function glitchChar(ch: string): string {
 
   const r = Math.random();
 
-  // Substitution — replace with noise glyph, slightly brighter than base
+  // Substitution — replace with noise glyph, only slightly above base
   if (r < P_SUBSTITUTE) {
-    return GLITCH_GLYPH + randomFrom(NOISE_CHARS) + RESET;
+    return GLITCH_GLYPH + randomFrom(NOISE_CHARS) + RESET_TO_DIM;
   }
 
-  // Color shimmer — subdued teal flicker
+  // Color shimmer — very muted teal, not a flash
   if (r < P_SUBSTITUTE + P_COLOR) {
-    return GLITCH_COLOR + ch + RESET;
+    return GLITCH_COLOR + ch + RESET_TO_DIM;
   }
 
   // Combining diacritics — corruption overlay at base dim
@@ -93,9 +96,9 @@ export function createSermonWidget(
     cursor = (cursor + 1) % SERMON.length;
     revealed += ch;
 
-    // Sliding window — keep only the tail
-    if (revealed.length > MAX_VISIBLE) {
-      revealed = revealed.slice(revealed.length - MAX_VISIBLE);
+    // Sliding window — keep a generous buffer; render() trims to actual width
+    if (revealed.length > 300) {
+      revealed = revealed.slice(revealed.length - 300);
     }
 
     tui.requestRender();
@@ -111,7 +114,8 @@ export function createSermonWidget(
 
   return {
     render(width: number): string[] {
-      const maxW = Math.min(MAX_VISIBLE, width - 4);
+      // Use full terminal width minus a small indent (2 chars)
+      const maxW = Math.max(MIN_VISIBLE, width - 4);
       const visible = revealed.length > maxW
         ? revealed.slice(revealed.length - maxW)
         : revealed;
