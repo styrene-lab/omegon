@@ -820,6 +820,7 @@ describe("timeout constants", () => {
 // ─── Native agent resolution ────────────────────────────────────────────────
 
 import { resolveNativeAgent, _clearNativeAgentCache, type NativeAgentSpec } from "../lib/omegon-subprocess.ts";
+import { NATIVE_TIER_DEFAULTS } from "./dispatcher.ts";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -909,6 +910,24 @@ describe("native agent dispatch routing", () => {
 			wouldUseNative(nativeAgent, "gloriana", "openai:gpt-4.1-2025-04-14"),
 			true,
 			"gloriana tier should use native when available",
+		);
+	});
+
+	it("NATIVE_TIER_DEFAULTS provides fallback when registry is empty", () => {
+		assert.ok(NATIVE_TIER_DEFAULTS["victory"], "victory default must exist");
+		assert.ok(NATIVE_TIER_DEFAULTS["gloriana"], "gloriana default must exist");
+		assert.ok(NATIVE_TIER_DEFAULTS["retribution"], "retribution default must exist");
+		assert.equal(NATIVE_TIER_DEFAULTS["local"], undefined, "local must NOT have a default");
+
+		// With tier defaults, native dispatch should work even without registry
+		_clearNativeAgentCache();
+		delete process.env.OMEGON_NATIVE_DISPATCH;
+		const nativeAgent = resolveNativeAgent();
+		if (!nativeAgent) return;
+		assert.equal(
+			wouldUseNative(nativeAgent, "victory", NATIVE_TIER_DEFAULTS["victory"]),
+			true,
+			"tier default should enable native dispatch when registry is empty",
 		);
 	});
 

@@ -48,6 +48,17 @@ export const LARGE_RUN_THRESHOLD = 4;
 export const DEFAULT_CHILD_TIMEOUT_MS = 15 * 60 * 1000;
 
 /**
+ * Hardcoded provider:model defaults for native dispatch when the pi model
+ * registry is unavailable (e.g. cleave_run tool context where pi.modelRegistry
+ * is not populated). The native binary needs an explicit provider:model string.
+ */
+export const NATIVE_TIER_DEFAULTS: Record<string, string> = {
+	gloriana: "anthropic:claude-sonnet-4-20250514",
+	victory: "anthropic:claude-sonnet-4-20250514",
+	retribution: "anthropic:claude-haiku-3-5-20241022",
+};
+
+/**
  * Default RPC idle timeout (3 minutes).
  * If no RPC event arrives within this window, the child is considered stalled
  * and is killed. Resets on every event (tool_start, tool_end, assistant_message,
@@ -1121,12 +1132,7 @@ async function dispatchSingleChild(
 			// Registry unavailable (empty registryModels) — use hardcoded tier defaults.
 			// The native binary just needs a provider:model string; pi-ai resolution
 			// isn't available in this code path when the registry is empty.
-			const TIER_DEFAULTS: Record<string, string> = {
-				gloriana: "anthropic:claude-sonnet-4-20250514",
-				victory: "anthropic:claude-sonnet-4-20250514",
-				retribution: "anthropic:claude-haiku-3-5-20241022",
-			};
-			nativeModelSpec = TIER_DEFAULTS[effectiveTier];
+			nativeModelSpec = NATIVE_TIER_DEFAULTS[effectiveTier];
 		}
 	}
 
