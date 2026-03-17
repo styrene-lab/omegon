@@ -59,6 +59,7 @@ import {
 	validateNodeId,
 	scaffoldOpenSpecChange,
 	scaffoldDesignOpenSpecChange,
+	extractAndArchiveDesignSpec,
 	mirrorOpenQuestionsToDesignSpec,
 	matchBranchToNode,
 	appendBranch,
@@ -798,31 +799,44 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					}
 					const oldStatus = node.status;
 
-					// Hard gate: set_status(decided) requires archived design spec.
-					// Exception: bug/chore/task nodes with no open questions can skip
-					// the design-phase ceremony — the decision IS the diagnosis.
+					// Gate: set_status(decided) checks substance first, then artifacts.
+					// Substance = open questions resolved, decisions recorded.
+					// Artifacts = design spec archived (auto-created if missing).
 					if (newStatus === "decided") {
+						const sections = getNodeSections(node);
+						const openQs = node.open_questions?.length ?? 0;
+						const decisionCount = sections.decisions.length;
+
+						// Substance check: open questions must be resolved
+						if (openQs > 0) {
+							return {
+								content: [{ type: "text", text:
+									`⚠ Cannot decide '${node.title}': ${openQs} open question${openQs > 1 ? "s" : ""} remain\n` +
+									`→ Resolve with add_decision/remove_question, or branch child nodes for exploration` }],
+								details: { id: node.id, blockedBy: "open-questions", openQuestions: openQs },
+								isError: true,
+							};
+						}
+
+						// Substance check: at least one decision recorded (skip for lightweight types)
 						const lightweightTypes = new Set(["bug", "chore", "task"]);
 						const isLightweight = node.issue_type && lightweightTypes.has(node.issue_type);
-						const hasOpenQuestions = (node.open_questions?.length ?? 0) > 0;
+						if (!isLightweight && decisionCount === 0) {
+							return {
+								content: [{ type: "text", text:
+									`⚠ Cannot decide '${node.title}': no decisions recorded\n` +
+									`→ Use add_decision to record at least one design decision before marking decided` }],
+								details: { id: node.id, blockedBy: "no-decisions" },
+								isError: true,
+							};
+						}
 
-						// Lightweight nodes: allow decided if no open questions remain,
-						// regardless of design-phase spec state.
-						if (!(isLightweight && !hasOpenQuestions)) {
-							const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
-							if (designSpec.missing) {
-								return {
-									content: [{ type: "text", text: `Cannot mark '${node.title}' decided: scaffold design spec first via set_status(exploring).` }],
-									details: { id: node.id, blockedBy: "design-openspec-missing" },
-									isError: true,
-								};
-							}
-							if (designSpec.active && !designSpec.archived) {
-								return {
-									content: [{ type: "text", text: `Cannot mark '${node.title}' decided: run \`/assess design ${node.id}\` then archive the design change before marking decided.` }],
-									details: { id: node.id, blockedBy: "design-openspec-not-archived" },
-									isError: true,
-								};
+						// Artifact check: auto-scaffold + auto-archive if missing
+						const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
+						if (!designSpec.archived) {
+							const extracted = extractAndArchiveDesignSpec(ctx.cwd, node);
+							if (extracted.created) {
+								// Auto-scaffolded — proceed (message appended below)
 							}
 						}
 					}
@@ -945,10 +959,18 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					if (!node) {
 						return { content: [{ type: "text", text: `Node '${params.node_id}' not found` }], details: {}, isError: true };
 					}
+					// Auto-transition seed → exploring on first substance addition
+					let transitioned = "";
+					if (node.status === "seed") {
+						const updated = setNodeStatus(node, "exploring");
+						tree.nodes.set(updated.id, updated);
+						scaffoldDesignOpenSpecChange(ctx.cwd, updated);
+						transitioned = " (auto-transitioned seed → exploring)";
+					}
 					addResearch(node, params.heading, params.content);
 					emitCurrentState();
 					return {
-						content: [{ type: "text", text: `Added research '${params.heading}' to '${node.title}'` }],
+						content: [{ type: "text", text: `Added research '${params.heading}' to '${node.title}'${transitioned}` }],
 						details: { id: node.id, heading: params.heading },
 					};
 				}
@@ -961,6 +983,12 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					const node = tree.nodes.get(params.node_id);
 					if (!node) {
 						return { content: [{ type: "text", text: `Node '${params.node_id}' not found` }], details: {}, isError: true };
+					}
+					// Auto-transition seed → exploring on first substance addition
+					if (node.status === "seed") {
+						const updated = setNodeStatus(node, "exploring");
+						tree.nodes.set(updated.id, updated);
+						scaffoldDesignOpenSpecChange(ctx.cwd, updated);
 					}
 					const validDecisionStatuses = ["exploring", "decided", "rejected"];
 					const rawDStatus = params.decision_status || "exploring";
@@ -1136,43 +1164,25 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 						return { content: [{ type: "text", text: `Node '${params.node_id}' not found` }], details: {}, isError: true };
 					}
 					if (node.status !== "decided" && node.status !== "resolved") {
+						const openQs = node.open_questions?.length ?? 0;
+						const hint = openQs > 0
+							? `→ Resolve ${openQs} open question${openQs > 1 ? "s" : ""}, then run set_status(decided)`
+							: `→ Run set_status(decided) to advance this node`;
 						return {
-							content: [{
-								type: "text",
-								text: `Node '${node.title}' is '${node.status}', not 'decided' or 'resolved'. ` +
-									`Resolve open questions and set status to 'decided' (or 'resolved') before implementing.`,
-							}],
-							details: {},
+							content: [{ type: "text", text:
+								`⚠ Cannot implement '${node.title}': status is '${node.status}', needs 'decided' or 'resolved'\n${hint}` }],
+							details: { id: node.id, blockedBy: "status", currentStatus: node.status },
 							isError: true,
 						};
 					}
 
-					// Hard gate: design-phase spec must be archived before implementation.
-					// Exception: bug/chore/task nodes that are already decided with no
-					// open questions can proceed directly — they don't need a design-phase
-					// spec because the decision is the bug diagnosis itself.
+					// Design-spec gate: if not yet archived, auto-extract from doc.
+					// The decided gate already handles substance checks — implement
+					// only needs the artifact to exist for audit trail.
 					{
-						const lightweightTypes = new Set(["bug", "chore", "task"]);
-						const isLightweight = node.issue_type && lightweightTypes.has(node.issue_type);
-						const hasOpenQuestions = (node.open_questions?.length ?? 0) > 0;
-						const skipDesignGate = isLightweight && !hasOpenQuestions && (node.status === "decided" || node.status === "resolved");
-
-						if (!skipDesignGate) {
-							const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
-							if (designSpec.missing) {
-								return {
-									content: [{ type: "text", text: "Scaffold design spec first via set_status(exploring)" }],
-									details: { id: node.id, blockedBy: "design-openspec-missing" },
-									isError: true,
-								};
-							}
-							if (designSpec.active && !designSpec.archived) {
-								return {
-									content: [{ type: "text", text: `Cannot implement '${node.title}': archive the design change first (\`/opsx:archive\` on the design change).` }],
-									details: { id: node.id, blockedBy: "design-openspec-not-archived" },
-									isError: true,
-								};
-							}
+						const designSpec = resolveDesignSpecBinding(ctx.cwd, node.id);
+						if (!designSpec.archived) {
+							extractAndArchiveDesignSpec(ctx.cwd, node);
 						}
 					}
 

@@ -1605,3 +1605,115 @@ export function mirrorOpenQuestionsToDesignSpec(cwd: string, node: DesignNode): 
 	const content = buildDesignTasksContent(node, syntheticSections as DocumentSections);
 	fs.writeFileSync(tasksPath, content);
 }
+
+/**
+ * Extract a design-spec artifact from the doc's structured content.
+ * Deterministic: no LLM pass, no placeholders. If the doc has thin content,
+ * the extracted spec reflects that honestly.
+ *
+ * Creates openspec/design/{id}/ with proposal.md, spec.md, and archives it
+ * immediately to openspec/design-archive/{date}-{id}/.
+ *
+ * Returns { created, archived, message }.
+ */
+export function extractAndArchiveDesignSpec(
+	cwd: string,
+	node: DesignNode,
+): { created: boolean; archived: boolean; message: string } {
+	const designDir = path.join(cwd, "openspec", "design", node.id);
+	const archiveBaseDir = path.join(cwd, "openspec", "design-archive");
+
+	// Already archived? Nothing to do.
+	if (fs.existsSync(archiveBaseDir)) {
+		for (const entry of fs.readdirSync(archiveBaseDir, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			const match = entry.name.match(/^\d{4}-\d{2}-\d{2}-(.+)$/);
+			if (match && match[1] === node.id) {
+				return { created: false, archived: true, message: "Design spec already archived" };
+			}
+		}
+	}
+
+	let sections: DocumentSections;
+	try {
+		sections = getNodeSections(node);
+	} catch {
+		sections = {
+			overview: "",
+			research: [],
+			decisions: [],
+			openQuestions: node.open_questions ?? [],
+			implementationNotes: { fileScope: [], constraints: [], rawContent: "" },
+			acceptanceCriteria: { scenarios: [], falsifiability: [], constraints: [] },
+			extraSections: [],
+		};
+	}
+
+	// ── Build spec content from doc sections ──────────────────────
+	const specLines: string[] = [
+		`# ${node.title} — Design Spec (extracted)`,
+		"",
+		`> Auto-extracted from docs/${node.id}.md at decide-time.`,
+		"",
+	];
+
+	if (sections.decisions.length > 0) {
+		specLines.push("## Decisions", "");
+		for (const d of sections.decisions) {
+			specLines.push(`### ${d.title} (${d.status})`);
+			if (d.rationale) specLines.push("", d.rationale);
+			specLines.push("");
+		}
+	}
+
+	const ac = sections.acceptanceCriteria;
+	if (ac.scenarios.length > 0 || ac.falsifiability.length > 0 || ac.constraints.length > 0) {
+		specLines.push("## Acceptance Criteria", "");
+		if (ac.scenarios.length > 0) {
+			specLines.push("### Scenarios", "");
+			for (const s of ac.scenarios) specLines.push(`- ${s}`);
+			specLines.push("");
+		}
+		if (ac.falsifiability.length > 0) {
+			specLines.push("### Falsifiability", "");
+			for (const f of ac.falsifiability) specLines.push(`- ${f}`);
+			specLines.push("");
+		}
+		if (ac.constraints.length > 0) {
+			specLines.push("### Constraints", "");
+			for (const c of ac.constraints) specLines.push(`- ${c}`);
+			specLines.push("");
+		}
+	}
+
+	if (sections.research.length > 0) {
+		specLines.push("## Research Summary", "");
+		for (const r of sections.research) {
+			specLines.push(`### ${r.heading}`, "", r.content.slice(0, 500) + (r.content.length > 500 ? "…" : ""), "");
+		}
+	}
+
+	// ── Write to openspec/design/{id}/ ──────────────────────────
+	fs.mkdirSync(designDir, { recursive: true });
+	fs.writeFileSync(
+		path.join(designDir, "proposal.md"),
+		`# ${node.title}\n\n## Intent\n\n${sections.overview?.split("\n").find(l => l.trim()) ?? node.title}\n\nSee [design doc](../../../docs/${node.id}.md).\n`,
+	);
+	fs.writeFileSync(path.join(designDir, "spec.md"), specLines.join("\n"));
+
+	// ── Immediately archive ─────────────────────────────────────
+	const today = new Date().toISOString().split("T")[0];
+	const archiveDir = path.join(archiveBaseDir, `${today}-${node.id}`);
+	fs.mkdirSync(archiveDir, { recursive: true });
+
+	for (const file of fs.readdirSync(designDir)) {
+		fs.copyFileSync(path.join(designDir, file), path.join(archiveDir, file));
+	}
+	fs.rmSync(designDir, { recursive: true, force: true });
+
+	return {
+		created: true,
+		archived: true,
+		message: `Extracted design spec from docs/${node.id}.md (${sections.decisions.length} decisions, ${sections.research.length} research sections) → archived to openspec/design-archive/${today}-${node.id}/`,
+	};
+}
