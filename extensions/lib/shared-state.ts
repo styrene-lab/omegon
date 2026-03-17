@@ -145,10 +145,12 @@ export type MindLifecycleAction = "fork" | "activate" | "ingest" | "delete";
 
 export interface MindLifecycleRequest {
   action: MindLifecycleAction;
-  /** Mind name for fork target, activate, or delete. Source for ingest. */
+  /** Mind name: fork target, activate target, ingest source, or delete target. */
   mind: string;
-  /** Description for fork. Target mind for ingest. */
-  detail?: string;
+  /** Human-readable description (used by fork). */
+  description?: string;
+  /** Target mind for ingest (defaults to 'default'). */
+  targetMind?: string;
 }
 
 // Initialize once on first import, reuse thereafter via global symbol.

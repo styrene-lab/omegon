@@ -767,14 +767,15 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 					// Merge directive-scoped memory mind back to default and clean up.
 					// The mind was forked at implement time; ingest merges discoveries
 					// back (deduplicating) and delete removes the scope.
+					// Queue unconditionally — the drain skips gracefully if the mind
+					// doesn't exist (e.g. untracked changes that skipped implement).
 					{
 						const mindName = `directive/${params.change_name}`;
 						(sharedState.mindLifecycleQueue ??= []).push(
-							{ action: "ingest", mind: mindName, detail: "default" },
+							{ action: "ingest", mind: mindName, targetMind: "default" },
 							{ action: "activate", mind: "default" },
 							{ action: "delete", mind: mindName },
 						);
-						result.operations.push(`Merged directive memory scope '${mindName}' back to default`);
 					}
 
 					// Auto-delete merged feature branches from transitioned design nodes
@@ -1776,15 +1777,15 @@ export default function openspecExtension(pi: ExtensionAPI): void {
 				);
 			}
 
-			// Merge directive-scoped memory mind back to default and clean up
+			// Merge directive-scoped memory mind back to default and clean up.
+			// Queue unconditionally — the drain skips if the mind doesn't exist.
 			{
 				const mindName = `directive/${changeName}`;
 				(sharedState.mindLifecycleQueue ??= []).push(
-					{ action: "ingest", mind: mindName, detail: "default" },
+					{ action: "ingest", mind: mindName, targetMind: "default" },
 					{ action: "activate", mind: "default" },
 					{ action: "delete", mind: mindName },
 				);
-				result.operations.push(`Merged directive memory scope '${mindName}' back to default`);
 			}
 
 			// Auto-delete merged feature branches from transitioned design nodes

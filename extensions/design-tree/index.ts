@@ -1185,7 +1185,7 @@ export default function designTreeExtension(pi: ExtensionAPI): void {
 					if (implResult.ok) {
 						const mindName = `directive/${node.id}`;
 						(sharedState.mindLifecycleQueue ??= []).push(
-							{ action: "fork", mind: mindName, detail: `Memory scope for ${implResult.branch ?? node.id}` },
+							{ action: "fork", mind: mindName, description: `Memory scope for ${implResult.branch ?? node.id}` },
 							{ action: "activate", mind: mindName },
 						);
 					}

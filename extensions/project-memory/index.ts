@@ -566,7 +566,6 @@ export default function (pi: ExtensionAPI) {
       splashUpdate("memory", "active");
     } catch {}
 
-    drainMindLifecycleQueue(ctx);
     drainLifecycleCandidateQueue(ctx);
     drainFactArchiveQueue();
     memoryDir = path.join(ctx.cwd, ".pi", "memory");
@@ -660,6 +659,10 @@ export default function (pi: ExtensionAPI) {
     } catch {
       // Best effort
     }
+
+    // Drain mind lifecycle queue after store is initialized — fork/activate/ingest/delete
+    // requests from implement/archive flows that were queued before store existed.
+    drainMindLifecycleQueue(ctx);
 
     triggerState = createTriggerState();
     postCompaction = false;
@@ -1921,7 +1924,7 @@ export default function (pi: ExtensionAPI) {
               // Already forked (e.g. resumed directive) — just skip
               break;
             }
-            store.forkMind("default", req.mind, req.detail ?? `Directive scope: ${req.mind}`);
+            store.forkMind("default", req.mind, req.description ?? `Directive scope: ${req.mind}`);
             if (ctx.hasUI) {
               ctx.ui.notify(`[memory] Forked directive mind '${req.mind}'`, "info");
             }
@@ -1937,7 +1940,7 @@ export default function (pi: ExtensionAPI) {
             break;
           }
           case "ingest": {
-            const targetMind = req.detail ?? "default";
+            const targetMind = req.targetMind ?? "default";
             if (!store.mindExists(req.mind)) {
               // Source mind doesn't exist — nothing to ingest
               break;
