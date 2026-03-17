@@ -740,11 +740,11 @@ async function spawnChildRpc(
 			}, 5_000);
 		};
 
+		let sawAgentEnd = false;
 		let eventsFinished: Promise<void> = Promise.resolve();
 		if (proc.stdout) {
 			eventsFinished = (async () => {
 				try {
-					let sawAgentEnd = false;
 					for await (const event of parseRpcEventStream(proc.stdout!)) {
 						events.push(event);
 						resetIdleTimer(); // activity — push back the idle deadline
@@ -766,15 +766,15 @@ async function spawnChildRpc(
 						// pipe break.
 						if (event.type === "agent_end") {
 							sawAgentEnd = true;
+							onEvent?.(event);
+							// Agent is done — kill immediately. The RPC process has
+							// no shutdown command and hangs on `new Promise(() => {})`
+							// forever. There is nothing left to flush.
 							try { proc.stdin?.end(); } catch { /* already closed */ }
-							// Grace period: let the process flush stdout, then kill
-							setTimeout(() => {
-								if (!killed && !proc.killed) {
-									killed = true;
-									killCleaveProc(proc);
-									scheduleEscalation();
-								}
-							}, 2_000);
+							killed = true;
+							killCleaveProc(proc);
+							scheduleEscalation();
+							break; // Exit the event loop — we're done
 						}
 						onEvent?.(event);
 					}
@@ -818,14 +818,18 @@ async function spawnChildRpc(
 			// Wait for all RPC events to be consumed before resolving
 			await eventsFinished;
 
-			const killReason = idleKilled
-				? `Killed (idle — no RPC events for ${Math.round(idleTimeoutMs / 1000)}s)\n${stderr}`
-				: killed
-					? `Killed (timeout or abort)\n${stderr}`
-					: stderr;
+			const killReason = sawAgentEnd
+				? stderr // Clean completion — agent finished, we killed the leftover process
+				: idleKilled
+					? `Killed (idle — no RPC events for ${Math.round(idleTimeoutMs / 1000)}s)\n${stderr}`
+					: killed
+						? `Killed (timeout or abort)\n${stderr}`
+						: stderr;
 
 			resolve({
-				exitCode: killed ? -1 : (code ?? 1),
+				// sawAgentEnd means the agent completed successfully — treat as exit 0
+				// even though we had to kill the process (RPC has no shutdown command)
+				exitCode: sawAgentEnd ? 0 : (killed ? -1 : (code ?? 1)),
 				stdout: "",
 				stderr: killReason,
 				events,
@@ -1167,6 +1171,9 @@ async function dispatchSingleChild(
 		&& nativeModelSpec != null
 		// Opt-out: OMEGON_NATIVE_DISPATCH=0 disables native dispatch
 		&& process.env.OMEGON_NATIVE_DISPATCH !== "0";
+
+	// DEBUG: trace native dispatch decision
+	console.warn(`[cleave:debug] child=${child.label} effectiveTier=${effectiveTier} nativeAgent=${nativeAgent != null} nativeModelSpec=${nativeModelSpec} OMEGON_NATIVE_DISPATCH=${process.env.OMEGON_NATIVE_DISPATCH} → useNative=${useNative}`);
 
 	if (useNative) {
 		child.backend = "native";
