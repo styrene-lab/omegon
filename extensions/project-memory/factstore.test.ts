@@ -341,6 +341,128 @@ describe("FactStore", () => {
     assert.ok(facts.find(f => f.content === "Fact B"));
   });
 
+  // --- Mind parent-chain inheritance ---
+
+  describe("mind parent-chain inheritance", () => {
+    it("forkMind creates lightweight child with zero fact copy", () => {
+      // Populate parent with facts
+      for (let i = 0; i < 100; i++) {
+        store.storeFact({ section: "Architecture", content: `Parent fact ${i}` });
+      }
+      assert.equal(store.countActiveFacts("default"), 100);
+
+      store.forkMind("default", "directive/test", "test");
+
+      // Mind record exists with correct parent
+      const mind = store.getMind("directive/test");
+      assert.ok(mind);
+      assert.equal(mind!.parent, "default");
+
+      // Zero facts directly in child
+      const directChildFacts = (store as any).db.prepare(
+        `SELECT COUNT(*) as count FROM facts WHERE mind = 'directive/test' AND status = 'active'`
+      ).get();
+      assert.equal(directChildFacts.count, 0);
+
+      // But getActiveFacts returns all 100 parent facts
+      const active = store.getActiveFacts("directive/test");
+      assert.equal(active.length, 100);
+    });
+
+    it("child facts with different content coexist with parent facts", () => {
+      store.storeFact({ section: "Decisions", content: "X is Y" });
+      store.forkMind("default", "directive/test", "test");
+
+      // Store a fact with different content in child
+      store.storeFact({ mind: "directive/test", section: "Decisions", content: "X is Z" });
+
+      const facts = store.getActiveFacts("directive/test");
+      const contents = facts.map(f => f.content);
+      assert.ok(contents.includes("X is Y"), "parent fact should be visible");
+      assert.ok(contents.includes("X is Z"), "child fact should be visible");
+    });
+
+    it("exact duplicate in parent prevents re-creation in child", () => {
+      const { id: parentId } = store.storeFact({ section: "Architecture", content: "shared content" });
+      store.forkMind("default", "directive/test", "test");
+
+      // Attempt to store same content in child — should dedup to parent
+      const result = store.storeFact({ mind: "directive/test", section: "Architecture", content: "shared content" });
+      assert.equal(result.duplicate, true);
+      assert.equal(result.id, parentId, "should return the parent's fact id");
+
+      // No new fact in child mind
+      const directChildFacts = (store as any).db.prepare(
+        `SELECT COUNT(*) as count FROM facts WHERE mind = 'directive/test' AND status = 'active'`
+      ).get();
+      assert.equal(directChildFacts.count, 0);
+    });
+
+    it("ingestMind copies only child-owned facts, not inherited", () => {
+      // Populate parent
+      store.storeFact({ section: "Architecture", content: "Parent fact 1" });
+      store.storeFact({ section: "Architecture", content: "Parent fact 2" });
+
+      store.forkMind("default", "directive/test", "test");
+
+      // Store 3 facts directly in child
+      store.storeFact({ mind: "directive/test", section: "Decisions", content: "Child fact A" });
+      store.storeFact({ mind: "directive/test", section: "Decisions", content: "Child fact B" });
+      store.storeFact({ mind: "directive/test", section: "Decisions", content: "Child fact C" });
+
+      const result = store.ingestMind("directive/test", "default");
+      // Only the 3 child-owned facts should be considered, not the 2 inherited parent facts
+      assert.equal(result.factsIngested + result.duplicatesSkipped, 3);
+      assert.equal(result.factsIngested, 3);
+    });
+
+    it("sweepDecayedFacts only sweeps own facts, not parent facts", () => {
+      // Create a fact in parent with very old reinforcement (will be decayed)
+      const longAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+      store.storeFact({ section: "Recent Work", content: "Old parent work" });
+      // Manually backdate the parent fact
+      (store as any).db.prepare(
+        `UPDATE facts SET last_reinforced = ?, reinforcement_count = 1 WHERE content LIKE 'Old parent work'`
+      ).run(longAgo);
+
+      store.forkMind("default", "directive/test", "test");
+
+      // Add a decayed fact directly in child
+      store.storeFact({ mind: "directive/test", section: "Recent Work", content: "Old child work" });
+      (store as any).db.prepare(
+        `UPDATE facts SET last_reinforced = ?, reinforcement_count = 1 WHERE content LIKE 'Old child work'`
+      ).run(longAgo);
+
+      // Sweep child — should only sweep child's decayed facts
+      const swept = store.sweepDecayedFacts("directive/test");
+      assert.equal(swept, 1, "should only sweep the child's decayed fact");
+
+      // Parent's decayed fact should still be active (not swept by child's sweep)
+      const parentFact = (store as any).db.prepare(
+        `SELECT status FROM facts WHERE mind = 'default' AND content LIKE 'Old parent work'`
+      ).get();
+      assert.equal(parentFact.status, "active");
+    });
+
+    it("resolveMindChain caches results", () => {
+      store.forkMind("default", "child", "child mind");
+
+      // First call populates cache
+      const chain1 = (store as any).resolveMindChain("child");
+      assert.deepEqual(chain1, ["child", "default"]);
+
+      // Second call should return same reference (cached)
+      const chain2 = (store as any).resolveMindChain("child");
+      assert.strictEqual(chain1, chain2, "should return cached array reference");
+
+      // After invalidation, returns new array
+      (store as any).invalidateMindChainCache();
+      const chain3 = (store as any).resolveMindChain("child");
+      assert.deepEqual(chain3, ["child", "default"]);
+      assert.notStrictEqual(chain1, chain3, "should be a new array after cache invalidation");
+    });
+  });
+
   it("ingests facts between minds with dedup", () => {
     store.storeFact({ section: "Architecture", content: "Shared fact" });
     store.createMind("source", "Source mind");
