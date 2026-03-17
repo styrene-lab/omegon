@@ -1,35 +1,56 @@
 /**
  * chronos — Authoritative date and time context from system clock
  *
- * Registers a `chronos` tool that executes the chronos.sh script and returns
- * structured date context. Eliminates AI date calculation errors by providing
- * an authoritative source of truth from the system clock.
- *
- * Also registers a `/chronos` command for interactive use.
+ * Pure TypeScript implementation — no shell dependencies.
+ * Registers a `chronos` tool and `/chronos` command.
  *
  * Subcommands: week (default), month, quarter, relative, iso, epoch, tz, range, all
  */
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { StringEnum } from "../lib/typebox-helpers";
 import type { ExtensionAPI } from "@styrene-lab/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-
-const CHRONOS_SH = join(import.meta.dirname ?? __dirname, "chronos.sh");
+import {
+	computeWeek,
+	computeMonth,
+	computeQuarter,
+	computeRelative,
+	computeIso,
+	computeEpoch,
+	computeTz,
+	computeRange,
+	computeAll,
+} from "./chronos";
 
 const SUBCOMMANDS = ["week", "month", "quarter", "relative", "iso", "epoch", "tz", "range", "all"] as const;
 
+function executeChronos(params: { subcommand?: string; expression?: string; from_date?: string; to_date?: string }): string {
+	const sub = params.subcommand || "week";
+
+	switch (sub) {
+		case "week": return computeWeek();
+		case "month": return computeMonth();
+		case "quarter": return computeQuarter();
+		case "relative":
+			if (!params.expression) {
+				throw new Error("The 'relative' subcommand requires an 'expression' parameter (e.g. '3 days ago').");
+			}
+			return computeRelative(params.expression);
+		case "iso": return computeIso();
+		case "epoch": return computeEpoch();
+		case "tz": return computeTz();
+		case "range":
+			if (!params.from_date || !params.to_date) {
+				throw new Error("The 'range' subcommand requires both 'from_date' and 'to_date' (YYYY-MM-DD).");
+			}
+			return computeRange(params.from_date, params.to_date);
+		case "all": return computeAll();
+		default: throw new Error(`Unknown subcommand: ${sub}`);
+	}
+}
+
 export default function chronosExtension(pi: ExtensionAPI) {
 
-	// Ensure the script exists and is executable
-	if (!existsSync(CHRONOS_SH)) {
-		// Fail silently at load — the tool will report the error at call time
-	}
-
-	// ------------------------------------------------------------------
-	// chronos tool — callable by the LLM
-	// ------------------------------------------------------------------
 	pi.registerTool({
 		name: "chronos",
 		label: "Chronos",
@@ -68,45 +89,15 @@ export default function chronosExtension(pi: ExtensionAPI) {
 			),
 		}),
 
-		async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-			if (!existsSync(CHRONOS_SH)) {
-				throw new Error(
-					`chronos.sh not found at ${CHRONOS_SH}. ` +
-					`Expected alongside the chronos skill.`
-				);
-			}
-
-			const sub = params.subcommand || "week";
-			const args = [CHRONOS_SH, sub];
-
-			if (sub === "relative") {
-				if (!params.expression) {
-					throw new Error("The 'relative' subcommand requires an 'expression' parameter (e.g. '3 days ago').");
-				}
-				args.push(params.expression);
-			} else if (sub === "range") {
-				if (!params.from_date || !params.to_date) {
-					throw new Error("The 'range' subcommand requires both 'from_date' and 'to_date' (YYYY-MM-DD).");
-				}
-				args.push(params.from_date, params.to_date);
-			}
-
-			const result = await pi.exec("bash", args, { signal, timeout: 10_000 });
-
-			if (result.code !== 0) {
-				throw new Error(`chronos.sh failed (exit ${result.code}):\n${result.stderr || result.stdout}`);
-			}
-
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			const result = executeChronos(params);
 			return {
-				content: [{ type: "text", text: result.stdout.trim() }],
-				details: { subcommand: sub },
+				content: [{ type: "text", text: result }],
+				details: { subcommand: params.subcommand || "week" },
 			};
 		},
 	});
 
-	// ------------------------------------------------------------------
-	// /chronos command — interactive shortcut
-	// ------------------------------------------------------------------
 	pi.registerCommand("chronos", {
 		description: "Show date/time context (usage: /chronos [week|month|quarter|iso|epoch|tz|all])",
 		getArgumentCompletions: (prefix: string) => {
@@ -116,33 +107,21 @@ export default function chronosExtension(pi: ExtensionAPI) {
 		},
 		handler: async (args, _ctx) => {
 			const sub = (args || "").trim() || "week";
-
-			if (!existsSync(CHRONOS_SH)) {
+			try {
+				const result = executeChronos({ subcommand: sub });
 				pi.sendMessage({
 					customType: "view",
-					content: `❌ chronos.sh not found at \`${CHRONOS_SH}\``,
+					content: `**Chronos**\n\n\`\`\`\n${result}\n\`\`\``,
 					display: true,
 				});
-				return;
-			}
-
-			const cliArgs = [CHRONOS_SH, sub];
-			const result = await pi.exec("bash", cliArgs, { timeout: 10_000 });
-
-			if (result.code !== 0) {
+			} catch (err: unknown) {
+				const msg = err instanceof Error ? err.message : String(err);
 				pi.sendMessage({
 					customType: "view",
-					content: `❌ chronos.sh failed:\n\`\`\`\n${result.stderr || result.stdout}\n\`\`\``,
+					content: `❌ ${msg}`,
 					display: true,
 				});
-				return;
 			}
-
-			pi.sendMessage({
-				customType: "view",
-				content: `**Chronos**\n\n\`\`\`\n${result.stdout.trim()}\n\`\`\``,
-				display: true,
-			});
 		},
 	});
 }
