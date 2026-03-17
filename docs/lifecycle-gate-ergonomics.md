@@ -235,6 +235,11 @@ Approach 1 is the safety net — if something falls through, the gate fixes it. 
 **Status:** exploring
 **Rationale:** The edge case (substance exists but artifact doesn't) happens because nodes accumulate research/decisions in seed status without transitioning to exploring. Fix at both ends: auto-transition seed→exploring when add_research/add_decision is called (closes the gap at source), AND auto-scaffold at set_status(decided) time if the artifact is still missing (safety net). The gate stays — it just becomes self-healing rather than blocking.
 
+### Decision: All four decisions implemented and shipped
+
+**Status:** decided
+**Rationale:** Substance-over-ceremony gates, actionable error messages, deterministic extraction, and seed→exploring auto-transition are all implemented in commit 9196479. Tests updated to reflect new behavior (1722 pass). The gates are now guardrails that guide and auto-scaffold, not brick walls that block and demand manual ceremony.
+
 ## Open Questions
 
 *No open questions.*
