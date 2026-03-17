@@ -3,6 +3,13 @@
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.7.8] - 2026-03-17
+
+### Fixed
+- Bridged `/assess spec` no longer times out — uses in-session follow-up pattern instead of fragile 120s subprocess. Removes ~150 lines of dead subprocess code.
+- Anthropic OAuth login on headless machines no longer fails with `invalid_grant` — token exchange now always uses the localhost `redirect_uri` matching the authorization request.
+- Kitty theme ownership marker aligned with generated file content.
+
 ## [0.7.7] - 2026-03-16
 
 ### Fixed
