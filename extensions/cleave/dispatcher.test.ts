@@ -13,6 +13,8 @@ import {
 	extractResultSection,
 	resolveModelIdForTier,
 	LARGE_RUN_THRESHOLD,
+	DEFAULT_CHILD_TIMEOUT_MS,
+	IDLE_TIMEOUT_MS,
 	dispatchChildren,
 } from "./dispatcher.ts";
 import type { RegistryModel, ProviderRoutingPolicy } from "../lib/model-routing.ts";
@@ -795,5 +797,22 @@ describe("emitCleaveChildProgress — RPC structured progress", () => {
 		} finally {
 			(sharedState as any).cleave = previous;
 		}
+	});
+});
+
+// ─── Timeout constants ──────────────────────────────────────────────────────
+
+describe("timeout constants", () => {
+	it("DEFAULT_CHILD_TIMEOUT_MS is 15 minutes", () => {
+		assert.equal(DEFAULT_CHILD_TIMEOUT_MS, 15 * 60 * 1000);
+	});
+
+	it("IDLE_TIMEOUT_MS is 3 minutes", () => {
+		assert.equal(IDLE_TIMEOUT_MS, 3 * 60 * 1000);
+	});
+
+	it("idle timeout is shorter than wall-clock timeout", () => {
+		assert.ok(IDLE_TIMEOUT_MS < DEFAULT_CHILD_TIMEOUT_MS,
+			"idle timeout must be shorter than wall-clock timeout");
 	});
 });

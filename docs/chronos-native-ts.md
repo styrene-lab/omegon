@@ -1,7 +1,7 @@
 ---
 id: chronos-native-ts
 title: "Rewrite chronos as pure TypeScript — eliminate BSD/GNU date dependency"
-status: implementing
+status: implemented
 parent: lifecycle-gate-ergonomics
 tags: [chronos, portability, typescript, tools]
 open_questions: []

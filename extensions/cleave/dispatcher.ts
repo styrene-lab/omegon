@@ -41,6 +41,20 @@ import { registerCleaveProc, deregisterCleaveProc, killCleaveProc } from "./subp
  */
 export const LARGE_RUN_THRESHOLD = 4;
 
+/**
+ * Default per-child wall-clock timeout (15 minutes).
+ * Hard backstop — children that exceed this are killed regardless of activity.
+ */
+export const DEFAULT_CHILD_TIMEOUT_MS = 15 * 60 * 1000;
+
+/**
+ * Default RPC idle timeout (3 minutes).
+ * If no RPC event arrives within this window, the child is considered stalled
+ * and is killed. Resets on every event (tool_start, tool_end, assistant_message,
+ * etc.). Only applies to RPC mode — pipe mode children use wall-clock only.
+ */
+export const IDLE_TIMEOUT_MS = 3 * 60 * 1000;
+
 // ─── Explicit model resolution ──────────────────────────────────────────────
 
 /**
@@ -505,6 +519,7 @@ async function spawnChildRpc(
 	signal?: AbortSignal,
 	localModel?: string,
 	onEvent?: (event: RpcChildEvent) => void,
+	idleTimeoutMs: number = IDLE_TIMEOUT_MS,
 ): Promise<RpcChildResult> {
 	const omegon = resolveOmegonSubprocess();
 	const args = [...omegon.argvPrefix, "--mode", "rpc", "--no-session"];
@@ -540,6 +555,25 @@ async function spawnChildRpc(
 		// Collect stderr
 		proc.stderr?.on("data", (data) => { stderr += data.toString(); });
 
+		// ── Idle timeout ─────────────────────────────────────────────────
+		// Reset on every RPC event. If no event arrives within the idle
+		// window, the child is stalled — kill it.
+		let idleKilled = false;
+		let idleTimer: ReturnType<typeof setTimeout> | undefined;
+		const resetIdleTimer = () => {
+			if (idleTimer) clearTimeout(idleTimer);
+			if (idleTimeoutMs > 0) {
+				idleTimer = setTimeout(() => {
+					if (!killed && !proc.killed) {
+						idleKilled = true;
+						killed = true;
+						killCleaveProc(proc);
+						scheduleEscalation();
+					}
+				}, idleTimeoutMs);
+			}
+		};
+
 		// Parse stdout exclusively via RPC event stream (no competing data listener)
 		let eventsFinished: Promise<void> = Promise.resolve();
 		if (proc.stdout) {
@@ -547,6 +581,7 @@ async function spawnChildRpc(
 				try {
 					for await (const event of parseRpcEventStream(proc.stdout!)) {
 						events.push(event);
+						resetIdleTimer(); // activity — push back the idle deadline
 						if (event.type === "pipe_closed") {
 							pipeBroken = true;
 						}
@@ -572,6 +607,10 @@ async function spawnChildRpc(
 			}, 5_000);
 		};
 
+		// Start the idle timer now — if the child never emits an event, it's
+		// caught within the idle window rather than waiting for the full wall clock.
+		resetIdleTimer();
+
 		const timer = setTimeout(() => {
 			killed = true;
 			killCleaveProc(proc);
@@ -592,6 +631,7 @@ async function spawnChildRpc(
 			deregisterCleaveProc(proc);
 			clearTimeout(timer);
 			clearTimeout(escalationTimer);
+			clearTimeout(idleTimer);
 			signal?.removeEventListener("abort", onAbort);
 
 			// Close stdin if still open (child has exited)
@@ -600,10 +640,16 @@ async function spawnChildRpc(
 			// Wait for all RPC events to be consumed before resolving
 			await eventsFinished;
 
+			const killReason = idleKilled
+				? `Killed (idle — no RPC events for ${Math.round(idleTimeoutMs / 1000)}s)\n${stderr}`
+				: killed
+					? `Killed (timeout or abort)\n${stderr}`
+					: stderr;
+
 			resolve({
 				exitCode: killed ? -1 : (code ?? 1),
 				stdout: "",
-				stderr: killed ? `Killed (timeout or abort)\n${stderr}` : stderr,
+				stderr: killReason,
 				events,
 				pipeBroken,
 			});
@@ -615,6 +661,7 @@ async function spawnChildRpc(
 			deregisterCleaveProc(proc);
 			clearTimeout(timer);
 			clearTimeout(escalationTimer);
+			clearTimeout(idleTimer);
 			signal?.removeEventListener("abort", onAbort);
 			resolve({
 				exitCode: 1,

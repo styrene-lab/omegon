@@ -51,7 +51,7 @@ import {
 } from "./assessment.ts";
 import { detectConflicts, parseTaskResult } from "./conflicts.ts";
 import { emitResolvedBugCandidate } from "./lifecycle-emitter.ts";
-import { dispatchChildren, resolveExecuteModel } from "./dispatcher.ts";
+import { DEFAULT_CHILD_TIMEOUT_MS, dispatchChildren, resolveExecuteModel } from "./dispatcher.ts";
 import { DEFAULT_REVIEW_CONFIG, type ReviewConfig } from "./review.ts";
 import {
 	detectOpenSpec,
@@ -2144,7 +2144,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 					pi,
 					state,
 					4, // maxParallel
-					120 * 60 * 1000,
+					DEFAULT_CHILD_TIMEOUT_MS,
 					undefined,
 					signal,
 					(msg) => emit(msg),
@@ -2581,7 +2581,7 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 				pi,
 				state,
 				maxParallel,
-				120 * 60 * 1000, // 2 hour timeout per child
+				DEFAULT_CHILD_TIMEOUT_MS,
 				localModel,
 				signal ?? undefined,
 				(msg) => {
