@@ -60,7 +60,8 @@ let nativeCached: NativeAgentSpec | null | undefined;
  * Result is cached for the process lifetime.
  */
 export function resolveNativeAgent(): NativeAgentSpec | null {
-  if (nativeCached !== undefined) return nativeCached;
+  // NO CACHING. The binary may be built mid-session (cargo build --release).
+  // A stale null cache was the reason native dispatch silently never activated.
 
   const here = dirname(fileURLToPath(import.meta.url));
   const repoRoot = resolve(here, "..", "..");
