@@ -132,8 +132,12 @@ export async function dispatchViaNative(
 			let state: any = null;
 			try {
 				const statePath = join(config.workspacePath, "state.json");
-				state = JSON.parse(readFileSync(statePath, "utf-8"));
-			} catch { /* state.json may not exist if binary crashed early */ }
+				const raw = readFileSync(statePath, "utf-8");
+				state = JSON.parse(raw);
+				onProgress?.(`[native-dispatch] exitCode=${code}, children=${state?.children?.length}, statuses=${state?.children?.map((c: any) => c.status).join(",")}`);
+			} catch (e: any) {
+				onProgress?.(`[native-dispatch] exitCode=${code}, state.json read failed: ${e.message}`);
+			}
 
 			resolve({
 				exitCode: code ?? 1,

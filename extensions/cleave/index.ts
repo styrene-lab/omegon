@@ -2604,6 +2604,10 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 			});
 
 			// Reload state from the Rust binary's output
+			onUpdate?.({
+				content: [{ type: "text", text: `[debug] nativeResult: exitCode=${nativeResult.exitCode}, hasState=${!!nativeResult.state}, stderrLen=${nativeResult.stderr.length}` }],
+				details: { phase: "dispatch", children: state.children },
+			});
 			if (nativeResult.state) {
 				// Map Rust state format back to TS state
 				const rustState = nativeResult.state;
