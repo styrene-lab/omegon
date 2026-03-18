@@ -532,6 +532,47 @@ Same pattern, different URL (`https://api.openai.com/v1/chat/completions`), diff
 
 **The 95% case:** Anthropic + OpenAI. These two cover >95% of actual usage. Bedrock/Google/Mistral are nice-to-have. We can add them later or keep the bridge as an optional fallback for long-tail providers.
 
+### Post-E2E reassessment — what changed and what decisions are stale
+
+**The E2E test proved the binary is fully self-contained.** No Node.js, no npm, no bridge subprocess. This invalidates several decisions made when we assumed the Node.js bridge was permanent.
+
+**Stale decisions:**
+1. ~~"Standalone install: binary from GitHub Release + `npm install -g @omegon/bridge` for LLM providers"~~ → The bridge is no longer needed. Native Anthropic + OpenAI clients handle >95% of usage. Install is: download binary + set API key (or run `login`).
+
+2. ~~"Platform-specific npm packages for the Rust binary (esbuild/swc model)"~~ → npm distribution is still valid for the **transition period** (where TS Omegon coexists with Rust), but is no longer the primary path. The primary path is standalone binary distribution.
+
+3. ~~"CI builds Rust binary from the core/ submodule as part of the omegon publish workflow"~~ → The Rust binary should have its own CI workflow (GitHub Releases on tag push), independent of the npm publish workflow. They can be coordinated but shouldn't be coupled.
+
+**What's current:**
+
+| Channel | Status | When |
+|---------|--------|------|
+| **GitHub Releases** (primary) | Ready to implement | Now — just need CI + release workflow |
+| **`brew install`** | Future | After GitHub Releases are working |
+| **`curl \| sh` installer** | Future | After GitHub Releases are working |
+| **npm platform packages** | Transition only | While TS Omegon is still the interactive mode |
+| **cargo install** | Optional | Always available from source |
+
+**What the CI needs:**
+1. GitHub Actions workflow triggered on version tags (v0.12.0, etc.)
+2. Build matrix: darwin-arm64, darwin-x64, linux-x64, linux-arm64
+3. Upload tarballs as release assets
+4. Each tarball contains: `omegon-agent` binary (that's it — one file)
+
+**What the install script needs:**
+```bash
+#!/bin/sh
+# Detect platform
+ARCH=$(uname -m)
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+# Download + install
+curl -fsSL "https://github.com/styrene-lab/omegon-core/releases/latest/download/omegon-agent-${OS}-${ARCH}.tar.gz" | tar xz
+sudo mv omegon-agent /usr/local/bin/
+echo "Installed. Run: omegon-agent login (subscription) or set ANTHROPIC_API_KEY"
+```
+
+**Binary size:** 7.7MB (arm64 macOS release). Acceptable — rustls + reqwest + ratatui + sqlite are the bulk. Could drop to ~5MB with `opt-level = "z"` + strip, but speed matters more (per existing decision).
+
 ## Decisions
 
 ### Decision: Platform-specific npm packages for the Rust binary (esbuild/swc model)
@@ -578,6 +619,11 @@ Same pattern, different URL (`https://api.openai.com/v1/chat/completions`), diff
 
 **Status:** decided
 **Rationale:** The Rust binary is 7.5MB and self-contained except for the LLM bridge (307 lines of JS that imports pi-ai for streaming provider clients). Rather than bundling Node.js or trying to eliminate it (Phase 3), the immediate install path is: (1) download the binary from GitHub Releases, (2) npm install -g @omegon/bridge which pulls in pi-ai and installs the bridge script. The binary auto-discovers the bridge via `which omegon-bridge` or the --bridge flag. This is two commands, clear separation of concerns, and works today without platform npm packages or CI build matrices. Path A (binary inside npm omegon package) remains the long-term distribution channel.
+
+### Decision: Primary distribution is GitHub Releases (standalone binary), not npm — npm retained for transition only
+
+**Status:** decided
+**Rationale:** The E2E test proved the Rust binary is fully self-contained — native Anthropic + OpenAI clients, OAuth login, no Node.js dependency. npm distribution is now a supply chain liability, not a requirement. The primary install path is: download binary from GitHub Releases (7.7MB tarball), run `omegon-agent login` or set API key. npm platform packages are retained only for the transition period where TS Omegon coexists as the interactive mode. Supersedes the earlier decision about @omegon/bridge npm package (no longer needed).
 
 ## Open Questions
 
