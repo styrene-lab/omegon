@@ -2530,6 +2530,8 @@ export default function cleaveExtension(pi: ExtensionAPI) {
 				children: plan.children.map((c, i) => ({
 					childId: i,
 					label: c.label,
+					description: c.description,
+					scope: c.scope ?? [],
 					dependsOn: c.dependsOn,
 					status: "pending" as const,
 					branch: `cleave/${i}-${c.label}`,

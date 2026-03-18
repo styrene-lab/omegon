@@ -140,6 +140,8 @@ export type ChildStatus =
 export interface ChildState {
 	childId: number;
 	label: string;
+	description?: string;
+	scope?: string[];
 	dependsOn: string[];
 	status: ChildStatus;
 	branch: string;
