@@ -19,6 +19,20 @@ export interface NativeDispatchConfig {
 	maxTurns: number;
 }
 
+/**
+ * Native progress events emitted by the Rust omegon-agent cleave subcommand.
+ * Discriminated on the `event` field (matches Rust `#[serde(tag = "event")]`).
+ */
+export type NativeProgressEvent =
+	| { event: "wave_start"; wave: number; children: string[] }
+	| { event: "child_spawned"; child: string; pid: number }
+	| { event: "child_status"; child: string; status: "running" | "completed" | "failed"; duration_secs?: number; error?: string }
+	| { event: "child_activity"; child: string; turn?: number; tool?: string; target?: string }
+	| { event: "auto_commit"; child: string; files: number }
+	| { event: "merge_start" }
+	| { event: "merge_result"; child: string; success: boolean; detail?: string }
+	| { event: "done"; completed: number; failed: number; duration_secs: number };
+
 /** Shape of the Rust CleaveState.ChildState after serde(rename_all = "camelCase"). */
 export interface RustChildState {
 	childId: number;
@@ -55,6 +69,7 @@ export async function dispatchViaNative(
 	config: NativeDispatchConfig,
 	signal?: AbortSignal,
 	onProgress?: (line: string) => void,
+	onEvent?: (event: NativeProgressEvent) => void,
 ): Promise<NativeDispatchResult> {
 	const nativeAgent = resolveNativeAgent();
 	if (!nativeAgent) {
@@ -108,6 +123,28 @@ export async function dispatchViaNative(
 		const STDERR_CAP = 64 * 1024;
 		let stderr = "";
 		let stderrLines = 0;
+
+		// Parse stdout as NDJSON progress events
+		let stdoutBuffer = "";
+		proc.stdout?.on("data", (data: Buffer) => {
+			stdoutBuffer += data.toString();
+			const lines = stdoutBuffer.split("\n");
+			// Keep the last incomplete line in the buffer
+			stdoutBuffer = lines.pop() || "";
+			
+			for (const line of lines) {
+				const trimmed = line.trim();
+				if (trimmed && onEvent) {
+					try {
+						const event = JSON.parse(trimmed) as NativeProgressEvent;
+						onEvent(event);
+					} catch (e) {
+						// Non-JSON lines on stdout - treat as progress messages
+						onProgress?.(`[stdout] ${trimmed}`);
+					}
+				}
+			}
+		});
 
 		proc.stderr?.on("data", (data: Buffer) => {
 			const text = data.toString();
