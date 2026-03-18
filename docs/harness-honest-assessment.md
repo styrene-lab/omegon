@@ -1,13 +1,11 @@
 ---
 id: harness-honest-assessment
 title: Honest assessment — what the harness actually feels like from inside, March 2026
-status: exploring
+status: resolved
 parent: rust-agent-loop
 tags: [introspective, assessment, harness, ux, agent-experience]
 open_questions:
-  - "Should `change` replace `edit` entirely (force new behavior) or should the loop silently batch concurrent `edit` calls into atomic changesets (preserve old behavior, upgrade quality)?"
   - "Should ambient lifecycle capture use a cheap LLM extraction pass on every response, or pattern-match on natural language heuristically, or keep the omg: tags and invest in training/prompting to get consistent production?"
-  - "How much of pi's system prompt should be ported verbatim vs. rewritten for Omegon's tool set? The pi prompt references 30+ tools that don't exist in the Rust binary — a naive port would confuse more than help."
 ---
 
 # Honest assessment — what the harness actually feels like from inside, March 2026
@@ -218,6 +216,26 @@ Ranked by how much they'd improve the agent's actual capability, not architectur
 - `remember` tool (session scratchpad) — the IntentDocument covers most of this use case
 - lifecycle.db (sqlite) — markdown is fine for now; the query performance gains aren't needed until the lifecycle engine is active"""
 
+### Problem 10: Memory DB contention during cleave — Arc is irrelevant, the real issue is cross-process SQLite writes
+
+Arc is intra-process shared memory. Cleave children are separate OS processes. Arc doesn't help.
+
+The actual problem: `find_project_root` follows worktree `.git` files back to the main repo, so every child resolves to the same `.pi/memory/facts.db`. Four concurrent processes, one SQLite file, and **no `busy_timeout` set** — any concurrent write gets an immediate `SQLITE_BUSY` failure.
+
+Three issues:
+1. **No busy_timeout**: `rusqlite` defaults to 0ms timeout. Even SQLite's normal write serialization can't work if we fail immediately. Fix: `PRAGMA busy_timeout=5000;` (5 seconds) gives the write lock time to release.
+
+2. **Children shouldn't write project facts**: A cleave child implementing "refactor auth tokens" shouldn't be storing "auth uses token rotation" as a permanent project fact. That's a parent responsibility after harvesting results. Children should either: (a) write to a session-local memory that the parent merges, or (b) not have memory_store at all — only memory_recall for reading existing context.
+
+3. **Context injection reads are fine**: Multiple processes reading the same WAL-mode SQLite is exactly what WAL was designed for. The context injection pattern (read facts each turn) works across any number of concurrent readers.
+
+The right architecture:
+- **Parent process**: full read-write access to facts.db
+- **Child processes**: read-only access to facts.db (context injection works, memory_recall works, memory_store is disabled or writes to a child-local DB that gets harvested)
+- **busy_timeout=5000** on all connections regardless — defensive
+
+This is a real production bug. Today's cleave children run through the TS Omegon which doesn't have native memory tools (they go through pi's extension layer, which has its own subprocess). When children start using the Rust binary with native memory, the first cleave with 3+ children will hit SQLITE_BUSY on memory_store.
+
 ## Decisions
 
 ### Decision: Prompt quality is the #1 priority — tools without a good prompt are a fast car with no steering wheel
@@ -235,8 +253,21 @@ Ranked by how much they'd improve the agent's actual capability, not architectur
 **Status:** decided
 **Rationale:** Current decay produces `[Read: 200 lines, 8432 bytes]` — useless for reasoning because it doesn't say WHAT was read. The file path is in the preceding tool call, but if that message is also decayed, the chain is broken. ToolResultEntry should carry an `args_summary` field set at creation time (e.g. "path: src/auth.rs" or "command: cargo test"). The decay skeleton includes this summary. Small structural change, high impact on post-decay reasoning quality.
 
+### Decision: Keep ingrained tool names (edit/read/write/bash), secretly upgrade their behavior in the loop
+
+**Status:** decided
+**Rationale:** The agent's training distribution uses edit/read/write/bash. Fighting that with new tool names (change/execute/understand) creates adoption friction. Instead: keep the names, make the loop silently improve them. edit calls in the same turn get batched atomically with rollback. All mutation tools auto-validate. bash output gets progressive disclosure (structured envelope in details, tail in content). The change/speculate tools remain available as explicit precision instruments but are not the expected default path.
+
+### Decision: System prompt rewritten for Omegon's tool set with rich per-tool guidelines, global/project directives, and convention detection
+
+**Status:** decided
+**Rationale:** Not a port of pi's 15k-token prompt — a purpose-built prompt for Omegon's 25 tools. Tool guidelines explain how to use each tool well (not just what it does), including common failure modes and best practices. Global AGENTS.md from ~/.omegon/ carries operator preferences. Project conventions auto-detected from config files (Cargo.toml, tsconfig, pyproject, go.mod, test runners). This matches what was shipped in prompt.rs rewrite.
+
+### Decision: Cleave children get read-only memory access; busy_timeout=5000 on all SQLite connections
+
+**Status:** decided
+**Rationale:** Arc is irrelevant — the concurrency problem is cross-process, not intra-process. Children should not write permanent project facts (that's the parent's job after harvesting). Children get read-only memory access (context injection + memory_recall work fine via WAL concurrent readers). busy_timeout=5000ms on all connections as defense-in-depth. The two-handle approach in setup.rs is safe for the read-only context pattern and doesn't need Arc — it needs the busy_timeout pragma.
+
 ## Open Questions
 
-- Should `change` replace `edit` entirely (force new behavior) or should the loop silently batch concurrent `edit` calls into atomic changesets (preserve old behavior, upgrade quality)?
 - Should ambient lifecycle capture use a cheap LLM extraction pass on every response, or pattern-match on natural language heuristically, or keep the omg: tags and invest in training/prompting to get consistent production?
-- How much of pi's system prompt should be ported verbatim vs. rewritten for Omegon's tool set? The pi prompt references 30+ tools that don't exist in the Rust binary — a naive port would confuse more than help.
