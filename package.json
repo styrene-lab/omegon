@@ -41,11 +41,7 @@
   },
   "homepage": "https://github.com/styrene-lab/omegon#readme",
   "optionalDependencies": {
-    "@mariozechner/clipboard": "0.3.2",
-    "@styrene-lab/omegon-darwin-arm64": "0.10.7",
-    "@styrene-lab/omegon-darwin-x64": "0.10.7",
-    "@styrene-lab/omegon-linux-x64": "0.10.7",
-    "@styrene-lab/omegon-linux-arm64": "0.10.7"
+    "@mariozechner/clipboard": "0.3.2"
   },
   "engines": {
     "node": ">=20.0.0"

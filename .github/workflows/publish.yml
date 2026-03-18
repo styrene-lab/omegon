@@ -5,22 +5,32 @@ on:
     branches: [main]
 
 jobs:
-  # ── Check if publish is needed ────────────────────────────────────────
-  check:
+  publish:
     runs-on: ubuntu-latest
-    outputs:
-      skip: ${{ steps.check.outputs.skip }}
-      version: ${{ steps.check.outputs.version }}
-      core_changed: ${{ steps.core-check.outputs.changed }}
+    permissions:
+      contents: write
+      id-token: write
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+
+      - name: Cache pi-mono node_modules
+        uses: actions/cache@v4
+        with:
+          path: vendor/pi-mono/node_modules
+          key: pi-mono-${{ hashFiles('vendor/pi-mono/package.json') }}
+          restore-keys: pi-mono-
+
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@^11.5.1
 
       - name: Check if publish needed
         id: check
@@ -36,173 +46,17 @@ jobs:
             echo "Publishing: $LOCAL_VER (npm has $NPM_VER)"
           fi
 
-      - name: Check if core/ submodule changed
-        id: core-check
-        run: |
-          # Compare core/ submodule SHA between current and previous release tag
-          PREV_TAG=$(git tag --sort=-v:refname | head -1)
-          if [ -z "$PREV_TAG" ]; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "No previous tag — building core"
-          else
-            PREV_CORE=$(git ls-tree "$PREV_TAG" core/ | awk '{print $3}')
-            CURR_CORE=$(git ls-tree HEAD core/ | awk '{print $3}')
-            if [ "$PREV_CORE" = "$CURR_CORE" ]; then
-              echo "changed=false" >> $GITHUB_OUTPUT
-              echo "core/ unchanged since $PREV_TAG"
-            else
-              echo "changed=true" >> $GITHUB_OUTPUT
-              echo "core/ changed: $PREV_CORE → $CURR_CORE"
-            fi
-          fi
-
-  # ── Build Rust binaries for all platforms ─────────────────────────────
-  build-core:
-    needs: check
-    if: needs.check.outputs.skip == 'false' && needs.check.outputs.core_changed == 'true'
-    strategy:
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            platform: darwin-arm64
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            platform: darwin-x64
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            platform: linux-x64
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
-            platform: linux-arm64
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            core/target
-          key: cargo-${{ matrix.target }}-${{ hashFiles('core/Cargo.lock') }}
-          restore-keys: cargo-${{ matrix.target }}-
-
-      - name: Build release binary
-        run: |
-          cd core
-          cargo build --release --target ${{ matrix.target }}
-
-      - name: Package platform binary
-        run: |
-          VERSION=${{ needs.check.outputs.version }}
-          PKG_DIR=npm/platform-packages/${{ matrix.platform }}
-
-          # Copy binary
-          cp core/target/${{ matrix.target }}/release/omegon-agent "$PKG_DIR/omegon-agent"
-          chmod +x "$PKG_DIR/omegon-agent"
-
-          # Update version
-          node -e "
-            const p = require('./$PKG_DIR/package.json');
-            p.version = '$VERSION';
-            require('fs').writeFileSync('./$PKG_DIR/package.json', JSON.stringify(p, null, 2) + '\n');
-          "
-
-          ls -lh "$PKG_DIR/omegon-agent"
-          echo "✓ Packaged @styrene-lab/omegon-${{ matrix.platform }}@${VERSION}"
-
-      - name: Upload platform package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: platform-${{ matrix.platform }}
-          path: npm/platform-packages/${{ matrix.platform }}/
-
-  # ── Publish platform packages ─────────────────────────────────────────
-  publish-platforms:
-    needs: [check, build-core]
-    if: needs.check.outputs.skip == 'false' && needs.check.outputs.core_changed == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    strategy:
-      matrix:
-        platform: [darwin-arm64, darwin-x64, linux-x64, linux-arm64]
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@^11.5.1
-
-      - name: Download platform artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: platform-${{ matrix.platform }}
-          path: pkg/
-
-      - name: Publish platform package
-        run: |
-          cd pkg
-          chmod +x omegon-agent
-          npm publish --access public --provenance
-        continue-on-error: true  # Don't fail if version already exists
-
-  # ── Publish main omegon package ───────────────────────────────────────
-  publish:
-    needs: [check, publish-platforms]
-    if: |
-      always() &&
-      needs.check.outputs.skip == 'false' &&
-      (needs.publish-platforms.result == 'success' || needs.publish-platforms.result == 'skipped')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Cache pi-mono node_modules
-        uses: actions/cache@v4
-        with:
-          path: vendor/pi-mono/node_modules
-          key: pi-mono-${{ hashFiles('vendor/pi-mono/package.json') }}
-          restore-keys: pi-mono-
-
-      - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@^11.5.1
-
       - name: Tag release
+        if: steps.check.outputs.skip == 'false'
         run: |
-          TAG="v${{ needs.check.outputs.version }}"
+          TAG="v${{ steps.check.outputs.version }}"
           if ! git tag --list "$TAG" | grep -q "$TAG"; then
             git tag "$TAG"
             git push origin --tags
           fi
 
       - name: Install and build pi-mono
+        if: steps.check.outputs.skip == 'false'
         run: |
           cd vendor/pi-mono
           rm -f package-lock.json
@@ -210,21 +64,36 @@ jobs:
           npm run build
 
       - name: Publish pi-mono fork packages
+        if: steps.check.outputs.skip == 'false'
         run: bash scripts/publish-pi-mono.sh
 
       - name: Install Omegon dependencies
+        if: steps.check.outputs.skip == 'false'
         run: npm install --ignore-scripts
 
       - name: Verify vendor dist is fresh
+        if: steps.check.outputs.skip == 'false'
         run: node scripts/check-vendor-dist.mjs
 
       - name: Publish omegon
+        if: steps.check.outputs.skip == 'false'
         run: npm publish --access public --provenance
 
-      - name: Verify package is installable
+      - name: Deprecate broken 0.9.1
+        if: steps.check.outputs.skip == 'false'
+        continue-on-error: true
         run: |
-          VERSION=${{ needs.check.outputs.version }}
+          npm deprecate 'omegon@0.9.1' 'Broken: ships stale vendor dist with unfixed OAuth bug. Upgrade to 0.9.2 or later.'
+
+      - name: Verify package is installable
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION=${{ steps.check.outputs.version }}
           echo "Verifying omegon@${VERSION} is installable..."
+          # npm CDN propagation for 41MB+ tarballs can take 5-10 minutes
+          # from certain Cloudflare PoPs (including GitHub Actions' edge).
+          # Use npm install to verify — it follows redirects and retries
+          # internally, which is more reliable than HEAD requests to the CDN.
           for i in $(seq 1 24); do
             if npm install --dry-run "omegon@${VERSION}" 2>/dev/null; then
               echo "✓ Package installable (attempt $i)"
@@ -233,5 +102,6 @@ jobs:
             echo "Attempt $i/24: not yet available — waiting 15s..."
             sleep 15
           done
-          echo "::warning::Package not installable after 6 minutes — check manually."
+          echo "::warning::Package not installable after 6 minutes from this CDN edge. The tarball typically propagates within 10 minutes — check manually."
+          # Don't fail hard — the tarball will appear, just slowly on this edge
           exit 0
