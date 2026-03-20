@@ -1,10 +1,12 @@
 ---
 id: repo-model
 title: RepoModel — git state tracking in Rust core
-status: exploring
+status: implementing
 parent: git-harness-integration
 tags: [rust, git, architecture]
 open_questions: []
+branches: ["feature/repo-model"]
+openspec_change: repo-model
 ---
 
 # RepoModel — git state tracking in Rust core
@@ -75,3 +77,26 @@ Use `git2` for the operations it handles well (status, index, commit, submodules
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `core/crates/omegon-git/Cargo.toml` (new) — New crate: git2 dep, re-exports RepoModel and git operations
+- `core/crates/omegon-git/src/lib.rs` (new) — Crate root — re-exports repo, status, commit, submodule, worktree modules
+- `core/crates/omegon-git/src/repo.rs` (new) — RepoModel struct — discovery, branch, head SHA, submodule map, working set tracking
+- `core/crates/omegon-git/src/status.rs` (new) — Status queries — dirty files, staged files, submodule state via git2 statuses API
+- `core/crates/omegon-git/src/commit.rs` (new) — Commit operations — stage paths, create commit with conventional message, submodule two-level dance
+- `core/crates/omegon-git/src/worktree.rs` (new) — Worktree operations — create, remove, list via git2 + CLI fallback for edge cases
+- `core/crates/omegon-git/src/merge.rs` (new) — Merge operations — squash-merge, conflict detection, merge-base resolution
+- `core/Cargo.toml` (modified) — Add omegon-git to workspace members
+- `core/crates/omegon/Cargo.toml` (modified) — Add omegon-git dependency
+- `core/crates/omegon/src/cleave/worktree.rs` (modified) — Replace Command::new(git) calls with omegon-git API, add squash-merge
+
+### Constraints
+
+- git2 is the primary library — shell out to git CLI only for operations git2 doesn't cover well
+- RepoModel must be Send + Sync for use across async tasks
+- Working set tracks files touched by edit/write tools — reset on commit
+- Submodule map populated at init, refreshed on submodule operations
+- Squash-merge is the default for cleave child branches
