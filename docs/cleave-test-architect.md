@@ -1,7 +1,7 @@
 ---
 id: cleave-test-architect
 title: Cleave test-architect phase and post-implementation coverage review
-status: decided
+status: implemented
 parent: testing-directives-pipeline
 dependencies: [spec-edge-case-format, task-file-testing-section]
 open_questions: []

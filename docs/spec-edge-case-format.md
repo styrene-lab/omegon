@@ -1,7 +1,7 @@
 ---
 id: spec-edge-case-format
 title: Spec edge case format and authoring conventions
-status: decided
+status: implemented
 parent: testing-directives-pipeline
 open_questions: []
 ---

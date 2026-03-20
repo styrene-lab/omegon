@@ -1,7 +1,7 @@
 ---
 id: task-file-testing-section
 title: Task file Testing Requirements section — structure and injection
-status: decided
+status: implemented
 parent: testing-directives-pipeline
 open_questions: []
 ---

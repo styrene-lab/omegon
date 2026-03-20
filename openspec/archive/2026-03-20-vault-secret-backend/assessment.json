@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "changeName": "vault-secret-backend",
+  "assessmentKind": "spec",
+  "outcome": "pass",
+  "timestamp": "2026-03-20T11:45:38.553Z",
+  "summary": "All 15 scenarios verified against implementation. 33 Rust tests pass. Vault client, recipe resolution, path enforcement, auth negotiation, child token minting, TUI unseal, and startup health checks all implemented and tested.",
+  "snapshot": {
+    "gitHead": "84a42269d89650ab3ed338a9aa9de3913754a58d",
+    "fingerprint": "0cfec67c2edb98542edb8aed3351c63a011cad9d0305062b22a7689afcf714a4",
+    "dirty": false,
+    "scopedPaths": [
+      "core/crates/omegon-secrets/Cargo.toml",
+      "core/crates/omegon-secrets/src/guards.rs",
+      "core/crates/omegon-secrets/src/lib.rs",
+      "core/crates/omegon-secrets/src/resolve.rs",
+      "core/crates/omegon-secrets/src/vault.rs",
+      "core/crates/omegon/src/features/lifecycle.rs",
+      "core/crates/omegon/src/tools/whoami.rs",
+      "core/crates/omegon/src/tui/mod.rs"
+    ],
+    "files": [
+      {
+        "path": "core/crates/omegon-secrets/Cargo.toml",
+        "exists": true,
+        "size": 827,
+        "sha256": "27a7b40517b52f9d6981e8aeedccb0ca67f7bb634f9c8d2e09290fe5f71e28da"
+      },
+      {
+        "path": "core/crates/omegon-secrets/src/guards.rs",
+        "exists": true,
+        "size": 7982,
+        "sha256": "0a1aaf600fdde19685194192ec768b5f740db49826654e958d298a38a023f896"
+      },
+      {
+        "path": "core/crates/omegon-secrets/src/lib.rs",
+        "exists": true,
+        "size": 8876,
+        "sha256": "b3ba5270d39a3ce38d2d906118d619d1912531c1fdb5ea0f50ec9fe4e36be8a3"
+      },
+      {
+        "path": "core/crates/omegon-secrets/src/resolve.rs",
+        "exists": true,
+        "size": 9351,
+        "sha256": "08b9a6e3bc21ae86cdcb4beac7a027b3cd39a926d94ecb893f1eb55fc4d1af5f"
+      },
+      {
+        "path": "core/crates/omegon-secrets/src/vault.rs",
+        "exists": true,
+        "size": 30032,
+        "sha256": "c5b902025f3fbfa70017507c9bf4c94268f4746eaf83b15058d884a0cd1f033c"
+      },
+      {
+        "path": "core/crates/omegon/src/features/lifecycle.rs",
+        "exists": true,
+        "size": 44934,
+        "sha256": "80cc7c6e6f48a155dbae809592a1bf942282a87fefc0d1ad147a9df28dc3028c"
+      },
+      {
+        "path": "core/crates/omegon/src/tools/whoami.rs",
+        "exists": true,
+        "size": 11692,
+        "sha256": "621b8a3e1a8455e2d4bb863ccd86504b8647c55eb08b01ec4a40e9decf4555f8"
+      },
+      {
+        "path": "core/crates/omegon/src/tui/mod.rs",
+        "exists": true,
+        "size": 78704,
+        "sha256": "2ecfcc63f5b2c84d00058bb29fecb908fad7ad100455c94c7b2b81aff0dd72c4"
+      },
+      {
+        "path": "openspec/changes/vault-secret-backend/design.md",
+        "exists": true,
+        "size": 15379,
+        "sha256": "f7be257f053d1ed8a3a4b970a5f2be88147c1cb03f5fdee3f0c23fbc9c7c6f1c"
+      },
+      {
+        "path": "openspec/changes/vault-secret-backend/proposal.md",
+        "exists": true,
+        "size": 507,
+        "sha256": "b1cc393d74fd691115e85696ce81d273a23b98b54fadf6a59c61b954214a8458"
+      },
+      {
+        "path": "openspec/changes/vault-secret-backend/specs/vault-client.md",
+        "exists": true,
+        "size": 5323,
+        "sha256": "aae8f52b7e324d8fe3105506eef6832c76f1041ef46691cbd63ea3b6d6d32efa"
+      },
+      {
+        "path": "openspec/changes/vault-secret-backend/tasks.md",
+        "exists": true,
+        "size": 4839,
+        "sha256": "7fd260a1c0a7e518361851c3c500bafb8b82d7543e9f0ca5afe1658f24871bca"
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [],
+    "constraints": [],
+    "recommendedAction": null
+  }
+}

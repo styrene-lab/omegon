@@ -1,7 +1,7 @@
 ---
 id: fast-forward-edge-case-generation
 title: Fast-forward edge case generation and task enrichment
-status: decided
+status: implemented
 parent: testing-directives-pipeline
 open_questions: []
 ---
