@@ -4,6 +4,9 @@
 # Usage:
 #   curl -fsSL https://omegon.styrene.dev/install.sh | sh
 #
+# Non-interactive:
+#   curl -fsSL https://omegon.styrene.dev/install.sh | sh -s -- --no-confirm
+#
 # Or directly from GitHub:
 #   curl -fsSL https://raw.githubusercontent.com/styrene-lab/omegon-core/main/install.sh | sh
 #
@@ -23,6 +26,28 @@ INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 VERSION="${VERSION:-}"
 GITHUB_API="https://api.github.com/repos/${REPO}"
 TMP=""
+NO_CONFIRM=false
+RECEIPT_DIR="${HOME}/.config/omegon"
+
+# ── Parse arguments ───────────────────────────────────────────
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-confirm) NO_CONFIRM=true ;;
+    --help|-h)
+      echo "Usage: curl -fsSL https://omegon.styrene.dev/install.sh | sh"
+      echo ""
+      echo "Options (pass after 'sh -s --'):"
+      echo "  --no-confirm    Skip interactive confirmation"
+      echo ""
+      echo "Environment:"
+      echo "  INSTALL_DIR     Installation directory (default: /usr/local/bin)"
+      echo "  VERSION         Pin a specific version (default: latest)"
+      echo "  NO_COLOR        Disable colored output"
+      exit 0
+      ;;
+  esac
+done
 
 # ── Color support ─────────────────────────────────────────────
 
@@ -53,7 +78,6 @@ cleanup() {
   fi
 }
 
-# Always clean up, even on error or interrupt
 trap cleanup EXIT INT TERM
 
 # ── Preflight checks ─────────────────────────────────────────
@@ -115,9 +139,49 @@ if [ -z "$VERSION" ]; then
   fi
 fi
 
-ok "Version:  ${BOLD}${VERSION}${RESET}"
-step "Platform: ${BOLD}${PLATFORM}${RESET}"
+# ── Installation plan ─────────────────────────────────────────
+
+NEEDS_SUDO=false
+if [ -d "$INSTALL_DIR" ] && [ ! -w "$INSTALL_DIR" ]; then
+  NEEDS_SUDO=true
+elif [ ! -d "$INSTALL_DIR" ] && ! mkdir -p "$INSTALL_DIR" 2>/dev/null; then
+  NEEDS_SUDO=true
+  rmdir "$INSTALL_DIR" 2>/dev/null || true
+fi
+
+EXISTING=""
+if [ -x "${INSTALL_DIR}/${BINARY}" ]; then
+  EXISTING=$("${INSTALL_DIR}/${BINARY}" --version 2>/dev/null | head -1 || echo "unknown version")
+fi
+
+printf "${DIM}  ┌─────────────────────────────────────────────────────┐${RESET}\n"
+printf "${DIM}  │${RESET}  ${BOLD}Installation Plan${RESET}                                   ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}                                                       ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}  ${CYAN}Version:${RESET}    %-42s ${DIM}│${RESET}\n" "${VERSION}"
+printf "${DIM}  │${RESET}  ${CYAN}Platform:${RESET}   %-42s ${DIM}│${RESET}\n" "${PLATFORM}"
+printf "${DIM}  │${RESET}  ${CYAN}Install to:${RESET} %-42s ${DIM}│${RESET}\n" "${INSTALL_DIR}/${BINARY}"
+if [ -n "$EXISTING" ]; then
+printf "${DIM}  │${RESET}  ${YELLOW}Replaces:${RESET}   %-42s ${DIM}│${RESET}\n" "${EXISTING}"
+fi
+if [ "$NEEDS_SUDO" = true ]; then
+printf "${DIM}  │${RESET}  ${YELLOW}Requires:${RESET}   %-42s ${DIM}│${RESET}\n" "sudo (${INSTALL_DIR} not writable)"
+fi
+printf "${DIM}  │${RESET}                                                       ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}  ${DIM}Source: github.com/${REPO}${RESET}     ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}  ${DIM}Integrity: SHA-256 checksum verification${RESET}            ${DIM}│${RESET}\n"
+printf "${DIM}  └─────────────────────────────────────────────────────┘${RESET}\n"
 echo ""
+
+# ── Confirmation ──────────────────────────────────────────────
+
+if [ "$NO_CONFIRM" = false ] && [ -t 0 ]; then
+  printf "  Proceed with installation? ${DIM}[Y/n]${RESET} "
+  read -r REPLY < /dev/tty || REPLY="y"
+  case "$REPLY" in
+    [nN]*) echo "  Cancelled."; exit 0 ;;
+  esac
+  echo ""
+fi
 
 # ── Download ──────────────────────────────────────────────────
 
@@ -209,21 +273,36 @@ ok "Binary validated"
 step "Installing to ${INSTALL_DIR}/${BINARY}..."
 
 if [ ! -d "$INSTALL_DIR" ]; then
-  if [ -w "$(dirname "$INSTALL_DIR")" ]; then
-    mkdir -p "$INSTALL_DIR"
-  else
+  if [ "$NEEDS_SUDO" = true ]; then
     sudo mkdir -p "$INSTALL_DIR" || die "could not create ${INSTALL_DIR}"
+  else
+    mkdir -p "$INSTALL_DIR"
   fi
 fi
 
-if [ -w "$INSTALL_DIR" ]; then
-  mv "${TMP}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-else
+if [ "$NEEDS_SUDO" = true ]; then
   sudo mv "${TMP}/${BINARY}" "${INSTALL_DIR}/${BINARY}" || \
     die "could not install to ${INSTALL_DIR} — try: INSTALL_DIR=~/.local/bin curl -fsSL … | sh"
+  sudo chmod +x "${INSTALL_DIR}/${BINARY}"
+else
+  mv "${TMP}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+  chmod +x "${INSTALL_DIR}/${BINARY}" 2>/dev/null || true
 fi
 
-chmod +x "${INSTALL_DIR}/${BINARY}" 2>/dev/null || true
+# ── Write install receipt ─────────────────────────────────────
+
+mkdir -p "$RECEIPT_DIR" 2>/dev/null || true
+cat > "${RECEIPT_DIR}/install-receipt.json" 2>/dev/null <<EOF || true
+{
+  "version": "${VERSION}",
+  "platform": "${PLATFORM}",
+  "install_dir": "${INSTALL_DIR}",
+  "binary": "${INSTALL_DIR}/${BINARY}",
+  "installed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "source": "https://github.com/${REPO}/releases/tag/${VERSION}",
+  "installer": "https://omegon.styrene.dev/install.sh"
+}
+EOF
 
 # ── Verify installation ──────────────────────────────────────
 
@@ -245,6 +324,7 @@ printf "${BOLD}${GREEN}  ✓ Omegon ${VERSION} installed successfully${RESET}\n"
 if [ -n "$INSTALLED_VERSION" ]; then
   printf "${DIM}    ${INSTALLED_VERSION}${RESET}\n"
 fi
+printf "${DIM}    Receipt: ${RECEIPT_DIR}/install-receipt.json${RESET}\n"
 echo ""
 printf "${DIM}  ┌─────────────────────────────────────────────────┐${RESET}\n"
 printf "${DIM}  │${RESET}  ${BOLD}Quick start:${RESET}                                    ${DIM}│${RESET}\n"
@@ -258,5 +338,9 @@ printf "${DIM}  │${RESET}    omegon login                                   ${
 printf "${DIM}  │${RESET}                                                   ${DIM}│${RESET}\n"
 printf "${DIM}  │${RESET}  ${CYAN}One-shot prompt:${RESET}                                ${DIM}│${RESET}\n"
 printf "${DIM}  │${RESET}    omegon --prompt \"hello world\"                  ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}                                                   ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}  ${DIM}Uninstall:${RESET}                                     ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}    ${DIM}rm ${INSTALL_DIR}/${BINARY}${RESET}                    ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}    ${DIM}rm -rf ~/.config/omegon${RESET}                        ${DIM}│${RESET}\n"
 printf "${DIM}  └─────────────────────────────────────────────────┘${RESET}\n"
 echo ""

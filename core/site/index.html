@@ -153,6 +153,32 @@
   .platform-name { color: var(--fg); font-weight: 600; }
   .platform-arch { color: var(--dim); font-size: 11px; font-family: 'SF Mono', monospace; }
 
+  /* Docs link */
+  .docs-link {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+  .docs-link a {
+    color: var(--muted);
+    font-size: 14px;
+    letter-spacing: 0.3px;
+    transition: color 0.15s;
+  }
+  .docs-link a:hover {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  /* Feature heading links inherit card style */
+  .feature h3 a {
+    color: var(--fg);
+    transition: color 0.15s;
+  }
+  .feature h3 a:hover {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
   /* Footer */
   footer {
     margin-top: auto;
@@ -253,17 +279,17 @@
     </div>
     <div class="feature">
       <div class="feature-icon">◉</div>
-      <h3>OAuth Login</h3>
-      <p>Works with your Claude Pro/Max subscription via OAuth. Or use API keys directly.</p>
+      <h3><a href="/docs/three-axis-model">Three-Axis Routing</a></h3>
+      <p>Capability tier × thinking level × context class. Provider-aware model selection with downgrade safeguards.</p>
     </div>
     <div class="feature">
       <div class="feature-icon">◈</div>
-      <h3>Design Tree</h3>
-      <p>140+ node knowledge graph. Track design decisions, dependencies, and implementation status.</p>
+      <h3><a href="/docs/design-tree">Design Tree</a></h3>
+      <p>185-node knowledge graph. Track design decisions, dependencies, and implementation status.</p>
     </div>
     <div class="feature">
       <div class="feature-icon">⟳</div>
-      <h3>Parallel Execution</h3>
+      <h3><a href="/docs/cleave">Parallel Execution</a></h3>
       <p>Cleave tasks into parallel git worktree children. Automatic merge and conflict detection.</p>
     </div>
     <div class="feature">
@@ -273,9 +299,13 @@
     </div>
     <div class="feature">
       <div class="feature-icon">◎</div>
-      <h3>Project Memory</h3>
+      <h3><a href="/docs/memory">Project Memory</a></h3>
       <p>Persistent facts across sessions. Semantic recall. Architecture, decisions, constraints tracked automatically.</p>
     </div>
+  </div>
+
+  <div class="docs-link">
+    <a href="/docs/">Read the docs →</a>
   </div>
 
   <div class="platforms">
@@ -304,6 +334,8 @@
 
 <footer>
   <div class="container">
+    <a href="/docs/">Docs</a> ·
+    <a href="/changelog">Changelog</a> ·
     <a href="https://github.com/styrene-lab/omegon-core">GitHub</a> ·
     <a href="https://github.com/styrene-lab/omegon-core/releases">Releases</a> ·
     <a href="https://github.com/styrene-lab/omegon-core/blob/main/LICENSE">BSL 1.1</a> ·
