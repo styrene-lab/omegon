@@ -8,6 +8,7 @@
 //! instead of shelling out to `git` via bash.
 
 pub mod commit;
+pub mod jj;
 pub mod merge;
 pub mod repo;
 pub mod status;

@@ -7,9 +7,11 @@ repository.workspace = true
 description = "Git operations for Omegon — RepoModel, commit, merge, worktree, submodule"
 
 [dependencies]
+jj-lib = "0.39"
 git2 = "0.20"
 anyhow = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { workspace = true }
