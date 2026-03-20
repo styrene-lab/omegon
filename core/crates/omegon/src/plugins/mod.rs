@@ -111,9 +111,18 @@ async fn load_armory_plugin(
     _cwd: &Path,
 ) -> anyhow::Result<Option<Vec<Box<dyn omegon_traits::Feature>>>> {
     let content = std::fs::read_to_string(manifest_path)?;
+
+    // Check if this looks like an armory manifest (has [plugin] with type field).
+    // If the content contains `type =` under `[plugin]`, it's armory-style.
+    // If it doesn't, fall through to legacy gracefully.
+    let is_armory = content.contains("[plugin]") && content.contains("type =");
     let manifest = match armory::ArmoryManifest::parse(&content) {
         Ok(m) => m,
-        Err(_) => return Ok(None), // Not armory-style, try legacy
+        Err(e) if is_armory => {
+            // Looks like an armory manifest with a syntax error — surface it
+            anyhow::bail!("armory manifest parse error in {}: {e}", manifest_path.display());
+        }
+        Err(_) => return Ok(None), // Genuinely not armory-style
     };
 
     let mut features: Vec<Box<dyn omegon_traits::Feature>> = Vec::new();

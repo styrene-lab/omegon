@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Canonical memory database schema contract. Generated from Rust omegon-memory. Both Rust and TS implementations must produce at least these tables and columns.",
+  "version": 5,
+  "generated_by": "omegon-memory schema_contract test",
+  "tables": {
+    "minds": {
+      "columns": {
+        "name": "TEXT PRIMARY KEY",
+        "description": "TEXT",
+        "status": "TEXT NOT NULL DEFAULT 'active'",
+        "origin_type": "TEXT",
+        "origin_path": "TEXT",
+        "origin_url": "TEXT",
+        "readonly": "INTEGER NOT NULL DEFAULT 0",
+        "parent": "TEXT",
+        "created_at": "TEXT NOT NULL",
+        "last_sync": "TEXT"
+      }
+    },
+    "facts": {
+      "columns": {
+        "id": "TEXT PRIMARY KEY",
+        "mind": "TEXT NOT NULL DEFAULT 'default'",
+        "section": "TEXT NOT NULL",
+        "content": "TEXT NOT NULL",
+        "status": "TEXT NOT NULL DEFAULT 'active'",
+        "created_at": "TEXT NOT NULL",
+        "created_session": "TEXT",
+        "supersedes": "TEXT",
+        "superseded_at": "TEXT",
+        "archived_at": "TEXT",
+        "source": "TEXT NOT NULL DEFAULT 'manual'",
+        "content_hash": "TEXT NOT NULL",
+        "confidence": "REAL NOT NULL DEFAULT 1.0",
+        "last_reinforced": "TEXT NOT NULL",
+        "reinforcement_count": "INTEGER NOT NULL DEFAULT 1",
+        "decay_rate": "REAL NOT NULL DEFAULT 0.05",
+        "decay_profile": "TEXT NOT NULL DEFAULT 'standard'",
+        "version": "INTEGER NOT NULL DEFAULT 0",
+        "last_accessed": "TEXT",
+        "jj_change_id": "TEXT"
+      }
+    },
+    "edges": {
+      "columns": {
+        "id": "TEXT PRIMARY KEY",
+        "source_fact_id": "TEXT NOT NULL",
+        "target_fact_id": "TEXT NOT NULL",
+        "relation": "TEXT NOT NULL",
+        "description": "TEXT",
+        "confidence": "REAL NOT NULL DEFAULT 1.0",
+        "last_reinforced": "TEXT",
+        "reinforcement_count": "INTEGER NOT NULL DEFAULT 1",
+        "decay_rate": "REAL NOT NULL DEFAULT 0.05",
+        "status": "TEXT NOT NULL DEFAULT 'active'",
+        "created_at": "TEXT NOT NULL",
+        "created_session": "TEXT",
+        "source_mind": "TEXT",
+        "target_mind": "TEXT"
+      }
+    },
+    "episodes": {
+      "columns": {
+        "id": "TEXT PRIMARY KEY",
+        "mind": "TEXT NOT NULL DEFAULT 'default'",
+        "title": "TEXT NOT NULL",
+        "narrative": "TEXT NOT NULL",
+        "date": "TEXT NOT NULL",
+        "session_id": "TEXT",
+        "created_at": "TEXT NOT NULL",
+        "jj_change_id": "TEXT"
+      }
+    },
+    "episode_facts": {
+      "columns": {
+        "episode_id": "TEXT NOT NULL",
+        "fact_id": "TEXT NOT NULL"
+      }
+    },
+    "episodes_vec": {
+      "columns": {
+        "episode_id": "TEXT PRIMARY KEY",
+        "embedding": "BLOB NOT NULL",
+        "model_name": "TEXT NOT NULL DEFAULT ''",
+        "dims": "INTEGER NOT NULL",
+        "created_at": "TEXT NOT NULL"
+      }
+    },
+    "facts_vec": {
+      "columns": {
+        "fact_id": "TEXT PRIMARY KEY",
+        "embedding": "BLOB NOT NULL",
+        "model": "TEXT NOT NULL",
+        "dims": "INTEGER NOT NULL",
+        "created_at": "TEXT NOT NULL",
+        "model_name": "TEXT NOT NULL DEFAULT ''"
+      }
+    },
+    "embedding_metadata": {
+      "columns": {
+        "model_name": "TEXT PRIMARY KEY",
+        "dims": "INTEGER NOT NULL",
+        "inserted_at": "TEXT NOT NULL"
+      }
+    },
+    "schema_version": {
+      "columns": {
+        "version": "INTEGER PRIMARY KEY",
+        "applied_at": "TEXT NOT NULL"
+      }
+    }
+  }
+}

@@ -180,7 +180,7 @@ impl McpFeature {
                 let params: Value = serde_json::to_value(&t.input_schema)
                     .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
                 McpTool {
-                    name: format!("{}_{}", server_name, t.name),
+                    name: format!("{}::{}", server_name, t.name),
                     description: t.description.map(|d| d.to_string()).unwrap_or_default(),
                     parameters: params,
                     server_name: server_name.to_string(),
@@ -220,7 +220,7 @@ impl McpFeature {
             return Ok(cmd);
         }
 
-        // Mode 2: Docker MCP Toolkit gateway
+        // Mode 2: Docker MCP Gateway
         if let Some(ref gateway_name) = config.docker_mcp {
             let mut cmd = Command::new("docker");
             cmd.args(["mcp", "gateway", "run", gateway_name]);
@@ -230,7 +230,7 @@ impl McpFeature {
             return Ok(cmd);
         }
 
-        // Mode 2: OCI container (podman preferred, docker fallback)
+        // Mode 3: OCI container (podman preferred, docker fallback)
         if let Some(ref image) = config.image {
             let runtime = detect_container_runtime();
             let mut cmd = Command::new(&runtime);
@@ -250,8 +250,12 @@ impl McpFeature {
                 }
             }
 
-            // Environment variables
+            // Environment variables — validate key names to prevent injection
             for (key, value) in &config.env {
+                if !key.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    tracing::warn!(key = key, "skipping env var with invalid name");
+                    continue;
+                }
                 cmd.arg(format!("-e={}={}", key, resolve_env_template(value)));
             }
 
@@ -260,7 +264,7 @@ impl McpFeature {
             return Ok(cmd);
         }
 
-        // Mode 3: Local process (default)
+        // Mode 4: Local process (default)
         let command = config.command.as_deref().ok_or_else(|| {
             anyhow::anyhow!(
                 "MCP server '{}': must specify command, image, or docker_mcp",
@@ -277,10 +281,12 @@ impl McpFeature {
         Ok(cmd)
     }
 
-    /// Parse "servername_toolname" → ("servername", "toolname").
+    /// Parse "servername::toolname" → ("servername", "toolname").
+    /// Uses `::` separator because both server names and MCP tool names
+    /// commonly contain underscores (e.g. `brave_search`, `read_file`).
     fn split_tool_name(prefixed: &str) -> (&str, &str) {
-        if let Some(pos) = prefixed.find('_') {
-            (&prefixed[..pos], &prefixed[pos + 1..])
+        if let Some(pos) = prefixed.find("::") {
+            (&prefixed[..pos], &prefixed[pos + 2..])
         } else {
             ("", prefixed)
         }
@@ -331,6 +337,10 @@ impl Feature for McpFeature {
         params.name = mcp_name.into();
         params.arguments = arguments;
 
+        // TODO: Apply config.timeout_secs via tokio::time::timeout wrapping this call.
+        // Currently the _cancel token is available but timeout_secs from the config
+        // is not propagated to the execute method. Requires storing config per-server
+        // in the clients map or a separate timeout map.
         let result = client.call_tool(params).await?;
 
         // Convert MCP content to Omegon content blocks
@@ -359,9 +369,18 @@ impl Feature for McpFeature {
 /// Detect the available OCI container runtime.
 /// Prefers podman (rootless, daemonless), falls back to docker.
 fn detect_container_runtime() -> String {
-    // Check OMEGON_CONTAINER_RUNTIME env var first (operator override)
+    // Check OMEGON_CONTAINER_RUNTIME env var first (operator override).
+    // Only accept known-safe values to prevent command injection.
     if let Ok(runtime) = std::env::var("OMEGON_CONTAINER_RUNTIME") {
-        return runtime;
+        match runtime.as_str() {
+            "podman" | "docker" | "nerdctl" => return runtime,
+            other => {
+                tracing::warn!(
+                    runtime = other,
+                    "OMEGON_CONTAINER_RUNTIME must be 'podman', 'docker', or 'nerdctl' — ignoring"
+                );
+            }
+        }
     }
 
     // Prefer podman (rootless, no daemon)
@@ -379,10 +398,12 @@ fn detect_container_runtime() -> String {
     "docker".into()
 }
 
-/// Check if a binary exists in PATH.
+/// Check if a binary exists in PATH (cross-platform).
 fn which_exists(name: &str) -> bool {
-    std::process::Command::new("which")
-        .arg(name)
+    // Try running `<name> --version` — works on all platforms
+    // and doesn't require `which` (which doesn't exist on Windows).
+    std::process::Command::new(name)
+        .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -391,17 +412,36 @@ fn which_exists(name: &str) -> bool {
 }
 
 /// Resolve `{ENV_VAR}` patterns from environment variables.
+///
+/// Single-pass left-to-right — resolved values are not re-scanned,
+/// preventing infinite loops from values containing `{`.
 fn resolve_env_template(template: &str) -> String {
-    let mut result = template.to_string();
-    while let Some(start) = result.find('{') {
-        if let Some(end) = result[start..].find('}') {
-            let var = &result[start + 1..start + end];
-            let value = std::env::var(var).unwrap_or_default();
-            result = format!("{}{}{}", &result[..start], value, &result[start + end + 1..]);
+    let mut result = String::with_capacity(template.len());
+    let mut chars = template.char_indices().peekable();
+
+    while let Some((i, ch)) = chars.next() {
+        if ch == '{' {
+            // Find the closing brace
+            if let Some(end_offset) = template[i + 1..].find('}') {
+                let var = &template[i + 1..i + 1 + end_offset];
+                // Only resolve if var looks like an env var name (alphanumeric + _)
+                if !var.is_empty() && var.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    let value = std::env::var(var).unwrap_or_default();
+                    result.push_str(&value);
+                    // Advance past the closing brace
+                    for _ in 0..end_offset + 1 {
+                        chars.next();
+                    }
+                    continue;
+                }
+            }
+            // Not a valid pattern — emit the literal `{`
+            result.push(ch);
         } else {
-            break;
+            result.push(ch);
         }
     }
+
     result
 }
 
@@ -430,10 +470,41 @@ mod tests {
     }
 
     #[test]
+    fn resolve_env_template_nested_braces() {
+        // Nested braces should not cause infinite loop
+        let result = resolve_env_template("{foo{bar}}");
+        // {foo{bar}} — `foo{bar` is not a valid env var name (contains {)
+        // so it's emitted literally
+        assert!(result.contains("foo"), "should not loop: {result}");
+    }
+
+    #[test]
+    fn resolve_env_template_value_with_braces() {
+        // If the resolved value contains {, it should NOT be re-scanned
+        unsafe { std::env::set_var("TEST_BRACE_VAL", "has{braces}inside"); }
+        let result = resolve_env_template("{TEST_BRACE_VAL}");
+        assert_eq!(result, "has{braces}inside");
+        unsafe { std::env::remove_var("TEST_BRACE_VAL"); }
+    }
+
+    #[test]
+    fn resolve_env_template_unclosed_brace() {
+        let result = resolve_env_template("prefix {UNCLOSED");
+        assert_eq!(result, "prefix {UNCLOSED");
+    }
+
+    #[test]
     fn split_tool_name_prefixed() {
-        let (server, tool) = McpFeature::split_tool_name("filesystem_read_file");
+        let (server, tool) = McpFeature::split_tool_name("filesystem::read_file");
         assert_eq!(server, "filesystem");
         assert_eq!(tool, "read_file");
+    }
+
+    #[test]
+    fn split_tool_name_underscore_in_server() {
+        let (server, tool) = McpFeature::split_tool_name("brave_search::web_search");
+        assert_eq!(server, "brave_search");
+        assert_eq!(tool, "web_search");
     }
 
     #[test]

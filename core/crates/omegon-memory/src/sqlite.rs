@@ -50,7 +50,12 @@ impl SqliteBackend {
                 description TEXT,
                 status      TEXT NOT NULL DEFAULT 'active',
                 origin_type TEXT,
-                created_at  TEXT NOT NULL
+                origin_path TEXT,
+                origin_url  TEXT,
+                readonly    INTEGER NOT NULL DEFAULT 0,
+                parent      TEXT,
+                created_at  TEXT NOT NULL,
+                last_sync   TEXT
             );
 
             INSERT OR IGNORE INTO minds (name, created_at) VALUES ('default', datetime('now'));
@@ -101,13 +106,20 @@ impl SqliteBackend {
             );
 
             CREATE TABLE IF NOT EXISTS edges (
-                id              TEXT PRIMARY KEY,
-                source_fact_id  TEXT NOT NULL,
-                target_fact_id  TEXT NOT NULL,
-                relation        TEXT NOT NULL,
-                description     TEXT,
-                weight          REAL NOT NULL DEFAULT 1.0,
-                created_at      TEXT NOT NULL,
+                id                  TEXT PRIMARY KEY,
+                source_fact_id      TEXT NOT NULL,
+                target_fact_id      TEXT NOT NULL,
+                relation            TEXT NOT NULL,
+                description         TEXT,
+                confidence          REAL NOT NULL DEFAULT 1.0,
+                last_reinforced     TEXT,
+                reinforcement_count INTEGER NOT NULL DEFAULT 1,
+                decay_rate          REAL NOT NULL DEFAULT 0.05,
+                status              TEXT NOT NULL DEFAULT 'active',
+                created_at          TEXT NOT NULL,
+                created_session     TEXT,
+                source_mind         TEXT,
+                target_mind         TEXT,
                 FOREIGN KEY (source_fact_id) REFERENCES facts(id) ON DELETE CASCADE,
                 FOREIGN KEY (target_fact_id) REFERENCES facts(id) ON DELETE CASCADE
             );
@@ -198,10 +210,27 @@ impl SqliteBackend {
         if current < 5 {
             // Add missing columns (idempotent — ignore "duplicate column" errors)
             for stmt in &[
+                // facts
                 "ALTER TABLE facts ADD COLUMN created_session TEXT",
                 "ALTER TABLE facts ADD COLUMN superseded_at TEXT",
                 "ALTER TABLE facts ADD COLUMN archived_at TEXT",
                 "ALTER TABLE facts ADD COLUMN jj_change_id TEXT",
+                // edges
+                "ALTER TABLE edges ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0",
+                "ALTER TABLE edges ADD COLUMN last_reinforced TEXT",
+                "ALTER TABLE edges ADD COLUMN reinforcement_count INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE edges ADD COLUMN decay_rate REAL NOT NULL DEFAULT 0.05",
+                "ALTER TABLE edges ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+                "ALTER TABLE edges ADD COLUMN created_session TEXT",
+                "ALTER TABLE edges ADD COLUMN source_mind TEXT",
+                "ALTER TABLE edges ADD COLUMN target_mind TEXT",
+                // minds
+                "ALTER TABLE minds ADD COLUMN origin_path TEXT",
+                "ALTER TABLE minds ADD COLUMN origin_url TEXT",
+                "ALTER TABLE minds ADD COLUMN readonly INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE minds ADD COLUMN parent TEXT",
+                "ALTER TABLE minds ADD COLUMN last_sync TEXT",
+                // episodes
                 "ALTER TABLE episodes ADD COLUMN session_id TEXT",
                 "ALTER TABLE episodes ADD COLUMN jj_change_id TEXT",
             ] {
@@ -894,5 +923,46 @@ mod tests {
     async fn sqlite_backend_passes_all_tests() {
         let backend = SqliteBackend::in_memory().unwrap();
         run_backend_tests(&backend).await;
+    }
+
+    /// Validate that the actual SQLite schema matches schema-contract.json.
+    /// If this test fails, either the Rust schema or the contract needs updating.
+    /// The contract is consumed by the TS omegon-pi repo to prevent drift.
+    #[test]
+    fn schema_matches_contract() {
+        let backend = SqliteBackend::in_memory().unwrap();
+        let conn = backend.conn.lock().unwrap();
+
+        // Load the contract
+        let contract_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("schema-contract.json");
+        let contract_text = std::fs::read_to_string(&contract_path)
+            .unwrap_or_else(|e| panic!("Failed to read {}: {}", contract_path.display(), e));
+        let contract: serde_json::Value = serde_json::from_str(&contract_text)
+            .expect("schema-contract.json is not valid JSON");
+
+        let tables = contract["tables"].as_object().expect("tables must be an object");
+        for (table_name, table_spec) in tables {
+            // Get actual columns from SQLite
+            let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table_name))
+                .unwrap_or_else(|_| panic!("Table '{}' does not exist in Rust schema", table_name));
+            let actual_cols: Vec<String> = stmt
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect();
+
+            let required_cols = table_spec["columns"].as_object()
+                .unwrap_or_else(|| panic!("columns must be an object for table {}", table_name));
+
+            for col_name in required_cols.keys() {
+                assert!(
+                    actual_cols.contains(col_name),
+                    "Contract requires column '{}.{}' but it's missing from the Rust schema. \
+                     Either add it to sqlite.rs or update schema-contract.json.",
+                    table_name, col_name
+                );
+            }
+        }
     }
 }

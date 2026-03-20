@@ -18,6 +18,7 @@ keyring = { version = "3", features = ["apple-native", "linux-native"] }
 secrecy = { version = "0.10", features = ["serde"] }
 zeroize = "1"
 aho-corasick = "1"
+rusqlite = { workspace = true }
 aes-gcm = "0.10"
 argon2 = "0.5"
 hex = "0.4"
