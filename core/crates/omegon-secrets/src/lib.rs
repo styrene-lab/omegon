@@ -17,6 +17,7 @@ mod guards;
 mod recipes;
 mod redact;
 mod resolve;
+pub mod store;
 mod vault;
 
 pub use audit::AuditLog;
@@ -24,6 +25,7 @@ pub use guards::{GuardDecision, PathGuard};
 pub use recipes::{Recipe, RecipeStore};
 pub use redact::Redactor;
 pub use resolve::{store_in_keyring, delete_from_keyring, resolve_vault_secret};
+pub use store::{KeyBackend, SecretStore};
 pub use vault::{AuthConfig, VaultClient, VaultConfig};
 
 use secrecy::{ExposeSecret, SecretString};

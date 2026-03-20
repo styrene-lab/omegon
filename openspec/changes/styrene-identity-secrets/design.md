@@ -1,23 +1,23 @@
----
-id: styrene-identity-secrets
-title: Styrene Identity as operator credential root — RNS identity for secret unlocking and trust
-status: implementing
-related: [styrene-ipc-mcp-transport]
-tags: [architecture, security, identity, styrene, secrets, vault, keyring, trust]
-open_questions: []
-branches: ["feature/styrene-identity-secrets"]
-openspec_change: styrene-identity-secrets
-issue_type: feature
-priority: 2
----
+# Styrene Identity as operator credential root — RNS identity for secret unlocking and trust — Design
 
-# Styrene Identity as operator credential root — RNS identity for secret unlocking and trust
+## Architecture Decisions
 
-## Overview
+### Decision: Separate secrets.db, encrypted at rest, never in git
 
-Should the operator's Styrene Identity (Ed25519 keypair from RNS, unique to their mesh node) serve as the root credential for unlocking Omegon's secret store? Today omegon-secrets uses keyring (OS credential store), Vault, env vars, and shell commands for secret resolution. A Styrene identity would add a cryptographic identity layer — the operator's mesh identity IS their Omegon identity, and possessing the RNS private key unlocks the secret store.
+**Status:** decided
+**Rationale:** Different threat model (credentials vs knowledge), different lifecycle (never synced/archived casually), different encryption boundary (secrets.db encrypted at rest, memory.db plaintext for semantic search). Located at ~/.config/omegon/secrets.db. Never appears in any git repo, backup, or sync mechanism without explicit operator action.
 
-## Research
+### Decision: Mesh secrets are live lookups, no caching
+
+**Status:** decided
+**Rationale:** Caching introduces invalidation, staleness, and a larger encrypted attack surface for zero demonstrated need. If the mesh is down, mesh secrets are unavailable — same as Vault when unreachable. Local secrets (keyring, passphrase-encrypted, env vars) are the offline path. Mesh secrets are by definition online resources.
+
+### Decision: Three encryption backends: Styrene Identity (feature-gated), OS keyring (default), passphrase with Argon2id (default)
+
+**Status:** decided
+**Rationale:** Dropped age crate — it solves a niche case that passphrase encryption handles without a new dependency. (1) Styrene Identity: HKDF-derived AES key from RNS Ed25519/X25519 keypair, feature-gated with --features=styrene. (2) OS keyring: platform credential store via keyring crate, default for desktop operators. (3) Passphrase: AES-256-GCM with Argon2id key derivation, default for headless servers with no keyring daemon. Uses aes-gcm already in the dependency tree via styrene-tunnel. All three produce the same encryption key for secrets.db — the operator picks during `omegon secrets init`.
+
+## Research Context
 
 ### What a Styrene Identity provides
 
@@ -101,24 +101,3 @@ The bootstrap flow (from the native-local-inference design) should show the secr
     ✓ Vault               vault.local:8200 (AppRole auth)
     ○ age Identity        not configured
 ```
-
-## Decisions
-
-### Decision: Separate secrets.db, encrypted at rest, never in git
-
-**Status:** decided
-**Rationale:** Different threat model (credentials vs knowledge), different lifecycle (never synced/archived casually), different encryption boundary (secrets.db encrypted at rest, memory.db plaintext for semantic search). Located at ~/.config/omegon/secrets.db. Never appears in any git repo, backup, or sync mechanism without explicit operator action.
-
-### Decision: Mesh secrets are live lookups, no caching
-
-**Status:** decided
-**Rationale:** Caching introduces invalidation, staleness, and a larger encrypted attack surface for zero demonstrated need. If the mesh is down, mesh secrets are unavailable — same as Vault when unreachable. Local secrets (keyring, passphrase-encrypted, env vars) are the offline path. Mesh secrets are by definition online resources.
-
-### Decision: Three encryption backends: Styrene Identity (feature-gated), OS keyring (default), passphrase with Argon2id (default)
-
-**Status:** decided
-**Rationale:** Dropped age crate — it solves a niche case that passphrase encryption handles without a new dependency. (1) Styrene Identity: HKDF-derived AES key from RNS Ed25519/X25519 keypair, feature-gated with --features=styrene. (2) OS keyring: platform credential store via keyring crate, default for desktop operators. (3) Passphrase: AES-256-GCM with Argon2id key derivation, default for headless servers with no keyring daemon. Uses aes-gcm already in the dependency tree via styrene-tunnel. All three produce the same encryption key for secrets.db — the operator picks during `omegon secrets init`.
-
-## Open Questions
-
-*No open questions.*
