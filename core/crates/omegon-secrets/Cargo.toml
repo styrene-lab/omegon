@@ -1,0 +1,30 @@
+[package]
+name = "omegon-secrets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Secret resolution, output redaction, and tool guards for Omegon"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"
+omegon-traits = { path = "../omegon-traits" }
+keyring = { version = "3", features = ["apple-native", "linux-native"] }
+secrecy = { version = "0.10", features = ["serde"] }
+zeroize = "1"
+aho-corasick = "1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio = { version = "1", features = ["full"] }
+url = "2"
+globset = "0.4"
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"
+mockito = "1"
+tokio-test = "0.4"

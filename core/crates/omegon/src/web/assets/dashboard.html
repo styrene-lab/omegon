@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ω Omegon Dashboard</title>
+<style>
+  :root {
+    --bg: #02030a;
+    --card-bg: #080e1a;
+    --surface-bg: #0a1020;
+    --border: #1a4458;
+    --border-dim: #0c1828;
+    --fg: #c4d8e4;
+    --muted: #607888;
+    --dim: #405870;
+    --accent: #2ab4c8;
+    --accent-muted: #1a8898;
+    --success: #22c55e;
+    --error: #ef4444;
+    --warning: #f59e0b;
+    --caution: #8b5cf6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 0; border-bottom: 1px solid var(--border-dim);
+    margin-bottom: 16px;
+  }
+  header h1 { font-size: 16px; color: var(--accent); font-weight: 600; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .status-dot.connected { background: var(--success); }
+  .status-dot.disconnected { background: var(--error); }
+
+  /* Tab bar */
+  .tab-bar { display: flex; gap: 2px; margin-bottom: 16px; }
+  .tab {
+    padding: 6px 16px; border-radius: 6px 6px 0 0; cursor: pointer;
+    background: var(--card-bg); color: var(--dim); border: 1px solid var(--border-dim);
+    border-bottom: none; font-family: inherit; font-size: 12px;
+    transition: color 0.15s, background 0.15s;
+  }
+  .tab:hover { color: var(--fg); }
+  .tab.active { background: var(--surface-bg); color: var(--accent); border-color: var(--border); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    padding: 12px 16px;
+  }
+  .card h2 {
+    font-size: 11px; color: var(--accent); margin-bottom: 10px;
+    text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600;
+    padding-bottom: 6px; border-bottom: 1px solid var(--border-dim);
+  }
+
+  .count-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .count-badge {
+    padding: 2px 7px; border-radius: 3px; font-size: 11px;
+    background: var(--surface-bg); color: var(--muted);
+    border: 1px solid var(--border-dim);
+  }
+  .count-badge.accent { color: var(--accent); }
+  .count-badge.success { color: var(--success); }
+  .count-badge.warning { color: var(--warning); }
+  .count-badge.error { color: var(--error); }
+
+  /* Pipeline funnel */
+  .funnel { display: flex; height: 4px; border-radius: 2px; overflow: hidden; margin: 4px 0 10px; }
+  .funnel-seg { min-width: 2px; }
+
+  .node-list { list-style: none; }
+  .node-list li {
+    padding: 6px 0; border-bottom: 1px solid var(--border-dim);
+    display: grid; grid-template-columns: 16px 1fr auto; gap: 6px;
+    align-items: baseline; font-size: 12px; line-height: 1.4;
+  }
+  .node-list li:last-child { border-bottom: none; }
+  .node-icon { text-align: center; line-height: 1.4; }
+  .node-id { color: var(--accent-muted); font-size: 12px; font-weight: 600; }
+  .node-title {
+    color: var(--muted); font-size: 11px; font-weight: 400;
+    grid-column: 2 / 3; margin-top: -2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .node-questions {
+    color: var(--warning); font-size: 11px; font-weight: 600;
+    grid-row: 1; grid-column: 3;
+  }
+
+  .change-list { list-style: none; }
+  .change-list li {
+    padding: 6px 0; display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--border-dim); font-size: 12px;
+  }
+  .change-list li:last-child { border-bottom: none; }
+  .stage-badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 3px;
+    background: var(--surface-bg); text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .progress-bar {
+    width: 60px; height: 4px; background: var(--border-dim);
+    border-radius: 2px; overflow: hidden;
+  }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+
+  .child-list { list-style: none; }
+  .child-list li { padding: 3px 0; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+
+  .empty { color: var(--dim); font-style: italic; padding: 8px 0; font-size: 12px; }
+
+  /* Graph view */
+  #graph-container {
+    background: var(--card-bg);
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+  }
+  #graph-canvas {
+    width: 100%; height: 700px; display: block; cursor: grab;
+  }
+  #node-detail {
+    position: absolute; top: 12px; right: 12px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 16px;
+    min-width: 240px; max-width: 320px;
+    display: none; font-size: 12px;
+  }
+  #node-detail.visible { display: block; }
+  #node-detail h3 { color: var(--accent); font-size: 13px; margin-bottom: 4px; }
+  #node-detail .nd-status { text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+  #node-detail .nd-meta { color: var(--dim); margin-top: 4px; }
+  #node-detail .nd-deps { margin-top: 6px; white-space: pre-wrap; color: var(--muted); font-size: 11px; }
+  #node-detail .nd-close {
+    position: absolute; top: 8px; right: 10px; cursor: pointer;
+    color: var(--dim); font-size: 14px;
+  }
+  #node-detail .nd-close:hover { color: var(--fg); }
+
+  /* Graph legend */
+  .graph-legend {
+    position: absolute; bottom: 12px; left: 12px;
+    display: flex; gap: 12px; font-size: 11px; color: var(--dim);
+  }
+  .graph-legend span::before {
+    content: ''; display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; margin-right: 4px; vertical-align: middle;
+  }
+  .legend-seed::before { background: var(--muted); opacity: 0.4; }
+  .legend-exploring::before { background: var(--accent); }
+  .legend-decided::before { background: var(--success); }
+  .legend-implementing::before { background: var(--warning); }
+  .legend-implemented::before { background: var(--dim); opacity: 0.3; }
+  .legend-blocked::before { background: var(--error); }
+
+  #conversation {
+    margin-top: 16px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 12px 16px;
+  }
+  #conversation h2 { font-size: 13px; color: var(--accent); margin-bottom: 8px; }
+  .msg { padding: 4px 0; border-bottom: 1px solid var(--border-dim); }
+  .msg:last-child { border-bottom: none; }
+  .msg-role { font-size: 11px; color: var(--dim); text-transform: uppercase; }
+  .msg-text { white-space: pre-wrap; word-break: break-word; }
+  .msg-tool { color: var(--accent-muted); }
+
+  #prompt-bar {
+    margin-top: 12px; display: flex; gap: 8px;
+  }
+  #prompt-bar input {
+    flex: 1; padding: 8px 12px;
+    background: var(--surface-bg); border: 1px solid var(--border-dim);
+    border-radius: 6px; color: var(--fg); font-family: inherit; font-size: 13px;
+    outline: none;
+  }
+  #prompt-bar input:focus { border-color: var(--accent); }
+  #prompt-bar button {
+    padding: 8px 16px; background: var(--accent); color: var(--bg);
+    border: none; border-radius: 6px; font-family: inherit; font-size: 13px;
+    cursor: pointer; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Ω Omegon Dashboard</h1>
+    <div class="header-right">
+      <span class="status-dot" id="ws-status"></span>
+      <span id="ws-label" style="color: var(--dim); font-size: 12px; margin-left: 4px;">connecting…</span>
+    </div>
+  </header>
+
+  <!-- Tab bar -->
+  <div class="tab-bar">
+    <button class="tab active" onclick="switchTab('overview')">Overview</button>
+    <button class="tab" onclick="switchTab('graph')">Graph</button>
+  </div>
+
+  <!-- Overview tab (existing dashboard) -->
+  <div class="tab-content active" id="tab-overview">
+    <div class="grid">
+      <div class="card">
+        <h2>◈ Design Tree</h2>
+        <div class="count-row" id="design-counts"></div>
+        <div class="funnel" id="design-funnel"></div>
+        <div id="design-focused"></div>
+        <ul class="node-list" id="design-nodes"></ul>
+      </div>
+
+      <div class="card">
+        <h2>◎ Implementation</h2>
+        <div id="openspec-summary"></div>
+        <ul class="change-list" id="openspec-changes"></ul>
+      </div>
+
+      <div class="card" id="cleave-card" style="display:none;">
+        <h2>⚡ Cleave</h2>
+        <div id="cleave-summary"></div>
+        <ul class="child-list" id="cleave-children"></ul>
+      </div>
+
+      <div class="card">
+        <h2>⊙ Session</h2>
+        <div id="session-info"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Graph tab -->
+  <div class="tab-content" id="tab-graph">
+    <div id="graph-container">
+      <canvas id="graph-canvas"></canvas>
+      <div id="node-detail">
+        <span class="nd-close" onclick="closeDetail()">✕</span>
+        <h3 id="nd-title"></h3>
+        <div class="nd-status" id="nd-status"></div>
+        <div class="nd-meta" id="nd-meta"></div>
+        <div class="nd-deps" id="nd-deps"></div>
+      </div>
+      <div class="graph-legend">
+        <span class="legend-seed">seed</span>
+        <span class="legend-exploring">exploring</span>
+        <span class="legend-decided">decided</span>
+        <span class="legend-implementing">implementing</span>
+        <span class="legend-implemented">done</span>
+        <span class="legend-blocked">blocked</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="conversation">
+    <h2>◌ Conversation</h2>
+    <div id="conv-messages"><div class="empty">Waiting for agent activity…</div></div>
+  </div>
+
+  <div id="prompt-bar">
+    <input type="text" id="prompt-input" placeholder="Send a message to the agent…" />
+    <button onclick="sendPrompt()">Send</button>
+  </div>
+</div>
+
+<script>
+// ── Auth token from URL ──────────────────────────────────────────
+const params = new URLSearchParams(location.search);
+const AUTH_TOKEN = params.get('token') || '';
+
+// ── Tab switching ────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.querySelector(`.tab[onclick*="${name}"]`).classList.add('active');
+  if (name === 'graph' && !graphLoaded) loadGraph();
+}
+
+// ── WebSocket connection with auto-reconnect ─────────────────────
+let ws = null;
+let reconnectTimer = null;
+const WS_URL = `ws://${location.host}/ws?token=${encodeURIComponent(AUTH_TOKEN)}`;
+
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    document.getElementById('ws-status').className = 'status-dot connected';
+    document.getElementById('ws-label').textContent = 'connected';
+    if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
+  };
+  ws.onclose = () => {
+    document.getElementById('ws-status').className = 'status-dot disconnected';
+    document.getElementById('ws-label').textContent = 'disconnected';
+    if (!reconnectTimer) {
+      reconnectTimer = setInterval(() => { try { connect(); } catch(e) {} }, 3000);
+    }
+  };
+  ws.onmessage = (e) => {
+    try { handleEvent(JSON.parse(e.data)); } catch(err) { console.error('ws parse error:', err); }
+  };
+}
+
+// ── State ────────────────────────────────────────────────────────
+let state = null;
+let messages = [];
+const MAX_MESSAGES = 50;
+
+function handleEvent(event) {
+  switch (event.type) {
+    case 'state_snapshot':
+      state = event.data;
+      renderAll();
+      break;
+    case 'turn_start':
+      addMessage('system', `── Turn ${event.turn} ──`);
+      break;
+    case 'message_chunk':
+      appendToLastMessage('assistant', event.text);
+      break;
+    case 'thinking_chunk':
+      break;
+    case 'message_end':
+      break;
+    case 'tool_start':
+      addMessage('tool', `▸ ${event.name}`);
+      break;
+    case 'tool_end':
+      const icon = event.is_error ? '✗' : '✓';
+      const result = (event.result || '').substring(0, 200);
+      addMessage('tool', `${icon} ${result}`);
+      break;
+    case 'agent_end':
+      addMessage('system', '── Agent idle ──');
+      break;
+    case 'system_notification':
+      addMessage('system', event.message);
+      break;
+    case 'phase_changed':
+      addMessage('system', `Phase → ${event.phase}`);
+      break;
+    case 'decomposition_started':
+      addMessage('system', `⚡ Cleave: ${event.children.length} children`);
+      break;
+    case 'decomposition_child_completed':
+      addMessage('system', `${event.success ? '✓' : '✗'} Child '${event.label}'`);
+      break;
+    case 'decomposition_completed':
+      addMessage('system', `⚡ Cleave ${event.merged ? 'merged' : 'completed'}`);
+      fetch('/api/state').then(r => r.json()).then(d => { state = d; renderAll(); });
+      break;
+    default:
+      console.log('unhandled event:', event);
+  }
+}
+
+function addMessage(role, text) {
+  messages.push({ role, text });
+  if (messages.length > MAX_MESSAGES) messages.shift();
+  renderMessages();
+}
+
+function appendToLastMessage(role, text) {
+  const last = messages[messages.length - 1];
+  if (last && last.role === role) {
+    last.text += text;
+  } else {
+    messages.push({ role, text });
+    if (messages.length > MAX_MESSAGES) messages.shift();
+  }
+  renderMessages();
+}
+
+// ── Rendering ────────────────────────────────────────────────────
+const STATUS_ICONS = {
+  seed: '○', exploring: '◐', resolved: '◉', decided: '●',
+  implementing: '⚙', implemented: '✓', blocked: '✕', deferred: '◑'
+};
+const STATUS_COLORS = {
+  seed: 'var(--muted)', exploring: 'var(--accent)', resolved: 'var(--success)',
+  decided: 'var(--success)', implementing: 'var(--warning)',
+  implemented: 'var(--dim)', blocked: 'var(--error)', deferred: 'var(--caution)'
+};
+const STATUS_HEX = {
+  seed: '#607888', exploring: '#2ab4c8', resolved: '#22c55e',
+  decided: '#22c55e', implementing: '#f59e0b',
+  implemented: '#405870', blocked: '#ef4444', deferred: '#8b5cf6'
+};
+const STAGE_ICONS = {
+  proposed: '◌', specified: '◐', planned: '▸',
+  implementing: '⟳', verifying: '◉', archived: '✓'
+};
+
+function renderAll() {
+  if (!state) return;
+  renderDesign();
+  renderOpenSpec();
+  renderCleave();
+  renderSession();
+}
+
+function renderDesign() {
+  const d = state.design;
+  const counts = d.counts;
+
+  const badges = [];
+  if (counts.implementing > 0) badges.push(`<span class="count-badge warning">${counts.implementing} implementing</span>`);
+  if (counts.decided > 0) badges.push(`<span class="count-badge success">${counts.decided} decided</span>`);
+  if (counts.exploring > 0) badges.push(`<span class="count-badge accent">${counts.exploring} exploring</span>`);
+  if (counts.blocked > 0) badges.push(`<span class="count-badge error">${counts.blocked} blocked</span>`);
+  if (counts.implemented > 0) badges.push(`<span class="count-badge">${counts.implemented} done</span>`);
+  if (counts.open_questions > 0) badges.push(`<span class="count-badge">${counts.open_questions}?</span>`);
+  document.getElementById('design-counts').innerHTML = badges.join('') || `<span class="count-badge">${counts.total} nodes</span>`;
+
+  // Pipeline funnel
+  const total = counts.total || 1;
+  const funnelEl = document.getElementById('design-funnel');
+  const segs = [
+    { count: counts.exploring + (counts.seed || 0), color: 'var(--accent)' },
+    { count: (counts.resolved || 0) + counts.decided, color: 'var(--success)' },
+    { count: counts.implementing, color: 'var(--warning)' },
+    { count: counts.implemented, color: 'var(--dim)' },
+  ].filter(s => s.count > 0);
+  funnelEl.innerHTML = segs.map(s =>
+    `<div class="funnel-seg" style="flex: ${s.count}; background: ${s.color}"></div>`
+  ).join('');
+
+  // Focused node
+  let focusedHtml = '';
+  if (d.focused) {
+    const icon = STATUS_ICONS[d.focused.status] || '○';
+    const color = STATUS_COLORS[d.focused.status] || 'var(--muted)';
+    const badges = [];
+    if (d.focused.decisions > 0) badges.push(`<span style="color: var(--success); font-size: 11px;">● ${d.focused.decisions}</span>`);
+    if (d.focused.open_questions.length > 0) badges.push(`<span style="color: var(--warning); font-size: 11px;">? ${d.focused.open_questions.length}</span>`);
+    if (d.focused.children > 0) badges.push(`<span style="color: var(--dim); font-size: 11px;">↳ ${d.focused.children}</span>`);
+    focusedHtml = `
+      <div style="padding: 8px 10px; background: var(--surface-bg); border-radius: 6px; border-left: 2px solid ${color}; margin-bottom: 8px; font-size: 12px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="color: ${color}">${icon}</span>
+          <span style="color: var(--accent); font-weight: 600;">${escapeHtml(d.focused.id)}</span>
+          ${badges.length > 0 ? `<span style="margin-left: auto; display: flex; gap: 8px;">${badges.join('')}</span>` : ''}
+        </div>
+        <div style="color: var(--muted); font-size: 11px; margin-top: 2px; padding-left: 22px;">${escapeHtml(d.focused.title)}</div>
+      </div>`;
+  }
+  document.getElementById('design-focused').innerHTML = focusedHtml;
+
+  // Actionable + implementing nodes
+  const nodes = [...d.implementing, ...d.actionable].slice(0, 10);
+  if (nodes.length === 0 && !d.focused) {
+    document.getElementById('design-nodes').innerHTML = '<li class="empty">No active design nodes</li>';
+  } else {
+    document.getElementById('design-nodes').innerHTML = nodes.map(n => `
+      <li>
+        <span class="node-icon" style="color: ${STATUS_COLORS[n.status] || 'var(--muted)'}">${STATUS_ICONS[n.status] || '○'}</span>
+        <span class="node-id">${escapeHtml(n.id)}</span>
+        ${n.open_questions > 0 ? `<span class="node-questions">${n.open_questions}?</span>` : '<span></span>'}
+        <span class="node-title" title="${escapeHtml(n.title)}">${escapeHtml(n.title)}</span>
+      </li>`).join('');
+  }
+}
+
+function renderOpenSpec() {
+  const os = state.openspec;
+  if (os.changes.length === 0) {
+    document.getElementById('openspec-summary').innerHTML = '<div class="empty">No active changes</div>';
+    document.getElementById('openspec-changes').innerHTML = '';
+    return;
+  }
+
+  const totalPct = os.total_tasks > 0 ? Math.round(os.done_tasks / os.total_tasks * 100) : 0;
+  document.getElementById('openspec-summary').innerHTML = `
+    <div style="color: var(--dim); font-size: 11px; margin-bottom: 6px;">
+      ${os.changes.length} change${os.changes.length > 1 ? 's' : ''} · ${os.done_tasks}/${os.total_tasks} tasks (${totalPct}%)
+    </div>`;
+
+  document.getElementById('openspec-changes').innerHTML = os.changes.map(c => {
+    const pct = c.total_tasks > 0 ? Math.round(c.done_tasks / c.total_tasks * 100) : 0;
+    return `<li>
+      <span>${STAGE_ICONS[c.stage] || '◌'}</span>
+      <span style="flex: 1;">${escapeHtml(c.name)}</span>
+      <span class="stage-badge">${c.stage}</span>
+      ${c.total_tasks > 0 ? `
+        <span style="color: var(--dim); font-size: 12px;">${c.done_tasks}/${c.total_tasks}</span>
+        <div class="progress-bar"><div class="progress-fill" style="width: ${pct}%"></div></div>
+      ` : ''}
+    </li>`;
+  }).join('');
+}
+
+function renderCleave() {
+  const cl = state.cleave;
+  const card = document.getElementById('cleave-card');
+  if (!cl.active && cl.total_children === 0) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  const done = cl.completed + cl.failed;
+  document.getElementById('cleave-summary').innerHTML = cl.active
+    ? `<span style="color: var(--warning)">⟳ ${done}/${cl.total_children} children</span>`
+    : `<span style="color: ${cl.failed > 0 ? 'var(--error)' : 'var(--success)'}">✓ ${cl.completed} ok, ${cl.failed} failed</span>`;
+
+  document.getElementById('cleave-children').innerHTML = cl.children.map(c => {
+    const icons = { completed: '✓', failed: '✗', running: '⟳', pending: '○' };
+    const colors = { completed: 'var(--success)', failed: 'var(--error)', running: 'var(--warning)', pending: 'var(--dim)' };
+    const dur = c.duration_secs != null ? ` ${c.duration_secs.toFixed(0)}s` : '';
+    return `<li>
+      <span style="color: ${colors[c.status] || 'var(--dim)'}">${icons[c.status] || '○'}</span>
+      <span>${escapeHtml(c.label)}</span>
+      <span style="color: var(--dim); font-size: 12px;">${dur}</span>
+    </li>`;
+  }).join('');
+}
+
+function renderSession() {
+  const s = state.session;
+  document.getElementById('session-info').innerHTML = `
+    <div style="color: var(--muted); font-size: 12px;">${s.turns} turns · ${s.tool_calls} tool calls</div>
+    ${s.compactions > 0 ? `<div style="color: var(--dim); font-size: 12px;">${s.compactions} compactions</div>` : ''}
+  `;
+}
+
+function renderMessages() {
+  const el = document.getElementById('conv-messages');
+  if (messages.length === 0) {
+    el.innerHTML = '<div class="empty">Waiting for agent activity…</div>';
+    return;
+  }
+  el.innerHTML = messages.map(m => {
+    const cls = m.role === 'tool' ? 'msg-tool' : '';
+    return `<div class="msg">
+      <span class="msg-role">${m.role}</span>
+      <div class="msg-text ${cls}">${escapeHtml(m.text)}</div>
+    </div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ── Prompt sending ───────────────────────────────────────────────
+function sendPrompt() {
+  const input = document.getElementById('prompt-input');
+  const text = input.value.trim();
+  if (!text || !ws || ws.readyState !== 1) return;
+
+  if (text.startsWith('/')) {
+    const [name, ...rest] = text.substring(1).split(' ');
+    ws.send(JSON.stringify({ type: 'slash_command', name, args: rest.join(' ') }));
+  } else {
+    ws.send(JSON.stringify({ type: 'user_prompt', text }));
+  }
+  addMessage('user', text);
+  input.value = '';
+}
+
+document.getElementById('prompt-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendPrompt();
+  // Ctrl+C or Cmd+Backspace — clear input
+  if ((e.key === 'c' && e.ctrlKey && !e.shiftKey) || (e.key === 'Backspace' && e.metaKey)) {
+    e.preventDefault();
+    e.target.value = '';
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// ── Force-directed graph (vanilla canvas, polished) ──────────────
+// ═══════════════════════════════════════════════════════════════════
+let graphLoaded = false;
+let graphNodes = [];
+let graphLinks = [];
+let selectedNode = null;
+let hoverNode = null;
+let simAlpha = 1.0;        // Cooling: starts hot, decays to 0
+let simFrame = 0;
+
+// Camera
+let camX = 0, camY = 0, camZoom = 1;
+let isDragging = false, dragStartX = 0, dragStartY = 0;
+let dragNode = null;
+
+// Node importance tiers for rendering priority
+const ACTIVE_GROUPS = new Set([1, 2, 3, 5, 6]); // exploring, decided, implementing, blocked, deferred
+
+async function loadGraph() {
+  graphLoaded = true;
+  const res = await fetch('/api/graph');
+  const data = await res.json();
+
+  const nodeMap = {};
+  data.nodes.forEach(n => { nodeMap[n.id] = n; n.children = []; n.depth = 0; });
+  data.links.forEach(l => {
+    l.sourceNode = nodeMap[l.source];
+    l.targetNode = nodeMap[l.target];
+  });
+  data.links = data.links.filter(l => l.sourceNode && l.targetNode);
+
+  // Build parent→children index for hierarchical layout
+  data.nodes.forEach(n => {
+    const parentLink = data.links.find(l => l.targetNode === n && l.link_type === 'parent');
+    if (parentLink) {
+      parentLink.sourceNode.children.push(n);
+      n._parent = parentLink.sourceNode;
+    }
+  });
+
+  // Compute depths
+  function setDepth(node, d) { node.depth = d; node.children.forEach(c => setDepth(c, d + 1)); }
+  const roots = data.nodes.filter(n => !n._parent);
+  roots.forEach((r, i) => setDepth(r, 0));
+
+  // Hierarchical initial layout: roots spread in a line, children fan below
+  const canvasW = 800, canvasH = 600;
+  const cx = canvasW / 2, cy = canvasH / 2;
+
+  // Place roots in a horizontal line
+  roots.sort((a, b) => b.children.length - a.children.length); // big subtrees first
+  const rootSpacing = Math.min(120, (canvasW - 100) / Math.max(roots.length, 1));
+  const rootStartX = cx - (roots.length - 1) * rootSpacing / 2;
+
+  function layoutTree(node, px, py, angle, spread, depth) {
+    node.x = px; node.y = py;
+    node.vx = 0; node.vy = 0;
+    const n = node.children.length;
+    if (n === 0) return;
+    const childSpread = spread / Math.max(n, 2);
+    const dist = 50 + depth * 10; // children further from parents at deeper levels
+    node.children.forEach((c, i) => {
+      const a = angle + (i - (n - 1) / 2) * childSpread;
+      const childX = px + Math.cos(a) * dist + (Math.random() - 0.5) * 10;
+      const childY = py + Math.sin(a) * dist + (Math.random() - 0.5) * 10;
+      layoutTree(c, childX, childY, a, childSpread * 0.8, depth + 1);
+    });
+  }
+
+  roots.forEach((r, i) => {
+    const rx = rootStartX + i * rootSpacing;
+    const ry = cy - 50 + (Math.random() - 0.5) * 40;
+    const baseAngle = Math.PI / 2 + (i - roots.length / 2) * 0.3; // fan downward
+    layoutTree(r, rx, ry, baseAngle, Math.PI * 0.6, 0);
+  });
+
+  // Orphan nodes (no parent link in the data) — place in outer ring
+  data.nodes.filter(n => n.x === undefined).forEach((n, i) => {
+    const angle = (i / 10) * Math.PI * 2;
+    n.x = cx + Math.cos(angle) * 350;
+    n.y = cy + Math.sin(angle) * 350;
+    n.vx = 0; n.vy = 0;
+  });
+
+  graphNodes = data.nodes;
+  graphLinks = data.links;
+
+  const canvas = document.getElementById('graph-canvas');
+  const container = document.getElementById('graph-container');
+  canvas.width = container.clientWidth * devicePixelRatio;
+  canvas.height = 700 * devicePixelRatio;
+  canvas.style.height = '700px';
+
+  // Fit camera: compute bounding box of all nodes, then fit
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  graphNodes.forEach(n => {
+    minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x);
+    minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y);
+  });
+  const graphW = (maxX - minX) + 100, graphH = (maxY - minY) + 100;
+  const viewW = canvas.width / devicePixelRatio, viewH = canvas.height / devicePixelRatio;
+  camZoom = Math.min(viewW / graphW, viewH / graphH, 1.2);
+  camX = viewW / 2 - ((minX + maxX) / 2) * camZoom;
+  camY = viewH / 2 - ((minY + maxY) / 2) * camZoom;
+
+  simAlpha = 1.0;
+  simFrame = 0;
+
+  setupGraphEvents(canvas);
+  runSimulation(canvas);
+}
+
+function setupGraphEvents(canvas) {
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.92 : 1.08;
+    const newZoom = Math.max(0.15, Math.min(4, camZoom * delta));
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    camX = mx - (mx - camX) * (newZoom / camZoom);
+    camY = my - (my - camY) * (newZoom / camZoom);
+    camZoom = newZoom;
+  }, { passive: false });
+
+  canvas.addEventListener('mousedown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left - camX) / camZoom;
+    const my = (e.clientY - rect.top - camY) / camZoom;
+
+    for (const n of graphNodes) {
+      const dx = n.x - mx, dy = n.y - my;
+      const r = nodeRadius(n) + 3;
+      if (dx*dx + dy*dy < r*r) {
+        dragNode = n;
+        n._pinned = true;
+        showDetail(n);
+        simAlpha = Math.max(simAlpha, 0.3); // Reheat slightly for drag
+        return;
+      }
+    }
+    isDragging = true;
+    dragStartX = e.clientX - camX;
+    dragStartY = e.clientY - camY;
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    if (isDragging) {
+      camX = e.clientX - dragStartX;
+      camY = e.clientY - dragStartY;
+      return;
+    }
+    if (dragNode) {
+      dragNode.x = (e.clientX - rect.left - camX) / camZoom;
+      dragNode.y = (e.clientY - rect.top - camY) / camZoom;
+      dragNode.vx = 0; dragNode.vy = 0;
+      return;
+    }
+    // Hover detection
+    const mx = (e.clientX - rect.left - camX) / camZoom;
+    const my = (e.clientY - rect.top - camY) / camZoom;
+    let found = null;
+    for (const n of graphNodes) {
+      const dx = n.x - mx, dy = n.y - my;
+      const r = nodeRadius(n) + 3;
+      if (dx*dx + dy*dy < r*r) { found = n; break; }
+    }
+    hoverNode = found;
+    canvas.style.cursor = found ? 'pointer' : (isDragging ? 'grabbing' : 'grab');
+  });
+
+  canvas.addEventListener('mouseup', () => {
+    if (dragNode) dragNode._pinned = false;
+    isDragging = false;
+    dragNode = null;
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    if (dragNode) dragNode._pinned = false;
+    isDragging = false;
+    dragNode = null;
+    hoverNode = null;
+  });
+
+  // Double-click to focus + recenter
+  canvas.addEventListener('dblclick', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left - camX) / camZoom;
+    const my = (e.clientY - rect.top - camY) / camZoom;
+    for (const n of graphNodes) {
+      const dx = n.x - mx, dy = n.y - my;
+      if (dx*dx + dy*dy < 100) {
+        // Center on this node
+        const viewW = canvas.width / devicePixelRatio;
+        const viewH = canvas.height / devicePixelRatio;
+        camX = viewW / 2 - n.x * camZoom;
+        camY = viewH / 2 - n.y * camZoom;
+        showDetail(n);
+        return;
+      }
+    }
+  });
+}
+
+function nodeRadius(n) {
+  if (n.group === 4) return 3;          // implemented — tiny
+  if (n.group === 0) return 3;          // seed — tiny
+  if (n.group === 3) return 6;          // implementing
+  if (n.group === 2) return 5;          // decided
+  if (n.group === 1) return 4.5;        // exploring
+  if (n.group === 5) return 5;          // blocked
+  return 4;
+}
+
+function nodeAlpha(n) {
+  if (n.group === 4) return 0.3;        // implemented — very faded
+  if (n.group === 0) return 0.4;        // seed — faded
+  return 1.0;                           // active nodes — full opacity
+}
+
+function nodeColor(n) {
+  return STATUS_HEX[n.status] || '#607888';
+}
+
+// Is this node "interesting" enough to always show its label?
+function isLabelWorthy(n) {
+  return n.group === 3 || n.group === 5 || (n.group >= 1 && n.group <= 2 && n.questions > 0);
+}
+
+function showDetail(n) {
+  selectedNode = n;
+  const el = document.getElementById('node-detail');
+  document.getElementById('nd-title').textContent = n.id;
+  const statusEl = document.getElementById('nd-status');
+  statusEl.textContent = n.status;
+  statusEl.style.color = STATUS_HEX[n.status] || '#607888';
+
+  let meta = escapeHtml(n.title);
+  if (n.questions > 0) meta += `\n${n.questions} open question${n.questions > 1 ? 's' : ''}`;
+  if (n.has_openspec) meta += '\n◎ has OpenSpec change';
+  document.getElementById('nd-meta').textContent = meta;
+
+  // Connections
+  const incoming = graphLinks.filter(l => l.targetNode === n);
+  const outgoing = graphLinks.filter(l => l.sourceNode === n);
+  let deps = '';
+  if (incoming.length > 0) {
+    const parents = incoming.filter(l => l.link_type === 'parent').map(l => l.sourceNode.id);
+    const depSources = incoming.filter(l => l.link_type === 'dependency').map(l => l.sourceNode.id);
+    if (parents.length) deps += `parent: ${parents.join(', ')}\n`;
+    if (depSources.length) deps += `depends on: ${depSources.join(', ')}\n`;
+  }
+  if (outgoing.length > 0) {
+    const children = outgoing.filter(l => l.link_type === 'parent').map(l => l.targetNode.id);
+    const depTargets = outgoing.filter(l => l.link_type === 'dependency').map(l => l.targetNode.id);
+    if (children.length) deps += `children: ${children.join(', ')}\n`;
+    if (depTargets.length) deps += `depended on by: ${depTargets.join(', ')}`;
+  }
+  document.getElementById('nd-deps').textContent = deps.trim();
+  el.classList.add('visible');
+}
+
+function closeDetail() {
+  selectedNode = null;
+  document.getElementById('node-detail').classList.remove('visible');
+}
+
+function runSimulation(canvas) {
+  const ctx = canvas.getContext('2d');
+  const dpr = devicePixelRatio;
+
+  // Precompute neighbor sets for connected-component locality
+  const neighborSet = new Map();
+  graphNodes.forEach(n => neighborSet.set(n, new Set()));
+  graphLinks.forEach(l => {
+    if (l.sourceNode && l.targetNode) {
+      neighborSet.get(l.sourceNode).add(l.targetNode);
+      neighborSet.get(l.targetNode).add(l.sourceNode);
+    }
+  });
+
+  function tick() {
+    simFrame++;
+    const w = canvas.width / dpr, h = canvas.height / dpr;
+
+    // ── Physics ──────────────────────────────────────
+    // Alpha cooling: rapid initial convergence, then settles
+    if (!dragNode) {
+      simAlpha *= 0.985; // Cool toward 0
+      if (simAlpha < 0.001) simAlpha = 0;
+    }
+
+    if (simAlpha > 0) {
+      const alpha = simAlpha;
+      const repulsion = 2000;       // Strong repulsion to spread nodes
+      const springLen = 80;          // Base spring rest length
+      const springK = 0.08;          // Spring stiffness
+      const centerGrav = 0.008;      // Gentle center pull
+      const damping = 0.7;           // Strong damping for fast settling
+
+      // Compute center of mass
+      let cmx = 0, cmy = 0;
+      graphNodes.forEach(n => { cmx += n.x; cmy += n.y; });
+      cmx /= graphNodes.length; cmy /= graphNodes.length;
+
+      // Repulsion (O(n²) — fine for 140 nodes)
+      for (let i = 0; i < graphNodes.length; i++) {
+        const a = graphNodes[i];
+        for (let j = i + 1; j < graphNodes.length; j++) {
+          const b = graphNodes[j];
+          let dx = b.x - a.x, dy = b.y - a.y;
+          let dist2 = dx*dx + dy*dy;
+          if (dist2 < 1) { dx = (Math.random()-0.5)*2; dy = (Math.random()-0.5)*2; dist2 = 4; }
+          const dist = Math.sqrt(dist2);
+          // Implemented nodes repel less (they can pack tighter)
+          const repMult = (a.group === 4 && b.group === 4) ? 0.3 : 1.0;
+          const force = repulsion * repMult / dist2 * alpha;
+          const fx = dx / dist * force, fy = dy / dist * force;
+          a.vx -= fx; a.vy -= fy;
+          b.vx += fx; b.vy += fy;
+        }
+      }
+
+      // Spring forces along links
+      for (const l of graphLinks) {
+        const a = l.sourceNode, b = l.targetNode;
+        if (!a || !b) continue;
+        let dx = b.x - a.x, dy = b.y - a.y;
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        // Parent links: shorter. Dependency links: longer
+        const targetLen = l.link_type === 'parent' ? springLen : springLen * 1.8;
+        const force = (dist - targetLen) * springK * alpha;
+        const fx = dx / dist * force, fy = dy / dist * force;
+        a.vx += fx; a.vy += fy;
+        b.vx -= fx; b.vy -= fy;
+      }
+
+      // Center gravity — toward center of mass
+      for (const n of graphNodes) {
+        n.vx += (cmx - n.x) * centerGrav * alpha;
+        n.vy += (cmy - n.y) * centerGrav * alpha;
+      }
+
+      // Integrate
+      for (const n of graphNodes) {
+        if (n._pinned) continue;
+        n.vx *= damping;
+        n.vy *= damping;
+        // Clamp velocity to prevent explosions
+        const maxV = 15;
+        n.vx = Math.max(-maxV, Math.min(maxV, n.vx));
+        n.vy = Math.max(-maxV, Math.min(maxV, n.vy));
+        n.x += n.vx;
+        n.y += n.vy;
+      }
+    }
+
+    // ── Render ──────────────────────────────────────
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+    ctx.translate(camX, camY);
+    ctx.scale(camZoom, camZoom);
+
+    // Links — draw underneath
+    ctx.lineWidth = 1;
+    for (const l of graphLinks) {
+      const a = l.sourceNode, b = l.targetNode;
+      if (!a || !b) continue;
+      const isDep = l.link_type === 'dependency';
+      const isHighlight = selectedNode && (a === selectedNode || b === selectedNode);
+      const isHoverHL = hoverNode && (a === hoverNode || b === hoverNode);
+
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+
+      if (isHighlight || isHoverHL) {
+        ctx.strokeStyle = isDep ? '#2ab4c8' : '#1a4458';
+        ctx.lineWidth = isDep ? 2 : 1.5;
+        ctx.globalAlpha = 0.8;
+      } else {
+        ctx.strokeStyle = isDep ? '#152838' : '#0a1420';
+        ctx.lineWidth = isDep ? 1 : 0.5;
+        ctx.globalAlpha = 0.5;
+      }
+
+      if (isDep) { ctx.setLineDash([3, 3]); } else { ctx.setLineDash([]); }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 1;
+    }
+
+    // Nodes — sort so active nodes render on top
+    const sortedNodes = [...graphNodes].sort((a, b) => {
+      if (a === selectedNode) return 1;
+      if (b === selectedNode) return -1;
+      return a.group === 4 ? -1 : b.group === 4 ? 1 : 0;
+    });
+
+    for (const n of sortedNodes) {
+      const r = nodeRadius(n);
+      const alpha = nodeAlpha(n);
+      const isSelected = selectedNode && selectedNode.id === n.id;
+      const isHovered = hoverNode && hoverNode.id === n.id;
+      const isNeighborOfSelected = selectedNode && neighborSet.get(selectedNode)?.has(n);
+
+      // Glow for selected/hovered
+      if (isSelected) {
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r + 6, 0, Math.PI * 2);
+        ctx.fillStyle = nodeColor(n);
+        ctx.globalAlpha = 0.2;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      // Node circle
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.globalAlpha = isSelected ? 1 : isHovered ? 1 : isNeighborOfSelected ? 0.9 : alpha;
+      ctx.fillStyle = isSelected ? '#ffffff' : nodeColor(n);
+      ctx.fill();
+
+      // Stroke for active nodes
+      if (n.group !== 4 && n.group !== 0) {
+        ctx.strokeStyle = nodeColor(n);
+        ctx.lineWidth = isSelected ? 2 : 1;
+        ctx.globalAlpha = isSelected ? 1 : 0.5;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      // ── Labels ──────────────────────────────────
+      const showLabel = isSelected || isHovered || isNeighborOfSelected
+        || (isLabelWorthy(n) && camZoom > 0.45)
+        || (ACTIVE_GROUPS.has(n.group) && camZoom > 0.8)
+        || camZoom > 1.6;
+
+      if (showLabel) {
+        const fontSize = Math.max(8, Math.min(11, 10 / camZoom));
+        ctx.font = `${fontSize}px 'SF Mono','Fira Code',monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+
+        // Truncate label
+        let label = n.id;
+        const maxChars = camZoom > 1.2 ? 24 : camZoom > 0.8 ? 18 : 14;
+        if (label.length > maxChars) label = label.substring(0, maxChars - 1) + '…';
+
+        // Text with background for legibility
+        const textW = ctx.measureText(label).width;
+        const tx = n.x, ty = n.y + r + 3;
+        ctx.fillStyle = '#02030a';
+        ctx.globalAlpha = 0.7;
+        ctx.fillRect(tx - textW/2 - 2, ty - 1, textW + 4, fontSize + 2);
+        ctx.globalAlpha = isSelected || isHovered ? 1 : isNeighborOfSelected ? 0.8 : 0.6;
+        ctx.fillStyle = isSelected ? '#c4d8e4' : isHovered ? '#c4d8e4' : '#607888';
+        ctx.fillText(label, tx, ty);
+        ctx.globalAlpha = 1;
+      }
+
+      // ── Question badge (small, offset) ─────────
+      if (n.questions > 0 && (camZoom > 0.5 || isSelected || isHovered)) {
+        const bx = n.x + r + 2, by = n.y - r - 2;
+        const badgeText = String(n.questions);
+        ctx.font = 'bold 7px monospace';
+        const bw = ctx.measureText(badgeText).width + 4;
+        // Badge background
+        ctx.fillStyle = '#f59e0b';
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(bx + bw/2 - 1, by, 5, 0, Math.PI * 2);
+        ctx.fill();
+        // Badge text
+        ctx.fillStyle = '#02030a';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(badgeText, bx + bw/2 - 1, by);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // Status indicator
+    if (simAlpha > 0.01) {
+      ctx.restore();
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = '#1a4458';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(`settling… ${(simAlpha * 100).toFixed(0)}%`, w - 12, 16);
+      ctx.restore();
+    } else {
+      ctx.restore();
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(tick);
+}
+
+// ── Boot ─────────────────────────────────────────────────────────
+connect();
+fetch('/api/state').then(r => r.json()).then(d => { state = d; renderAll(); }).catch(() => {});
+</script>
+</body>
+</html>

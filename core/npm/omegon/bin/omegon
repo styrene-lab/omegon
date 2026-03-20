@@ -1,0 +1,84 @@
+#!/usr/bin/env node
+
+/**
+ * Thin wrapper that finds and spawns the platform-specific Omegon binary.
+ *
+ * The actual binary comes from one of the @styrene-lab/omegon-{platform}
+ * optional dependencies. This script resolves the correct one for the
+ * current platform/arch and spawns it with inherited stdio, then exits
+ * with the same code.
+ */
+
+const { spawn } = require("child_process");
+const { existsSync } = require("fs");
+const { join, dirname } = require("path");
+
+const PLATFORM_MAP = {
+  "darwin-arm64": "@styrene-lab/omegon-darwin-arm64",
+  "darwin-x64": "@styrene-lab/omegon-darwin-x64",
+  "linux-arm64": "@styrene-lab/omegon-linux-arm64",
+  "linux-x64": "@styrene-lab/omegon-linux-x64",
+};
+
+const key = `${process.platform}-${process.arch}`;
+const pkg = PLATFORM_MAP[key];
+
+if (!pkg) {
+  console.error(
+    `Omegon does not have a prebuilt binary for ${process.platform}-${process.arch}.\n` +
+    `Supported platforms: ${Object.keys(PLATFORM_MAP).join(", ")}\n` +
+    `Install from source: https://github.com/styrene-lab/omegon-core`
+  );
+  process.exit(1);
+}
+
+// Resolve the platform package's binary.
+// 1. Try require.resolve (normal npm install)
+// 2. Fallback to sibling platform dir (local dev / publish layout)
+let binaryPath = null;
+
+try {
+  const pkgJson = require.resolve(`${pkg}/package.json`);
+  binaryPath = join(dirname(pkgJson), "omegon");
+} catch {
+  // Not in node_modules — try sibling layout
+}
+
+if (!binaryPath || !existsSync(binaryPath)) {
+  const localPath = join(__dirname, "..", "..", "platform", key, "omegon");
+  if (existsSync(localPath)) {
+    binaryPath = localPath;
+  }
+}
+
+if (!binaryPath || !existsSync(binaryPath)) {
+  console.error(
+    `Could not find ${pkg}.\n` +
+    `This usually means the optional dependency was not installed.\n` +
+    `Try: npm install -g omegon --force\n` +
+    `Or install directly: curl -fsSL https://omegon.styrene.dev/install.sh | sh`
+  );
+  process.exit(1);
+}
+
+// Spawn the binary with inherited stdio and forward signals.
+// The Node wrapper stays alive only to relay the exit code.
+const child = spawn(binaryPath, process.argv.slice(2), {
+  stdio: "inherit",
+  env: process.env,
+});
+
+// Forward signals to the child
+const forwardSignal = (sig) => child.kill(sig);
+process.on("SIGINT", forwardSignal);
+process.on("SIGTERM", forwardSignal);
+
+child.on("exit", (code, signal) => {
+  process.removeListener("SIGINT", forwardSignal);
+  process.removeListener("SIGTERM", forwardSignal);
+  if (signal) {
+    process.kill(process.pid, signal);
+  } else {
+    process.exit(code ?? 1);
+  }
+});

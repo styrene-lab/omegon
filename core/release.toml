@@ -1,0 +1,12 @@
+# cargo-release configuration
+# Usage: cargo release patch --execute   (or minor/major)
+# Dry-run by default — --execute actually does it. No confirmation prompts.
+
+shared-version = true
+consolidate-commits = true
+tag-name = "v{{version}}"
+tag-message = "v{{version}}"
+pre-release-commit-message = "chore(release): bump version to {{version}}"
+pre-release-hook = ["git-cliff", "--tag", "v{{version}}", "-o", "CHANGELOG.md"]
+publish = false
+push-remote = "origin"

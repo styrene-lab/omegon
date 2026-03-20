@@ -1,0 +1,15 @@
+[package]
+name = "omegon-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Git operations for Omegon — RepoModel, commit, merge, worktree, submodule"
+
+[dependencies]
+git2 = "0.20"
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

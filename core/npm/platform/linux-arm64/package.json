@@ -1,0 +1,27 @@
+{
+  "name": "@styrene-lab/omegon-linux-arm64",
+  "version": "0.13.1",
+  "description": "Omegon native binary for linux-arm64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/styrene-lab/omegon-core"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "bin": {
+    "omegon": "omegon"
+  },
+  "files": [
+    "omegon"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "rust_target": "aarch64-unknown-linux-gnu",
+  "author": "cwilson <cwilson@styrene.io>"
+}

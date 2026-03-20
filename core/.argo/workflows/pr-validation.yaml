@@ -1,0 +1,216 @@
+# PR validation: test, clippy, conventional commit lint
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: omegon-pr-validation
+  namespace: argo
+spec:
+  arguments:
+    parameters:
+      - name: commit-sha
+      - name: pr-number
+      - name: repo
+        value: styrene-lab/omegon-core
+  entrypoint: pipeline
+  serviceAccountName: ci-workflow-sa
+
+  hooks:
+    exit:
+      template: report-github-status
+
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 10Gi
+
+  volumes:
+    - name: ghcr-auth
+      secret:
+        secretName: ghcr-secret
+    - name: cargo-cache
+      emptyDir: {}
+
+  templates:
+    - name: pipeline
+      dag:
+        tasks:
+          - name: set-pending
+            template: github-status
+            arguments:
+              parameters:
+                - name: state
+                  value: pending
+                - name: description
+                  value: "CI running..."
+          - name: checkout
+            template: git-checkout
+          - name: commitlint
+            template: commitlint
+            depends: "checkout"
+          - name: test
+            template: cargo-test
+            depends: "checkout"
+          - name: clippy
+            template: cargo-clippy
+            depends: "checkout"
+
+    - name: git-checkout
+      container:
+        image: alpine/git:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            TOKEN=$(cat /ghcr/password)
+            git clone --depth 50 \
+              https://x-access-token:${TOKEN}@github.com/{{workflow.parameters.repo}}.git \
+              /workspace/src
+            cd /workspace/src
+            git fetch origin pull/{{workflow.parameters.pr-number}}/head
+            git checkout {{workflow.parameters.commit-sha}}
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+
+    - name: commitlint
+      container:
+        image: alpine/git:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            cd /workspace/src
+
+            # Validate all commits in PR against conventional commit format
+            PATTERN='^(feat|fix|docs|style|refactor|perf|test|chore|ci|revert)(\(.+\))?(!)?: .+'
+            MAIN_SHA=$(git merge-base origin/main HEAD)
+            FAILED=0
+
+            for SHA in $(git log --format=%H "${MAIN_SHA}..HEAD"); do
+              MSG=$(git log -1 --format=%s "$SHA")
+              if ! echo "$MSG" | grep -qE "$PATTERN"; then
+                echo "FAIL: $SHA — $MSG"
+                FAILED=1
+              fi
+            done
+
+            if [ "$FAILED" -eq 1 ]; then
+              echo ""
+              echo "Commits must follow Conventional Commits: <type>(<scope>): <description>"
+              echo "Types: feat, fix, docs, style, refactor, perf, test, chore, ci, revert"
+              exit 1
+            fi
+            echo "All commits follow conventional format"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+
+    - name: cargo-test
+      container:
+        image: rust:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            cd /workspace/src
+            export CARGO_HOME=/cache/cargo
+            cargo test --all 2>&1
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: cargo-cache
+            mountPath: /cache/cargo
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+          limits:
+            cpu: "8"
+            memory: 8Gi
+        activeDeadlineSeconds: 600
+
+    - name: cargo-clippy
+      container:
+        image: rust:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            cd /workspace/src
+            export CARGO_HOME=/cache/cargo
+            rustup component add clippy
+            cargo clippy --all -- -D warnings 2>&1
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: cargo-cache
+            mountPath: /cache/cargo
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+          limits:
+            cpu: "8"
+            memory: 8Gi
+        activeDeadlineSeconds: 600
+
+    - name: github-status
+      inputs:
+        parameters:
+          - name: state
+          - name: description
+            default: ""
+      container:
+        image: curlimages/curl:latest
+        command: [sh, -c]
+        args:
+          - |
+            STATE="{{inputs.parameters.state}}"
+            DESC="{{inputs.parameters.description}}"
+            [ -z "$DESC" ] && DESC="Argo Workflows CI"
+            curl -sf -X POST \
+              -H "Authorization: token $(cat /ghcr/password)" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/{{workflow.parameters.repo}}/statuses/{{workflow.parameters.commit-sha}}" \
+              -d "{\"state\":\"${STATE}\",\"target_url\":\"https://argo.vanderlyn.house/workflows/argo/{{workflow.name}}\",\"description\":\"${DESC}\",\"context\":\"argo/ci\"}"
+        volumeMounts:
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+
+    - name: report-github-status
+      container:
+        image: curlimages/curl:latest
+        command: [sh, -c]
+        args:
+          - |
+            if [ "{{workflow.status}}" = "Succeeded" ]; then
+              STATE="success"; DESC="CI passed"
+            else
+              STATE="failure"; DESC="CI failed"
+            fi
+            curl -sf -X POST \
+              -H "Authorization: token $(cat /ghcr/password)" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/{{workflow.parameters.repo}}/statuses/{{workflow.parameters.commit-sha}}" \
+              -d "{\"state\":\"${STATE}\",\"target_url\":\"https://argo.vanderlyn.house/workflows/argo/{{workflow.name}}\",\"description\":\"${DESC}\",\"context\":\"argo/ci\"}"
+        volumeMounts:
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true

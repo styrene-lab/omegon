@@ -1,0 +1,21 @@
+[package]
+name = "omegon-memory"
+description = "Memory backend for the Omegon agent — fact store, decay, search, injection"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+omegon-traits = { path = "../omegon-traits" }
+async-trait.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs"] }
+tracing.workspace = true
+tokio-util.workspace = true
+sha2 = "0.10"
+hex = "0.4"
+
+rusqlite = { workspace = true }

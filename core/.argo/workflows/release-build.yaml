@@ -1,0 +1,472 @@
+# Release build: tag push → cross-compile 4 targets → GitHub release → docs → notify
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: omegon-release-build
+  namespace: argo
+spec:
+  arguments:
+    parameters:
+      - name: ref          # refs/tags/v0.13.0
+      - name: commit-sha
+      - name: repo
+        value: styrene-lab/omegon-core
+  entrypoint: pipeline
+  serviceAccountName: ci-workflow-sa
+
+  hooks:
+    exit:
+      template: notify-release-result
+
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 20Gi
+
+  volumes:
+    - name: ghcr-auth
+      secret:
+        secretName: ghcr-secret
+    - name: ntfy-auth
+      secret:
+        secretName: ntfy-secret
+    - name: version-scratch
+      emptyDir: {}
+    - name: artifacts
+      emptyDir: {}
+
+  templates:
+    - name: pipeline
+      dag:
+        tasks:
+          - name: extract-version
+            template: parse-version
+          - name: checkout
+            template: git-checkout
+          - name: test
+            template: cargo-test
+            depends: "checkout"
+
+          # Cross-compile all 4 targets in parallel
+          - name: build-linux-x64
+            template: cross-build
+            depends: "test"
+            arguments:
+              parameters:
+                - name: target
+                  value: x86_64-unknown-linux-gnu
+                - name: archive-name
+                  value: omegon-linux-x64
+          - name: build-linux-arm64
+            template: cross-build
+            depends: "test"
+            arguments:
+              parameters:
+                - name: target
+                  value: aarch64-unknown-linux-gnu
+                - name: archive-name
+                  value: omegon-linux-arm64
+          - name: build-darwin-x64
+            template: cross-build
+            depends: "test"
+            arguments:
+              parameters:
+                - name: target
+                  value: x86_64-apple-darwin
+                - name: archive-name
+                  value: omegon-darwin-x64
+          - name: build-darwin-arm64
+            template: cross-build
+            depends: "test"
+            arguments:
+              parameters:
+                - name: target
+                  value: aarch64-apple-darwin
+                - name: archive-name
+                  value: omegon-darwin-arm64
+
+          # Create GitHub release with all artifacts
+          - name: create-release
+            template: github-release
+            depends: "build-linux-x64 && build-linux-arm64 && build-darwin-x64 && build-darwin-arm64 && extract-version"
+            arguments:
+              parameters:
+                - name: version
+                  value: "{{tasks.extract-version.outputs.parameters.version}}"
+                - name: prerelease
+                  value: "{{tasks.extract-version.outputs.parameters.prerelease}}"
+
+          # Build and deploy docs site
+          - name: build-docs
+            template: build-docs
+            depends: "checkout && extract-version"
+            arguments:
+              parameters:
+                - name: version
+                  value: "{{tasks.extract-version.outputs.parameters.version}}"
+          - name: push-docs-image
+            template: kaniko-push-docs
+            depends: "build-docs"
+          - name: update-deploy
+            template: update-deploy-repo
+            depends: "push-docs-image"
+          - name: refresh-docs
+            template: argocd-refresh
+            depends: "update-deploy"
+
+    - name: parse-version
+      container:
+        image: alpine:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            REF="{{workflow.parameters.ref}}"
+            VERSION="${REF#refs/tags/v}"
+            echo "$VERSION" > /scratch/version
+            if echo "$VERSION" | grep -qE '(rc|alpha|beta|dev)'; then
+              echo "true" > /scratch/prerelease
+            else
+              echo "false" > /scratch/prerelease
+            fi
+            echo "Version: $VERSION, Prerelease: $(cat /scratch/prerelease)"
+        volumeMounts:
+          - name: version-scratch
+            mountPath: /scratch
+      outputs:
+        parameters:
+          - name: version
+            valueFrom:
+              path: /scratch/version
+          - name: prerelease
+            valueFrom:
+              path: /scratch/prerelease
+
+    - name: git-checkout
+      container:
+        image: alpine/git:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            TOKEN=$(cat /ghcr/password)
+            git clone \
+              https://x-access-token:${TOKEN}@github.com/{{workflow.parameters.repo}}.git \
+              /workspace/src
+            cd /workspace/src
+            git checkout {{workflow.parameters.commit-sha}}
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+
+    - name: cargo-test
+      container:
+        image: rust:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            cd /workspace/src
+            cargo test --all 2>&1
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+          limits:
+            cpu: "8"
+            memory: 8Gi
+        activeDeadlineSeconds: 600
+
+    # Cross-compile a single target — parameterized, run in parallel
+    - name: cross-build
+      inputs:
+        parameters:
+          - name: target
+          - name: archive-name
+      container:
+        image: rust:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            TARGET="{{inputs.parameters.target}}"
+            ARCHIVE="{{inputs.parameters.archive-name}}"
+
+            cd /workspace/src
+
+            # Install cross for Docker-based cross-compilation
+            cargo install cross --git https://github.com/cross-rs/cross
+
+            # Build
+            cross build --release --target "$TARGET"
+
+            # Strip if possible
+            BINARY="target/${TARGET}/release/omegon"
+            strip "$BINARY" 2>/dev/null || true
+
+            # Package
+            tar czf "/artifacts/${ARCHIVE}.tar.gz" -C "$(dirname "$BINARY")" "$(basename "$BINARY")"
+            echo "Built: /artifacts/${ARCHIVE}.tar.gz ($(du -h "/artifacts/${ARCHIVE}.tar.gz" | cut -f1))"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: artifacts
+            mountPath: /artifacts
+        resources:
+          requests:
+            cpu: "4"
+            memory: 8Gi
+          limits:
+            cpu: "16"
+            memory: 16Gi
+        activeDeadlineSeconds: 1800
+
+    - name: github-release
+      inputs:
+        parameters:
+          - name: version
+          - name: prerelease
+      container:
+        image: alpine:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            apk add --no-cache curl jq
+
+            VERSION="{{inputs.parameters.version}}"
+            PRERELEASE="{{inputs.parameters.prerelease}}"
+            GHCR_TOKEN=$(cat /ghcr/password)
+            REPO="{{workflow.parameters.repo}}"
+
+            # Generate checksums
+            cd /artifacts
+            sha256sum *.tar.gz > checksums.sha256
+            cat checksums.sha256
+
+            # Extract changelog section for this version from the repo
+            cd /workspace/src
+            CHANGELOG=""
+            if [ -f CHANGELOG.md ]; then
+              # Extract section between ## [version] and next ## [
+              CHANGELOG=$(awk "/^## \[${VERSION}\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md)
+            fi
+            [ -z "$CHANGELOG" ] && CHANGELOG="Release v${VERSION}"
+
+            # Create release
+            RELEASE_DATA=$(jq -n \
+              --arg tag "v${VERSION}" \
+              --arg name "v${VERSION}" \
+              --arg body "## Changes\n\n${CHANGELOG}\n\n## Installation\n\n\`\`\`bash\ncurl -fsSL https://omegon.styrene.dev/install.sh | sh\n\`\`\`\n\nOr download a binary below." \
+              --argjson prerelease "${PRERELEASE}" \
+              '{tag_name: $tag, name: $name, body: $body, prerelease: $prerelease}')
+
+            RELEASE_ID=$(curl -sf -X POST \
+              -H "Authorization: token ${GHCR_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${REPO}/releases" \
+              -d "$RELEASE_DATA" | jq -r '.id')
+
+            echo "Created release ID: ${RELEASE_ID}"
+
+            # Upload all artifacts
+            cd /artifacts
+            for f in *.tar.gz checksums.sha256; do
+              echo "Uploading ${f}..."
+              curl -sf -X POST \
+                -H "Authorization: token ${GHCR_TOKEN}" \
+                -H "Content-Type: application/octet-stream" \
+                "https://uploads.github.com/repos/${REPO}/releases/${RELEASE_ID}/assets?name=${f}" \
+                --data-binary "@${f}"
+            done
+            echo "Release v${VERSION} published"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: artifacts
+            mountPath: /artifacts
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+
+    # Build documentation — mdserve-rendered static output + cargo doc
+    - name: build-docs
+      inputs:
+        parameters:
+          - name: version
+      container:
+        image: rust:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            cd /workspace/src
+            VERSION="{{inputs.parameters.version}}"
+
+            # Generate cargo doc (API reference)
+            cargo doc --all --no-deps
+            cp -r target/doc /workspace/api-docs
+
+            # Copy user docs, CHANGELOG, README for the docs site
+            mkdir -p /workspace/docs-site
+            cp -r docs/ /workspace/docs-site/docs/ 2>/dev/null || mkdir -p /workspace/docs-site/docs/
+            cp CHANGELOG.md /workspace/docs-site/
+            cp README.md /workspace/docs-site/
+            cp install.sh /workspace/docs-site/
+            cp -r site/ /workspace/docs-site/site/
+
+            # Stamp version into site
+            sed -i "s/Omegon — /Omegon ${VERSION} — /" /workspace/docs-site/site/index.html 2>/dev/null || true
+
+            echo "Docs built for v${VERSION}"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+          limits:
+            cpu: "4"
+            memory: 8Gi
+
+    - name: kaniko-push-docs
+      container:
+        image: gcr.io/kaniko-project/executor:debug
+        command: [/busybox/sh, -c]
+        args:
+          - |
+            SERVER=$(cat /ghcr/server)
+            USER=$(cat /ghcr/username)
+            PASS=$(cat /ghcr/password)
+            AUTH=$(/busybox/echo -n "${USER}:${PASS}" | /busybox/base64)
+            mkdir -p /kaniko/.docker
+            /busybox/printf '{"auths":{"%s":{"auth":"%s"}}}' "$SERVER" "$AUTH" > /kaniko/.docker/config.json
+            /kaniko/executor \
+              --context=/workspace/docs-site \
+              --dockerfile=/workspace/src/site/Containerfile \
+              --destination=ghcr.io/styrene-lab/omegon-site:sha-{{workflow.parameters.commit-sha}} \
+              --cache=true
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+
+    - name: update-deploy-repo
+      container:
+        image: alpine/git:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            TOKEN=$(cat /ghcr/password)
+            FULL_SHA="{{workflow.parameters.commit-sha}}"
+            SHORT_SHA=$(echo "${FULL_SHA}" | cut -c1-7)
+            IMAGE="ghcr.io/styrene-lab/omegon-site:sha-${FULL_SHA}"
+            DEPLOY_FILE="omegon-site/deployment.yaml"
+
+            git clone --depth 1 \
+              https://x-access-token:${TOKEN}@github.com/styrene-lab/deploy.git \
+              /workspace/deploy
+            cd /workspace/deploy
+            git config user.name "styrene-ci"
+            git config user.email "ci@styrene.io"
+
+            # Create omegon-site dir if needed
+            mkdir -p omegon-site
+            if [ ! -f "${DEPLOY_FILE}" ]; then
+              echo "Deploy manifest not found — skipping (needs initial setup)"
+              exit 0
+            fi
+
+            sed -i "s|image: ghcr.io/styrene-lab/omegon-site:[^ ]*|image: ${IMAGE}|" "${DEPLOY_FILE}"
+            git add "${DEPLOY_FILE}"
+            git diff --cached --quiet && echo "Image tag unchanged" && exit 0
+
+            git commit -m "deploy: omegon-site ${SHORT_SHA}"
+            git push
+            echo "Updated deploy repo: ${IMAGE}"
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+          - name: ghcr-auth
+            mountPath: /ghcr
+            readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+
+    - name: argocd-refresh
+      container:
+        image: bitnami/kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            kubectl patch application omegon-site -n argocd \
+              --type merge -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}' \
+              2>/dev/null || echo "ArgoCD app not found — skipping refresh"
+
+    - name: notify-release-result
+      container:
+        image: curlimages/curl:latest
+        command: [sh, -c]
+        args:
+          - |
+            NTFY_TOKEN=$(cat /ntfy/token)
+            REF="{{workflow.parameters.ref}}"
+            VERSION="${REF#refs/tags/v}"
+            ARGO_URL="https://argo.vanderlyn.house/workflows/argo/{{workflow.name}}"
+            if [ "{{workflow.status}}" = "Succeeded" ]; then
+              curl -sf \
+                -H "Authorization: Bearer ${NTFY_TOKEN}" \
+                -H "Title: Omegon v${VERSION} released" \
+                -H "Priority: 3" \
+                -H "Tags: rocket" \
+                -H "Click: ${ARGO_URL}" \
+                -d "omegon v${VERSION} — binaries + docs published" \
+                http://ntfy.ntfy.svc.cluster.local/styrene-ci || true
+            else
+              curl -sf \
+                -H "Authorization: Bearer ${NTFY_TOKEN}" \
+                -H "Title: Omegon release FAILED: v${VERSION}" \
+                -H "Priority: 5" \
+                -H "Tags: rotating_light" \
+                -H "Click: ${ARGO_URL}" \
+                -d "Release pipeline failed — check Argo" \
+                http://ntfy.ntfy.svc.cluster.local/styrene-ci || true
+            fi
+        volumeMounts:
+          - name: ntfy-auth
+            mountPath: /ntfy
+            readOnly: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 32Mi

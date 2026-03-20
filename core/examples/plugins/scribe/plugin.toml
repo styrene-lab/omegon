@@ -1,0 +1,56 @@
+# Scribe — Engagement tracking plugin for Omegon
+#
+# Activates when a .scribe marker file is found in the project tree,
+# indicating this repo is tracked by the Scribe engagement system.
+#
+# Install: copy this directory to ~/.omegon/plugins/scribe/
+# Requires: SCRIBE_URL environment variable pointing to your Scribe instance
+
+[plugin]
+name = "scribe"
+version = "0.1.0"
+description = "Engagement & partnership tracking — context injection, work logging, session capture"
+
+[activation]
+marker_files = [".scribe"]
+env_vars = ["SCRIBE_URL"]
+
+# ── Context injection ─────────────────────────────────────────────
+# When active, Omegon reads partnership/engagement info from the local
+# .scribe file and injects it into the agent's system prompt.
+[context]
+local_file = ".scribe"
+ttl_turns = 30
+priority = 35
+
+# ── Tools ─────────────────────────────────────────────────────────
+# These tools are registered with the LLM and backed by Scribe's HTTP API.
+
+[[tools]]
+name = "scribe_status"
+description = "Get the current engagement status, team composition, and recent activity summary for the active partnership"
+endpoint = "{SCRIBE_URL}/api/engagement/current/summary"
+method = "GET"
+timeout_secs = 10
+
+[[tools]]
+name = "scribe_log"
+description = "Add a work log entry to the current engagement. Use after completing significant work, making architectural decisions, or resolving issues."
+endpoint = "{SCRIBE_URL}/api/logs"
+method = "POST"
+timeout_secs = 10
+parameters = { type = "object", required = ["content"], properties = { content = { type = "string", description = "Work log entry content" }, category = { type = "string", enum = ["development", "architecture", "review", "deployment", "meeting", "investigation"], description = "Log entry category" } } }
+
+[[tools]]
+name = "scribe_timeline"
+description = "Get the engagement timeline — recent commits, PRs, deployments, and manual log entries"
+endpoint = "{SCRIBE_URL}/api/engagement/current/timeline"
+method = "GET"
+timeout_secs = 10
+parameters = { type = "object", properties = { page = { type = "integer", description = "Page number (default: 1)" }, per_page = { type = "integer", description = "Items per page (default: 20)" } } }
+
+# ── Event forwarding ──────────────────────────────────────────────
+# Agent lifecycle events are forwarded to Scribe for session tracking.
+[events]
+turn_end = "{SCRIBE_URL}/api/sessions/ingest"
+session_start = "{SCRIBE_URL}/api/sessions/start"

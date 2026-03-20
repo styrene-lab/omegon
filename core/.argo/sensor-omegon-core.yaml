@@ -1,0 +1,116 @@
+# Sensor: maps GitHub events for omegon-core to Argo Workflows
+# Deploy to: vanderlyn/apps/argo-events/ (alongside existing sensors)
+# Also requires adding "omegon-core" to eventsource-github.yaml repo names
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: omegon-core-ci
+  namespace: argo-events
+spec:
+  template:
+    serviceAccountName: operate-workflow-sa
+  dependencies:
+    # Tag push → release build
+    - name: tag-push
+      eventSourceName: github
+      eventName: styrene-lab
+      filters:
+        data:
+          - path: "headers.X-Github-Event"
+            type: string
+            value: ["create"]
+          - path: "body.ref_type"
+            type: string
+            value: ["tag"]
+          - path: "body.repository.name"
+            type: string
+            value: ["omegon-core"]
+
+    # PR → validation
+    - name: pull-request
+      eventSourceName: github
+      eventName: styrene-lab
+      filters:
+        data:
+          - path: "headers.X-Github-Event"
+            type: string
+            value: ["pull_request"]
+          - path: "body.action"
+            type: string
+            value: ["opened", "synchronize"]
+          - path: "body.repository.name"
+            type: string
+            value: ["omegon-core"]
+
+  triggers:
+    # Tag → release build
+    - template:
+        name: release-build
+        conditions: "tag-push"
+        k8s:
+          operation: create
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: omegon-release-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: omegon-release-build
+                arguments:
+                  parameters:
+                    - name: ref
+                    - name: commit-sha
+                    - name: repo
+          parameters:
+            - src:
+                dependencyName: tag-push
+                dataKey: body.ref
+              dest: spec.arguments.parameters.0.value
+              operation: prepend
+              value: "refs/tags/"
+            - src:
+                dependencyName: tag-push
+                dataKey: body.master_branch
+              dest: spec.arguments.parameters.1.value
+            - src:
+                dependencyName: tag-push
+                dataKey: body.repository.full_name
+              dest: spec.arguments.parameters.2.value
+
+    # PR → validation
+    - template:
+        name: pr-validation
+        conditions: "pull-request"
+        k8s:
+          operation: create
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: omegon-pr-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: omegon-pr-validation
+                arguments:
+                  parameters:
+                    - name: commit-sha
+                    - name: pr-number
+                    - name: repo
+          parameters:
+            - src:
+                dependencyName: pull-request
+                dataKey: body.pull_request.head.sha
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: pull-request
+                dataKey: body.number
+              dest: spec.arguments.parameters.1.value
+            - src:
+                dependencyName: pull-request
+                dataKey: body.repository.full_name
+              dest: spec.arguments.parameters.2.value

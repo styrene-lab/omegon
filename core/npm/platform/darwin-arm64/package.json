@@ -1,0 +1,27 @@
+{
+  "name": "@styrene-lab/omegon-darwin-arm64",
+  "version": "0.13.1",
+  "description": "Omegon native binary for darwin-arm64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/styrene-lab/omegon-core"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "bin": {
+    "omegon": "omegon"
+  },
+  "files": [
+    "omegon"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "rust_target": "aarch64-apple-darwin",
+  "author": "cwilson <cwilson@styrene.io>"
+}
