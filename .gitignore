@@ -23,3 +23,6 @@ settings.json
 
 # Sessions (runtime state)
 sessions/
+
+# Jujutsu VCS (co-located with git)
+.jj/
