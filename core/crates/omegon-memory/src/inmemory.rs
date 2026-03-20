@@ -95,7 +95,7 @@ impl MemoryBackend for InMemoryBackend {
             superseded_by: None,
             source: req.source,
             content_hash: Some(ch),
-            last_accessed: None,
+            last_accessed: None, created_session: None, superseded_at: None, archived_at: None, jj_change_id: None,
         };
         s.facts.insert(fact.id.clone(), fact.clone());
         Ok(StoreResult {
@@ -182,7 +182,7 @@ impl MemoryBackend for InMemoryBackend {
             superseded_by: Some(id.to_string()), // "I supersede old_id"
             source: replacement.source,
             content_hash: Some(ch),
-            last_accessed: None,
+            last_accessed: None, created_session: None, superseded_at: None, archived_at: None, jj_change_id: None,
         };
 
         // Archive original — matches TS: original gets status='superseded', no forward pointer.
@@ -450,7 +450,7 @@ impl MemoryBackend for InMemoryBackend {
                             superseded_by: None,
                             source: jf.source,
                             content_hash: jf.content_hash,
-                            last_accessed: None,
+                            last_accessed: None, created_session: None, superseded_at: None, archived_at: None, jj_change_id: None,
                         };
                         s.facts.insert(jf.id, fact);
                         stats.imported += 1;

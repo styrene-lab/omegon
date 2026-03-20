@@ -79,6 +79,18 @@ pub struct Fact {
     /// Used for soft decay timer reset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_accessed: Option<String>,
+    /// Session ID that created this fact.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_session: Option<String>,
+    /// When the fact was superseded (ISO 8601).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_at: Option<String>,
+    /// When the fact was archived (ISO 8601).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<String>,
+    /// jj change ID that created this fact (permanent, survives rebase).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jj_change_id: Option<String>,
 }
 
 /// Decay profile discriminant — persisted in DB.

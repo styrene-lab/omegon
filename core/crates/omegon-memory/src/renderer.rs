@@ -128,7 +128,7 @@ mod tests {
             decay_profile: DecayProfileName::Standard,
             last_reinforced: "2026-01-01".into(), created_at: "2026-01-01".into(),
             version: 1, superseded_by: None, source: None, content_hash: None,
-            last_accessed: None,
+            last_accessed: None, created_session: None, superseded_at: None, archived_at: None, jj_change_id: None,
         }
     }
 

@@ -1,6 +1,6 @@
 //! SqliteBackend — production MemoryBackend backed by rusqlite.
 //!
-//! Schema matches the TypeScript factstore.ts (v4) exactly.
+//! Schema matches the TypeScript factstore.ts (v5) exactly.
 //! WAL mode for concurrent reads. FTS5 for full-text search.
 //! Bundled sqlite via rusqlite's `bundled` feature.
 
@@ -62,7 +62,10 @@ impl SqliteBackend {
                 content             TEXT NOT NULL,
                 status              TEXT NOT NULL DEFAULT 'active',
                 created_at          TEXT NOT NULL,
+                created_session     TEXT,
                 supersedes          TEXT,
+                superseded_at       TEXT,
+                archived_at         TEXT,
                 source              TEXT NOT NULL DEFAULT 'manual',
                 content_hash        TEXT NOT NULL,
                 confidence          REAL NOT NULL DEFAULT 1.0,
@@ -72,12 +75,15 @@ impl SqliteBackend {
                 decay_profile       TEXT NOT NULL DEFAULT 'standard',
                 version             INTEGER NOT NULL DEFAULT 0,
                 last_accessed       TEXT,
+                jj_change_id        TEXT,
                 FOREIGN KEY (mind) REFERENCES minds(name) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS idx_facts_active ON facts(mind, status) WHERE status = 'active';
             CREATE INDEX IF NOT EXISTS idx_facts_hash ON facts(mind, content_hash);
             CREATE INDEX IF NOT EXISTS idx_facts_section ON facts(mind, section) WHERE status = 'active';
+            CREATE INDEX IF NOT EXISTS idx_facts_session ON facts(created_session);
+            CREATE INDEX IF NOT EXISTS idx_facts_version ON facts(version DESC);
 
             CREATE TABLE IF NOT EXISTS facts_vec (
                 fact_id    TEXT PRIMARY KEY,
@@ -112,10 +118,29 @@ impl SqliteBackend {
                 title       TEXT NOT NULL,
                 narrative   TEXT NOT NULL,
                 date        TEXT NOT NULL,
+                session_id  TEXT,
                 created_at  TEXT NOT NULL,
+                jj_change_id TEXT,
                 FOREIGN KEY (mind) REFERENCES minds(name) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_episodes_mind ON episodes(mind, date DESC);
+
+            CREATE TABLE IF NOT EXISTS episode_facts (
+                episode_id TEXT NOT NULL,
+                fact_id    TEXT NOT NULL,
+                PRIMARY KEY (episode_id, fact_id),
+                FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+                FOREIGN KEY (fact_id) REFERENCES facts(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS episodes_vec (
+                episode_id TEXT PRIMARY KEY,
+                embedding  BLOB NOT NULL,
+                model_name TEXT NOT NULL DEFAULT '',
+                dims       INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE
+            );
 
             -- FTS5 for full-text search on facts
             CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
@@ -160,13 +185,52 @@ impl SqliteBackend {
             );
         ")?;
 
-        // Mark schema version 4 (matches TS factstore.ts v4) if not already set
+        // Mark schema version 5 (matches TS factstore.ts v5) if not already set
         let current: i64 = conn.query_row(
             "SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| r.get(0)
         ).unwrap_or(0);
-        if current < 4 {
+
+        // Migration: v4 → v5 (align with TS factstore.ts v5)
+        // Adds columns that were in TS but missing from Rust's initial schema:
+        //   facts: created_session, superseded_at, archived_at, jj_change_id
+        //   episodes: session_id, jj_change_id
+        // Also creates episode_facts and episodes_vec tables if missing.
+        if current < 5 {
+            // Add missing columns (idempotent — ignore "duplicate column" errors)
+            for stmt in &[
+                "ALTER TABLE facts ADD COLUMN created_session TEXT",
+                "ALTER TABLE facts ADD COLUMN superseded_at TEXT",
+                "ALTER TABLE facts ADD COLUMN archived_at TEXT",
+                "ALTER TABLE facts ADD COLUMN jj_change_id TEXT",
+                "ALTER TABLE episodes ADD COLUMN session_id TEXT",
+                "ALTER TABLE episodes ADD COLUMN jj_change_id TEXT",
+            ] {
+                let _ = conn.execute(stmt, []); // ignore if column already exists
+            }
+
+            // Create tables that may not exist in older Rust DBs
+            conn.execute_batch("
+                CREATE TABLE IF NOT EXISTS episode_facts (
+                    episode_id TEXT NOT NULL,
+                    fact_id    TEXT NOT NULL,
+                    PRIMARY KEY (episode_id, fact_id),
+                    FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE,
+                    FOREIGN KEY (fact_id) REFERENCES facts(id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS episodes_vec (
+                    episode_id TEXT PRIMARY KEY,
+                    embedding  BLOB NOT NULL,
+                    model_name TEXT NOT NULL DEFAULT '',
+                    dims       INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_facts_session ON facts(created_session);
+                CREATE INDEX IF NOT EXISTS idx_facts_version ON facts(version DESC);
+            ")?;
+
             conn.execute(
-                "INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (4, datetime('now'))",
+                "INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (5, datetime('now'))",
                 [],
             )?;
         }
@@ -229,6 +293,10 @@ impl SqliteBackend {
             source: row.get("source")?,
             content_hash: Some(row.get::<_, String>("content_hash")?),
             last_accessed: row.get("last_accessed")?,
+            created_session: row.get("created_session")?,
+            superseded_at: row.get("superseded_at")?,
+            archived_at: row.get("archived_at")?,
+            jj_change_id: row.get("jj_change_id")?,
         })
     }
 }
