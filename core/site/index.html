@@ -240,7 +240,7 @@
       <button class="copy-btn" title="Copy to clipboard">⎘</button>
     </div>
     <div class="install-note">
-      Or pin a version: <code>VERSION=v0.12.0 curl -fsSL … | sh</code><br>
+      Or pin a version: <code>VERSION=v<span id="latest-ver">…</span> curl -fsSL … | sh</code><br>
       Or install to home: <code>INSTALL_DIR=~/.local/bin curl -fsSL … | sh</code>
     </div>
   </div>
@@ -320,6 +320,20 @@ function copyInstall(el) {
     setTimeout(() => badge.classList.remove('show'), 1500);
   }).catch(() => {});
 }
+// Fetch latest version from GitHub API and update the pinned version example
+fetch('https://api.github.com/repos/styrene-lab/omegon-core/releases/latest')
+  .then(r => r.json())
+  .then(d => {
+    const tag = d.tag_name; // e.g. "v0.14.0"
+    const ver = tag.replace(/^v/, '');
+    const el = document.getElementById('latest-ver');
+    if (el && ver) el.textContent = ver;
+  })
+  .catch(() => {
+    // Fallback: hide the loading indicator
+    const el = document.getElementById('latest-ver');
+    if (el) el.textContent = 'X.Y.Z';
+  });
 </script>
 </body>
 </html>

@@ -1,0 +1,43 @@
+name: Build & Push omegon-site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'core/site/**'
+      - 'core/install.sh'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy install.sh into site directory
+        run: cp core/install.sh core/site/install.sh
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: core/site
+          file: core/site/Containerfile
+          push: true
+          tags: |
+            ghcr.io/styrene-lab/omegon-site:sha-${{ github.sha }}
+            ghcr.io/styrene-lab/omegon-site:latest
+
+      - name: Output deployment update
+        run: |
+          echo "::notice::New site image: ghcr.io/styrene-lab/omegon-site:sha-${{ github.sha }}"
+          echo "Update vanderlyn/apps/omegon-site/deployment.yaml with the new SHA."

@@ -10,6 +10,7 @@
 # Environment variables:
 #   INSTALL_DIR   — installation directory (default: /usr/local/bin)
 #   VERSION       — specific version to install (default: latest)
+#   NO_COLOR      — disable colored output (set to any value)
 #
 # Manual download:
 #   https://github.com/styrene-lab/omegon-core/releases
@@ -23,12 +24,28 @@ VERSION="${VERSION:-}"
 GITHUB_API="https://api.github.com/repos/${REPO}"
 TMP=""
 
-# ── Helpers ───────────────────────────────────────────────────────
+# ── Color support ─────────────────────────────────────────────
 
-log()  { printf '  %s\n' "$*"; }
-info() { printf '\033[0;36m%s\033[0m\n' "$*"; }
-err()  { printf '\033[0;31mError: %s\033[0m\n' "$*" >&2; }
-die()  { err "$*"; cleanup; exit 1; }
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  BOLD="\033[1m"
+  DIM="\033[2m"
+  CYAN="\033[0;36m"
+  GREEN="\033[0;32m"
+  YELLOW="\033[0;33m"
+  RED="\033[0;31m"
+  RESET="\033[0m"
+else
+  BOLD="" DIM="" CYAN="" GREEN="" YELLOW="" RED="" RESET=""
+fi
+
+# ── Helpers ───────────────────────────────────────────────────
+
+step()    { printf "${CYAN}  ▸${RESET} %s\n" "$*"; }
+ok()      { printf "${GREEN}  ✓${RESET} %s\n" "$*"; }
+warn()    { printf "${YELLOW}  ⚠${RESET} %s\n" "$*"; }
+err()     { printf "${RED}  ✗${RESET} %s\n" "$*" >&2; }
+die()     { err "$*"; cleanup; exit 1; }
+dimtext() { printf "${DIM}%s${RESET}" "$*"; }
 
 cleanup() {
   if [ -n "$TMP" ] && [ -d "$TMP" ]; then
@@ -39,15 +56,11 @@ cleanup() {
 # Always clean up, even on error or interrupt
 trap cleanup EXIT INT TERM
 
-# ── Preflight checks ─────────────────────────────────────────────
+# ── Preflight checks ─────────────────────────────────────────
 
-# Require curl
 command -v curl >/dev/null 2>&1 || die "curl is required but not found"
-
-# Require tar
 command -v tar >/dev/null 2>&1 || die "tar is required but not found"
 
-# Require a checksum tool
 if command -v sha256sum >/dev/null 2>&1; then
   sha256() { sha256sum "$1" | cut -d' ' -f1; }
 elif command -v shasum >/dev/null 2>&1; then
@@ -56,7 +69,7 @@ else
   die "sha256sum or shasum is required for checksum verification"
 fi
 
-# ── Platform detection ────────────────────────────────────────────
+# ── Platform detection ────────────────────────────────────────
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
@@ -81,14 +94,17 @@ PLATFORM="${OS_NAME}-${ARCH_NAME}"
 ARCHIVE="${BINARY}-${PLATFORM}.tar.gz"
 CHECKSUMS="checksums.sha256"
 
-# ── Version resolution ────────────────────────────────────────────
+# ── Banner ────────────────────────────────────────────────────
 
-info "Ω omegon installer"
+echo ""
+printf "${BOLD}${CYAN}  Ω  Omegon Installer${RESET}\n"
+printf "${DIM}  Native AI agent harness — single binary, zero dependencies${RESET}\n"
 echo ""
 
+# ── Version resolution ────────────────────────────────────────
+
 if [ -z "$VERSION" ]; then
-  log "Detecting latest release..."
-  # Use GitHub API to get latest release tag
+  step "Resolving latest release..."
   RELEASE_JSON=$(curl -fsSL "${GITHUB_API}/releases/latest" 2>/dev/null) || \
     die "could not reach GitHub API. Check your network connection."
 
@@ -99,11 +115,11 @@ if [ -z "$VERSION" ]; then
   fi
 fi
 
-log "Version:  ${VERSION}"
-log "Platform: ${PLATFORM}"
+ok "Version:  ${BOLD}${VERSION}${RESET}"
+step "Platform: ${BOLD}${PLATFORM}${RESET}"
 echo ""
 
-# ── Download ──────────────────────────────────────────────────────
+# ── Download ──────────────────────────────────────────────────
 
 BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
 ARCHIVE_URL="${BASE_URL}/${ARCHIVE}"
@@ -111,29 +127,28 @@ CHECKSUMS_URL="${BASE_URL}/${CHECKSUMS}"
 
 TMP=$(mktemp -d) || die "could not create temporary directory"
 
-log "Downloading ${ARCHIVE}..."
+step "Downloading ${ARCHIVE}..."
 
-# Download the archive
 HTTP_CODE=$(curl -fSL -w '%{http_code}' -o "${TMP}/${ARCHIVE}" "$ARCHIVE_URL" 2>/dev/null) || true
 if [ ! -f "${TMP}/${ARCHIVE}" ] || [ "$HTTP_CODE" = "404" ]; then
   die "release artifact not found: ${ARCHIVE_URL}
-  
+
   Available platforms: darwin-arm64, darwin-x64, linux-x64, linux-arm64
   Check releases: https://github.com/${REPO}/releases/tag/${VERSION}"
 fi
 
-# Verify the download is not empty / truncated
 ARCHIVE_SIZE=$(wc -c < "${TMP}/${ARCHIVE}" | tr -d ' ')
 if [ "$ARCHIVE_SIZE" -lt 1000 ]; then
   die "downloaded archive is too small (${ARCHIVE_SIZE} bytes) — likely a failed download"
 fi
 
-# ── Checksum verification ─────────────────────────────────────────
+ok "Downloaded $(dimtext "${ARCHIVE_SIZE} bytes")"
 
-log "Verifying checksum..."
+# ── Checksum verification ─────────────────────────────────────
+
+step "Verifying checksum..."
 
 if curl -fsSL -o "${TMP}/${CHECKSUMS}" "$CHECKSUMS_URL" 2>/dev/null; then
-  # Extract expected checksum for our archive
   EXPECTED=$(grep "${ARCHIVE}" "${TMP}/${CHECKSUMS}" | cut -d' ' -f1)
 
   if [ -z "$EXPECTED" ]; then
@@ -146,57 +161,53 @@ if curl -fsSL -o "${TMP}/${CHECKSUMS}" "$CHECKSUMS_URL" 2>/dev/null; then
     die "checksum mismatch!
     Expected: ${EXPECTED}
     Actual:   ${ACTUAL}
-    
+
     The download may be corrupted or tampered with.
     Try again, or download manually from:
       https://github.com/${REPO}/releases/tag/${VERSION}"
   fi
 
-  log "Checksum OK: ${ACTUAL}"
+  ok "Checksum verified $(dimtext "${ACTUAL:0:12}…")"
 else
-  # Checksums file not available (older releases before we added it)
-  log "⚠ Checksum file not available for this release — skipping verification"
+  warn "Checksum file not available for this release — skipping verification"
 fi
 
-# ── Extract ───────────────────────────────────────────────────────
+# ── Extract ───────────────────────────────────────────────────
 
-log "Extracting..."
+step "Extracting..."
 
 tar xzf "${TMP}/${ARCHIVE}" -C "$TMP" 2>/dev/null || \
   die "failed to extract ${ARCHIVE} — the download may be corrupted"
 
-# Verify the binary exists and is executable
 if [ ! -f "${TMP}/${BINARY}" ]; then
   die "binary '${BINARY}' not found in archive — unexpected archive structure"
 fi
 
-# ── Validate binary ───────────────────────────────────────────────
+# ── Validate binary ───────────────────────────────────────────
 
-# Quick sanity check: the binary should be an executable, not a text file or HTML error page
 FIRST_BYTES=$(head -c 4 "${TMP}/${BINARY}" | xxd -p 2>/dev/null || od -A n -t x1 -N 4 "${TMP}/${BINARY}" | tr -d ' ')
 
 case "$OS_NAME" in
   darwin)
-    # Mach-O magic: feedface (32-bit) or feedfacf (64-bit) or cafebabe (fat/universal)
     case "$FIRST_BYTES" in
-      feedface*|feedfacf*|cafebabe*|cffaedfe*|cffa*) ;; # valid Mach-O
+      feedface*|feedfacf*|cafebabe*|cffaedfe*|cffa*) ;;
       *) die "downloaded file is not a valid macOS binary (magic: ${FIRST_BYTES})" ;;
     esac
     ;;
   linux)
-    # ELF magic: 7f454c46
     case "$FIRST_BYTES" in
-      7f454c46*) ;; # valid ELF
+      7f454c46*) ;;
       *) die "downloaded file is not a valid Linux binary (magic: ${FIRST_BYTES})" ;;
     esac
     ;;
 esac
 
-# ── Install ───────────────────────────────────────────────────────
+ok "Binary validated"
 
-log "Installing to ${INSTALL_DIR}/${BINARY}..."
+# ── Install ───────────────────────────────────────────────────
 
-# Create install directory if it doesn't exist
+step "Installing to ${INSTALL_DIR}/${BINARY}..."
+
 if [ ! -d "$INSTALL_DIR" ]; then
   if [ -w "$(dirname "$INSTALL_DIR")" ]; then
     mkdir -p "$INSTALL_DIR"
@@ -205,41 +216,47 @@ if [ ! -d "$INSTALL_DIR" ]; then
   fi
 fi
 
-# Move binary into place
 if [ -w "$INSTALL_DIR" ]; then
   mv "${TMP}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 else
   sudo mv "${TMP}/${BINARY}" "${INSTALL_DIR}/${BINARY}" || \
-    die "could not install to ${INSTALL_DIR} — try: INSTALL_DIR=~/.local/bin sh install.sh"
+    die "could not install to ${INSTALL_DIR} — try: INSTALL_DIR=~/.local/bin curl -fsSL … | sh"
 fi
 
 chmod +x "${INSTALL_DIR}/${BINARY}" 2>/dev/null || true
 
-# ── Verify installation ──────────────────────────────────────────
+# ── Verify installation ──────────────────────────────────────
 
-if ! command -v "$BINARY" >/dev/null 2>&1; then
-  if [ -x "${INSTALL_DIR}/${BINARY}" ]; then
-    log "⚠ ${BINARY} installed but ${INSTALL_DIR} is not in your PATH"
-    log "  Add it:  export PATH=\"${INSTALL_DIR}:\$PATH\""
-  else
-    die "installation failed — ${INSTALL_DIR}/${BINARY} is not executable"
-  fi
+INSTALLED_VERSION=""
+if command -v "$BINARY" >/dev/null 2>&1; then
+  INSTALLED_VERSION=$("${INSTALL_DIR}/${BINARY}" --version 2>/dev/null | head -1 || echo "")
+  ok "Installed to ${BOLD}${INSTALL_DIR}/${BINARY}${RESET}"
+elif [ -x "${INSTALL_DIR}/${BINARY}" ]; then
+  warn "${BINARY} installed but ${INSTALL_DIR} is not in your PATH"
+  printf "${DIM}    Add it: export PATH=\"${INSTALL_DIR}:\$PATH\"${RESET}\n"
+else
+  die "installation failed — ${INSTALL_DIR}/${BINARY} is not executable"
 fi
 
-# ── Done ──────────────────────────────────────────────────────────
+# ── Summary ───────────────────────────────────────────────────
 
 echo ""
-info "✓ Installed ${BINARY} ${VERSION} to ${INSTALL_DIR}/${BINARY}"
+printf "${BOLD}${GREEN}  ✓ Omegon ${VERSION} installed successfully${RESET}\n"
+if [ -n "$INSTALLED_VERSION" ]; then
+  printf "${DIM}    ${INSTALLED_VERSION}${RESET}\n"
+fi
 echo ""
-log "Get started:"
-log ""
-log "  # With API key:"
-log "  export ANTHROPIC_API_KEY=\"sk-ant-...\""
-log "  ${BINARY} --prompt \"hello world\""
-log ""
-log "  # With subscription (Claude Pro/Max):"
-log "  ${BINARY} login"
-log ""
-log "  # Interactive mode:"
-log "  ${BINARY} interactive"
+printf "${DIM}  ┌─────────────────────────────────────────────────┐${RESET}\n"
+printf "${DIM}  │${RESET}  ${BOLD}Quick start:${RESET}                                    ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}                                                   ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}  ${CYAN}With API key:${RESET}                                  ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}    export ANTHROPIC_API_KEY=\"sk-ant-...\"          ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}    omegon                                         ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}                                                   ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}  ${CYAN}With Claude Pro/Max subscription:${RESET}               ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}    omegon login                                   ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}                                                   ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}  ${CYAN}One-shot prompt:${RESET}                                ${DIM}│${RESET}\n"
+printf "${DIM}  │${RESET}    omegon --prompt \"hello world\"                  ${DIM}│${RESET}\n"
+printf "${DIM}  └─────────────────────────────────────────────────┘${RESET}\n"
 echo ""
