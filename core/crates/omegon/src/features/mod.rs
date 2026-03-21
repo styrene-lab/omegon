@@ -20,6 +20,7 @@
 //! - Context injection → `Feature::provide_context()`
 
 pub mod auto_compact;
+pub mod auth;
 pub mod cleave;
 pub mod adapter;
 pub mod harness_settings;

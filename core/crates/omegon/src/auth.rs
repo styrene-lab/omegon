@@ -6,6 +6,7 @@
 //!
 //! Token refresh happens automatically when the stored token is expired.
 
+use crate::status::ProviderStatus;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -492,6 +493,134 @@ fn urlencoding_encode(s: &str) -> String {
     }).collect()
 }
 
+/// Probe all credential providers and return their status.
+pub async fn probe_all_providers() -> Vec<ProviderStatus> {
+    let mut providers = Vec::new();
+
+    // Anthropic - check OAuth token and env vars
+    let anthropic = probe_anthropic().await;
+    providers.push(anthropic);
+
+    // OpenAI - check OAuth token and env vars  
+    let openai = probe_openai().await;
+    providers.push(openai);
+
+    // Vault - check connectivity
+    if let Some(vault) = probe_vault().await {
+        providers.push(vault);
+    }
+
+    // Additional API key env vars
+    if std::env::var("OPENAI_API_KEY").is_ok() {
+        providers.push(ProviderStatus {
+            name: "OpenAI API".into(),
+            authenticated: true,
+            auth_method: Some("api-key".into()),
+            model: None,
+        });
+    }
+
+    providers
+}
+
+/// Probe Anthropic credentials.
+async fn probe_anthropic() -> ProviderStatus {
+    // Check env var first
+    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+        return ProviderStatus {
+            name: "Anthropic".into(),
+            authenticated: true,
+            auth_method: Some("api-key".into()),
+            model: Some("claude-3-5-sonnet-20241022".into()),
+        };
+    }
+
+    if std::env::var("ANTHROPIC_OAUTH_TOKEN").is_ok() {
+        return ProviderStatus {
+            name: "Anthropic".into(),
+            authenticated: true,
+            auth_method: Some("oauth".into()),
+            model: Some("claude-3-5-sonnet-20241022".into()),
+        };
+    }
+
+    // Check stored OAuth token
+    if let Some(creds) = read_credentials("anthropic") {
+        if creds.cred_type == "oauth" {
+            let expired = creds.is_expired();
+            return ProviderStatus {
+                name: "Anthropic".into(),
+                authenticated: !expired,
+                auth_method: Some("oauth".into()),
+                model: Some("claude-3-5-sonnet-20241022".into()),
+            };
+        }
+    }
+
+    ProviderStatus {
+        name: "Anthropic".into(),
+        authenticated: false,
+        auth_method: None,
+        model: None,
+    }
+}
+
+/// Probe OpenAI credentials.
+async fn probe_openai() -> ProviderStatus {
+    // Check env var first
+    if std::env::var("OPENAI_API_KEY").is_ok() {
+        return ProviderStatus {
+            name: "OpenAI".into(),
+            authenticated: true,
+            auth_method: Some("api-key".into()),
+            model: Some("gpt-4o".into()),
+        };
+    }
+
+    // Check stored OAuth token
+    if let Some(creds) = read_credentials("openai-codex") {
+        if creds.cred_type == "oauth" {
+            let expired = creds.is_expired();
+            return ProviderStatus {
+                name: "OpenAI".into(),
+                authenticated: !expired,
+                auth_method: Some("oauth".into()),
+                model: Some("gpt-4o".into()),
+            };
+        }
+    }
+
+    ProviderStatus {
+        name: "OpenAI".into(),
+        authenticated: false,
+        auth_method: None,
+        model: None,
+    }
+}
+
+/// Probe Vault connectivity.
+async fn probe_vault() -> Option<ProviderStatus> {
+    // Check if vault CLI is available and connected
+    if let Ok(output) = std::process::Command::new("vault")
+        .args(["status", "-format=json"])
+        .output()
+    {
+        if output.status.success() {
+            if let Ok(status_json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
+                let sealed = status_json["sealed"].as_bool().unwrap_or(true);
+                return Some(ProviderStatus {
+                    name: "Vault".into(),
+                    authenticated: !sealed,
+                    auth_method: Some("vault-token".into()),
+                    model: None,
+                });
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,5 +673,47 @@ mod tests {
     fn urlencoding() {
         assert_eq!(urlencoding_encode("hello world"), "hello%20world");
         assert_eq!(urlencoding_encode("a:b"), "a%3Ab");
+    }
+
+    #[tokio::test]
+    async fn probe_anthropic_env_var() {
+        unsafe {
+            std::env::set_var("ANTHROPIC_API_KEY", "test-key");
+        }
+        let status = probe_anthropic().await;
+        assert_eq!(status.name, "Anthropic");
+        assert!(status.authenticated);
+        assert_eq!(status.auth_method, Some("api-key".into()));
+        unsafe {
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_openai_no_env_var() {
+        // Temporarily remove env var to test fallback to stored credentials
+        let original_key = std::env::var("OPENAI_API_KEY").ok();
+        unsafe {
+            std::env::remove_var("OPENAI_API_KEY");
+        }
+        
+        let status = probe_openai().await;
+        assert_eq!(status.name, "OpenAI");
+        // May be authenticated via stored oauth or may not be - either is fine
+        // We mainly want to test that it doesn't panic and returns consistent data
+        
+        // Restore original env var if it existed
+        if let Some(key) = original_key {
+            unsafe {
+                std::env::set_var("OPENAI_API_KEY", key);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_all_providers_includes_anthropic() {
+        let providers = probe_all_providers().await;
+        assert!(providers.iter().any(|p| p.name == "Anthropic"));
+        assert!(providers.iter().any(|p| p.name == "OpenAI"));
     }
 }

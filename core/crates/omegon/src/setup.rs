@@ -243,6 +243,9 @@ impl AgentSetup {
         let manage_tools = features::manage_tools::ManageTools::new();
         bus.register(Box::new(manage_tools));
 
+        // ─── Auth (credential probing + status) ───────────────────────
+        bus.register(Box::new(features::auth::AuthFeature::new()));
+
         // ─── Native features ────────────────────────────────────────────
         // ─── Persona system ────────────────────────────────────────────
         let persona_registry = crate::plugins::registry::PluginRegistry::new(
@@ -272,6 +275,10 @@ impl AgentSetup {
 
         // ─── Assemble harness status (bootstrap probe) ──────────────────
         let mut harness_status = crate::status::HarnessStatus::assemble();
+
+        // Probe all authentication providers
+        let providers = crate::auth::probe_all_providers().await;
+        harness_status.providers = providers;
 
         // Populate MCP/plugin info from discovered features
         harness_status.update_from_bus(&bus);
