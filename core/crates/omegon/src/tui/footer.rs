@@ -35,12 +35,27 @@ pub struct FooterData {
     /// HarnessStatus — persona, MCP, secrets, inference state.
     /// Updated via BusEvent::HarnessStatusChanged.
     pub harness: HarnessStatus,
+    /// Compaction flash counter — set to 3 when compaction occurs, decrements each frame.
+    /// When > 0, system card renders with accent border.
+    pub compaction_flash_ticks: u8,
 }
 
 impl FooterData {
     /// Update the harness status snapshot from a BusEvent::HarnessStatusChanged.
     pub fn update_harness(&mut self, status: HarnessStatus) {
         self.harness = status;
+    }
+
+    /// Set compaction flash — triggers accent border on system card for 3 ticks.
+    pub fn trigger_compaction_flash(&mut self) {
+        self.compaction_flash_ticks = 3;
+    }
+
+    /// Decrement compaction flash counter each frame.
+    pub fn tick_compaction_flash(&mut self) {
+        if self.compaction_flash_ticks > 0 {
+            self.compaction_flash_ticks = self.compaction_flash_ticks.saturating_sub(1);
+        }
     }
 
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
@@ -246,7 +261,23 @@ impl FooterData {
     }
 
     fn render_system_card(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
-        let block = Self::card_block("system", t);
+        let border_color = if self.compaction_flash_ticks > 0 { 
+            t.accent() 
+        } else { 
+            t.border_dim() 
+        };
+        
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color).bg(t.card_bg()))
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .title(Span::styled(
+                " system ",
+                Style::default().fg(t.muted()).bg(t.card_bg()),
+            ))
+            .padding(Padding::horizontal(1))
+            .style(Style::default().bg(t.card_bg()));
+        
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -300,12 +331,14 @@ impl FooterData {
                 parts.push(Span::styled(format!("{}", self.tool_calls), Style::default().fg(t.muted())));
             }
 
-            // Compactions
+            // Compactions - show ⟳ icon when flashing
             if self.compactions > 0 {
                 if !parts.is_empty() {
                     parts.push(Span::styled(" · ", Style::default().fg(t.dim())));
                 }
-                parts.push(Span::styled("↻ ", Style::default().fg(t.dim())));
+                let icon = if self.compaction_flash_ticks > 0 { "⟳" } else { "↻" };
+                let color = if self.compaction_flash_ticks > 0 { t.accent() } else { t.dim() };
+                parts.push(Span::styled(format!("{icon} "), Style::default().fg(color)));
                 parts.push(Span::styled(format!("{}", self.compactions), Style::default().fg(t.muted())));
             }
 
