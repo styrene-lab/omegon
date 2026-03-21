@@ -1,9 +1,11 @@
 ---
 id: subagent-architecture
 title: Subagent architecture — map cleave onto the subagent mental model with Omegon-native advantages
-status: decided
+status: implementing
 tags: [architecture, cleave, subagents, delegation, multi-agent, ux, competitive, strategic]
 open_questions: []
+branches: ["feature/subagent-architecture"]
+openspec_change: subagent-architecture
 issue_type: epic
 priority: 1
 ---
@@ -243,3 +245,24 @@ The `delegate` tool doesn't need to know the difference — it reads the agent s
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `core/crates/omegon/src/features/delegate.rs` (new) — DelegateFeature: delegate tool (sync+async), delegate_result tool (retrieve async results), delegate_status tool (list active/completed). Agent loader from .omegon/agents/*.md. Field kit assembly (model, thinking, scope, facts, mind). Worktree decision based on tool list write-check.
+- `core/crates/omegon/src/delegate/` (new) — Delegate execution engine: agent_loader.rs (parse .omegon/agents/*.md), field_kit.rs (assemble child context from parent memory + agent defaults), runner.rs (spawn child using cleave worktree infra for write agents, in-place for read-only), result_store.rs (store/retrieve async results by task ID)
+- `core/crates/omegon/src/features/mod.rs` (modified) — Register delegate module
+- `core/crates/omegon/src/setup.rs` (modified) — Register DelegateFeature with access to cleave infra + memory backend
+- `core/crates/omegon/src/tui/mod.rs` (modified) — Toast handler for delegate completion events. /delegate status slash command.
+
+### Constraints
+
+- Read-only agents (tool list has no write/edit/bash) run in main tree — no worktree overhead
+- Write agents ALWAYS get a worktree — if in doubt, create one (err for safety)
+- Sync delegate (background=false) blocks until child completes, returns as tool result
+- Async delegate (background=true) returns task_id immediately, toasts on completion
+- delegate_result(task_id) retrieves stored output — no LLM call, pure retrieval
+- Field kit: parent specifies model/thinking/scope/facts/mind per invocation; agent .md provides defaults
+- Agent .md files scanned from .omegon/agents/ at startup, registered for delegate tool tab-completion
+- Maximum concurrent async delegates: 4 (same as cleave max_parallel)
