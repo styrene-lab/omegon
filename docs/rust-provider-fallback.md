@@ -1,7 +1,7 @@
 ---
 id: rust-provider-fallback
 title: Provider fallback chain — task-aware resilience in the Rust agent loop
-status: exploring
+status: deferred
 parent: rust-agent-loop
 related: [context-class-taxonomy-and-routing-policy]
 tags: [rust, providers, resilience, fallback, routing]

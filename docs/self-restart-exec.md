@@ -1,7 +1,7 @@
 ---
 id: self-restart-exec
 title: Self-restart via exec() — agent rebuilds and hot-replaces its own binary
-status: exploring
+status: deferred
 parent: rust-agent-loop
 tags: [rust, self-update, exec, autonomy, lifecycle]
 open_questions:

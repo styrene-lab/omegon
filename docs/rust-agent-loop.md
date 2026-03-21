@@ -1,7 +1,7 @@
 ---
 id: rust-agent-loop
 title: "Rust-native agent loop — middle-out replacement of pi's orchestration core"
-status: implementing
+status: implemented
 parent: omega
 related: [Omegon-standalone, omega-memory-backend]
 tags: [rust, architecture, agent-loop, pi-mono, strategic, middle-out]
