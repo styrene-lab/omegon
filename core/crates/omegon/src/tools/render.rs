@@ -261,6 +261,17 @@ impl ToolProvider for RenderProvider {
     }
 }
 
+/// Execute render tools with standard CoreTools signature.
+pub async fn execute(
+    tool_name: &str,
+    _call_id: &str,
+    args: serde_json::Value,
+    _cancel: tokio_util::sync::CancellationToken,
+) -> anyhow::Result<omegon_traits::ToolResult> {
+    let provider = RenderProvider::new();
+    provider.execute(tool_name, _call_id, args, _cancel).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

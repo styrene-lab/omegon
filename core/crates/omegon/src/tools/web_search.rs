@@ -383,6 +383,17 @@ impl ToolProvider for WebSearchProvider {
     }
 }
 
+/// Execute the web search tool with standard CoreTools signature.
+pub async fn execute(
+    _tool_name: &str,
+    _call_id: &str,
+    args: serde_json::Value,
+    cancel: tokio_util::sync::CancellationToken,
+) -> anyhow::Result<omegon_traits::ToolResult> {
+    let provider = WebSearchProvider::new();
+    provider.execute("web_search", _call_id, args, cancel).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -366,6 +366,113 @@ impl ToolProvider for CoreTools {
                     }
                 }),
             },
+            ToolDefinition {
+                name: "view".into(),
+                label: "view".into(),
+                description: "View a file inline with rich rendering. Images render graphically. \
+                    PDFs render as text. Documents convert to markdown via pandoc. Code files \
+                    get displayed with line counts.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Path to the file to view" },
+                        "page": { "type": "number", "description": "Page number for PDFs" }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            ToolDefinition {
+                name: "web_search".into(),
+                label: "web_search".into(),
+                description: "Search the web using multiple providers (brave, tavily, serper). \
+                    Modes: quick (single provider), deep (more results), compare (all providers, \
+                    deduplicated).".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Search query" },
+                        "provider": { "type": "string", "enum": ["brave", "tavily", "serper"], "description": "Specific provider. Omit to auto-select." },
+                        "mode": { "type": "string", "enum": ["quick", "deep", "compare"], "description": "Search mode. Default: quick" },
+                        "max_results": { "type": "number", "description": "Max results per provider. Default: 5", "minimum": 1, "maximum": 20 },
+                        "topic": { "type": "string", "enum": ["general", "news"], "description": "Search topic. Default: general" }
+                    },
+                    "required": ["query"]
+                }),
+            },
+            ToolDefinition {
+                name: "render_diagram".into(),
+                label: "render_diagram".into(),
+                description: "Render a D2 diagram as an inline PNG image. D2 is a modern \
+                    declarative diagramming language. Requires d2 CLI.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "code": { "type": "string", "description": "D2 diagram source code" },
+                        "title": { "type": "string", "description": "Optional title" },
+                        "layout": { "type": "string", "enum": ["dagre", "elk"], "description": "Layout engine (default: elk)" },
+                        "theme": { "type": "number", "description": "D2 theme ID (default: 200 = dark)" },
+                        "sketch": { "type": "boolean", "description": "Sketch/hand-drawn mode" }
+                    },
+                    "required": ["code"]
+                }),
+            },
+            ToolDefinition {
+                name: "generate_image_local".into(),
+                label: "generate_image_local".into(),
+                description: "Generate an image locally on Apple Silicon using FLUX.1 via MLX. \
+                    Runs entirely on-device.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "prompt": { "type": "string", "description": "Text prompt" },
+                        "preset": { "type": "string", "enum": ["schnell", "dev", "dev-fast", "diagram", "portrait", "wide"] },
+                        "width": { "type": "number", "description": "Width in pixels (multiple of 64)" },
+                        "height": { "type": "number", "description": "Height in pixels (multiple of 64)" },
+                        "steps": { "type": "number", "description": "Diffusion steps" },
+                        "seed": { "type": "number", "description": "Random seed" },
+                        "quantize": { "type": "string", "enum": ["3", "4", "5", "6", "8"] }
+                    },
+                    "required": ["prompt"]
+                }),
+            },
+            ToolDefinition {
+                name: "ask_local_model".into(),
+                label: "ask_local_model".into(),
+                description: "Delegate a sub-task to a locally running LLM (zero API cost). \
+                    The local model runs on-device via Ollama.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "prompt": { "type": "string", "description": "Complete prompt. Include ALL necessary context." },
+                        "system": { "type": "string", "description": "Optional system prompt." },
+                        "model": { "type": "string", "description": "Specific model ID. Omit to auto-select." },
+                        "temperature": { "type": "number", "description": "Sampling temperature 0.0-1.0 (default: 0.3)" },
+                        "max_tokens": { "type": "number", "description": "Maximum response tokens (default: 2048)" }
+                    },
+                    "required": ["prompt"]
+                }),
+            },
+            ToolDefinition {
+                name: "list_local_models".into(),
+                label: "list_local_models".into(),
+                description: "List all models currently available in the local inference \
+                    server (Ollama).".into(),
+                parameters: json!({ "type": "object", "properties": {} }),
+            },
+            ToolDefinition {
+                name: "manage_ollama".into(),
+                label: "manage_ollama".into(),
+                description: "Manage the Ollama local inference server: start, stop, \
+                    check status, or pull models.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": { "type": "string", "enum": ["start", "stop", "status", "pull"], "description": "Action to perform" },
+                        "model": { "type": "string", "description": "Model name for 'pull' action" }
+                    },
+                    "required": ["action"]
+                }),
+            },
         ]
     }
 
@@ -639,6 +746,18 @@ impl ToolProvider for CoreTools {
                     Err(e) => anyhow::bail!("{e}"),
                 }
             }
+            "view" => {
+                view::execute(tool_name, _call_id, args, cancel, &self.cwd).await
+            }
+            "web_search" => {
+                web_search::execute(tool_name, _call_id, args, cancel).await
+            }
+            "render_diagram" | "generate_image_local" => {
+                render::execute(tool_name, _call_id, args, cancel).await
+            }
+            "ask_local_model" | "list_local_models" | "manage_ollama" => {
+                local_inference::execute(tool_name, _call_id, args, cancel).await
+            }
             _ => anyhow::bail!("Unknown core tool: {tool_name}"),
         }
     }
@@ -683,5 +802,81 @@ mod tests {
     fn lexical_normalize_resolves_dot() {
         let result = lexical_normalize(Path::new("/a/./b/./c"));
         assert_eq!(result, PathBuf::from("/a/b/c"));
+    }
+    
+    #[test]
+    fn all_expected_tools_are_registered() {
+        let tools = CoreTools::new(PathBuf::from("/tmp/workspace"));
+        let all_tools = tools.tools();
+        let tool_names: std::collections::HashSet<&str> = all_tools
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        
+        // Primitive tools
+        assert!(tool_names.contains("bash"));
+        assert!(tool_names.contains("read"));
+        assert!(tool_names.contains("write"));
+        assert!(tool_names.contains("edit"));
+        assert!(tool_names.contains("change"));
+        
+        // Git/speculation tools
+        assert!(tool_names.contains("commit"));
+        assert!(tool_names.contains("speculate_start"));
+        assert!(tool_names.contains("speculate_check"));
+        assert!(tool_names.contains("speculate_commit"));
+        assert!(tool_names.contains("speculate_rollback"));
+        
+        // Utility tools
+        assert!(tool_names.contains("whoami"));
+        assert!(tool_names.contains("chronos"));
+        
+        // Newly wired tools
+        assert!(tool_names.contains("view"));
+        assert!(tool_names.contains("web_search"));
+        assert!(tool_names.contains("render_diagram"));
+        assert!(tool_names.contains("generate_image_local"));
+        assert!(tool_names.contains("ask_local_model"));
+        assert!(tool_names.contains("list_local_models"));
+        assert!(tool_names.contains("manage_ollama"));
+        
+        // Should have at least 18 tools total
+        assert!(tool_names.len() >= 18, "Expected at least 18 tools, got {}", tool_names.len());
+    }
+    
+    #[test]
+    fn newly_wired_tools_have_correct_parameters() {
+        let tools = CoreTools::new(PathBuf::from("/tmp/workspace"));
+        let all_tools = tools.tools();
+        let tools_map: std::collections::HashMap<&str, &ToolDefinition> = all_tools
+            .iter()
+            .map(|t| (t.name.as_str(), t))
+            .collect();
+        
+        // Check view tool
+        let view_tool = tools_map.get("view").expect("view tool should be registered");
+        assert_eq!(view_tool.label, "view");
+        assert!(view_tool.description.contains("rich rendering"));
+        
+        // Check web_search tool
+        let search_tool = tools_map.get("web_search").expect("web_search tool should be registered");
+        assert!(search_tool.description.contains("brave, tavily, serper"));
+        
+        // Check render tools
+        let diagram_tool = tools_map.get("render_diagram").expect("render_diagram should be registered");
+        assert!(diagram_tool.description.contains("D2 diagram"));
+        
+        let image_tool = tools_map.get("generate_image_local").expect("generate_image_local should be registered");
+        assert!(image_tool.description.contains("FLUX.1"));
+        
+        // Check local inference tools
+        let ask_tool = tools_map.get("ask_local_model").expect("ask_local_model should be registered");
+        assert!(ask_tool.description.contains("Ollama"));
+        
+        let list_tool = tools_map.get("list_local_models").expect("list_local_models should be registered");
+        assert!(list_tool.description.contains("Ollama"));
+        
+        let manage_tool = tools_map.get("manage_ollama").expect("manage_ollama should be registered");
+        assert!(manage_tool.description.contains("start, stop"));
     }
 }

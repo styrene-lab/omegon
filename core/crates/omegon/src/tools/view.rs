@@ -119,6 +119,18 @@ pub fn base64_encode_bytes(data: &[u8]) -> String {
     base64_encode(data)
 }
 
+/// Execute the view tool with standard CoreTools signature.
+pub async fn execute(
+    _tool_name: &str,
+    _call_id: &str,
+    args: serde_json::Value,
+    _cancel: tokio_util::sync::CancellationToken,
+    cwd: &std::path::Path,
+) -> anyhow::Result<omegon_traits::ToolResult> {
+    let provider = ViewProvider::new(cwd.to_path_buf());
+    provider.execute("view", _call_id, args, _cancel).await
+}
+
 fn base64_encode(data: &[u8]) -> String {
     use std::io::Write;
     let mut buf = Vec::new();

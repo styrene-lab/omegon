@@ -283,6 +283,17 @@ impl ToolProvider for LocalInferenceProvider {
     }
 }
 
+/// Execute local inference tools with standard CoreTools signature.
+pub async fn execute(
+    tool_name: &str,
+    _call_id: &str,
+    args: serde_json::Value,
+    cancel: tokio_util::sync::CancellationToken,
+) -> anyhow::Result<omegon_traits::ToolResult> {
+    let provider = LocalInferenceProvider::new();
+    provider.execute(tool_name, _call_id, args, cancel).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
