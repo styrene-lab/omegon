@@ -357,7 +357,8 @@ impl LlmBridge for AnthropicClient {
             .and_then(|m| m.strip_prefix("anthropic:"))
             .unwrap_or("claude-sonnet-4-6");
 
-        // OAuth requires Claude Code identity prefix + array format
+        // System prompt format: OAuth requires array format with CC identity prefix
+        // to satisfy the claude-code beta header contract.
         let system_value = if self.is_oauth {
             json!([
                 {"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
@@ -395,12 +396,14 @@ impl LlmBridge for AnthropicClient {
 
         let msg_count = body["messages"].as_array().map(|a| a.len()).unwrap_or(0);
         let system_len = system_prompt.len();
+        let body_size = serde_json::to_string(&body).map(|s| s.len()).unwrap_or(0);
         tracing::debug!(
             model,
             is_oauth = self.is_oauth,
             tool_count,
             msg_count,
             system_len,
+            body_size,
             base_url = %self.base_url,
             "Anthropic streaming request"
         );
@@ -437,6 +440,10 @@ impl LlmBridge for AnthropicClient {
                 %status,
                 error_body = %err,
                 response_headers = %headers,
+                body_size,
+                tool_count,
+                system_len,
+                is_oauth = self.is_oauth,
                 "Anthropic API error"
             );
             tracing::debug!(request_body = %serde_json::to_string(&body).unwrap_or_default(), "failed request body");
@@ -444,7 +451,14 @@ impl LlmBridge for AnthropicClient {
             let user_msg = serde_json::from_str::<Value>(&err).ok()
                 .and_then(|v| v["error"]["message"].as_str().map(|s| s.to_string()))
                 .unwrap_or_else(|| err.chars().take(200).collect());
-            let _ = tx.send(LlmEvent::Error { message: format!("Anthropic {status}: {user_msg}") }).await;
+            let detail = if self.is_oauth && (status.as_u16() == 429 || status.as_u16() == 413) {
+                format!("\n  (OAuth subscription — {tool_count} tools, {body_size} byte request body, system prompt {system_len} chars)")
+            } else {
+                String::new()
+            };
+            let _ = tx.send(LlmEvent::Error {
+                message: format!("Anthropic {status}: {user_msg}{detail}")
+            }).await;
             return Ok(rx);
         }
         tracing::debug!(status = %response.status(), "Anthropic response OK — starting SSE stream");
