@@ -1,22 +1,23 @@
----
-id: unified-auth-surface
-title: "Unified auth surface — single /login command, agent-callable, all backends"
-status: implementing
-tags: [auth, ux, oauth, providers, mcp, vault, secrets, unification]
-open_questions: []
-branches: ["feature/unified-auth-surface"]
-openspec_change: unified-auth-surface
-issue_type: feature
-priority: 2
----
+# Unified auth surface — single /login command, agent-callable, all backends — Design
 
-# Unified auth surface — single /login command, agent-callable, all backends
+## Architecture Decisions
 
-## Overview
+### Decision: /vault stays as separate power-user command — /auth covers login/status, /vault covers operations
 
-Auth is fragmented across 6 mechanisms with 3 different UX paths: CLI-only for LLM providers (`omegon login`), TUI-only for Vault (`/vault login`), and nothing for MCP remote OAuth or secrets store unlock. The operator has no single place to see what's authenticated, what's expired, and what needs attention.\n\nGoal: one `/auth` slash command + one `auth` agent tool + one `omegon auth` CLI subcommand that covers all backends uniformly.
+**Status:** decided
+**Rationale:** /auth handles the common auth surface: status, login, logout, unlock across all backends. /vault stays for Vault-specific operations (unseal, configure, init-policy) that don't map to the generic auth model. /auth login vault triggers the same flow as /vault login — one calls the other internally.
 
-## Research
+### Decision: Vault as upstream secret backend for LLM API keys — vault:secret/data/omegon/anthropic recipe type
+
+**Status:** decided
+**Rationale:** Power users who keep all secrets in Vault should be able to resolve LLM provider API keys from Vault paths instead of env vars or OAuth. The secret recipe system already supports shell commands — add a 'vault' recipe type that reads from Vault KV paths. When Vault is configured and unsealed, resolve_api_key checks the recipe store before falling back to env/OAuth. This means an operator with Vault can run Omegon without any local API keys or OAuth tokens — everything comes from Vault.
+
+### Decision: Enable MCP Streamable HTTP + OAuth now — rmcp transport-streamable-http-client-reqwest + auth features
+
+**Status:** decided
+**Rationale:** Remote MCP servers with OAuth are the standard pattern for hosted tool services (GitHub, Vercel, etc). OpenCode supports this natively. The rmcp crate already implements the transport and OAuth flow — we just need to enable the features and add a 'url' field to McpServerConfig. Deferring means operators can't use any remote MCP server, which is a growing gap as the MCP ecosystem shifts toward HTTP.
+
+## Research Context
 
 ### Current state — 6 auth mechanisms, 3 UX paths
 
@@ -112,30 +113,7 @@ The `providers` field in HarnessStatus (currently empty at startup) should be po
 
 All auth tokens stay where they are (auth.json, vault.json, secrets.db, env vars). The unified surface is a *read* layer that probes each backend and presents a coherent view. No storage migration needed.
 
-## Decisions
-
-### Decision: /vault stays as separate power-user command — /auth covers login/status, /vault covers operations
-
-**Status:** decided
-**Rationale:** /auth handles the common auth surface: status, login, logout, unlock across all backends. /vault stays for Vault-specific operations (unseal, configure, init-policy) that don't map to the generic auth model. /auth login vault triggers the same flow as /vault login — one calls the other internally.
-
-### Decision: Vault as upstream secret backend for LLM API keys — vault:secret/data/omegon/anthropic recipe type
-
-**Status:** decided
-**Rationale:** Power users who keep all secrets in Vault should be able to resolve LLM provider API keys from Vault paths instead of env vars or OAuth. The secret recipe system already supports shell commands — add a 'vault' recipe type that reads from Vault KV paths. When Vault is configured and unsealed, resolve_api_key checks the recipe store before falling back to env/OAuth. This means an operator with Vault can run Omegon without any local API keys or OAuth tokens — everything comes from Vault.
-
-### Decision: Enable MCP Streamable HTTP + OAuth now — rmcp transport-streamable-http-client-reqwest + auth features
-
-**Status:** decided
-**Rationale:** Remote MCP servers with OAuth are the standard pattern for hosted tool services (GitHub, Vercel, etc). OpenCode supports this natively. The rmcp crate already implements the transport and OAuth flow — we just need to enable the features and add a 'url' field to McpServerConfig. Deferring means operators can't use any remote MCP server, which is a growing gap as the MCP ecosystem shifts toward HTTP.
-
-## Open Questions
-
-*No open questions.*
-
-## Implementation Notes
-
-### File Scope
+## File Changes
 
 - `core/crates/omegon/src/features/auth.rs` (new) — AuthFeature: auth_status tool (read-only probe of all backends) + provide_context for auth state injection + on_event for expiry notifications
 - `core/crates/omegon/src/auth.rs` (modified) — Add probe_all_providers() that returns Vec<ProviderStatus> with auth state for each backend. Unify credential check logic.
@@ -147,7 +125,7 @@ All auth tokens stay where they are (auth.json, vault.json, secrets.db, env vars
 - `core/crates/omegon/src/setup.rs` (modified) — Populate HarnessStatus.providers from auth::probe_all_providers() at startup
 - `core/crates/omegon-secrets/src/recipes.rs` (modified) — Add RecipeType::Vault with path field for Vault KV resolution
 
-### Constraints
+## Constraints
 
 - auth_status tool is read-only — agent can probe but never trigger login flows
 - Vault recipe resolution fails closed: if Vault unreachable, recipe returns None (never falls through to stale cache)
