@@ -52,7 +52,7 @@ impl Feature for HarnessSettings {
 
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![ToolDefinition {
-            name: "harness_settings".into(),
+            name: crate::tool_registry::harness_settings::HARNESS_SETTINGS.into(),
             label: "harness_settings".into(),
             description: "Read or modify harness settings. Actions: get (current state), \
                 set_context_class (Squad/Maniple/Clan/Legion), compact (trigger compaction), \

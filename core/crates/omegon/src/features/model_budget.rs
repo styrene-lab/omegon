@@ -154,7 +154,7 @@ impl Feature for ModelBudget {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
-                name: "set_model_tier".into(),
+                name: crate::tool_registry::model_budget::SET_MODEL_TIER.into(),
                 label: "set_model_tier".into(),
                 description: "Switch the active model tier. Use 'retribution' for simple tasks, 'victory' for routine coding, 'gloriana' for deep reasoning.".into(),
                 parameters: json!({
@@ -174,7 +174,7 @@ impl Feature for ModelBudget {
                 }),
             },
             ToolDefinition {
-                name: "switch_to_offline_driver".into(),
+                name: crate::tool_registry::model_budget::SWITCH_TO_OFFLINE_DRIVER.into(),
                 label: "switch_to_offline_driver".into(),
                 description: "Switch from cloud to a local offline model (Ollama). Use when detecting connectivity issues, API errors, or when offline mode is requested.".into(),
                 parameters: json!({
@@ -193,7 +193,7 @@ impl Feature for ModelBudget {
                 }),
             },
             ToolDefinition {
-                name: "set_thinking_level".into(),
+                name: crate::tool_registry::model_budget::SET_THINKING_LEVEL.into(),
                 label: "set_thinking_level".into(),
                 description: "Adjust the extended thinking budget. Higher = more reasoning tokens, slower. Use 'high' for complex problems, 'low' for speed.".into(),
                 parameters: json!({
@@ -223,7 +223,7 @@ impl Feature for ModelBudget {
         _cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
-            "set_model_tier" => {
+            crate::tool_registry::model_budget::SET_MODEL_TIER => {
                 let tier_str = args["tier"].as_str().ok_or_else(|| anyhow::anyhow!("tier required"))?;
                 let reason = args["reason"].as_str().unwrap_or("No reason given");
                 let tier = ModelTier::parse(tier_str)
@@ -234,7 +234,7 @@ impl Feature for ModelBudget {
                     details: json!({"tier": tier_str, "model": tier.resolve_model(&self.current_provider(), "")}),
                 })
             }
-            "switch_to_offline_driver" => {
+            crate::tool_registry::model_budget::SWITCH_TO_OFFLINE_DRIVER => {
                 let reason = args["reason"].as_str().unwrap_or("User requested offline mode");
                 let preferred = args["preferred_model"].as_str();
                 let model = preferred.unwrap_or("auto");
@@ -246,7 +246,7 @@ impl Feature for ModelBudget {
                     details: json!({"tier": "local", "preferred_model": model, "reason": reason}),
                 })
             }
-            "set_thinking_level" => {
+            crate::tool_registry::model_budget::SET_THINKING_LEVEL => {
                 let level_str = args["level"].as_str().ok_or_else(|| anyhow::anyhow!("level required"))?;
                 let reason = args["reason"].as_str().unwrap_or("No reason given");
                 let level = ThinkingLevel::parse(level_str)

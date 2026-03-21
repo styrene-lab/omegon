@@ -315,7 +315,7 @@ impl Feature for CleaveFeature {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
-                name: "cleave_assess".into(),
+                name: crate::tool_registry::cleave::CLEAVE_ASSESS.into(),
                 label: "cleave_assess".into(),
                 description: "Assess the complexity of a task directive to determine if it should be decomposed. Returns complexity score, matched pattern, and decision (execute/cleave).".into(),
                 parameters: json!({
@@ -334,7 +334,7 @@ impl Feature for CleaveFeature {
                 }),
             },
             ToolDefinition {
-                name: "cleave_run".into(),
+                name: crate::tool_registry::cleave::CLEAVE_RUN.into(),
                 label: "cleave_run".into(),
                 description: "Execute a cleave decomposition plan. Creates git worktrees for each child, dispatches child processes, harvests results, and merges branches back.".into(),
                 parameters: json!({
@@ -367,8 +367,8 @@ impl Feature for CleaveFeature {
         cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
-            "cleave_assess" => self.execute_assess(&args),
-            "cleave_run" => self.execute_run(&args, cancel).await,
+            crate::tool_registry::cleave::CLEAVE_ASSESS => self.execute_assess(&args),
+            crate::tool_registry::cleave::CLEAVE_RUN => self.execute_run(&args, cancel).await,
             _ => anyhow::bail!("Unknown tool: {tool_name}"),
         }
     }

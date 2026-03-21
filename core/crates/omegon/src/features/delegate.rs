@@ -242,7 +242,7 @@ impl Feature for DelegateFeature {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
-                name: "delegate".to_string(),
+                name: crate::tool_registry::delegate::DELEGATE.to_string(),
                 label: "Delegate Task".to_string(),
                 description: "Spawn a subagent to handle a specific task".to_string(),
                 parameters: json!({
@@ -288,7 +288,7 @@ impl Feature for DelegateFeature {
                 }),
             },
             ToolDefinition {
-                name: "delegate_result".to_string(),
+                name: crate::tool_registry::delegate::DELEGATE_RESULT.to_string(),
                 label: "Get Delegate Result".to_string(),
                 description: "Retrieve result from a background delegate task".to_string(),
                 parameters: json!({
@@ -303,7 +303,7 @@ impl Feature for DelegateFeature {
                 }),
             },
             ToolDefinition {
-                name: "delegate_status".to_string(),
+                name: crate::tool_registry::delegate::DELEGATE_STATUS.to_string(),
                 label: "Delegate Status".to_string(),
                 description: "List all delegate tasks and their status".to_string(),
                 parameters: json!({
@@ -322,7 +322,7 @@ impl Feature for DelegateFeature {
         cancel: CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
-            "delegate" => {
+            crate::tool_registry::delegate::DELEGATE => {
                 let task: String = args.get("task")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("task parameter is required"))?
@@ -379,7 +379,7 @@ impl Feature for DelegateFeature {
                 }
             }
 
-            "delegate_result" => {
+            crate::tool_registry::delegate::DELEGATE_RESULT => {
                 let task_id: String = args.get("task_id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("task_id parameter is required"))?
@@ -424,7 +424,7 @@ impl Feature for DelegateFeature {
                 }
             }
 
-            "delegate_status" => {
+            crate::tool_registry::delegate::DELEGATE_STATUS => {
                 let tasks = self.result_store.list_all_tasks();
                 let mut status_text = String::from("# Delegate Tasks\n\n| Task ID | Agent | Status | Description |\n|---------|-------|--------|-------------|\n");
                 
@@ -462,7 +462,7 @@ impl Feature for DelegateFeature {
 
     fn commands(&self) -> Vec<CommandDefinition> {
         vec![CommandDefinition {
-            name: "delegate".to_string(),
+            name: crate::tool_registry::delegate::DELEGATE.to_string(),
             description: "delegate task management".to_string(),
             subcommands: vec!["status".to_string()],
         }]

@@ -304,7 +304,7 @@ fn view_text(path: &Path) -> ToolResult {
 impl ToolProvider for ViewProvider {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![ToolDefinition {
-            name: "view".into(),
+            name: crate::tool_registry::view::VIEW.into(),
             label: "View File".into(),
             description: "View a file inline with rich rendering. Images render graphically. PDFs render as text. Documents convert to markdown via pandoc. Code files get displayed with line counts.".into(),
             parameters: json!({

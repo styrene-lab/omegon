@@ -56,13 +56,25 @@ impl EventBus {
 
     /// Finalize registration — cache tool and command definitions.
     /// Call after all features are registered, before the agent loop starts.
+    /// Deduplicates tools by name (first registration wins) to prevent
+    /// Anthropic API 400 "Tool names must be unique" errors.
     pub fn finalize(&mut self) {
         self.tool_defs.clear();
         self.command_defs.clear();
 
+        let mut seen_tools = std::collections::HashSet::new();
         for (idx, feature) in self.features.iter().enumerate() {
             for def in feature.tools() {
+                if seen_tools.contains(def.name.as_str()) {
+                    tracing::warn!(
+                        feature = feature.name(),
+                        tool = %def.name,
+                        "duplicate tool definition — skipping (first registration wins)"
+                    );
+                    continue;
+                }
                 tracing::debug!(feature = feature.name(), tool = %def.name, "registered tool");
+                seen_tools.insert(def.name.clone());
                 self.tool_defs.push((idx, def));
             }
             for cmd in feature.commands() {
@@ -71,10 +83,14 @@ impl EventBus {
             }
         }
 
+        let tool_names: Vec<&str> = self.tool_defs.iter()
+            .map(|(_, d)| d.name.as_str())
+            .collect();
         tracing::info!(
             features = self.features.len(),
             tools = self.tool_defs.len(),
             commands = self.command_defs.len(),
+            tool_names = ?tool_names,
             "event bus finalized"
         );
     }
@@ -355,6 +371,18 @@ mod tests {
 
         let names = bus.feature_names();
         assert_eq!(names, vec!["counter", "notifier"]);
+    }
+
+    #[test]
+    fn finalize_deduplicates_tools() {
+        let mut bus = EventBus::new();
+        // Register two features that both provide "count"
+        bus.register(Box::new(CounterFeature { event_count: 0 }));
+        bus.register(Box::new(CounterFeature { event_count: 0 }));
+        bus.finalize();
+
+        // Should have only 1 tool (deduped), not 2
+        assert_eq!(bus.tool_definitions().len(), 1);
     }
 
     #[test]

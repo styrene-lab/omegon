@@ -71,7 +71,7 @@ impl Feature for AuthFeature {
 
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![ToolDefinition {
-            name: "auth_status".into(),
+            name: crate::tool_registry::auth::AUTH_STATUS.into(),
             label: "auth_status".into(),
             description: "Check authentication status across all backends (Anthropic OAuth, OpenAI OAuth, Vault, secrets store, MCP remote, API keys). Read-only status tool.".into(),
             parameters: json!({

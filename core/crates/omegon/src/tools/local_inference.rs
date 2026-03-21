@@ -167,7 +167,7 @@ impl ToolProvider for LocalInferenceProvider {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
-                name: "ask_local_model".into(),
+                name: crate::tool_registry::local_inference::ASK_LOCAL_MODEL.into(),
                 label: "Ask Local Model".into(),
                 description: "Delegate a sub-task to a locally running LLM (zero API cost). The local model runs on-device via Ollama.".into(),
                 parameters: json!({
@@ -183,13 +183,13 @@ impl ToolProvider for LocalInferenceProvider {
                 }),
             },
             ToolDefinition {
-                name: "list_local_models".into(),
+                name: crate::tool_registry::local_inference::LIST_LOCAL_MODELS.into(),
                 label: "List Local Models".into(),
                 description: "List all models currently available in the local inference server (Ollama).".into(),
                 parameters: json!({ "type": "object", "properties": {} }),
             },
             ToolDefinition {
-                name: "manage_ollama".into(),
+                name: crate::tool_registry::local_inference::MANAGE_OLLAMA.into(),
                 label: "Manage Ollama".into(),
                 description: "Manage the Ollama local inference server: start, stop, check status, or pull models.".into(),
                 parameters: json!({

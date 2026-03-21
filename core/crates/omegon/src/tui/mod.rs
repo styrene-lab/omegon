@@ -1633,7 +1633,8 @@ pub async fn run_tui(
         let ctx = s.context_window / 1000;
 
         let version = env!("CARGO_PKG_VERSION");
-        let mut welcome = format!("Ω Omegon {version} — {project}");
+        let sha = env!("OMEGON_GIT_SHA");
+        let mut welcome = format!("Ω Omegon {version} ({sha}) — {project}");
         welcome.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
         if facts > 0 {
             welcome.push_str(&format!("  ·  {facts} facts loaded"));

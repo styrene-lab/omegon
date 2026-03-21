@@ -29,6 +29,8 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
 
+use crate::tool_registry::core as reg;
+
 /// Core tool provider — registers the primitive tools.
 pub struct CoreTools {
     cwd: PathBuf,
@@ -119,8 +121,8 @@ impl ToolProvider for CoreTools {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
-                name: "bash".into(),
-                label: "bash".into(),
+                name: reg::BASH.into(),
+                label: reg::BASH.into(),
                 description: "Execute a bash command in the current working directory. \
                     Returns stdout and stderr. Output is truncated to last 2000 lines \
                     or 50KB. Optionally provide a timeout in seconds."
@@ -141,8 +143,8 @@ impl ToolProvider for CoreTools {
                 }),
             },
             ToolDefinition {
-                name: "read".into(),
-                label: "read".into(),
+                name: reg::READ.into(),
+                label: reg::READ.into(),
                 description: "Read the contents of a file. Supports text files and \
                     images. Output is truncated to 2000 lines or 50KB. Use offset/limit \
                     for large files."
@@ -167,8 +169,8 @@ impl ToolProvider for CoreTools {
                 }),
             },
             ToolDefinition {
-                name: "write".into(),
-                label: "write".into(),
+                name: reg::WRITE.into(),
+                label: reg::WRITE.into(),
                 description: "Write content to a file. Creates the file if it doesn't \
                     exist, overwrites if it does. Automatically creates parent directories."
                     .into(),
@@ -188,8 +190,8 @@ impl ToolProvider for CoreTools {
                 }),
             },
             ToolDefinition {
-                name: "edit".into(),
-                label: "edit".into(),
+                name: reg::EDIT.into(),
+                label: reg::EDIT.into(),
                 description: "Edit a file by replacing exact text. The oldText must match \
                     exactly (including whitespace). Use this for precise, surgical edits."
                     .into(),
@@ -213,8 +215,8 @@ impl ToolProvider for CoreTools {
                 }),
             },
             ToolDefinition {
-                name: "change".into(),
-                label: "change".into(),
+                name: reg::CHANGE.into(),
+                label: reg::CHANGE.into(),
                 description: "Atomic multi-file edit with automatic validation. Accepts an array \
                     of edits, applies all atomically (rollback on any failure), then runs type \
                     checking. One tool call replaces multiple edits + validation."
@@ -245,7 +247,7 @@ impl ToolProvider for CoreTools {
                 }),
             },
             ToolDefinition {
-                name: "speculate_start".into(),
+                name: reg::SPECULATE_START.into(),
                 label: "speculate".into(),
                 description: "Create a git checkpoint for exploratory changes. Make changes freely, \
                     then use speculate_commit to keep them or speculate_rollback to undo everything."
@@ -262,7 +264,7 @@ impl ToolProvider for CoreTools {
                 }),
             },
             ToolDefinition {
-                name: "speculate_check".into(),
+                name: reg::SPECULATE_CHECK.into(),
                 label: "speculate".into(),
                 description: "Check the current speculation state — shows modified files and \
                     runs validation against them."
@@ -273,7 +275,7 @@ impl ToolProvider for CoreTools {
                 }),
             },
             ToolDefinition {
-                name: "speculate_commit".into(),
+                name: reg::SPECULATE_COMMIT.into(),
                 label: "speculate".into(),
                 description: "Keep all changes made during speculation and discard the checkpoint."
                     .into(),
@@ -283,7 +285,7 @@ impl ToolProvider for CoreTools {
                 }),
             },
             ToolDefinition {
-                name: "speculate_rollback".into(),
+                name: reg::SPECULATE_ROLLBACK.into(),
                 label: "speculate".into(),
                 description: "Revert all changes made during speculation back to the checkpoint."
                     .into(),
@@ -293,8 +295,8 @@ impl ToolProvider for CoreTools {
                 }),
             },
             ToolDefinition {
-                name: "commit".into(),
-                label: "commit".into(),
+                name: reg::COMMIT.into(),
+                label: reg::COMMIT.into(),
                 description: "Commit changes to git. Stages the specified files (or all \
                     dirty files if none specified), creates a commit with the given message. \
                     Handles submodule commits automatically — if edited files are inside a \
@@ -318,8 +320,8 @@ impl ToolProvider for CoreTools {
                 }),
             },
             ToolDefinition {
-                name: "whoami".into(),
-                label: "whoami".into(),
+                name: reg::WHOAMI.into(),
+                label: reg::WHOAMI.into(),
                 description: "Check authentication status across development tools \
                     (git, GitHub, GitLab, AWS, Kubernetes, OCI registries). Returns \
                     structured status with error diagnosis and refresh commands for \
@@ -331,8 +333,8 @@ impl ToolProvider for CoreTools {
                 }),
             },
             ToolDefinition {
-                name: "chronos".into(),
-                label: "chronos".into(),
+                name: reg::CHRONOS.into(),
+                label: reg::CHRONOS.into(),
                 description: "Get authoritative date and time context from the system clock. \
                     Use before any date calculations, weekly/monthly reporting, relative date \
                     references, quarter boundaries, or epoch timestamps. Eliminates AI date \
@@ -366,113 +368,12 @@ impl ToolProvider for CoreTools {
                     }
                 }),
             },
-            ToolDefinition {
-                name: "view".into(),
-                label: "view".into(),
-                description: "View a file inline with rich rendering. Images render graphically. \
-                    PDFs render as text. Documents convert to markdown via pandoc. Code files \
-                    get displayed with line counts.".into(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Path to the file to view" },
-                        "page": { "type": "number", "description": "Page number for PDFs" }
-                    },
-                    "required": ["path"]
-                }),
-            },
-            ToolDefinition {
-                name: "web_search".into(),
-                label: "web_search".into(),
-                description: "Search the web using multiple providers (brave, tavily, serper). \
-                    Modes: quick (single provider), deep (more results), compare (all providers, \
-                    deduplicated).".into(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string", "description": "Search query" },
-                        "provider": { "type": "string", "enum": ["brave", "tavily", "serper"], "description": "Specific provider. Omit to auto-select." },
-                        "mode": { "type": "string", "enum": ["quick", "deep", "compare"], "description": "Search mode. Default: quick" },
-                        "max_results": { "type": "number", "description": "Max results per provider. Default: 5", "minimum": 1, "maximum": 20 },
-                        "topic": { "type": "string", "enum": ["general", "news"], "description": "Search topic. Default: general" }
-                    },
-                    "required": ["query"]
-                }),
-            },
-            ToolDefinition {
-                name: "render_diagram".into(),
-                label: "render_diagram".into(),
-                description: "Render a D2 diagram as an inline PNG image. D2 is a modern \
-                    declarative diagramming language. Requires d2 CLI.".into(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "code": { "type": "string", "description": "D2 diagram source code" },
-                        "title": { "type": "string", "description": "Optional title" },
-                        "layout": { "type": "string", "enum": ["dagre", "elk"], "description": "Layout engine (default: elk)" },
-                        "theme": { "type": "number", "description": "D2 theme ID (default: 200 = dark)" },
-                        "sketch": { "type": "boolean", "description": "Sketch/hand-drawn mode" }
-                    },
-                    "required": ["code"]
-                }),
-            },
-            ToolDefinition {
-                name: "generate_image_local".into(),
-                label: "generate_image_local".into(),
-                description: "Generate an image locally on Apple Silicon using FLUX.1 via MLX. \
-                    Runs entirely on-device.".into(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "prompt": { "type": "string", "description": "Text prompt" },
-                        "preset": { "type": "string", "enum": ["schnell", "dev", "dev-fast", "diagram", "portrait", "wide"] },
-                        "width": { "type": "number", "description": "Width in pixels (multiple of 64)" },
-                        "height": { "type": "number", "description": "Height in pixels (multiple of 64)" },
-                        "steps": { "type": "number", "description": "Diffusion steps" },
-                        "seed": { "type": "number", "description": "Random seed" },
-                        "quantize": { "type": "string", "enum": ["3", "4", "5", "6", "8"] }
-                    },
-                    "required": ["prompt"]
-                }),
-            },
-            ToolDefinition {
-                name: "ask_local_model".into(),
-                label: "ask_local_model".into(),
-                description: "Delegate a sub-task to a locally running LLM (zero API cost). \
-                    The local model runs on-device via Ollama.".into(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "prompt": { "type": "string", "description": "Complete prompt. Include ALL necessary context." },
-                        "system": { "type": "string", "description": "Optional system prompt." },
-                        "model": { "type": "string", "description": "Specific model ID. Omit to auto-select." },
-                        "temperature": { "type": "number", "description": "Sampling temperature 0.0-1.0 (default: 0.3)" },
-                        "max_tokens": { "type": "number", "description": "Maximum response tokens (default: 2048)" }
-                    },
-                    "required": ["prompt"]
-                }),
-            },
-            ToolDefinition {
-                name: "list_local_models".into(),
-                label: "list_local_models".into(),
-                description: "List all models currently available in the local inference \
-                    server (Ollama).".into(),
-                parameters: json!({ "type": "object", "properties": {} }),
-            },
-            ToolDefinition {
-                name: "manage_ollama".into(),
-                label: "manage_ollama".into(),
-                description: "Manage the Ollama local inference server: start, stop, \
-                    check status, or pull models.".into(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "action": { "type": "string", "enum": ["start", "stop", "status", "pull"], "description": "Action to perform" },
-                        "model": { "type": "string", "description": "Model name for 'pull' action" }
-                    },
-                    "required": ["action"]
-                }),
-            },
+            // NOTE: view, web_search, render_diagram, generate_image_local,
+            // ask_local_model, list_local_models, manage_ollama are provided by
+            // their dedicated ToolProvider implementations (ViewProvider,
+            // WebSearchProvider, RenderProvider, LocalInferenceProvider) registered
+            // separately in setup.rs. Do NOT add them here — duplicates cause
+            // Anthropic API 400 "Tool names must be unique" errors.
         ]
     }
 
@@ -484,7 +385,7 @@ impl ToolProvider for CoreTools {
         cancel: CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
-            "bash" => {
+            reg::BASH => {
                 let command = args["command"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'command' argument"))?;
@@ -510,7 +411,7 @@ impl ToolProvider for CoreTools {
 
                 bash::execute(command, &self.cwd, timeout, cancel).await
             }
-            "read" => {
+            reg::READ => {
                 let path_str = args["path"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'path' argument"))?;
@@ -519,7 +420,7 @@ impl ToolProvider for CoreTools {
                 let limit = args["limit"].as_u64().map(|n| n as usize);
                 read::execute(&path, offset, limit).await
             }
-            "write" => {
+            reg::WRITE => {
                 let path_str = args["path"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'path' argument"))?;
@@ -535,7 +436,7 @@ impl ToolProvider for CoreTools {
                 }
                 result
             }
-            "edit" => {
+            reg::EDIT => {
                 let path_str = args["path"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'path' argument"))?;
@@ -554,7 +455,7 @@ impl ToolProvider for CoreTools {
                 }
                 result
             }
-            "change" => {
+            reg::CHANGE => {
                 let edits_val = args.get("edits")
                     .ok_or_else(|| anyhow::anyhow!("missing 'edits' argument"))?;
                 let edits: Vec<change::EditSpec> = serde_json::from_value(edits_val.clone())?;
@@ -583,7 +484,7 @@ impl ToolProvider for CoreTools {
                 }
                 result
             }
-            "commit" => {
+            reg::COMMIT => {
                 let message = args["message"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'message' argument"))?;
@@ -715,25 +616,25 @@ impl ToolProvider for CoreTools {
                     }),
                 })
             }
-            "speculate_start" => {
+            reg::SPECULATE_START => {
                 let label = args["label"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'label' argument"))?;
                 speculate::start(label, &self.cwd).await
             }
-            "speculate_check" => {
+            reg::SPECULATE_CHECK => {
                 speculate::check(&self.cwd).await
             }
-            "speculate_commit" => {
+            reg::SPECULATE_COMMIT => {
                 speculate::commit(&self.cwd).await
             }
-            "speculate_rollback" => {
+            reg::SPECULATE_ROLLBACK => {
                 speculate::rollback(&self.cwd).await
             }
-            "whoami" => {
+            reg::WHOAMI => {
                 whoami::execute().await
             }
-            "chronos" => {
+            reg::CHRONOS => {
                 let sub = args["subcommand"].as_str().unwrap_or("week");
                 let expr = args["expression"].as_str();
                 let from = args["from_date"].as_str();
@@ -746,18 +647,8 @@ impl ToolProvider for CoreTools {
                     Err(e) => anyhow::bail!("{e}"),
                 }
             }
-            "view" => {
-                view::execute(tool_name, _call_id, args, cancel, &self.cwd).await
-            }
-            "web_search" => {
-                web_search::execute(tool_name, _call_id, args, cancel).await
-            }
-            "render_diagram" | "generate_image_local" => {
-                render::execute(tool_name, _call_id, args, cancel).await
-            }
-            "ask_local_model" | "list_local_models" | "manage_ollama" => {
-                local_inference::execute(tool_name, _call_id, args, cancel).await
-            }
+            // view, web_search, render_*, local_inference tools are handled
+            // by their dedicated providers registered in setup.rs.
             _ => anyhow::bail!("Unknown core tool: {tool_name}"),
         }
     }
@@ -831,52 +722,38 @@ mod tests {
         assert!(tool_names.contains("whoami"));
         assert!(tool_names.contains("chronos"));
         
-        // Newly wired tools
-        assert!(tool_names.contains("view"));
-        assert!(tool_names.contains("web_search"));
-        assert!(tool_names.contains("render_diagram"));
-        assert!(tool_names.contains("generate_image_local"));
-        assert!(tool_names.contains("ask_local_model"));
-        assert!(tool_names.contains("list_local_models"));
-        assert!(tool_names.contains("manage_ollama"));
+        // view, web_search, render_*, local_inference tools are provided
+        // by dedicated providers, NOT by CoreTools (to avoid duplicates).
+        assert!(!tool_names.contains("view"));
+        assert!(!tool_names.contains("web_search"));
+        assert!(!tool_names.contains("render_diagram"));
+        assert!(!tool_names.contains("generate_image_local"));
+        assert!(!tool_names.contains("ask_local_model"));
+        assert!(!tool_names.contains("list_local_models"));
+        assert!(!tool_names.contains("manage_ollama"));
         
-        // Should have at least 18 tools total
-        assert!(tool_names.len() >= 18, "Expected at least 18 tools, got {}", tool_names.len());
+        // Should have 11 core tools (bash, read, write, edit, change,
+        // speculate_start/check/commit/rollback, commit, whoami, chronos)
+        assert_eq!(tool_names.len(), 12, "Expected 12 core tools, got {}", tool_names.len());
     }
     
     #[test]
-    fn newly_wired_tools_have_correct_parameters() {
+    fn core_tools_do_not_include_provider_tools() {
+        // Dedicated providers (ViewProvider, WebSearchProvider, etc.) own these
+        // tools. CoreTools must NOT include them to avoid duplicate tool names
+        // in the API request.
         let tools = CoreTools::new(PathBuf::from("/tmp/workspace"));
         let all_tools = tools.tools();
-        let tools_map: std::collections::HashMap<&str, &ToolDefinition> = all_tools
+        let tool_names: std::collections::HashSet<&str> = all_tools
             .iter()
-            .map(|t| (t.name.as_str(), t))
+            .map(|t| t.name.as_str())
             .collect();
         
-        // Check view tool
-        let view_tool = tools_map.get("view").expect("view tool should be registered");
-        assert_eq!(view_tool.label, "view");
-        assert!(view_tool.description.contains("rich rendering"));
-        
-        // Check web_search tool
-        let search_tool = tools_map.get("web_search").expect("web_search tool should be registered");
-        assert!(search_tool.description.contains("brave, tavily, serper"));
-        
-        // Check render tools
-        let diagram_tool = tools_map.get("render_diagram").expect("render_diagram should be registered");
-        assert!(diagram_tool.description.contains("D2 diagram"));
-        
-        let image_tool = tools_map.get("generate_image_local").expect("generate_image_local should be registered");
-        assert!(image_tool.description.contains("FLUX.1"));
-        
-        // Check local inference tools
-        let ask_tool = tools_map.get("ask_local_model").expect("ask_local_model should be registered");
-        assert!(ask_tool.description.contains("Ollama"));
-        
-        let list_tool = tools_map.get("list_local_models").expect("list_local_models should be registered");
-        assert!(list_tool.description.contains("Ollama"));
-        
-        let manage_tool = tools_map.get("manage_ollama").expect("manage_ollama should be registered");
-        assert!(manage_tool.description.contains("start, stop"));
+        let provider_tools = ["view", "web_search", "render_diagram",
+            "generate_image_local", "ask_local_model", "list_local_models", "manage_ollama"];
+        for name in &provider_tools {
+            assert!(!tool_names.contains(name),
+                "CoreTools should not include '{name}' — it belongs to a dedicated provider");
+        }
     }
 }

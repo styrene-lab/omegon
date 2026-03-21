@@ -45,7 +45,7 @@ impl Feature for ManageTools {
 
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![ToolDefinition {
-            name: "manage_tools".into(),
+            name: crate::tool_registry::manage_tools::MANAGE_TOOLS.into(),
             label: "manage_tools".into(),
             description: "List, enable, or disable tools. Use to activate tools the user \
                 requests or disable irrelevant ones to save context window space."

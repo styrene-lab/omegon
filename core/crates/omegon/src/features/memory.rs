@@ -71,7 +71,7 @@ impl Feature for MemoryFeature {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
-                name: "memory_store".into(),
+                name: crate::tool_registry::memory::MEMORY_STORE.into(),
                 label: "memory_store".into(),
                 description: "Store a fact in project memory. Facts persist across sessions.".into(),
                 parameters: serde_json::json!({
@@ -91,7 +91,7 @@ impl Feature for MemoryFeature {
                 }),
             },
             ToolDefinition {
-                name: "memory_recall".into(),
+                name: crate::tool_registry::memory::MEMORY_RECALL.into(),
                 label: "memory_recall".into(),
                 description: "Search project memory for facts relevant to a query. Returns ranked results.".into(),
                 parameters: serde_json::json!({
@@ -114,7 +114,7 @@ impl Feature for MemoryFeature {
                 }),
             },
             ToolDefinition {
-                name: "memory_query".into(),
+                name: crate::tool_registry::memory::MEMORY_QUERY.into(),
                 label: "memory_query".into(),
                 description: "Read all active facts from project memory.".into(),
                 parameters: serde_json::json!({
@@ -123,7 +123,7 @@ impl Feature for MemoryFeature {
                 }),
             },
             ToolDefinition {
-                name: "memory_archive".into(),
+                name: crate::tool_registry::memory::MEMORY_ARCHIVE.into(),
                 label: "memory_archive".into(),
                 description: "Archive one or more facts by ID.".into(),
                 parameters: serde_json::json!({
@@ -139,7 +139,7 @@ impl Feature for MemoryFeature {
                 }),
             },
             ToolDefinition {
-                name: "memory_supersede".into(),
+                name: crate::tool_registry::memory::MEMORY_SUPERSEDE.into(),
                 label: "memory_supersede".into(),
                 description: "Replace an existing fact with an updated version.".into(),
                 parameters: serde_json::json!({
@@ -153,7 +153,7 @@ impl Feature for MemoryFeature {
                 }),
             },
             ToolDefinition {
-                name: "memory_connect".into(),
+                name: crate::tool_registry::memory::MEMORY_CONNECT.into(),
                 label: "memory_connect".into(),
                 description: "Create a relationship between two facts.".into(),
                 parameters: serde_json::json!({
@@ -168,7 +168,7 @@ impl Feature for MemoryFeature {
                 }),
             },
             ToolDefinition {
-                name: "memory_focus".into(),
+                name: crate::tool_registry::memory::MEMORY_FOCUS.into(),
                 label: "memory_focus".into(),
                 description: "Pin facts into working memory so they persist across the session.".into(),
                 parameters: serde_json::json!({
@@ -183,7 +183,7 @@ impl Feature for MemoryFeature {
                 }),
             },
             ToolDefinition {
-                name: "memory_release".into(),
+                name: crate::tool_registry::memory::MEMORY_RELEASE.into(),
                 label: "memory_release".into(),
                 description: "Clear working memory — release all pinned facts.".into(),
                 parameters: serde_json::json!({
@@ -192,7 +192,7 @@ impl Feature for MemoryFeature {
                 }),
             },
             ToolDefinition {
-                name: "memory_episodes".into(),
+                name: crate::tool_registry::memory::MEMORY_EPISODES.into(),
                 label: "memory_episodes".into(),
                 description: "Search session episode narratives for past work context.".into(),
                 parameters: serde_json::json!({
@@ -211,7 +211,7 @@ impl Feature for MemoryFeature {
                 }),
             },
             ToolDefinition {
-                name: "memory_compact".into(),
+                name: crate::tool_registry::memory::MEMORY_COMPACT.into(),
                 label: "memory_compact".into(),
                 description: "Trigger context compaction to free up context window space.".into(),
                 parameters: serde_json::json!({
@@ -225,7 +225,7 @@ impl Feature for MemoryFeature {
                 }),
             },
             ToolDefinition {
-                name: "memory_search_archive".into(),
+                name: crate::tool_registry::memory::MEMORY_SEARCH_ARCHIVE.into(),
                 label: "memory_search_archive".into(),
                 description: "Search archived project memories from previous months.".into(),
                 parameters: serde_json::json!({
@@ -240,7 +240,7 @@ impl Feature for MemoryFeature {
                 }),
             },
             ToolDefinition {
-                name: "memory_ingest_lifecycle".into(),
+                name: crate::tool_registry::memory::MEMORY_INGEST_LIFECYCLE.into(),
                 label: "memory_ingest_lifecycle".into(),
                 description: "Internal tool for lifecycle candidate ingestion. Used by design-tree, openspec, and cleave extensions.".into(),
                 parameters: serde_json::json!({
@@ -269,7 +269,7 @@ impl Feature for MemoryFeature {
         _cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
-            "memory_store" => {
+            crate::tool_registry::memory::MEMORY_STORE => {
                 let content = args["content"].as_str().unwrap_or("").to_string();
                 let section_str = args["section"].as_str().unwrap_or("Architecture");
                 let section: Section = serde_json::from_value(Value::String(section_str.into()))
@@ -293,7 +293,7 @@ impl Feature for MemoryFeature {
                     details: serde_json::json!({ "id": result.fact.id, "action": format!("{:?}", result.action) }),
                 })
             }
-            "memory_recall" => {
+            crate::tool_registry::memory::MEMORY_RECALL => {
                 let query = args["query"].as_str().unwrap_or("").to_string();
                 let k = args["k"].as_u64().unwrap_or(10) as usize;
 
@@ -328,7 +328,7 @@ impl Feature for MemoryFeature {
                     details: serde_json::json!({ "count": results.len() }),
                 })
             }
-            "memory_query" => {
+            crate::tool_registry::memory::MEMORY_QUERY => {
                 let facts = self.backend.list_facts(&self.mind, FactFilter::default())
                     .await.map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -374,7 +374,7 @@ impl Feature for MemoryFeature {
                     details: serde_json::json!({ "count": facts.len(), "sections": sections.len() }),
                 })
             }
-            "memory_archive" => {
+            crate::tool_registry::memory::MEMORY_ARCHIVE => {
                 let ids: Vec<String> = args["fact_ids"].as_array()
                     .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                     .unwrap_or_default();
@@ -386,7 +386,7 @@ impl Feature for MemoryFeature {
                     details: serde_json::json!({ "archived": count }),
                 })
             }
-            "memory_supersede" => {
+            crate::tool_registry::memory::MEMORY_SUPERSEDE => {
                 let fact_id = args["fact_id"].as_str().unwrap_or("").to_string();
                 let content = args["content"].as_str().unwrap_or("").to_string();
                 let section_str = args["section"].as_str().unwrap_or("Architecture");
@@ -407,7 +407,7 @@ impl Feature for MemoryFeature {
                     details: serde_json::json!({ "old_id": fact_id, "new_id": new_fact.id }),
                 })
             }
-            "memory_connect" => {
+            crate::tool_registry::memory::MEMORY_CONNECT => {
                 let edge = self.backend.create_edge(CreateEdge {
                     source_id: args["source_fact_id"].as_str().unwrap_or("").into(),
                     target_id: args["target_fact_id"].as_str().unwrap_or("").into(),
@@ -421,7 +421,7 @@ impl Feature for MemoryFeature {
                     details: serde_json::json!({ "edge_id": edge.id }),
                 })
             }
-            "memory_focus" => {
+            crate::tool_registry::memory::MEMORY_FOCUS => {
                 let ids: Vec<String> = args["fact_ids"].as_array()
                     .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                     .unwrap_or_default();
@@ -432,14 +432,14 @@ impl Feature for MemoryFeature {
                     details: Value::Null,
                 })
             }
-            "memory_release" => {
+            crate::tool_registry::memory::MEMORY_RELEASE => {
                 self.working_memory.lock().unwrap().clear();
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: "Working memory cleared.".into() }],
                     details: Value::Null,
                 })
             }
-            "memory_episodes" => {
+            crate::tool_registry::memory::MEMORY_EPISODES => {
                 let query = args["query"].as_str().unwrap_or("").to_string();
                 let k = args["k"].as_u64().unwrap_or(5) as usize;
                 let episodes = self.backend.search_episodes(&self.mind, &query, k).await
@@ -461,7 +461,7 @@ impl Feature for MemoryFeature {
                     details: Value::Null,
                 })
             }
-            "memory_compact" => {
+            crate::tool_registry::memory::MEMORY_COMPACT => {
                 // Context compaction is handled at the conversation level, not memory level.
                 // Signal the caller that compaction was requested.
                 Ok(ToolResult {
@@ -471,7 +471,7 @@ impl Feature for MemoryFeature {
                     details: serde_json::json!({ "action": "compact_requested" }),
                 })
             }
-            "memory_search_archive" => {
+            crate::tool_registry::memory::MEMORY_SEARCH_ARCHIVE => {
                 let query = args["query"].as_str().unwrap_or("").to_string();
                 // Search archived facts using FTS - for now this searches all facts,
                 // we'd need to update the backend to filter for archived specifically
@@ -493,7 +493,7 @@ impl Feature for MemoryFeature {
                     details: Value::Null,
                 })
             }
-            "memory_ingest_lifecycle" => {
+            crate::tool_registry::memory::MEMORY_INGEST_LIFECYCLE => {
                 // Lifecycle fact ingestion — stores with source metadata
                 let content = args["content"].as_str().unwrap_or("").to_string();
                 let section_str = args["section"].as_str().unwrap_or("Architecture");

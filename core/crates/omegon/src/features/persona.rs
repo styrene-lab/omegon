@@ -47,7 +47,7 @@ impl Feature for PersonaFeature {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
-                name: "switch_persona".into(),
+                name: crate::tool_registry::persona::SWITCH_PERSONA.into(),
                 label: "switch_persona".into(),
                 description: "Switch the active persona identity. Personas carry domain expertise, mind stores, and skill profiles. Use 'off' to deactivate.".into(),
                 parameters: json!({
@@ -66,7 +66,7 @@ impl Feature for PersonaFeature {
                 }),
             },
             ToolDefinition {
-                name: "switch_tone".into(),
+                name: crate::tool_registry::persona::SWITCH_TONE.into(),
                 label: "switch_tone".into(),
                 description: "Switch the conversational tone. Tones modify voice/style without changing expertise. Use 'off' to deactivate.".into(),
                 parameters: json!({
@@ -85,7 +85,7 @@ impl Feature for PersonaFeature {
                 }),
             },
             ToolDefinition {
-                name: "list_personas".into(),
+                name: crate::tool_registry::persona::LIST_PERSONAS.into(),
                 label: "list_personas".into(),
                 description: "List available personas and tones installed on this system. Shows active status.".into(),
                 parameters: json!({
@@ -104,7 +104,7 @@ impl Feature for PersonaFeature {
         _cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
-            "switch_persona" => {
+            crate::tool_registry::persona::SWITCH_PERSONA => {
                 let name = args.get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
@@ -161,7 +161,7 @@ impl Feature for PersonaFeature {
                 }
             }
 
-            "switch_tone" => {
+            crate::tool_registry::persona::SWITCH_TONE => {
                 let name = args.get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
@@ -216,7 +216,7 @@ impl Feature for PersonaFeature {
                 }
             }
 
-            "list_personas" => {
+            crate::tool_registry::persona::LIST_PERSONAS => {
                 let (personas, tones) = persona_loader::scan_available();
                 let registry = self.registry.lock().unwrap();
                 let active_persona = registry.active_persona().map(|p| &p.id);

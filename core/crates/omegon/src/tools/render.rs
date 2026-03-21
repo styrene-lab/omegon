@@ -210,7 +210,7 @@ impl ToolProvider for RenderProvider {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
-                name: "render_diagram".into(),
+                name: crate::tool_registry::render::RENDER_DIAGRAM.into(),
                 label: "Render Diagram".into(),
                 description: "Render a D2 diagram as an inline PNG image. D2 is a modern declarative diagramming language. Requires d2 CLI.".into(),
                 parameters: json!({
@@ -226,7 +226,7 @@ impl ToolProvider for RenderProvider {
                 }),
             },
             ToolDefinition {
-                name: "generate_image_local".into(),
+                name: crate::tool_registry::render::GENERATE_IMAGE_LOCAL.into(),
                 label: "Generate Image".into(),
                 description: "Generate an image locally on Apple Silicon using FLUX.1 via MLX. Runs entirely on-device.".into(),
                 parameters: json!({

@@ -556,7 +556,7 @@ impl Feature for LifecycleFeature {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
-                name: "design_tree".into(),
+                name: crate::tool_registry::lifecycle::DESIGN_TREE.into(),
                 label: "design_tree".into(),
                 description: "Query the design tree: list nodes, get node details, find open questions (frontier), check dependencies, list children.".into(),
                 parameters: json!({
@@ -576,7 +576,7 @@ impl Feature for LifecycleFeature {
                 }),
             },
             ToolDefinition {
-                name: "design_tree_update".into(),
+                name: crate::tool_registry::lifecycle::DESIGN_TREE_UPDATE.into(),
                 label: "design_tree_update".into(),
                 description: "Mutate the design tree: create nodes, change status, add questions/research/decisions, branch, set focus, implement.".into(),
                 parameters: json!({
@@ -610,7 +610,7 @@ impl Feature for LifecycleFeature {
                 }),
             },
             ToolDefinition {
-                name: "openspec_manage".into(),
+                name: crate::tool_registry::lifecycle::OPENSPEC_MANAGE.into(),
                 label: "openspec_manage".into(),
                 description: "Manage OpenSpec changes: list status, get details, propose changes, add specs, archive.".into(),
                 parameters: json!({
@@ -642,9 +642,9 @@ impl Feature for LifecycleFeature {
         _cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
-            "design_tree" => self.execute_design_tree(&args),
-            "design_tree_update" => self.execute_design_tree_update(&args),
-            "openspec_manage" => self.execute_openspec_manage(&args),
+            crate::tool_registry::lifecycle::DESIGN_TREE => self.execute_design_tree(&args),
+            crate::tool_registry::lifecycle::DESIGN_TREE_UPDATE => self.execute_design_tree_update(&args),
+            crate::tool_registry::lifecycle::OPENSPEC_MANAGE => self.execute_openspec_manage(&args),
             _ => anyhow::bail!("Unknown tool: {tool_name}"),
         }
     }

@@ -271,7 +271,7 @@ fn format_results(results: &[SearchResult]) -> String {
 impl ToolProvider for WebSearchProvider {
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![ToolDefinition {
-            name: "web_search".into(),
+            name: crate::tool_registry::web_search::WEB_SEARCH.into(),
             label: "Web Search".into(),
             description: "Search the web using multiple providers (brave, tavily, serper). Modes: quick (single provider), deep (more results), compare (all providers, deduplicated).".into(),
             parameters: json!({

@@ -33,6 +33,7 @@ mod setup;
 mod plugin_cli;
 mod plugins;
 pub mod status;
+pub mod tool_registry;
 mod tools;
 mod tui;
 mod web;
@@ -40,8 +41,38 @@ mod web;
 use bridge::{LlmBridge, SubprocessBridge};
 use omegon_traits::AgentEvent;
 
+/// Short version: `0.14.0 (3a4b5c6 2026-03-21)`
+const fn build_version() -> &'static str {
+    concat!(
+        env!("CARGO_PKG_VERSION"),
+        " (",
+        env!("OMEGON_GIT_SHA"),
+        " ",
+        env!("OMEGON_BUILD_DATE"),
+        ")",
+    )
+}
+
+/// Long version for `--version` verbose: includes git describe for RC distance.
+const fn build_long_version() -> &'static str {
+    concat!(
+        env!("CARGO_PKG_VERSION"),
+        " (",
+        env!("OMEGON_GIT_SHA"),
+        " ",
+        env!("OMEGON_BUILD_DATE"),
+        ")\ngit: ",
+        env!("OMEGON_GIT_DESCRIBE"),
+    )
+}
+
 #[derive(Parser)]
-#[command(name = "omegon", about = "Omegon — AI coding agent", version)]
+#[command(
+    name = "omegon",
+    about = "Omegon — AI coding agent",
+    version = build_version(),
+    long_version = build_long_version(),
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
