@@ -1,7 +1,7 @@
 ---
 id: skills-repo-format
 title: Simple skills repo addition — open format for community skill packages
-status: implementing
+status: implemented
 parent: persona-system
 tags: [skills, distribution, open-format, community, extensions]
 open_questions: []

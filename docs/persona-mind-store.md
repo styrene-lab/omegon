@@ -1,7 +1,7 @@
 ---
 id: persona-mind-store
 title: Persona mind stores — dedicated memory layers per persona identity
-status: implementing
+status: implemented
 parent: persona-system
 open_questions: []
 issue_type: feature
