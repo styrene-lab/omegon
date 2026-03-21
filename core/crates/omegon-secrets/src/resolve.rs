@@ -258,6 +258,7 @@ pub fn delete_from_keyring(name: &str) -> anyhow::Result<()> {
 
 /// Expose a SecretString's value for operations that need it (e.g., redaction set building).
 /// The caller is responsible for not leaking the exposed value.
+#[allow(dead_code)] // Available for future use — expose a SecretString for display
 pub fn expose(secret: &SecretString) -> &str {
     secret.expose_secret()
 }

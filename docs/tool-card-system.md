@@ -1,7 +1,7 @@
 ---
 id: tool-card-system
 title: Tool Card Visual System — Omegon-owned card rendering with borders, state colors, and glyphs
-status: decided
+status: implemented
 tags: [ux, tui, tools, rendering]
 open_questions: []
 ---

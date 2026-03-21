@@ -1,7 +1,7 @@
 ---
 id: fractal-status-surface
 title: Fractal status surface — multi-dimensional state visualization via generative fractal rendering
-status: decided
+status: implemented
 parent: tui-visual-system
 tags: [tui, ux, visualization, fractal, ratatui, generative, status, aesthetic]
 open_questions: []

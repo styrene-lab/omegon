@@ -25,6 +25,8 @@ pub mod splash;
 pub mod theme;
 pub mod widgets;
 
+pub mod fractal;
+
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

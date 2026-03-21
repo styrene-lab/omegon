@@ -1,7 +1,7 @@
 ---
 id: rust-crate-consolidation
 title: Rust crate consolidation and ecosystem leverage
-status: decided
+status: implemented
 parent: ts-to-rust-migration
 open_questions: []
 ---

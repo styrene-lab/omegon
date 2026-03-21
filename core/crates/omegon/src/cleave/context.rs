@@ -5,7 +5,7 @@
 //! they need to write correct code on the first attempt.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
 
 /// Discovered project context for a child's scope.
 #[derive(Debug, Default)]

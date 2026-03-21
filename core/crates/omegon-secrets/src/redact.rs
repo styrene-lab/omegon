@@ -70,14 +70,16 @@ impl Redactor {
     }
 }
 
-/// Legacy API — build+redact in one call. Used by SecretsManager.
-pub fn redact_string(input: &str, secrets: &HashMap<String, SecretString>) -> String {
+/// Build+redact in one call. Used internally and in tests.
+#[cfg(test)]
+pub(crate) fn redact_string(input: &str, secrets: &HashMap<String, SecretString>) -> String {
     let redactor = Redactor::build(secrets);
     redactor.redact(input)
 }
 
-/// Legacy API — redact content blocks.
-pub fn redact_content_blocks(
+/// Redact content blocks. Used internally and in tests.
+#[cfg(test)]
+pub(crate) fn redact_content_blocks(
     content: &mut Vec<omegon_traits::ContentBlock>,
     secrets: &HashMap<String, SecretString>,
 ) {

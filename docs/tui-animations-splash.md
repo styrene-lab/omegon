@@ -1,7 +1,7 @@
 ---
 id: tui-animations-splash
 title: TUI animations and splash screen — tachyonfx + Omegon branding
-status: decided
+status: implemented
 parent: tui-visual-system
 tags: [tui, ratatui, animation, visual, branding]
 open_questions: []
