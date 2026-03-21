@@ -143,7 +143,7 @@ async fn load_armory_plugin(
     // Load script-backed and OCI tools via ArmoryFeature
     let plugin_root = manifest_path.parent()
         .ok_or_else(|| anyhow::anyhow!("manifest has no parent directory"))?;
-    if let Some(armory_feature) = armory_feature::ArmoryFeature::from_manifest(&manifest, plugin_root) {
+    if let Some(armory_feature) = armory_feature::ArmoryFeature::from_manifest(&manifest, plugin_root).await {
         let tool_count = armory_feature.tools().len();
         tracing::info!(
             plugin = manifest.plugin.name,

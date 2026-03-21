@@ -63,20 +63,61 @@ pub struct ArmoryFeature {
     tools: Vec<ToolEntry>,
     /// Detected container runtime (lazy — only probed if OCI tools exist).
     container_runtime: std::sync::OnceLock<String>,
+    /// Pre-cached dynamic context (generated at load time by context script/endpoint).
+    cached_context: Option<CachedContext>,
+}
+
+/// Pre-generated context from a plugin's `[context]` section.
+struct CachedContext {
+    content: String,
+    ttl_turns: u32,
 }
 
 impl ArmoryFeature {
-    /// Create from a parsed manifest. Returns None if no executable tools.
+    /// Create from a parsed manifest. Returns None if no executable tools
+    /// and no dynamic context.
     ///
     /// Only includes tools with a runner (script/OCI). HTTP-only tools
     /// (endpoint without runner) are handled by HttpPluginFeature.
-    pub fn from_manifest(manifest: &ArmoryManifest, plugin_root: &Path) -> Option<Self> {
+    ///
+    /// If the manifest has a `[context]` section, the context script is
+    /// executed at load time and the output is cached.
+    pub async fn from_manifest(manifest: &ArmoryManifest, plugin_root: &Path) -> Option<Self> {
         let executable_tools: Vec<ToolEntry> = manifest.tools.iter()
             .filter(|t| t.is_script() || t.is_oci())
             .cloned()
             .collect();
 
-        if executable_tools.is_empty() {
+        // Generate dynamic context if declared
+        let cached_context = if let Some(ref ctx) = manifest.context {
+            match generate_context(ctx, plugin_root).await {
+                Ok(content) if !content.is_empty() => {
+                    tracing::info!(
+                        plugin = manifest.plugin.name,
+                        len = content.len(),
+                        ttl = ctx.ttl_turns,
+                        "generated dynamic context"
+                    );
+                    Some(CachedContext {
+                        content,
+                        ttl_turns: ctx.ttl_turns,
+                    })
+                }
+                Ok(_) => None,
+                Err(e) => {
+                    tracing::warn!(
+                        plugin = manifest.plugin.name,
+                        error = %e,
+                        "failed to generate dynamic context"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        if executable_tools.is_empty() && cached_context.is_none() {
             return None;
         }
 
@@ -85,6 +126,7 @@ impl ArmoryFeature {
             plugin_root: plugin_root.to_path_buf(),
             tools: executable_tools,
             container_runtime: std::sync::OnceLock::new(),
+            cached_context,
         })
     }
 
@@ -233,6 +275,16 @@ impl Feature for ArmoryFeature {
         &self.name
     }
 
+    fn provide_context(&self, _signals: &omegon_traits::ContextSignals<'_>) -> Option<omegon_traits::ContextInjection> {
+        let ctx = self.cached_context.as_ref()?;
+        Some(omegon_traits::ContextInjection {
+            source: format!("armory:{}", self.name),
+            content: ctx.content.clone(),
+            priority: 60, // below core directives (90+), above background memory (40)
+            ttl_turns: ctx.ttl_turns,
+        })
+    }
+
     fn tools(&self) -> Vec<ToolDefinition> {
         self.tools.iter().map(|t| {
             let runner_prefix = t.runner.as_ref()
@@ -266,6 +318,68 @@ impl Feature for ArmoryFeature {
             anyhow::bail!("tool '{}' has no supported execution method", tool_name)
         }
     }
+}
+
+/// Generate dynamic context by running the plugin's context script or calling its endpoint.
+///
+/// The script is expected to output plain text (not JSON) — this text is injected
+/// directly into the system prompt as context.
+async fn generate_context(
+    ctx: &super::armory::ContextEntry,
+    plugin_root: &Path,
+) -> anyhow::Result<String> {
+    // Script-backed context
+    if let (Some(runner), Some(script)) = (&ctx.runner, &ctx.script) {
+        let cmd = match runner {
+            ToolRunner::Python => "python3",
+            ToolRunner::Node => "node",
+            ToolRunner::Bash => "bash",
+            other => anyhow::bail!("unsupported context runner: {other}"),
+        };
+
+        let script_path = plugin_root.join(script);
+        if !script_path.exists() {
+            anyhow::bail!("context script not found: {}", script_path.display());
+        }
+
+        let script_str = script_path.to_str()
+            .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path"))?;
+
+        let output = tokio::time::timeout(
+            Duration::from_secs(15),
+            tokio::process::Command::new(cmd)
+                .arg(script_str)
+                .current_dir(plugin_root)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output(),
+        ).await
+            .map_err(|_| anyhow::anyhow!("context script timed out after 15s"))??;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("context script failed: {stderr}");
+        }
+
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+    }
+
+    // HTTP-backed context
+    if let Some(ref endpoint) = ctx.endpoint {
+        let client = reqwest::Client::new();
+        let resp = client.get(endpoint)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            anyhow::bail!("context endpoint returned {}", resp.status());
+        }
+
+        return Ok(resp.text().await?.trim().to_string());
+    }
+
+    anyhow::bail!("context entry has no runner+script or endpoint")
 }
 
 /// Parse subprocess output into a ToolResult.
@@ -361,8 +475,8 @@ mod tests {
         assert!(result_text(&result).contains("file not found"));
     }
 
-    #[test]
-    fn from_manifest_no_executable_tools() {
+    #[tokio::test]
+    async fn from_manifest_no_executable_tools() {
         let manifest = ArmoryManifest::parse(r#"
             [plugin]
             type = "persona"
@@ -372,11 +486,11 @@ mod tests {
             description = "test plugin"
         "#).unwrap();
 
-        assert!(ArmoryFeature::from_manifest(&manifest, Path::new("/tmp")).is_none());
+        assert!(ArmoryFeature::from_manifest(&manifest, Path::new("/tmp")).await.is_none());
     }
 
-    #[test]
-    fn from_manifest_with_script_tool() {
+    #[tokio::test]
+    async fn from_manifest_with_script_tool() {
         let manifest = ArmoryManifest::parse(r#"
             [plugin]
             type = "extension"
@@ -392,7 +506,7 @@ mod tests {
             script = "tools/analyze.py"
         "#).unwrap();
 
-        let feature = ArmoryFeature::from_manifest(&manifest, Path::new("/tmp")).unwrap();
+        let feature = ArmoryFeature::from_manifest(&manifest, Path::new("/tmp")).await.unwrap();
         assert_eq!(feature.name(), "CSV Analyzer");
         let tools = feature.tools();
         assert_eq!(tools.len(), 1);
@@ -400,8 +514,8 @@ mod tests {
         assert!(tools[0].label.contains("armory:python:"));
     }
 
-    #[test]
-    fn from_manifest_with_oci_tool() {
+    #[tokio::test]
+    async fn from_manifest_with_oci_tool() {
         let manifest = ArmoryManifest::parse(r#"
             [plugin]
             type = "extension"
@@ -420,15 +534,15 @@ mod tests {
             timeout_secs = 120
         "#).unwrap();
 
-        let feature = ArmoryFeature::from_manifest(&manifest, Path::new("/tmp")).unwrap();
+        let feature = ArmoryFeature::from_manifest(&manifest, Path::new("/tmp")).await.unwrap();
         let tools = feature.tools();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name, "drc_check");
         assert!(tools[0].label.contains("armory:oci:"));
     }
 
-    #[test]
-    fn from_manifest_mixed_tools_only_executable() {
+    #[tokio::test]
+    async fn from_manifest_mixed_tools_only_executable() {
         let manifest = ArmoryManifest::parse(r#"
             [plugin]
             type = "extension"
@@ -455,7 +569,7 @@ mod tests {
             image = "test:latest"
         "#).unwrap();
 
-        let feature = ArmoryFeature::from_manifest(&manifest, Path::new("/tmp")).unwrap();
+        let feature = ArmoryFeature::from_manifest(&manifest, Path::new("/tmp")).await.unwrap();
         let tools = feature.tools();
         // Only script + OCI — HTTP-only tool excluded
         assert_eq!(tools.len(), 2);
@@ -482,7 +596,7 @@ mod tests {
         "#).unwrap();
 
         let dir = tempfile::tempdir().unwrap();
-        let feature = ArmoryFeature::from_manifest(&manifest, dir.path()).unwrap();
+        let feature = ArmoryFeature::from_manifest(&manifest, dir.path()).await.unwrap();
         let cancel = tokio_util::sync::CancellationToken::new();
         let result = feature.execute("nope", "call-1", serde_json::json!({}), cancel).await;
         assert!(result.is_err());
@@ -518,7 +632,7 @@ print(json.dumps({"result": f"got {args.get('name', 'nobody')}", "error": None})
             timeout_secs = 10
         "#).unwrap();
 
-        let feature = ArmoryFeature::from_manifest(&manifest, dir.path()).unwrap();
+        let feature = ArmoryFeature::from_manifest(&manifest, dir.path()).await.unwrap();
         let cancel = tokio_util::sync::CancellationToken::new();
         let result = feature.execute("echo", "call-1", serde_json::json!({"name": "operator"}), cancel).await;
 
@@ -563,7 +677,7 @@ print(json.dumps({"result": f"got {args.get('name', 'nobody')}", "error": None})
             timeout_secs = 5
         "#).unwrap();
 
-        let feature = ArmoryFeature::from_manifest(&manifest, dir.path()).unwrap();
+        let feature = ArmoryFeature::from_manifest(&manifest, dir.path()).await.unwrap();
         let cancel = tokio_util::sync::CancellationToken::new();
         let result = feature.execute("fail", "call-1", serde_json::json!({}), cancel).await.unwrap();
         let text = result_text(&result);
@@ -588,7 +702,7 @@ print(json.dumps({"result": f"got {args.get('name', 'nobody')}", "error": None})
             script = "tools/real.sh"
         "#).unwrap();
 
-        let feature = ArmoryFeature::from_manifest(&manifest, Path::new("/tmp")).unwrap();
+        let feature = ArmoryFeature::from_manifest(&manifest, Path::new("/tmp")).await.unwrap();
         let cancel = tokio_util::sync::CancellationToken::new();
         let result = feature.execute("nonexistent", "call-1", serde_json::json!({}), cancel).await;
         assert!(result.is_err());
@@ -620,10 +734,118 @@ print(json.dumps({"result": f"got {args.get('name', 'nobody')}", "error": None})
             timeout_secs = 5
         "#).unwrap();
 
-        let feature = ArmoryFeature::from_manifest(&manifest, dir.path()).unwrap();
+        let feature = ArmoryFeature::from_manifest(&manifest, dir.path()).await.unwrap();
         let cancel = tokio_util::sync::CancellationToken::new();
         let result = feature.execute("plain", "call-1", serde_json::json!({}), cancel).await.unwrap();
         assert!(!result_is_error(&result));
         assert!(result_text(&result).contains("plain text result"));
+    }
+
+    #[tokio::test]
+    async fn from_manifest_with_context_script() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx_dir = dir.path().join("context");
+        std::fs::create_dir_all(&ctx_dir).unwrap();
+
+        std::fs::write(ctx_dir.join("status.sh"), "#!/bin/bash\necho 'Library: 42 components loaded'\n").unwrap();
+
+        let manifest = ArmoryManifest::parse(r#"
+            [plugin]
+            type = "extension"
+            id = "dev.test.ctx"
+            name = "Context Test"
+            version = "1.0.0"
+            description = "test plugin"
+
+            [context]
+            runner = "bash"
+            script = "context/status.sh"
+            ttl_turns = 30
+
+            [[tools]]
+            name = "dummy"
+            description = "dummy tool"
+            runner = "bash"
+            script = "tools/dummy.sh"
+        "#).unwrap();
+
+        let feature = ArmoryFeature::from_manifest(&manifest, dir.path()).await.unwrap();
+
+        // Check cached context is populated
+        assert!(feature.cached_context.is_some());
+        let ctx = feature.cached_context.as_ref().unwrap();
+        assert!(ctx.content.contains("42 components"), "context should contain script output: {}", ctx.content);
+        assert_eq!(ctx.ttl_turns, 30);
+
+        // Check provide_context returns the cached content
+        let signals = omegon_traits::ContextSignals {
+            user_prompt: "test",
+            recent_tools: &[],
+            recent_files: &[],
+            lifecycle_phase: &omegon_traits::LifecyclePhase::Idle,
+            turn_number: 1,
+            context_budget_tokens: 10000,
+        };
+        let injection = feature.provide_context(&signals).unwrap();
+        assert_eq!(injection.source, "armory:Context Test");
+        assert!(injection.content.contains("42 components"));
+        assert_eq!(injection.ttl_turns, 30);
+        assert_eq!(injection.priority, 60);
+    }
+
+    #[tokio::test]
+    async fn from_manifest_context_only_no_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx_dir = dir.path().join("context");
+        std::fs::create_dir_all(&ctx_dir).unwrap();
+
+        std::fs::write(ctx_dir.join("info.sh"), "#!/bin/bash\necho 'project info here'\n").unwrap();
+
+        let manifest = ArmoryManifest::parse(r#"
+            [plugin]
+            type = "extension"
+            id = "dev.test.ctx-only"
+            name = "Context Only"
+            version = "1.0.0"
+            description = "test plugin"
+
+            [context]
+            runner = "bash"
+            script = "context/info.sh"
+        "#).unwrap();
+
+        // Should create a feature even with no tools (context-only plugin)
+        let feature = ArmoryFeature::from_manifest(&manifest, dir.path()).await;
+        assert!(feature.is_some(), "context-only plugin should create a feature");
+        assert!(feature.unwrap().tools().is_empty(), "no tools expected");
+    }
+
+    #[tokio::test]
+    async fn from_manifest_context_script_fails_gracefully() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let manifest = ArmoryManifest::parse(r#"
+            [plugin]
+            type = "extension"
+            id = "dev.test.ctx-fail"
+            name = "Ctx Fail"
+            version = "1.0.0"
+            description = "test plugin"
+
+            [context]
+            runner = "bash"
+            script = "context/nonexistent.sh"
+
+            [[tools]]
+            name = "tool"
+            description = "a tool"
+            runner = "bash"
+            script = "tools/tool.sh"
+        "#).unwrap();
+
+        // Should still create a feature (tools exist) even if context fails
+        let feature = ArmoryFeature::from_manifest(&manifest, dir.path()).await;
+        assert!(feature.is_some(), "should still load despite context failure");
+        assert!(feature.unwrap().cached_context.is_none(), "context should be None on failure");
     }
 }
