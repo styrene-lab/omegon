@@ -4,12 +4,12 @@
 //! (macOS Keychain, Windows Credential Manager, Linux Secret Service).
 //! Secret values are wrapped in `secrecy::SecretString` and zeroized on drop.
 
-use crate::recipes::RecipeStore;
+use crate::recipes::{Recipe, RecipeStore};
 use crate::vault::VaultClient;
 use secrecy::{ExposeSecret, SecretString};
 use std::process::Command;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+
+
 
 /// Well-known environment variables that commonly contain secrets.
 pub const WELL_KNOWN_SECRET_ENVS: &[&str] = &[
@@ -34,6 +34,7 @@ const KEYRING_SERVICE: &str = "omegon";
 
 /// Resolve a secret by name. Priority: env var > recipe (including vault:).
 /// Returns a SecretString that auto-zeroizes on drop.
+/// For vault recipes, this returns None and logs a warning - use resolve_async instead.
 pub fn resolve_secret(name: &str, recipes: &RecipeStore) -> Option<SecretString> {
     // 1. Check environment variable
     if let Ok(val) = std::env::var(name) {
@@ -50,8 +51,57 @@ pub fn resolve_secret(name: &str, recipes: &RecipeStore) -> Option<SecretString>
     None
 }
 
-/// Execute a recipe string to resolve a secret value.
-///
+/// Resolve a secret by name with async vault support.
+/// This is the preferred method when vault recipes might be present.
+pub async fn resolve_secret_async(
+    name: &str, 
+    recipes: &RecipeStore, 
+    vault_client: Option<&VaultClient>
+) -> Option<SecretString> {
+    // 1. Check environment variable
+    if let Ok(val) = std::env::var(name) {
+        if !val.is_empty() {
+            return Some(SecretString::from(val));
+        }
+    }
+
+    // 2. Check recipe store
+    if let Some(recipe) = recipes.get(name) {
+        return execute_recipe_async(name, recipe, vault_client).await;
+    }
+
+    None
+}
+
+/// Execute a recipe to resolve a secret value.
+pub fn execute_recipe(name: &str, recipe: &Recipe) -> Option<SecretString> {
+    match recipe {
+        Recipe::String(recipe_str) => execute_string_recipe(name, recipe_str),
+        Recipe::Vault { .. } => {
+            tracing::warn!(name = name, "vault recipe requires async resolution - use execute_recipe_async");
+            None
+        }
+    }
+}
+
+/// Execute a recipe to resolve a secret value with async vault support.
+pub async fn execute_recipe_async(
+    name: &str, 
+    recipe: &Recipe, 
+    vault_client: Option<&VaultClient>
+) -> Option<SecretString> {
+    match recipe {
+        Recipe::String(recipe_str) => execute_string_recipe(name, recipe_str),
+        Recipe::Vault { path } => {
+            // Convert vault recipe to vault:path format for resolve_vault_secret
+            let vault_recipe = format!("vault:{}", path);
+            resolve_vault_secret(vault_client, &vault_recipe).await
+        }
+    }
+}
+
+/// Execute a string-based recipe to resolve a secret value.
+/// 
 /// Recipe formats:
 /// - `env:VAR_NAME` — read from environment variable
 /// - `cmd:some command` — execute shell command, trim output
@@ -59,7 +109,7 @@ pub fn resolve_secret(name: &str, recipes: &RecipeStore) -> Option<SecretString>
 /// - `keychain:service_name` — alias for keyring (backward compat with macOS-only shell-out)
 /// - `file:/path/to/file` — read first line of file
 /// - `vault:path#key` — read from Vault KV v2 (async resolution in SecretsManager)
-pub fn execute_recipe(name: &str, recipe: &str) -> Option<SecretString> {
+pub fn execute_string_recipe(name: &str, recipe: &str) -> Option<SecretString> {
     let (kind, payload) = recipe.split_once(':')?;
 
     match kind {
@@ -119,9 +169,9 @@ pub fn execute_recipe(name: &str, recipe: &str) -> Option<SecretString> {
         }
 
         "vault" => {
-            // Vault recipes are handled asynchronously in SecretsManager
+            // String vault recipes are handled asynchronously in SecretsManager
             // This function is for synchronous resolution only
-            tracing::warn!(recipe = recipe, "vault recipes require async resolution");
+            tracing::warn!(recipe = recipe, "vault recipes require async resolution - use execute_recipe_async");
             None
         }
 
@@ -229,14 +279,14 @@ mod tests {
     #[test]
     fn execute_env_recipe() {
         unsafe { std::env::set_var("TEST_RECIPE_ENV", "secret_val") };
-        let val = execute_recipe("test", "env:TEST_RECIPE_ENV");
+        let val = execute_string_recipe("test", "env:TEST_RECIPE_ENV");
         assert_eq!(val.map(|s| s.expose_secret().to_string()), Some("secret_val".to_string()));
         unsafe { std::env::remove_var("TEST_RECIPE_ENV") };
     }
 
     #[test]
     fn execute_cmd_recipe() {
-        let val = execute_recipe("test", "cmd:echo hello");
+        let val = execute_string_recipe("test", "cmd:echo hello");
         assert_eq!(val.map(|s| s.expose_secret().to_string()), Some("hello".to_string()));
     }
 
@@ -245,13 +295,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("secret.txt");
         std::fs::write(&path, "my_secret\nextra_line\n").unwrap();
-        let val = execute_recipe("test", &format!("file:{}", path.display()));
+        let val = execute_string_recipe("test", &format!("file:{}", path.display()));
         assert_eq!(val.map(|s| s.expose_secret().to_string()), Some("my_secret".to_string()));
     }
 
     #[test]
     fn unknown_recipe_kind() {
-        let val = execute_recipe("test", "unknown:something");
+        let val = execute_string_recipe("test", "unknown:something");
         assert_eq!(val.map(|s| s.expose_secret().to_string()), None);
     }
 
@@ -312,5 +362,86 @@ mod tests {
     async fn vault_recipe_rejects_null_byte() {
         let result = resolve_vault_secret(None, "vault:secret/data\0/test#key").await;
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn execute_vault_recipe() {
+        use crate::vault::{VaultClient, VaultConfig, AuthConfig};
+        use crate::recipes::Recipe;
+        use mockito::Server;
+        use secrecy::SecretString;
+
+        let mut server = Server::new_async().await;
+        let _m = server.mock("GET", "/v1/secret/data/omegon/api-keys")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data": {"data": {"anthropic": "sk-ant-test123"}, "metadata": {"version": 1, "created_time": "2024-01-01T00:00:00Z", "destroyed": false}}}"#)
+            .create_async().await;
+
+        let config = VaultConfig {
+            addr: server.url(),
+            auth: AuthConfig::Token,
+            allowed_paths: vec!["secret/data/*".to_string()],
+            denied_paths: vec![],
+            timeout_secs: 5,
+        };
+
+        let mut client = VaultClient::new(config).unwrap();
+        client.set_token(SecretString::from("hvs.test"));
+
+        // Test the new vault recipe format
+        let recipe = Recipe::vault("secret/data/omegon/api-keys#anthropic".to_string());
+        let secret = execute_recipe_async("test", &recipe, Some(&client)).await;
+        assert_eq!(secret.map(|s| s.expose_secret().to_string()), Some("sk-ant-test123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn resolve_secret_async_test() {
+        use crate::recipes::RecipeStore;
+        use crate::vault::{VaultClient, VaultConfig, AuthConfig};
+        use mockito::Server;
+        use secrecy::SecretString;
+
+        let mut server = Server::new_async().await;
+        let _m = server.mock("GET", "/v1/secret/data/omegon/api-keys")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data": {"data": {"anthropic": "sk-ant-test123"}, "metadata": {"version": 1, "created_time": "2024-01-01T00:00:00Z", "destroyed": false}}}"#)
+            .create_async().await;
+
+        let config = VaultConfig {
+            addr: server.url(),
+            auth: AuthConfig::Token,
+            allowed_paths: vec!["secret/data/*".to_string()],
+            denied_paths: vec![],
+            timeout_secs: 5,
+        };
+
+        let mut client = VaultClient::new(config).unwrap();
+        client.set_token(SecretString::from("hvs.test"));
+
+        // Set up test recipe store with proper temp directory
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut recipes = RecipeStore::load(temp_dir.path()).unwrap();
+        recipes.set_vault("ANTHROPIC_API_KEY".to_string(), "secret/data/omegon/api-keys#anthropic".to_string()).unwrap();
+
+        // Test async resolution
+        let secret = resolve_secret_async("ANTHROPIC_API_KEY", &recipes, Some(&client)).await;
+        assert_eq!(secret.map(|s| s.expose_secret().to_string()), Some("sk-ant-test123".to_string()));
+        
+        // Test env var priority (env should win over recipe)
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "env_value") };
+        let secret = resolve_secret_async("ANTHROPIC_API_KEY", &recipes, Some(&client)).await;
+        assert_eq!(secret.map(|s| s.expose_secret().to_string()), Some("env_value".to_string()));
+        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
+    }
+
+    #[test]
+    fn vault_recipe_warns_on_sync_execution() {
+        use crate::recipes::Recipe;
+        
+        let recipe = Recipe::vault("secret/data/omegon/api-keys#anthropic".to_string());
+        let secret = execute_recipe("test", &recipe);
+        assert!(secret.is_none()); // Should return None and log warning
     }
 }

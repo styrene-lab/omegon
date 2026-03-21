@@ -24,7 +24,7 @@ pub use audit::AuditLog;
 pub use guards::{GuardDecision, PathGuard};
 pub use recipes::{Recipe, RecipeStore};
 pub use redact::Redactor;
-pub use resolve::{store_in_keyring, delete_from_keyring, resolve_vault_secret};
+pub use resolve::{store_in_keyring, delete_from_keyring, resolve_vault_secret, resolve_secret_async, execute_recipe_async};
 pub use store::{KeyBackend, SecretStore};
 pub use vault::{AuthConfig, VaultClient, VaultConfig};
 
@@ -155,45 +155,27 @@ impl SecretsManager {
     /// Resolve a secret by name with async vault support.
     /// This is the preferred method for vault: recipes.
     pub async fn resolve_async(&self, name: &str) -> Option<String> {
-        // 1. Check environment variable first
-        if let Ok(val) = std::env::var(name) {
-            if !val.is_empty() {
-                return Some(val);
-            }
-        }
-
-        // 2. Check recipe store
-        if let Some(recipe) = self.recipes.get(name) {
-            if recipe.starts_with("vault:") {
-                // Handle vault recipes asynchronously
-                let client = self.vault_client.lock().await;
-                if let Some(ref vault) = *client {
-                    if let Some(secret) = resolve_vault_secret(Some(vault), recipe).await {
-                        let value = secret.expose_secret().to_string();
-                        
-                        // Add to redaction set
-                        {
-                            let mut set = self.redaction_set.write().unwrap();
-                            set.insert(name.to_string(), secret);
-                            // Rebuild redactor with new value
-                            let new_redactor = Redactor::build(&set);
-                            *self.redactor.write().unwrap() = new_redactor;
-                        }
-                        
-                        return Some(value);
-                    }
-                } else {
-                    tracing::warn!(recipe = recipe, "vault recipe requested but no vault client available");
+        let client = self.vault_client.lock().await;
+        let vault_client = client.as_ref();
+        
+        if let Some(secret) = resolve_secret_async(name, &self.recipes, vault_client).await {
+            let value = secret.expose_secret().to_string();
+            
+            // Add to redaction set if it's a new value
+            {
+                let mut set = self.redaction_set.write().unwrap();
+                if !set.contains_key(name) {
+                    set.insert(name.to_string(), secret);
+                    // Rebuild redactor with new value
+                    let new_redactor = Redactor::build(&set);
+                    *self.redactor.write().unwrap() = new_redactor;
                 }
-                return None;
-            } else {
-                // Handle non-vault recipes synchronously
-                return resolve::execute_recipe(name, recipe)
-                    .map(|s| s.expose_secret().to_string());
             }
+            
+            Some(value)
+        } else {
+            None
         }
-
-        None
     }
 
     /// Redact all known secret values from a string.
@@ -226,7 +208,7 @@ impl SecretsManager {
         let mut set = self.redaction_set.write().unwrap();
         set.clear();
 
-        // Resolve from recipes
+        // Resolve from recipes (sync only - vault recipes will be skipped here)
         for (name, recipe) in self.recipes.iter() {
             if let Some(value) = resolve::execute_recipe(name, recipe) {
                 set.insert(name.clone(), value);
@@ -250,6 +232,6 @@ impl SecretsManager {
         let new_redactor = Redactor::build(&set);
         *self.redactor.write().unwrap() = new_redactor;
 
-        tracing::info!(count = count, "redaction set refreshed (keyring + aho-corasick)");
+        tracing::info!(count = count, "redaction set refreshed (keyring + aho-corasick) - vault recipes require async refresh");
     }
 }
