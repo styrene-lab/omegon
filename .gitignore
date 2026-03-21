@@ -26,3 +26,4 @@ sessions/
 
 # Jujutsu VCS (co-located with git)
 .jj/
+.omegon/history
