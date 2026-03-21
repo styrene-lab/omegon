@@ -45,8 +45,15 @@ pub async fn ws_handler(
     // Validate auth token
     let expected = state.auth_token.as_str();
     match query.token.as_deref() {
-        Some(t) if t == expected => {}
-        _ => {
+        Some(t) if t == expected => {
+            tracing::debug!("WebSocket auth OK, upgrading");
+        }
+        Some(_) => {
+            tracing::warn!("WebSocket auth failed — token mismatch");
+            return axum::http::StatusCode::UNAUTHORIZED.into_response();
+        }
+        None => {
+            tracing::warn!("WebSocket auth failed — no token provided");
             return axum::http::StatusCode::UNAUTHORIZED.into_response();
         }
     }
@@ -55,6 +62,7 @@ pub async fn ws_handler(
 
 /// Handle a single WebSocket connection.
 async fn handle_socket(socket: WebSocket, state: WebState) {
+    tracing::info!("WebSocket client connected");
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // Send initial state snapshot
@@ -63,9 +71,13 @@ async fn handle_socket(socket: WebSocket, state: WebState) {
         "type": "state_snapshot",
         "data": snapshot,
     });
-    if ws_tx.send(Message::Text(init_msg.to_string().into())).await.is_err() {
+    let snapshot_json = init_msg.to_string();
+    tracing::debug!(bytes = snapshot_json.len(), "sending initial snapshot");
+    if ws_tx.send(Message::Text(snapshot_json.into())).await.is_err() {
+        tracing::warn!("WebSocket: initial snapshot send failed — client disconnected");
         return;
     }
+    tracing::debug!("initial snapshot sent OK");
 
     // Subscribe to agent events
     let mut events_rx = state.events_tx.subscribe();
@@ -126,7 +138,7 @@ async fn handle_socket(socket: WebSocket, state: WebState) {
         _ = &mut recv_task => { send_task.abort(); }
     }
 
-    tracing::debug!("WebSocket client disconnected");
+    tracing::info!("WebSocket client disconnected");
 }
 
 /// Process a command from a WebSocket client.

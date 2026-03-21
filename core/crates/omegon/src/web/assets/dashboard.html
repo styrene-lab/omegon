@@ -301,23 +301,32 @@ let ws = null;
 let reconnectTimer = null;
 const WS_URL = `ws://${location.host}/ws?token=${encodeURIComponent(AUTH_TOKEN)}`;
 
+let wsAttempts = 0;
 function connect() {
-  console.log('[ws] connecting to', WS_URL);
-  ws = new WebSocket(WS_URL);
+  wsAttempts++;
+  console.log('[ws] attempt', wsAttempts, 'connecting to', WS_URL);
+  document.getElementById('ws-label').textContent = `connecting… (attempt ${wsAttempts})`;
+  try {
+    ws = new WebSocket(WS_URL);
+  } catch (e) {
+    console.error('[ws] constructor threw:', e);
+    document.getElementById('ws-label').textContent = `failed: ${e.message}`;
+    return;
+  }
   ws.onopen = () => {
     console.log('[ws] connected');
+    wsAttempts = 0;
     document.getElementById('ws-status').className = 'status-dot connected';
     document.getElementById('ws-label').textContent = 'connected';
     if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
   };
   ws.onerror = (e) => {
     console.error('[ws] error:', e);
-    document.getElementById('ws-label').textContent = 'error — check console';
   };
   ws.onclose = (e) => {
     console.log('[ws] closed:', e.code, e.reason);
     document.getElementById('ws-status').className = 'status-dot disconnected';
-    document.getElementById('ws-label').textContent = `disconnected (${e.code})`;
+    document.getElementById('ws-label').textContent = `disconnected (code ${e.code})`;
     if (!reconnectTimer) {
       reconnectTimer = setInterval(() => { try { connect(); } catch(e) {} }, 3000);
     }
