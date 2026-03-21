@@ -31,6 +31,7 @@ mod session;
 pub mod settings;
 mod setup;
 mod plugins;
+pub mod status;
 mod tools;
 mod tui;
 mod web;
