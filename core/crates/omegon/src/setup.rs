@@ -3,6 +3,7 @@
 //! Builds the EventBus with all features registered, plus the ContextManager
 //! and ConversationState needed for the agent loop.
 
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use omegon_memory::MemoryBackend as _; // bring trait methods into scope
@@ -255,6 +256,22 @@ impl AgentSetup {
 
         // ─── Finalize bus (caches tool/command definitions) ─────────────
         bus.finalize();
+
+        // ─── Assemble harness status (bootstrap probe) ──────────────────
+        let harness_status = crate::status::HarnessStatus::assemble();
+        tracing::info!(
+            providers = harness_status.providers.len(),
+            mcp = harness_status.mcp_servers.len(),
+            container = harness_status.container_runtime.is_some(),
+            "harness status assembled"
+        );
+
+        // Print bootstrap panel if running interactively
+        let is_tty = std::io::stderr().is_terminal();
+        if is_tty {
+            let panel = crate::tui::bootstrap::render_bootstrap(&harness_status, true);
+            eprint!("{panel}");
+        }
 
         // ─── System prompt + context ────────────────────────────────────
         // Build the base prompt from bus tool definitions (not the old tools vec)

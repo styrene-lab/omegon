@@ -253,6 +253,10 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "type": "system_notification",
             "message": escape_html(message),
         }),
+        AgentEvent::HarnessStatusChanged { status_json } => json!({
+            "type": "harness_status_changed",
+            "status": status_json,
+        }),
     }
 }
 

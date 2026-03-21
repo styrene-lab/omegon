@@ -341,6 +341,9 @@ pub enum AgentEvent {
     DecompositionCompleted { merged: bool },
     /// System notification — displayed in TUI but not sent to the LLM.
     SystemNotification { message: String },
+    /// Harness status changed — persona switch, MCP connect, secret unlock, etc.
+    /// Serialized HarnessStatus JSON. Web dashboard renders the snapshot.
+    HarnessStatusChanged { status_json: Value },
 }
 
 /// Session configuration for legacy SessionHook.

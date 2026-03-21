@@ -10,6 +10,7 @@ use super::theme::Theme;
 use super::widgets::{self, GaugeConfig};
 
 use crate::settings::{ContextClass, ContextMode};
+use crate::status::HarnessStatus;
 
 /// Footer data — updated by the TUI on every event and rendered each frame.
 #[derive(Default)]
@@ -31,6 +32,9 @@ pub struct FooterData {
     pub compactions: u32,
     pub cwd: String,
     pub is_oauth: bool,
+    /// HarnessStatus — persona, MCP, secrets, inference state.
+    /// Updated via BusEvent::HarnessStatusChanged.
+    pub harness: HarnessStatus,
 }
 
 impl FooterData {
@@ -165,15 +169,33 @@ impl FooterData {
             Span::styled(self.context_class.short(), Style::default().fg(ctx_class_color)),
         ]));
 
-        lines.push(Line::from(vec![
+        // Second line: auth + persona badge
+        let mut auth_parts: Vec<Span<'static>> = vec![
             Span::styled(format!("{auth_icon} "), Style::default().fg(auth_color)),
             Span::styled(
                 if self.is_oauth { "subscription" } else { "api key" },
                 Style::default().fg(t.muted()),
             ),
-            Span::styled(" · ", Style::default().fg(t.border_dim())),
-            Span::styled(self.model_provider.clone(), Style::default().fg(t.dim())),
-        ]));
+        ];
+
+        // Persona badge
+        if let Some(ref p) = self.harness.active_persona {
+            auth_parts.push(Span::styled(" · ", Style::default().fg(t.border_dim())));
+            auth_parts.push(Span::styled(
+                format!("{} {}", p.badge, p.name),
+                Style::default().fg(t.accent()),
+            ));
+        }
+        // Tone badge
+        if let Some(ref tone) = self.harness.active_tone {
+            auth_parts.push(Span::styled(" · ", Style::default().fg(t.border_dim())));
+            auth_parts.push(Span::styled(
+                format!("♪ {}", tone.name),
+                Style::default().fg(t.dim()),
+            ));
+        }
+
+        lines.push(Line::from(auth_parts));
 
         let widget = Paragraph::new(lines).style(Style::default().bg(t.card_bg()));
         frame.render_widget(widget, inner);
@@ -237,13 +259,43 @@ impl FooterData {
             Span::styled(display_cwd, Style::default().fg(t.muted())),
         ]));
 
-        // Tool calls + compactions
-        if self.tool_calls > 0 || self.compactions > 0 {
+        // Second line: MCP + secrets + tool calls + compactions
+        {
             let mut parts: Vec<Span<'static>> = Vec::new();
+
+            // MCP servers
+            let mcp_connected = self.harness.mcp_servers.iter().filter(|s| s.connected).count();
+            if mcp_connected > 0 {
+                let tool_count = self.harness.mcp_tool_count();
+                parts.push(Span::styled("MCP ", Style::default().fg(t.dim())));
+                parts.push(Span::styled(
+                    format!("{}({}t)", mcp_connected, tool_count),
+                    Style::default().fg(t.accent()),
+                ));
+            }
+
+            // Secrets
+            if let Some(ref sec) = self.harness.secret_backend {
+                if !parts.is_empty() {
+                    parts.push(Span::styled(" · ", Style::default().fg(t.dim())));
+                }
+                let icon = if sec.locked { "🔒" } else { "🔓" };
+                parts.push(Span::styled(
+                    format!("{icon} {}", sec.stored_count),
+                    Style::default().fg(t.muted()),
+                ));
+            }
+
+            // Tool calls
             if self.tool_calls > 0 {
+                if !parts.is_empty() {
+                    parts.push(Span::styled(" · ", Style::default().fg(t.dim())));
+                }
                 parts.push(Span::styled("⚙ ", Style::default().fg(t.dim())));
                 parts.push(Span::styled(format!("{}", self.tool_calls), Style::default().fg(t.muted())));
             }
+
+            // Compactions
             if self.compactions > 0 {
                 if !parts.is_empty() {
                     parts.push(Span::styled(" · ", Style::default().fg(t.dim())));
@@ -251,7 +303,10 @@ impl FooterData {
                 parts.push(Span::styled("↻ ", Style::default().fg(t.dim())));
                 parts.push(Span::styled(format!("{}", self.compactions), Style::default().fg(t.muted())));
             }
-            lines.push(Line::from(parts));
+
+            if !parts.is_empty() {
+                lines.push(Line::from(parts));
+            }
         }
 
         let widget = Paragraph::new(lines).style(Style::default().bg(t.card_bg()));
