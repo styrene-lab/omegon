@@ -336,7 +336,21 @@ fn generate_pkce() -> (String, String) {
 
 /// Run the Anthropic OAuth login flow.
 /// Opens a browser, listens for the callback, exchanges the code for tokens.
+/// Progress callback for OAuth login — allows TUI to receive status updates
+/// without writing to stderr.
+pub type LoginProgress = Box<dyn Fn(&str) + Send + Sync>;
+
+fn default_progress() -> LoginProgress {
+    Box::new(|msg| eprintln!("{msg}"))
+}
+
 pub async fn login_anthropic() -> anyhow::Result<OAuthCredentials> {
+    login_anthropic_with_progress(default_progress()).await
+}
+
+pub async fn login_anthropic_with_progress(
+    progress: LoginProgress,
+) -> anyhow::Result<OAuthCredentials> {
     let (verifier, challenge) = generate_pkce();
 
     // Build authorization URL
@@ -349,12 +363,14 @@ pub async fn login_anthropic() -> anyhow::Result<OAuthCredentials> {
 
     // Start local HTTP server for the callback
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{CALLBACK_PORT}")).await?;
-    tracing::info!(port = CALLBACK_PORT, "OAuth callback server listening");
+    tracing::debug!(port = CALLBACK_PORT, "OAuth callback server listening");
 
     // Open browser
-    eprintln!("\nOpening browser for Anthropic login...");
-    eprintln!("If the browser doesn't open, visit:\n  {auth_url}\n");
-    let _ = open::that(&auth_url);
+    progress("Opening browser for Anthropic login…");
+    let browser_ok = open::that(&auth_url).is_ok();
+    if !browser_ok {
+        progress(&format!("Could not open browser. Visit:\n  {auth_url}"));
+    }
 
     // Wait for callback
     let (mut stream, _addr) = listener.accept().await?;
@@ -375,7 +391,7 @@ pub async fn login_anthropic() -> anyhow::Result<OAuthCredentials> {
         anyhow::bail!("OAuth state mismatch");
     }
 
-    eprintln!("Exchanging authorization code for tokens...");
+    progress("Exchanging authorization code for tokens…");
 
     // Exchange code for tokens
     let client = reqwest::Client::new();
@@ -413,7 +429,7 @@ pub async fn login_anthropic() -> anyhow::Result<OAuthCredentials> {
 
     // Save to auth.json
     write_credentials("anthropic", &creds)?;
-    eprintln!("✓ Authentication successful. Credentials saved to ~/.pi/agent/auth.json");
+    progress("✓ Authentication successful. Credentials saved.");
 
     Ok(creds)
 }
@@ -429,6 +445,12 @@ const OPENAI_SCOPE: &str = "openid profile email offline_access";
 
 /// Run the OpenAI Codex OAuth login flow (ChatGPT Plus/Pro subscription).
 pub async fn login_openai() -> anyhow::Result<OAuthCredentials> {
+    login_openai_with_progress(default_progress()).await
+}
+
+pub async fn login_openai_with_progress(
+    progress: LoginProgress,
+) -> anyhow::Result<OAuthCredentials> {
     let (verifier, challenge) = generate_pkce();
 
     // Random state parameter
@@ -446,11 +468,13 @@ pub async fn login_openai() -> anyhow::Result<OAuthCredentials> {
     );
 
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{OPENAI_CALLBACK_PORT}")).await?;
-    tracing::info!(port = OPENAI_CALLBACK_PORT, "OpenAI OAuth callback server listening");
+    tracing::debug!(port = OPENAI_CALLBACK_PORT, "OpenAI OAuth callback server listening");
 
-    eprintln!("\nOpening browser for OpenAI login...");
-    eprintln!("If the browser doesn't open, visit:\n  {auth_url}\n");
-    let _ = open::that(&auth_url);
+    progress("Opening browser for OpenAI login…");
+    let browser_ok = open::that(&auth_url).is_ok();
+    if !browser_ok {
+        progress(&format!("Could not open browser. Visit:\n  {auth_url}"));
+    }
 
     let (mut stream, _addr) = listener.accept().await?;
     let mut buf = [0u8; 4096];
@@ -467,7 +491,7 @@ pub async fn login_openai() -> anyhow::Result<OAuthCredentials> {
         anyhow::bail!("OAuth state mismatch");
     }
 
-    eprintln!("Exchanging authorization code for tokens...");
+    progress("Exchanging authorization code for tokens…");
 
     let client = reqwest::Client::new();
     let resp = client
@@ -507,7 +531,7 @@ pub async fn login_openai() -> anyhow::Result<OAuthCredentials> {
 
     // Store with accountId as extra field
     write_credentials_with_extra("openai-codex", &creds, account_id.as_deref())?;
-    eprintln!("✓ OpenAI authentication successful. Credentials saved.");
+    progress("✓ OpenAI authentication successful. Credentials saved.");
 
     Ok(creds)
 }

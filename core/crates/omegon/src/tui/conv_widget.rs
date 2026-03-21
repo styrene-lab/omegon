@@ -170,6 +170,15 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
     type State = ConvState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ConvState) {
+        // Fill conversation background — without this, empty space inherits
+        // the terminal's default background, breaking the themed palette.
+        let bg = self.theme.surface_bg();
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                buf[(x, y)].set_bg(bg);
+            }
+        }
+
         if area.width == 0 || area.height == 0 || self.segments.is_empty() {
             return;
         }

@@ -692,6 +692,8 @@ impl App {
         ("context",  "select context class (Squad/Maniple/Clan/Legion)",       &["squad", "maniple", "clan", "legion"]),
         ("sessions", "list saved sessions",                  &[]),
         ("memory",   "memory stats",                        &[]),
+        ("login",    "log in to provider (default: anthropic)", &["anthropic", "openai"]),
+        ("logout",   "log out of provider",                   &["anthropic", "openai"]),
         ("auth",     "authentication management",             &["status", "login", "logout", "unlock"]),
         ("chronos",  "date/time context",                      &["week", "month", "quarter", "relative", "iso", "epoch", "tz", "range", "all"]),
         ("migrate",  "import from other tools",               &["auto", "claude-code", "pi", "codex", "cursor", "aider"]),
@@ -1154,6 +1156,26 @@ impl App {
                     }
                     _ => SlashResult::Display(format!("Unknown vault subcommand: {args}\nOptions: status, unseal, login, configure, init-policy")),
                 }
+            }
+
+            // /login [provider] — alias for /auth login <provider>
+            "login" => {
+                let provider = if args.is_empty() { "anthropic" } else { args };
+                let _ = tx.try_send(TuiCommand::BusCommand {
+                    name: "auth_login".to_string(),
+                    args: provider.to_string(),
+                });
+                SlashResult::Handled
+            }
+
+            // /logout [provider] — alias for /auth logout <provider>
+            "logout" => {
+                let provider = if args.is_empty() { "anthropic" } else { args };
+                let _ = tx.try_send(TuiCommand::BusCommand {
+                    name: "auth_logout".to_string(),
+                    args: provider.to_string(),
+                });
+                SlashResult::Handled
             }
 
             "exit" | "quit" => SlashResult::Quit,

@@ -670,13 +670,29 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             let provider = args.trim();
                             let provider = if provider.is_empty() { "anthropic" } else { provider };
                             
-                            // Run the login in a background task to avoid blocking
+                            // Run the login in a background task. Progress updates go
+                            // through SystemNotification instead of eprintln (which
+                            // would corrupt the ratatui display).
                             let events_tx_clone = events_tx.clone();
+                            let progress_tx = events_tx.clone();
                             let provider_clone = provider.to_string();
                             tokio::spawn(async move {
-                                let result = run_auth_login(&provider_clone).await;
+                                let progress: auth::LoginProgress = Box::new(move |msg| {
+                                    let _ = progress_tx.send(AgentEvent::SystemNotification {
+                                        message: msg.to_string(),
+                                    });
+                                });
+                                let result = match provider_clone.as_str() {
+                                    "anthropic" | "claude" => {
+                                        auth::login_anthropic_with_progress(progress).await
+                                    }
+                                    "openai" | "chatgpt" => {
+                                        auth::login_openai_with_progress(progress).await
+                                    }
+                                    _ => Err(anyhow::anyhow!("Unknown provider: {}. Use: anthropic, openai", provider_clone)),
+                                };
                                 let message = match result {
-                                    Ok(()) => format!("✓ Successfully logged in to {}", provider_clone),
+                                    Ok(_) => format!("✓ Successfully logged in to {}", provider_clone),
                                     Err(e) => format!("❌ Login failed: {}", e),
                                 };
                                 let _ = events_tx_clone.send(AgentEvent::SystemNotification { message });
