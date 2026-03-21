@@ -1,7 +1,7 @@
 ---
 id: rust-secrets
 title: Port secrets system to Rust (redaction, recipes, tool guards)
-status: implementing
+status: implemented
 parent: ts-to-rust-migration
 open_questions: []
 ---
@@ -22,3 +22,17 @@ Port the 00-secrets extension: secret recipes (env, keychain, shell cmd), output
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `core/crates/omegon-secrets/` (new) — Full crate: 2,862 LoC, 8 modules (recipes, redact, guards, audit, resolve, store, vault, lib), 61 tests. SecretsManager facade wired into setup.rs + loop.rs.
+- `core/crates/omegon/src/setup.rs` (modified) — SecretsManager initialized from ~/.omegon/, stored as Arc in AgentSetup
+- `core/crates/omegon/src/loop.rs` (modified) — redact_content called on tool results, check_guard called before dispatch
+
+### Constraints
+
+- Redaction happens at dispatch level — catches all tool output before it enters conversation
+- Guards fire before tool dispatch — blocks sensitive path access
+- Encrypted store uses AES-256-GCM + Argon2id (separate from memory DB)
