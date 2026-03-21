@@ -1,7 +1,7 @@
 ---
 id: functional-plugins
 title: Functional plugins — code-backed skills with tools, endpoints, and runtime logic
-status: implementing
+status: implemented
 parent: persona-system
 tags: [plugins, architecture, extensions, tools, mcp, code]
 open_questions: []
@@ -230,6 +230,11 @@ my-pcb-tools/
 
 **Status:** decided
 **Rationale:** The Feature::provide_context() method is synchronous — can't spawn subprocesses. Running a script per-turn would be expensive and add latency. Instead, context is generated once at plugin load (async from_manifest) and cached. ttl_turns controls how long it persists in the context budget. If fresh context is needed, the plugin provides a tool that the agent can call explicitly.
+
+### Decision: Local plugins symlinked, not copied — development mode
+
+**Status:** decided
+**Rationale:** Symlinks let developers edit plugin source and see changes immediately without reinstalling. The symlink marker (→) in `plugin list` makes the mode visible. On Windows, falls back to directory copy since symlinks require admin privileges.
 
 ## Open Questions
 
