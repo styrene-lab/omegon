@@ -12,6 +12,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use crate::lifecycle::types::*;
 use super::theme::Theme;
 use super::widgets;
+use super::fractal::FractalWidget;
 
 use std::sync::{Arc, Mutex};
 
@@ -145,6 +146,8 @@ pub struct DashboardState {
     // Context gauge
     pub context_used_pct: f32,
     pub context_window_k: usize,
+    // Fractal widget
+    pub fractal: FractalWidget,
 }
 
 #[derive(Default, Clone)]

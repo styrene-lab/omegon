@@ -14,6 +14,7 @@
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use std::cell::RefCell;
 
 use omegon_traits::{
     BusEvent, BusRequest, ContentBlock, Feature,
@@ -28,6 +29,7 @@ pub struct HarnessSettings {
     session_start: std::time::Instant,
     turns: u32,
     tool_calls: u32,
+    refresh_status_pending: RefCell<bool>,
 }
 
 impl HarnessSettings {
@@ -37,6 +39,7 @@ impl HarnessSettings {
             session_start: std::time::Instant::now(),
             turns: 0,
             tool_calls: 0,
+            refresh_status_pending: RefCell::new(false),
         }
     }
 }
@@ -115,6 +118,11 @@ impl Feature for HarnessSettings {
                     let mut s = self.settings.lock().unwrap();
                     s.context_class = class;
                     s.context_window = window;
+                    drop(s);
+                    
+                    // Set flag for status refresh on next turn
+                    *self.refresh_status_pending.borrow_mut() = true;
+                    
                     Ok(text_result(&format!(
                         "Context class → {} ({} tokens)",
                         class.short(), window,
@@ -231,7 +239,12 @@ impl Feature for HarnessSettings {
         match event {
             BusEvent::TurnEnd { .. } => {
                 self.turns += 1;
-                vec![]
+                if *self.refresh_status_pending.borrow() {
+                    *self.refresh_status_pending.borrow_mut() = false;
+                    vec![BusRequest::RefreshHarnessStatus]
+                } else {
+                    vec![]
+                }
             }
             BusEvent::ToolEnd { .. } => {
                 self.tool_calls += 1;

@@ -43,6 +43,19 @@ pub struct HarnessStatus {
 
     // ── Cloud providers ──────────────────────────────────────
     pub providers: Vec<ProviderStatus>,
+
+    // ── Active delegates ─────────────────────────────────────
+    /// Currently running delegate processes (cleave children).
+    pub active_delegates: Vec<DelegateSummary>,
+}
+
+/// Summary of an active delegate process.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegateSummary {
+    pub task_id: String,
+    pub agent_name: String,
+    pub status: String, // "running" / "completed" / "failed"
+    pub elapsed_ms: u64,
 }
 
 // ── Sub-types ────────────────────────────────────────────────
@@ -399,6 +412,7 @@ impl Default for HarnessStatus {
                 active_persona_mind: None,
             },
             providers: vec![],
+            active_delegates: vec![],
         }
     }
 }

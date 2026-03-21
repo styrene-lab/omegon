@@ -7,6 +7,7 @@
 
 use async_trait::async_trait;
 use serde_json::json;
+use std::cell::RefCell;
 
 use omegon_traits::{
     BusEvent, BusRequest, ContentBlock, Feature, NotifyLevel,
@@ -18,17 +19,22 @@ use crate::plugins::registry::PluginRegistry;
 
 /// Feature that exposes persona/tone management as agent tools.
 pub struct PersonaFeature {
-    registry: PluginRegistry,
+    registry: RefCell<PluginRegistry>,
+    /// Flag indicating harness status should be refreshed on next turn boundary
+    refresh_status_pending: RefCell<bool>,
 }
 
 impl PersonaFeature {
     pub fn new(registry: PluginRegistry) -> Self {
-        Self { registry }
+        Self { 
+            registry: RefCell::new(registry),
+            refresh_status_pending: RefCell::new(false),
+        }
     }
 
     /// Get a reference to the inner registry (for HarnessStatus, etc.)
-    pub fn registry(&self) -> &PluginRegistry {
-        &self.registry
+    pub fn registry(&self) -> std::cell::Ref<PluginRegistry> {
+        self.registry.borrow()
     }
 }
 
@@ -104,9 +110,15 @@ impl Feature for PersonaFeature {
                     .unwrap_or("");
 
                 if name == "off" {
-                    // Can't mutate self in async fn — return a request via text
-                    // The TUI/loop will process the switch. For now, report intent.
-                    return Ok(text_result("Persona deactivation requested. Use /persona off in the TUI."));
+                    // Deactivate current persona
+                    let result = self.registry.borrow_mut().deactivate_persona();
+                    *self.refresh_status_pending.borrow_mut() = true;
+                    
+                    if result.removed_id.is_some() {
+                        return Ok(text_result("Persona deactivated."));
+                    } else {
+                        return Ok(text_result("No persona was active."));
+                    }
                 }
 
                 let (personas, _) = persona_loader::scan_available();
@@ -115,16 +127,26 @@ impl Feature for PersonaFeature {
                 match personas.iter().find(|p| p.name.to_lowercase() == target || p.id.to_lowercase().contains(&target)) {
                     Some(available) => {
                         match persona_loader::load_persona(&available.path) {
-                            Ok(persona) => {
-                                let badge = persona.badge.clone().unwrap_or_else(|| "⚙".into());
-                                let fact_count = persona.mind_facts.len();
-                                let pname = persona.name.clone();
-                                let skills = persona.activated_skills.join(", ");
+                            Ok(loaded_persona) => {
+                                let badge = loaded_persona.badge.clone().unwrap_or_else(|| "⚙".into());
+                                let fact_count = loaded_persona.mind_facts.len();
+                                let pname = loaded_persona.name.clone();
+                                let skills = loaded_persona.activated_skills.join(", ");
 
-                                Ok(text_result(&format!(
+                                // Actually activate the persona
+                                let activation_result = self.registry.borrow_mut().activate_persona(loaded_persona);
+                                *self.refresh_status_pending.borrow_mut() = true;
+
+                                let mut message = format!(
                                     "{badge} Persona activated: {pname}\n  Mind facts: {fact_count}\n  Skills: {skills}\n\n\
                                     Note: The persona directive and mind facts are now active in the system prompt."
-                                )))
+                                );
+                                
+                                if let Some(prev) = activation_result.previous_id {
+                                    message.push_str(&format!("\n\nPrevious persona ({}) was deactivated.", prev));
+                                }
+
+                                Ok(text_result(&message))
                             }
                             Err(e) => Ok(error_result(&format!("Failed to load persona '{name}': {e}"))),
                         }
@@ -145,7 +167,15 @@ impl Feature for PersonaFeature {
                     .unwrap_or("");
 
                 if name == "off" {
-                    return Ok(text_result("Tone deactivation requested. Use /tone off in the TUI."));
+                    // Deactivate current tone
+                    let removed = self.registry.borrow_mut().deactivate_tone();
+                    *self.refresh_status_pending.borrow_mut() = true;
+                    
+                    if removed.is_some() {
+                        return Ok(text_result("Tone deactivated."));
+                    } else {
+                        return Ok(text_result("No tone was active."));
+                    }
                 }
 
                 let (_, tones) = persona_loader::scan_available();
@@ -154,15 +184,24 @@ impl Feature for PersonaFeature {
                 match tones.iter().find(|t| t.name.to_lowercase() == target || t.id.to_lowercase().contains(&target)) {
                     Some(available) => {
                         match persona_loader::load_tone(&available.path) {
-                            Ok(tone) => {
-                                let tname = tone.name.clone();
-                                let exemplar_count = tone.exemplars.len();
+                            Ok(loaded_tone) => {
+                                let tname = loaded_tone.name.clone();
+                                let exemplar_count = loaded_tone.exemplars.len();
 
-                                Ok(text_result(&format!(
-                                    "♪ Tone activated: {tname}\n  Exemplars: {exemplar_count}\n  Intensity: design={}, coding={}\n\n\
-                                    Note: The tone directive is now active in the system prompt.",
-                                    tone.intensity.design, tone.intensity.coding
-                                )))
+                                // Actually activate the tone
+                                let previous = self.registry.borrow_mut().activate_tone(loaded_tone);
+                                *self.refresh_status_pending.borrow_mut() = true;
+
+                                let mut message = format!(
+                                    "♪ Tone activated: {tname}\n  Exemplars: {exemplar_count}\n\n\
+                                    Note: The tone directive is now active in the system prompt."
+                                );
+                                
+                                if let Some(prev) = previous {
+                                    message.push_str(&format!("\n\nPrevious tone ({}) was deactivated.", prev));
+                                }
+
+                                Ok(text_result(&message))
                             }
                             Err(e) => Ok(error_result(&format!("Failed to load tone '{name}': {e}"))),
                         }
@@ -179,8 +218,9 @@ impl Feature for PersonaFeature {
 
             "list_personas" => {
                 let (personas, tones) = persona_loader::scan_available();
-                let active_persona = self.registry.active_persona().map(|p| &p.id);
-                let active_tone = self.registry.active_tone().map(|t| &t.id);
+                let registry = self.registry.borrow();
+                let active_persona = registry.active_persona().map(|p| &p.id);
+                let active_tone = registry.active_tone().map(|t| &t.id);
 
                 let mut out = String::new();
 
@@ -218,20 +258,30 @@ impl Feature for PersonaFeature {
             // On session start, log the active persona/tone
             BusEvent::SessionStart { .. } => {
                 let mut requests = Vec::new();
-                if let Some(persona) = self.registry.active_persona() {
+                let registry = self.registry.borrow();
+                if let Some(persona) = registry.active_persona() {
                     let badge = persona.badge.as_deref().unwrap_or("⚙");
                     requests.push(BusRequest::Notify {
                         message: format!("{badge} Persona: {}", persona.name),
                         level: NotifyLevel::Info,
                     });
                 }
-                if let Some(tone) = self.registry.active_tone() {
+                if let Some(tone) = registry.active_tone() {
                     requests.push(BusRequest::Notify {
                         message: format!("♪ Tone: {}", tone.name),
                         level: NotifyLevel::Info,
                     });
                 }
                 requests
+            }
+            // Check for refresh flag on turn boundaries
+            BusEvent::TurnEnd { .. } => {
+                if *self.refresh_status_pending.borrow() {
+                    *self.refresh_status_pending.borrow_mut() = false;
+                    vec![BusRequest::RefreshHarnessStatus]
+                } else {
+                    vec![]
+                }
             }
             _ => vec![],
         }

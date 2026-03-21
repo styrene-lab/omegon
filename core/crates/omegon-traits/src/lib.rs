@@ -173,6 +173,9 @@ pub enum BusRequest {
     },
     /// Request context compaction before the next turn.
     RequestCompaction,
+    /// Request the harness to refresh and re-emit its status.
+    /// Used when features change state that affects the HarnessStatus.
+    RefreshHarnessStatus,
 }
 
 /// Notification severity level.
