@@ -457,14 +457,16 @@ impl LlmBridge for AnthropicClient {
             )
             .header("anthropic-version", "2023-06-01")
             .header("anthropic-beta", {
-                let mut flags = if is_oauth {
-                    "claude-code-20250219,oauth-2025-04-20".to_string()
+                let flags = if is_oauth {
+                    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14".to_string()
                 } else {
                     "interleaved-thinking-2025-05-14".to_string()
                 };
-                if options.extended_context {
-                    flags.push_str(",context-1m-2025-08-07");
-                }
+                // NOTE: context-1m-2025-08-07 is NEVER sent. Sonnet 4.6 and
+                // Opus 4.6 support 1M context natively without a beta flag.
+                // Sending it triggers "Extra usage is required for long context
+                // requests" (429) on OAuth subscriptions — a deprecated billing
+                // gate that no longer corresponds to a capability gate.
                 flags
             })
             .header("content-type", "application/json")
@@ -1090,6 +1092,19 @@ mod tests {
         };
         assert!(flags.contains("claude-code-20250219"), "OAuth must include CC beta");
         assert!(flags.contains("oauth-2025-04-20"), "OAuth must include OAuth beta");
+        assert!(!flags.contains("context-1m"), "OAuth must NOT include 1M context beta");
+    }
+
+    #[test]
+    fn context_1m_beta_flag_never_sent() {
+        // The context-1m-2025-08-07 beta flag is deprecated. Sonnet/Opus 4.6
+        // support 1M context natively. The flag only triggers billing gates
+        // ("Extra usage is required for long context requests" 429).
+        // Verified empirically: OAuth request with flag → 429, without → 200.
+        let oauth_flags = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14";
+        let api_flags = "interleaved-thinking-2025-05-14";
+        assert!(!oauth_flags.contains("context-1m"), "OAuth must never send context-1m");
+        assert!(!api_flags.contains("context-1m"), "API key must never send context-1m");
     }
 
     #[test]

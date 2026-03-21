@@ -671,6 +671,86 @@ fn urlencoding_encode(s: &str) -> String {
     }).collect()
 }
 
+/// Model limits returned by the provider's models endpoint.
+#[derive(Debug, Clone)]
+pub struct ModelLimits {
+    pub model_id: String,
+    pub max_input_tokens: usize,
+    pub max_output_tokens: usize,
+}
+
+/// Query the Anthropic /v1/models endpoint for the selected model's limits.
+/// Returns None if the API is unreachable or the model isn't found.
+pub async fn probe_anthropic_model_limits(model_id: &str) -> Option<ModelLimits> {
+    let (api_key, is_oauth) = resolve_with_refresh("anthropic").await?;
+    let client = reqwest::Client::new();
+    let base_url = std::env::var("ANTHROPIC_BASE_URL")
+        .unwrap_or_else(|_| "https://api.anthropic.com".into());
+
+    let mut req = client
+        .get(format!("{base_url}/v1/models"))
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json");
+
+    if is_oauth {
+        req = req
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("anthropic-beta", "claude-code-20250219,oauth-2025-04-20");
+    } else {
+        req = req.header("x-api-key", &api_key);
+    }
+
+    let resp = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        req.send(),
+    ).await {
+        Ok(Ok(r)) if r.status().is_success() => r,
+        Ok(Ok(r)) => {
+            tracing::debug!(status = %r.status(), "models endpoint returned error");
+            return None;
+        }
+        Ok(Err(e)) => {
+            tracing::debug!(error = %e, "models endpoint request failed");
+            return None;
+        }
+        Err(_) => {
+            tracing::debug!("models endpoint timed out (5s)");
+            return None;
+        }
+    };
+
+    let body: serde_json::Value = resp.json().await.ok()?;
+    let models = body.get("data")?.as_array()?;
+
+    // Match the requested model — try exact match first, then prefix
+    let entry = models.iter().find(|m| {
+        m.get("id").and_then(|v| v.as_str()) == Some(model_id)
+    }).or_else(|| {
+        // Prefix match for versioned model IDs (e.g. "claude-sonnet-4-6" matches "claude-sonnet-4-6-20260217")
+        models.iter().find(|m| {
+            m.get("id").and_then(|v| v.as_str())
+                .is_some_and(|id| id.starts_with(model_id) || model_id.starts_with(id))
+        })
+    })?;
+
+    let max_input = entry.get("max_input_tokens")?.as_u64()? as usize;
+    let max_output = entry.get("max_tokens")?.as_u64()? as usize;
+    let found_id = entry.get("id")?.as_str()?.to_string();
+
+    tracing::info!(
+        model = %found_id,
+        max_input,
+        max_output,
+        "model limits from /v1/models (authoritative)"
+    );
+
+    Some(ModelLimits {
+        model_id: found_id,
+        max_input_tokens: max_input,
+        max_output_tokens: max_output,
+    })
+}
+
 /// Convert AuthStatus to Vec<ProviderStatus> for HarnessStatus compatibility.
 pub fn auth_status_to_provider_statuses(status: &AuthStatus) -> Vec<ProviderStatus> {
     status.providers.iter().map(|p| ProviderStatus {

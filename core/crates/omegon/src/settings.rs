@@ -162,11 +162,9 @@ impl ContextClass {
     }
 
     /// Derive the legacy ContextMode from this class.
+    /// All classes map to Standard now — Extended was a beta flag concept.
     pub fn context_mode(self) -> ContextMode {
-        match self {
-            Self::Legion => ContextMode::Extended,
-            _ => ContextMode::Standard,
-        }
+        ContextMode::Standard
     }
 
     /// All classes in ascending order.
@@ -192,42 +190,33 @@ impl ContextClass {
 /// and backward compatibility with existing profile.json files.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContextMode {
-    /// Standard context window (200k for Anthropic, varies for OpenAI).
+    /// Standard context window — model-native (200K–1M depending on model).
+    /// Sonnet/Opus 4.6 support 1M natively, no beta flag needed.
     #[default]
     Standard,
-    /// Extended 1M context window (Anthropic beta).
+    /// Legacy: was "Extended 1M via beta flag". The beta flag is now
+    /// deprecated — it only triggers billing gates. Kept for config compat.
     Extended,
 }
 
 impl ContextMode {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Standard => "200k",
-            Self::Extended => "1M",
+            // Both modes use the model's native context window now
+            Self::Standard | Self::Extended => "native",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
-            "standard" | "200k" | "default" => Some(Self::Standard),
-            "extended" | "1m" | "1M" | "million" => Some(Self::Extended),
+            "standard" | "200k" | "default" | "native" => Some(Self::Standard),
+            "extended" | "1m" | "1M" | "million" => Some(Self::Standard), // silently normalize
             _ => None,
         }
     }
 
     pub fn icon(&self) -> &'static str {
-        match self {
-            Self::Standard => "◇",
-            Self::Extended => "◆",
-        }
-    }
-
-    /// Returns the Anthropic beta header flag needed for this mode, if any.
-    pub fn anthropic_beta_flag(&self) -> Option<&'static str> {
-        match self {
-            Self::Standard => None,
-            Self::Extended => Some("context-1m-2025-08-07"),
-        }
+        "◆" // always native full context
     }
 }
 
@@ -262,12 +251,9 @@ impl Settings {
     }
 
     /// Recalculate context_window and context_class based on current model.
+    /// Context window is always the model's native capability — no beta flags.
     pub fn apply_context_mode(&mut self) {
-        let base = infer_context_window(&self.model);
-        self.context_window = match self.context_mode {
-            ContextMode::Extended if self.provider() == "anthropic" => 1_000_000,
-            _ => base,
-        };
+        self.context_window = infer_context_window(&self.model);
         self.context_class = ContextClass::from_tokens(self.context_window);
     }
 
@@ -682,10 +668,12 @@ mod tests {
 
     #[test]
     fn context_class_derives_context_mode() {
+        // All classes now return Standard — Extended was a deprecated beta flag concept.
+        // Context window is the model's native capability, not a mode toggle.
         assert_eq!(ContextClass::Squad.context_mode(), ContextMode::Standard);
         assert_eq!(ContextClass::Maniple.context_mode(), ContextMode::Standard);
         assert_eq!(ContextClass::Clan.context_mode(), ContextMode::Standard);
-        assert_eq!(ContextClass::Legion.context_mode(), ContextMode::Extended);
+        assert_eq!(ContextClass::Legion.context_mode(), ContextMode::Standard);
     }
 
     #[test]

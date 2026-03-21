@@ -1663,7 +1663,7 @@ pub async fn run_tui(
         }
         welcome.push('\n');
         welcome.push_str("\n  /model  switch provider    /think  reasoning level");
-        welcome.push_str("\n  /context  toggle 200k↔1M   /help   all commands");
+        welcome.push_str("\n  /context  context class      /help   all commands");
         welcome.push_str("\n  Ctrl+R  search history      Ctrl+C  cancel/quit");
 
         app.conversation.push_system(&welcome);

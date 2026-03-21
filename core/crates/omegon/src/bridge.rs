@@ -162,7 +162,8 @@ pub struct StreamOptions {
     pub model: Option<String>,
     /// Reasoning/thinking level
     pub reasoning: Option<String>,
-    /// Extended context window (1M for Anthropic).
+    /// Deprecated — 1M context is native on Sonnet/Opus 4.6, no flag needed.
+    /// Kept for struct compatibility but never read.
     pub extended_context: bool,
 }
 

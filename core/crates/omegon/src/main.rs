@@ -527,6 +527,29 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         );
     }
 
+    // ─── Probe provider for authoritative model limits ──────────────
+    // The route matrix is a static fallback. The /v1/models endpoint
+    // returns the real context window for the selected model.
+    {
+        let model_id = cli.model.split(':').nth(1).unwrap_or(&cli.model);
+        let provider = cli.model.split(':').next().unwrap_or("anthropic");
+        if provider == "anthropic" {
+            if let Some(limits) = auth::probe_anthropic_model_limits(model_id).await {
+                if let Ok(mut s) = shared_settings.lock() {
+                    let old = s.context_window;
+                    s.context_window = limits.max_input_tokens;
+                    s.context_class = settings::ContextClass::from_tokens(limits.max_input_tokens);
+                    if old != limits.max_input_tokens {
+                        tracing::info!(
+                            old, new = limits.max_input_tokens,
+                            "context window updated from /v1/models"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     let is_oauth = providers::resolve_api_key_sync(
         cli.model.split(':').next().unwrap_or("anthropic")
     ).is_some_and(|(_, oauth)| oauth);
