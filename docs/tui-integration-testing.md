@@ -1,11 +1,10 @@
 ---
 id: tui-integration-testing
 title: TUI integration testing — snapshot tests, PTY harness, and interactive verification
-status: exploring
+status: decided
 parent: tui-visual-system
 tags: [testing, tui, ratatui, snapshot, pty, insta, ci, quality]
-open_questions:
-  - Should we start with Tier 1 (insta snapshots for widget rendering) and build up, or jump to Tier 2 (interactive scenario tests for slash commands and selectors) since that covers more of the new functionality?
+open_questions: []
 issue_type: feature
 priority: 2
 ---
@@ -161,6 +160,13 @@ fn full_startup_renders_splash_then_editor() {
 3. Selector state machine (3 selectors × open/navigate/confirm/cancel = ~12 tests)
 4. HarnessStatusChanged event handling (persona switch, MCP change = ~5 tests)
 
+## Decisions
+
+### Decision: Start with T2 (scenario tests for commands + selectors), then T1 (insta snapshots) — behavior before appearance
+
+**Status:** decided
+**Rationale:** T2 covers more of the new functionality (slash commands, selectors, event handling, toasts) without adding a new dependency. T1 (insta) is straightforward to add later and mostly guards against visual regression in existing widgets. The new code we just shipped (TUI surface pass, /auth, /persona, /tone, context selector, harness settings) is all behavior — testing it first is higher value.
+
 ## Open Questions
 
-- Should we start with Tier 1 (insta snapshots for widget rendering) and build up, or jump to Tier 2 (interactive scenario tests for slash commands and selectors) since that covers more of the new functionality?
+*No open questions.*

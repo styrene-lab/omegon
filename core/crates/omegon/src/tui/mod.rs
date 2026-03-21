@@ -25,6 +25,9 @@ pub mod splash;
 pub mod theme;
 pub mod widgets;
 
+#[cfg(test)]
+mod tests;
+
 use std::io;
 use std::time::Duration;
 
