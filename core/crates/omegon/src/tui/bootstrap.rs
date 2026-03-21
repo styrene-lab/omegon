@@ -4,7 +4,9 @@
 //! everything that's available: providers, inference, MCP servers,
 //! secrets, plugins, and context routing.
 //!
-//! Degrades to plain text when stdout is not a terminal (--no-tui / CI).
+//! Output goes to stderr (via `eprint!` in setup.rs) so it doesn't
+//! pollute piped stdout. Degrades to plain text (no ANSI codes) when
+//! stderr is not a terminal or `NO_COLOR` env var is set.
 
 use crate::status::*;
 

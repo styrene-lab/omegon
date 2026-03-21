@@ -69,6 +69,18 @@ HarnessStatus is assembled by the agent loop from its constituent parts (PluginR
          └─────────┘              └───────────┘
 ```
 
+### Known limitations from adversarial review (accepted)
+
+**N1 — Bootstrap format width:** `{:<14}` format specifier assumes names ≤14 chars. Names like "Styrene Mesh Node" (18 chars) will misalign columns. Fix: use dynamic column width based on longest name, or switch to a table renderer. Cosmetic, not structural.
+
+**N2 — stderr/stdout confusion:** Bootstrap renders to stderr via `eprint!()`. The docstring says "degrades to plain text when stdout is not a terminal" but the check is `std::io::stderr().is_terminal()`. These are different file descriptors. The behavior is correct (we want the panel on stderr so it doesn't pollute piped stdout), but the documentation should say stderr, not stdout.
+
+**O2 — No end-to-end integration test:** The BusEvent→AgentEvent bridge is verified by code review (main.rs broadcasts after channel creation, TUI handler deserializes). A runtime integration test would require a mock TUI or a test that creates the full event pipeline. Deferred — the unit tests cover serialization roundtrip and individual handlers.
+
+**O3 — installed_plugins field unpopulated:** The `installed_plugins: Vec<PluginSummary>` field in HarnessStatus is structurally present but never filled because the plugin loader doesn't yet enumerate installed armory plugins. It will be populated when `omegon plugin list` is implemented. The field should stay — removing it would be a breaking change to the WebSocket contract.
+
+**O4 — No /status command:** Operators see the bootstrap panel once at startup and never again. A `/status` slash command that re-renders the bootstrap panel mid-session would be useful for checking MCP health, verifying persona switches, etc. Deferred to a child node.
+
 ## Decisions
 
 ### Decision: Bootstrap is a structured TUI panel, not plain printf
@@ -100,6 +112,9 @@ HarnessStatus is assembled by the agent loop from its constituent parts (PluginR
 - `core/crates/omegon/src/tui/bootstrap.rs` (new) — Structured bootstrap panel rendering from HarnessStatus
 - `core/crates/omegon/src/web/mod.rs` (modified) — Broadcast HarnessStatusChanged over WebSocket to dashboard
 - `core/crates/omegon/src/setup.rs` (modified) — Assemble HarnessStatus at startup, emit initial event
+- `core/crates/omegon/src/main.rs` (modified) — Broadcasts initial HarnessStatus as AgentEvent after events channel creation — the BusEvent→AgentEvent bridge
+- `core/crates/omegon/src/bus.rs` (modified) — emit_harness_status() helper — serializes + emits BusEvent + returns JSON for AgentEvent forwarding
+- `core/crates/omegon/src/tui/mod.rs` (modified) — handle_agent_event HarnessStatusChanged arm — deserializes, updates footer, triggers ping effect
 
 ### Constraints
 
@@ -108,3 +123,7 @@ HarnessStatus is assembled by the agent loop from its constituent parts (PluginR
 - The footer must fit in a single terminal line — use short labels and badges, not full names
 - Bootstrap panel must degrade gracefully to plain text when --no-tui is set
 - The event must not contain secret values — only metadata (backend type, count, locked status)
+- Bootstrap panel must respect NO_COLOR env var (checked alongside is_terminal)
+- Persona names truncated to 15 chars, tone names to 12 chars in footer_summary() to fit single line
+- installed_plugins field is a placeholder until the plugin loader populates it at runtime
+- The /status slash command to re-display bootstrap mid-session is deferred to future work
