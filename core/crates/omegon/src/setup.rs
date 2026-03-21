@@ -214,6 +214,10 @@ impl AgentSetup {
         let cleave_handle = cleave_feature.shared_progress();
         bus.register(Box::new(cleave_feature));
 
+        // ─── Delegate (subagent system) ─────────────────────────────────
+        let agents = crate::features::delegate::scan_agents(&cwd);
+        bus.register(Box::new(features::delegate::DelegateFeature::new(&cwd, agents)));
+
         // ─── Session log (context injection) ────────────────────────────
         bus.register(Box::new(features::session_log::SessionLog::new(&cwd)));
 

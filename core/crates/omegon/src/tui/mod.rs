@@ -694,6 +694,7 @@ impl App {
         ("vault",    "Vault status and management",           &["status", "unseal", "login", "configure", "init-policy"]),
         ("persona",  "switch persona (or 'off' to deactivate)",  &["off"]),
         ("tone",     "switch tone (or 'off' to deactivate)",    &["off"]),
+        ("delegate", "delegate task management",              &["status"]),
         ("status",   "show harness status (providers, MCP, secrets, routing)", &[]),
         ("splash",   "replay splash animation",              &[]),
         ("exit",     "quit (or double Ctrl+C)",              &[]),
