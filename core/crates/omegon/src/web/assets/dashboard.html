@@ -302,15 +302,22 @@ let reconnectTimer = null;
 const WS_URL = `ws://${location.host}/ws?token=${encodeURIComponent(AUTH_TOKEN)}`;
 
 function connect() {
+  console.log('[ws] connecting to', WS_URL);
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
+    console.log('[ws] connected');
     document.getElementById('ws-status').className = 'status-dot connected';
     document.getElementById('ws-label').textContent = 'connected';
     if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; }
   };
-  ws.onclose = () => {
+  ws.onerror = (e) => {
+    console.error('[ws] error:', e);
+    document.getElementById('ws-label').textContent = 'error — check console';
+  };
+  ws.onclose = (e) => {
+    console.log('[ws] closed:', e.code, e.reason);
     document.getElementById('ws-status').className = 'status-dot disconnected';
-    document.getElementById('ws-label').textContent = 'disconnected';
+    document.getElementById('ws-label').textContent = `disconnected (${e.code})`;
     if (!reconnectTimer) {
       reconnectTimer = setInterval(() => { try { connect(); } catch(e) {} }, 3000);
     }

@@ -76,10 +76,11 @@ pub async fn start_server(
         .route("/", axum::routing::get(serve_dashboard))
         .layer(
             tower_http::cors::CorsLayer::new()
-                .allow_origin([
-                    "http://127.0.0.1".parse().unwrap(),
-                    "http://localhost".parse().unwrap(),
-                ])
+                // Allow any origin — the server is localhost-only (bound to 127.0.0.1)
+                // and protected by auth token. Strict origin matching breaks WebSocket
+                // upgrades because the browser sends Origin with the port
+                // (http://127.0.0.1:7842) which doesn't match portless origins.
+                .allow_origin(tower_http::cors::Any)
                 .allow_methods([axum::http::Method::GET])
                 .allow_headers(tower_http::cors::Any),
         )
