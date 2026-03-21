@@ -54,7 +54,7 @@ ratatui-toaster = "0.1"
 ratatui-textarea = { version = "0.8", features = ["crossterm"] }
 tui-popup = "0.7"
 hyperrat = "0.1"
-rmcp = { version = "1.2", features = ["transport-child-process", "client"], default-features = false }
+rmcp = { version = "1.2", features = ["transport-child-process", "client", "transport-streamable-http-client-reqwest", "auth"], default-features = false }
 
 [dev-dependencies]
 tempfile = "3.27.0"

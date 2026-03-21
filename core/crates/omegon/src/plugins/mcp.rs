@@ -19,7 +19,7 @@ use rmcp::{
     handler::client::ClientHandler,
     model::*,
     service::{self, RoleClient, RunningService},
-    transport::TokioChildProcess,
+    transport::{TokioChildProcess, StreamableHttpClientTransport},
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -30,13 +30,18 @@ use tokio::sync::Mutex;
 
 /// Configuration for a single MCP server.
 ///
-/// Supports three execution modes:
-/// 1. **Local process** (default): `command` + `args` spawned directly
-/// 2. **OCI container**: `image` specified, spawned via podman/docker
-/// 3. **Docker MCP Gateway**: `docker_mcp` flag, uses `docker mcp gateway run`
+/// Supports four execution modes:
+/// 1. **HTTP transport** (remote): `url` specified, connects via StreamableHttpClientTransport
+/// 2. **Local process** (default): `command` + `args` spawned directly
+/// 3. **OCI container**: `image` specified, spawned via podman/docker
+/// 4. **Docker MCP Gateway**: `docker_mcp` flag, uses `docker mcp gateway run`
 ///
 /// Examples:
 /// ```toml
+/// # HTTP transport (remote MCP server)
+/// [mcp_servers.remote_api]
+/// url = "https://api.example.com/mcp"
+/// 
 /// # Local process
 /// [mcp_servers.filesystem]
 /// command = "npx"
@@ -53,6 +58,10 @@ use tokio::sync::Mutex;
 /// ```
 #[derive(Debug, Clone, Deserialize)]
 pub struct McpServerConfig {
+    /// HTTP URL for remote MCP server (enables HTTP transport mode).
+    /// Must use HTTPS scheme, except http://localhost is allowed for development.
+    #[serde(default)]
+    pub url: Option<String>,
     /// Command to spawn (for local process mode).
     #[serde(default)]
     pub command: Option<String>,
@@ -166,9 +175,17 @@ impl McpFeature {
         server_name: &str,
         config: &McpServerConfig,
     ) -> anyhow::Result<(Vec<McpTool>, McpConnection)> {
-        let cmd = Self::build_command(server_name, config)?;
-        let transport = TokioChildProcess::new(cmd)?;
-        let client = service::serve_client(OmegonMcpClient, transport).await?;
+        let client = if let Some(ref url) = config.url {
+            // HTTP transport mode
+            Self::validate_url(url)?;
+            let transport = StreamableHttpClientTransport::from_uri(url.clone());
+            service::serve_client(OmegonMcpClient, transport).await?
+        } else {
+            // Local process transport mode  
+            let cmd = Self::build_command(server_name, config)?;
+            let transport = TokioChildProcess::new(cmd)?;
+            service::serve_client(OmegonMcpClient, transport).await?
+        };
 
         // Discover tools via MCP tools/list
         let tools_result = client.list_tools(None).await?;
@@ -191,7 +208,32 @@ impl McpFeature {
         Ok((tools, client))
     }
 
+    /// Validate URL for HTTP transport.
+    /// Requires HTTPS scheme, except http://localhost is allowed for development.
+    fn validate_url(url: &str) -> anyhow::Result<()> {
+        if url.starts_with("https://") {
+            if url.len() > 8 && !url[8..].is_empty() {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!("Invalid HTTPS URL: must have host after scheme: {}", url))
+            }
+        } else if url.starts_with("http://") {
+            if url.starts_with("http://localhost") || url.starts_with("http://127.0.0.1") {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!(
+                    "HTTP URLs are only allowed for localhost, got: {}", url
+                ))
+            }
+        } else {
+            Err(anyhow::anyhow!(
+                "Only HTTPS and localhost HTTP URLs are supported, got: {}", url
+            ))
+        }
+    }
+
     /// Build the command to spawn an MCP server based on its config mode.
+    /// This method is only called for local execution modes (not HTTP transport).
     ///
     /// Modes (in priority order):
     /// 1. Styrene mesh — remote exec over RNS/Yggdrasil (PQC-encrypted)
@@ -580,6 +622,7 @@ mod tests {
     #[test]
     fn build_command_local_process() {
         let config = McpServerConfig {
+            url: None,
             command: Some("npx".into()),
             args: vec!["-y".into(), "server".into()],
             env: HashMap::new(),
@@ -598,6 +641,7 @@ mod tests {
     #[test]
     fn build_command_oci_container() {
         let config = McpServerConfig {
+            url: None,
             command: None,
             args: vec![],
             env: HashMap::from([("DB".into(), "postgres://localhost".into())]),
@@ -621,6 +665,7 @@ mod tests {
     #[test]
     fn build_command_docker_gateway() {
         let config = McpServerConfig {
+            url: None,
             command: None,
             args: vec![],
             env: HashMap::new(),
@@ -655,6 +700,7 @@ mod tests {
     #[test]
     fn build_command_styrene_mesh() {
         let config = McpServerConfig {
+            url: None,
             command: Some("/opt/mcp/server".into()),
             args: vec!["--port".into(), "0".into()],
             env: HashMap::new(),
@@ -677,6 +723,7 @@ mod tests {
     #[test]
     fn build_command_no_execution_method() {
         let config = McpServerConfig {
+            url: None,
             command: None,
             args: vec![],
             env: HashMap::new(),
@@ -722,5 +769,48 @@ mod tests {
         assert_eq!(manifest.mcp_servers.len(), 2);
         assert!(manifest.mcp_servers.contains_key("filesystem"));
         assert!(manifest.mcp_servers.contains_key("brave"));
+    }
+
+    #[test]
+    fn mcp_server_config_http_transport() {
+        let toml = r#"
+            url = "https://api.example.com/mcp"
+            timeout_secs = 45
+        "#;
+        let config: McpServerConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.url.as_deref(), Some("https://api.example.com/mcp"));
+        assert!(config.command.is_none());
+        assert!(config.image.is_none());
+        assert_eq!(config.timeout_secs, 45);
+    }
+
+    #[test]
+    fn validate_url_https_allowed() {
+        assert!(McpFeature::validate_url("https://api.example.com/mcp").is_ok());
+        assert!(McpFeature::validate_url("https://localhost/mcp").is_ok());
+    }
+
+    #[test]
+    fn validate_url_localhost_http_allowed() {
+        assert!(McpFeature::validate_url("http://localhost/mcp").is_ok());
+        assert!(McpFeature::validate_url("http://127.0.0.1:8080/mcp").is_ok());
+    }
+
+    #[test]
+    fn validate_url_non_localhost_http_rejected() {
+        assert!(McpFeature::validate_url("http://example.com/mcp").is_err());
+        assert!(McpFeature::validate_url("http://192.168.1.1/mcp").is_err());
+    }
+
+    #[test]
+    fn validate_url_invalid_scheme_rejected() {
+        assert!(McpFeature::validate_url("ftp://example.com/file").is_err());
+        assert!(McpFeature::validate_url("ws://example.com/socket").is_err());
+    }
+
+    #[test]
+    fn validate_url_invalid_format_rejected() {
+        assert!(McpFeature::validate_url("not-a-url").is_err());
+        assert!(McpFeature::validate_url("https://").is_err());
     }
 }
