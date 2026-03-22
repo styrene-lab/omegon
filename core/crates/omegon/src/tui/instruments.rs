@@ -32,6 +32,13 @@ pub struct InstrumentPanel {
     time: f64,
     /// Focus mode toggle state.
     focus_mode: bool,
+    /// Tracked intensities for display in borders.
+    context_intensity: f64,
+    tool_intensity: f64,
+    thinking_intensity: f64,
+    memory_intensity: f64,
+    /// Tool error state for red border.
+    tool_error: bool,
 }
 
 impl Default for InstrumentPanel {
@@ -43,6 +50,11 @@ impl Default for InstrumentPanel {
             waterfall: CaWaterfall::new(),
             time: 0.0,
             focus_mode: false,
+            context_intensity: 0.0,
+            tool_intensity: 0.0,
+            thinking_intensity: 0.0,
+            memory_intensity: 0.0,
+            tool_error: false,
         }
     }
 }
@@ -61,10 +73,20 @@ impl InstrumentPanel {
         self.time += dt;
 
         // Update individual instruments with their telemetry
+        let ctx = (context_pct / 70.0).min(1.0) as f64; // cap at 70% (compaction threshold)
+        self.context_intensity = ctx;
         self.perlin.update(context_pct, self.time);
+
         self.lissajous.update(tool_calls, self.time);
+        self.tool_intensity = if tool_calls > 0 { 0.6 } else { self.tool_intensity * 0.95 };
+
         self.plasma.update(thinking_level, self.time);
+        self.thinking_intensity = match thinking_level {
+            "high" => 0.9, "medium" => 0.6, "low" => 0.3, "minimal" => 0.15, _ => 0.0,
+        };
+
         self.waterfall.update(memory_facts, memory_minds, self.time);
+        self.memory_intensity = if memory_facts > 0 { 0.3 } else { 0.0 };
     }
 
     /// Toggle focus mode (expand one instrument to full panel).
@@ -104,47 +126,66 @@ impl InstrumentPanel {
             Constraint::Percentage(50),
         ]).split(rows[1]);
 
-        // Render each instrument in its quadrant
-        self.perlin.render(top_cols[0], frame.buffer_mut());      // Top-left: context
-        self.lissajous.render(top_cols[1], frame.buffer_mut());   // Top-right: tools
-        self.plasma.render(bottom_cols[0], frame.buffer_mut());   // Bottom-left: thinking
-        self.waterfall.render(bottom_cols[1], frame.buffer_mut()); // Bottom-right: memory
+        // Render each instrument in its quadrant with labeled borders
+        let labels = [
+            (" sonar ", &self.context_intensity),
+            (" radar ", &self.tool_intensity),
+            (" thermal ", &self.thinking_intensity),
+            (" waterfall ", &self.memory_intensity),
+        ];
+        let areas = [top_cols[0], top_cols[1], bottom_cols[0], bottom_cols[1]];
+
+        for (i, (area, (label, intensity))) in areas.iter().zip(labels.iter()).enumerate() {
+            use ratatui::widgets::{Block, Borders};
+            let pct = (**intensity * 100.0) as u32;
+            let border_color = if i == 1 && self.tool_error {
+                Color::Rgb(224, 72, 72) // red border on tool error
+            } else {
+                Color::Rgb(20, 40, 55)
+            };
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(border_color))
+                .title(Span::styled(
+                    format!("{}{pct}% ", label),
+                    Style::default().fg(Color::Rgb(64, 88, 112)),
+                ));
+            let inner = block.inner(*area);
+            frame.render_widget(block, *area);
+
+            match i {
+                0 => self.perlin.render(inner, frame.buffer_mut()),
+                1 => self.lissajous.render(inner, frame.buffer_mut()),
+                2 => self.plasma.render(inner, frame.buffer_mut()),
+                3 => self.waterfall.render(inner, frame.buffer_mut()),
+                _ => {}
+            }
+        }
     }
 }
 
 // ═══ Individual Instruments ═══════════════════════════════════════════════
 
-/// Convert intensity (0-1) to CIE L* perceptual navy→teal→amber ramp.
-/// Amber gets 50% of the range for high-intensity visibility.
+/// CIE L* perceptual navy→teal→amber ramp (operator-tuned from demo).
+/// Cube root transfer function makes equal numeric steps feel like equal
+/// visual steps. Amber gets 50% of perceptual range.
 fn intensity_color(intensity: f64) -> Color {
     if intensity < 0.005 {
-        return Color::Rgb(0, 1, 3); // surface_bg
+        return Color::Rgb(0, 1, 3);
     }
+    let linear = intensity.clamp(0.0, 1.0);
+    let i = if linear > 0.008856 { linear.cbrt() } else { linear * 7.787 + 16.0 / 116.0 };
+    let i = ((i - 0.138) / (1.0 - 0.138)).clamp(0.0, 1.0);
 
-    let clamped = intensity.clamp(0.0, 1.0);
-
-    if clamped <= 0.5 {
-        // Navy → Teal (0.0 to 0.5 maps to first half)
-        let t = clamped * 2.0; // 0.0 to 1.0
-        let navy = (8, 24, 48);    // Dark navy
-        let teal = (42, 180, 200); // Alpharius accent teal
-        
-        let r = navy.0 as f64 + t * (teal.0 as f64 - navy.0 as f64);
-        let g = navy.1 as f64 + t * (teal.1 as f64 - navy.1 as f64);
-        let b = navy.2 as f64 + t * (teal.2 as f64 - navy.2 as f64);
-        
-        Color::Rgb(r as u8, g as u8, b as u8)
+    if i < 0.3 {
+        let t = i / 0.3;
+        Color::Rgb((1.0 + t * 3.0) as u8, (4.0 + t * 34.0) as u8, (6.0 + t * 30.0) as u8)
+    } else if i < 0.5 {
+        let t = (i - 0.3) / 0.2;
+        Color::Rgb((4.0 + t * 4.0) as u8, (38.0 + t * 10.0) as u8, (36.0 + t * 6.0) as u8)
     } else {
-        // Teal → Amber (0.5 to 1.0 maps to second half, amber gets 50% range)
-        let t = (clamped - 0.5) * 2.0; // 0.0 to 1.0
-        let teal = (42, 180, 200);     // Alpharius accent teal
-        let amber = (255, 191, 0);     // Bright amber
-        
-        let r = teal.0 as f64 + t * (amber.0 as f64 - teal.0 as f64);
-        let g = teal.1 as f64 + t * (amber.1 as f64 - teal.1 as f64);
-        let b = teal.2 as f64 + t * (amber.2 as f64 - teal.2 as f64);
-        
-        Color::Rgb(r as u8, g as u8, b as u8)
+        let t = (i - 0.5) / 0.5;
+        Color::Rgb((8.0 + t * 82.0) as u8, (48.0 - t * 2.0) as u8, (42.0 - t * 34.0) as u8)
     }
 }
 
@@ -584,24 +625,25 @@ mod tests {
     }
 
     #[test]
-    fn intensity_color_navy_to_teal_range() {
-        let navy = intensity_color(0.0);
-        let mid = intensity_color(0.25);
-        let teal = intensity_color(0.5);
-        
-        // Should progress from dark to brighter
-        assert!(matches!(navy, Color::Rgb(0, 1, 3))); // surface_bg for zero
-        assert!(matches!(mid, Color::Rgb(_, _, _))); // Some interpolated color
-        assert!(matches!(teal, Color::Rgb(42, 180, 200))); // Teal
+    fn intensity_color_floor_is_bg() {
+        assert!(matches!(intensity_color(0.0), Color::Rgb(0, 1, 3)));
+        assert!(matches!(intensity_color(0.004), Color::Rgb(0, 1, 3)));
     }
 
     #[test]
-    fn intensity_color_teal_to_amber_range() {
-        let teal = intensity_color(0.5);
-        let amber = intensity_color(1.0);
-        
-        assert!(matches!(teal, Color::Rgb(42, 180, 200))); // Teal
-        assert!(matches!(amber, Color::Rgb(255, 191, 0))); // Amber
+    fn intensity_color_ramp_progresses() {
+        // Low intensity should be in the dark end of the ramp
+        if let Color::Rgb(r, g, b) = intensity_color(0.1) {
+            assert!(r < 20 && g < 50 && b < 50, "0.1 should be dark: ({r},{g},{b})");
+        }
+        // Mid intensity perceptually maps to amber zone (CIE L* pushes it up)
+        if let Color::Rgb(r, g, b) = intensity_color(0.5) {
+            assert!(g > 20 || b > 20, "0.5 should have color: ({r},{g},{b})");
+        }
+        // High intensity should shift toward amber (r grows, b shrinks)
+        if let Color::Rgb(r, g, b) = intensity_color(1.0) {
+            assert!(r > 40 && b < r, "1.0 should be amber-ish: ({r},{g},{b})");
+        }
     }
 
     #[test]
