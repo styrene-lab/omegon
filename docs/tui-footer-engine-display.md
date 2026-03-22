@@ -260,6 +260,38 @@ The attractor collapsed because parameters drifted into sparse orbits. Fix: cons
 
 Each instrument is small enough to be ambient but large enough to be readable. The 2×2 grid uses ~48×10 of the system panel, leaving ~48×10 for text stats on the right.
 
+### Cross-instrument visual features — linked minds and injection band
+
+**Linked minds as waterfall columns:**
+
+The waterfall's 22-column width divides into segments per active mind. The structural change (column count) IS the mind count — no number reading needed.
+
+- 1 mind (project only): full 22-column waterfall
+- 2 minds (project + working): two 10-column waterfalls with 2-col gap
+- 3 minds (+ episodes): three 6-column waterfalls with 2-col gaps
+- 4 minds (+ archive): four 4-column waterfalls with 2-col gaps
+
+When a mind activates, a new column segment appears. When it deactivates, the segment fades and merges back. The gap between segments uses a thin border character (│) in dim color.
+
+Each segment can run slightly different CA parameters to show which mind is active — project could use Rule 30, working uses Rule 110, etc. Or they all use the same rule but the active mind's segment is brighter.
+
+**Context injection band on sonar:**
+
+The sonar (Perlin) shows context fill as intensity across the whole instrument. The memory injection portion is a distinct visual layer at the bottom:
+
+- Bottom N rows of the sonar show dim CRT glitch characters (from the waterfall glyph set) overlaid on the Perlin field
+- N is proportional to memory_tokens / context_window
+- When memory injects 10% of context, the bottom 10% of the sonar has glitch texture
+- The glitch band uses the same navy→teal ramp but at ~30% brightness — dim but visible as a different texture
+- As injection grows, the glitch band rises, visually showing "this much of your context is occupied by memory"
+
+This creates a visual bridge between the sonar and waterfall instruments — they share the glitch glyph language. The sonar's glitch band echoes the waterfall's aesthetic, reinforcing that both instruments are related to memory/knowledge.
+
+**Why this works (EID):**
+- Mind count is SPATIAL (column segments) — skill-based perception, no reading
+- Injection band is TEXTURE (glitch vs smooth) — skill-based, a different visual feel in the same space
+- Both use existing visual language (glitch chars, color ramp) — no new symbols to learn
+
 ## Decisions
 
 ### Decision: Footer grows to 10-12 rows, conversation absorbs the loss

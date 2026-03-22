@@ -60,7 +60,7 @@ fn main() -> io::Result<()> {
 
             // Tick waterfall — memory state selects CA rule, activity drives density + speed
             let mem_intensity = state.sim.memory_activity;
-            let density = state.ca_density + mem_intensity * 0.15;
+            let density = state.ca_density + mem_intensity * 0.25; // aggressive density boost
             let scroll = state.ca_scroll_rate * (0.5 + mem_intensity * 1.5);
             let rule = state.sim.memory_rule(); // Rule 204 idle, 30/110/90/150 per state
             let fade = state.ca_fade;
@@ -461,11 +461,12 @@ impl TelemetrySim {
     fn thinking_start(&mut self) { self.thinking_target = 0.85; }
     fn thinking_stop(&mut self)  { self.thinking_target = 0.0; }
 
-    // Memory scenarios — each state selects a different CA rule
-    fn memory_recall(&mut self)     { self.memory_activity = 0.7; self.memory_state = MemoryState::Recall; }
-    fn memory_write(&mut self)      { self.memory_activity = 0.6; self.memory_state = MemoryState::Write; }
-    fn memory_multi_mind(&mut self) { self.memory_activity = 0.9; self.memory_state = MemoryState::MultiMind; }
-    fn memory_cleanup(&mut self)    { self.memory_activity = 0.5; self.memory_state = MemoryState::Cleanup; }
+    // Memory scenarios — each state selects a different CA rule.
+    // Pushed hard into the amber zone so they pop against the dim idle.
+    fn memory_recall(&mut self)     { self.memory_activity = 0.95; self.memory_state = MemoryState::Recall; }
+    fn memory_write(&mut self)      { self.memory_activity = 0.85; self.memory_state = MemoryState::Write; }
+    fn memory_multi_mind(&mut self) { self.memory_activity = 1.0;  self.memory_state = MemoryState::MultiMind; }
+    fn memory_cleanup(&mut self)    { self.memory_activity = 0.7;  self.memory_state = MemoryState::Cleanup; }
 
     /// Get the CA rule for the current memory state.
     fn memory_rule(&self) -> u8 {
@@ -524,32 +525,32 @@ fn intensity_color(intensity: f64) -> Color {
     } else {
         linear * 7.787 + 16.0 / 116.0
     };
-    // Normalize: cbrt(1.0) = 1.0, cbrt(0.008856) ≈ 0.207
-    // The 16/116 offset means i starts at ~0.138 for linear=0
-    // Rescale to 0..1 for the gradient
+    // Rescale to 0..1
     let i = ((i - 0.138) / (1.0 - 0.138)).clamp(0.0, 1.0);
 
-    // Three-stop gradient in perceptual space:
-    //   0.0 → 0.4:  dark navy → teal
-    //   0.4 → 0.7:  teal deepens (brand center)
-    //   0.7 → 1.0:  teal → amber
-    if i < 0.4 {
-        let t = i / 0.4;
+    // Three-stop gradient — amber gets much more range:
+    //   0.0 → 0.3:  dark navy → dim teal (idle zone)
+    //   0.3 → 0.5:  teal (brand center, narrow — this is "normal")
+    //   0.5 → 1.0:  teal → amber → hot amber (HALF the range is the hot zone)
+    if i < 0.3 {
+        let t = i / 0.3;
         let r = (1.0 + t * 3.0) as u8;            // 1 → 4
-        let g = (4.0 + t * 38.0) as u8;           // 4 → 42
-        let b = (6.0 + t * 34.0) as u8;           // 6 → 40
+        let g = (4.0 + t * 34.0) as u8;           // 4 → 38
+        let b = (6.0 + t * 30.0) as u8;           // 6 → 36
         Color::Rgb(r, g, b)
-    } else if i < 0.7 {
-        let t = (i - 0.4) / 0.3;
-        let r = (4.0 + t * 2.0) as u8;            // 4 → 6
-        let g = (42.0 + t * 10.0) as u8;          // 42 → 52
-        let b = (40.0 + t * 4.0) as u8;           // 40 → 44
+    } else if i < 0.5 {
+        let t = (i - 0.3) / 0.2;
+        let r = (4.0 + t * 4.0) as u8;            // 4 → 8
+        let g = (38.0 + t * 10.0) as u8;          // 38 → 48
+        let b = (36.0 + t * 6.0) as u8;           // 36 → 42
         Color::Rgb(r, g, b)
     } else {
-        let t = (i - 0.7) / 0.3;
-        let r = (6.0 + t * 74.0) as u8;           // 6 → 80
-        let g = (52.0 - t * 8.0) as u8;           // 52 → 44
-        let b = (44.0 - t * 36.0) as u8;          // 44 → 8
+        // HALF the perceptual range is teal→amber. This gives amber
+        // enough room to actually register as amber, not a sliver.
+        let t = (i - 0.5) / 0.5;
+        let r = (8.0 + t * 82.0) as u8;           // 8 → 90
+        let g = (48.0 - t * 2.0) as u8;           // 48 → 46
+        let b = (42.0 - t * 34.0) as u8;          // 42 → 8
         Color::Rgb(r, g, b)
     }
 }
@@ -857,7 +858,9 @@ fn render_waterfall(intensity: f64, area: Rect, buf: &mut Buffer, wf: &Waterfall
             let idx = (tier / 2 + hash / 2).min(NOISE_CHARS.len() - 1);
             let ch = NOISE_CHARS[idx];
 
-            let effective = (val * intensity).max(val * 0.2);
+            // Floor is very low — idle waterfall is nearly invisible,
+            // bursts pop with color contrast
+            let effective = (val * intensity).max(val * 0.08);
             let color = intensity_color(effective);
 
             if let Some(cell) = buf.cell_mut(Position::new(area.x + cx as u16, area.y + cy as u16)) {
@@ -914,8 +917,8 @@ impl Default for DemoState {
             liss_freq_spread: 3.0, liss_amplitude: 0.50, liss_points: 500.0,
             // CA Waterfall — signal/memory
             waterfall: WaterfallState::new(22, 5),
-            ca_scroll_rate: 8.0,  // rows/sec
-            ca_density: 0.02,     // sparse at idle
+            ca_scroll_rate: 6.0,  // rows/sec
+            ca_density: 0.008,    // very sparse at idle — near invisible
             ca_rule: 30.0,        // Rule 30 — chaotic, interesting patterns
             ca_fade: 0.85,        // gentle trail fade
         }
