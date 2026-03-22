@@ -89,6 +89,186 @@ impl FooterData {
         self.render_system_card(cols[3], frame, t);
     }
 
+    /// Render the left panel for the split-panel layout (engine + memory).
+    /// This replaces the 4-card layout when instruments are visible on the right.
+    pub fn render_left_panel(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        let bg = t.footer_bg();
+        let bg_block = Block::default().style(Style::default().bg(bg));
+        frame.render_widget(bg_block, area);
+
+        if area.height < 4 || area.width < 20 {
+            // Ultra-narrow fallback
+            let model_short = short_model(&self.model_id);
+            let line = Line::from(vec![
+                Span::styled(format!(" Ω {model_short} "), Style::default().fg(t.accent()).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{}% ", self.context_percent as u32), Style::default().fg(t.muted())),
+                Span::styled(format!("⌗{}", self.total_facts), Style::default().fg(t.dim())),
+            ]);
+            frame.render_widget(Paragraph::new(line).style(Style::default().bg(bg)), area);
+            return;
+        }
+
+        // Split into engine (top) and memory (bottom)
+        let halves = Layout::vertical([
+            Constraint::Percentage(50),
+            Constraint::Percentage(50),
+        ]).split(area);
+
+        self.render_engine_section(halves[0], frame, t);
+        self.render_memory_section(halves[1], frame, t);
+    }
+
+    fn render_engine_section(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        let bg = t.footer_bg();
+        let inner = Rect {
+            x: area.x + 1,
+            y: area.y,
+            width: area.width.saturating_sub(2),
+            height: area.height,
+        };
+
+        let model_short = short_model(&self.model_id);
+        let source_icon = if self.model_provider == "local" { "⚡" } else { "☁" };
+        let auth_icon = if self.is_oauth { "●" } else { "○" };
+        let auth_color = if self.is_oauth { t.success() } else { t.muted() };
+        let ctx_class_color = match self.context_class {
+            ContextClass::Legion => t.accent(),
+            ContextClass::Clan => t.fg(),
+            _ => t.dim(),
+        };
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+
+        // Line 1: header
+        lines.push(Line::from(Span::styled(
+            " engine", Style::default().fg(t.accent_muted()).add_modifier(Modifier::BOLD),
+        )));
+
+        // Line 2: model + class
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {source_icon} "), Style::default().fg(if self.model_provider == "local" { t.accent() } else { t.dim() })),
+            Span::styled(model_short.to_string(), Style::default().fg(t.fg()).add_modifier(Modifier::BOLD)),
+            Span::styled(" · ", Style::default().fg(t.border_dim())),
+            Span::styled(self.context_class.short(), Style::default().fg(ctx_class_color)),
+        ]));
+
+        // Line 3: auth + persona
+        let mut auth_parts: Vec<Span<'static>> = vec![
+            Span::styled(format!(" {auth_icon} "), Style::default().fg(auth_color)),
+            Span::styled(
+                if self.is_oauth { "subscription" } else { "api key" },
+                Style::default().fg(t.muted()),
+            ),
+        ];
+        if let Some(ref p) = self.harness.active_persona {
+            auth_parts.push(Span::styled(" · ", Style::default().fg(t.border_dim())));
+            auth_parts.push(Span::styled(format!("{} {}", p.badge, p.name), Style::default().fg(t.accent())));
+        }
+        lines.push(Line::from(auth_parts));
+
+        // Line 4: context gauge
+        let bar_w = (inner.width as usize).saturating_sub(14).min(16);
+        let pct = self.context_percent.min(100.0);
+        let mut bar_spans: Vec<Span<'static>> = vec![Span::raw(" ")];
+        bar_spans.extend(widgets::gauge_bar(&widgets::GaugeConfig {
+            percent: pct,
+            bar_width: bar_w,
+            memory_blocks: 0,
+        }, t));
+        bar_spans.push(Span::styled(
+            format!(" {}%", pct as u32),
+            Style::default().fg(widgets::percent_color(pct, t)),
+        ));
+        if self.context_window > 0 {
+            bar_spans.push(Span::styled(
+                format!(" / {}", widgets::format_tokens(self.context_window)),
+                Style::default().fg(t.dim()),
+            ));
+        }
+        lines.push(Line::from(bar_spans));
+
+        // Line 5: thinking + context mode + turn
+        let _thinking = &self.harness;
+        let mut status_parts: Vec<Span<'static>> = vec![
+            Span::styled(
+                format!(" {} {}", self.context_mode.icon(), self.context_mode.as_str()),
+                Style::default().fg(t.dim()),
+            ),
+        ];
+        if self.turn > 0 {
+            status_parts.push(Span::styled(" · ", Style::default().fg(t.border_dim())));
+            status_parts.push(Span::styled(format!("T·{}", self.turn), Style::default().fg(t.muted())));
+        }
+        if self.tool_calls > 0 {
+            status_parts.push(Span::styled(" · ", Style::default().fg(t.border_dim())));
+            status_parts.push(Span::styled(format!("⚙ {}", self.tool_calls), Style::default().fg(t.muted())));
+        }
+        lines.push(Line::from(status_parts));
+
+        let widget = Paragraph::new(lines).style(Style::default().bg(bg));
+        frame.render_widget(widget, inner);
+    }
+
+    fn render_memory_section(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        let bg = t.footer_bg();
+        let inner = Rect {
+            x: area.x + 1,
+            y: area.y,
+            width: area.width.saturating_sub(2),
+            height: area.height,
+        };
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+
+        // Header with dim divider
+        lines.push(Line::from(Span::styled(
+            " memory", Style::default().fg(t.accent_muted()).add_modifier(Modifier::BOLD),
+        )));
+
+        // Mind rows — always show all, even at zero
+        let sep = Span::styled(" · ", Style::default().fg(t.border_dim()));
+
+        // Project memory (always active)
+        let mut proj: Vec<Span<'static>> = vec![
+            Span::styled(" ⬡ ", Style::default().fg(t.accent())),
+            Span::styled("project", Style::default().fg(t.fg())),
+            Span::styled(format!("  ⌗ {}", self.total_facts), Style::default().fg(t.muted())),
+        ];
+        if self.injected_facts > 0 {
+            proj.push(sep.clone());
+            proj.push(Span::styled(format!("inj {}", self.injected_facts), Style::default().fg(t.accent_muted())));
+        }
+        lines.push(Line::from(proj));
+
+        // Working memory
+        let wm_color = if self.working_memory > 0 { t.accent() } else { t.dim() };
+        let wm: Vec<Span<'static>> = vec![
+            Span::styled(" ⬡ ", Style::default().fg(wm_color)),
+            Span::styled("working", Style::default().fg(if self.working_memory > 0 { t.fg() } else { t.dim() })),
+            Span::styled(format!("  ⌗ {}", self.working_memory), Style::default().fg(t.muted())),
+        ];
+        lines.push(Line::from(wm));
+
+        // Token estimate
+        if self.memory_tokens_est > 0 {
+            lines.push(Line::from(vec![
+                Span::styled(format!(" ~{} tokens injected", widgets::format_tokens(self.memory_tokens_est)), Style::default().fg(t.dim())),
+            ]));
+        } else {
+            lines.push(Line::from(Span::styled(" ~0 tokens injected", Style::default().fg(t.dim()))));
+        }
+
+        // Compactions
+        if self.compactions > 0 {
+            lines.push(Line::from(vec![
+                Span::styled(format!(" ↻ {} compactions", self.compactions), Style::default().fg(t.dim())),
+            ]));
+        }
+
+        let widget = Paragraph::new(lines).style(Style::default().bg(bg));
+        frame.render_widget(widget, inner);
+    }
+
     /// Card block: bordered, titled, card_bg background.
     fn card_block<'a>(title: &str, t: &dyn Theme) -> Block<'a> {
         Block::default()

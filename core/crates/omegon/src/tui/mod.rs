@@ -599,7 +599,7 @@ impl App {
                 Constraint::Percentage(60),
             ]).split(footer_area);
 
-            self.footer_data.render(footer_cols[0], frame, t.as_ref());
+            self.footer_data.render_left_panel(footer_cols[0], frame, t.as_ref());
             self.instrument_panel.render(footer_cols[1], frame);
             footer_cols[1]
         } else {
