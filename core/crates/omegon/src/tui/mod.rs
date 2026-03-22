@@ -90,6 +90,8 @@ pub struct App {
     tool_calls: u32,
     /// Previous tool_calls count — used to compute delta for instrument telemetry
     prev_tool_calls: u32,
+    /// Memory operations this frame — drives memory instrument
+    memory_ops_this_frame: u32,
     history: Vec<String>,
     history_idx: Option<usize>,
     dashboard: DashboardState,
@@ -173,6 +175,7 @@ impl App {
             turn: 0,
             tool_calls: 0,
             prev_tool_calls: 0,
+            memory_ops_this_frame: 0,
             history: Vec::new(),
             history_idx: None,
             dashboard: DashboardState::default(),
@@ -660,13 +663,16 @@ impl App {
             let tool_delta = self.tool_calls.saturating_sub(self.prev_tool_calls);
             self.prev_tool_calls = self.tool_calls;
 
+            let mem_ops = self.memory_ops_this_frame;
+            self.memory_ops_this_frame = 0; // reset per frame
+
             self.instrument_panel.update_telemetry(
                 self.footer_data.context_percent,
                 tool_delta,
                 thinking,
-                self.footer_data.injected_facts, // injected this turn, not total
+                mem_ops as usize,
                 self.agent_active,
-                0.016, // TODO: real dt from frame timing
+                0.016,
             );
         }
 
@@ -1571,7 +1577,12 @@ impl App {
                         self.footer_data.total_facts = self.footer_data.total_facts.saturating_sub(1);
                     }
                     if is_memory_mutation {
+                        self.memory_ops_this_frame += 1;
                         self.effects.ping_footer(self.theme.as_ref());
+                    }
+                    // Also count recall/query operations
+                    if matches!(name.as_str(), "memory_recall" | "memory_query" | "memory_episodes" | "memory_search_archive" | "memory_focus" | "memory_release") {
+                        self.memory_ops_this_frame += 1;
                     }
                 }
                 self.last_tool_name = None;

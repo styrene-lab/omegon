@@ -24,8 +24,9 @@ pub struct InstrumentPanel {
     tool_intensity: f64,
     thinking_intensity: f64,
     memory_intensity: f64,
-    /// Tool error state → red border
+    /// Tool error state → red border. Decays on a timer.
     tool_error: bool,
+    tool_error_ttl: f64,
     /// Persistent Lissajous grid — avoids per-frame allocation
     liss_grid: Vec<u32>,
     /// Waterfall persistent state (one per mind)
@@ -44,6 +45,7 @@ impl Default for InstrumentPanel {
             thinking_intensity: 0.0,
             memory_intensity: 0.0,
             tool_error: false,
+            tool_error_ttl: 0.0,
             liss_grid: Vec::new(),
             waterfalls: [
                 WaterfallState::new(22, 5, 0xdeadbeef),
@@ -91,9 +93,12 @@ impl InstrumentPanel {
             self.tool_intensity = (self.tool_intensity - dt * 0.25).max(0.0);
         }
 
-        // Tool error: set externally via set_tool_error(), decays here
-        if self.tool_error && self.tool_intensity < 0.05 {
-            self.tool_error = false;
+        // Tool error: timer-based decay (5 seconds of red border)
+        if self.tool_error {
+            self.tool_error_ttl -= dt;
+            if self.tool_error_ttl <= 0.0 {
+                self.tool_error = false;
+            }
         }
 
         // Thinking: target from level, smooth approach
@@ -103,15 +108,14 @@ impl InstrumentPanel {
         // Smooth ramp toward target (not instant jump)
         self.thinking_intensity += (thinking_target - self.thinking_intensity) * dt * 3.0;
 
-        // Memory: spike on injection events, decay otherwise
+        // Memory: spike on memory operations (store, recall, archive, etc)
         if injected_facts > 0 {
-            self.memory_intensity = (self.memory_intensity + injected_facts as f64 * 0.05).min(1.0);
+            // Each memory op spikes hard — visible burst
+            self.memory_intensity = (self.memory_intensity + injected_facts as f64 * 0.4).min(1.0);
         } else if agent_active {
-            // Slow decay during active session
-            self.memory_intensity = (self.memory_intensity - dt * 0.3).max(0.0);
+            self.memory_intensity = (self.memory_intensity - dt * 0.15).max(0.0);
         } else {
-            // Faster decay when idle
-            self.memory_intensity = (self.memory_intensity - dt * 0.5).max(0.0);
+            self.memory_intensity = (self.memory_intensity - dt * 0.3).max(0.0);
         }
 
         // Tick waterfalls — per-mind with state-driven CA rules
@@ -133,6 +137,7 @@ impl InstrumentPanel {
     /// Set tool error state — triggers red border on tools instrument.
     pub fn set_tool_error(&mut self) {
         self.tool_error = true;
+        self.tool_error_ttl = 5.0; // 5 seconds of red border
         self.tool_intensity = 0.85;
     }
 
@@ -318,20 +323,16 @@ fn render_lissajous(time: f64, intensity: f64, area: Rect, buf: &mut Buffer, gri
     grid.resize(needed, 0);
     grid.fill(0);
 
-    let nc = 3; // curves=3.6 rounded
-    let pts = 500usize;
-    let speed = match () {
-        _ if intensity > 0.8 => 1.2,  // cleave
-        _ if intensity > 0.5 => 0.8,  // burst
-        _ if intensity > 0.2 => 0.5,  // single
-        _ => 0.3,                      // idle
-    };
+    // More curves and points at higher intensity — the display gets DENSER
+    let nc = (3.0 + intensity * 5.0) as usize; // 3 idle → 8 at max
+    let pts = (500.0 + intensity * 2000.0) as usize; // 500 idle → 2500 at max
+    let speed = 0.3 + intensity * 0.9;
     let t = time * speed;
 
     for curve in 0..nc {
-        let fx = 1.9 + curve as f64 * 3.0 / nc as f64;
-        let fy = 1.9 + 1.0 + curve as f64 * (3.0 * 0.8) / nc as f64;
-        let phase = t * (1.0 + curve as f64 * 0.03);
+        let fx = 1.9 + curve as f64 * 3.0 / nc.max(1) as f64;
+        let fy = 1.9 + 1.0 + curve as f64 * (3.0 * 0.8) / nc.max(1) as f64;
+        let phase = t * (1.0 + curve as f64 * 0.05);
         for i in 0..pts {
             let tt = i as f64 / pts as f64 * std::f64::consts::TAU;
             let x = (fx * tt + phase).sin();
@@ -348,10 +349,12 @@ fn render_lissajous(time: f64, intensity: f64, area: Rect, buf: &mut Buffer, gri
         if row >= area.height as usize { break; }
         for px in 0..w {
             if px >= area.width as usize { break; }
-            let top_v = (grid[py * w + px] as f64 / max_hits).min(1.0);
-            let bot_v = if py + 1 < h { (grid[(py + 1) * w + px] as f64 / max_hits).min(1.0) } else { 0.0 };
-            let tc = pixel_color_floor(top_v, intensity, 0.25);
-            let bc = pixel_color_floor(bot_v, intensity, 0.25);
+            // Gamma correction: sqrt boosts mid-range values so curves aren't just dim dots
+            let top_v = (grid[py * w + px] as f64 / max_hits).min(1.0).sqrt();
+            let bot_v = if py + 1 < h { (grid[(py + 1) * w + px] as f64 / max_hits).min(1.0).sqrt() } else { 0.0 };
+            // Use intensity directly — at high intensity, even dim curves are visible
+            let tc = pixel_color(top_v, intensity.max(0.15));
+            let bc = pixel_color(bot_v, intensity.max(0.15));
             set_halfblock(buf, area, px, row, tc, bc);
         }
     }
