@@ -189,7 +189,7 @@ impl App {
             effects: effects::Effects::new(),
             bus_commands: Vec::new(),
             dashboard_handles: dashboard::DashboardHandles::default(),
-            dashboard_refresh_turn: 0,
+            dashboard_refresh_turn: u32::MAX, // force refresh on first frame
             web_server_addr: None,
             queued_prompt: None,
             toasts: ratatui_toaster::ToastEngineBuilder::new(ratatui::prelude::Rect::default())
