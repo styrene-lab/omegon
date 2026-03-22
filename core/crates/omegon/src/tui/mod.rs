@@ -26,6 +26,7 @@ pub mod theme;
 pub mod widgets;
 
 pub mod fractal;
+pub mod instruments;
 
 #[cfg(test)]
 mod tests;
