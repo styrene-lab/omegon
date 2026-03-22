@@ -103,7 +103,7 @@ impl FractalWidget {
     /// Convert intensity (0-1) to an RGB color at the current hue.
     fn hue_color(&self, intensity: f64) -> Color {
         if intensity < 0.005 {
-            return Color::Rgb(1, 2, 4); // surface_bg
+            return Color::Rgb(0, 1, 3); // surface_bg
         }
         let hue = self.current_hue();
         let saturation = 0.82;
@@ -325,8 +325,8 @@ mod tests {
     #[test]
     fn hue_color_below_threshold_returns_bg() {
         let w = FractalWidget::default();
-        assert!(matches!(w.hue_color(0.0), Color::Rgb(1, 2, 4)));
-        assert!(matches!(w.hue_color(0.004), Color::Rgb(1, 2, 4)));
+        assert!(matches!(w.hue_color(0.0), Color::Rgb(0, 1, 3)));
+        assert!(matches!(w.hue_color(0.004), Color::Rgb(0, 1, 3)));
     }
 
     #[test]

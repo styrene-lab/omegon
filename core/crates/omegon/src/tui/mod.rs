@@ -713,6 +713,7 @@ impl App {
         {
             let base = self.theme.surface_bg();
             let card = self.theme.card_bg();
+            let footer = self.theme.footer_bg();
             let err_bg = Color::Rgb(30, 8, 16);    // tool_error_bg
             let diff_add = Color::Rgb(4, 22, 12);  // diff_added_bg
             let diff_rm = Color::Rgb(22, 4, 4);    // diff_removed_bg
@@ -729,7 +730,7 @@ impl App {
                     let bg = cell.bg;
                     match bg {
                         // Known-good: theme backgrounds
-                        c if c == base || c == card => {}
+                        c if c == base || c == card || c == footer => {}
                         // Known-good: semantic backgrounds
                         c if c == err_bg || c == diff_add || c == diff_rm => {}
                         // Everything else: override to base
@@ -1755,7 +1756,7 @@ pub async fn run_tui(
     // diff optimizer may skip cells that haven't changed from the initial
     // state, leaving the terminal's native background visible.
     io::stdout().execute(crossterm::style::SetBackgroundColor(
-        crossterm::style::Color::Rgb { r: 1, g: 2, b: 4 },
+        crossterm::style::Color::Rgb { r: 0, g: 1, b: 3 },
     ))?;
     // Clear the screen with our bg so every pixel starts owned.
     io::stdout().execute(crossterm::terminal::Clear(crossterm::terminal::ClearType::All))?;

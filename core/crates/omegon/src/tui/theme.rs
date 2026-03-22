@@ -35,6 +35,7 @@ pub trait Theme: Send + Sync {
     fn caution(&self) -> Color;
 
     // ─── Extended (semantic tool/diff colors) ───────────────────────
+    fn footer_bg(&self) -> Color { Color::Rgb(1, 3, 6) }
     fn user_msg_bg(&self) -> Color { self.card_bg() }
     fn tool_success_bg(&self) -> Color { self.card_bg() }
     fn tool_error_bg(&self) -> Color { Color::Rgb(30, 8, 16) }
@@ -76,7 +77,7 @@ pub trait Theme: Send + Sync {
         Style::default().fg(self.fg()).add_modifier(Modifier::BOLD)
     }
     fn style_footer_bg(&self) -> Style {
-        Style::default().bg(self.card_bg())
+        Style::default().bg(self.footer_bg())
     }
     fn style_border(&self) -> Style {
         Style::default().fg(self.border())
@@ -204,9 +205,9 @@ impl Theme for JsonTheme {
 pub struct Alpharius;
 
 impl Theme for Alpharius {
-    fn bg(&self) -> Color { Color::Rgb(1, 2, 4) }
-    fn card_bg(&self) -> Color { Color::Rgb(6, 10, 18) }
-    fn surface_bg(&self) -> Color { Color::Rgb(1, 2, 4) }
+    fn bg(&self) -> Color { Color::Rgb(0, 1, 3) }
+    fn card_bg(&self) -> Color { Color::Rgb(2, 6, 12) }
+    fn surface_bg(&self) -> Color { Color::Rgb(0, 1, 3) }
     fn border(&self) -> Color { Color::Rgb(48, 112, 140) }
     fn border_dim(&self) -> Color { Color::Rgb(32, 72, 96) }
 
