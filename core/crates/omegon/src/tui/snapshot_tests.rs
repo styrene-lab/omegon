@@ -40,7 +40,7 @@ fn render_to_string(terminal: &Terminal<TestBackend>) -> String {
 
 #[test]
 fn snapshot_dashboard_empty() {
-    let state = DashboardState::default();
+    let mut state = DashboardState::default();
     let backend = TestBackend::new(36, 20);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| state.render_themed(f.area(), f, &Alpharius)).unwrap();

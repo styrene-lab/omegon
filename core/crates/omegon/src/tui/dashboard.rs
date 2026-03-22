@@ -148,6 +148,8 @@ pub struct DashboardState {
     pub context_window_k: usize,
     // Fractal widget
     pub fractal: FractalWidget,
+    /// Last rendered fractal area — cleanup pass must skip this region.
+    pub fractal_area: Rect,
 }
 
 #[derive(Default, Clone)]
@@ -190,11 +192,11 @@ pub struct ChangeSummary {
 }
 
 impl DashboardState {
-    pub fn render(&self, area: Rect, frame: &mut Frame) {
+    pub fn render(&mut self, area: Rect, frame: &mut Frame) {
         self.render_themed(area, frame, &super::theme::Alpharius);
     }
 
-    pub fn render_themed(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+    pub fn render_themed(&mut self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         // Clear the dashboard area first — ratatui uses diff-based rendering,
         // so stale conversation text from a previous frame (before the dashboard
         // appeared) would bleed through any cells the dashboard doesn't overwrite.
@@ -223,6 +225,9 @@ impl DashboardState {
 
         if fractal_area.height >= 4 {
             self.fractal.render(fractal_area, frame.buffer_mut());
+            self.fractal_area = fractal_area;
+        } else {
+            self.fractal_area = Rect::ZERO;
         }
 
         let inner_w = text_area.width.saturating_sub(1) as usize;
@@ -602,7 +607,7 @@ mod tests {
 
     #[test]
     fn empty_dashboard_renders() {
-        let state = DashboardState::default();
+        let mut state = DashboardState::default();
         let backend = TestBackend::new(36, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| {

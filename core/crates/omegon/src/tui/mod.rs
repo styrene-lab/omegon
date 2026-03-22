@@ -707,17 +707,24 @@ impl App {
         // ── Final bg cleanup pass ───────────────────────────────────
         // Force every cell to have a known-good background color.
         // If a cell's bg isn't in our allow-list of intentional colors,
-        // override it to the theme base bg. This is the nuclear option
-        // that ensures NO foreign color can appear in the final buffer.
+        // override it to the theme base bg. This ensures no foreign color
+        // can appear in the final buffer.
+        // The fractal area is excluded — it owns every pixel via HSV rendering.
         {
             let base = self.theme.surface_bg();
             let card = self.theme.card_bg();
             let err_bg = Color::Rgb(30, 8, 16);    // tool_error_bg
             let diff_add = Color::Rgb(4, 22, 12);  // diff_added_bg
             let diff_rm = Color::Rgb(22, 4, 4);    // diff_removed_bg
+            let fractal = self.dashboard.fractal_area;
             let buf = frame.buffer_mut();
             for y in area.top()..area.bottom() {
                 for x in area.left()..area.right() {
+                    // Skip fractal region — it owns its pixels
+                    if fractal.width > 0 && x >= fractal.x && x < fractal.right()
+                        && y >= fractal.y && y < fractal.bottom() {
+                        continue;
+                    }
                     let cell = &mut buf[(x, y)];
                     let bg = cell.bg;
                     match bg {
@@ -725,9 +732,6 @@ impl App {
                         c if c == base || c == card => {}
                         // Known-good: semantic backgrounds
                         c if c == err_bg || c == diff_add || c == diff_rm => {}
-                        // Known-good: fractal colors (teal range from HSV renderer)
-                        Color::Rgb(r, g, b) if r <= 12 && g <= 50 && b <= 50
-                            && (g > 20 || b > 20) => {}
                         // Everything else: override to base
                         _ => { cell.set_bg(base); }
                     }
