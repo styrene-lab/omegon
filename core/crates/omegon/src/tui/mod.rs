@@ -1644,7 +1644,7 @@ close access fileRef"#,
 
         if is_wayland {
             // wl-paste: try each MIME type
-            for (mime, ext) in &types {
+            for &(mime, ext) in types.iter() {
                 let output = std::process::Command::new("wl-paste")
                     .args(["--type", mime, "--no-newline"])
                     .output()
