@@ -119,7 +119,11 @@ fn main() -> io::Result<()> {
 
                 let selected = idx == state.selected_instrument;
                 let intensity = state.sim.intensity(idx);
-                let border_color = if selected {
+                // Error state on the radar instrument → red border
+                let is_error = idx == 1 && state.sim.tool_state == ToolState::Error;
+                let border_color = if is_error {
+                    Color::Rgb(224, 72, 72)  // theme error red
+                } else if selected {
                     Color::Rgb(42, 180, 200)
                 } else {
                     Color::Rgb(20, 40, 55)
@@ -382,7 +386,9 @@ impl TelemetrySim {
 
     fn intensity(&self, instrument: usize) -> f64 {
         match instrument {
-            0 => self.context_fill,          // sonar = context fill level
+            // Context caps at 0.7 — auto-compaction fires at ~70%,
+            // so that's our visual maximum. Full amber = about to compact.
+            0 => (self.context_fill / 0.7).min(1.0),
             1 => self.tool_activity,          // radar = tool activity
             2 => self.thinking_level,         // thermal = thinking depth
             3 => self.memory_activity,        // signal = memory activity
@@ -395,12 +401,19 @@ impl TelemetrySim {
             0 => self.context_speed_mult,
             1 => match self.tool_state {
                 ToolState::Idle => 0.3,
-                ToolState::Single => 0.5,    // gentle
-                ToolState::Burst => 0.8,     // moderate
-                ToolState::Cleave => 1.2,    // visibly faster
-                ToolState::Error => 0.15,    // SLOW — ominous, not frenetic
+                ToolState::Single => 0.5,
+                ToolState::Burst => 0.8,
+                ToolState::Cleave => 1.2,
+                ToolState::Error => 0.15,    // SLOW — ominous
             },
-            2 => 0.2 + self.thinking_level * 2.0,
+            2 => {
+                // Thinking: color leads, speed follows.
+                // Color (intensity) ramps linearly. Speed uses a squared
+                // curve — stays slow during ignition, then accelerates
+                // once the color is already established.
+                let level = self.thinking_level;
+                0.2 + level * level * 2.0   // quadratic: slow start, fast finish
+            },
             3 => 0.3 + self.memory_activity * 2.0,
             _ => 1.0,
         }
@@ -429,8 +442,10 @@ impl TelemetrySim {
     fn tool_error(&mut self) {
         self.tool_activity = 0.85;
         self.tool_state = ToolState::Error;
-        // Error breaks the ramp entirely — red alert
-        self.tool_hue_override = Some([224, 72, 72]); // theme error color
+        // Error uses normal amber color (high intensity) — the RED comes
+        // from the border, not the fractal body. Red body was invisible
+        // in the center against the dark background.
+        self.tool_hue_override = None;
     }
 
     // Thinking scenarios
@@ -777,7 +792,7 @@ impl Default for DemoState {
             perlin_scale: 7.9, perlin_octaves: 2.5,
             perlin_lacunarity: 4.0, perlin_amplitude: 1.0,
             // Thermal — operator tuned
-            plasma_complexity: 1.65, plasma_distortion: 0.8, plasma_amplitude: 0.88,
+            plasma_complexity: 2.46, plasma_distortion: 0.68, plasma_amplitude: 1.0,
             // Radar — operator tuned
             liss_num_curves: 3.6, liss_freq_base: 1.9,
             liss_freq_spread: 3.0, liss_amplitude: 0.50, liss_points: 500.0,
