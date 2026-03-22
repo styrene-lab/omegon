@@ -58,13 +58,13 @@ fn main() -> io::Result<()> {
         if !state.paused {
             state.sim.update(dt);
 
-            // Tick waterfall — memory activity drives density and scroll rate
+            // Tick waterfall — memory state selects CA rule, activity drives density + speed
             let mem_intensity = state.sim.memory_activity;
-            let density = state.ca_density + mem_intensity * 0.15; // more births when active
-            let scroll = state.ca_scroll_rate * (0.5 + mem_intensity * 1.5); // faster scroll when active
-            let rule = state.ca_rule as u8;
+            let density = state.ca_density + mem_intensity * 0.15;
+            let scroll = state.ca_scroll_rate * (0.5 + mem_intensity * 1.5);
+            let rule = state.sim.memory_rule(); // Rule 204 idle, 30/110/90/150 per state
             let fade = state.ca_fade;
-            state.waterfall.ensure_size(22, 10); // match real instrument size
+            state.waterfall.ensure_size(22, 5);
             state.waterfall.tick(dt, scroll, density, rule, fade);
         }
 
@@ -461,11 +461,22 @@ impl TelemetrySim {
     fn thinking_start(&mut self) { self.thinking_target = 0.85; }
     fn thinking_stop(&mut self)  { self.thinking_target = 0.0; }
 
-    // Memory scenarios
+    // Memory scenarios — each state selects a different CA rule
     fn memory_recall(&mut self)     { self.memory_activity = 0.7; self.memory_state = MemoryState::Recall; }
     fn memory_write(&mut self)      { self.memory_activity = 0.6; self.memory_state = MemoryState::Write; }
     fn memory_multi_mind(&mut self) { self.memory_activity = 0.9; self.memory_state = MemoryState::MultiMind; }
     fn memory_cleanup(&mut self)    { self.memory_activity = 0.5; self.memory_state = MemoryState::Cleanup; }
+
+    /// Get the CA rule for the current memory state.
+    fn memory_rule(&self) -> u8 {
+        match self.memory_state {
+            MemoryState::Idle    => 204, // identity — bars stay still
+            MemoryState::Recall  => 30,  // chaotic cascade — information flowing
+            MemoryState::Write   => 110, // complex structured growth
+            MemoryState::MultiMind => 90, // Sierpinski branching — systems linking
+            MemoryState::Cleanup => 150, // structured chaos → order
+        }
+    }
 
     fn tool_state_label(&self) -> &str {
         match self.tool_state {
@@ -549,10 +560,6 @@ fn pixel_color(value: f64, intensity: f64) -> Color {
     let v = value.clamp(0.0, 1.0);
     if v < 0.01 { return bg_color(); }
     intensity_color(v * intensity)
-}
-
-fn pixel_color_floor(value: f64, intensity: f64, floor: f64) -> Color {
-    pixel_color_floor_hue(value, intensity, floor, None)
 }
 
 fn pixel_color_floor_hue(value: f64, intensity: f64, floor: f64, hue_override: Option<[u8; 3]>) -> Color {
@@ -807,24 +814,57 @@ impl WaterfallState {
     }
 }
 
-fn render_waterfall(intensity: f64, area: Rect, buf: &mut Buffer, wf: &WaterfallState) {
-    let w = area.width as usize;
-    let h = area.height as usize * 2;
+/// CRT noise glyphs — same character set as the splash screen glitch effect.
+/// Ordered roughly by visual density: sparse → dense.
+const NOISE_CHARS: &[char] = &[
+    // Light — idle/sparse
+    '▏', '▎', '▍', '░',
+    // Medium — active
+    '▌', '▐', '▒', '┤', '├', '│', '─',
+    // Heavy — intense
+    '▊', '▋', '▓', '╱', '╲', '┼', '╪', '╫',
+    // Full — maximum
+    '█', '╬', '■', '◆',
+];
 
-    for py in (0..h).step_by(2) {
-        let row = py / 2;
-        if row >= area.height as usize { break; }
-        for px in 0..w {
-            if px >= area.width as usize { break; }
-            let top_v = if py < wf.height && px < wf.width {
-                wf.grid[py * wf.width + px]
-            } else { 0.0 };
-            let bot_v = if py + 1 < wf.height && px < wf.width {
-                wf.grid[(py + 1) * wf.width + px]
-            } else { 0.0 };
-            let tc = pixel_color_floor(top_v, intensity, 0.2);
-            let bc = pixel_color_floor(bot_v, intensity, 0.2);
-            set_halfblock(buf, area, px, row, tc, bc);
+/// Render waterfall using CRT noise glyphs — the splash screen's glitch
+/// character set applied as a scrolling signal display. Each cell picks
+/// a glyph based on its value (density) and a pseudo-random hash (variety).
+/// Color carries the intensity ramp as usual.
+fn render_waterfall(intensity: f64, area: Rect, buf: &mut Buffer, wf: &WaterfallState) {
+    for cy in 0..area.height as usize {
+        for cx in 0..area.width as usize {
+            let val = if cx < wf.width && cy < wf.height {
+                wf.grid[cy * wf.width + cx]
+            } else {
+                0.0
+            };
+
+            if val < 0.05 {
+                // Dead cell — background
+                if let Some(cell) = buf.cell_mut(Position::new(area.x + cx as u16, area.y + cy as u16)) {
+                    cell.set_char(' ');
+                    cell.set_fg(bg_color());
+                    cell.set_bg(bg_color());
+                }
+                continue;
+            }
+
+            // Pick glyph: value determines density tier, position adds variety
+            let hash = ((cx * 7 + cy * 13 + (val * 100.0) as usize) * 31) % NOISE_CHARS.len();
+            let tier = ((val * (NOISE_CHARS.len() - 1) as f64) as usize).min(NOISE_CHARS.len() - 1);
+            // Blend tier and hash for variety within the density band
+            let idx = (tier / 2 + hash / 2).min(NOISE_CHARS.len() - 1);
+            let ch = NOISE_CHARS[idx];
+
+            let effective = (val * intensity).max(val * 0.2);
+            let color = intensity_color(effective);
+
+            if let Some(cell) = buf.cell_mut(Position::new(area.x + cx as u16, area.y + cy as u16)) {
+                cell.set_char(ch);
+                cell.set_fg(color);
+                cell.set_bg(bg_color());
+            }
         }
     }
 }
@@ -873,7 +913,7 @@ impl Default for DemoState {
             liss_num_curves: 3.6, liss_freq_base: 1.9,
             liss_freq_spread: 3.0, liss_amplitude: 0.50, liss_points: 500.0,
             // CA Waterfall — signal/memory
-            waterfall: WaterfallState::new(22, 10),
+            waterfall: WaterfallState::new(22, 5),
             ca_scroll_rate: 8.0,  // rows/sec
             ca_density: 0.02,     // sparse at idle
             ca_rule: 30.0,        // Rule 30 — chaotic, interesting patterns
