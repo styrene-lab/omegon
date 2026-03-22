@@ -101,9 +101,13 @@ impl InstrumentPanel {
             }
         }
 
-        // Thinking: target from level, smooth approach
-        let thinking_target = match thinking_level {
-            "high" => 0.85, "medium" => 0.6, "low" => 0.35, "minimal" => 0.15, _ => 0.0,
+        // Thinking: only active during inference, intensity from configured level
+        let thinking_target = if agent_active {
+            match thinking_level {
+                "high" => 0.85, "medium" => 0.6, "low" => 0.35, "minimal" => 0.15, _ => 0.1,
+            }
+        } else {
+            0.0 // idle when agent isn't generating
         };
         // Smooth ramp toward target (not instant jump)
         self.thinking_intensity += (thinking_target - self.thinking_intensity) * dt * 3.0;
