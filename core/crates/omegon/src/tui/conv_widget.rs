@@ -238,6 +238,17 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
 
                 let temp_area = Rect::new(0, 0, area.width, seg_height);
                 let mut temp_buf = Buffer::empty(temp_area);
+                // Fill temp buffer with theme bg so clipped cells don't
+                // bleed Color::Reset into the main buffer
+                let bg = self.theme.surface_bg();
+                let fg = self.theme.fg();
+                for y in 0..seg_height {
+                    for x in 0..area.width {
+                        let cell = &mut temp_buf[(x, y)];
+                        cell.set_bg(bg);
+                        cell.set_fg(fg);
+                    }
+                }
                 segment.render(temp_area, &mut temp_buf, self.theme);
 
                 // Copy the visible portion from temp_buf to main buf

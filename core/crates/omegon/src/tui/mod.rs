@@ -697,6 +697,23 @@ impl App {
         // ── Toast notifications — rendered last, on top of everything ──
         self.toasts.set_area(frame.area());
         frame.render_widget(&self.toasts, frame.area());
+
+        // ── Final bg cleanup pass ───────────────────────────────────
+        // Any cell that widgets left with Color::Reset bg gets the theme bg.
+        // This catches spans/paragraphs that use Style::default() without
+        // explicit .bg() — they'd otherwise show the terminal's default color.
+        {
+            let bg = self.theme.surface_bg();
+            let buf = frame.buffer_mut();
+            for y in area.top()..area.bottom() {
+                for x in area.left()..area.right() {
+                    let cell = &mut buf[(x, y)];
+                    if cell.bg == Color::Reset {
+                        cell.set_bg(bg);
+                    }
+                }
+            }
+        }
     }
 
     /// Show a transient toast notification.
