@@ -27,7 +27,6 @@ pub mod theme;
 pub mod widgets;
 
 pub mod fractal;
-pub mod instruments;
 
 #[cfg(test)]
 mod tests;
@@ -55,7 +54,7 @@ use self::dashboard::DashboardState;
 use self::segments::Segment;
 use self::footer::FooterData;
 use self::editor::Editor;
-use self::instruments::{InstrumentPanel, InstrumentTelemetry};
+use self::instruments::InstrumentPanel;
 
 /// Messages from TUI to the agent coordinator.
 #[derive(Debug)]
@@ -566,36 +565,33 @@ impl App {
             self.dashboard.render_themed(dash_area, frame, t.as_ref());
         }
 
-        // ── CIC Instrument Panel (replaces footer and hint line) ────
+        // ── CIC Instrument Panel telemetry update ────
         {
-            // Update telemetry from current state
-            let telemetry = InstrumentTelemetry {
-                context_percent: self.footer_data.context_percent / 100.0,
-                tool_activity: if self.agent_active { 0.8 } else { 0.1 },
-                thinking_level: match self.settings().thinking {
-                    crate::settings::ThinkingLevel::Off => 0.0,
-                    crate::settings::ThinkingLevel::Minimal => 0.2,
-                    crate::settings::ThinkingLevel::Low => 0.4,
-                    crate::settings::ThinkingLevel::Medium => 0.7,
-                    crate::settings::ThinkingLevel::High => 1.0,
-                },
-                memory_activity: [
-                    (self.footer_data.total_facts as f32 / 1000.0).min(1.0),
-                    (self.footer_data.working_memory as f32 / 100.0).min(1.0),
-                    if self.agent_active { 0.6 } else { 0.1 },
-                    (self.footer_data.compactions as f32 / 10.0).min(1.0),
-                ],
-                memory_minds_active: [
-                    self.footer_data.total_facts > 0,
-                    self.footer_data.working_memory > 0,
-                    true, // episodes always active
-                    self.footer_data.compactions > 0,
-                ],
-                focus_mode: self.focus_mode,
+            let thinking = match self.settings().thinking {
+                crate::settings::ThinkingLevel::Off => "off",
+                crate::settings::ThinkingLevel::Minimal => "minimal",
+                crate::settings::ThinkingLevel::Low => "low",
+                crate::settings::ThinkingLevel::Medium => "medium",
+                crate::settings::ThinkingLevel::High => "high",
             };
+            let minds: Vec<String> = vec!["project".into()]; // TODO: track active minds
+            self.instrument_panel.update_telemetry(
+                self.footer_data.context_percent,
+                self.tool_calls,
+                thinking,
+                self.footer_data.total_facts,
+                &minds,
+                0.016,
+            );
+        }
 
-            self.instrument_panel.update_telemetry(telemetry, 0.016);
-            self.instrument_panel.render(chunks[2], frame, t.as_ref());
+        // ── Footer / Instrument Panel ────────────────────────────────
+        if !self.focus_mode {
+            // Render the old footer data as a fallback (footer.rs still has the
+            // card layout). The instrument panel renders alongside it.
+            self.footer_data.render(chunks[2], frame, t.as_ref());
+            // TODO: replace footer_data.render with the full split-panel layout
+            // that embeds the instrument panel in the right half.
         }
 
         // Apply theme to textarea each frame (in case theme changed)
@@ -694,7 +690,9 @@ impl App {
         // If a cell's bg isn't in our allow-list of intentional colors,
         // override it to the theme base bg. This ensures no foreign color
         // can appear in the final buffer.
-        // The fractal area is excluded — it owns every pixel via HSV rendering.
+        // The instrument panel renders its own pixels — we skip it in the
+        // bg cleanup. The instruments area is inside the footer which uses
+        // footer_bg, so it's already in the allow-list.
         {
             let base = self.theme.surface_bg();
             let card = self.theme.card_bg();
@@ -702,23 +700,14 @@ impl App {
             let err_bg = Color::Rgb(30, 8, 16);    // tool_error_bg
             let diff_add = Color::Rgb(4, 22, 12);  // diff_added_bg
             let diff_rm = Color::Rgb(22, 4, 4);    // diff_removed_bg
-            let fractal = self.dashboard.fractal_area;
             let buf = frame.buffer_mut();
             for y in area.top()..area.bottom() {
                 for x in area.left()..area.right() {
-                    // Skip fractal region — it owns its pixels
-                    if fractal.width > 0 && x >= fractal.x && x < fractal.right()
-                        && y >= fractal.y && y < fractal.bottom() {
-                        continue;
-                    }
                     let cell = &mut buf[(x, y)];
                     let bg = cell.bg;
                     match bg {
-                        // Known-good: theme backgrounds
                         c if c == base || c == card || c == footer => {}
-                        // Known-good: semantic backgrounds
                         c if c == err_bg || c == diff_add || c == diff_rm => {}
-                        // Everything else: override to base
                         _ => { cell.set_bg(base); }
                     }
                 }
