@@ -763,6 +763,9 @@ impl App {
         let (cmd, args) = rest.split_once(' ').unwrap_or((rest, ""));
         let args = args.trim();
 
+        // Absolute file paths (e.g. /home/user/file.txt) are not commands
+        if cmd.contains('/') { return SlashResult::NotACommand; }
+
         match cmd {
             "help" => {
                 let lines: Vec<String> = Self::COMMANDS.iter()
@@ -1636,7 +1639,30 @@ close access fileRef"#,
             ("image/tiff", "tiff"),
         ];
 
-        // Check what's available
+        // Try wl-paste first (Wayland), fall back to xclip (X11)
+        let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
+
+        if is_wayland {
+            // wl-paste: try each MIME type
+            for (mime, ext) in &types {
+                let output = std::process::Command::new("wl-paste")
+                    .args(["--type", mime, "--no-newline"])
+                    .output()
+                    .ok();
+                if let Some(output) = output {
+                    if output.status.success() && !output.stdout.is_empty() {
+                        let tmp_dir = std::env::temp_dir();
+                        let filename = format!("omegon-clipboard-{}.{ext}", std::process::id());
+                        let tmp_path = tmp_dir.join(&filename);
+                        std::fs::write(&tmp_path, &output.stdout).ok()?;
+                        return Some(tmp_path);
+                    }
+                }
+            }
+            return None;
+        }
+
+        // X11: use xclip
         let targets = std::process::Command::new("xclip")
             .args(["-selection", "clipboard", "-t", "TARGETS", "-o"])
             .output()
@@ -1700,12 +1726,14 @@ pub async fn run_tui(
 
     io::stdout().execute(EnterAlternateScreen)?;
     io::stdout().execute(EnableMouseCapture)?;
+    io::stdout().execute(crossterm::event::EnableBracketedPaste)?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
     // Install panic hook that restores terminal
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        let _ = io::stdout().execute(crossterm::event::DisableBracketedPaste);
         let _ = io::stdout().execute(DisableMouseCapture);
         let _ = disable_raw_mode();
         let _ = io::stdout().execute(LeaveAlternateScreen);
@@ -2167,6 +2195,7 @@ pub async fn run_tui(
     app.save_history();
 
     // Restore terminal
+    io::stdout().execute(crossterm::event::DisableBracketedPaste)?;
     io::stdout().execute(DisableMouseCapture)?;
     disable_raw_mode()?;
     io::stdout().execute(LeaveAlternateScreen)?;
