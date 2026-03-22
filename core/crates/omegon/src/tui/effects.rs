@@ -10,7 +10,7 @@
 use std::time::Instant;
 
 use ratatui::prelude::*;
-use tachyonfx::{fx, EffectManager, EffectTimer, Interpolation, Motion};
+use tachyonfx::{fx, EffectManager, EffectTimer, Interpolation};
 
 use super::theme::Theme;
 
