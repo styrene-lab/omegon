@@ -1,213 +1,29 @@
-//! CIC instrument panel — four simultaneous displays.
+//! Unified instrument panel — two-panel layout.
 //!
-//! Ported directly from the fractal_demo example (the operator-tuned reference).
+//! Ported from the instrument_lab R&D prototype.
 //!
-//! ## Four Instruments
+//! LEFT: Inference state
+//!   - Context bar (gradient fill, caps at 70%)
+//!   - Thinking glitch overlay (CRT noise chars on bar surface)
+//!   - Tree connector (│├└ linking context to memory)
+//!   - Memory sine strings (one per mind, plucked on store/recall)
 //!
-//! 1. **Context** (Perlin flow) — context utilization, scale=7.9
-//! 2. **Tools** (Lissajous curves) — tool execution activity, curves=3.6
-//! 3. **Thinking** (Plasma sine) — inference/thinking state, complexity=2.46
-//! 4. **Memory** (CA waterfall) — memory activity with per-mind columns
+//! RIGHT: Tool activity
+//!   - Bubble-sort list sorted by recency
+//!   - Tool names, recency bars, time since last call
 //!
 //! All use unified navy→teal→amber CIE L* perceptual color ramp.
 
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
 
-// ─── Panel ──────────────────────────────────────────────────────────────
-
-/// Instrument panel — four simultaneous displays in a 2×2 grid.
-pub struct InstrumentPanel {
-    time: f64,
-    /// Per-instrument intensity (0.0 = idle, 1.0 = max)
-    context_intensity: f64,
-    tool_intensity: f64,
-    thinking_intensity: f64,
-    memory_intensity: f64,
-    /// Tool error state → red border. Decays on a timer.
-    tool_error: bool,
-    tool_error_ttl: f64,
-    /// Persistent Lissajous grid — avoids per-frame allocation
-    liss_grid: Vec<u32>,
-    /// Waterfall persistent state (one per mind)
-    waterfalls: [WaterfallState; 4],
-    minds_active: [bool; 4],
-    /// Focus mode toggle
-    pub focus_mode: bool,
-}
-
-impl Default for InstrumentPanel {
-    fn default() -> Self {
-        Self {
-            time: 0.0,
-            context_intensity: 0.0,
-            tool_intensity: 0.0,
-            thinking_intensity: 0.0,
-            memory_intensity: 0.0,
-            tool_error: false,
-            tool_error_ttl: 0.0,
-            liss_grid: Vec::new(),
-            waterfalls: [
-                WaterfallState::new(22, 5, 0xdeadbeef),
-                WaterfallState::new(22, 5, 0xcafebabe),
-                WaterfallState::new(22, 5, 0x8badf00d),
-                WaterfallState::new(22, 5, 0xfeedface),
-            ],
-            minds_active: [true, false, false, false],
-            focus_mode: false,
-        }
-    }
-}
-
-impl InstrumentPanel {
-    /// Update instrument telemetry from harness state.
-    ///
-    /// - `context_pct`: 0-100 context utilization
-    /// - `tool_call_delta`: tool calls THIS frame (0 if none)
-    /// - `thinking_level`: "off"/"minimal"/"low"/"medium"/"high"
-    /// - `injected_facts`: facts injected THIS turn (0 if none)
-    /// - `agent_active`: whether the agent is currently processing
-    /// - `dt`: real frame delta in seconds
-    pub fn update_telemetry(
-        &mut self,
-        context_pct: f32,
-        tool_call_delta: u32,
-        thinking_level: &str,
-        injected_facts: usize,
-        agent_active: bool,
-        dt: f64,
-    ) {
-        self.time += dt;
-
-        // Context: cap at 70% (auto-compaction threshold)
-        self.context_intensity = (context_pct as f64 / 70.0).min(1.0);
-
-        // Tools: spike on NEW calls, sustain during active agent, slow decay when idle
-        if tool_call_delta > 0 {
-            self.tool_intensity = (self.tool_intensity + tool_call_delta as f64 * 0.35).min(1.0);
-        } else if agent_active {
-            // Agent is working — very slow decay so tools sustain between calls
-            self.tool_intensity = (self.tool_intensity - dt * 0.08).max(0.0);
-        } else {
-            // Agent idle — moderate decay back to zero
-            self.tool_intensity = (self.tool_intensity - dt * 0.25).max(0.0);
-        }
-
-        // Tool error: timer-based decay (5 seconds of red border)
-        if self.tool_error {
-            self.tool_error_ttl -= dt;
-            if self.tool_error_ttl <= 0.0 {
-                self.tool_error = false;
-            }
-        }
-
-        // Thinking: only active during inference, intensity from configured level
-        let thinking_target = if agent_active {
-            match thinking_level {
-                "high" => 0.85, "medium" => 0.6, "low" => 0.35, "minimal" => 0.15, _ => 0.1,
-            }
-        } else {
-            0.0 // idle when agent isn't generating
-        };
-        // Smooth ramp toward target (not instant jump)
-        self.thinking_intensity += (thinking_target - self.thinking_intensity) * dt * 3.0;
-
-        // Memory: spike on memory operations (store, recall, archive, etc)
-        if injected_facts > 0 {
-            // Each memory op spikes hard — visible burst
-            self.memory_intensity = (self.memory_intensity + injected_facts as f64 * 0.4).min(1.0);
-        } else if agent_active {
-            self.memory_intensity = (self.memory_intensity - dt * 0.15).max(0.0);
-        } else {
-            self.memory_intensity = (self.memory_intensity - dt * 0.3).max(0.0);
-        }
-
-        // Tick waterfalls — per-mind with state-driven CA rules
-        // Width is determined at render time; tick uses current grid size
-        for i in 0..4 {
-            if !self.minds_active[i] { continue; }
-            if self.waterfalls[i].width == 0 { continue; } // not yet rendered
-            let density = 0.008 + self.memory_intensity * 0.25;
-            let scroll = 6.0 * (0.5 + self.memory_intensity * 1.5);
-            let rule = if self.memory_intensity > 0.1 {
-                [30u8, 110, 90, 150][i]
-            } else {
-                204
-            };
-            self.waterfalls[i].tick(dt, scroll, density, rule, 0.85);
-        }
-    }
-
-    /// Set tool error state — triggers red border on tools instrument.
-    pub fn set_tool_error(&mut self) {
-        self.tool_error = true;
-        self.tool_error_ttl = 5.0; // 5 seconds of red border
-        self.tool_intensity = 0.85;
-    }
-
-    pub fn toggle_focus(&mut self) {
-        self.focus_mode = !self.focus_mode;
-    }
-
-    pub fn render(&mut self, area: Rect, frame: &mut Frame) {
-        if area.width < 8 || area.height < 4 { return; }
-
-        let rows = Layout::vertical([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
-        ]).split(area);
-        let top = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[0]);
-        let bot = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[1]);
-
-        let instruments: [(Rect, &str, f64, bool); 4] = [
-            (top[0], "context",  self.context_intensity, false),
-            (top[1], "tools",    self.tool_intensity, self.tool_error),
-            (bot[0], "thinking", self.thinking_intensity, false),
-            (bot[1], "memory",   self.memory_intensity, false),
-        ];
-
-        // Use theme-consistent colors (border_dim, dim fg)
-        let border_dim = Color::Rgb(20, 40, 55); // matches theme border_dim range
-        let label_fg = Color::Rgb(64, 88, 112);  // matches theme dim
-        let error_border = Color::Rgb(224, 72, 72); // matches theme error
-
-        for (idx, (area, label, intensity, is_error)) in instruments.iter().enumerate() {
-            let pct = (*intensity * 100.0) as u32;
-            let border_color = if *is_error { error_border } else { border_dim };
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(border_color))
-                .title(Span::styled(
-                    format!(" {} {}% ", label, pct),
-                    Style::default().fg(label_fg),
-                ));
-            let inner = block.inner(*area);
-            frame.render_widget(block, *area);
-
-            if inner.width < 2 || inner.height < 1 { continue; }
-
-            match idx {
-                0 => render_perlin(self.time, *intensity, inner, frame.buffer_mut()),
-                1 => {
-                    render_lissajous(self.time, *intensity, inner, frame.buffer_mut(), &mut self.liss_grid);
-                },
-                2 => render_plasma(self.time, *intensity, inner, frame.buffer_mut()),
-                3 => render_waterfall_multi(*intensity, inner, frame.buffer_mut(),
-                        &mut self.waterfalls, &self.minds_active),
-                _ => {}
-            }
-        }
-    }
-}
-
-// ─── Color ramp (CIE L* perceptual, ported from demo) ──────────────────
+// ─── Color ramp (CIE L* perceptual) ────────────────────────────────────
 
 fn intensity_color(intensity: f64) -> Color {
     if intensity < 0.005 { return Color::Rgb(0, 1, 3); }
     let linear = intensity.clamp(0.0, 1.0);
     let i = if linear > 0.008856 { linear.cbrt() } else { linear * 7.787 + 16.0 / 116.0 };
     let i = ((i - 0.138) / (1.0 - 0.138)).clamp(0.0, 1.0);
-
     if i < 0.3 {
         let t = i / 0.3;
         Color::Rgb((1.0 + t * 3.0) as u8, (4.0 + t * 34.0) as u8, (6.0 + t * 30.0) as u8)
@@ -222,280 +38,433 @@ fn intensity_color(intensity: f64) -> Color {
 
 fn bg_color() -> Color { Color::Rgb(0, 1, 3) }
 
-fn pixel_color(value: f64, intensity: f64) -> Color {
-    let v = value.clamp(0.0, 1.0);
-    if v < 0.01 { return bg_color(); }
-    intensity_color(v * intensity)
-}
-
-fn pixel_color_floor(value: f64, intensity: f64, floor: f64) -> Color {
-    let v = value.clamp(0.0, 1.0);
-    if v < 0.01 { return bg_color(); }
-    let effective = (v * intensity).max(v * floor);
-    intensity_color(effective)
-}
-
-fn set_halfblock(buf: &mut Buffer, area: Rect, px: usize, row: usize, top: Color, bot: Color) {
-    if let Some(cell) = buf.cell_mut(Position::new(area.x + px as u16, area.y + row as u16)) {
-        cell.set_char('▀');
-        cell.set_fg(top);
-        cell.set_bg(bot);
-    }
-}
-
-// ─── Perlin flow (context) — ported from demo ──────────────────────────
-
-fn render_perlin(time: f64, intensity: f64, area: Rect, buf: &mut Buffer) {
-    let w = area.width as usize;
-    let h = area.height as usize * 2;
-    // Speed increases with intensity (flame effect)
-    let speed = 0.3 + intensity * 2.5;
-    let t = time * speed;
-    for py in (0..h).step_by(2) {
-        let row = py / 2;
-        if row >= area.height as usize { break; }
-        for px in 0..w {
-            if px >= area.width as usize { break; }
-            let top = noise_octaves(px as f64 / 7.9, py as f64 / 7.9, t, 2, 4.0);
-            let bot = noise_octaves(px as f64 / 7.9, (py + 1) as f64 / 7.9, t, 2, 4.0);
-            let tc = pixel_color((top * 0.5 + 0.5) * 1.0, intensity);
-            let bc = pixel_color((bot * 0.5 + 0.5) * 1.0, intensity);
-            set_halfblock(buf, area, px, row, tc, bc);
-        }
-    }
-}
-
-fn noise_octaves(x: f64, y: f64, z: f64, octaves: usize, lacunarity: f64) -> f64 {
-    let mut val = 0.0;
-    let mut amp = 1.0;
-    let mut freq = 1.0;
-    let mut total_amp = 0.0;
-    for _ in 0..octaves.max(1) {
-        val += noise_sample(x * freq, y * freq, z) * amp;
-        total_amp += amp;
-        amp *= 0.5;
-        freq *= lacunarity;
-    }
-    val / total_amp
-}
-
-fn noise_sample(x: f64, y: f64, z: f64) -> f64 {
-    let v1 = (x * 1.3 + z).sin() * (y * 0.7 + z * 0.5).cos();
-    let v2 = ((x + y) * 0.8 - z * 0.3).sin();
-    let v3 = (x * 2.1 - z * 0.7).cos() * (y * 1.5 + z * 0.4).sin();
-    (v1 + v2 + v3) / 3.0
-}
-
-// ─── Plasma sine (thinking) — ported from demo ─────────────────────────
-
-fn render_plasma(time: f64, intensity: f64, area: Rect, buf: &mut Buffer) {
-    let w = area.width as usize;
-    let h = area.height as usize * 2;
-    // Quadratic speed: slow ignition, then accelerates
-    let speed = 0.2 + intensity * intensity * 2.0;
-    let t = time * speed;
-    for py in (0..h).step_by(2) {
-        let row = py / 2;
-        if row >= area.height as usize { break; }
-        for px in 0..w {
-            if px >= area.width as usize { break; }
-            let top = plasma_sample(px as f64, py as f64, t);
-            let bot = plasma_sample(px as f64, (py + 1) as f64, t);
-            let tc = pixel_color((top * 0.5 + 0.5) * 1.0, intensity);
-            let bc = pixel_color((bot * 0.5 + 0.5) * 1.0, intensity);
-            set_halfblock(buf, area, px, row, tc, bc);
-        }
-    }
-}
-
-fn plasma_sample(x: f64, y: f64, t: f64) -> f64 {
-    let c = 2.46;
-    let d = 0.68;
-    let v1 = (x / (6.0 / c) + t).sin();
-    let v2 = ((y / (4.0 / c) + t * 0.7).sin() + (x / (8.0 / c)).cos()).sin();
-    let v3 = ((x * x + y * y).sqrt() * d / (6.0 / c) - t * 1.3).sin();
-    let v4 = (x / (3.0 / c) - t * 0.5).cos() * (y / (5.0 / c) + t * 0.9).sin();
-    (v1 + v2 + v3 + v4) / 4.0
-}
-
-// ─── Lissajous curves (tools) — ported from demo ───────────────────────
-
-fn render_lissajous(time: f64, intensity: f64, area: Rect, buf: &mut Buffer, grid: &mut Vec<u32>) {
-    let w = area.width as usize;
-    let h = area.height as usize * 2;
-    let needed = w * h;
-    grid.resize(needed, 0);
-    grid.fill(0);
-
-    // More curves and points at higher intensity — the display gets DENSER
-    let nc = (3.0 + intensity * 5.0) as usize; // 3 idle → 8 at max
-    let pts = (500.0 + intensity * 2000.0) as usize; // 500 idle → 2500 at max
-    let speed = 0.3 + intensity * 0.9;
-    let t = time * speed;
-
-    for curve in 0..nc {
-        let fx = 1.9 + curve as f64 * 3.0 / nc.max(1) as f64;
-        let fy = 1.9 + 1.0 + curve as f64 * (3.0 * 0.8) / nc.max(1) as f64;
-        let phase = t * (1.0 + curve as f64 * 0.05);
-        for i in 0..pts {
-            let tt = i as f64 / pts as f64 * std::f64::consts::TAU;
-            let x = (fx * tt + phase).sin();
-            let y = (fy * tt + phase * 0.3).cos();
-            let gx = ((x * 0.5 + 0.5) * w as f64) as usize;
-            let gy = ((y * 0.5 + 0.5) * h as f64) as usize;
-            if gx < w && gy < h { grid[gy * w + gx] += 1; }
-        }
-    }
-
-    let max_hits = (*grid.iter().max().unwrap_or(&1)).max(1) as f64;
-    for py in (0..h).step_by(2) {
-        let row = py / 2;
-        if row >= area.height as usize { break; }
-        for px in 0..w {
-            if px >= area.width as usize { break; }
-            // Gamma correction: sqrt boosts mid-range values so curves aren't just dim dots
-            let top_v = (grid[py * w + px] as f64 / max_hits).min(1.0).sqrt();
-            let bot_v = if py + 1 < h { (grid[(py + 1) * w + px] as f64 / max_hits).min(1.0).sqrt() } else { 0.0 };
-            // Use intensity directly — at high intensity, even dim curves are visible
-            let tc = pixel_color(top_v, intensity.max(0.15));
-            let bc = pixel_color(bot_v, intensity.max(0.15));
-            set_halfblock(buf, area, px, row, tc, bc);
-        }
-    }
-}
-
-// ─── CA waterfall (memory) — ported from demo ──────────────────────────
-
 const NOISE_CHARS: &[char] = &[
-    '▏', '▎', '▍', '░',
-    '▌', '▐', '▒', '┤', '├', '│', '─',
-    '▊', '▋', '▓', '╱', '╲', '┼', '╪', '╫',
-    '█', '╬', '■', '◆',
+    '▏', '▎', '▍', '░', '▌', '▐', '▒', '┤', '├', '│', '─',
+    '▊', '▋', '▓', '╱', '╲', '┼', '╪', '╫', '█', '╬', '■', '◆',
 ];
 
-/// Persistent waterfall state per mind.
-pub struct WaterfallState {
-    grid: Vec<f64>,
-    width: usize,
-    height: usize,
-    scroll_accum: f64,
-    rng: u64,
+// ─── Wave direction ─────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum WaveDirection { Left, Right }
+
+// ─── Mind state (sine string) ───────────────────────────────────────────
+
+struct MindState {
+    name: String,
+    active: bool,
+    wave: Vec<f64>,
+    velocity: Vec<f64>,
+    damping: f64,
 }
 
-impl WaterfallState {
-    fn new(w: usize, h: usize, seed: u64) -> Self {
-        Self { grid: vec![0.0; w * h], width: w, height: h, scroll_accum: 0.0, rng: seed }
+impl MindState {
+    fn new(name: &str, active: bool) -> Self {
+        let w = 80;
+        Self { name: name.into(), active, wave: vec![0.0; w], velocity: vec![0.0; w], damping: 0.92 }
     }
 
-    fn next_rand(&mut self) -> u64 {
-        self.rng ^= self.rng << 13;
-        self.rng ^= self.rng >> 7;
-        self.rng ^= self.rng << 17;
-        self.rng
+    fn pluck(&mut self, direction: WaveDirection) {
+        let w = self.wave.len();
+        let center = w / 2;
+        let sign = match direction { WaveDirection::Right => 1.0, WaveDirection::Left => -1.0 };
+        for i in 0..w {
+            let dx = (i as f64 - center as f64) / 4.0;
+            self.velocity[i] += (-dx * dx / 2.0).exp() * 2.0 * sign * 0.5;
+        }
     }
 
-    fn tick(&mut self, dt: f64, scroll_rate: f64, density: f64, rule: u8, fade: f64) {
-        self.scroll_accum += dt * scroll_rate;
-        while self.scroll_accum >= 1.0 {
-            self.scroll_accum -= 1.0;
-            let w = self.width;
-            let h = self.height;
-            for y in 0..(h - 1) {
-                for x in 0..w {
-                    self.grid[y * w + x] = self.grid[(y + 1) * w + x] * fade;
+    fn update(&mut self) {
+        let w = self.wave.len();
+        if w < 3 { return; }
+        let c2 = 0.3;
+        let mut accel = vec![0.0; w];
+        for i in 1..w - 1 {
+            accel[i] = c2 * (self.wave[i - 1] + self.wave[i + 1] - 2.0 * self.wave[i]);
+        }
+        for i in 0..w {
+            self.velocity[i] = (self.velocity[i] + accel[i]) * self.damping;
+            self.wave[i] = (self.wave[i] + self.velocity[i]) * 0.999; // slight position damping too
+        }
+        self.wave[0] = 0.0;
+        self.wave[w - 1] = 0.0;
+        self.velocity[0] = 0.0;
+        self.velocity[w - 1] = 0.0;
+    }
+
+    fn max_amplitude(&self) -> f64 {
+        self.wave.iter().map(|v| v.abs()).fold(0.0_f64, f64::max)
+    }
+}
+
+// ─── Tool entry ─────────────────────────────────────────────────────────
+
+struct ToolEntry {
+    name: String,
+    last_called: f64,
+    is_error: bool,
+    error_ttl: f64,
+}
+
+// ─── Panel ──────────────────────────────────────────────────────────────
+
+pub struct InstrumentPanel {
+    time: f64,
+    context_fill: f64,
+    thinking_active: bool,
+    thinking_intensity: f64,
+    minds: Vec<MindState>,
+    tools: Vec<ToolEntry>,
+    pub focus_mode: bool,
+}
+
+impl Default for InstrumentPanel {
+    fn default() -> Self {
+        Self {
+            time: 0.0,
+            context_fill: 0.0,
+            thinking_active: false,
+            thinking_intensity: 0.0,
+            minds: vec![
+                MindState::new("project", true),
+                MindState::new("working", false),
+                MindState::new("episodes", false),
+                MindState::new("archive", false),
+            ],
+            tools: Vec::new(),
+            focus_mode: false,
+        }
+    }
+}
+
+impl InstrumentPanel {
+    /// Update telemetry from harness state.
+    pub fn update_telemetry(
+        &mut self,
+        context_pct: f32,
+        tool_name: Option<&str>,
+        tool_error: bool,
+        thinking_level: &str,
+        memory_op: Option<(usize, WaveDirection)>, // (mind_idx, direction)
+        agent_active: bool,
+        dt: f64,
+    ) {
+        self.time += dt;
+
+        // Context: cap at 70%
+        self.context_fill = (context_pct as f64 / 70.0).min(1.0);
+
+        // Thinking: only active during inference
+        self.thinking_active = agent_active;
+        let target = if agent_active {
+            match thinking_level {
+                "high" => 0.85, "medium" => 0.6, "low" => 0.35, "minimal" => 0.15, _ => 0.1,
+            }
+        } else { 0.0 };
+        self.thinking_intensity += (target - self.thinking_intensity) * dt * 3.0;
+
+        // Tool: register call
+        if let Some(name) = tool_name {
+            if let Some(entry) = self.tools.iter_mut().find(|t| t.name == name) {
+                entry.last_called = self.time;
+                if tool_error { entry.is_error = true; entry.error_ttl = 5.0; }
+            } else {
+                self.tools.push(ToolEntry {
+                    name: name.to_string(),
+                    last_called: self.time,
+                    is_error: tool_error,
+                    error_ttl: if tool_error { 5.0 } else { 0.0 },
+                });
+            }
+        }
+        // Decay tool error TTLs
+        for tool in &mut self.tools {
+            if tool.is_error {
+                tool.error_ttl -= dt;
+                if tool.error_ttl <= 0.0 { tool.is_error = false; }
+            }
+        }
+
+        // Memory: pluck the string
+        if let Some((mind_idx, direction)) = memory_op {
+            if mind_idx < self.minds.len() {
+                if !self.minds[mind_idx].active {
+                    self.minds[mind_idx].active = true;
+                    self.minds[mind_idx].wave = vec![0.0; 80];
+                    self.minds[mind_idx].velocity = vec![0.0; 80];
                 }
+                self.minds[mind_idx].pluck(direction);
             }
-            let prev_row = h - 2;
-            let new_row = h - 1;
-            for x in 0..w {
-                let left = if x > 0 { (self.grid[prev_row * w + x - 1] > 0.3) as u8 } else { 0 };
-                let center = (self.grid[prev_row * w + x] > 0.3) as u8;
-                let right = if x + 1 < w { (self.grid[prev_row * w + x + 1] > 0.3) as u8 } else { 0 };
-                let neighborhood = (left << 2) | (center << 1) | right;
-                let alive = (rule >> neighborhood) & 1 == 1;
-                let random_birth = (self.next_rand() % 1000) < (density * 1000.0) as u64;
-                self.grid[new_row * w + x] = if alive || random_birth { 1.0 } else { 0.0 };
-            }
+        }
+
+        // Update wave physics
+        for mind in &mut self.minds {
+            if mind.active { mind.update(); }
         }
     }
 
-    fn ensure_size(&mut self, w: usize, h: usize) {
-        if self.width != w || self.height != h {
-            self.grid = vec![0.0; w * h];
-            self.width = w;
-            self.height = h;
+    pub fn set_tool_error(&mut self, name: &str) {
+        if let Some(entry) = self.tools.iter_mut().find(|t| t.name == name) {
+            entry.is_error = true;
+            entry.error_ttl = 5.0;
         }
     }
-}
 
-fn render_waterfall_multi(
-    intensity: f64, area: Rect, buf: &mut Buffer,
-    waterfalls: &mut [WaterfallState; 4], minds_active: &[bool; 4],
-) {
-    let active_indices: Vec<usize> = minds_active.iter().enumerate()
-        .filter(|(_, a)| **a).map(|(i, _)| i).collect();
-    let n = active_indices.len();
-    if n == 0 { return; }
+    pub fn toggle_focus(&mut self) { self.focus_mode = !self.focus_mode; }
 
-    let total_w = area.width as usize;
-    let gap = if n > 1 { 1 } else { 0 };
-    let usable = total_w.saturating_sub(if n > 1 { n - 1 } else { 0 });
-    let col_w = usable / n;
+    pub fn render(&mut self, area: Rect, frame: &mut Frame) {
+        if area.width < 20 || area.height < 4 { return; }
 
-    for (seg_idx, &mind_idx) in active_indices.iter().enumerate() {
-        let x_offset = seg_idx * (col_w + gap);
-        let seg_w = col_w.min(total_w.saturating_sub(x_offset));
-        let seg_area = Rect {
-            x: area.x + x_offset as u16,
-            y: area.y,
-            width: seg_w as u16,
-            height: area.height,
-        };
-        // Resize waterfall to match actual render area
-        waterfalls[mind_idx].ensure_size(seg_w, area.height as usize);
-        render_waterfall(intensity, seg_area, buf, &waterfalls[mind_idx]);
+        let panels = Layout::horizontal([
+            Constraint::Percentage(55),
+            Constraint::Percentage(45),
+        ]).split(area);
 
-        if seg_idx < n - 1 && gap > 0 {
-            let sep_x = area.x + (x_offset + col_w) as u16;
-            for y in area.y..area.bottom() {
-                if let Some(cell) = buf.cell_mut(Position::new(sep_x, y)) {
-                    cell.set_char('│');
-                    cell.set_fg(Color::Rgb(20, 40, 55));
-                    cell.set_bg(bg_color());
-                }
-            }
+        self.render_inference(panels[0], frame);
+        self.render_tools(panels[1], frame);
+    }
+
+    fn render_inference(&self, area: Rect, frame: &mut Frame) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(20, 40, 55)))
+            .title(Span::styled(" inference ", Style::default().fg(Color::Rgb(64, 88, 112))));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        if inner.width < 10 || inner.height < 3 { return; }
+
+        let buf = frame.buffer_mut();
+        let active_minds: Vec<usize> = self.minds.iter().enumerate()
+            .filter(|(_, m)| m.active).map(|(i, _)| i).collect();
+
+        // Context bar: top 2 rows
+        let bar_h = 2u16.min(inner.height);
+        let bar_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: bar_h };
+        self.render_context_bar(bar_area, buf);
+
+        // Tree + memory strings: remaining rows
+        if inner.height > bar_h && !active_minds.is_empty() {
+            let tree_area = Rect {
+                x: inner.x, y: inner.y + bar_h,
+                width: inner.width, height: inner.height - bar_h,
+            };
+            self.render_memory_strings(&active_minds, tree_area, buf);
         }
     }
-}
 
-fn render_waterfall(intensity: f64, area: Rect, buf: &mut Buffer, wf: &WaterfallState) {
-    for cy in 0..area.height as usize {
-        for cx in 0..area.width as usize {
-            let val = if cx < wf.width && cy < wf.height {
-                wf.grid[cy * wf.width + cx]
+    fn render_context_bar(&self, area: Rect, buf: &mut Buffer) {
+        let w = area.width as usize;
+        let fill_cols = (self.context_fill * w as f64) as usize;
+
+        for x in 0..w {
+            let intensity = if x < fill_cols {
+                (x as f64 / fill_cols.max(1) as f64) * self.context_fill
             } else { 0.0 };
 
-            if val < 0.05 {
-                if let Some(cell) = buf.cell_mut(Position::new(area.x + cx as u16, area.y + cy as u16)) {
-                    cell.set_char(' ');
-                    cell.set_fg(bg_color());
+            let is_glitch = self.thinking_intensity > 0.05 && {
+                let hash = ((x * 17 + (self.time * 8.0) as usize) * 31) % 100;
+                (hash as f64) < self.thinking_intensity * 60.0
+            };
+
+            if is_glitch {
+                let idx = ((x * 7 + (self.time * 12.0) as usize) * 13) % NOISE_CHARS.len();
+                let color = intensity_color((intensity + self.thinking_intensity * 0.3).min(1.0));
+                if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, area.y)) {
+                    cell.set_char(NOISE_CHARS[idx]);
+                    cell.set_fg(color);
                     cell.set_bg(bg_color());
                 }
-                continue;
+            } else {
+                let color = intensity_color(intensity);
+                if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, area.y)) {
+                    cell.set_char(if intensity > 0.01 { '█' } else { ' ' });
+                    cell.set_fg(color);
+                    cell.set_bg(bg_color());
+                }
+            }
+        }
+
+        // Row 2: percentage
+        if area.height > 1 {
+            let pct = (self.context_fill * 70.0) as u32; // show actual %, not normalized
+            let label = format!(" {}%", pct);
+            let color = intensity_color(self.context_fill);
+            for (i, ch) in label.chars().enumerate() {
+                if i >= w { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(area.x + i as u16, area.y + 1)) {
+                    cell.set_char(ch);
+                    cell.set_fg(color);
+                    cell.set_bg(bg_color());
+                }
+            }
+        }
+    }
+
+    fn render_memory_strings(&self, active_minds: &[usize], area: Rect, buf: &mut Buffer) {
+        let w = area.width as usize;
+        let n = active_minds.len();
+
+        for (row_idx, &mind_idx) in active_minds.iter().enumerate() {
+            let y = area.y + row_idx as u16;
+            if y >= area.bottom() { break; }
+            let mind = &self.minds[mind_idx];
+            let is_last = row_idx == n - 1;
+
+            // Tree connector
+            let connector = if is_last { "└─" } else { "├─" };
+            for (i, ch) in connector.chars().enumerate() {
+                if let Some(cell) = buf.cell_mut(Position::new(area.x + i as u16, y)) {
+                    cell.set_char(ch);
+                    cell.set_fg(Color::Rgb(32, 72, 96));
+                    cell.set_bg(bg_color());
+                }
+            }
+            // Vertical trunk on earlier rows
+            for prev in 0..row_idx {
+                let py = area.y + prev as u16;
+                if let Some(cell) = buf.cell_mut(Position::new(area.x, py)) {
+                    if cell.symbol() != "├" && cell.symbol() != "└" {
+                        cell.set_char('│');
+                        cell.set_fg(Color::Rgb(32, 72, 96));
+                    }
+                }
             }
 
-            let hash = ((cx * 7 + cy * 13 + (val * 100.0) as usize) * 31) % NOISE_CHARS.len();
-            let tier = ((val * (NOISE_CHARS.len() - 1) as f64) as usize).min(NOISE_CHARS.len() - 1);
-            let idx = (tier / 2 + hash / 2).min(NOISE_CHARS.len() - 1);
-            let ch = NOISE_CHARS[idx];
+            // Mind name
+            let name_start = 3usize;
+            let name_color = if mind.max_amplitude() > 0.1 {
+                Color::Rgb(42, 180, 200)
+            } else {
+                Color::Rgb(64, 88, 112)
+            };
+            for (i, ch) in mind.name.chars().enumerate() {
+                let x = name_start + i;
+                if x >= w { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, y)) {
+                    cell.set_char(ch);
+                    cell.set_fg(name_color);
+                    cell.set_bg(bg_color());
+                }
+            }
 
-            let effective = (val * intensity).max(val * 0.08);
-            let color = intensity_color(effective);
+            // Sine wave
+            let wave_start = 13usize.min(name_start + mind.name.len() + 2);
+            let wave_w = w.saturating_sub(wave_start);
+            let wave_len = mind.wave.len();
+            for wx in 0..wave_w {
+                let x = wave_start + wx;
+                if x >= w { break; }
+                let sample_pos = (wx as f64 / wave_w as f64) * wave_len as f64;
+                let idx = (sample_pos as usize).min(wave_len.saturating_sub(1));
+                let displacement = mind.wave[idx];
+                let amp = displacement.abs();
+                let intensity = (amp * 0.5).min(1.0);
 
-            if let Some(cell) = buf.cell_mut(Position::new(area.x + cx as u16, area.y + cy as u16)) {
-                cell.set_char(ch);
-                cell.set_fg(color);
-                cell.set_bg(bg_color());
+                let ch = if amp < 0.05 { '─' }
+                    else if amp < 0.3 { '∿' }
+                    else if amp < 0.8 { if displacement > 0.0 { '╱' } else { '╲' } }
+                    else { if displacement > 0.0 { '▀' } else { '▄' } };
+
+                let color = if intensity > 0.01 { intensity_color(intensity) } else { Color::Rgb(20, 40, 55) };
+                if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, y)) {
+                    cell.set_char(ch);
+                    cell.set_fg(color);
+                    cell.set_bg(bg_color());
+                }
+            }
+        }
+    }
+
+    fn render_tools(&self, area: Rect, frame: &mut Frame) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(20, 40, 55)))
+            .title(Span::styled(" tools ", Style::default().fg(Color::Rgb(64, 88, 112))));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        if inner.width < 15 || inner.height < 2 { return; }
+
+        let buf = frame.buffer_mut();
+        let w = inner.width as usize;
+        let name_w = 15.min(w / 2);
+        let bar_w = w.saturating_sub(name_w + 6).max(2);
+
+        // Sort by recency
+        let mut sorted: Vec<&ToolEntry> = self.tools.iter().collect();
+        sorted.sort_by(|a, b| b.last_called.partial_cmp(&a.last_called).unwrap_or(std::cmp::Ordering::Equal));
+
+        for (row, tool) in sorted.iter().enumerate() {
+            let y = inner.y + row as u16;
+            if y >= inner.bottom().saturating_sub(1) { break; } // leave room for footer
+
+            let age = (self.time - tool.last_called).max(0.0);
+            let recency = if age > 120.0 { 0.0 } else { (1.0 - age / 120.0).max(0.0) };
+
+            let indicator = if age < 2.0 { "▸ " } else { "  " };
+            let ind_color = if tool.is_error { Color::Rgb(224, 72, 72) }
+                else if age < 2.0 { Color::Rgb(42, 180, 200) }
+                else { Color::Rgb(20, 40, 55) };
+            let name_color = if tool.is_error { Color::Rgb(224, 72, 72) }
+                else if recency > 0.3 { intensity_color(recency) }
+                else { Color::Rgb(48, 64, 80) };
+            let bar_filled = (recency * bar_w as f64) as usize;
+            let bar_color = if tool.is_error { Color::Rgb(224, 72, 72) } else { intensity_color(recency) };
+
+            let time_str = if age > 999.0 { "   ·".to_string() }
+                else if age > 60.0 { format!("{:>3.0}m", age / 60.0) }
+                else { format!("{:>3.0}s", age) };
+
+            let mut x = inner.x;
+            for ch in indicator.chars() {
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(ch); cell.set_fg(ind_color); cell.set_bg(bg_color());
+                }
+                x += 1;
+            }
+            let display_name = if tool.name.len() > name_w - 2 { &tool.name[..name_w - 2] } else { &tool.name };
+            for ch in display_name.chars() {
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(ch); cell.set_fg(name_color); cell.set_bg(bg_color());
+                }
+                x += 1;
+            }
+            while x < inner.x + 2 + name_w as u16 {
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) { cell.set_char(' '); cell.set_bg(bg_color()); }
+                x += 1;
+            }
+            for i in 0..bar_w {
+                if x >= inner.right() { break; }
+                let ch = if i < bar_filled { '█' } else { '░' };
+                let c = if i < bar_filled { bar_color } else { Color::Rgb(10, 16, 24) };
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(ch); cell.set_fg(c); cell.set_bg(bg_color());
+                }
+                x += 1;
+            }
+            for ch in time_str.chars() {
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(ch); cell.set_fg(Color::Rgb(48, 64, 80)); cell.set_bg(bg_color());
+                }
+                x += 1;
+            }
+        }
+
+        // Footer
+        let footer_y = inner.bottom().saturating_sub(1);
+        if footer_y > inner.y + sorted.len() as u16 {
+            let active = self.tools.iter().filter(|t| self.time - t.last_called < 120.0).count();
+            let total = self.tools.len();
+            let footer = format!("  {active}/{total} active");
+            for (i, ch) in footer.chars().enumerate() {
+                let x = inner.x + i as u16;
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, footer_y)) {
+                    cell.set_char(ch); cell.set_fg(Color::Rgb(48, 64, 80)); cell.set_bg(bg_color());
+                }
             }
         }
     }
@@ -513,16 +482,6 @@ mod tests {
     }
 
     #[test]
-    fn intensity_color_ramp_progresses() {
-        if let Color::Rgb(r, g, b) = intensity_color(0.1) {
-            assert!(r < 20 && g < 50 && b < 50, "0.1 dark: ({r},{g},{b})");
-        }
-        if let Color::Rgb(r, g, b) = intensity_color(1.0) {
-            assert!(r > 40 && b < r, "1.0 amber: ({r},{g},{b})");
-        }
-    }
-
-    #[test]
     fn panel_renders_without_panic() {
         let mut panel = InstrumentPanel::default();
         let area = Rect::new(0, 0, 96, 12);
@@ -532,10 +491,24 @@ mod tests {
     }
 
     #[test]
-    fn waterfall_scrolls() {
-        let mut wf = WaterfallState::new(10, 5, 0xdeadbeef);
-        wf.tick(0.5, 10.0, 0.1, 30, 0.85);
-        let has_content = wf.grid.iter().any(|&v| v > 0.0);
-        assert!(has_content, "waterfall should have content after tick");
+    fn wave_physics_dampens() {
+        let mut mind = MindState::new("test", true);
+        mind.pluck(WaveDirection::Right);
+        // Let wave build up from velocity
+        for _ in 0..20 { mind.update(); }
+        let peak = mind.max_amplitude();
+        assert!(peak > 0.01, "wave should have amplitude after pluck: {peak:.3}");
+        // Let it dampen
+        for _ in 0..500 { mind.update(); }
+        let final_amp = mind.max_amplitude();
+        assert!(final_amp < peak * 0.5, "wave should dampen: peak={peak:.3} final={final_amp:.3}");
+    }
+
+    #[test]
+    fn tool_registration() {
+        let mut panel = InstrumentPanel::default();
+        panel.update_telemetry(0.0, Some("bash"), false, "off", None, false, 0.016);
+        assert_eq!(panel.tools.len(), 1);
+        assert_eq!(panel.tools[0].name, "bash");
     }
 }

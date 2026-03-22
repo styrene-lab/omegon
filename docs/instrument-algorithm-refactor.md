@@ -1,11 +1,11 @@
 ---
 id: instrument-algorithm-refactor
 title: Instrument algorithm refactor — thinking as glitch, memory as sine strings
-status: exploring
+status: decided
 parent: tui-hud-redesign
 tags: [tui, instruments, visual]
 open_questions: []
-jj_change_id: zupvwlroklmpnqymnlsslokyzmqxzvrl
+jj_change_id: lozslwvmnptpwntvzyoollnyvpqwpkmm
 ---
 
 # Instrument algorithm refactor — thinking as glitch, memory as sine strings
@@ -50,6 +50,23 @@ The four instrument algorithms need better visual differentiation and semantic m
 ## Open Questions
 
 *No open questions.*
+
+## Implementation Notes
+
+### File Scope
+
+- `core/crates/omegon/src/tui/instruments.rs` (modified) — Complete rewrite: replace 2x2 grid with two-panel layout. Port inference panel (context bar + thinking glitch + tree connector + sine strings) and tool panel (bubble-sort list) from instrument_lab.rs example.
+- `core/crates/omegon/src/tui/mod.rs` (modified) — Update instrument panel wiring: pass tool names on ToolStart/ToolEnd, pass memory op direction (store vs recall), update layout split.
+
+### Constraints
+
+- Port directly from instrument_lab.rs — do NOT rewrite from scratch
+- Wave physics must use the same 1D wave equation from the lab
+- Tool list must show actual tool names from the session, not hardcoded
+- Memory direction: store=rightward, recall=leftward wave propagation
+- Thinking glitch density scales with thinking level AND agent_active
+- Context bar caps at 70% (auto-compaction threshold)
+- Tree connector uses │├└ characters linking context to memory minds
 
 ## The new model: two panels, not four
 

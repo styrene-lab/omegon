@@ -671,14 +671,32 @@ impl App {
 
             // Consume memory ops accumulated since last telemetry update.
             // These accumulate from ToolEnd events between draws.
-            let mem_ops = self.memory_ops_this_frame;
+            // Tool name: pass the last tool that fired (if any this frame)
+            let tool_name = if tool_delta > 0 {
+                self.last_tool_name.as_deref()
+            } else { None };
+
+            // Memory op: determine direction from tool name
+            let mem_op = if self.memory_ops_this_frame > 0 {
+                let dir = if self.last_tool_name.as_deref() == Some("memory_recall")
+                    || self.last_tool_name.as_deref() == Some("memory_query")
+                    || self.last_tool_name.as_deref() == Some("memory_episodes")
+                    || self.last_tool_name.as_deref() == Some("memory_search_archive")
+                {
+                    instruments::WaveDirection::Left // recall = leftward
+                } else {
+                    instruments::WaveDirection::Right // store = rightward
+                };
+                Some((0usize, dir)) // mind 0 = project for now
+            } else { None };
             self.memory_ops_this_frame = 0;
 
             self.instrument_panel.update_telemetry(
                 self.footer_data.context_percent,
-                tool_delta,
+                tool_name,
+                false, // tool_error set separately
                 thinking,
-                mem_ops as usize,
+                mem_op,
                 self.agent_active,
                 0.016,
             );
@@ -1553,7 +1571,9 @@ impl App {
 
                 // Signal tool error to instrument panel
                 if is_error {
-                    self.instrument_panel.set_tool_error();
+                    if let Some(ref name) = self.last_tool_name {
+                        self.instrument_panel.set_tool_error(name);
+                    }
                 }
 
                 // Detect image results from view/render tools
