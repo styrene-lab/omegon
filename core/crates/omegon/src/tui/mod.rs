@@ -551,10 +551,9 @@ impl App {
                     .map(|mut d| d.next().is_some())
                     .unwrap_or(false);
                 if !has_design_tree {
-                    // Warn the operator: Acts 2 & 3 adapt but work best with
-                    // an existing codebase. Steps now handle empty trees gracefully.
+                    // Toast max width is 50 chars — keep message short.
                     self.show_toast(
-                        "No design tree found — Acts 2 & 3 will adapt to this project.",
+                        "No design tree — hands-on mode active",
                         ratatui_toaster::ToastType::Warning,
                     );
                 }
@@ -1261,7 +1260,13 @@ impl App {
     }
 
     /// Show a transient toast notification.
+    /// ⚠ ratatui_toaster default max width is 50 chars. Keep messages ≤48 chars
+    /// (2 chars for border padding) or they will be clipped without wrapping.
     fn show_toast(&mut self, message: &str, toast_type: ratatui_toaster::ToastType) {
+        debug_assert!(
+            message.chars().count() <= 48,
+            "toast message too long ({} chars, max 48): {:?}", message.chars().count(), message
+        );
         use ratatui_toaster::{ToastBuilder, ToastPosition};
         self.toasts.show_toast(
             ToastBuilder::new(std::borrow::Cow::Owned(message.to_string()))
