@@ -481,6 +481,135 @@ impl App {
         }
     }
 
+    /// Handle /milestone command — release milestone management.
+    fn handle_milestone(&self, args: &str) -> SlashResult {
+        let parts: Vec<&str> = args.splitn(3, ' ').collect();
+        let milestone_dir = std::path::Path::new(&self.footer_data.cwd).join(".omegon");
+        let milestone_file = milestone_dir.join("milestones.json");
+
+        match parts.as_slice() {
+            // /milestone — list all milestones
+            [] | [""] => {
+                let milestones = load_milestones(&milestone_file);
+                if milestones.is_empty() {
+                    return SlashResult::Display("No milestones defined.\n\nUsage:\n  /milestone v0.15.0 add <node-id>\n  /milestone v0.15.0 status\n  /milestone v0.15.0 freeze".into());
+                }
+                let mut out = String::new();
+                for (name, ms) in &milestones {
+                    let frozen = if ms.frozen { " 🔒 FROZEN" } else { "" };
+                    out.push_str(&format!("{}{}  ({} nodes)\n", name, frozen, ms.nodes.len()));
+                    for node_id in &ms.nodes {
+                        out.push_str(&format!("  • {}\n", node_id));
+                    }
+                }
+                SlashResult::Display(out.trim_end().to_string())
+            }
+            // /milestone <version> — show specific milestone
+            [version] => {
+                let milestones = load_milestones(&milestone_file);
+                if let Some(ms) = milestones.get(*version) {
+                    let frozen = if ms.frozen { " 🔒 FROZEN" } else { "" };
+                    let mut out = format!("{}{}\n\n", version, frozen);
+                    if ms.nodes.is_empty() {
+                        out.push_str("  (no nodes)\n");
+                    }
+                    for node_id in &ms.nodes {
+                        // Check if the node exists in the dashboard
+                        let status = self.dashboard.all_nodes.iter()
+                            .find(|n| n.id == *node_id)
+                            .map(|n| format!("{:?}", n.status))
+                            .unwrap_or_else(|| "unknown".into());
+                        out.push_str(&format!("  • {} ({})\n", node_id, status));
+                    }
+                    SlashResult::Display(out.trim_end().to_string())
+                } else {
+                    SlashResult::Display(format!("Milestone '{}' not found. Create it with: /milestone {} add <node-id>", version, version))
+                }
+            }
+            // /milestone <version> add <node-id>
+            [version, "add", node_id] => {
+                let mut milestones = load_milestones(&milestone_file);
+                let ms = milestones.entry(version.to_string()).or_insert_with(|| Milestone { nodes: vec![], frozen: false });
+                if ms.frozen {
+                    return SlashResult::Display(format!("Milestone {} is frozen. No new nodes can be added.", version));
+                }
+                if !ms.nodes.contains(&node_id.to_string()) {
+                    ms.nodes.push(node_id.to_string());
+                }
+                let _ = std::fs::create_dir_all(&milestone_dir);
+                let _ = save_milestones(&milestone_file, &milestones);
+                SlashResult::Display(format!("Added '{}' to milestone {}", node_id, version))
+            }
+            // /milestone <version> remove <node-id>
+            [version, "remove", node_id] => {
+                let mut milestones = load_milestones(&milestone_file);
+                if let Some(ms) = milestones.get_mut(*version) {
+                    ms.nodes.retain(|n| n != node_id);
+                    let _ = save_milestones(&milestone_file, &milestones);
+                    SlashResult::Display(format!("Removed '{}' from milestone {}", node_id, version))
+                } else {
+                    SlashResult::Display(format!("Milestone '{}' not found.", version))
+                }
+            }
+            // /milestone <version> freeze
+            [version, "freeze"] => {
+                let mut milestones = load_milestones(&milestone_file);
+                if let Some(ms) = milestones.get_mut(*version) {
+                    ms.frozen = true;
+                    let _ = save_milestones(&milestone_file, &milestones);
+                    SlashResult::Display(format!("🔒 Milestone {} is now frozen. No new nodes can be added.", version))
+                } else {
+                    SlashResult::Display(format!("Milestone '{}' not found.", version))
+                }
+            }
+            // /milestone <version> unfreeze
+            [version, "unfreeze"] => {
+                let mut milestones = load_milestones(&milestone_file);
+                if let Some(ms) = milestones.get_mut(*version) {
+                    ms.frozen = false;
+                    let _ = save_milestones(&milestone_file, &milestones);
+                    SlashResult::Display(format!("🔓 Milestone {} unfrozen.", version))
+                } else {
+                    SlashResult::Display(format!("Milestone '{}' not found.", version))
+                }
+            }
+            // /milestone <version> status
+            [version, "status"] => {
+                let milestones = load_milestones(&milestone_file);
+                if let Some(ms) = milestones.get(*version) {
+                    let total = ms.nodes.len();
+                    let mut implemented = 0;
+                    let mut decided = 0;
+                    let mut exploring = 0;
+                    let mut seed = 0;
+                    for node_id in &ms.nodes {
+                        if let Some(node) = self.dashboard.all_nodes.iter().find(|n| n.id == *node_id) {
+                            match node.status {
+                                crate::lifecycle::types::NodeStatus::Implemented => implemented += 1,
+                                crate::lifecycle::types::NodeStatus::Decided => decided += 1,
+                                crate::lifecycle::types::NodeStatus::Exploring => exploring += 1,
+                                _ => seed += 1,
+                            }
+                        } else {
+                            seed += 1;
+                        }
+                    }
+                    let frozen = if ms.frozen { "🔒 FROZEN" } else { "open" };
+                    let progress = if total > 0 { implemented * 100 / total } else { 0 };
+                    SlashResult::Display(format!(
+                        "{} — {}\n\n  {} nodes total\n  {} implemented ({}%)\n  {} decided\n  {} exploring\n  {} seed/unknown",
+                        version, frozen, total, implemented, progress, decided, exploring, seed
+                    ))
+                } else {
+                    SlashResult::Display(format!("Milestone '{}' not found.", version))
+                }
+            }
+            _ => {
+                SlashResult::Display("Usage:\n  /milestone                        — list all\n  /milestone v0.15.0                — show scope\n  /milestone v0.15.0 add <node-id>  — add node\n  /milestone v0.15.0 remove <node>  — remove node\n  /milestone v0.15.0 freeze         — lock scope\n  /milestone v0.15.0 status         — readiness report".into())
+            }
+        }
+    }
+
     fn queue_prompt(&mut self, text: String) {
         if let Some(ref prev) = self.queued_prompt {
             self.conversation.push_system(&format!("⏳ Replaced queued: {}", &prev[..prev.len().min(40)]));
@@ -880,6 +1009,7 @@ impl App {
         ("status",   "show harness status (providers, MCP, secrets, routing)", &[]),
         ("focus",    "toggle instrument panel focus mode",   &[]),
         ("demo",     "launch interactive demo (clones demo project)", &[]),
+        ("milestone","release milestone management",          &["freeze", "status"]),
         ("splash",   "replay splash animation",              &[]),
         ("dashboard", "open web dashboard (alias for /dash open)", &[]),
         ("version",  "show build version and git sha",       &[]),
@@ -1257,6 +1387,10 @@ impl App {
                 self.focus_mode = !self.focus_mode;
                 let status = if self.focus_mode { "enabled" } else { "disabled" };
                 SlashResult::Display(format!("Instrument panel focus mode → {status}"))
+            }
+
+            "milestone" => {
+                self.handle_milestone(args)
             }
 
             "demo" => {
@@ -1865,6 +1999,26 @@ fn sel_opt(value: &str, label: &str, desc: &str, current: &str) -> selector::Sel
         description: desc.to_string(),
         active: value == current,
     }
+}
+
+// ─── Milestone system ───────────────────────────────────────────────────
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct Milestone {
+    nodes: Vec<String>,
+    frozen: bool,
+}
+
+fn load_milestones(path: &std::path::Path) -> std::collections::BTreeMap<String, Milestone> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_milestones(path: &std::path::Path, milestones: &std::collections::BTreeMap<String, Milestone>) -> std::io::Result<()> {
+    let json = serde_json::to_string_pretty(milestones)?;
+    std::fs::write(path, json)
 }
 
 pub async fn run_tui(
