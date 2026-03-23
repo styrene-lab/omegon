@@ -192,9 +192,9 @@ impl FooterData {
             _ => t.dim(),
         };
         lines.push(Line::from(vec![
-            Span::styled(format!(" {}", self.model_tier), Style::default().fg(tier_color)),
+            Span::styled(format!(" {}", capitalize(&self.model_tier)), Style::default().fg(tier_color)),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
-            Span::styled(format!("◎ {}", self.thinking_level), Style::default().fg(think_color)),
+            Span::styled(format!("◎ {}", capitalize(&self.thinking_level)), Style::default().fg(think_color)),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
             Span::styled(
                 format!("{} {}", self.context_mode.icon(), self.context_mode.as_str()),
@@ -540,6 +540,15 @@ impl FooterData {
 }
 
 /// Extract short model name from full ID.
+/// Capitalize first letter of a string.
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().to_string() + c.as_str(),
+    }
+}
+
 fn short_model(model_id: &str) -> &str {
     model_id.split(':').next_back()
         .or_else(|| model_id.split('/').next_back())

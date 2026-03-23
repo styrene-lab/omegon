@@ -138,16 +138,20 @@ impl Segment {
         let mut temp_buf = Buffer::empty(temp_area);
         self.render(temp_area, &mut temp_buf, t);
 
-        // Find the last row with actual text content (not just styled background).
-        // Cards set bg on their entire area, so we can't rely on bg != Reset.
-        // Instead check for non-space symbols or border characters.
+        // Find the last row with actual text content.
+        // Skip border characters (│╰╯┐┘├┤┌└) in the first/last 2 columns
+        // and background-only cells. Only count rows with real text INSIDE
+        // the card borders.
         let mut last_used: u16 = 0;
+        let _border_chars: &[char] = &['│', '─', '╭', '╮', '╰', '╯', '┌', '┐', '└', '┘', '├', '┤', '┬', '┴', '┼'];
         for y in (0..h).rev() {
             let mut has_content = false;
-            for x in 0..width {
+            // Check interior columns only (skip first 2 and last 2 for borders + padding)
+            let x_start = 2.min(width);
+            let x_end = width.saturating_sub(2).max(x_start);
+            for x in x_start..x_end {
                 let cell = &temp_buf[(x, y)];
                 let sym = cell.symbol();
-                // A row has content if it has any non-space character
                 if sym != " " && !sym.is_empty() {
                     has_content = true;
                     break;
