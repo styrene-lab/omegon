@@ -83,15 +83,11 @@ impl Effects {
     }
 
     /// Flash effect when a footer value changes (fact count, context %, etc.).
-    pub fn ping_footer(&mut self, t: &dyn Theme) {
-        let ping = self.footer.unique(
-            FooterSlot::Ping,
-            fx::fade_from_fg(
-                t.accent_bright(),
-                EffectTimer::from_ms(300, Interpolation::CubicOut),
-            ),
-        );
-        self.footer.add_effect(ping);
+    pub fn ping_footer(&mut self, _t: &dyn Theme) {
+        // Disabled: the tachyonfx footer ping was flashing green across
+        // the entire footer including the instrument panel bars. The new
+        // instrument panel provides its own visual feedback (tool list
+        // updates, memory strings pluck). The ping is redundant.
     }
 
     /// HSL cycling glow on the editor/spinner area.
@@ -146,11 +142,12 @@ mod tests {
     }
 
     #[test]
-    fn ping_footer_adds_effect() {
+    fn ping_footer_is_noop() {
         let mut fx = Effects::new();
         let t = Alpharius;
         fx.ping_footer(&t);
-        assert!(fx.has_active());
+        // ping_footer disabled — instrument panel provides its own feedback
+        assert!(!fx.has_active());
     }
 
     #[test]
@@ -166,11 +163,10 @@ mod tests {
     #[test]
     fn effects_are_zone_isolated() {
         let mut fx = Effects::new();
-        let t = Alpharius;
-        fx.ping_footer(&t);
-        // Only footer should be active
-        assert!(fx.footer.is_running());
+        // Spinner glow only affects editor zone
+        fx.start_spinner_glow();
+        assert!(!fx.footer.is_running());
         assert!(!fx.conversation.is_running());
-        assert!(!fx.editor.is_running());
+        assert!(fx.editor.is_running());
     }
 }
