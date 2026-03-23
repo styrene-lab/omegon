@@ -58,7 +58,7 @@ pub const STEPS: &[Step] = &[
     // ═══ Act 1 — The Cockpit ═══════════════════════════════════
     Step {
         title: "Welcome to Omegon",
-        body: "This is your AI agent cockpit.\n\nThe main area is the conversation \u{2014} where you\nand the agent work together. The panels at the\nbottom show engine status and live telemetry.\nThe sidebar on the right tracks your design space.",
+        body: "This is your AI agent cockpit.\n\nThe main area is the conversation \u{2014} where you\nand the agent work together. The panels at the\nbottom show engine status and live telemetry.\nThe sidebar on the right tracks your design space.\n\n\u{25b6} Hands-on mode: Acts 2\u{2013}3 use YOUR project.\n\n  Want the full scripted demo with live cleave?\n  Press Esc, then type /tutorial demo",
         anchor: Anchor::Center,
         trigger: Trigger::Enter,
         highlight: None,
@@ -112,26 +112,23 @@ give it a meaningful id, title, and overview based on what you read about the co
     },
     // ═══ Act 3 — The Lifecycle ═════════════════════════════════
     Step {
-        title: "Decomposition",
-        body: "This is the showpiece \u{2014} live parallel work.\n\nThe agent will decompose a prepared task into\nparallel branches and execute them simultaneously.\n\nThis uses API credits (~$0.10\u{2013}0.30).\n\n  \u{25b6} Press Tab to start the cleave\n  \u{25b6} Press Esc to skip this step",
+        title: "Spec Before Code",
+        body: "Omegon enforces spec-before-code.\n\nThe agent will now propose a concrete improvement\nit identified while reading YOUR project \u{2014}\nand create a proper spec for it with\nGiven/When/Then scenarios.\n\nThis creates a real OpenSpec change in your\nai/openspec/ directory.",
         anchor: Anchor::Center,
         trigger: Trigger::AutoPrompt(
-            "Check the openspec directory (ai/openspec/changes/ or openspec/changes/) for any prepared changes. \
-If a change with tasks.md exists, run /cleave on it using retribution tier. \
-If no prepared change exists, instead: use openspec_manage to propose a small change called 'add-tests' \
-for this project, generate a spec, and fast_forward it to create tasks — then describe what the cleave would do."
+            "Based on what you read about this project, identify ONE concrete, small improvement that would be valuable. \
+Use openspec_manage with action 'propose' to create a change for it (pick a short slug like 'improve-error-handling' or 'add-validation'). \
+Then use action 'generate_spec' to create a Given/When/Then spec for it. \
+Keep it focused: one clear requirement, 2-3 scenarios. \
+Explain what you proposed and why."
         ),
         highlight: None,
     },
     Step {
-        title: "Verification",
-        body: "The branches have merged.\n\nNow the agent will verify the implementation\nagainst the specs. Watch for pass/fail results.",
+        title: "The Full Lifecycle",
+        body: "You've just experienced the core lifecycle:\n\n  \u{2022} Memory \u{2014} facts persist across sessions\n  \u{2022} Design tree \u{2014} nodes track architecture\n  \u{2022} OpenSpec \u{2014} specs before code\n\nThe next step is decomposition \u{2014} breaking the\nspec into parallel branches with /cleave.\n\nType /tutorial demo to see a live cleave\non a pre-seeded project.",
         anchor: Anchor::Center,
-        trigger: Trigger::AutoPrompt(
-            "Check if there are tests in this project. If so, run them and report results. \
-If not, describe the test strategy you would use based on the codebase you've read. \
-Summarize what was accomplished during this tutorial session."
-        ),
+        trigger: Trigger::Enter,
         highlight: None,
     },
     // ═══ Act 4 — You're Ready ══════════════════════════════════

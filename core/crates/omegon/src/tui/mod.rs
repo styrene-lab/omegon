@@ -518,6 +518,13 @@ impl App {
                 }
                 SlashResult::Display("Tutorial reset. Type /tutorial to start again.".into())
             }
+            "demo" => {
+                // Scripted demo mode — clones omegon-demo and exec()s into it.
+                // The demo project has pre-seeded design nodes, OpenSpec change,
+                // and memory facts so the full lifecycle (including live cleave)
+                // runs as intended.
+                self.launch_tutorial_project()
+            }
             _ => {
                 // Start/resume the overlay tutorial
                 if let Some(ref mut overlay) = self.tutorial_overlay {
@@ -1288,7 +1295,7 @@ impl App {
         ("delegate", "delegate task management",              &["status"]),
         ("status",   "show harness status (providers, MCP, secrets, routing)", &[]),
         ("focus",    "toggle instrument panel focus mode",   &[]),
-        ("tutorial", "interactive tutorial",                           &["status", "reset"]),
+        ("tutorial", "interactive tutorial",                           &["demo", "status", "reset"]),
         ("milestone","release milestone management",                 &["freeze", "status"]),
         ("calibrate","adjust display colors (gamma, saturation, hue)", &["reset"]),
         ("splash",   "replay splash animation",              &[]),
