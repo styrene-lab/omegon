@@ -26,6 +26,9 @@ pub enum Trigger {
     Command(&'static str),
     /// Wait for any user message to be sent.
     AnyInput,
+    /// Auto-send a prompt to the agent, wait for the turn to complete.
+    /// The overlay shows a "watching..." indicator while the agent works.
+    AutoPrompt(&'static str),
 }
 
 /// A single tutorial step.
@@ -45,55 +48,91 @@ pub enum Highlight {
     InstrumentPanel,
     EnginePanel,
     InputBar,
+    Dashboard,
 }
 
 /// The compiled tutorial steps — Omegon's built-in onboarding.
+/// Four acts: Cockpit (passive UI tour), Agent Works (auto-prompted
+/// tasks), Lifecycle (live cleave), Ready (wrap-up).
 pub const STEPS: &[Step] = &[
+    // ═══ Act 1 — The Cockpit ═══════════════════════════════════
     Step {
         title: "Welcome to Omegon",
-        body: "This is your AI agent cockpit.\n\nThe main area is the conversation — where you\nand the agent talk. The panels at the bottom\nshow engine status and live telemetry.",
+        body: "This is your AI agent cockpit.\n\nThe main area is the conversation \u{2014} where you\nand the agent work together. The panels at the\nbottom show engine status and live telemetry.\nThe sidebar on the right tracks your design space.",
         anchor: Anchor::Center,
         trigger: Trigger::Enter,
         highlight: None,
     },
     Step {
         title: "Engine Panel",
-        body: "Look at the bottom-left of your screen.\n\nThe engine panel shows:\n  \u{2022} Model name and provider\n  \u{2022} Tier (Victory / Gloriana / Retribution)\n  \u{2022} Thinking level\n  \u{2022} Context usage percentage",
+        body: "Look at the bottom-left of your screen.\n\nThe engine panel shows:\n  \u{2022} Model name and provider\n  \u{2022} Tier (Victory / Gloriana / Retribution)\n  \u{2022} Thinking level\n  \u{2022} Context capacity",
         anchor: Anchor::Upper,
         trigger: Trigger::Enter,
         highlight: Some(Highlight::EnginePanel),
     },
     Step {
         title: "Inference Instruments",
-        body: "The left instrument panel shows inference state:\n\n  \u{2022} Context bar \u{2014} navy (empty) \u{2192} teal \u{2192} amber (full)\n  \u{2022} Glitch chars appear when the agent thinks\n  \u{2022} Memory strings show fact counts per mind\n\nWaves on the strings show memory activity:\n  \u{2192} rightward = storing\n  \u{2190} leftward = recalling",
+        body: "The right panels show live telemetry:\n\n  \u{2022} Context bar \u{2014} navy \u{2192} teal \u{2192} amber\n  \u{2022} Glitch chars when the agent thinks\n  \u{2022} Memory strings show fact counts\n  \u{2022} Tool recency \u{2014} most recent at top",
         anchor: Anchor::Upper,
         trigger: Trigger::Enter,
         highlight: Some(Highlight::InstrumentPanel),
     },
     Step {
-        title: "Tool Activity",
-        body: "The right instrument panel shows tools:\n\n  \u{2022} Sorted list, most recently used at top\n  \u{2022} Recency bars (teal = just called)\n  \u{2022} Timestamps since last call\n\nAsk the agent: \"what files are in this project?\"\nand watch the tools panel light up with 'bash'.",
+        title: "Design Sidebar",
+        body: "The right panel is your design tree.\n\nIt shows every design node, grouped by status:\n  \u{2022} \u{2699} implementing  \u{25cf} decided\n  \u{2022} \u{25d0} exploring     \u{2715} blocked\n\nPress Ctrl+D to navigate it. Enter focuses\na node into the agent's context.\n\nWatch it update live as work progresses.",
+        anchor: Anchor::Center,
+        trigger: Trigger::Enter,
+        highlight: Some(Highlight::Dashboard),
+    },
+    // ═══ Act 2 — The Agent Works ═══════════════════════════════
+    Step {
+        title: "Watch the Agent",
+        body: "Now let's see the agent work.\n\nIt will read this project, analyze the code,\nand store facts about its architecture.\n\nWatch the instruments \u{2014} tools will light up\nand memory strings will pulse as facts\nare stored.",
         anchor: Anchor::Upper,
-        trigger: Trigger::AnyInput,
+        trigger: Trigger::AutoPrompt(
+            "Read the project files in src/ and Cargo.toml. Understand the architecture, then store 3 memory facts about what this project does, its structure, and its test coverage."
+        ),
         highlight: Some(Highlight::InstrumentPanel),
     },
     Step {
-        title: "Slash Commands",
-        body: "Type / in the input bar to see commands:\n\n  /model    \u{2014} switch models\n  /think    \u{2014} adjust thinking level\n  /context  \u{2014} change context class\n  /focus    \u{2014} toggle instruments\n  /help     \u{2014} full command list\n\nTry typing /focus now.",
+        title: "Design Exploration",
+        body: "The agent will now explore a design question.\n\nWatch the sidebar \u{2014} the node's status will\nchange as the agent adds research and makes\na decision.",
         anchor: Anchor::Center,
-        trigger: Trigger::Command("focus"),
-        highlight: Some(Highlight::InputBar),
+        trigger: Trigger::AutoPrompt(
+            "Focus on the design node 'output-formatting' and explore it. Read the doc, research the open question about color support, add your findings, and make a decision."
+        ),
+        highlight: Some(Highlight::Dashboard),
+    },
+    // ═══ Act 3 — The Lifecycle ═════════════════════════════════
+    Step {
+        title: "Decomposition",
+        body: "This is the showpiece \u{2014} live parallel work.\n\nThe agent will decompose a prepared task into\nparallel branches and execute them simultaneously.\n\nThis uses API credits (~$0.10\u{2013}0.30).\n\n  \u{25b6} Press Tab to start the cleave\n  \u{25b6} Press Esc to skip this step",
+        anchor: Anchor::Center,
+        trigger: Trigger::AutoPrompt(
+            "Run /assess diff to review the current state, then execute the prepared cleave plan in the openspec change 'add-validation'. Use retribution tier for the children."
+        ),
+        highlight: None,
     },
     Step {
-        title: "Focus Mode",
-        body: "The instruments disappeared!\n\nFocus mode gives the conversation full height.\n\nType /focus again to bring them back.",
+        title: "Verification",
+        body: "The branches have merged.\n\nNow the agent will verify the implementation\nagainst the specs. Watch for pass/fail results.",
         anchor: Anchor::Center,
-        trigger: Trigger::Command("focus"),
+        trigger: Trigger::AutoPrompt(
+            "Run the tests with `cargo test` and report the results. Then summarize what was implemented across the cleave branches."
+        ),
+        highlight: None,
+    },
+    // ═══ Act 4 — You're Ready ══════════════════════════════════
+    Step {
+        title: "Power Tools",
+        body: "A few more things to know:\n\n  \u{2022} /focus \u{2014} toggle instrument panels\n  \u{2022} /calibrate \u{2014} adjust display colors\n  \u{2022} /model \u{2014} switch AI models\n  \u{2022} /think \u{2014} adjust reasoning depth\n  \u{2022} Ctrl+D \u{2014} navigate the design tree\n  \u{2022} Ctrl+C \u{d7}2 \u{2014} quit",
+        anchor: Anchor::Center,
+        trigger: Trigger::Enter,
         highlight: None,
     },
     Step {
         title: "You're Ready!",
-        body: "That's the basics!\n\n  \u{2022} The agent has memory \u{2014} facts persist\n  \u{2022} The design tree tracks ideas\n  \u{2022} /help shows all commands\n  \u{2022} /tutorial restarts this guide",
+        body: "That's Omegon.\n\n  \u{2022} Memory persists across sessions\n  \u{2022} Design tree tracks your architecture\n  \u{2022} OpenSpec enforces spec-before-code\n  \u{2022} /help shows all commands\n  \u{2022} /tutorial replays this guide\n\nGo build something.",
         anchor: Anchor::Center,
         trigger: Trigger::Enter,
         highlight: None,
@@ -106,6 +145,9 @@ pub struct Tutorial {
     current: usize,
     /// Whether the tutorial is active (visible).
     pub active: bool,
+    /// Whether the current AutoPrompt step has sent its prompt.
+    /// Reset to false when advancing to a new step.
+    pub auto_prompt_sent: bool,
 }
 
 impl Tutorial {
@@ -113,6 +155,7 @@ impl Tutorial {
         Self {
             current: 0,
             active: true,
+            auto_prompt_sent: false,
         }
     }
 
@@ -132,6 +175,7 @@ impl Tutorial {
     pub fn advance(&mut self) -> bool {
         if self.current < STEPS.len() - 1 {
             self.current += 1;
+            self.auto_prompt_sent = false;
             true
         } else {
             self.active = false;
@@ -143,9 +187,38 @@ impl Tutorial {
     pub fn go_back(&mut self) -> bool {
         if self.current > 0 {
             self.current -= 1;
+            self.auto_prompt_sent = false;
             true
         } else {
             false
+        }
+    }
+
+    /// Mark the current AutoPrompt step's prompt as sent.
+    pub fn mark_auto_prompt_sent(&mut self) {
+        self.auto_prompt_sent = true;
+    }
+
+    /// Check if the current step is an AutoPrompt that hasn't been sent yet.
+    pub fn pending_auto_prompt(&self) -> Option<&'static str> {
+        if !self.active || self.auto_prompt_sent {
+            return None;
+        }
+        if let Trigger::AutoPrompt(prompt) = &self.step().trigger {
+            Some(prompt)
+        } else {
+            None
+        }
+    }
+
+    /// Called when the agent finishes a turn. If the current step is an
+    /// AutoPrompt that was sent, advance to the next step.
+    pub fn on_agent_turn_complete(&mut self) {
+        if !self.active { return; }
+        if self.auto_prompt_sent {
+            if let Trigger::AutoPrompt(_) = &self.step().trigger {
+                self.advance();
+            }
         }
     }
 
@@ -210,6 +283,15 @@ impl Tutorial {
             (_, Some(Highlight::InputBar)) => {
                 upper_rect(area, footer_height + 3) // extra 3 for input bar
             }
+            // Steps highlighting dashboard → position in left portion
+            (_, Some(Highlight::Dashboard)) => {
+                // Dashboard is on the right — put overlay on the left
+                let w = area.width.min(48).max(30);
+                let h = area.height.saturating_sub(footer_height + 3).min(14);
+                let x = area.x + 2;
+                let y = area.y + 2;
+                Rect { x, y, width: w, height: h }
+            }
             // Center for steps with no highlight or Center anchor
             (Anchor::Center, _) => centered_rect(area),
             (Anchor::Upper, _) => upper_rect(area, footer_height),
@@ -239,6 +321,13 @@ impl Tutorial {
                 return self.render_with_cta(overlay, buf, theme, &format!("  \u{25b6} Type /{cmd} in the input bar below"));
             }
             Trigger::AnyInput => "  \u{25b6} Type a message in the input bar below",
+            Trigger::AutoPrompt(_) => {
+                if self.auto_prompt_sent {
+                    "  \u{23f3} Agent is working... watch the instruments"
+                } else {
+                    "  \u{25b6} Press Tab to start"
+                }
+            }
         };
 
         self.render_with_cta(overlay, buf, theme, cta);
@@ -373,29 +462,36 @@ mod tests {
     }
 
     #[test]
-    fn check_command_matches() {
+    fn check_command_on_non_command_step() {
+        // check_command should be a no-op on non-Command steps
         let mut tut = Tutorial::new();
-        // Find the /focus step
-        while !matches!(tut.step().trigger, Trigger::Command("focus")) {
-            tut.advance();
-        }
         let idx = tut.step_index();
-        assert!(!tut.check_command("model")); // wrong command
-        assert_eq!(tut.step_index(), idx);
-        assert!(tut.check_command("focus")); // right command
-        assert_eq!(tut.step_index(), idx + 1);
+        assert!(!tut.check_command("focus"));
+        assert_eq!(tut.step_index(), idx); // didn't advance
     }
 
     #[test]
-    fn check_any_input() {
+    fn auto_prompt_lifecycle() {
         let mut tut = Tutorial::new();
-        // Find the AnyInput step
-        while tut.step().trigger != Trigger::AnyInput {
-            tut.advance();
+        // Find an AutoPrompt step
+        while !matches!(tut.step().trigger, Trigger::AutoPrompt(_)) {
+            assert!(tut.advance(), "should have an AutoPrompt step");
         }
         let idx = tut.step_index();
-        assert!(tut.check_any_input());
+
+        // Should have pending auto-prompt
+        assert!(tut.pending_auto_prompt().is_some());
+        assert!(!tut.auto_prompt_sent);
+
+        // Mark as sent
+        tut.mark_auto_prompt_sent();
+        assert!(tut.auto_prompt_sent);
+        assert!(tut.pending_auto_prompt().is_none());
+
+        // Agent turn complete should advance
+        tut.on_agent_turn_complete();
         assert_eq!(tut.step_index(), idx + 1);
+        assert!(!tut.auto_prompt_sent); // reset for new step
     }
 
     #[test]

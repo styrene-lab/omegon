@@ -2029,6 +2029,11 @@ impl App {
                 self.agent_active = false;
                 self.conversation.finalize_message();
                 self.effects.stop_spinner_glow();
+                // Notify tutorial — AutoPrompt steps advance when agent finishes
+                if let Some(ref mut tut) = self.tutorial_overlay {
+                    tut.on_agent_turn_complete();
+                    if !tut.active { self.mark_tutorial_completed(); }
+                }
             }
             AgentEvent::PhaseChanged { phase } => {
                 self.conversation.push_lifecycle("◈", &format!("Phase → {phase:?}"));
@@ -2769,12 +2774,25 @@ pub async fn run_tui(
                                 continue;
                             }
                             (KeyCode::Tab, _) => {
-                                if tut.step().trigger == tutorial::Trigger::Enter {
-                                    tut.advance();
-                                    if !tut.active { app.mark_tutorial_completed(); }
+                                match &tut.step().trigger {
+                                    tutorial::Trigger::Enter => {
+                                        tut.advance();
+                                        if !tut.active { app.mark_tutorial_completed(); }
+                                    }
+                                    tutorial::Trigger::AutoPrompt(prompt) if !tut.auto_prompt_sent => {
+                                        // Tab triggers the auto-prompt — send it to the agent
+                                        let prompt = prompt.to_string();
+                                        tut.mark_auto_prompt_sent();
+                                        app.conversation.push_user(&prompt);
+                                        app.agent_active = true;
+                                        let _ = command_tx.send(TuiCommand::UserPrompt(prompt)).await;
+                                    }
+                                    _ => {
+                                        // Command/AnyInput/already-sent AutoPrompt:
+                                        // Tab does nothing — the operator must do the action
+                                        // or wait for the agent to finish
+                                    }
                                 }
-                                // For Command/AnyInput triggers, Tab does nothing —
-                                // the operator must do the action
                                 continue;
                             }
                             _ => {}
