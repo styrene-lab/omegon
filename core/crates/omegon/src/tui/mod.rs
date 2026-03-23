@@ -2709,21 +2709,22 @@ pub async fn run_tui(
                         app.editor.move_word_forward();
                     }
 
-                    // Tab: command completion if typing, or toggle tool card expansion
+                    // Tab: command completion when typing a slash command
                     (KeyCode::Tab, _) => {
                         let text = app.editor.render_text().to_string();
                         if text.starts_with('/') {
-                            // Command completion
                             let matches = app.matching_commands();
                             if matches.len() == 1 {
                                 let cmd = format!("/{}", matches[0].0);
                                 app.editor.set_text(&cmd);
                             }
-                        } else if text.is_empty() {
-                            // Toggle nearest tool card expansion
-                            if let Some(idx) = app.conversation.focused_tool_card() {
-                                app.conversation.toggle_expand(idx);
-                            }
+                        }
+                    }
+
+                    // Ctrl+O: toggle tool card expansion (shadows pi's output toggle)
+                    (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
+                        if let Some(idx) = app.conversation.focused_tool_card() {
+                            app.conversation.toggle_expand(idx);
                         }
                     }
 

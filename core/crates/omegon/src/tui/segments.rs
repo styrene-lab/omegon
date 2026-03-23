@@ -503,7 +503,7 @@ fn render_tool_card(
             let hint = if expanded {
                 format!("  ── {} lines ── Tab to collapse", result_lines.len())
             } else {
-                format!("  ── {} more lines ── Tab to expand", result_lines.len() - show)
+                format!("  ── {} more lines ── Ctrl+O to expand", result_lines.len() - show)
             };
             lines.push(Line::from(Span::styled(
                 hint,
