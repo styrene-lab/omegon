@@ -3,6 +3,82 @@
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.15.0] - 2026-03-21
+
+### Added
+
+- **Interactive tutorial overlay** — 4-act, 10-step onboarding guide compiled into the binary. Four acts: Cockpit (passive UI tour), Agent Works (AutoPrompt — watch the agent read the project and explore a design node), Lifecycle (live cleave demonstration), Ready (wrap-up and power tools). Triggered by `/tutorial` or shown automatically on first run.
+  - `Trigger::AutoPrompt` — new trigger type that sends a prompt to the agent automatically on Tab press, then advances the overlay when the agent's turn completes. Operator watches real work happen while the overlay narrates.
+  - `Highlight::Dashboard` — positions overlay in the center of the conversation area when demonstrating the sidebar, leaving the design tree fully visible.
+  - Large overlay during AutoPrompt steps covers conversation chaos while the agent works; footer instruments remain visible for telemetry.
+  - Tab advances, Shift+Tab / BackTab goes back, Esc dismisses. All other keys swallowed while tutorial is active.
+  - Auto-dismissed permanently via `.omegon/tutorial_completed` marker.
+
+- **Dashboard sidebar overhaul** — full rewrite using `tui-tree-widget`. Layout: header with inline status badges and pipeline funnel → focused node panel → interactive tree (fills remaining height, scrollable) → OpenSpec changes. Activated via Ctrl+D.
+  - Per-node rich text: `status_icon node-id ?N P1 ◈` with color-coded status badges.
+  - Parent-child hierarchy, sorted by actionability (implementing → blocked → decided → exploring → seed → deferred). Implemented nodes filtered by default.
+  - Degraded nodes (parse failures, missing IDs) shown at top with ⚠ error-colored italic styling. Header badge shows count. Enter on degraded node shows diagnostic info.
+  - Pipeline funnel across all 8 statuses with live counts.
+  - Periodic rescan every 10 seconds picks up external changes (other Omegon instances, git pull, manual edits).
+
+- **Terminal responsive degradation** — 5-tier progressive layout collapse:
+  - Tier 1 (≥120w, ≥30h): sidebar + full 9-row footer
+  - Tier 2 (<120w or <30h): full footer, no sidebar
+  - Tier 3 (<24h): compact 4-row footer (model+tier+ctx%, session+facts)
+  - Tier 4 (<18h): conversation + editor only
+  - Tier 5 (<10h or <40w): centered "terminal too small" message
+  - Focus mode override always wins; `compute_footer_height()` is a testable function.
+
+- **Theme calibration** — `/calibrate` command with live HSL transform layer over `alpharius.json`:
+  - Three parameters: gamma (lightness curve), saturation multiplier, hue shift (degrees).
+  - `CalibratedTheme` pre-computes all 23 color fields at construction — zero HSL calculations per frame.
+  - Persisted to project profile (`profile.json`) — calibration is per-project, not global.
+  - `/calibrate reset` restores identity (1.0, 1.0, 0°).
+
+- **`ai/` directory convention** — unified home for all agent-managed content:
+  - `ai/docs/` — design tree markdown documents
+  - `ai/openspec/` — OpenSpec lifecycle changes
+  - `ai/memory/` — facts.db and facts.jsonl
+  - `ai/lifecycle/` — opsx-core state.json
+  - `ai/milestones.json`
+  - Centralized path resolution in `paths.rs` with fallback chain: `ai/` → legacy (`docs/`, `openspec/`, `.omegon/`) → `.pi/` compat. New writes go to `ai/`; existing projects with legacy layout continue working.
+
+- **`/init` command** — project scanner and migration assistant:
+  - Detects: Claude Code (CLAUDE.md), Codex (codex.md), Cursor (.cursor/rules, .cursorrules), Windsurf (.windsurfrules), Cline (.clinerules), GitHub Copilot (.github/copilot-instructions.md), Aider, and pi artifacts (.pi/memory/).
+  - Auto-migrates: instructions → `AGENTS.md`, memory → `ai/memory/`, lifecycle state → `ai/lifecycle/`, milestones → `ai/`, auth.json → `~/.config/omegon/`.
+  - `/init migrate` moves `docs/` → `ai/docs/` and `openspec/` → `ai/openspec/` with `fs::rename` (same-mount safe).
+
+- **Conversation visual identity** — agent text is plain flowing prose; operator messages get an accent bar + bold. Thinking blocks are dimmed. Tool cards show recency bars and elapsed time. Ctrl+O expands tool card detail.
+
+- **opsx-core crate** — lifecycle FSM with TDD enforcement:
+  - `Specs → Testing → Implementing` gate: first-class Testing state between Planned and Implementing; test stubs required before work begins.
+  - FSM validates all state transitions before markdown is written. opsx-core is the state guardian; markdown is the content store.
+  - JSON file store with atomic writes (write-then-rename). Schema versioning with forward migration stubs.
+
+- **Scanner hardening** — 256 KB file size cap, 1000 files per directory, 128 char ID limit, symlinks skipped. `ScanResult` returns parse failures alongside nodes for degraded node detection without redundant file re-reads.
+
+- **User config path migration** — `~/.config/omegon/` replaces `~/.pi/agent/` for auth tokens, sessions, logs, visuals. Fallback reads from legacy locations for backward compat. Writes always go to primary.
+
+### Changed
+
+- Footer height reduced from 12 → 9 rows; `compute_footer_height()` extracted as testable pure function.
+- Dashboard panel width increased from 36 → 40 columns.
+- Tab is now the universal "interact with active widget" key (tutorial advance, command completion). Ctrl+O expands tool cards. Shift+Tab / BackTab navigates backward.
+- Ctrl+D toggles sidebar navigation mode; arrow keys navigate the tree; Enter focuses selected node via `design-focus` bus command.
+- `auth_json_path()` split into read path (legacy fallback) and `auth_json_write_path()` (always primary). All three credential write functions updated.
+- `sessions_dir()` split into read (legacy fallback) and `sessions_dir_write()` (always primary).
+
+### Fixed
+
+- Tutorial overlay: uses `card_bg` as surface color, preventing terminal default color bleed-through. Every cell gets explicit bg + fg.
+- Tutorial Shift+Tab / BackTab now correctly goes back. `crossterm` sends `KeyCode::BackTab`; the previous code only matched `Tab` + SHIFT modifier.
+- Tutorial key events swallowed while overlay is active — previously leaked to sidebar navigator and editor.
+- Dashboard step overlay centered in conversation area instead of pinned to x=2 (far left wall).
+- Focus mode now collapses footer to 0 rows (was allocating 12 empty rows in focus mode).
+- Context bar reduced to 1 row; duplicate context gauge removed from engine panel.
+- Lifecycle rescan uses single Mutex lock acquisition — previous double-lock could deadlock.
+- Tool card expand moved to Ctrl+O; Tab freed for tutorial and command completion only.
+
 ## [0.9.0] - 2026-03-22
 
 ### Added

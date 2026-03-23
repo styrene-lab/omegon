@@ -5,7 +5,7 @@ status: implemented
 parent: rust-agent-loop
 tags: [tui, layout, responsive, ux, 0.15.0]
 open_questions: []
-jj_change_id: vlysvlkmwtumyvmlypsmvpoplxvrrvrk
+jj_change_id: zwpyutkzknmqptxxutqpkzvwuotkuywu
 issue_type: feature
 priority: 2
 ---

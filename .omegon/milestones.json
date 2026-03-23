@@ -5,7 +5,7 @@
       "terminal-responsive-degradation",
       "theme-calibration"
     ],
-    "frozen": false
+    "frozen": true
   },
   "0.16.0": {
     "nodes": [

@@ -5,7 +5,7 @@ status: implemented
 parent: alpharius-theme
 tags: [theme, ux, calibration, display, tweakcn, 0.15.0]
 open_questions: []
-jj_change_id: qzztylntkywyrnmqksnttnwvlrymyrqt
+jj_change_id: zwpyutkzknmqptxxutqpkzvwuotkuywu
 issue_type: feature
 priority: 3
 ---
