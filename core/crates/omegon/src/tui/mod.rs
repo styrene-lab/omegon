@@ -24,6 +24,7 @@ pub mod selector;
 pub mod spinner;
 pub mod splash;
 pub mod theme;
+pub mod tutorial;
 pub mod widgets;
 
 
@@ -141,7 +142,9 @@ pub struct App {
     pending_image: Option<std::path::PathBuf>,
     /// Previous harness status for diffing on HarnessStatusChanged.
     previous_harness_status: Option<crate::status::HarnessStatus>,
-    /// Tutorial state — active when running /tutorial.
+    /// Tutorial overlay — game-style first-play advisor.
+    tutorial_overlay: Option<tutorial::Tutorial>,
+    /// Legacy tutorial state — lesson-file based (for sandbox projects).
     tutorial: Option<TutorialState>,
 }
 
@@ -215,6 +218,7 @@ impl App {
                 .build(),
             pending_image: None,
             previous_harness_status: None,
+            tutorial_overlay: None,
             tutorial: None,
         }
     }
@@ -417,73 +421,96 @@ impl App {
     fn handle_tutorial(&mut self, args: &str) -> SlashResult {
         match args.trim() {
             "status" => {
+                if let Some(ref overlay) = self.tutorial_overlay {
+                    if overlay.active {
+                        return SlashResult::Display(format!(
+                            "Tutorial: step {}/{} — \"{}\"",
+                            overlay.step_index() + 1,
+                            overlay.total_steps(),
+                            overlay.step().title,
+                        ));
+                    }
+                }
                 if let Some(ref tut) = self.tutorial {
                     return SlashResult::Display(tut.status_line());
                 }
                 SlashResult::Display("No tutorial active. Type /tutorial to start.".into())
             }
             "reset" => {
+                self.tutorial_overlay = None;
                 if let Some(ref mut tut) = self.tutorial {
                     tut.reset();
-                    return SlashResult::Display("Tutorial reset to lesson 1. Type /tutorial to start.".into());
                 }
-                SlashResult::Display("No tutorial active.".into())
+                SlashResult::Display("Tutorial reset. Type /tutorial to start again.".into())
             }
             _ => {
-                // Start or resume tutorial
+                // Start/resume the overlay tutorial
+                if let Some(ref mut overlay) = self.tutorial_overlay {
+                    overlay.active = true;
+                    return SlashResult::Handled;
+                }
+                // Check for lesson-file tutorial (sandbox project)
                 let tutorial_dir = std::path::Path::new(&self.footer_data.cwd)
                     .join(".omegon").join("tutorial");
-
                 if tutorial_dir.is_dir() {
-                    // Tutorial lessons exist in this project — run in-place
-                    match TutorialState::load(&tutorial_dir) {
-                        Some(tut) => {
-                            let lesson = tut.current_lesson().clone();
-                            let status = tut.status_line();
-                            self.tutorial = Some(tut);
-                            self.queue_prompt(lesson.content);
-                            SlashResult::Display(format!("{status}\n\nLesson queued. The agent will begin when ready."))
-                        }
-                        None => SlashResult::Display("Tutorial directory exists but no lessons found.".into()),
+                    if let Some(tut) = TutorialState::load(&tutorial_dir) {
+                        let lesson = tut.current_lesson().clone();
+                        let status = tut.status_line();
+                        self.tutorial = Some(tut);
+                        self.queue_prompt(lesson.content);
+                        return SlashResult::Display(format!("{status}\n\nLesson queued."));
                     }
-                } else {
-                    // No tutorial in this project — clone and exec into the tutorial project
-                    self.launch_tutorial_project()
                 }
+                // No lesson files — start the built-in overlay tutorial
+                self.tutorial_overlay = Some(tutorial::Tutorial::new());
+                SlashResult::Handled
             }
         }
     }
 
-    /// Advance to the next tutorial lesson.
+    /// Advance to the next tutorial step (overlay or lesson-file).
     fn handle_tutorial_next(&mut self) -> SlashResult {
+        if let Some(ref mut overlay) = self.tutorial_overlay {
+            if overlay.active {
+                if !overlay.advance() {
+                    return SlashResult::Display("🎉 Tutorial complete!".into());
+                }
+                return SlashResult::Handled;
+            }
+        }
         if let Some(ref mut tut) = self.tutorial {
             if tut.advance() {
                 let lesson = tut.current_lesson().clone();
                 let status = tut.status_line();
                 self.queue_prompt(lesson.content);
-                SlashResult::Display(format!("{status}\n\nLesson queued."))
+                return SlashResult::Display(format!("{status}\n\nLesson queued."));
             } else {
-                SlashResult::Display("🎉 You've completed the tutorial! Type /tutorial reset to start over.".into())
+                return SlashResult::Display("🎉 Tutorial complete!".into());
             }
-        } else {
-            SlashResult::Display("No tutorial active. Type /tutorial to start.".into())
         }
+        SlashResult::Display("No tutorial active.".into())
     }
 
-    /// Go back to the previous tutorial lesson.
+    /// Go back to the previous tutorial step.
     fn handle_tutorial_prev(&mut self) -> SlashResult {
+        if let Some(ref mut overlay) = self.tutorial_overlay {
+            if overlay.active {
+                if !overlay.go_back() {
+                    return SlashResult::Display("Already at the first step.".into());
+                }
+                return SlashResult::Handled;
+            }
+        }
         if let Some(ref mut tut) = self.tutorial {
             if tut.go_back() {
                 let lesson = tut.current_lesson().clone();
                 let status = tut.status_line();
                 self.queue_prompt(lesson.content);
-                SlashResult::Display(format!("{status}\n\nLesson queued."))
-            } else {
-                SlashResult::Display("Already at the first lesson.".into())
+                return SlashResult::Display(format!("{status}\n\nLesson queued."));
             }
-        } else {
-            SlashResult::Display("No tutorial active. Type /tutorial to start.".into())
+            return SlashResult::Display("Already at the first lesson.".into());
         }
+        SlashResult::Display("No tutorial active.".into())
     }
 
     /// Clone the tutorial project and exec omegon inside it.
@@ -1032,6 +1059,13 @@ impl App {
                         _ => { cell.set_bg(base); }
                     }
                 }
+            }
+        }
+
+        // ── Tutorial overlay — rendered absolutely last, on top of everything ──
+        if let Some(ref tut) = self.tutorial_overlay {
+            if tut.active {
+                tut.render(area, frame.buffer_mut(), self.theme.as_ref());
             }
         }
     }
@@ -2535,6 +2569,27 @@ pub async fn run_tui(
                     continue;
                 }
 
+                // ── Tutorial overlay input ────────────────────────
+                // Handle tutorial keys BEFORE normal key processing.
+                // The overlay consumes Enter/Escape when active.
+                if let Some(ref mut tut) = app.tutorial_overlay {
+                    if tut.active {
+                        match key.code {
+                            KeyCode::Esc => {
+                                tut.dismiss();
+                                continue; // consume the key
+                            }
+                            KeyCode::Enter => {
+                                if tut.check_enter() {
+                                    continue; // consumed — advanced to next step
+                                }
+                                // Not an Enter-trigger step — fall through
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
                 match (key.code, key.modifiers) {
                     // ── Interrupt: Escape or Ctrl+C ─────────────────
                     (KeyCode::Esc, _) => {
@@ -2634,6 +2689,11 @@ pub async fn run_tui(
                         if !text.is_empty() {
                             // Slash commands always execute immediately
                             if text.starts_with('/') {
+                                // Notify tutorial overlay of slash command
+                                if let Some(ref mut tut) = app.tutorial_overlay {
+                                    let cmd = text[1..].split_whitespace().next().unwrap_or("");
+                                    tut.check_command(cmd);
+                                }
                                 match app.handle_slash_command(&text, &command_tx) {
                                     SlashResult::Display(response) => {
                                         app.conversation.push_system(&response);
@@ -2644,7 +2704,10 @@ pub async fn run_tui(
                                         let _ = command_tx.send(TuiCommand::Quit).await;
                                     }
                                     SlashResult::NotACommand => {
-                                        // Not a slash command (no / prefix) — send as prompt
+                                        // Tutorial overlay: AnyInput trigger
+                                        if let Some(ref mut tut) = app.tutorial_overlay {
+                                            tut.check_any_input();
+                                        }
                                         if app.agent_active {
                                             app.queue_prompt(text.clone());
                                         } else {
