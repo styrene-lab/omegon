@@ -1130,9 +1130,7 @@ impl App {
         ("delegate", "delegate task management",              &["status"]),
         ("status",   "show harness status (providers, MCP, secrets, routing)", &[]),
         ("focus",    "toggle instrument panel focus mode",   &[]),
-        ("tutorial", "interactive tutorial (replaces /demo)",         &["status", "reset"]),
-        ("next",     "advance to next tutorial lesson",              &[]),
-        ("prev",     "go back to previous tutorial lesson",          &[]),
+        ("tutorial", "interactive tutorial",                           &["status", "reset"]),
         ("milestone","release milestone management",                 &["freeze", "status"]),
         ("splash",   "replay splash animation",              &[]),
         ("dashboard", "open web dashboard (alias for /dash open)", &[]),
@@ -1521,13 +1519,7 @@ impl App {
                 self.handle_tutorial(args)
             }
 
-            "next" => {
-                self.handle_tutorial_next()
-            }
-
-            "prev" => {
-                self.handle_tutorial_prev()
-            }
+            // "next" and "prev" removed — tutorial uses Tab/Shift+Tab, not slash commands
 
             "vault" => {
                 match args {
@@ -2612,22 +2604,29 @@ pub async fn run_tui(
                 }
 
                 // ── Tutorial overlay input ────────────────────────
-                // Handle tutorial keys BEFORE normal key processing.
-                // The overlay consumes Enter/Escape when active.
+                // Tab advances, Shift+Tab goes back, Escape dismisses.
+                // Tab is unambiguous — doesn't conflict with Enter (submit)
+                // or any other keybinding.
                 if let Some(ref mut tut) = app.tutorial_overlay {
                     if tut.active {
-                        match key.code {
-                            KeyCode::Esc => {
+                        match (key.code, key.modifiers) {
+                            (KeyCode::Esc, _) => {
                                 tut.dismiss();
                                 app.mark_tutorial_completed();
-                                continue; // consume the key
+                                continue;
                             }
-                            KeyCode::Enter => {
-                                if tut.check_enter() {
+                            (KeyCode::Tab, mods) if mods.contains(KeyModifiers::SHIFT) => {
+                                tut.go_back();
+                                continue;
+                            }
+                            (KeyCode::Tab, _) => {
+                                if tut.step().trigger == tutorial::Trigger::Enter {
+                                    tut.advance();
                                     if !tut.active { app.mark_tutorial_completed(); }
-                                    continue; // consumed — advanced to next step
                                 }
-                                // Not an Enter-trigger step — fall through
+                                // For Command/AnyInput triggers, Tab does nothing —
+                                // the operator must do the action
+                                continue;
                             }
                             _ => {}
                         }

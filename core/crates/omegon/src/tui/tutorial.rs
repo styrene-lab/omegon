@@ -20,7 +20,7 @@ pub enum Anchor {
 /// How a step advances to the next one.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Trigger {
-    /// Press Enter (or any key) to continue.
+    /// Press Tab to continue (passive step).
     Enter,
     /// Wait for a specific slash command (e.g. "/focus").
     Command(&'static str),
@@ -51,21 +51,21 @@ pub enum Highlight {
 pub const STEPS: &[Step] = &[
     Step {
         title: "Welcome to Omegon",
-        body: "This is your AI agent cockpit.\n\nThe main area is the conversation — where you\nand the agent talk. The panels at the bottom\nshow engine status and live telemetry.\n\nPress Enter to continue.",
+        body: "This is your AI agent cockpit.\n\nThe main area is the conversation — where you\nand the agent talk. The panels at the bottom\nshow engine status and live telemetry.",
         anchor: Anchor::Center,
         trigger: Trigger::Enter,
         highlight: None,
     },
     Step {
         title: "Engine Panel",
-        body: "Look at the bottom-left of your screen.\n\nThe engine panel shows:\n  \u{2022} Model name and provider\n  \u{2022} Tier (Victory / Gloriana / Retribution)\n  \u{2022} Thinking level\n  \u{2022} Context usage percentage\n\nPress Enter to continue.",
+        body: "Look at the bottom-left of your screen.\n\nThe engine panel shows:\n  \u{2022} Model name and provider\n  \u{2022} Tier (Victory / Gloriana / Retribution)\n  \u{2022} Thinking level\n  \u{2022} Context usage percentage",
         anchor: Anchor::Upper,
         trigger: Trigger::Enter,
         highlight: Some(Highlight::EnginePanel),
     },
     Step {
         title: "Inference Instruments",
-        body: "The left instrument panel shows inference state:\n\n  \u{2022} Context bar \u{2014} navy (empty) \u{2192} teal \u{2192} amber (full)\n  \u{2022} Glitch chars appear when the agent thinks\n  \u{2022} Memory strings show fact counts per mind\n\nWaves on the strings show memory activity:\n  \u{2192} rightward = storing\n  \u{2190} leftward = recalling\n\nPress Enter to continue.",
+        body: "The left instrument panel shows inference state:\n\n  \u{2022} Context bar \u{2014} navy (empty) \u{2192} teal \u{2192} amber (full)\n  \u{2022} Glitch chars appear when the agent thinks\n  \u{2022} Memory strings show fact counts per mind\n\nWaves on the strings show memory activity:\n  \u{2192} rightward = storing\n  \u{2190} leftward = recalling",
         anchor: Anchor::Upper,
         trigger: Trigger::Enter,
         highlight: Some(Highlight::InstrumentPanel),
@@ -93,7 +93,7 @@ pub const STEPS: &[Step] = &[
     },
     Step {
         title: "You're Ready!",
-        body: "That's the basics!\n\n  \u{2022} The agent has memory \u{2014} facts persist\n  \u{2022} The design tree tracks ideas\n  \u{2022} /help shows all commands\n  \u{2022} /tutorial restarts this guide\n\nPress Enter to start working.",
+        body: "That's the basics!\n\n  \u{2022} The agent has memory \u{2014} facts persist\n  \u{2022} The design tree tracks ideas\n  \u{2022} /help shows all commands\n  \u{2022} /tutorial restarts this guide",
         anchor: Anchor::Center,
         trigger: Trigger::Enter,
         highlight: None,
@@ -220,10 +220,9 @@ impl Tutorial {
 
         // Build the call-to-action — prominent line inside the content
         let cta = match &step.trigger {
-            Trigger::Enter => "  \u{25b6} Press Enter to continue",
+            Trigger::Enter => "  \u{25b6} Press Tab to continue",
             Trigger::Command("focus") => "  \u{25b6} Type /focus in the input bar below",
             Trigger::Command(cmd) => {
-                // Leak is fine for static step data rendered per-frame
                 return self.render_with_cta(overlay, buf, theme, &format!("  \u{25b6} Type /{cmd} in the input bar below"));
             }
             Trigger::AnyInput => "  \u{25b6} Type a message in the input bar below",
@@ -245,7 +244,7 @@ impl Tutorial {
                 Line::from(vec![
                     Span::styled(&progress, Style::default().fg(theme.muted())),
                     Span::raw("  "),
-                    Span::styled("[Esc skip]", Style::default().fg(theme.muted())),
+                    Span::styled("[Esc skip] [Shift+Tab back]", Style::default().fg(theme.muted())),
                 ]).right_aligned()
             );
 
