@@ -676,13 +676,14 @@ impl App {
 
             // Memory op: determine direction from completed tool name
             let mem_op = if self.memory_ops_this_frame > 0 {
-                let dir = if matches!(tool_name.as_deref(),
+                let dir = match tool_name.as_deref() {
                     Some("memory_recall") | Some("memory_query") |
-                    Some("memory_episodes") | Some("memory_search_archive"))
-                {
-                    instruments::WaveDirection::Left // recall = leftward
-                } else {
-                    instruments::WaveDirection::Right // store = rightward
+                    Some("memory_episodes") | Some("memory_search_archive") =>
+                        instruments::WaveDirection::Left,   // recall ←
+                    Some("memory_supersede") =>
+                        instruments::WaveDirection::Center,  // supersede ↔
+                    _ =>
+                        instruments::WaveDirection::Right,   // store →
                 };
                 Some((0usize, dir)) // mind 0 = project for now
             } else { None };

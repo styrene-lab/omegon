@@ -46,7 +46,11 @@ const NOISE_CHARS: &[char] = &[
 // ─── Wave direction ─────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum WaveDirection { Left, Right }
+pub enum WaveDirection {
+    Left,   // recall: wave travels ← (mind → inference)
+    Right,  // store: wave travels → (inference → mind)
+    Center, // supersede: center-out symmetric twang
+}
 
 // ─── Mind state (sine string) ───────────────────────────────────────────
 
@@ -67,11 +71,30 @@ impl MindState {
 
     fn pluck(&mut self, direction: WaveDirection) {
         let w = self.wave.len();
-        let center = w / 2;
-        let sign = match direction { WaveDirection::Right => 1.0, WaveDirection::Left => -1.0 };
-        for i in 0..w {
-            let dx = (i as f64 - center as f64) / 4.0;
-            self.velocity[i] += (-dx * dx / 2.0).exp() * 2.0 * sign * 0.5;
+        match direction {
+            WaveDirection::Right => {
+                // Store: pulse at LEFT end, travels right →
+                for i in 0..w {
+                    let dx = i as f64 / 4.0;
+                    self.velocity[i] += (-dx * dx / 2.0).exp() * 2.5;
+                }
+            }
+            WaveDirection::Left => {
+                // Recall: pulse at RIGHT end, travels left ←
+                for i in 0..w {
+                    let dx = (w - 1 - i) as f64 / 4.0;
+                    self.velocity[i] -= (-dx * dx / 2.0).exp() * 2.5;
+                }
+            }
+            WaveDirection::Center => {
+                // Supersede: center-out symmetric twang ↔
+                let center = w / 2;
+                for i in 0..w {
+                    let dx = (i as f64 - center as f64) / 3.0;
+                    let pulse = (-dx * dx / 2.0).exp() * 3.0;
+                    self.velocity[i] += if i < center { pulse } else { -pulse };
+                }
+            }
         }
     }
 
@@ -359,24 +382,39 @@ impl InstrumentPanel {
                 }
             }
 
-            // Sine wave
+            // Sine wave — braille dots for sub-character resolution
+            // Each braille cell: 2 dots wide × 4 dots tall
+            // Wave displacement maps to vertical dot position
             let wave_start = (name_start + label.len() + 1).min(w / 3);
             let wave_w = w.saturating_sub(wave_start);
             let wave_len = mind.wave.len();
             for wx in 0..wave_w {
                 let x = wave_start + wx;
                 if x >= w { break; }
-                let sample_pos = (wx as f64 / wave_w as f64) * wave_len as f64;
-                let idx = (sample_pos as usize).min(wave_len.saturating_sub(1));
-                let displacement = mind.wave[idx];
-                let amp = displacement.abs();
+
+                // Sample two adjacent wave points (one per braille column)
+                let pos0 = (wx as f64 * 2.0 / (wave_w as f64 * 2.0)) * wave_len as f64;
+                let pos1 = ((wx as f64 * 2.0 + 1.0) / (wave_w as f64 * 2.0)) * wave_len as f64;
+                let d0 = mind.wave[(pos0 as usize).min(wave_len.saturating_sub(1))];
+                let d1 = mind.wave[(pos1 as usize).min(wave_len.saturating_sub(1))];
+
+                // Map displacement to braille row (0=top, 3=bottom)
+                let row0 = (1.5 - d0 * 0.8).clamp(0.0, 3.0) as u8;
+                let row1 = (1.5 - d1 * 0.8).clamp(0.0, 3.0) as u8;
+
+                // Braille dot bits: col0=[0x01,0x02,0x04,0x40] col1=[0x08,0x10,0x20,0x80]
+                let bit0 = match row0 { 0 => 0x01, 1 => 0x02, 2 => 0x04, _ => 0x40 };
+                let bit1 = match row1 { 0 => 0x08, 1 => 0x10, 2 => 0x20, _ => 0x80 };
+
+                let amp = d0.abs().max(d1.abs());
+                let dots = if amp < 0.02 {
+                    0x04 | 0x20 // flat middle line when idle
+                } else {
+                    bit0 | bit1
+                };
+
+                let ch = char::from_u32(0x2800 + dots as u32).unwrap_or('·');
                 let intensity = (amp * 0.5).min(1.0);
-
-                let ch = if amp < 0.05 { '─' }
-                    else if amp < 0.3 { '∿' }
-                    else if amp < 0.8 { if displacement > 0.0 { '╱' } else { '╲' } }
-                    else { if displacement > 0.0 { '▀' } else { '▄' } };
-
                 let color = if intensity > 0.01 { intensity_color(intensity) } else { Color::Rgb(20, 40, 55) };
                 if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, y)) {
                     cell.set_char(ch);

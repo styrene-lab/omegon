@@ -4,7 +4,8 @@ title: Instrument algorithm refactor — thinking as glitch, memory as sine stri
 status: decided
 parent: tui-hud-redesign
 tags: [tui, instruments, visual]
-open_questions: []
+open_questions:
+  - "How should cleave child processes be represented? Options: (a) temporary sine strings that appear/disappear per child, (b) the tools panel shows child-prefixed tool names, (c) a dedicated cleave section between context and memory, (d) the context bar splits into segments per child"
 jj_change_id: lozslwvmnptpwntvzyoollnyvpqwpkmm
 ---
 
@@ -21,6 +22,56 @@ The four instrument algorithms need better visual differentiation and semantic m
 
 
 ### Wave direction semantics and boundary-crossing connector
+
+
+
+## Decisions
+
+### Decision: Thinking glitch overlays the context bar as a static field, not a waterfall
+
+**Status:** decided
+**Rationale:** Thinking IS what's happening inside context. The glitch chars appear on the context bar surface — denser when thinking harder. No scrolling needed because the context bar itself is the spatial reference. The glitch disrupts the clean bar surface, making thinking visible as a perturbation of the context state.
+
+### Decision: Memory sine waves are plucked then dampen — direction encodes read vs write
+
+**Status:** decided
+**Rationale:** Each memory operation plucks the string. The wave propagates rightward (→) for storage, leftward (←) for retrieval. Amplitude and speed indicate intensity. The wave dampens naturally — a quiet string means no recent activity. Multiple rapid operations create interference patterns as waves overlap. This maps memory ops to a physical metaphor the operator develops intuition for.
+
+### Decision: Thinking overlays context directly — glitch chars on the bar surface
+
+**Status:** decided
+**Rationale:** Option (b) wins — thinking bleeds into context. The context bar is a clean gradient when idle. When thinking, glitch chars appear across its surface, denser at higher thinking levels. Context and thinking share the same pixels. A tree connector links context down to memory strings, showing the data flow path.
+
+### Decision: Tools as bubble-sort list with recency bars, not Lissajous curves
+
+**Status:** decided
+**Rationale:** Lissajous curves don't communicate WHICH tools are active. A sorted list with tool names, recency bars, and time-since-last-call is self-documenting. The list physically reorders when tools fire (bubble-to-top animation). The operator sees 'bash was called 3s ago' not 'there are teal curves.' Tool error = red bar that stays at top.
+
+### Decision: Two-panel layout: inference state (left) + tool activity (right)
+
+**Status:** decided
+**Rationale:** Replace the 2×2 grid with LEFT (unified inference: context bar + thinking glitch overlay + tree connector + memory sine strings) and RIGHT (tool bubble-sort list). Left tells the inference story top-to-bottom. Right shows execution activity. The 2×2 grid's four independent panels become two interconnected panels.
+
+## Open Questions
+
+- How should cleave child processes be represented? Options: (a) temporary sine strings that appear/disappear per child, (b) the tools panel shows child-prefixed tool names, (c) a dedicated cleave section between context and memory, (d) the context bar splits into segments per child
+
+## Implementation Notes
+
+### File Scope
+
+- `core/crates/omegon/src/tui/instruments.rs` (modified) — Complete rewrite: replace 2x2 grid with two-panel layout. Port inference panel (context bar + thinking glitch + tree connector + sine strings) and tool panel (bubble-sort list) from instrument_lab.rs example.
+- `core/crates/omegon/src/tui/mod.rs` (modified) — Update instrument panel wiring: pass tool names on ToolStart/ToolEnd, pass memory op direction (store vs recall), update layout split.
+
+### Constraints
+
+- Port directly from instrument_lab.rs — do NOT rewrite from scratch
+- Wave physics must use the same 1D wave equation from the lab
+- Tool list must show actual tool names from the session, not hardcoded
+- Memory direction: store=rightward, recall=leftward wave propagation
+- Thinking glitch density scales with thinking level AND agent_active
+- Context bar caps at 70% (auto-compaction threshold)
+- Tree connector uses │├└ characters linking context to memory minds
 
 ## Wave direction (revised)
 
@@ -61,54 +112,6 @@ When idle: ⠒⠒⠒⠒⠒⠒⠒⠒ (flat middle line, barely visible)
 Store pluck: ⠉⠒⠤⢄⣀⡠⠔⠊ → traveling right
 Recall pluck: ⠊⠔⡠⣀⢄⠤⠒⠉ ← traveling left
 Supersede: ⠉⣀⠉⣀ center-out burst
-
-## Decisions
-
-### Decision: Thinking glitch overlays the context bar as a static field, not a waterfall
-
-**Status:** decided
-**Rationale:** Thinking IS what's happening inside context. The glitch chars appear on the context bar surface — denser when thinking harder. No scrolling needed because the context bar itself is the spatial reference. The glitch disrupts the clean bar surface, making thinking visible as a perturbation of the context state.
-
-### Decision: Memory sine waves are plucked then dampen — direction encodes read vs write
-
-**Status:** decided
-**Rationale:** Each memory operation plucks the string. The wave propagates rightward (→) for storage, leftward (←) for retrieval. Amplitude and speed indicate intensity. The wave dampens naturally — a quiet string means no recent activity. Multiple rapid operations create interference patterns as waves overlap. This maps memory ops to a physical metaphor the operator develops intuition for.
-
-### Decision: Thinking overlays context directly — glitch chars on the bar surface
-
-**Status:** decided
-**Rationale:** Option (b) wins — thinking bleeds into context. The context bar is a clean gradient when idle. When thinking, glitch chars appear across its surface, denser at higher thinking levels. Context and thinking share the same pixels. A tree connector links context down to memory strings, showing the data flow path.
-
-### Decision: Tools as bubble-sort list with recency bars, not Lissajous curves
-
-**Status:** decided
-**Rationale:** Lissajous curves don't communicate WHICH tools are active. A sorted list with tool names, recency bars, and time-since-last-call is self-documenting. The list physically reorders when tools fire (bubble-to-top animation). The operator sees 'bash was called 3s ago' not 'there are teal curves.' Tool error = red bar that stays at top.
-
-### Decision: Two-panel layout: inference state (left) + tool activity (right)
-
-**Status:** decided
-**Rationale:** Replace the 2×2 grid with LEFT (unified inference: context bar + thinking glitch overlay + tree connector + memory sine strings) and RIGHT (tool bubble-sort list). Left tells the inference story top-to-bottom. Right shows execution activity. The 2×2 grid's four independent panels become two interconnected panels.
-
-## Open Questions
-
-*No open questions.*
-
-## Implementation Notes
-
-### File Scope
-
-- `core/crates/omegon/src/tui/instruments.rs` (modified) — Complete rewrite: replace 2x2 grid with two-panel layout. Port inference panel (context bar + thinking glitch + tree connector + sine strings) and tool panel (bubble-sort list) from instrument_lab.rs example.
-- `core/crates/omegon/src/tui/mod.rs` (modified) — Update instrument panel wiring: pass tool names on ToolStart/ToolEnd, pass memory op direction (store vs recall), update layout split.
-
-### Constraints
-
-- Port directly from instrument_lab.rs — do NOT rewrite from scratch
-- Wave physics must use the same 1D wave equation from the lab
-- Tool list must show actual tool names from the session, not hardcoded
-- Memory direction: store=rightward, recall=leftward wave propagation
-- Thinking glitch density scales with thinking level AND agent_active
-- Context bar caps at 70% (auto-compaction threshold)
-- Tree connector uses │├└ characters linking context to memory minds
 
 ## The new model: two panels, not four
 
