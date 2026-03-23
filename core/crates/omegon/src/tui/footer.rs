@@ -147,12 +147,16 @@ impl FooterData {
 
     fn render_engine_section(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         let bg = t.footer_bg();
-        let inner = Rect {
-            x: area.x + 1,
-            y: area.y,
-            width: area.width.saturating_sub(2),
-            height: area.height,
-        };
+
+        // Bordered block matching instrument panels
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(20, 40, 55)))
+            .title(Span::styled(" engine ", Style::default().fg(Color::Rgb(64, 88, 112))));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if inner.width < 15 || inner.height < 3 { return; }
 
         let model_short = short_model(&self.model_id);
         let source_icon = if self.model_provider == "local" { "⚡" } else { "☁" };
@@ -166,14 +170,9 @@ impl FooterData {
 
         let mut lines: Vec<Line<'static>> = Vec::new();
 
-        // Line 1: header
-        lines.push(Line::from(Span::styled(
-            " engine", Style::default().fg(t.accent_muted()).add_modifier(Modifier::BOLD),
-        )));
-
-        // Line 2: model + class
+        // Model + class
         lines.push(Line::from(vec![
-            Span::styled(format!(" {source_icon} "), Style::default().fg(if self.model_provider == "local" { t.accent() } else { t.dim() })),
+            Span::styled(format!("{source_icon} "), Style::default().fg(if self.model_provider == "local" { t.accent() } else { t.dim() })),
             Span::styled(model_short.to_string(), Style::default().fg(t.fg()).add_modifier(Modifier::BOLD)),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
             Span::styled(self.context_class.short(), Style::default().fg(ctx_class_color)),
@@ -181,7 +180,7 @@ impl FooterData {
 
         // Line 3: auth + persona
         let mut auth_parts: Vec<Span<'static>> = vec![
-            Span::styled(format!(" {auth_icon} "), Style::default().fg(auth_color)),
+            Span::styled(format!("{auth_icon} "), Style::default().fg(auth_color)),
             Span::styled(
                 if self.is_oauth { "subscription" } else { "api key" },
                 Style::default().fg(t.muted()),
@@ -197,7 +196,7 @@ impl FooterData {
         let pct = self.context_percent.min(100.0) as u32;
         let ctx_color = widgets::percent_color(self.context_percent.min(100.0), t);
         let mut ctx_parts: Vec<Span<'static>> = vec![
-            Span::styled(format!(" {}%", pct), Style::default().fg(ctx_color)),
+            Span::styled(format!("{}%", pct), Style::default().fg(ctx_color)),
         ];
         if self.context_window > 0 {
             ctx_parts.push(Span::styled(
@@ -221,7 +220,7 @@ impl FooterData {
             _ => t.dim(),
         };
         lines.push(Line::from(vec![
-            Span::styled(format!(" {}", capitalize(&self.model_tier)), Style::default().fg(tier_color)),
+            Span::styled(format!("{}", capitalize(&self.model_tier)), Style::default().fg(tier_color)),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
             Span::styled(format!("◎ {}", capitalize(&self.thinking_level)), Style::default().fg(think_color)),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
@@ -233,7 +232,7 @@ impl FooterData {
 
         // Line 6: session counters (always visible, even at 0)
         lines.push(Line::from(vec![
-            Span::styled(format!(" T·{}", self.turn), Style::default().fg(t.muted())),
+            Span::styled(format!("T·{}", self.turn), Style::default().fg(t.muted())),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
             Span::styled(format!("⚙ {}", self.tool_calls), Style::default().fg(t.muted())),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
@@ -359,7 +358,7 @@ impl FooterData {
             memory_blocks,
         }, t));
 
-        let pct_str = format!(" {}%", pct as u32);
+        let pct_str = format!("{}%", pct as u32);
         bar_spans.push(Span::styled(pct_str, Style::default().fg(
             widgets::percent_color(pct, t)
         )));

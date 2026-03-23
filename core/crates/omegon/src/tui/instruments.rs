@@ -274,6 +274,29 @@ impl InstrumentPanel {
         let active_minds: Vec<usize> = self.minds.iter().enumerate()
             .filter(|(_, m)| m.active).map(|(i, _)| i).collect();
 
+        // Idle state — show ready indicator when context is empty and no minds active
+        if self.context_fill < 0.001 && active_minds.is_empty() && !self.thinking_active {
+            let hints = [
+                ("", Color::Rgb(36, 52, 68)),
+                ("  ready", Color::Rgb(48, 80, 100)),
+                ("", Color::Rgb(36, 52, 68)),
+                ("  context and memory", Color::Rgb(36, 52, 68)),
+                ("  activity shown here", Color::Rgb(36, 52, 68)),
+            ];
+            for (row, (text, color)) in hints.iter().enumerate() {
+                let y = inner.y + row as u16;
+                if y >= inner.bottom() { break; }
+                for (i, ch) in text.chars().enumerate() {
+                    let x = inner.x + i as u16;
+                    if x >= inner.right() { break; }
+                    if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                        cell.set_char(ch); cell.set_fg(*color); cell.set_bg(bg_color());
+                    }
+                }
+            }
+            return;
+        }
+
         // Context bar: top 2 rows
         let bar_h = 2u16.min(inner.height);
         let bar_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: bar_h };
@@ -453,6 +476,30 @@ impl InstrumentPanel {
         let w = inner.width as usize;
         let name_w = 15.min(w / 2);
         let bar_w = w.saturating_sub(name_w + 6).max(2);
+
+        // Idle state — show hints when no tools have been called yet
+        if self.tools.is_empty() {
+            let hints = [
+                ("", Color::Rgb(48, 64, 80)),
+                ("  tools appear here as", Color::Rgb(48, 64, 80)),
+                ("  the agent calls them", Color::Rgb(48, 64, 80)),
+                ("", Color::Rgb(48, 64, 80)),
+                ("  each shows a recency", Color::Rgb(36, 52, 68)),
+                ("  bar and time elapsed", Color::Rgb(36, 52, 68)),
+            ];
+            for (row, (text, color)) in hints.iter().enumerate() {
+                let y = inner.y + row as u16;
+                if y >= inner.bottom() { break; }
+                for (i, ch) in text.chars().enumerate() {
+                    let x = inner.x + i as u16;
+                    if x >= inner.right() { break; }
+                    if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                        cell.set_char(ch); cell.set_fg(*color); cell.set_bg(bg_color());
+                    }
+                }
+            }
+            return;
+        }
 
         // Sort by recency
         let mut sorted: Vec<&ToolEntry> = self.tools.iter().collect();

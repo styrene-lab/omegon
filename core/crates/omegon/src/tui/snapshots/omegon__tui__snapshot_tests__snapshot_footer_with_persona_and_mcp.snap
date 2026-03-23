@@ -3,7 +3,7 @@ source: crates/omegon/src/tui/snapshot_tests.rs
 expression: render_to_string(&terminal)
 ---
 ╭ context ───────────────────╮╭ model ─────────────────────╮╭ memory ────────────────────╮╭ system ────────────────────╮
-│ ▐██████████░░░░▌ 72% / 272 ││ ☁ claude-sonnet-4-6 · Mani ││ ⌗ 1800 · inj 95 · wm 5     ││ ⌂                          │
+│ ▐██████████░░░░▌72% / 272k ││ ☁ claude-sonnet-4-6 · Mani ││ ⌗ 1800 · inj 95 · wm 5     ││ ⌂                          │
 │                            ││ ○ api key · ⚙ Systems Engi ││                            ││ MCP 2(8t) · 🔓  7 · ⚙ 23    │
 │                            ││                            ││                            ││                            │
 ╰────────────────────────────╯╰────────────────────────────╯╰────────────────────────────╯╰────────────────────────────╯
