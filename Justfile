@@ -114,13 +114,19 @@ rc:
     cd ..
 
     # Code sign with stable identity (avoids per-build macOS keychain prompts)
+    # Priority: YubiKey Developer ID > local self-signed cert > ad-hoc
     BINARY="core/target/release/omegon"
-    if security find-identity -v -p codesigning 2>/dev/null | grep -q "Omegon Local Dev"; then
+    if command -v rcodesign &>/dev/null && rcodesign smartcard-scan 2>/dev/null | grep -q "Developer ID Application"; then
+        echo "Signing with Apple Developer ID (YubiKey)..."
+        echo "⚡ Touch YubiKey when it blinks"
+        rcodesign sign --smartcard-slot 9c --code-signature-flags runtime "$BINARY"
+        echo "Signed with Developer ID Application (YubiKey)"
+    elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Omegon Local Dev"; then
         codesign -f -s "Omegon Local Dev" --identifier "dev.styrene.omegon" "$BINARY"
         echo "Signed with Omegon Local Dev certificate"
     else
         codesign -f -s - --identifier "dev.styrene.omegon" "$BINARY" 2>/dev/null || true
-        echo "Ad-hoc signed (run 'just setup-signing' to enable persistent keychain access)"
+        echo "Ad-hoc signed (run 'just setup-signing' for persistent keychain access)"
     fi
 
     echo ""
