@@ -6,9 +6,7 @@ parent: tutorial-system
 dependencies: [startup-systems-check]
 tags: [local-inference, ollama, onboarding, tutorial, ux, 0.15.1]
 open_questions:
-  - Should the tutorial install Ollama automatically if missing (curl the install script), or just tell the user how and wait?
   - What is the minimum model that can meaningfully drive a tutorial — can a 4B model do single-tool-call steps, or do we need 14B+ for reliable tool use?
-  - Should the local inference tutorial be a separate step array (STEPS_LOCAL) or a mode flag that adapts the existing demo steps (simpler prompts, lower expectations)?
 jj_change_id: kvywttuknzuoxmkzorsyqmsrwqvwpnku
 priority: 2
 ---
@@ -38,8 +36,23 @@ What's not smooth:
 - No way to set a local model as the *driver* (primary agent model) from the tutorial
 - The bootstrap panel shows "Ollama: 7 models" but doesn't show which ones or their sizes
 
+## Decisions
+
+### Decision: Show the install command and wait — don't auto-run curl scripts
+
+**Status:** decided
+**Rationale:** Running `curl | sh` without explicit operator consent is a security violation. The tutorial step shows the command, opens the Ollama website if possible, and waits (Command trigger on 'ollama' or manual confirmation). The operator pastes and runs it themselves. Trust boundary is the operator's terminal, not ours.
+
+### Decision: 14B minimum for driver, 4B usable for delegation/compaction — test empirically before shipping
+
+**Status:** exploring
+**Rationale:** Qwen3 14B and Devstral 24B can do multi-step tool use on Apple Silicon. 4B-8B models (Qwen3 4B, Llama 3.1 8B) can handle single-tool delegation tasks and compaction. Need empirical testing with the actual tutorial prompts to find the floor — run each auto-prompt step against each model size and record success rates. This is a QA task, not a design decision.
+
+### Decision: Mode flag on existing steps, not a separate array — tutorial adapts expectations per step
+
+**Status:** decided
+**Rationale:** A separate STEPS_LOCAL array means maintaining three parallel step sequences. Instead, the Tutorial struct gets an `inference_tier` field (from the systems check CapabilityTier). AutoPrompt steps check the tier and adjust: lower tiers get simpler prompts, shorter expectations, and recovery text if the model fails. The step body text adapts too: "Running locally — this may take longer." Same overlay engine, same rendering, different prompt complexity per tier.
+
 ## Open Questions
 
-- Should the tutorial install Ollama automatically if missing (curl the install script), or just tell the user how and wait?
 - What is the minimum model that can meaningfully drive a tutorial — can a 4B model do single-tool-call steps, or do we need 14B+ for reliable tool use?
-- Should the local inference tutorial be a separate step array (STEPS_LOCAL) or a mode flag that adapts the existing demo steps (simpler prompts, lower expectations)?
