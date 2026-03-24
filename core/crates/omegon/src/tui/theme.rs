@@ -35,7 +35,7 @@ pub trait Theme: Send + Sync {
     fn caution(&self) -> Color;
 
     // ─── Extended (semantic tool/diff colors) ───────────────────────
-    fn footer_bg(&self) -> Color { Color::Rgb(1, 3, 6) }
+    fn footer_bg(&self) -> Color { Color::Rgb(3, 7, 14) }
     fn user_msg_bg(&self) -> Color { self.card_bg() }
     fn tool_success_bg(&self) -> Color { self.card_bg() }
     fn tool_error_bg(&self) -> Color { Color::Rgb(30, 8, 16) }
@@ -208,15 +208,15 @@ impl Theme for JsonTheme {
 pub struct Alpharius;
 
 impl Theme for Alpharius {
-    fn bg(&self) -> Color { Color::Rgb(0, 1, 3) }
-    fn card_bg(&self) -> Color { Color::Rgb(2, 6, 12) }
-    fn surface_bg(&self) -> Color { Color::Rgb(0, 1, 3) }
+    fn bg(&self) -> Color { Color::Rgb(2, 4, 8) }          // Thunderhawk-tinted near-black
+    fn card_bg(&self) -> Color { Color::Rgb(4, 10, 18) }   // subtle lift for conversation cards
+    fn surface_bg(&self) -> Color { Color::Rgb(2, 4, 8) }  // matches bg
     fn border(&self) -> Color { Color::Rgb(48, 112, 140) }
-    fn border_dim(&self) -> Color { Color::Rgb(32, 72, 96) }
+    fn border_dim(&self) -> Color { Color::Rgb(36, 80, 104) } // brighter than before (was 32,72,96)
 
     fn fg(&self) -> Color { Color::Rgb(196, 216, 228) }
-    fn muted(&self) -> Color { Color::Rgb(96, 120, 136) }
-    fn dim(&self) -> Color { Color::Rgb(64, 88, 112) }
+    fn muted(&self) -> Color { Color::Rgb(108, 136, 152) } // brighter (was 96,120,136)
+    fn dim(&self) -> Color { Color::Rgb(72, 100, 124) }    // brighter (was 64,88,112)
 
     fn accent(&self) -> Color { Color::Rgb(42, 180, 200) }
     fn accent_muted(&self) -> Color { Color::Rgb(26, 136, 152) }

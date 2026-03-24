@@ -2388,7 +2388,7 @@ pub async fn run_tui(
     // diff optimizer may skip cells that haven't changed from the initial
     // state, leaving the terminal's native background visible.
     io::stdout().execute(crossterm::style::SetBackgroundColor(
-        crossterm::style::Color::Rgb { r: 0, g: 1, b: 3 },
+        crossterm::style::Color::Rgb { r: 2, g: 4, b: 8 },
     ))?;
     // Clear the screen with our bg so every pixel starts owned.
     io::stdout().execute(crossterm::terminal::Clear(crossterm::terminal::ClearType::All))?;

@@ -6,13 +6,13 @@
 		"primaryMuted": "#1a8898",
 		"primaryBright": "#6ecad8",
 		"fg": "#c4d8e4",
-		"mutedFg": "#607888",
-		"dimFg": "#405870",
-		"bg": "#000103",
-		"cardBg": "#02060c",
-		"surfaceBg": "#000103",
+		"mutedFg": "#6c8898",
+		"dimFg": "#48647c",
+		"bg": "#020408",
+		"cardBg": "#040a12",
+		"surfaceBg": "#020408",
 		"borderColor": "#285c74",
-		"borderDim": "#1c384c",
+		"borderDim": "#245068",
 		"green": "#1ab878",
 		"red": "#e04848",
 		"orange": "#c86418",
@@ -20,7 +20,7 @@
 		"selectedBg": "#020610",
 		"userMsgBg": "#02060c",
 		"toolErrorBg": "#1e0810",
-		"footerBg": "#010306",
+		"footerBg": "#03070e",
 		"syntaxComment": "#344858",
 		"syntaxType": "#5aa8e0",
 		"thinkingMedium": "#1a5878"
@@ -83,8 +83,8 @@
 		"bashMode": "yellow"
 	},
 	"export": {
-		"pageBg": "#000103",
-		"cardBg": "#02060c",
-		"infoBg": "#010306"
+		"pageBg": "#020408",
+		"cardBg": "#040a12",
+		"infoBg": "#03070e"
 	}
 }
