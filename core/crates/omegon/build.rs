@@ -38,9 +38,20 @@ fn main() {
     let describe = git(&["describe", "--tags", "--always"])
         .unwrap_or_else(|| sha.clone());
 
+    // Check if git describe matches Cargo.toml version (tag is on HEAD).
+    // If so, the git: line in --version is redundant — suppress it.
+    let cargo_version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    let tag_matches = describe == format!("v{cargo_version}")
+        || describe.strip_prefix('v') == Some(&cargo_version);
+    let describe_display = if tag_matches {
+        String::new()
+    } else {
+        format!("\ngit: {describe}")
+    };
+
     println!("cargo:rustc-env=OMEGON_GIT_SHA={sha}{dirty}");
     println!("cargo:rustc-env=OMEGON_BUILD_DATE={date}");
-    println!("cargo:rustc-env=OMEGON_GIT_DESCRIBE={describe}");
+    println!("cargo:rustc-env=OMEGON_GIT_DESCRIBE={describe_display}");
 
     // Only re-run when the commit changes (HEAD moves), not on every
     // git status/stage/stash. Watching .git/index causes full recompiles

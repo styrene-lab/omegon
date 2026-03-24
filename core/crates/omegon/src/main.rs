@@ -56,7 +56,9 @@ const fn build_version() -> &'static str {
     )
 }
 
-/// Long version for `--version` verbose: includes git describe for RC distance.
+/// Long version for `--version`: includes git describe only when tag doesn't match.
+/// build.rs sets OMEGON_GIT_DESCRIBE to "" when tag matches Cargo version,
+/// or "\ngit: v0.14.1-rc.15-125-gad5428c" when they diverge.
 const fn build_long_version() -> &'static str {
     concat!(
         env!("CARGO_PKG_VERSION"),
@@ -64,7 +66,7 @@ const fn build_long_version() -> &'static str {
         env!("OMEGON_GIT_SHA"),
         " ",
         env!("OMEGON_BUILD_DATE"),
-        ")\ngit: ",
+        ")",
         env!("OMEGON_GIT_DESCRIBE"),
     )
 }

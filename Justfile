@@ -62,6 +62,99 @@ link:
 run *args:
     core/target/release/omegon {{args}}
 
+# ─── Release ─────────────────────────────────────────────────
+
+# Cut a release candidate: bump rc.N, build, test, commit, tag.
+# Push the tag manually to publish: git push origin <tag>
+rc:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Refuse to run with uncommitted changes
+    if [ -n "$(git status --porcelain -- core/)" ]; then
+        echo "✗ Uncommitted changes in core/. Commit or stash first."
+        exit 1
+    fi
+
+    # Read current version
+    CURRENT=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+    echo "Current version: $CURRENT"
+
+    # Bump RC number
+    if echo "$CURRENT" | grep -q '\-rc\.'; then
+        # Already an RC — increment the number
+        BASE=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//')
+        RC_NUM=$(echo "$CURRENT" | sed 's/.*-rc\.//')
+        NEW_RC=$((RC_NUM + 1))
+        NEW_VERSION="${BASE}-rc.${NEW_RC}"
+    else
+        # Stable version — start rc.1 on next patch
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+        NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))-rc.1"
+    fi
+
+    echo "New version: $NEW_VERSION"
+
+    # Update Cargo.toml
+    sed -i '' "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" core/Cargo.toml
+
+    # Build
+    echo "Building..."
+    cd core && cargo build --release -p omegon 2>&1 | tail -3
+    cd ..
+
+    # Test
+    echo "Testing..."
+    cd core && cargo test -p omegon 2>&1 | tail -3
+    cd ..
+
+    # Commit and tag
+    git add core/Cargo.toml core/Cargo.lock
+    git commit -m "chore(release): ${NEW_VERSION}"
+    git tag "v${NEW_VERSION}"
+
+    echo ""
+    echo "✓ ${NEW_VERSION} — built, tested, committed, tagged."
+    echo "  To publish: git push origin v${NEW_VERSION}"
+
+# Cut a stable release: strip -rc.N, build, test, commit, tag.
+release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [ -n "$(git status --porcelain -- core/)" ]; then
+        echo "✗ Uncommitted changes in core/. Commit or stash first."
+        exit 1
+    fi
+
+    CURRENT=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+
+    if ! echo "$CURRENT" | grep -q '\-rc\.'; then
+        echo "✗ Current version ($CURRENT) is not an RC. Bump to an RC first with: just rc"
+        exit 1
+    fi
+
+    NEW_VERSION=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//')
+    echo "Releasing: $CURRENT → $NEW_VERSION"
+
+    sed -i '' "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" core/Cargo.toml
+
+    echo "Building..."
+    cd core && cargo build --release -p omegon 2>&1 | tail -3
+    cd ..
+
+    echo "Testing..."
+    cd core && cargo test -p omegon 2>&1 | tail -3
+    cd ..
+
+    git add core/Cargo.toml core/Cargo.lock
+    git commit -m "chore(release): ${NEW_VERSION}"
+    git tag "v${NEW_VERSION}"
+
+    echo ""
+    echo "✓ ${NEW_VERSION} — built, tested, committed, tagged."
+    echo "  To publish: git push origin v${NEW_VERSION}"
+
 # ─── TypeScript (omegon-pi) ─────────────────────────────────
 
 # Run all TS tests
