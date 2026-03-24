@@ -538,6 +538,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 
     // ─── LLM provider ──────────────────────────────────────────────────
     // Native Rust clients by default. --bridge flag forces the Node.js subprocess.
+    let mut provider_connected = true;
     let bridge: Box<dyn LlmBridge> = if let Some(ref bridge_path) = cli.bridge {
         tracing::info!(bridge = %bridge_path.display(), "using Node.js LLM bridge");
         Box::new(SubprocessBridge::spawn(bridge_path, &cli.node).await?)
@@ -557,11 +558,16 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     // No provider, no bridge — start TUI anyway with a null bridge
                     // so the user can /login from within the session
                     tracing::warn!("no LLM provider available — TUI will start but messages will fail until /login");
+                    provider_connected = false;
                     Box::new(bridge::NullBridge)
                 }
             }
         }
     };
+    // Update settings with provider status before TUI reads it
+    if let Ok(mut s) = shared_settings.lock() {
+        s.provider_connected = provider_connected;
+    }
     let bridge: Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>> =
         Arc::new(tokio::sync::RwLock::new(bridge));
 
@@ -716,15 +722,18 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     let bridge_clone = bridge.clone();
                     let model_clone = model.clone();
                     let events_clone = events_tx.clone();
+                    let settings_clone = shared_settings.clone();
                     tokio::spawn(async move {
                         if let Some(new_bridge) = providers::auto_detect_bridge(&model_clone).await {
                             let mut guard = bridge_clone.write().await;
                             *guard = new_bridge;
+                            if let Ok(mut s) = settings_clone.lock() { s.provider_connected = true; }
                             tracing::info!("bridge hot-swapped for provider {}", model_clone.split(':').next().unwrap_or("?"));
                             let _ = events_clone.send(AgentEvent::SystemNotification {
                                 message: format!("Provider switched to {}.", model_clone.split(':').next().unwrap_or("?")),
                             });
                         } else {
+                            if let Ok(mut s) = settings_clone.lock() { s.provider_connected = false; }
                             let _ = events_clone.send(AgentEvent::SystemNotification {
                                 message: format!("⚠ No credentials for {}. Use /login to authenticate.", model_clone.split(':').next().unwrap_or("?")),
                             });
@@ -901,6 +910,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             let provider_clone = provider.to_string();
                             let bridge_clone = bridge.clone();
                             let model_for_redetect = cli.model.clone();
+                            let settings_for_login = shared_settings.clone();
                             tokio::spawn(async move {
                                 let progress: auth::LoginProgress = Box::new(move |msg| {
                                     let _ = progress_tx.send(AgentEvent::SystemNotification {
@@ -927,6 +937,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                     if let Some(new_bridge) = providers::auto_detect_bridge(&model_for_redetect).await {
                                         let mut guard = bridge_clone.write().await;
                                         *guard = new_bridge;
+                                        if let Ok(mut s) = settings_for_login.lock() { s.provider_connected = true; }
                                         tracing::info!("bridge hot-swapped after successful login");
                                         let _ = events_tx_clone.send(AgentEvent::SystemNotification {
                                             message: "Provider connected — you can send messages now.".to_string(),

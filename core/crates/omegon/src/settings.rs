@@ -47,6 +47,12 @@ pub struct Settings {
     /// Provider preference order for routing. First = most preferred.
     #[serde(default)]
     pub provider_order: Vec<String>,
+
+    /// Whether a live LLM provider is connected. Set to false when NullBridge
+    /// is active (no credentials available). The TUI uses this to show
+    /// "no provider" instead of a model name that can't actually be used.
+    #[serde(skip)]
+    pub provider_connected: bool,
 }
 
 /// Tool card display mode in the conversation view.
@@ -233,6 +239,7 @@ impl Default for Settings {
             context_mode: ContextMode::Standard,
             tool_detail: ToolDetail::Detailed,
             provider_order: Vec::new(),
+            provider_connected: true, // optimistic default — set false when NullBridge
         }
     }
 }

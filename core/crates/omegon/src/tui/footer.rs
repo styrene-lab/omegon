@@ -42,6 +42,8 @@ pub struct FooterData {
     pub thinking_level: String,
     /// Current model tier name (for engine panel display).
     pub model_tier: String,
+    /// Whether a live LLM provider is connected. False when NullBridge is active.
+    pub provider_connected: bool,
 }
 
 impl FooterData {
@@ -125,6 +127,24 @@ impl FooterData {
             height: area.height,
         };
 
+        let mut lines: Vec<Line<'static>> = Vec::new();
+
+        // Line 1: header
+        lines.push(Line::from(Span::styled(
+            " engine", Style::default().fg(t.accent_muted()).add_modifier(Modifier::BOLD),
+        )));
+
+        if !self.provider_connected {
+            // No provider — show clear disconnected state
+            lines.push(Line::from(vec![
+                Span::styled(" ⚠ ", Style::default().fg(t.warning())),
+                Span::styled("no provider", Style::default().fg(t.warning()).add_modifier(Modifier::BOLD)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("   /login to connect", Style::default().fg(t.muted())),
+            ]));
+        } else {
+
         let model_short = short_model(&self.model_id);
         let source_icon = if self.model_provider == "local" { "⚡" } else { "☁" };
         let auth_icon = if self.is_oauth { "●" } else { "○" };
@@ -134,13 +154,6 @@ impl FooterData {
             ContextClass::Clan => t.fg(),
             _ => t.dim(),
         };
-
-        let mut lines: Vec<Line<'static>> = Vec::new();
-
-        // Line 1: header
-        lines.push(Line::from(Span::styled(
-            " engine", Style::default().fg(t.accent_muted()).add_modifier(Modifier::BOLD),
-        )));
 
         // Line 2: model + class
         lines.push(Line::from(vec![
@@ -210,6 +223,8 @@ impl FooterData {
             Span::styled(" · ", Style::default().fg(t.border_dim())),
             Span::styled(format!("↻ {}", self.compactions), Style::default().fg(t.dim())),
         ]));
+
+        } // close else (provider_connected)
 
         let widget = Paragraph::new(lines).style(Style::default().bg(bg));
         frame.render_widget(widget, inner);

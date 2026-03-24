@@ -1170,6 +1170,7 @@ impl App {
             self.footer_data.context_class = s.context_class;
             self.footer_data.context_mode = s.context_mode;
             self.footer_data.thinking_level = s.thinking.as_str().to_string();
+            self.footer_data.provider_connected = s.provider_connected;
         }
         {
             self.footer_data.model_tier = self.footer_data.harness.capability_tier.clone();
@@ -2838,15 +2839,19 @@ pub async fn run_tui(
     // Build a contextual welcome message
     {
         let s = app.settings();
-        let model_short = s.model_short();
         let project = app.footer_data.cwd.split('/').next_back().unwrap_or("project");
         let facts = app.footer_data.total_facts;
-        let ctx = s.context_window / 1000;
 
         let version = env!("CARGO_PKG_VERSION");
         let sha = env!("OMEGON_GIT_SHA");
         let mut welcome = format!("Ω Omegon {version} ({sha}) — {project}");
-        welcome.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
+        if s.provider_connected {
+            let model_short = s.model_short();
+            let ctx = s.context_window / 1000;
+            welcome.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
+        } else {
+            welcome.push_str("\n  ⚠ No provider — use /login to connect");
+        }
         if facts > 0 {
             welcome.push_str(&format!("  ·  {facts} facts loaded"));
         }
