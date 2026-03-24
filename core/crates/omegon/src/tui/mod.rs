@@ -1136,7 +1136,7 @@ impl App {
         ("auth",     "authentication management",             &["status", "login", "logout", "unlock"]),
         ("chronos",  "date/time context",                      &["week", "month", "quarter", "relative", "iso", "epoch", "tz", "range", "all"]),
         ("migrate",  "import from other tools",               &["auto", "claude-code", "pi", "codex", "cursor", "aider"]),
-        ("dash",     "toggle dashboard panel / open web UI",  &["open"]),
+        ("dash",     "open web dashboard in browser",          &["status"]),
         ("vault",    "Vault status and management",           &["status", "unseal", "login", "configure", "init-policy"]),
         ("persona",  "switch persona (or 'off' to deactivate)",  &["off"]),
         ("tone",     "switch tone (or 'off' to deactivate)",    &["off"]),
@@ -1148,7 +1148,7 @@ impl App {
         ("prev",     "go back to previous tutorial lesson",          &[]),
         ("milestone","release milestone management",                 &["freeze", "status"]),
         ("splash",   "replay splash animation",              &[]),
-        ("dashboard", "open web dashboard (alias for /dash open)", &[]),
+        ("dashboard", "open web dashboard (alias for /dash)",      &[]),
         ("version",  "show build version and git sha",       &[]),
         ("exit",     "quit (or double Ctrl+C)",              &[]),
     ];
@@ -1490,20 +1490,20 @@ impl App {
             }
 
             "dash" => {
-                if args == "open" {
-                    if let Some(addr) = self.web_server_addr {
-                        let url = format!("http://{addr}");
+                // /dash and /dash open both open the web dashboard.
+                // If the server is already running, open the browser.
+                // If not, start it (which auto-opens on ready).
+                if let Some(addr) = self.web_server_addr {
+                    let url = format!("http://{addr}");
+                    if args == "status" {
+                        SlashResult::Display(format!("Dashboard running at {url}"))
+                    } else {
                         open_browser(&url);
                         SlashResult::Display(format!("Dashboard at {url}"))
-                    } else {
-                        let _ = tx.try_send(TuiCommand::StartWebDashboard);
-                        SlashResult::Display("Starting web dashboard…".into())
                     }
-                } else if let Some(addr) = self.web_server_addr {
-                    let url = format!("http://{addr}");
-                    SlashResult::Display(format!("Dashboard running at {url}\nUse /dash open to open in browser"))
                 } else {
-                    SlashResult::Display("Use /dash open to start the web dashboard".into())
+                    let _ = tx.try_send(TuiCommand::StartWebDashboard);
+                    SlashResult::Display("Starting web dashboard…".into())
                 }
             }
 
@@ -1659,7 +1659,7 @@ impl App {
             "exit" | "quit" => SlashResult::Quit,
 
             // ── Aliases ─────────────────────────────────────────────
-            "dashboard" => self.handle_slash_command("/dash open", tx),
+            "dashboard" => self.handle_slash_command("/dash", tx),
             "thinking"  => self.handle_slash_command(&format!("/think {args}"), tx),
             "models"    => self.handle_slash_command("/model", tx),
             "version"   => SlashResult::Display(format!(

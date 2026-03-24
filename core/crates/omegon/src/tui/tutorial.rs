@@ -95,7 +95,7 @@ const STEP_SIDEBAR: Step = Step {
 
 const STEP_WEB_DASHBOARD: Step = Step {
     title: "Web Dashboard",
-    body: "The terminal sidebar is at-a-glance.\nFor deep exploration, open the browser view.\n\nType /dash open in the input bar.\n\nOmegon starts a local server and opens your\nbrowser. You\u{2019}ll see the design tree you just\nexplored, the OpenSpec changes, and a live\nWebSocket feed of everything happening here.\n\nSame in-memory data as the TUI \u{2014} no files,\nno polling, instant updates.",
+    body: "The terminal sidebar is at-a-glance.\nFor deep exploration, open the browser view.\n\nType /dash in the input bar.\n\nOmegon starts a local server and opens your\nbrowser. You\u{2019}ll see the design tree you just\nexplored, the OpenSpec changes, and a live\nWebSocket feed of everything happening here.\n\nSame in-memory data as the TUI \u{2014} no files,\nno polling, instant updates.",
     anchor: Anchor::Center,
     trigger: Trigger::Command("dash"),
     highlight: Some(Highlight::Dashboard),

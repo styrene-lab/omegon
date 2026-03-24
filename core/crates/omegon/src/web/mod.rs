@@ -1,6 +1,6 @@
 //! Embedded web server — localhost HTTP + WebSocket for the agent dashboard.
 //!
-//! Started on demand by `/dash open`. Serves:
+//! Started on demand by `/dash`. Serves:
 //! - `GET /` — embedded single-page dashboard
 //! - `GET /api/state` — full agent state snapshot (JSON)
 //! - `WS /ws` — bidirectional agent protocol (JSON-over-WebSocket)
