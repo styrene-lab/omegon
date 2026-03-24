@@ -178,15 +178,15 @@ fn probe_cloud() -> ProbeResult {
         providers.push("openrouter");
     }
 
-    // Also check stored credentials (additive — user may have env var for
-    // one provider and stored credentials for another)
-    for name in &["anthropic", "openai-codex", "openrouter"] {
-        if crate::auth::read_credentials(name)
-            .is_some_and(|c| !c.access.is_empty())
-        {
-            let label = if *name == "openai-codex" { "openai" } else { name };
-            if !providers.contains(&label) {
-                providers.push(label);
+    // Also check stored credentials using canonical provider map
+    for p in crate::auth::PROVIDERS {
+        if matches!(p.auth_method, crate::auth::AuthMethod::OAuth | crate::auth::AuthMethod::ApiKey) {
+            if crate::auth::read_credentials(p.auth_key)
+                .is_some_and(|c| !c.access.is_empty())
+            {
+                if !providers.contains(&p.id) {
+                    providers.push(p.id);
+                }
             }
         }
     }

@@ -12,6 +12,129 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
+// ─── Canonical provider credential map ──────────────────────────────────────
+// Single source of truth for every provider's auth.json key, env vars,
+// display name, and auth type. Every resolution path MUST use this map
+// instead of hardcoding key names.
+//
+// When adding a new provider: add it here, then update
+// docs/provider-credential-map.md to match.
+
+/// How a provider authenticates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AuthMethod {
+    /// Browser OAuth flow (PKCE)
+    OAuth,
+    /// Direct API key input
+    ApiKey,
+    /// Dynamic CLI tool execution
+    Dynamic,
+}
+
+/// Canonical credential descriptor for a provider.
+#[derive(Debug, Clone)]
+pub struct ProviderCredential {
+    /// Internal identifier (used in /model prefix, bus commands)
+    pub id: &'static str,
+    /// Key used in auth.json (may differ from id — e.g. "openai" → "openai-codex")
+    pub auth_key: &'static str,
+    /// Human-readable name for UI display
+    pub display_name: &'static str,
+    /// Environment variables that can carry this credential (checked in order)
+    pub env_vars: &'static [&'static str],
+    /// How this provider authenticates
+    pub auth_method: AuthMethod,
+    /// Short description for the login selector
+    pub description: &'static str,
+}
+
+/// All known providers. This is the ONLY place provider→key mappings should exist.
+pub static PROVIDERS: &[ProviderCredential] = &[
+    ProviderCredential {
+        id: "anthropic", auth_key: "anthropic",
+        display_name: "Anthropic (Claude)",
+        env_vars: &["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+        auth_method: AuthMethod::OAuth,
+        description: "OAuth — Claude Pro/Max subscription",
+    },
+    ProviderCredential {
+        id: "openai", auth_key: "openai-codex",
+        display_name: "OpenAI (ChatGPT)",
+        env_vars: &["OPENAI_API_KEY"],
+        auth_method: AuthMethod::OAuth,
+        description: "OAuth — ChatGPT Plus/Pro subscription",
+    },
+    ProviderCredential {
+        id: "openrouter", auth_key: "openrouter",
+        display_name: "OpenRouter",
+        env_vars: &["OPENROUTER_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — free tier, 27+ models",
+    },
+    ProviderCredential {
+        id: "brave", auth_key: "brave",
+        display_name: "Brave Search",
+        env_vars: &["BRAVE_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — web search",
+    },
+    ProviderCredential {
+        id: "tavily", auth_key: "tavily",
+        display_name: "Tavily Search",
+        env_vars: &["TAVILY_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — AI-optimized search",
+    },
+    ProviderCredential {
+        id: "serper", auth_key: "serper",
+        display_name: "Serper (Google Search)",
+        env_vars: &["SERPER_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — Google results",
+    },
+    ProviderCredential {
+        id: "github", auth_key: "github",
+        display_name: "GitHub",
+        env_vars: &["GITHUB_TOKEN", "GH_TOKEN"],
+        auth_method: AuthMethod::Dynamic,
+        description: "Dynamic — uses gh CLI",
+    },
+    ProviderCredential {
+        id: "gitlab", auth_key: "gitlab",
+        display_name: "GitLab",
+        env_vars: &["GITLAB_TOKEN"],
+        auth_method: AuthMethod::ApiKey,
+        description: "Token — git operations, API",
+    },
+    ProviderCredential {
+        id: "huggingface", auth_key: "huggingface",
+        display_name: "Hugging Face",
+        env_vars: &["HF_TOKEN", "HUGGING_FACE_TOKEN"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — models, datasets",
+    },
+];
+
+/// Look up a provider by its id (e.g. "openai", "anthropic").
+pub fn provider_by_id(id: &str) -> Option<&'static ProviderCredential> {
+    PROVIDERS.iter().find(|p| p.id == id)
+}
+
+/// Get the auth.json key for a provider id. Falls back to the id itself
+/// for unknown providers.
+pub fn auth_json_key(provider_id: &str) -> &str {
+    provider_by_id(provider_id)
+        .map(|p| p.auth_key)
+        .unwrap_or(provider_id)
+}
+
+/// Get the env vars to check for a provider id.
+pub fn provider_env_vars(provider_id: &str) -> &[&str] {
+    provider_by_id(provider_id)
+        .map(|p| p.env_vars)
+        .unwrap_or(&[])
+}
+
 /// Authentication status for all providers and backends.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthStatus {
@@ -189,7 +312,7 @@ async fn probe_provider(provider: &str) -> ProviderInfo {
     }
     
     // Check stored credentials
-    let auth_key = if provider == "openai" { "openai-codex" } else { provider };
+    let auth_key = auth_json_key(provider);
     if let Some(creds) = read_credentials(auth_key) {
         let status = if creds.is_expired() {
             ProviderAuthStatus::Expired
@@ -225,7 +348,7 @@ pub fn logout_provider(provider: &str) -> anyhow::Result<()> {
     let content = std::fs::read_to_string(&path)?;
     let mut auth: Value = serde_json::from_str(&content)?;
     
-    let auth_key = if provider == "openai" { "openai-codex" } else { provider };
+    let auth_key = auth_json_key(provider);
     
     if auth.get(auth_key).is_none() {
         return Err(anyhow::anyhow!("No credentials found for {provider}"));
@@ -244,30 +367,28 @@ pub fn logout_provider(provider: &str) -> anyhow::Result<()> {
 /// Resolve API key with automatic token refresh.
 /// Returns (api_key, is_oauth_token).
 pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
+    // Use canonical provider map for env vars
+    let env_vars = provider_env_vars(provider);
+
     // 1. Env vars first (not OAuth)
-    let env_keys: &[&str] = match provider {
-        "anthropic" => &["ANTHROPIC_API_KEY"],
-        "openai" => &["OPENAI_API_KEY"],
-        "openrouter" => &["OPENROUTER_API_KEY"],
-        _ => &[],
-    };
-    for key in env_keys {
+    for key in env_vars {
+        if *key == "ANTHROPIC_OAUTH_TOKEN" { continue; } // handled separately
         if let Ok(val) = std::env::var(key)
             && !val.is_empty() {
                 return Some((val, false));
             }
     }
 
-    // Check ANTHROPIC_OAUTH_TOKEN (explicit OAuth token from env)
-    if provider == "anthropic"
-        && let Ok(val) = std::env::var("ANTHROPIC_OAUTH_TOKEN")
+    // Check OAuth token env vars (e.g. ANTHROPIC_OAUTH_TOKEN)
+    if env_vars.contains(&"ANTHROPIC_OAUTH_TOKEN") {
+        if let Ok(val) = std::env::var("ANTHROPIC_OAUTH_TOKEN")
             && !val.is_empty() {
                 return Some((val, true));
             }
+    }
 
-    // 2. auth.json — with refresh if expired
-    // OpenAI subscription stored as "openai-codex" in auth.json
-    let auth_key = if provider == "openai" { "openai-codex" } else { provider };
+    // 2. auth.json — with refresh if expired (canonical key mapping)
+    let auth_key = auth_json_key(provider);
     let mut creds = read_credentials(auth_key)?;
     if creds.cred_type != "oauth" {
         return Some((creds.access, false));

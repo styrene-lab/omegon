@@ -362,39 +362,22 @@ impl App {
     }
 
     fn open_login_selector(&mut self) {
-        // Check what's already configured
-        let has_key = |env_vars: &[&str], auth_name: &str| -> bool {
-            env_vars.iter().any(|v| std::env::var(v).is_ok_and(|s| !s.is_empty()))
-                || crate::auth::read_credentials(auth_name)
-                    .is_some_and(|c| !c.access.is_empty())
-        };
-
-        let catalog: &[(&str, &str, &str, &[&str], &str)] = &[
-            // (value, label, description, env_vars_to_check, auth.json_key)
-            ("anthropic",   "Anthropic (Claude)",    "OAuth — Claude Pro/Max subscription",     &["ANTHROPIC_API_KEY"], "anthropic"),
-            ("openai",      "OpenAI (ChatGPT)",      "OAuth — ChatGPT Plus/Pro subscription",   &["OPENAI_API_KEY"], "openai-codex"),
-            ("openrouter",  "OpenRouter",            "API key — free tier, 27+ models",         &["OPENROUTER_API_KEY"], "openrouter"),
-            ("brave",       "Brave Search",          "API key — web search",                    &["BRAVE_API_KEY"], "brave"),
-            ("tavily",      "Tavily Search",         "API key — AI-optimized search",           &["TAVILY_API_KEY"], "tavily"),
-            ("serper",      "Serper (Google Search)", "API key — Google results",                &["SERPER_API_KEY"], "serper"),
-            ("github",      "GitHub",                "Dynamic — uses gh CLI",                   &["GITHUB_TOKEN", "GH_TOKEN"], "github"),
-            ("gitlab",      "GitLab",                "Token — git operations, API",             &["GITLAB_TOKEN"], "gitlab"),
-            ("huggingface", "Hugging Face",          "API key — models, datasets",              &["HF_TOKEN", "HUGGING_FACE_TOKEN"], "huggingface"),
-        ];
-
-        let options: Vec<selector::SelectOption> = catalog.iter().map(|(val, label, desc, envs, auth_key)| {
-            let configured = has_key(envs, auth_key);
+        // Build from canonical provider map — single source of truth
+        let options: Vec<selector::SelectOption> = crate::auth::PROVIDERS.iter().map(|p| {
+            let configured = p.env_vars.iter().any(|v| std::env::var(v).is_ok_and(|s| !s.is_empty()))
+                || crate::auth::read_credentials(p.auth_key)
+                    .is_some_and(|c| !c.access.is_empty());
             selector::SelectOption {
-                value: val.to_string(),
+                value: p.id.to_string(),
                 label: if configured {
-                    format!("✓ {label}")
+                    format!("✓ {}", p.display_name)
                 } else {
-                    format!("  {label}")
+                    format!("  {}", p.display_name)
                 },
                 description: if configured {
                     "configured ✓".into()
                 } else {
-                    desc.to_string()
+                    p.description.to_string()
                 },
                 active: configured,
             }
@@ -3083,23 +3066,17 @@ pub async fn run_tui(
                                     // For provider keys, also write to auth.json so the
                                     // provider resolution chain finds them (/login checks
                                     // auth.json, not the secrets keyring)
-                                    let provider_name = match label.as_str() {
-                                        "OPENROUTER_API_KEY" => Some("openrouter"),
-                                        "BRAVE_API_KEY" => Some("brave"),
-                                        "TAVILY_API_KEY" => Some("tavily"),
-                                        "SERPER_API_KEY" => Some("serper"),
-                                        "HUGGING_FACE_TOKEN" => Some("huggingface"),
-                                        "GITLAB_TOKEN" => Some("gitlab"),
-                                        _ => None,
-                                    };
-                                    if let Some(provider) = provider_name {
+                                    // Look up provider by env var name using canonical map
+                                    let provider = crate::auth::PROVIDERS.iter()
+                                        .find(|p| p.env_vars.contains(&label.as_str()));
+                                    if let Some(p) = provider {
                                         let creds = crate::auth::OAuthCredentials {
                                             cred_type: "api-key".into(),
                                             access: value.clone(),
                                             refresh: String::new(),
                                             expires: u64::MAX,
                                         };
-                                        let _ = crate::auth::write_credentials(provider, &creds);
+                                        let _ = crate::auth::write_credentials(p.auth_key, &creds);
                                     }
                                 }
                             }

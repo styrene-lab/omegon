@@ -25,14 +25,14 @@ use omegon_traits::ToolDefinition;
 /// Resolve API key synchronously — env vars and unexpired auth.json tokens.
 /// Returns (key, is_oauth).
 pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
+    // Use canonical provider map for env vars and auth.json key
+    let env_keys = crate::auth::provider_env_vars(provider);
+    let auth_key = crate::auth::auth_json_key(provider);
+
     // Env vars (not OAuth)
-    let env_keys: &[&str] = match provider {
-        "anthropic" => &["ANTHROPIC_API_KEY"],
-        "openai" => &["OPENAI_API_KEY"],
-        "openrouter" => &["OPENROUTER_API_KEY"],
-        _ => &[],
-    };
     for key in env_keys {
+        // Skip OAuth token env vars — those are handled separately below
+        if *key == "ANTHROPIC_OAUTH_TOKEN" { continue; }
         if let Ok(val) = std::env::var(key)
             && !val.is_empty()
         {
@@ -41,44 +41,31 @@ pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
         }
     }
 
-    // OAuth token from env
-    if provider == "anthropic"
-        && let Ok(val) = std::env::var("ANTHROPIC_OAUTH_TOKEN")
-        && !val.is_empty()
-    {
-        tracing::debug!(provider, "OAuth token resolved from ANTHROPIC_OAUTH_TOKEN env");
-        return Some((val, true));
+    // OAuth token from env (Anthropic only — ANTHROPIC_OAUTH_TOKEN)
+    if env_keys.contains(&"ANTHROPIC_OAUTH_TOKEN") {
+        if let Ok(val) = std::env::var("ANTHROPIC_OAUTH_TOKEN")
+            && !val.is_empty()
+        {
+            tracing::debug!(provider, "OAuth token resolved from ANTHROPIC_OAUTH_TOKEN env");
+            return Some((val, true));
+        }
     }
 
-    // auth.json — only if not expired
-    match crate::auth::read_credentials(provider) {
+    // auth.json — using canonical key
+    match crate::auth::read_credentials(auth_key) {
         Some(creds) if creds.cred_type == "oauth" && !creds.is_expired() => {
-            tracing::debug!(provider, expires = creds.expires, "OAuth token from auth.json (valid)");
+            tracing::debug!(provider, auth_key, expires = creds.expires, "OAuth token from auth.json (valid)");
             return Some((creds.access, true));
         }
         Some(creds) if creds.cred_type == "oauth" => {
-            tracing::debug!(provider, expires = creds.expires, "OAuth token from auth.json (EXPIRED — needs refresh)");
+            tracing::debug!(provider, auth_key, expires = creds.expires, "OAuth token from auth.json (EXPIRED — needs refresh)");
         }
         Some(creds) => {
-            tracing::debug!(provider, cred_type = %creds.cred_type, "credential from auth.json");
+            tracing::debug!(provider, auth_key, cred_type = %creds.cred_type, "credential from auth.json");
             return Some((creds.access, false));
         }
         None => {
-            tracing::debug!(provider, "no credentials in auth.json");
-        }
-    }
-
-    // Fallback: OpenAI subscription stored as "openai-codex" in auth.json
-    if provider == "openai" {
-        match crate::auth::read_credentials("openai-codex") {
-            Some(creds) if creds.cred_type == "oauth" && !creds.is_expired() => {
-                tracing::debug!("OpenAI subscription token from auth.json (openai-codex)");
-                return Some((creds.access, true));
-            }
-            Some(creds) if creds.cred_type == "oauth" => {
-                tracing::debug!("OpenAI subscription token from auth.json (EXPIRED — needs refresh)");
-            }
-            _ => {}
+            tracing::debug!(provider, auth_key, "no credentials in auth.json");
         }
     }
 
@@ -87,15 +74,8 @@ pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
 
 /// Resolve API key from env vars or ~/.pi/agent/auth.json (legacy, no refresh).
 fn resolve_api_key(provider: &str) -> Option<String> {
-    let env_keys: &[&str] = match provider {
-        "anthropic" => &["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
-        "openai" => &["OPENAI_API_KEY"],
-        "openrouter" => &["OPENROUTER_API_KEY"],
-        "google" => &["GOOGLE_API_KEY"],
-        "mistral" => &["MISTRAL_API_KEY"],
-        _ => &[],
-    };
-
+    // Use canonical provider map for env vars
+    let env_keys = crate::auth::provider_env_vars(provider);
     for key in env_keys {
         if let Ok(val) = std::env::var(key)
             && !val.is_empty() {
@@ -110,12 +90,13 @@ fn resolve_api_key(provider: &str) -> Option<String> {
             return Some(val);
         }
 
-    // ~/.pi/agent/auth.json — OAuth access tokens from pi's auth flow
+    // auth.json — use canonical key mapping
+    let auth_key = crate::auth::auth_json_key(provider);
     let home = dirs::home_dir()?;
     let auth_path = home.join(".pi/agent/auth.json");
     let content = std::fs::read_to_string(&auth_path).ok()?;
     let auth: Value = serde_json::from_str(&content).ok()?;
-    auth.get(provider)?
+    auth.get(auth_key)?
         .get("access")?
         .as_str()
         .map(String::from)

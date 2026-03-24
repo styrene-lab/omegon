@@ -32,20 +32,10 @@ pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
         if !seen_providers.insert(key) { continue; } // skip duplicates
         let icon = if p.authenticated { format!("{green}✓{reset}") } else { format!("{yellow}⚠{reset}") };
         let auth = p.auth_method.as_deref().unwrap_or("none");
-        // Capitalize display name — canonical map for known providers.
-        // When adding a new provider, add it here too.
-        let display_name = match p.name.to_lowercase().as_str() {
-            "anthropic" => "Anthropic",
-            "openai" | "openai-codex" => "OpenAI",
-            "openrouter" => "OpenRouter",
-            "gemini" | "gemini-cli" => "Gemini",
-            "github-copilot" | "copilot" => "Copilot",
-            "groq" => "Groq",
-            "brave" => "Brave",
-            "tavily" => "Tavily",
-            "serper" => "Serper",
-            _ => &p.name, // fallback: display as-is
-        };
+        // Display name from canonical provider map
+        let display_name = crate::auth::provider_by_id(&p.name.to_lowercase())
+            .map(|pc| pc.display_name)
+            .unwrap_or(&p.name);
         out.push_str(&format!("  {icon} {:<12} {dim}({auth}){reset}\n", display_name));
         has_providers = true;
     }

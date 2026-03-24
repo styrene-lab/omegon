@@ -173,10 +173,8 @@ impl Feature for AuthFeature {
                     
                     // Check token expiry for OAuth providers
                     if provider.auth_method.as_deref() == Some("oauth") {
-                        let auth_key = match provider.name.as_str() {
-                            "OpenAI" => "openai-codex",
-                            name => &name.to_lowercase(),
-                        };
+                        let provider_lower = provider.name.to_lowercase();
+                        let auth_key = crate::auth::auth_json_key(&provider_lower);
                         
                         if let Some(creds) = crate::auth::read_credentials(auth_key) {
                             let expires_in = if creds.is_expired() {
@@ -305,10 +303,8 @@ impl AuthFeature {
         
         for provider in &self.cached_providers {
             if provider.auth_method.as_deref() == Some("oauth") && provider.authenticated {
-                let auth_key = match provider.name.as_str() {
-                    "OpenAI" => "openai-codex",
-                    name => &name.to_lowercase(),
-                };
+                let provider_lower = provider.name.to_lowercase();
+                let auth_key = crate::auth::auth_json_key(&provider_lower);
                 
                 if let Some(creds) = crate::auth::read_credentials(auth_key) {
                     let now_ms = SystemTime::now()
