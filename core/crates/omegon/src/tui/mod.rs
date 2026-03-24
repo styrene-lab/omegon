@@ -2889,10 +2889,35 @@ pub async fn run_tui(
                                 if value.is_empty() {
                                     app.conversation.push_system("Cancelled — no value entered.");
                                 } else {
+                                    // Store in secrets engine
                                     let _ = command_tx.send(TuiCommand::BusCommand {
                                         name: "secrets".to_string(),
                                         args: format!("set {} {}", label, value),
                                     }).await;
+
+                                    // For provider keys, also write to auth.json so the
+                                    // provider resolution chain finds them (/login checks
+                                    // auth.json, not the secrets keyring)
+                                    let provider_name = match label.as_str() {
+                                        "OPENROUTER_API_KEY" => Some("openrouter"),
+                                        "BRAVE_API_KEY" => Some("brave"),
+                                        "TAVILY_API_KEY" => Some("tavily"),
+                                        "SERPER_API_KEY" => Some("serper"),
+                                        "HUGGING_FACE_TOKEN" => Some("huggingface"),
+                                        "GITLAB_TOKEN" => Some("gitlab"),
+                                        _ => None,
+                                    };
+                                    if let Some(provider) = provider_name {
+                                        let creds = crate::auth::OAuthCredentials {
+                                            cred_type: "api-key".into(),
+                                            access: value.clone(),
+                                            refresh: String::new(),
+                                            expires: u64::MAX,
+                                        };
+                                        let _ = crate::auth::write_credentials(provider, &creds);
+                                        // Set env var for current session
+                                        unsafe { std::env::set_var(&label, &value); }
+                                    }
                                 }
                             }
                         }

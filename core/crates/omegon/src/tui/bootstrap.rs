@@ -24,12 +24,22 @@ pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
     // Compact banner
     out.push_str(&format!("\n{bold}{cyan}  Ω  Omegon{reset}\n\n"));
 
-    // Providers — one line each, inline
+    // Providers — deduplicated by name (case-insensitive), one line each
     let mut has_providers = false;
+    let mut seen_providers = std::collections::HashSet::new();
     for p in &status.providers {
+        let key = p.name.to_lowercase();
+        if !seen_providers.insert(key) { continue; } // skip duplicates
         let icon = if p.authenticated { format!("{green}✓{reset}") } else { format!("{yellow}⚠{reset}") };
         let auth = p.auth_method.as_deref().unwrap_or("none");
-        out.push_str(&format!("  {icon} {:<12} {dim}({auth}){reset}\n", p.name));
+        // Capitalize display name
+        let display_name = match p.name.to_lowercase().as_str() {
+            "anthropic" => "Anthropic",
+            "openai" | "openai-codex" => "OpenAI",
+            "openrouter" => "OpenRouter",
+            _ => &p.name,
+        };
+        out.push_str(&format!("  {icon} {:<12} {dim}({auth}){reset}\n", display_name));
         has_providers = true;
     }
     if !has_providers {
