@@ -116,7 +116,8 @@ rc:
     # Code sign with stable identity (avoids per-build macOS keychain prompts)
     # Priority: YubiKey Developer ID > local self-signed cert > ad-hoc
     BINARY="core/target/release/omegon"
-    if "$HOME/.cargo/bin/rcodesign" smartcard-scan 2>/dev/null | grep -q "Developer ID Application"; then
+    SCAN=$("$HOME/.cargo/bin/rcodesign" smartcard-scan 2>/dev/null || true)
+    if echo "$SCAN" | grep -q "Developer ID Application"; then
         echo "Signing with Apple Developer ID (YubiKey)..."
         echo "⚡ Touch YubiKey when it blinks"
         "$HOME/.cargo/bin/rcodesign" sign --smartcard-slot 9c --code-signature-flags runtime "$BINARY"
