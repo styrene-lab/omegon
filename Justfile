@@ -44,6 +44,12 @@ update:
 build-release:
     cd core && cargo build --release -p omegon
 
+# Symlink release binary into ~/.cargo/bin so rebuilds are instantly live
+link:
+    ln -sf "{{justfile_directory()}}/core/target/release/omegon" ~/.cargo/bin/omegon
+    @echo "Linked ~/.cargo/bin/omegon → core/target/release/omegon"
+    @core/target/release/omegon --version 2>/dev/null || echo "(build first with: just build)"
+
 # Run the built binary directly (no recompile)
 run *args:
     core/target/dev-release/omegon {{args}}
