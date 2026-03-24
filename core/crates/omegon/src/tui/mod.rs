@@ -24,6 +24,7 @@ pub mod selector;
 pub mod spinner;
 pub mod splash;
 pub mod theme;
+pub mod tutorial;
 pub mod widgets;
 
 
@@ -141,8 +142,11 @@ pub struct App {
     pending_image: Option<std::path::PathBuf>,
     /// Previous harness status for diffing on HarnessStatusChanged.
     previous_harness_status: Option<crate::status::HarnessStatus>,
-    /// Tutorial state — active when running /tutorial.
+    /// Tutorial state — active when running /tutorial (lesson-based).
     tutorial: Option<TutorialState>,
+    /// Tutorial overlay — game-style first-play advisor.
+    /// Renders on top of the UI and guides the operator through steps.
+    tutorial_overlay: Option<tutorial::Tutorial>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -216,6 +220,7 @@ impl App {
             pending_image: None,
             previous_harness_status: None,
             tutorial: None,
+            tutorial_overlay: None,
         }
     }
 
@@ -413,24 +418,61 @@ impl App {
 
     /// Try to cancel the active agent turn. Returns true if cancelled.
     /// Queue a prompt to be sent when the agent finishes.
-    /// Handle /tutorial — start, resume, or manage the interactive tutorial.
+    /// Handle /tutorial — start, resume, or manage the interactive tutorial overlay.
     fn handle_tutorial(&mut self, args: &str) -> SlashResult {
         match args.trim() {
             "status" => {
+                if let Some(ref overlay) = self.tutorial_overlay {
+                    return SlashResult::Display(format!(
+                        "Tutorial: step {}/{} — \"{}\"\nMode: {}",
+                        overlay.step_index() + 1,
+                        overlay.total_steps(),
+                        overlay.step().title,
+                        if overlay.is_demo { "demo" } else { "hands-on" },
+                    ));
+                }
                 if let Some(ref tut) = self.tutorial {
                     return SlashResult::Display(tut.status_line());
                 }
                 SlashResult::Display("No tutorial active. Type /tutorial to start.".into())
             }
             "reset" => {
+                if self.tutorial_overlay.is_some() {
+                    self.tutorial_overlay = None;
+                    return SlashResult::Display("Tutorial overlay reset. Type /tutorial to start again.".into());
+                }
                 if let Some(ref mut tut) = self.tutorial {
                     tut.reset();
                     return SlashResult::Display("Tutorial reset to lesson 1. Type /tutorial to start.".into());
                 }
                 SlashResult::Display("No tutorial active.".into())
             }
+            "demo" => {
+                // Resume existing overlay if still active
+                if let Some(ref overlay) = self.tutorial_overlay {
+                    if overlay.active {
+                        return SlashResult::Display(format!(
+                            "Tutorial overlay active (step {}/{}). Press Tab to advance, Esc to dismiss.",
+                            overlay.step_index() + 1, overlay.total_steps(),
+                        ));
+                    }
+                }
+                // Start demo overlay
+                let has_design = self.dashboard.status_counts.total > 0;
+                self.tutorial_overlay = Some(tutorial::Tutorial::new_demo(has_design));
+                SlashResult::Display("Tutorial demo started. Tab to advance, Esc to dismiss.".into())
+            }
             _ => {
-                // Start or resume tutorial
+                // Resume existing overlay if still active
+                if let Some(ref overlay) = self.tutorial_overlay {
+                    if overlay.active {
+                        return SlashResult::Display(format!(
+                            "Tutorial overlay active (step {}/{}). Press Tab to advance, Esc to dismiss.",
+                            overlay.step_index() + 1, overlay.total_steps(),
+                        ));
+                    }
+                }
+                // Check for lesson-based tutorial in this project
                 let tutorial_dir = std::path::Path::new(&self.footer_data.cwd)
                     .join(".omegon").join("tutorial");
 
@@ -444,18 +486,34 @@ impl App {
                             self.queue_prompt(lesson.content);
                             SlashResult::Display(format!("{status}\n\nLesson queued. The agent will begin when ready."))
                         }
-                        None => SlashResult::Display("Tutorial directory exists but no lessons found.".into()),
+                        None => {
+                            // Fall through to overlay
+                            let has_design = self.dashboard.status_counts.total > 0;
+                            self.tutorial_overlay = Some(tutorial::Tutorial::with_context(has_design));
+                            SlashResult::Display("Tutorial started. Tab to advance, Esc to dismiss.".into())
+                        }
                     }
                 } else {
-                    // No tutorial in this project — clone and exec into the tutorial project
-                    self.launch_tutorial_project()
+                    // No lesson files — start the overlay tutorial
+                    let has_design = self.dashboard.status_counts.total > 0;
+                    self.tutorial_overlay = Some(tutorial::Tutorial::with_context(has_design));
+                    SlashResult::Display("Tutorial started. Tab to advance, Esc to dismiss.".into())
                 }
             }
         }
     }
 
-    /// Advance to the next tutorial lesson.
+    /// Advance to the next tutorial step/lesson.
     fn handle_tutorial_next(&mut self) -> SlashResult {
+        if let Some(ref mut overlay) = self.tutorial_overlay {
+            if overlay.active {
+                overlay.advance();
+                return SlashResult::Display(format!(
+                    "Tutorial step {}/{}",
+                    overlay.step_index() + 1, overlay.total_steps()
+                ));
+            }
+        }
         if let Some(ref mut tut) = self.tutorial {
             if tut.advance() {
                 let lesson = tut.current_lesson().clone();
@@ -470,8 +528,17 @@ impl App {
         }
     }
 
-    /// Go back to the previous tutorial lesson.
+    /// Go back to the previous tutorial step/lesson.
     fn handle_tutorial_prev(&mut self) -> SlashResult {
+        if let Some(ref mut overlay) = self.tutorial_overlay {
+            if overlay.active {
+                overlay.go_back();
+                return SlashResult::Display(format!(
+                    "Tutorial step {}/{}",
+                    overlay.step_index() + 1, overlay.total_steps()
+                ));
+            }
+        }
         if let Some(ref mut tut) = self.tutorial {
             if tut.go_back() {
                 let lesson = tut.current_lesson().clone();
@@ -998,6 +1065,12 @@ impl App {
         // ── Post-render effects (tachyonfx) — each zone processed separately ──
         self.effects.process(frame.buffer_mut(), chunks[0], chunks[2], chunks[1]);
 
+        // ── Tutorial overlay — rendered on top of everything except toasts ──
+        if let Some(ref overlay) = self.tutorial_overlay {
+            let footer_h = if self.focus_mode { 0 } else { chunks[2].height };
+            overlay.render(main_area, frame.buffer_mut(), self.theme.as_ref(), footer_h);
+        }
+
         // ── Toast notifications — rendered last, on top of everything ──
         self.toasts.set_area(frame.area());
         frame.render_widget(&self.toasts, frame.area());
@@ -1090,6 +1163,12 @@ impl App {
 
         // Absolute file paths (e.g. /home/user/file.txt) are not commands
         if cmd.contains('/') { return SlashResult::NotACommand; }
+
+        // Notify the tutorial overlay that a slash command was executed.
+        // This advances Command-triggered steps (e.g. /dash on the Web Dashboard step).
+        if let Some(ref mut overlay) = self.tutorial_overlay {
+            overlay.check_command(cmd);
+        }
 
         match cmd {
             "help" => {
@@ -1828,6 +1907,10 @@ impl App {
                 self.agent_active = false;
                 self.conversation.finalize_message();
                 self.effects.stop_spinner_glow();
+                // Advance tutorial overlay if an AutoPrompt step just completed
+                if let Some(ref mut overlay) = self.tutorial_overlay {
+                    overlay.on_agent_turn_complete();
+                }
             }
             AgentEvent::PhaseChanged { phase } => {
                 self.conversation.push_lifecycle("◈", &format!("Phase → {phase:?}"));
@@ -2535,6 +2618,89 @@ pub async fn run_tui(
                     continue;
                 }
 
+                // ── Tutorial overlay intercepts keys when active ────
+                if let Some(ref mut overlay) = app.tutorial_overlay {
+                    if overlay.active {
+                        let step_trigger = overlay.step().trigger.clone();
+                        match key.code {
+                            KeyCode::Esc => {
+                                overlay.dismiss();
+                                continue;
+                            }
+                            KeyCode::BackTab => {
+                                overlay.go_back();
+                                continue;
+                            }
+                            KeyCode::Tab => {
+                                match &step_trigger {
+                                    tutorial::Trigger::Enter => {
+                                        overlay.advance();
+                                        // After advancing, check if the new step has an auto-prompt
+                                        if let Some(prompt) = overlay.pending_auto_prompt() {
+                                            let prompt = prompt.to_string();
+                                            overlay.mark_auto_prompt_sent();
+                                            if !app.agent_active {
+                                                app.conversation.push_user("[tutorial auto-prompt]");
+                                                app.agent_active = true;
+                                                let _ = command_tx.send(TuiCommand::UserPrompt(prompt)).await;
+                                            } else {
+                                                app.queue_prompt(prompt);
+                                            }
+                                        }
+                                    }
+                                    tutorial::Trigger::AutoPrompt(prompt) => {
+                                        if !overlay.auto_prompt_sent {
+                                            // Tab starts the auto-prompt
+                                            let prompt = prompt.to_string();
+                                            overlay.mark_auto_prompt_sent();
+                                            if !app.agent_active {
+                                                app.conversation.push_user("[tutorial auto-prompt]");
+                                                app.agent_active = true;
+                                                let _ = command_tx.send(TuiCommand::UserPrompt(prompt)).await;
+                                            } else {
+                                                app.queue_prompt(prompt);
+                                            }
+                                        }
+                                        // If already sent, Tab does nothing — wait for agent
+                                    }
+                                    tutorial::Trigger::Command(_) | tutorial::Trigger::AnyInput => {
+                                        // Tab does nothing on Command/AnyInput steps — pass through
+                                        // (fall through to normal key handling below)
+                                    }
+                                }
+                                continue;
+                            }
+                            KeyCode::Left | KeyCode::Right if overlay.showing_choice() => {
+                                overlay.toggle_choice();
+                                continue;
+                            }
+                            KeyCode::Enter if overlay.showing_choice() => {
+                                overlay.confirm_choice();
+                                if overlay.choice == tutorial::TutorialChoice::Demo {
+                                    // Switch to demo mode
+                                    let has_design = app.dashboard.status_counts.total > 0;
+                                    *overlay = tutorial::Tutorial::new_demo(has_design);
+                                }
+                                continue;
+                            }
+                            _ => {
+                                // For Command and AnyInput steps, let keys pass through
+                                // to the editor so the user can type.
+                                // For Enter and AutoPrompt steps, consume the key (overlay blocks).
+                                match &step_trigger {
+                                    tutorial::Trigger::Command(_) | tutorial::Trigger::AnyInput => {
+                                        // Fall through to normal key handling
+                                    }
+                                    _ => {
+                                        // Consume — overlay blocks input
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 match (key.code, key.modifiers) {
                     // ── Interrupt: Escape or Ctrl+C ─────────────────
                     (KeyCode::Esc, _) => {
@@ -2659,6 +2825,10 @@ pub async fn run_tui(
                             } else if app.agent_active {
                                 // Agent busy — queue the prompt
                                 app.queue_prompt(text.clone());
+                                // Notify tutorial overlay of user input
+                                if let Some(ref mut overlay) = app.tutorial_overlay {
+                                    overlay.check_any_input();
+                                }
                             } else {
                                 // Agent idle — send immediately
                                 app.conversation.push_user(&text);
@@ -2669,6 +2839,10 @@ pub async fn run_tui(
                                     let _ = command_tx.send(TuiCommand::UserPromptWithImages(text, vec![img])).await;
                                 } else {
                                     let _ = command_tx.send(TuiCommand::UserPrompt(text)).await;
+                                }
+                                // Notify tutorial overlay of user input
+                                if let Some(ref mut overlay) = app.tutorial_overlay {
+                                    overlay.check_any_input();
                                 }
                             }
                         }
