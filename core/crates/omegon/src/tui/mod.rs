@@ -156,6 +156,7 @@ enum SelectorKind {
     Model,
     ThinkingLevel,
     ContextClass,
+    SecretName,
 }
 
 /// Result of handling a slash command.
@@ -404,6 +405,31 @@ impl App {
                     Some(format!("Unknown context class: {value}"))
                 }
             }
+            SelectorKind::SecretName => {
+                if value == "(custom)" {
+                    // Pre-fill editor for custom name entry
+                    self.editor.set_text("/secrets set ");
+                    None // no system message — user types the rest
+                } else {
+                    // Look up suggested recipe from catalog
+                    let suggested = Self::SECRET_CATALOG.iter()
+                        .find(|(name, _, _)| *name == value)
+                        .map(|(_, recipe, _)| *recipe)
+                        .unwrap_or("");
+                    if suggested.is_empty() {
+                        // Direct value — pre-fill with name, user types the key
+                        self.editor.set_text(&format!("/secrets set {value} "));
+                        Some(format!("Paste the value for {value}:"))
+                    } else {
+                        // Dynamic recipe — offer to set it directly
+                        let _ = tx.try_send(TuiCommand::BusCommand {
+                            name: "secrets".to_string(),
+                            args: format!("set {value} {suggested}"),
+                        });
+                        Some(format!("✓ {value} → {suggested}"))
+                    }
+                }
+            }
         }
     }
 
@@ -421,6 +447,92 @@ impl App {
 
     /// Try to cancel the active agent turn. Returns true if cancelled.
     /// Queue a prompt to be sent when the agent finishes.
+    // ─── Well-known secret names for the /secrets selector ────────
+    // Grouped: Omegon providers → cloud/infra → databases → dev tools → AI/ML
+    const SECRET_CATALOG: &'static [(&'static str, &'static str, &'static str)] = &[
+        // (name, suggested_recipe, description)
+        // Omegon providers — these drive the agent
+        ("ANTHROPIC_API_KEY",       "",                         "Anthropic Claude API"),
+        ("OPENAI_API_KEY",          "",                         "OpenAI API"),
+        ("OPENROUTER_API_KEY",      "",                         "OpenRouter (free tier available)"),
+        // Search providers
+        ("BRAVE_API_KEY",           "",                         "Brave Search API"),
+        ("TAVILY_API_KEY",          "",                         "Tavily Search API"),
+        ("SERPER_API_KEY",          "",                         "Serper (Google) Search API"),
+        // Git forges
+        ("GITHUB_TOKEN",            "cmd:gh auth token",        "GitHub (dynamic via gh CLI)"),
+        ("GITLAB_TOKEN",            "cmd:glab auth token",      "GitLab (dynamic via glab CLI)"),
+        // Cloud
+        ("AWS_ACCESS_KEY_ID",       "env:AWS_ACCESS_KEY_ID",    "AWS access key"),
+        ("AWS_SECRET_ACCESS_KEY",   "env:AWS_SECRET_ACCESS_KEY","AWS secret key"),
+        ("GOOGLE_APPLICATION_CREDENTIALS", "env:GOOGLE_APPLICATION_CREDENTIALS", "GCP service account"),
+        ("AZURE_CLIENT_SECRET",     "env:AZURE_CLIENT_SECRET",  "Azure service principal"),
+        // Databases
+        ("DATABASE_URL",            "env:DATABASE_URL",         "Database connection string"),
+        ("POSTGRES_PASSWORD",       "env:PGPASSWORD",           "PostgreSQL password"),
+        ("MONGO_URI",               "env:MONGO_URI",            "MongoDB connection string"),
+        ("REDIS_URL",               "env:REDIS_URL",            "Redis connection URL"),
+        // Container registries
+        ("DOCKER_PASSWORD",         "env:DOCKER_PASSWORD",      "Docker Hub / registry"),
+        // Package managers
+        ("NPM_TOKEN",              "cmd:npm token get",         "npm (dynamic via npm CLI)"),
+        ("CARGO_REGISTRY_TOKEN",   "env:CARGO_REGISTRY_TOKEN",  "crates.io publish token"),
+        ("PYPI_TOKEN",             "env:PYPI_TOKEN",            "PyPI publish token"),
+        // Messaging / notifications
+        ("SLACK_TOKEN",            "env:SLACK_TOKEN",            "Slack bot/user token"),
+        ("DISCORD_TOKEN",          "env:DISCORD_TOKEN",          "Discord bot token"),
+        // AI / ML
+        ("HUGGING_FACE_TOKEN",     "env:HF_TOKEN",              "Hugging Face API"),
+        ("REPLICATE_API_TOKEN",    "env:REPLICATE_API_TOKEN",   "Replicate API"),
+        // Custom
+        ("(custom)",               "",                          "Enter a custom secret name"),
+    ];
+
+    /// Handle /secrets — interactive secret management.
+    fn handle_secrets(&mut self, args: &str, tx: &mpsc::Sender<TuiCommand>) -> SlashResult {
+        let parts: Vec<&str> = args.splitn(3, ' ').collect();
+        match parts.first().copied().unwrap_or("") {
+            // /secrets set with no name → open selector
+            "set" if parts.len() < 3 => {
+                let existing: Vec<String> = {
+                    let _ = tx; // suppress unused warning in this branch
+                    // We can't access secrets manager here, so just open the selector
+                    Vec::new()
+                };
+                let options: Vec<selector::SelectOption> = Self::SECRET_CATALOG.iter()
+                    .map(|(name, recipe, desc)| {
+                        let is_configured = existing.contains(&name.to_string());
+                        selector::SelectOption {
+                            value: name.to_string(),
+                            label: if *name == "(custom)" {
+                                "➕ Custom secret...".to_string()
+                            } else {
+                                format!("{name:<30} {desc}")
+                            },
+                            description: if recipe.is_empty() {
+                                "direct value → OS keyring".to_string()
+                            } else {
+                                format!("suggested: {recipe}")
+                            },
+                            active: is_configured,
+                        }
+                    })
+                    .collect();
+                self.selector = Some(selector::Selector::new("Set Secret — pick a name", options));
+                self.selector_kind = Some(SelectorKind::SecretName);
+                SlashResult::Handled
+            }
+            // Everything else → send to bus handler
+            _ => {
+                let _ = tx.try_send(TuiCommand::BusCommand {
+                    name: "secrets".to_string(),
+                    args: args.to_string(),
+                });
+                SlashResult::Handled
+            }
+        }
+    }
+
     /// Handle /tutorial — start, resume, or manage the interactive tutorial overlay.
     fn handle_tutorial(&mut self, args: &str) -> SlashResult {
         match args.trim() {
@@ -1572,11 +1684,7 @@ impl App {
             }
 
             "secrets" => {
-                let _ = tx.try_send(TuiCommand::BusCommand {
-                    name: "secrets".to_string(),
-                    args: args.to_string(),
-                });
-                SlashResult::Handled
+                self.handle_secrets(args, tx)
             }
 
             "vault" => {
