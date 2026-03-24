@@ -2462,10 +2462,18 @@ pub async fn run_tui(
                 splash.set_load_state(item, splash::LoadState::Active);
             }
 
-            // Spawn async probes — results arrive via channel
+            // Spawn probes on a background thread with its own tokio runtime.
+            // The splash loop blocks the main thread with event::poll(), so
+            // tokio::spawn would never make progress — the worker is blocked.
             let (probe_tx, probe_rx) = std::sync::mpsc::channel();
             let probe_cwd = config.cwd.clone();
-            tokio::spawn(crate::startup::run_probes(probe_tx, probe_cwd));
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("probe runtime");
+                rt.block_on(crate::startup::run_probes(probe_tx, probe_cwd));
+            });
             let mut collected_probes: Vec<crate::startup::ProbeResult> = Vec::new();
 
             // Run splash animation loop
