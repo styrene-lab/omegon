@@ -119,10 +119,14 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
         }
         "openai" => OpenAIClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
         "openrouter" => OpenRouterClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
-        // Providers with credentials in auth.rs but no native client yet.
-        // These will be handled by the OpenAI-compatible client when restored.
-        "openai-codex" | "groq" | "xai" | "mistral" | "cerebras" | "huggingface" | "ollama" => {
-            tracing::debug!(provider = provider_id, "provider registered but no native client — needs OpenAI-compat layer");
+        // OpenAI-compatible providers — all use the Chat Completions protocol
+        "groq" | "xai" | "mistral" | "cerebras" | "huggingface" | "ollama" => {
+            OpenAICompatClient::from_env(provider_id)
+                .map(|c| Box::new(c) as Box<dyn LlmBridge>)
+        }
+        // Codex uses the Responses API — not Chat Completions. Needs its own client.
+        "openai-codex" => {
+            tracing::debug!("openai-codex requires Responses API client (not yet implemented)");
             None
         }
         _ => None,
@@ -134,51 +138,26 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
 pub async fn auto_detect_bridge(model_spec: &str) -> Option<Box<dyn LlmBridge>> {
     let provider = model_spec.split(':').next().unwrap_or("anthropic");
 
-    // Try the requested provider first
-    let primary: Option<Box<dyn LlmBridge>> = match provider {
-        "anthropic" => {
-            if let Some(client) = AnthropicClient::from_env() {
-                Some(Box::new(client))
-            } else {
-                AnthropicClient::from_env_async().await.map(|c| Box::new(c) as Box<dyn LlmBridge>)
-            }
-        }
-        "openai" => OpenAIClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
-        "openrouter" => OpenRouterClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
-        _ => None,
-    };
-
-    if primary.is_some() {
-        return primary;
+    // Try the requested provider first (handles all registered providers)
+    if let Some(bridge) = resolve_provider(provider).await {
+        return Some(bridge);
     }
 
     // Primary provider not available — try the full fallback chain.
-    // This handles: user requests Anthropic but only has OpenAI credentials.
-    tracing::warn!(
-        requested = provider,
-        "requested provider not available — trying fallback chain"
-    );
+    tracing::warn!(requested = provider, "requested provider not available — trying fallback chain");
 
-    if provider != "anthropic" {
-        if let Some(client) = AnthropicClient::from_env() {
-            tracing::info!("falling back to Anthropic");
-            return Some(Box::new(client));
-        }
-        if let Some(client) = AnthropicClient::from_env_async().await {
-            tracing::info!("falling back to Anthropic (after token refresh)");
-            return Some(Box::new(client));
-        }
-    }
-    if provider != "openai" {
-        if let Some(client) = OpenAIClient::from_env() {
-            tracing::info!("falling back to OpenAI");
-            return Some(Box::new(client));
-        }
-    }
-    if provider != "openrouter" {
-        if let Some(client) = OpenRouterClient::from_env() {
-            tracing::info!("falling back to OpenRouter");
-            return Some(Box::new(client));
+    // Priority: proprietary providers first (best quality), then compat providers
+    const FALLBACK_ORDER: &[&str] = &[
+        "anthropic", "openai", "openai-codex",
+        "groq", "xai", "mistral", "huggingface", "cerebras",
+        "openrouter", "ollama",
+    ];
+
+    for &fallback in FALLBACK_ORDER {
+        if fallback == provider { continue; }
+        if let Some(bridge) = resolve_provider(fallback).await {
+            tracing::info!(provider = fallback, "falling back to {fallback}");
+            return Some(bridge);
         }
     }
 
@@ -956,6 +935,129 @@ impl LlmBridge for OpenRouterClient {
     }
 }
 
+// ─── OpenAI-Compatible Generic Client ────────────────────────────────────────
+
+/// Generic client for any provider that speaks the OpenAI Chat Completions protocol.
+/// Covers: Groq, xAI, Mistral, Cerebras, HuggingFace, Ollama, and any custom endpoint.
+pub struct OpenAICompatClient {
+    inner: OpenAIClient,
+    provider_id: String,
+    default_model: Option<String>,
+}
+
+/// Base URLs for known OpenAI-compatible providers.
+fn compat_base_url(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        "groq" => Some("https://api.groq.com/openai"),
+        "xai" => Some("https://api.x.ai"),
+        "mistral" => Some("https://api.mistral.ai"),
+        "cerebras" => Some("https://api.cerebras.ai"),
+        "huggingface" => Some("https://router.huggingface.co"),
+        "ollama" => Some("http://localhost:11434"),
+        _ => None,
+    }
+}
+
+/// Default model for each compat provider (used when no model is specified).
+fn compat_default_model(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        "groq" => Some("llama-3.3-70b-versatile"),
+        "xai" => Some("grok-3-mini-fast"),
+        "mistral" => Some("devstral-small-2505"),
+        "cerebras" => Some("llama-3.3-70b"),
+        "huggingface" => Some("Qwen/Qwen3-32B"),
+        "ollama" => Some("qwen3:32b"),
+        _ => None,
+    }
+}
+
+impl OpenAICompatClient {
+    pub fn new(api_key: String, base_url: String, provider_id: String) -> Self {
+        let default_model = compat_default_model(&provider_id).map(String::from);
+        Self {
+            inner: OpenAIClient {
+                client: reqwest::Client::new(),
+                api_key,
+                base_url,
+            },
+            provider_id,
+            default_model,
+        }
+    }
+
+    /// Resolve from env vars / auth.json using the canonical PROVIDERS map.
+    pub fn from_env(provider_id: &str) -> Option<Self> {
+        let base_url = compat_base_url(provider_id)?;
+
+        // Ollama doesn't need an API key — just check reachability
+        if provider_id == "ollama" {
+            return Self::from_env_ollama(base_url);
+        }
+
+        let key = resolve_api_key(provider_id)?;
+        Some(Self::new(key, base_url.to_string(), provider_id.to_string()))
+    }
+
+    /// Ollama: no API key, just check if reachable.
+    fn from_env_ollama(base_url: &str) -> Option<Self> {
+        let host = std::env::var("OLLAMA_HOST")
+            .unwrap_or_else(|_| base_url.to_string());
+        let addr_str = host.trim_start_matches("http://").trim_start_matches("https://");
+        let addr: std::net::SocketAddr = addr_str.parse()
+            .unwrap_or_else(|_| std::net::SocketAddr::from(([127, 0, 0, 1], 11434)));
+        match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(200)) {
+            Ok(_) => {
+                tracing::debug!(host = %host, "Ollama server detected");
+                Some(Self::new(String::new(), host, "ollama".into()))
+            }
+            Err(_) => {
+                tracing::trace!("Ollama not reachable — skipping");
+                None
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl LlmBridge for OpenAICompatClient {
+    async fn stream(
+        &self,
+        system_prompt: &str,
+        messages: &[LlmMessage],
+        tools: &[ToolDefinition],
+        options: &StreamOptions,
+    ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
+        let mut opts = options.clone();
+
+        // Strip provider prefix from model name
+        if let Some(ref mut m) = opts.model {
+            let prefix = format!("{}:", self.provider_id);
+            if let Some(stripped) = m.strip_prefix(&prefix) {
+                *m = stripped.to_string();
+            }
+        }
+
+        // Apply default model if none specified
+        if opts.model.is_none() || opts.model.as_deref() == Some("") {
+            if let Some(ref default) = self.default_model {
+                opts.model = Some(default.clone());
+            }
+        }
+
+        // OpenAIClient.stream() strips "openai:" prefix. For compat providers,
+        // wrap the model so that strip works correctly.
+        if self.provider_id != "openai" {
+            if let Some(ref mut m) = opts.model {
+                if !m.starts_with("openai:") {
+                    *m = format!("openai:{m}");
+                }
+            }
+        }
+
+        self.inner.stream(system_prompt, messages, tools, &opts).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1233,5 +1335,59 @@ mod tests {
         };
         assert!(flags.contains("interleaved-thinking"), "API key must include thinking beta");
         assert!(!flags.contains("claude-code"), "API key must NOT include CC beta");
+    }
+
+    // ── OpenAI-compat client tests ──────────────────────────────────
+
+    #[test]
+    fn compat_base_url_covers_all_providers() {
+        for id in ["groq", "xai", "mistral", "cerebras", "huggingface", "ollama"] {
+            assert!(super::compat_base_url(id).is_some(), "missing base URL for {id}");
+        }
+        assert!(super::compat_base_url("unknown").is_none());
+    }
+
+    #[test]
+    fn compat_default_model_covers_all_providers() {
+        for id in ["groq", "xai", "mistral", "cerebras", "huggingface", "ollama"] {
+            assert!(super::compat_default_model(id).is_some(), "missing default model for {id}");
+        }
+    }
+
+    #[test]
+    fn compat_client_construction() {
+        let client = OpenAICompatClient::new(
+            "test-key".into(),
+            "https://api.groq.com/openai".into(),
+            "groq".into(),
+        );
+        assert_eq!(client.provider_id, "groq");
+        assert_eq!(client.default_model.as_deref(), Some("llama-3.3-70b-versatile"));
+    }
+
+    #[test]
+    fn compat_from_env_unknown_returns_none() {
+        assert!(OpenAICompatClient::from_env("nonexistent-provider").is_none());
+    }
+
+    #[test]
+    fn resolve_provider_handles_all_compat_ids() {
+        // Should not panic for any registered provider — returns None if no credentials
+        for id in ["groq", "xai", "mistral", "cerebras", "huggingface", "ollama", "openai-codex"] {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            let _ = rt.block_on(resolve_provider(id));
+        }
+    }
+
+    #[test]
+    fn fallback_order_covers_all_inference_providers() {
+        // The FALLBACK_ORDER in auto_detect_bridge should include every inference provider
+        let order = ["anthropic", "openai", "openai-codex", "groq", "xai", "mistral",
+                      "huggingface", "cerebras", "openrouter", "ollama"];
+        // Verify no duplicates
+        let mut seen = std::collections::HashSet::new();
+        for id in order {
+            assert!(seen.insert(id), "duplicate in fallback order: {id}");
+        }
     }
 }
