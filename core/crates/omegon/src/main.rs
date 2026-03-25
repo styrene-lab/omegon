@@ -937,7 +937,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             let progress_tx = events_tx.clone();
                             let provider_clone = provider.to_string();
                             let bridge_clone = bridge.clone();
-                            let model_for_redetect = cli.model.clone();
+                            let _model_for_redetect = cli.model.clone();
                             let settings_for_login = shared_settings.clone();
                             tokio::spawn(async move {
                                 let progress: auth::LoginProgress = Box::new(move |msg| {

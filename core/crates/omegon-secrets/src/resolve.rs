@@ -36,6 +36,7 @@ const KEYRING_SERVICE: &str = "omegon";
 /// Resolve a secret by name. Priority: env var > recipe (including vault:).
 /// Returns a SecretString that auto-zeroizes on drop.
 /// For vault recipes, this returns None and logs a warning - use resolve_async instead.
+#[allow(dead_code)]
 pub fn resolve_secret(name: &str, recipes: &RecipeStore) -> Option<SecretString> {
     // 1. Check environment variable
     if let Ok(val) = std::env::var(name) {
