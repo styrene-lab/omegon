@@ -61,7 +61,7 @@ async fn start(args: &serde_json::Value, cwd: &Path) -> Result<ToolResult> {
         .ok_or_else(|| anyhow::anyhow!("'command' is required"))?;
 
     let name = args.get("name").and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .map(|s| sanitize_name(s))
         .unwrap_or_else(|| slugify_command(command));
 
     let persist = args.get("persist").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -103,6 +103,13 @@ async fn start(args: &serde_json::Value, cwd: &Path) -> Result<ToolResult> {
         .spawn()?;
 
     let pid = child.id();
+
+    // Spawn a background thread to reap the child when it exits,
+    // preventing zombie processes. We track via PID file, not the handle.
+    std::thread::spawn(move || {
+        let mut child = child;
+        let _ = child.wait();
+    });
     std::fs::write(&pid_path, pid.to_string())?;
 
     let meta = ServiceMeta {
@@ -125,8 +132,8 @@ async fn start(args: &serde_json::Value, cwd: &Path) -> Result<ToolResult> {
 }
 
 async fn stop(args: &serde_json::Value) -> Result<ToolResult> {
-    let name = args.get("name").and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("'name' is required"))?;
+    let name = sanitize_name(args.get("name").and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("'name' is required"))?);
 
     let dir = serve_dir();
     let pid_path = dir.join(format!("{name}.pid"));
@@ -187,8 +194,8 @@ async fn list() -> Result<ToolResult> {
 }
 
 async fn logs(args: &serde_json::Value) -> Result<ToolResult> {
-    let name = args.get("name").and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("'name' is required"))?;
+    let name = sanitize_name(args.get("name").and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("'name' is required"))?);
     let max_lines = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
     let log_path = serve_dir().join(format!("{name}.log"));
@@ -205,8 +212,8 @@ async fn logs(args: &serde_json::Value) -> Result<ToolResult> {
 }
 
 async fn check(args: &serde_json::Value) -> Result<ToolResult> {
-    let name = args.get("name").and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("'name' is required"))?;
+    let name = sanitize_name(args.get("name").and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("'name' is required"))?);
 
     let dir = serve_dir();
     let pid_path = dir.join(format!("{name}.pid"));
@@ -276,6 +283,18 @@ pub fn running_services() -> Vec<(String, u32, bool)> {
         .collect()
 }
 
+/// Sanitize a service name to prevent path traversal.
+/// Strips path separators, `..`, and non-safe characters.
+fn sanitize_name(name: &str) -> String {
+    name.replace('/', "")
+        .replace('\\', "")
+        .replace("..", "")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '.' || *c == '_')
+        .take(64)
+        .collect::<String>()
+}
+
 fn is_alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as i32, 0) == 0 }
 }
@@ -323,6 +342,15 @@ mod tests {
         let args = json!({"name": "nonexistent-test-service-12345"});
         let result = check(&args).await.unwrap();
         assert_eq!(result.details.get("is_error").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn sanitize_blocks_traversal() {
+        assert_eq!(sanitize_name("../../etc/passwd"), "etcpasswd");
+        assert_eq!(sanitize_name("normal-name"), "normal-name");
+        assert_eq!(sanitize_name("has/slashes"), "hasslashes");
+        assert_eq!(sanitize_name("has\\back"), "hasback");
+        assert_eq!(sanitize_name("a]b[c{d}e"), "abcde");
     }
 
     #[test]
