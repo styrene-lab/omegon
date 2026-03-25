@@ -74,6 +74,30 @@ import Docs from "../../layouts/Docs.astro";
   </ul>
   <p>Toggle focus mode with <code>/focus</code> to expand the instrument panel.</p>
 
+  <h2>Sidebar Navigation</h2>
+  <p>
+    Press <code>Ctrl+D</code> to enter sidebar navigation mode. The dashboard border turns
+    accent-colored and keyboard input routes to the design tree:
+  </p>
+  <table>
+    <thead><tr><th>Key</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td><code>Ctrl+D</code></td><td>Toggle sidebar navigation mode</td></tr>
+      <tr><td><code>Up / k</code></td><td>Navigate up in the tree</td></tr>
+      <tr><td><code>Down / j</code></td><td>Navigate down in the tree</td></tr>
+      <tr><td><code>Left / h</code></td><td>Collapse node</td></tr>
+      <tr><td><code>Right / l</code></td><td>Expand node</td></tr>
+      <tr><td><code>Enter</code></td><td>Focus the selected node (inject its context into the agent)</td></tr>
+      <tr><td><code>Home / End</code></td><td>Jump to first / last node</td></tr>
+      <tr><td><code>Esc</code></td><td>Exit sidebar mode</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Nodes show status icons, open question counts, priority badges, and OpenSpec bindings.
+    The tree is sorted by actionability: implementing nodes first, then blocked, decided,
+    exploring, and seed.
+  </p>
+
   <h2>Visual Style</h2>
   <p>
     The TUI uses the <strong>Alpharius</strong> theme — a teal-dominant dark palette:

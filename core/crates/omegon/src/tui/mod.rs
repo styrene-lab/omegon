@@ -3315,6 +3315,25 @@ pub async fn run_tui(
                     }
                 }
 
+                // ── Sidebar navigation mode ──────────────────────
+                // When dashboard sidebar is active, route keys to the tree.
+                // Enter on a selected node triggers design-focus via bus.
+                if app.dashboard.sidebar_active {
+                    if key.code == KeyCode::Enter {
+                        if let Some(node_id) = app.dashboard.selected_node_id().map(|s| s.to_string()) {
+                            let _ = command_tx.send(TuiCommand::BusCommand {
+                                name: "design-focus".into(),
+                                args: node_id,
+                            }).await;
+                            app.dashboard.sidebar_active = false;
+                        }
+                        continue;
+                    }
+                    if app.dashboard.handle_key(key) {
+                        continue;
+                    }
+                }
+
                 match (key.code, key.modifiers) {
                     // ── Interrupt: Escape or Ctrl+C ─────────────────
                     (KeyCode::Esc, _) => {
@@ -3393,6 +3412,14 @@ pub async fn run_tui(
                     // Ctrl+O: toggle pin/expand on nearest tool card
                     (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
                         app.conversation.toggle_pin();
+                    }
+
+                    // Ctrl+D: toggle sidebar navigation mode (design tree)
+                    (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                        app.dashboard.sidebar_active = !app.dashboard.sidebar_active;
+                        if app.dashboard.sidebar_active && app.dashboard.tree_state.selected().is_empty() {
+                            app.dashboard.tree_state.select_first();
+                        }
                     }
 
                     // Tab: command completion if typing, or toggle tool card expansion
