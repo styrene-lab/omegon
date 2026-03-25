@@ -408,6 +408,99 @@ verify-sig binary:
       --certificate-identity-regexp "github.com/styrene-lab/omegon" \
       --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
+# ─── Merge safety ────────────────────────────────────────────
+
+# Smoke test: verify critical subsystem invariants after a merge or release.
+# Catches silent regressions (dropped files, missing providers, broken dashboard).
+smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Running post-merge smoke test..."
+    FAIL=0
+
+    # 1. Binary works
+    VERSION=$(cd core && cargo run -q -- --version 2>/dev/null || echo "FAILED")
+    echo "  Binary: $VERSION"
+    [[ "$VERSION" == *"omegon"* ]] || { echo "  ✗ Binary doesn't produce version"; FAIL=1; }
+
+    # 2. Test count doesn't drop below known floor
+    TEST_COUNT=$(cd core && cargo test -p omegon 2>&1 | grep 'test result:' | awk '{print $4}')
+    echo "  Tests: $TEST_COUNT"
+    if [ "$TEST_COUNT" -lt 850 ]; then
+        echo "  ✗ Test count ($TEST_COUNT) below safety floor (850)"
+        FAIL=1
+    fi
+
+    # 3. Provider count (auth.rs PROVIDERS should have all inference providers)
+    PROVIDER_COUNT=$(grep -c 'id: "' core/crates/omegon/src/auth.rs)
+    echo "  Providers in auth.rs: $PROVIDER_COUNT"
+    if [ "$PROVIDER_COUNT" -lt 15 ]; then
+        echo "  ✗ Provider count ($PROVIDER_COUNT) below expected (15)"
+        FAIL=1
+    fi
+
+    # 4. Tool count matches registry
+    TOOL_COUNT=$(grep 'TOOL_COUNT: usize' core/crates/omegon/src/tool_registry.rs | grep -o '[0-9]*')
+    echo "  Tools registered: $TOOL_COUNT"
+    if [ "$TOOL_COUNT" -lt 45 ]; then
+        echo "  ✗ Tool count ($TOOL_COUNT) below expected (45)"
+        FAIL=1
+    fi
+
+    # 5. Key files haven't been gutted
+    for file in core/crates/omegon/src/tui/dashboard.rs core/crates/omegon/src/providers.rs core/crates/omegon/src/tui/mod.rs; do
+        LINES=$(wc -l < "$file" | tr -d ' ')
+        MIN=900
+        if [ "$LINES" -lt "$MIN" ]; then
+            echo "  ✗ $file has only $LINES lines (expected >$MIN)"
+            FAIL=1
+        else
+            echo "  $file: $LINES lines ✓"
+        fi
+    done
+
+    # 6. No Node.js subprocess bridge
+    if grep -q 'SubprocessBridge' core/crates/omegon/src/main.rs; then
+        echo "  ✗ SubprocessBridge still referenced in main.rs"
+        FAIL=1
+    else
+        echo "  No SubprocessBridge ✓"
+    fi
+
+    if [ "$FAIL" -eq 0 ]; then
+        echo "✓ All smoke checks passed"
+    else
+        echo "✗ SMOKE TEST FAILED — review above"
+        exit 1
+    fi
+
+# Check for line-count regressions in key files vs the previous tag.
+# Warns on >20% drops — doesn't block, just signals.
+line-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+    if [ -z "$PREV_TAG" ]; then
+        echo "No previous tag to compare against — skipping"
+        exit 0
+    fi
+    echo "Comparing line counts against $PREV_TAG..."
+    WARN=0
+    for file in core/crates/omegon/src/tui/dashboard.rs core/crates/omegon/src/providers.rs core/crates/omegon/src/tui/mod.rs core/crates/omegon/src/auth.rs core/crates/omegon/src/tui/instruments.rs; do
+        NOW=$(wc -l < "$file" 2>/dev/null | tr -d ' ')
+        PREV=$(git show "$PREV_TAG:$file" 2>/dev/null | wc -l | tr -d ' ')
+        if [ "$PREV" -gt 0 ] && [ "$NOW" -gt 0 ]; then
+            DROP=$(( (PREV - NOW) * 100 / PREV ))
+            if [ "$DROP" -gt 20 ]; then
+                echo "  ⚠ $file: $PREV → $NOW ($DROP% drop)"
+                WARN=1
+            fi
+        fi
+    done
+    if [ "$WARN" -eq 0 ]; then
+        echo "✓ No significant line-count drops"
+    fi
+
 # ─── Git / jj ───────────────────────────────────────────────
 
 # Show recent jj log

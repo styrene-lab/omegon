@@ -1421,6 +1421,7 @@ impl App {
         ("logout",   "log out of provider",                   &["anthropic", "openai"]),
         ("auth",     "authentication management",             &["status", "login", "logout", "unlock"]),
         ("chronos",  "date/time context",                      &["week", "month", "quarter", "relative", "iso", "epoch", "tz", "range", "all"]),
+        ("init",     "initialize project — scan & migrate agent conventions", &["scan", "migrate"]),
         ("migrate",  "import from other tools",               &["auto", "claude-code", "pi", "codex", "cursor", "aider"]),
         ("dash",     "open web dashboard in browser",          &["status"]),
         ("secrets",  "manage stored secrets",                 &["list", "set", "get", "delete"]),
@@ -1762,6 +1763,13 @@ impl App {
                         }
                     }
                 }
+            }
+
+            "init" => {
+                let cwd = std::path::Path::new(&self.footer_data.cwd);
+                let move_all = args == "migrate";
+                let report = crate::migrate::init_project(cwd, move_all);
+                SlashResult::Display(report)
             }
 
             "migrate" => {
