@@ -509,10 +509,12 @@ fn render_tool_card(
     // ── Result section with distinct background ─────────────────
     if let Some(result) = detail_result {
         if !lines.is_empty() {
-            // Separator line
+            // Separator line — matches card border color (red on error)
+            let sep_color = if is_error { t.error() } else { t.border_dim() };
+            let sep_bg = if is_error { t.tool_error_bg() } else { t.surface_bg() };
             lines.push(Line::from(Span::styled(
                 "─".repeat(card_inner.width as usize),
-                Style::default().fg(t.border_dim()).bg(t.surface_bg()),
+                Style::default().fg(sep_color).bg(sep_bg),
             )));
         }
 

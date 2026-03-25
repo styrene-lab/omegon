@@ -3172,10 +3172,12 @@ pub async fn run_tui(
                             KeyCode::Tab => {
                                 match &step_trigger {
                                     tutorial::Trigger::Tab => {
+                                        // Check BEFORE advance — fire side-effects for the step being dismissed
+                                        let leaving_step_title = overlay.step().title;
+                                        let should_open_dash = leaving_step_title == "Web Dashboard";
                                         overlay.advance();
                                         let auto_prompt = overlay.pending_auto_prompt().map(|s| s.to_string());
                                         if auto_prompt.is_some() { overlay.mark_auto_prompt_sent(); }
-                                        let should_open_dash = overlay.step().title == "Web Dashboard";
                                         // Drop overlay borrow before touching app
                                         drop(step_trigger);
                                         if let Some(prompt) = auto_prompt {
