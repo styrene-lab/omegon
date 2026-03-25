@@ -7,14 +7,15 @@ import "../styles/global.css";
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Omegon — Terminal-Native AI Agent Harness</title>
-  <meta name="description" content="Single binary. Ten providers. Zero dependencies. A systems engineering harness for operators who ship." />
+  <meta name="description" content="Single binary. Ten providers. Zero dependencies. A systems engineering harness for operators who build." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Tomorrow:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
 </head>
 <body>
   <nav class="topnav">
-    <a href="/" class="topnav-logo">Ω Omegon</a>
+    <a href="/" class="topnav-logo">Omegon</a>
     <div class="topnav-links">
       <a href="/docs/">Docs</a>
       <a href="/changelog">Changelog</a>
@@ -24,11 +25,11 @@ import "../styles/global.css";
 
   <main class="hero">
     <div class="hero-content">
-      <h1 class="hero-title">Ω</h1>
+      <img src="/icon.svg" alt="Omegon" class="hero-icon" />
       <p class="hero-subtitle">Terminal-native AI agent harness</p>
       <p class="hero-tagline">
         Single binary. Ten providers. Zero dependencies.<br />
-        For operators who ship.
+        For operators who build.
       </p>
 
       <pre class="hero-install"><code>curl -fsSL https://omegon.styrene.dev/install.sh | sh</code></pre>
@@ -41,46 +42,40 @@ import "../styles/global.css";
 
     <div class="features">
       <div class="feature-card">
-        <div class="feature-icon">⚡</div>
         <h3>10 Inference Providers</h3>
-        <p>Anthropic, OpenAI, Codex, OpenRouter, Groq, xAI, Mistral, Cerebras, HuggingFace, Ollama — native Rust clients with automatic failover and routing.</p>
+        <p>Anthropic, OpenAI, Codex, OpenRouter, Groq, xAI, Mistral, Cerebras, HuggingFace, Ollama. Native Rust clients with automatic failover and routing.</p>
       </div>
 
       <div class="feature-card">
-        <div class="feature-icon">🧠</div>
         <h3>Persistent Memory</h3>
-        <p>Project knowledge survives across sessions. Semantic recall, episodic narratives, knowledge graphs. Not another markdown file — a real memory system.</p>
+        <p>Project knowledge survives across sessions. Semantic recall, episodic narratives, knowledge graphs. Not another markdown file.</p>
       </div>
 
       <div class="feature-card">
-        <div class="feature-icon">⑂</div>
         <h3>Parallel Execution</h3>
-        <p>Cleave tasks into parallel git worktree children. Automatic merge, conflict detection, adversarial review. Ship in hours what takes days.</p>
+        <p>Decompose tasks into parallel git worktree children. Automatic merge, conflict detection, adversarial review.</p>
       </div>
 
       <div class="feature-card">
-        <div class="feature-icon">🌳</div>
-        <h3>Design Tree</h3>
-        <p>263+ node knowledge graph tracking architecture decisions, dependencies, and implementation status. Not a task list — a design exploration system.</p>
+        <h3>Design Exploration</h3>
+        <p>Markdown-backed knowledge graph tracking architecture decisions, dependencies, and implementation status. Not a task list.</p>
       </div>
 
       <div class="feature-card">
-        <div class="feature-icon">📋</div>
         <h3>Spec-Driven Development</h3>
-        <p>OpenSpec lifecycle: propose → spec → execute → verify → archive. Write specs before code. Given/When/Then scenarios as source of truth.</p>
+        <p>OpenSpec lifecycle: propose, specify, execute, verify, archive. Acceptance scenarios are the source of truth, not the code.</p>
       </div>
 
       <div class="feature-card">
-        <div class="feature-icon">🎮</div>
-        <h3>Live TUI Dashboard</h3>
-        <p>Terminal UI with instrument panels, context telemetry, segment rendering with model tags. Plus a web dashboard over WebSocket for remote monitoring.</p>
+        <h3>Live TUI + Web Dashboard</h3>
+        <p>Terminal UI with instrument panels, context telemetry, and segment rendering. Plus a web dashboard over WebSocket for remote monitoring.</p>
       </div>
     </div>
 
     <div class="stats-bar">
-      <div class="stat"><span class="stat-value">65,000+</span><span class="stat-label">lines of Rust</span></div>
-      <div class="stat"><span class="stat-value">877</span><span class="stat-label">tests</span></div>
       <div class="stat"><span class="stat-value">15 MB</span><span class="stat-label">single binary</span></div>
+      <div class="stat"><span class="stat-value">10</span><span class="stat-label">inference providers</span></div>
+      <div class="stat"><span class="stat-value">48</span><span class="stat-label">agent tools</span></div>
       <div class="stat"><span class="stat-value">0</span><span class="stat-label">runtime dependencies</span></div>
     </div>
   </main>
@@ -98,29 +93,71 @@ import "../styles/global.css";
   .hero {
     max-width: 1000px;
     margin: 0 auto;
-    padding: 60px 24px;
+    padding: 40px 24px;
     text-align: center;
   }
 
-  .hero-title {
-    font-size: 80px;
-    color: var(--accent);
-    margin-bottom: 8px;
-    letter-spacing: -2px;
+  .topnav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border-dim);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
+  .topnav-logo {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+  }
+  .topnav-logo:hover { text-decoration: none; }
+  .topnav-links {
+    display: flex;
+    gap: 20px;
+    font-size: 14px;
+  }
+  .topnav-links a { color: var(--muted); }
+  .topnav-links a:hover { color: var(--fg); text-decoration: none; }
 
-  .hero-subtitle {
-    font-size: 28px;
-    font-weight: 600;
-    color: var(--fg);
+  .hero-icon {
+    width: 300px;
+    height: 300px;
     margin-bottom: 12px;
   }
 
+  .hero-title {
+    font-size: 48px;
+    color: var(--accent);
+    margin-bottom: 8px;
+    letter-spacing: -1px;
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .hero-subtitle {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 16px;
+    letter-spacing: -0.5px;
+  }
+
   .hero-tagline {
-    font-size: 16px;
+    font-size: 18px;
     color: var(--muted);
-    margin-bottom: 32px;
+    margin-bottom: 36px;
     line-height: 1.6;
+    max-width: 520px;
+    margin-left: auto;
+    margin-right: auto;
   }
 
   .hero-install {

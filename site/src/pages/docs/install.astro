@@ -44,14 +44,6 @@ cosign verify-blob omegon-0.15.2-aarch64-apple-darwin.tar.gz \
   --certificate-identity-regexp '.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com</code></pre>
 
-  <h2>npm (TypeScript Shim)</h2>
-  <p>
-    The npm package includes the TypeScript compatibility shim (omegon-pi) and will
-    download the Rust binary on first run. This method is being sunset — prefer the
-    install script or GitHub Releases.
-  </p>
-  <pre><code>npm install -g omegon</code></pre>
-
   <h2>Provider Setup</h2>
   <p>
     After installing, you need at least one inference provider configured. The fastest path:

@@ -53,9 +53,9 @@ import Docs from "../../layouts/Docs.astro";
 
   <h2>Storage</h2>
   <p>
-    Facts are stored in <code>.pi/memory/facts.jsonl</code> (one JSON object per line).
+    Facts are stored as one JSON object per line in the project's memory directory.
     This file is git-tracked with <code>merge=union</code> in <code>.gitattributes</code>,
     allowing multiple branches to add facts without merge conflicts. SQLite databases
-    (<code>*.db</code>) are gitignored and rebuilt from the JSONL source of truth.
+    are gitignored and rebuilt from the JSONL source of truth.
   </p>
 </Docs>

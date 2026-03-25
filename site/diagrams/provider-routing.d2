@@ -1,0 +1,66 @@
+direction: down
+
+operator: Operator {
+  style: { fill: "#0e2e20"; stroke: "#1ab878"; font-color: "#c4d8e4"; border-radius: 8 }
+}
+
+routing: Routing Engine {
+  style: { fill: "#1a4a6e"; stroke: "#2ab4c8"; font-color: "#c4d8e4"; border-radius: 8 }
+}
+
+providers: Providers {
+  style: {
+    fill: "#06080e"
+    stroke: "#1a3448"
+    font-color: "#6ecad8"
+    border-radius: 8
+  }
+
+  anthropic: Anthropic {
+    style: { fill: "#1a4a6e"; stroke: "#2ab4c8"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  openai: OpenAI {
+    style: { fill: "#1a4a6e"; stroke: "#2ab4c8"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  codex: Codex {
+    style: { fill: "#1a3a5a"; stroke: "#1a8898"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  openrouter: OpenRouter {
+    style: { fill: "#1a3a5a"; stroke: "#1a8898"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  groq: Groq {
+    style: { fill: "#0e2a40"; stroke: "#344858"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  xai: xAI {
+    style: { fill: "#0e2a40"; stroke: "#344858"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  mistral: Mistral {
+    style: { fill: "#0e2a40"; stroke: "#344858"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  cerebras: Cerebras {
+    style: { fill: "#0e2a40"; stroke: "#344858"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  ollama: Ollama (local) {
+    style: { fill: "#0e2a40"; stroke: "#344858"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+}
+
+operator -> routing: /model, /think, set_model_tier {
+  style: { stroke: "#1ab878"; font-color: "#c4d8e4" }
+}
+
+routing -> providers: score + select {
+  style: { stroke: "#2ab4c8"; font-color: "#c4d8e4" }
+}
+
+failover: Failover {
+  style: { fill: "#2a1808"; stroke: "#c86418"; font-color: "#c4d8e4"; border-radius: 8 }
+}
+
+providers -> failover: error / rate-limit {
+  style: { stroke: "#c83030"; font-color: "#c4d8e4" }
+}
+
+failover -> routing: retry next provider {
+  style: { stroke: "#c86418"; font-color: "#c4d8e4" }
+}

@@ -113,3 +113,12 @@ hr {
   background: var(--accent-muted);
   color: var(--fg);
 }
+
+/* Diagrams */
+.diagram {
+  width: 100%;
+  max-width: 720px;
+  margin: 24px 0;
+  border-radius: 8px;
+  border: 1px solid var(--border-dim);
+}

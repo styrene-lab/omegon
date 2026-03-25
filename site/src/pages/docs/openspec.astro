@@ -6,8 +6,10 @@ import Docs from "../../layouts/Docs.astro";
   <p>
     OpenSpec is the spec-driven development system in Omegon. Specs define what must be true
     <em>before</em> code is written — they are the source of truth for correctness. The full
-    lifecycle: propose → spec → fast-forward → cleave → assess → archive.
+    lifecycle: propose, spec, fast-forward, cleave, assess, archive.
   </p>
+
+  <img src="/diagrams/openspec-lifecycle.svg" alt="OpenSpec lifecycle: propose, spec, fast-forward, cleave, assess, archive — with feedback loop from assess back to spec on failure" class="diagram" />
 
   <h2>Lifecycle Stages</h2>
   <ol>
@@ -74,8 +76,8 @@ And ollama is ranked last (local tier only)</code></pre>
     After implementation or assessment, the lifecycle may need reconciliation:
   </p>
   <ul>
-    <li>If <code>/assess spec</code> finds issues → <code>reconcile_after_assess</code> reopens work</li>
-    <li>If cleave adds files not in the original scope → tasks.md is updated</li>
+    <li>If <code>/assess spec</code> finds issues, <code>reconcile_after_assess</code> reopens work</li>
+    <li>If cleave adds files not in the original scope, tasks.md is updated</li>
     <li>Archive refuses to proceed if tasks are incomplete or design-tree binding is stale</li>
   </ul>
 </Docs>

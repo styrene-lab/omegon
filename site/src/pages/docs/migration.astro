@@ -17,11 +17,11 @@ import Docs from "../../layouts/Docs.astro";
   <table>
     <thead><tr><th>Claude Code</th><th>Omegon</th></tr></thead>
     <tbody>
-      <tr><td>CLAUDE.md</td><td>Project memory (2,500+ persistent facts with semantic search)</td></tr>
+      <tr><td>CLAUDE.md</td><td>Project memory (persistent facts with semantic search)</td></tr>
       <tr><td>Model picker</td><td><code>/model</code> — 10 providers, tier-based routing</td></tr>
       <tr><td>Extended thinking toggle</td><td><code>/think off|low|medium|high</code></td></tr>
       <tr><td>Conversation history</td><td>Sessions — auto-save, <code>--resume</code>, full replay</td></tr>
-      <tr><td>—</td><td>Design tree (263+ node knowledge graph)</td></tr>
+      <tr><td>—</td><td>Design tree (knowledge graph)</td></tr>
       <tr><td>—</td><td>Parallel execution (cleave into git worktrees)</td></tr>
       <tr><td>—</td><td>Spec-driven development (OpenSpec lifecycle)</td></tr>
       <tr><td>—</td><td>Personas with organic memory growth</td></tr>
@@ -79,15 +79,9 @@ import Docs from "../../layouts/Docs.astro";
     <li>No IDE dependency — works over SSH, in tmux, in CI</li>
   </ul>
 
-  <h2>From omegon-pi (TypeScript)</h2>
-  <pre><code>/migrate pi</code></pre>
+  <h2>From Earlier Omegon Versions</h2>
   <p>
-    If you were using the TypeScript version (omegon-pi / the npm package), the Rust binary
-    is a superset. All pi extensions, tools, and prompt templates are supported. Your project
-    memory (<code>.pi/memory/facts.jsonl</code>) transfers directly — same format.
-  </p>
-  <p>
-    The main change: the Rust binary is the canonical runtime. The TypeScript harness exists
-    as a compatibility shim and is being sunset.
+    If you were using an earlier version, the Rust binary is a superset of all previous
+    functionality. Project memory transfers directly — same format, same location.
   </p>
 </Docs>

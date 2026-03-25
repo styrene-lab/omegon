@@ -1,0 +1,101 @@
+direction: right
+
+title: Three-Axis Routing Model {
+  style: {
+    font-size: 24
+    font-color: "#6ecad8"
+    bold: true
+  }
+}
+
+capability: Capability Tier {
+  style: {
+    fill: "#06080e"
+    stroke: "#2ab4c8"
+    font-color: "#6ecad8"
+    border-radius: 8
+  }
+
+  local: local {
+    style: { fill: "#0e2a40"; stroke: "#344858"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  retribution: retribution {
+    style: { fill: "#1a3a5a"; stroke: "#1a8898"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  victory: victory {
+    style: { fill: "#1a4a6e"; stroke: "#2ab4c8"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  gloriana: gloriana {
+    style: { fill: "#1a4a6e"; stroke: "#6ecad8"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+
+  local -> retribution -> victory -> gloriana {
+    style: { stroke: "#344858" }
+  }
+}
+
+thinking: Thinking Level {
+  style: {
+    fill: "#06080e"
+    stroke: "#1ab878"
+    font-color: "#6ecad8"
+    border-radius: 8
+  }
+
+  off: off {
+    style: { fill: "#0e2a40"; stroke: "#344858"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  low: low {
+    style: { fill: "#0e2e20"; stroke: "#1ab878"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  medium: medium {
+    style: { fill: "#0e2e20"; stroke: "#1ab878"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  high: high {
+    style: { fill: "#0e2e20"; stroke: "#1ab878"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+
+  off -> low -> medium -> high {
+    style: { stroke: "#344858" }
+  }
+}
+
+context: Context Class {
+  style: {
+    fill: "#06080e"
+    stroke: "#b89020"
+    font-color: "#6ecad8"
+    border-radius: 8
+  }
+
+  squad: Squad 128k {
+    style: { fill: "#2e2010"; stroke: "#b89020"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  maniple: Maniple 272k {
+    style: { fill: "#2e2010"; stroke: "#b89020"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  clan: Clan 400k {
+    style: { fill: "#2e2010"; stroke: "#b89020"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+  legion: Legion 1M {
+    style: { fill: "#2e2010"; stroke: "#b89020"; font-color: "#c4d8e4"; border-radius: 6 }
+  }
+
+  squad -> maniple -> clan -> legion {
+    style: { stroke: "#344858" }
+  }
+}
+
+routing: Routing Engine {
+  style: { fill: "#1a4a6e"; stroke: "#2ab4c8"; font-color: "#c4d8e4"; border-radius: 8 }
+}
+
+capability -> routing: tier {
+  style: { stroke: "#2ab4c8"; font-color: "#c4d8e4" }
+}
+thinking -> routing: budget {
+  style: { stroke: "#1ab878"; font-color: "#c4d8e4" }
+}
+context -> routing: window {
+  style: { stroke: "#b89020"; font-color: "#c4d8e4" }
+}

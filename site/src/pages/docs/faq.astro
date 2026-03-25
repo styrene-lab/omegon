@@ -18,7 +18,7 @@ import Docs from "../../layouts/Docs.astro";
   <p>
     Omegon's memory is a persistent knowledge base with semantic search, episodic narratives,
     a knowledge graph with typed edges, working memory pinning, cross-session compaction, and
-    2,500+ facts in the Omegon project itself. It's the difference between a sticky note on
+    It's the difference between a sticky note on
     your monitor and an institutional knowledge base. If your project fits on a sticky note,
     use the sticky note.
   </p>
@@ -42,24 +42,23 @@ import Docs from "../../layouts/Docs.astro";
   </p>
   <p>
     The protection isn't legal — it's velocity. By the time a large company decides to build
-    something like this, politics it through three VP layers, and ships it with enterprise
+    something like this, politics it through three VP layers, and releases it with enterprise
     SSO and a $40/seat/month price tag, we'll be three major versions ahead. That's the
-    advantage of a single maintainer who ships every day over a committee that ships every quarter.
+    advantage of a single maintainer who builds every day over a committee that releases every quarter.
   </p>
 
-  <h3>What's the relationship to pi (the coding agent)?</h3>
+  <h3>Is this based on another project?</h3>
   <p>
-    Omegon started as a fork of the <code>pi</code> TypeScript coding agent. The original
-    agent loop, extension system, and TUI were TypeScript (omegon-pi). Over time, we rewrote
-    the entire runtime in Rust: the agent loop, TUI, provider layer, memory system, cleave
-    orchestrator, and design tree. The TypeScript shim still exists for compatibility but is
-    being sunset. The Rust binary is the canonical runtime.
+    Omegon's earliest prototype was a TypeScript fork of another coding agent. Every
+    subsystem has since been rewritten in Rust — the agent loop, TUI, provider layer,
+    memory system, orchestrator, and design tree. Nothing of the original remains in the
+    runtime. The Rust binary is the only supported entrypoint.
   </p>
 
   <h3>Is this production-ready?</h3>
   <p>
-    It's what we use to build itself. 877 tests, zero compiler warnings, signed releases with
-    cosign and SBOM. The codebase is 65,000+ lines of Rust across 6 crates. It's been through
+    It's what we use to build itself. Comprehensive test suite, zero compiler warnings, signed releases with
+    cosign and SBOM. It's been through
     hundreds of sessions building real software.
   </p>
   <p>
@@ -82,7 +81,7 @@ import Docs from "../../layouts/Docs.astro";
 
   <h3>I'm coming from Claude Code. What changes?</h3>
   <p>
-    What you gain: persistent project memory that survives across sessions, a 263-node design
+    What you gain: persistent project memory that survives across sessions, a design
     tree for tracking architecture decisions, parallel execution via git worktrees, 10 inference
     providers instead of 1, a TUI dashboard with instrument panels, session save/resume, and
     spec-driven development lifecycle.
@@ -143,7 +142,7 @@ import Docs from "../../layouts/Docs.astro";
   <p>Big if true.</p>
   <p class="faq-fine-print">
     (We're genuinely interested in contributions — see <a href="/docs/contributing">Contributing</a>.
-    The license is BSL 1.1 which converts to Apache 2.0 after 4 years. PRs are welcome for
+    The license is BSL 1.1 which converts to MIT on 2031-03-19. PRs are welcome for
     bug fixes, provider integrations, and documentation. Feature proposals should start with
     a design tree node.)
   </p>

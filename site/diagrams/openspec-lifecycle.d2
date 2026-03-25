@@ -1,0 +1,44 @@
+direction: right
+
+propose: Propose {
+  style: { fill: "#0e2e20"; stroke: "#1ab878"; font-color: "#c4d8e4"; border-radius: 8 }
+}
+
+spec: Spec {
+  style: { fill: "#1a4a6e"; stroke: "#2ab4c8"; font-color: "#c4d8e4"; border-radius: 8 }
+}
+
+ff: Fast-Forward {
+  style: { fill: "#1a4a6e"; stroke: "#2ab4c8"; font-color: "#c4d8e4"; border-radius: 8 }
+}
+
+cleave: Cleave {
+  style: { fill: "#1a4a6e"; stroke: "#6ecad8"; font-color: "#c4d8e4"; border-radius: 8 }
+}
+
+assess: Assess {
+  style: { fill: "#2a1010"; stroke: "#c83030"; font-color: "#c4d8e4"; border-radius: 8 }
+}
+
+archive: Archive {
+  style: { fill: "#2e2010"; stroke: "#b89020"; font-color: "#c4d8e4"; border-radius: 8 }
+}
+
+propose -> spec: define scenarios {
+  style: { stroke: "#2ab4c8"; font-color: "#c4d8e4" }
+}
+spec -> ff: generate tasks {
+  style: { stroke: "#2ab4c8"; font-color: "#c4d8e4" }
+}
+ff -> cleave: parallel execute {
+  style: { stroke: "#2ab4c8"; font-color: "#c4d8e4" }
+}
+cleave -> assess: verify {
+  style: { stroke: "#2ab4c8"; font-color: "#c4d8e4" }
+}
+assess -> archive: pass {
+  style: { stroke: "#1ab878"; font-color: "#c4d8e4" }
+}
+assess -> spec: fail — revise {
+  style: { stroke: "#c83030"; font-color: "#c4d8e4" }
+}
