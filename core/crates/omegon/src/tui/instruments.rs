@@ -347,6 +347,7 @@ impl InstrumentPanel {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border))
+            .border_type(ratatui::widgets::BorderType::Rounded)
             .title(Span::styled(" inference ", Style::default().fg(label)));
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -535,6 +536,7 @@ impl InstrumentPanel {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border))
+            .border_type(ratatui::widgets::BorderType::Rounded)
             .title(Span::styled(" tools ", Style::default().fg(label)));
         let inner = block.inner(area);
         frame.render_widget(block, area);

@@ -201,6 +201,7 @@ impl DashboardState {
         let block = Block::default()
             .borders(Borders::LEFT)
             .border_style(Style::default().fg(t.border_dim()))
+            .border_type(ratatui::widgets::BorderType::Rounded)
             .style(Style::default().bg(t.bg()));
 
         // Render the block border, then work inside its inner area

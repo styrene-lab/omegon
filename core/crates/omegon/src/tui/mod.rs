@@ -3136,10 +3136,12 @@ pub async fn run_tui(
                                 match &step_trigger {
                                     tutorial::Trigger::Tab => {
                                         overlay.advance();
-                                        // After advancing, check if the new step has an auto-prompt
-                                        if let Some(prompt) = overlay.pending_auto_prompt() {
-                                            let prompt = prompt.to_string();
-                                            overlay.mark_auto_prompt_sent();
+                                        let auto_prompt = overlay.pending_auto_prompt().map(|s| s.to_string());
+                                        if auto_prompt.is_some() { overlay.mark_auto_prompt_sent(); }
+                                        let should_open_dash = overlay.step().title == "Web Dashboard";
+                                        // Drop overlay borrow before touching app
+                                        drop(step_trigger);
+                                        if let Some(prompt) = auto_prompt {
                                             if !app.agent_active {
                                                 app.conversation.push_system("▸ tutorial step");
                                                 app.agent_active = true;
@@ -3147,6 +3149,9 @@ pub async fn run_tui(
                                             } else {
                                                 app.queue_prompt(prompt);
                                             }
+                                        }
+                                        if should_open_dash {
+                                            let _ = command_tx.send(TuiCommand::StartWebDashboard).await;
                                         }
                                         continue;
                                     }

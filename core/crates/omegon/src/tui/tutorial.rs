@@ -79,7 +79,7 @@ const STEP_COCKPIT: Step = Step {
 
 const STEP_WEB_DASHBOARD: Step = Step {
     title: "Web Dashboard",
-    body: "Want a bigger view? Type /dash to open\nthe browser dashboard, or press Tab\nto skip ahead.\n\nIt shows everything from the right panel\nin a full web page \u{2014} design notes, specs,\nand a live feed of what\u{2019}s happening here.\n\nSame data, no polling, instant updates.",
+    body: "Opening the web dashboard in your browser.\n\nIt shows everything from the right panel\nin a full web page \u{2014} design notes, specs,\nand a live feed of what\u{2019}s happening here.\n\nSame data, no polling, instant updates.\nYou can also open it anytime with /dash.",
     anchor: Anchor::Center,
     trigger: Trigger::Tab,
     highlight: None,
