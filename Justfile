@@ -485,6 +485,69 @@ brew-tap:
     echo "  brew tap styrene-lab/tap"
     echo "  brew install omegon"
 
+# ─── Cross-compile ───────────────────────────────────────────
+
+# Build for Linux x86_64 (via zig cross-linker — no containers, no QEMU)
+build-linux-amd64:
+    cd core && cargo zigbuild --release --target x86_64-unknown-linux-gnu -p omegon
+    @ls -lh core/target/x86_64-unknown-linux-gnu/release/omegon
+    @file core/target/x86_64-unknown-linux-gnu/release/omegon
+
+# Build for Linux aarch64 (via zig cross-linker)
+build-linux-arm64:
+    cd core && cargo zigbuild --release --target aarch64-unknown-linux-gnu -p omegon
+    @ls -lh core/target/aarch64-unknown-linux-gnu/release/omegon
+    @file core/target/aarch64-unknown-linux-gnu/release/omegon
+
+# Build all release targets (macOS native + Linux via zig)
+build-all: build build-linux-amd64 build-linux-arm64
+    @echo ""
+    @echo "Built:"
+    @ls -lh core/target/release/omegon
+    @ls -lh core/target/x86_64-unknown-linux-gnu/release/omegon
+    @ls -lh core/target/aarch64-unknown-linux-gnu/release/omegon
+
+# Package release archives for all targets
+package:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    VERSION=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+    DIST="dist/v${VERSION}"
+    mkdir -p "$DIST"
+
+    package_target() {
+        local TARGET=$1 BINARY=$2
+        local ARCHIVE="omegon-${VERSION}-${TARGET}.tar.gz"
+        strip "$BINARY" 2>/dev/null || llvm-strip "$BINARY" 2>/dev/null || true
+        tar czf "${DIST}/${ARCHIVE}" -C "$(dirname "$BINARY")" omegon
+        shasum -a 256 "${DIST}/${ARCHIVE}" >> "${DIST}/checksums.sha256"
+        echo "  ${ARCHIVE} ($(du -h "${DIST}/${ARCHIVE}" | cut -f1))"
+    }
+
+    echo "Packaging v${VERSION}..."
+    > "${DIST}/checksums.sha256"  # truncate
+
+    # macOS arm64 (native build)
+    if [ -f core/target/release/omegon ]; then
+        package_target "aarch64-apple-darwin" "core/target/release/omegon"
+    fi
+
+    # Linux x86_64
+    if [ -f core/target/x86_64-unknown-linux-gnu/release/omegon ]; then
+        package_target "x86_64-unknown-linux-gnu" "core/target/x86_64-unknown-linux-gnu/release/omegon"
+    fi
+
+    # Linux aarch64
+    if [ -f core/target/aarch64-unknown-linux-gnu/release/omegon ]; then
+        package_target "aarch64-unknown-linux-gnu" "core/target/aarch64-unknown-linux-gnu/release/omegon"
+    fi
+
+    echo ""
+    echo "Checksums:"
+    cat "${DIST}/checksums.sha256"
+    echo ""
+    echo "Archives in ${DIST}/"
+
 # ─── TypeScript (omegon-pi) ─────────────────────────────────
 
 # Run all TS tests
