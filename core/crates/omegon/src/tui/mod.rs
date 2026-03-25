@@ -1930,11 +1930,36 @@ impl App {
                     self.open_login_selector();
                     SlashResult::Handled
                 } else {
-                    let _ = tx.try_send(TuiCommand::BusCommand {
-                        name: "auth_login".to_string(),
-                        args: args.to_string(),
-                    });
-                    SlashResult::Handled
+                    // Check if this is an API key provider — show secret input directly
+                    let parts: Vec<&str> = args.split_whitespace().collect();
+                    let provider_id = parts[0];
+                    let wants_oauth = parts.get(1) == Some(&"oauth");
+                    let provider_info = crate::auth::provider_by_id(provider_id);
+
+                    if !wants_oauth && provider_info.is_some_and(|p| p.auth_method == crate::auth::AuthMethod::ApiKey) {
+                        // Direct API key input — same as selecting from the login selector
+                        let p = provider_info.unwrap();
+                        let key_name = p.env_vars.iter()
+                            .find(|v| !v.contains("OAUTH"))
+                            .copied()
+                            .unwrap_or("API_KEY");
+                        self.editor.start_secret_input(key_name);
+                        let oauth_hint = match provider_id {
+                            "anthropic" => "\n  Or: /login anthropic oauth (Claude Pro/Max subscription)",
+                            _ => "",
+                        };
+                        self.conversation.push_system(
+                            &format!("🔒 Paste your {} API key (input is hidden):{oauth_hint}", p.display_name)
+                        );
+                        SlashResult::Handled
+                    } else {
+                        // OAuth or unknown — route through auth_login bus command
+                        let _ = tx.try_send(TuiCommand::BusCommand {
+                            name: "auth_login".to_string(),
+                            args: args.to_string(),
+                        });
+                        SlashResult::Handled
+                    }
                 }
             }
 
