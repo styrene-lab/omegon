@@ -55,7 +55,7 @@ fn slash_status_returns_bootstrap_panel() {
     let result = app.handle_slash_command("/status", &tx);
     if let SlashResult::Display(text) = result {
         assert!(text.contains("Omegon"), "should contain Omegon: {text}");
-        assert!(text.contains("Context"), "should contain Context: {text}");
+        assert!(text.contains("Context:"), "should contain Context: {text}");
     } else {
         panic!("expected Display result");
     }
@@ -355,7 +355,7 @@ fn handled_commands_are_in_commands_table() {
         .collect();
 
     // Test a set of plausible undocumented command names
-    let undocumented = ["secret", "config", "debug", "reload", "undo", "redo",
+    let undocumented = ["config", "debug", "reload", "undo", "redo",
         "run", "build", "deploy", "test", "profile", "env", "reset"];
 
     for name in undocumented {
@@ -402,9 +402,10 @@ fn unknown_slash_commands_show_error() {
     assert!(matches!(result, SlashResult::Display(_)),
         "/foobar should show error, not go to agent");
 
-    let result = app.handle_slash_command("/secret", &tx);
+    // /secret now prefix-matches to /secrets (valid command)
+    let result = app.handle_slash_command("/zzz_nonexistent", &tx);
     assert!(matches!(result, SlashResult::Display(_)),
-        "/secret should show error, not go to agent");
+        "/zzz_nonexistent should show error, not go to agent");
 }
 
 #[test]
@@ -536,47 +537,219 @@ fn tutorial_status_line() {
     assert!(tut.status_line().contains("(final)"));
 }
 
-// ─── Responsive layout tier tests ───────────────────────────────
-
+#[cfg(target_os = "macos")]
 #[test]
-fn footer_height_tier_1_full() {
-    // ≥24h → full 9-row footer
-    assert_eq!(App::compute_footer_height(30, false), 9);
-    assert_eq!(App::compute_footer_height(50, false), 9);
-    assert_eq!(App::compute_footer_height(24, false), 9);
+fn clipboard_format_matching() {
+    use super::match_clipboard_image_format;
+
+    // Real osascript output from a screenshot
+    let info = "«class PNGf», 29460, «class AVIF», 14396, «class 8BPS», 141278, GIF picture, 9009, «class jp2 », 39826, JPEG picture, 27092, TIFF picture, 792990, «class BMP », 792202, «class TPIC», 58310";
+    let result = match_clipboard_image_format(info);
+    assert!(result.is_some(), "should match PNGf in real clipboard output");
+    let (ext, pb) = result.unwrap();
+    assert_eq!(ext, "png");
+    assert_eq!(pb, "«class PNGf»");
+
+    // JPEG-only clipboard
+    let info = "JPEG picture, 12345";
+    let (ext, _) = match_clipboard_image_format(info).unwrap();
+    assert_eq!(ext, "jpg");
+
+    // TIFF-only clipboard
+    let info = "TIFF picture, 99999";
+    let (ext, _) = match_clipboard_image_format(info).unwrap();
+    assert_eq!(ext, "tiff");
+
+    // GIF
+    let info = "GIF picture, 5000";
+    let (ext, _) = match_clipboard_image_format(info).unwrap();
+    assert_eq!(ext, "gif");
+
+    // BMP
+    let info = "«class BMP », 200000";
+    let (ext, _) = match_clipboard_image_format(info).unwrap();
+    assert_eq!(ext, "bmp");
+
+    // No image — text only
+    let info = "«class utf8», 100, string, 100";
+    assert!(match_clipboard_image_format(info).is_none());
+
+    // Empty
+    assert!(match_clipboard_image_format("").is_none());
+
+    // The OLD broken matching — UTI strings that never appeared in osascript output
+    let info_with_uti = "public.png, 29460";
+    // This should NOT match PNGf (it contains "public.png" not "PNGf")
+    // But wait — "png" is not in our markers. This correctly returns None.
+    // The old code would have matched "public.png" → that was the bug.
+    assert!(match_clipboard_image_format(info_with_uti).is_none(),
+        "UTI strings should not match — osascript never outputs them");
 }
 
-#[test]
-fn footer_height_tier_3_compact() {
-    // 18..24h → compact 4-row footer
-    assert_eq!(App::compute_footer_height(23, false), 4);
-    assert_eq!(App::compute_footer_height(20, false), 4);
-    assert_eq!(App::compute_footer_height(18, false), 4);
-}
+// ═══════════════════════════════════════════════════════════════════
+// /note and /notes commands
+// ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn footer_height_tier_4_none() {
-    // <18h → no footer
-    assert_eq!(App::compute_footer_height(17, false), 0);
-    assert_eq!(App::compute_footer_height(10, false), 0);
-}
-
-#[test]
-fn footer_height_focus_mode_overrides() {
-    // Focus mode always returns 0 regardless of height
-    assert_eq!(App::compute_footer_height(50, true), 0);
-    assert_eq!(App::compute_footer_height(20, true), 0);
-    assert_eq!(App::compute_footer_height(10, true), 0);
-}
-
-#[test]
-fn dashboard_visible_tracks_render_state() {
+fn slash_note_with_text_persists_to_disk() {
+    let tmp = tempfile::tempdir().unwrap();
     let mut app = test_app();
-    // Initially no dashboard visible (no content + width is 0)
-    assert!(!app.dashboard_visible());
-    // Simulate draw setting the width
-    app.last_dash_width = 40;
-    assert!(app.dashboard_visible());
-    app.last_dash_width = 0;
-    assert!(!app.dashboard_visible());
+    app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
+    let tx = test_tx();
+
+    // Write a note
+    let result = app.handle_slash_command("/note look into this later", &tx);
+    if let SlashResult::Display(text) = result {
+        assert!(text.contains("Noted"), "should confirm note: {text}");
+        assert!(text.contains("1 entries"), "should count 1 entry: {text}");
+    } else {
+        panic!("expected Display result");
+    }
+
+    // Verify file exists and contains the note
+    let notes_path = tmp.path().join(".omegon").join("notes.md");
+    let content = std::fs::read_to_string(&notes_path).expect("notes file should exist");
+    assert!(content.contains("look into this later"), "note text should be persisted: {content}");
+    assert!(content.starts_with("- ["), "should have timestamp prefix: {content}");
+
+    // Write a second note and verify count
+    let result2 = app.handle_slash_command("/note second thing", &tx);
+    if let SlashResult::Display(text) = result2 {
+        assert!(text.contains("2 entries"), "should count 2 entries: {text}");
+    }
+}
+
+#[test]
+fn slash_note_without_args_shows_notes() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/note", &tx);
+    if let SlashResult::Display(text) = result {
+        assert!(text.contains("note"), "should mention notes: {text}");
+    } else {
+        panic!("expected Display result");
+    }
+}
+
+#[test]
+fn slash_notes_clear_returns_display() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/notes clear", &tx);
+    if let SlashResult::Display(text) = result {
+        assert!(text.contains("cleared"), "should confirm clear: {text}");
+    } else {
+        panic!("expected Display result");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// /checkin command
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn slash_checkin_with_notes_shows_note_count() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = test_app();
+    app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
+    let tx = test_tx();
+
+    // No notes → should NOT mention notes in checkin
+    let result = app.handle_slash_command("/checkin", &tx);
+    if let SlashResult::Display(text) = &result {
+        assert!(!text.contains("pending note"), "no notes yet: {text}");
+    }
+
+    // Add a note
+    app.handle_slash_command("/note investigate flaky test", &tx);
+
+    // Now checkin should show the note count
+    let result2 = app.handle_slash_command("/checkin", &tx);
+    if let SlashResult::Display(text) = result2 {
+        assert!(text.contains("1 pending note"), "should show note count: {text}");
+    } else {
+        panic!("expected Display result");
+    }
+}
+
+#[test]
+fn slash_checkin_with_opsx_changes_shows_them() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = test_app();
+    app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
+    let tx = test_tx();
+
+    // Create a fake OpenSpec change directory
+    let change_dir = tmp.path().join("openspec").join("changes").join("my-feature");
+    std::fs::create_dir_all(&change_dir).unwrap();
+
+    let result = app.handle_slash_command("/checkin", &tx);
+    if let SlashResult::Display(text) = result {
+        assert!(text.contains("OpenSpec"), "should show OpenSpec changes: {text}");
+        assert!(text.contains("my-feature"), "should name the change: {text}");
+    } else {
+        panic!("expected Display result");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Login selector
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn slash_login_selector_opens_with_provider_catalog() {
+    let mut app = test_app();
+    app.open_login_selector();
+    assert!(app.selector.is_some(), "selector should be open");
+    let selector = app.selector.as_ref().unwrap();
+    assert!(selector.options.len() >= 9, "should have at least 9 providers, got {}", selector.options.len());
+    // Verify structure: each option has a value and label
+    for opt in &selector.options {
+        assert!(!opt.value.is_empty(), "option value should not be empty");
+        assert!(!opt.label.is_empty(), "option label should not be empty");
+    }
+    // Unconfigured providers should NOT have checkmark
+    let has_unconfigured = selector.options.iter().any(|o| !o.active);
+    assert!(has_unconfigured, "at least some providers should be unconfigured in test env");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Recovery hints
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn recovery_hint_rate_limit() {
+    let hint = App::recovery_hint(None, "Error: 429 Too Many Requests");
+    assert!(hint.contains("Rate limited"), "should suggest rate limit recovery: {hint}");
+}
+
+#[test]
+fn recovery_hint_unauthorized() {
+    let hint = App::recovery_hint(None, "HTTP 401 Unauthorized");
+    assert!(hint.contains("/login"), "should suggest login: {hint}");
+}
+
+#[test]
+fn recovery_hint_no_false_positive_on_status_codes() {
+    // A path containing "401" should NOT trigger the auth hint
+    let hint = App::recovery_hint(None, "Error reading /var/lib/app/401/config.json");
+    assert!(hint.is_empty(), "path with 401 should not trigger auth hint: {hint}");
+}
+
+#[test]
+fn recovery_hint_ollama_connection() {
+    let hint = App::recovery_hint(None, "Connection refused to ollama at localhost:11434");
+    assert!(hint.contains("ollama serve"), "should suggest starting ollama: {hint}");
+}
+
+#[test]
+fn recovery_hint_context_window() {
+    let hint = App::recovery_hint(None, "context_length_exceeded: too many tokens");
+    assert!(hint.contains("/compact"), "should suggest compact: {hint}");
+}
+
+#[test]
+fn recovery_hint_no_match() {
+    let hint = App::recovery_hint(None, "some random error");
+    assert!(hint.is_empty(), "should return empty for unknown errors");
 }

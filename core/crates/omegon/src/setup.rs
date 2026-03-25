@@ -66,7 +66,6 @@ impl LifecycleSnapshot {
                     assumptions,
                     decisions: decisions_count,
                     readiness,
-                    openspec_change: n.openspec_change.clone(),
                 }
             })
         });
@@ -170,12 +169,10 @@ impl AgentSetup {
         // ─── Memory ─────────────────────────────────────────────────────
         let mind = "default".to_string();
         let project_root = find_project_root(&cwd);
-        // Memory: ai/memory/ → .omegon/memory/ → .pi/memory/ (fallback chain)
-        let mem_dir = crate::paths::memory_dir_write(&project_root);
-        let _ = std::fs::create_dir_all(&mem_dir);
-        let db_path = mem_dir.join("facts.db");
-        let jsonl_path = crate::paths::facts_jsonl(&project_root)
-            .unwrap_or_else(|| mem_dir.join("facts.jsonl"));
+        let memory_dir = project_root.join(".pi").join("memory");
+        let _ = std::fs::create_dir_all(&memory_dir);
+        let db_path = memory_dir.join("facts.db");
+        let jsonl_path = memory_dir.join("facts.jsonl");
 
         let mut initial_fact_count: usize = 0;
 

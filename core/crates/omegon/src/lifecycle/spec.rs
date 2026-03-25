@@ -9,19 +9,9 @@ use std::path::{Path, PathBuf};
 use super::types::*;
 
 /// Locate the openspec/ directory in a repository.
-/// Primary: `ai/openspec/`, fallback: `openspec/`
 pub fn find_openspec_dir(repo_path: &Path) -> Option<PathBuf> {
-    crate::paths::openspec_dir(repo_path)
-}
-
-/// Locate a specific change directory. Checks both ai/openspec/ and openspec/.
-fn find_change_dir(repo_path: &Path, change_name: &str) -> PathBuf {
-    if let Some(dir) = find_openspec_dir(repo_path) {
-        dir.join("changes").join(change_name)
-    } else {
-        // Not found — default to the write path for new changes
-        crate::paths::openspec_dir_write(repo_path).join("changes").join(change_name)
-    }
+    let dir = repo_path.join("openspec");
+    if dir.is_dir() { Some(dir) } else { None }
 }
 
 /// List all active OpenSpec changes (in openspec/changes/).
@@ -388,7 +378,7 @@ pub fn propose_change(
     title: &str,
     intent: &str,
 ) -> anyhow::Result<ChangeInfo> {
-    let openspec_dir = crate::paths::openspec_dir_write(repo_path);
+    let openspec_dir = repo_path.join("openspec");
     let changes_dir = openspec_dir.join("changes");
     let change_dir = changes_dir.join(name);
 
@@ -425,7 +415,9 @@ pub fn add_spec(
     domain: &str,
     spec_content: &str,
 ) -> anyhow::Result<PathBuf> {
-    let change_dir = find_change_dir(repo_path, change_name);
+    let change_dir = repo_path
+        .join("openspec/changes")
+        .join(change_name);
 
     if !change_dir.exists() {
         anyhow::bail!("Change '{change_name}' does not exist");
@@ -448,19 +440,17 @@ pub fn add_spec(
     Ok(spec_path)
 }
 
-/// Archive a change by moving it to openspec/archive/ (or ai/openspec/archive/).
+/// Archive a change by moving it to openspec/archive/.
 pub fn archive_change(repo_path: &Path, change_name: &str) -> anyhow::Result<()> {
-    let change_dir = find_change_dir(repo_path, change_name);
+    let change_dir = repo_path
+        .join("openspec/changes")
+        .join(change_name);
 
     if !change_dir.exists() {
         anyhow::bail!("Change '{change_name}' does not exist");
     }
 
-    // Archive goes to the same parent as the changes dir
-    let archive_dir = change_dir.parent()
-        .and_then(|p| p.parent()) // changes/ → openspec/ or ai/openspec/
-        .map(|p| p.join("archive"))
-        .unwrap_or_else(|| repo_path.join("ai/openspec/archive"));
+    let archive_dir = repo_path.join("openspec/archive");
     fs::create_dir_all(&archive_dir)?;
     let dest = archive_dir.join(change_name);
 
@@ -617,9 +607,7 @@ mod integration_tests {
         tracing::debug!("Found {} active OpenSpec changes", changes.len());
 
         // Verify baseline specs can be parsed
-        let baseline_dir = find_openspec_dir(repo_path)
-            .map(|d| d.join("baseline"))
-            .unwrap_or_else(|| repo_path.join("openspec/baseline"));
+        let baseline_dir = repo_path.join("openspec/baseline");
         if baseline_dir.is_dir() {
             let specs = parse_specs_dir(&baseline_dir);
             tracing::debug!("Parsed {} baseline spec files", specs.len());
@@ -695,10 +683,7 @@ mod mutation_tests {
 
         archive_change(dir.path(), "to-archive").unwrap();
         assert!(!change.path.exists(), "original should be gone");
-        // Archive goes next to changes/ — ai/openspec/archive/ for new projects
-        let archive_exists = dir.path().join("ai/openspec/archive/to-archive").exists()
-            || dir.path().join("openspec/archive/to-archive").exists();
-        assert!(archive_exists, "should be in archive dir");
+        assert!(dir.path().join("openspec/archive/to-archive").exists(), "should be in archive");
     }
 
     #[test]

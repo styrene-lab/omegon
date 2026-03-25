@@ -164,8 +164,9 @@ impl Feature for HarnessSettings {
             }
 
             "memory_stats" => {
+                // Read from .pi/memory/facts.db if accessible
                 let cwd = std::env::current_dir().unwrap_or_default();
-                let db_path = crate::paths::memory_dir(&cwd).join("facts.db");
+                let db_path = cwd.join(".pi").join("memory").join("facts.db");
                 if db_path.exists() {
                     match rusqlite::Connection::open_with_flags(
                         &db_path,
@@ -197,13 +198,13 @@ impl Feature for HarnessSettings {
                         Err(e) => Ok(error_result(&format!("Cannot read memory DB: {e}"))),
                     }
                 } else {
-                    Ok(text_result("No memory database found. Run a session to create one."))
+                    Ok(text_result("No memory database found at .pi/memory/facts.db"))
                 }
             }
 
             "sessions" => {
                 let cwd = std::env::current_dir().unwrap_or_default();
-                let sessions_dir = crate::paths::config_dir(&cwd).join("sessions");
+                let sessions_dir = cwd.join(".pi").join("sessions");
                 if !sessions_dir.is_dir() {
                     return Ok(text_result("No saved sessions."));
                 }

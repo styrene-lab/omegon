@@ -36,12 +36,12 @@ mod snapshot_tests;
 use std::io;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use crossterm::ExecutableCommand;
-use crossterm::event::{EnableMouseCapture, DisableMouseCapture};
+use crossterm::event::{EnableMouseCapture, DisableMouseCapture, MouseEventKind};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use tokio::sync::{broadcast, mpsc};
@@ -132,10 +132,6 @@ pub struct App {
     dashboard_handles: dashboard::DashboardHandles,
     /// Turn counter for throttled dashboard refresh.
     dashboard_refresh_turn: u32,
-    /// Last time we rescanned filesystem for design/lifecycle changes.
-    last_lifecycle_rescan: std::time::Instant,
-    /// Width of the dashboard panel on last render (0 if not visible).
-    last_dash_width: u16,
     /// Web dashboard server address (if running).
     web_server_addr: Option<std::net::SocketAddr>,
     /// Prompt queued while agent was busy — sent on next AgentEnd.
@@ -146,14 +142,13 @@ pub struct App {
     pending_image: Option<std::path::PathBuf>,
     /// Previous harness status for diffing on HarnessStatusChanged.
     previous_harness_status: Option<crate::status::HarnessStatus>,
-    /// Tutorial overlay — game-style first-play advisor.
-    tutorial_overlay: Option<tutorial::Tutorial>,
-    /// Tutorial highlight target — the widget should pulse/flash its border.
-    tutorial_highlight: Option<tutorial::Highlight>,
-    /// Legacy tutorial state — lesson-file based (for sandbox projects).
+    /// Capability tier detected at startup by systems check probes.
+    pub capability_tier: Option<crate::startup::CapabilityTier>,
+    /// Tutorial state — active when running /tutorial (lesson-based).
     tutorial: Option<TutorialState>,
-    /// Provider inventory for routing — populated after splash probes.
-    provider_inventory: Option<std::sync::Arc<tokio::sync::RwLock<crate::routing::ProviderInventory>>>,
+    /// Tutorial overlay — game-style first-play advisor.
+    /// Renders on top of the UI and guides the operator through steps.
+    tutorial_overlay: Option<tutorial::Tutorial>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -161,6 +156,8 @@ enum SelectorKind {
     Model,
     ThinkingLevel,
     ContextClass,
+    SecretName,
+    LoginProvider,
 }
 
 /// Result of handling a slash command.
@@ -182,14 +179,6 @@ impl App {
             let s = settings.lock().unwrap();
             (s.model.clone(), s.provider().to_string())
         };
-        // Load calibration from project profile if available
-        let cwd = std::env::current_dir().unwrap_or_default();
-        let profile = crate::settings::Profile::load(&cwd);
-        let theme = if let Some(cal) = profile.calibration {
-            theme::calibrated_theme(&cal)
-        } else {
-            theme::default_theme()
-        };
         Self {
             editor: Editor::new(),
             conversation: ConversationView::new(),
@@ -209,7 +198,7 @@ impl App {
             },
             instrument_panel: InstrumentPanel::default(),
             focus_mode: false,
-            theme,
+            theme: theme::default_theme(),
             settings,
             cancel: std::sync::Arc::new(std::sync::Mutex::new(None)),
             last_ctrl_c: None,
@@ -227,8 +216,6 @@ impl App {
             bus_commands: Vec::new(),
             dashboard_handles: dashboard::DashboardHandles::default(),
             dashboard_refresh_turn: u32::MAX, // force refresh on first frame
-            last_lifecycle_rescan: std::time::Instant::now(),
-            last_dash_width: 0,
             web_server_addr: None,
             queued_prompt: None,
             toasts: ratatui_toaster::ToastEngineBuilder::new(ratatui::prelude::Rect::default())
@@ -236,10 +223,9 @@ impl App {
                 .build(),
             pending_image: None,
             previous_harness_status: None,
-            tutorial_overlay: None,
-            tutorial_highlight: None,
+            capability_tier: None,
             tutorial: None,
-            provider_inventory: None,
+            tutorial_overlay: None,
         }
     }
 
@@ -317,6 +303,87 @@ impl App {
         }).collect();
         self.selector = Some(selector::Selector::new("Context Class", options));
         self.selector_kind = Some(SelectorKind::ContextClass);
+    }
+
+    /// Shorthand for the current working directory as a Path.
+    fn cwd(&self) -> &std::path::Path {
+        std::path::Path::new(&self.footer_data.cwd)
+    }
+
+    /// Generate a recovery hint for a tool error, if one applies.
+    fn recovery_hint(tool_name: Option<&str>, error_text: &str) -> &'static str {
+        let lower = error_text.to_lowercase();
+        // Connection / network errors
+        if lower.contains("connection refused") || lower.contains("connect timeout") {
+            if lower.contains("ollama") || lower.contains("11434") {
+                return "Ollama not running. Start with: ollama serve";
+            }
+            return "Service unreachable. Check if the target is running and the port is correct.";
+        }
+        // Rate limiting — match HTTP status codes as word boundaries, not substrings
+        if lower.contains("rate limit") || lower.contains("status 429") || lower.contains("http 429")
+            || lower.contains("too many requests") || lower.contains("error 429") {
+            return "Rate limited. Use /model to switch provider, or wait a moment and retry.";
+        }
+        // Authentication — same boundary-aware matching
+        if lower.contains("status 401") || lower.contains("http 401") || lower.contains("error 401")
+            || lower.contains("unauthorized") || lower.contains("invalid api key") || lower.contains("invalid_api_key") {
+            return "Authentication failed. Use /login to re-authenticate.";
+        }
+        if lower.contains("status 403") || lower.contains("http 403") || lower.contains("error 403")
+            || lower.contains("forbidden") || lower.contains("permission denied") {
+            return "Permission denied. Check file permissions or API access scope.";
+        }
+        // Timeout
+        if lower.contains("timeout") || lower.contains("timed out") {
+            return "Operation timed out. Try a simpler request or increase timeout.";
+        }
+        // MCP errors
+        if lower.contains("mcp") && (lower.contains("not connected") || lower.contains("disconnected")) {
+            return "MCP server disconnected. Check the server process and restart if needed.";
+        }
+        // Context window
+        if lower.contains("context length") || lower.contains("too many tokens") || lower.contains("context_length") {
+            return "Context window exceeded. Use /compact to free space, or /context to select a larger class.";
+        }
+        // Git errors
+        if tool_name == Some("bash") && (lower.contains("not a git repository") || lower.contains("fatal: ")) {
+            return "Git error. Check that you're in a git repository and the operation is valid.";
+        }
+        ""
+    }
+
+    /// Count pending notes in .omegon/notes.md
+    fn count_notes(cwd: &std::path::Path) -> usize {
+        let notes_path = cwd.join(".omegon").join("notes.md");
+        std::fs::read_to_string(&notes_path)
+            .map(|c| c.lines().filter(|l| l.starts_with("- [")).count())
+            .unwrap_or(0)
+    }
+
+    fn open_login_selector(&mut self) {
+        // Build from canonical provider map — single source of truth
+        let options: Vec<selector::SelectOption> = crate::auth::PROVIDERS.iter().map(|p| {
+            let configured = p.env_vars.iter().any(|v| std::env::var(v).is_ok_and(|s| !s.is_empty()))
+                || crate::auth::read_credentials(p.auth_key)
+                    .is_some_and(|c| !c.access.is_empty());
+            selector::SelectOption {
+                value: p.id.to_string(),
+                label: if configured {
+                    format!("✓ {}", p.display_name)
+                } else {
+                    format!("  {}", p.display_name)
+                },
+                description: if configured {
+                    "configured ✓".into()
+                } else {
+                    p.description.to_string()
+                },
+                active: configured,
+            }
+        }).collect();
+        self.selector = Some(selector::Selector::new("Login — choose provider", options));
+        self.selector_kind = Some(SelectorKind::LoginProvider);
     }
 
     fn show_status_change_toasts(&mut self, prev: &crate::status::HarnessStatus, current: &crate::status::HarnessStatus) {
@@ -420,6 +487,74 @@ impl App {
                     Some(format!("Unknown context class: {value}"))
                 }
             }
+            SelectorKind::LoginProvider => {
+                // OAuth providers go through the auth login flow (opens browser)
+                // API key providers go through secret input mode (hidden input)
+                match value.as_str() {
+                    "anthropic" | "openai" => {
+                        let _ = tx.try_send(TuiCommand::BusCommand {
+                            name: "auth_login".to_string(),
+                            args: value.clone(),
+                        });
+                        Some(format!("Opening browser for {} login…", value))
+                    }
+                    "openrouter" | "brave" | "tavily" | "serper" | "huggingface" => {
+                        // Map to the correct env var name for storage
+                        let key_name = match value.as_str() {
+                            "openrouter" => "OPENROUTER_API_KEY",
+                            "brave" => "BRAVE_API_KEY",
+                            "tavily" => "TAVILY_API_KEY",
+                            "serper" => "SERPER_API_KEY",
+                            "huggingface" => "HUGGING_FACE_TOKEN",
+                            _ => unreachable!(),
+                        };
+                        self.editor.start_secret_input(key_name);
+                        Some(format!("🔒 Paste your {} API key (input is hidden):", value))
+                    }
+                    "github" => {
+                        // GitHub uses dynamic resolution via gh CLI
+                        let _ = tx.try_send(TuiCommand::BusCommand {
+                            name: "secrets".to_string(),
+                            args: "set GITHUB_TOKEN cmd:gh auth token".to_string(),
+                        });
+                        Some("✓ GITHUB_TOKEN → cmd:gh auth token (always fresh from gh CLI)".to_string())
+                    }
+                    "gitlab" => {
+                        self.editor.start_secret_input("GITLAB_TOKEN");
+                        Some("🔒 Paste your GitLab token (input is hidden):".to_string())
+                    }
+                    _ => {
+                        let _ = tx.try_send(TuiCommand::BusCommand {
+                            name: "auth_login".to_string(),
+                            args: value.clone(),
+                        });
+                        Some(format!("Logging in to {value}…"))
+                    }
+                }
+            }
+            SelectorKind::SecretName => {
+                if value == "(custom)" {
+                    self.editor.set_text("/secrets set ");
+                    Some("Type: /secrets set NAME VALUE".to_string())
+                } else {
+                    let suggested = Self::SECRET_CATALOG.iter()
+                        .find(|(name, _, _)| *name == value)
+                        .map(|(_, recipe, _)| *recipe)
+                        .unwrap_or("");
+                    if suggested.is_empty() {
+                        // Direct value — enter masked secret input mode
+                        self.editor.start_secret_input(&value);
+                        Some(format!("🔒 Enter value for {value} (input is hidden):"))
+                    } else {
+                        // Dynamic recipe — set immediately
+                        let _ = tx.try_send(TuiCommand::BusCommand {
+                            name: "secrets".to_string(),
+                            args: format!("set {value} {suggested}"),
+                        });
+                        Some(format!("✓ {value} → {suggested}"))
+                    }
+                }
+            }
         }
     }
 
@@ -436,175 +571,226 @@ impl App {
     }
 
     /// Try to cancel the active agent turn. Returns true if cancelled.
-    /// Handle /calibrate — adjust display colors.
-    fn handle_calibrate(&mut self, args: &str) -> SlashResult {
-        let cwd = std::path::PathBuf::from(&self.footer_data.cwd);
-        let mut profile = crate::settings::Profile::load(&cwd);
-        let mut cal = profile.calibration.unwrap_or_default();
+    /// Queue a prompt to be sent when the agent finishes.
+    // ─── Well-known secret names for the /secrets selector ────────
+    // Grouped: Omegon providers → cloud/infra → databases → dev tools → AI/ML
+    const SECRET_CATALOG: &'static [(&'static str, &'static str, &'static str)] = &[
+        // (name, suggested_recipe, description)
+        // Omegon providers — these drive the agent
+        ("ANTHROPIC_API_KEY",       "",                         "Anthropic Claude API"),
+        ("OPENAI_API_KEY",          "",                         "OpenAI API"),
+        ("OPENROUTER_API_KEY",      "",                         "OpenRouter (free tier available)"),
+        // Search providers
+        ("BRAVE_API_KEY",           "",                         "Brave Search API"),
+        ("TAVILY_API_KEY",          "",                         "Tavily Search API"),
+        ("SERPER_API_KEY",          "",                         "Serper (Google) Search API"),
+        // Git forges
+        ("GITHUB_TOKEN",            "cmd:gh auth token",        "GitHub (dynamic via gh CLI)"),
+        ("GITLAB_TOKEN",            "cmd:glab auth token",      "GitLab (dynamic via glab CLI)"),
+        // Cloud
+        ("AWS_ACCESS_KEY_ID",       "env:AWS_ACCESS_KEY_ID",    "AWS access key"),
+        ("AWS_SECRET_ACCESS_KEY",   "env:AWS_SECRET_ACCESS_KEY","AWS secret key"),
+        ("GOOGLE_APPLICATION_CREDENTIALS", "env:GOOGLE_APPLICATION_CREDENTIALS", "GCP service account"),
+        ("AZURE_CLIENT_SECRET",     "env:AZURE_CLIENT_SECRET",  "Azure service principal"),
+        // Databases
+        ("DATABASE_URL",            "env:DATABASE_URL",         "Database connection string"),
+        ("POSTGRES_PASSWORD",       "env:PGPASSWORD",           "PostgreSQL password"),
+        ("MONGO_URI",               "env:MONGO_URI",            "MongoDB connection string"),
+        ("REDIS_URL",               "env:REDIS_URL",            "Redis connection URL"),
+        // Container registries
+        ("DOCKER_PASSWORD",         "env:DOCKER_PASSWORD",      "Docker Hub / registry"),
+        // Package managers
+        ("NPM_TOKEN",              "cmd:npm token get",         "npm (dynamic via npm CLI)"),
+        ("CARGO_REGISTRY_TOKEN",   "env:CARGO_REGISTRY_TOKEN",  "crates.io publish token"),
+        ("PYPI_TOKEN",             "env:PYPI_TOKEN",            "PyPI publish token"),
+        // Messaging / notifications
+        ("SLACK_TOKEN",            "env:SLACK_TOKEN",            "Slack bot/user token"),
+        ("DISCORD_TOKEN",          "env:DISCORD_TOKEN",          "Discord bot token"),
+        // AI / ML
+        ("HUGGING_FACE_TOKEN",     "env:HF_TOKEN",              "Hugging Face API"),
+        ("REPLICATE_API_TOKEN",    "env:REPLICATE_API_TOKEN",   "Replicate API"),
+        // Custom
+        ("(custom)",               "",                          "Enter a custom secret name"),
+    ];
 
-        match args.trim() {
-            "" | "status" => {
-                SlashResult::Display(format!(
-                    "Display calibration:\n  gamma:      {:.2} (lightness, >1 = brighter)\n  saturation: {:.2} (color vividity, >1 = more vivid)\n  hue shift:  {:.1}° (color wheel rotation)\n\nAdjust: /calibrate gamma 1.2\n        /calibrate saturation 0.8\n        /calibrate hue 15\n        /calibrate reset",
-                    cal.gamma, cal.saturation, cal.hue_shift
-                ))
-            }
-            "reset" => {
-                profile.calibration = None;
-                let _ = profile.save(&cwd);
-                self.theme = theme::default_theme();
-                SlashResult::Display("Calibration reset to defaults".into())
-            }
-            _ => {
-                // Parse: /calibrate <param> <value>
-                let parts: Vec<&str> = args.split_whitespace().collect();
-                if parts.len() != 2 {
-                    return SlashResult::Display(
-                        "Usage: /calibrate <gamma|saturation|hue> <value>\n       /calibrate reset".into()
-                    );
-                }
-                let Ok(value) = parts[1].parse::<f32>() else {
-                    return SlashResult::Display(format!("Invalid value: {}", parts[1]));
+    /// Handle /secrets — interactive secret management.
+    fn handle_secrets(&mut self, args: &str, tx: &mpsc::Sender<TuiCommand>) -> SlashResult {
+        let parts: Vec<&str> = args.splitn(3, ' ').collect();
+        match parts.first().copied().unwrap_or("") {
+            // /secrets set with no name → open selector
+            "set" if parts.len() < 3 => {
+                let existing: Vec<String> = {
+                    let _ = tx; // suppress unused warning in this branch
+                    // We can't access secrets manager here, so just open the selector
+                    Vec::new()
                 };
-                match parts[0] {
-                    "gamma" | "g" => {
-                        cal.gamma = value.clamp(0.2, 5.0);
-                    }
-                    "saturation" | "sat" | "s" => {
-                        cal.saturation = value.clamp(0.0, 3.0);
-                    }
-                    "hue" | "h" => {
-                        cal.hue_shift = value.rem_euclid(360.0);
-                    }
-                    other => {
-                        return SlashResult::Display(format!(
-                            "Unknown parameter: {other}\nAvailable: gamma, saturation, hue"
-                        ));
-                    }
-                }
-                profile.calibration = Some(cal);
-                let _ = profile.save(&cwd);
-                // Apply live — rebuild theme with new calibration
-                self.theme = theme::calibrated_theme(&cal);
-                SlashResult::Display(format!(
-                    "Calibration updated:\n  gamma={:.2}  saturation={:.2}  hue={:.1}°\n\nChanges applied live and saved to profile.",
-                    cal.gamma, cal.saturation, cal.hue_shift
-                ))
+                let options: Vec<selector::SelectOption> = Self::SECRET_CATALOG.iter()
+                    .map(|(name, recipe, desc)| {
+                        let is_configured = existing.contains(&name.to_string());
+                        selector::SelectOption {
+                            value: name.to_string(),
+                            label: if *name == "(custom)" {
+                                "➕ Custom secret...".to_string()
+                            } else {
+                                format!("{name:<30} {desc}")
+                            },
+                            description: if recipe.is_empty() {
+                                "direct value → OS keyring".to_string()
+                            } else {
+                                format!("suggested: {recipe}")
+                            },
+                            active: is_configured,
+                        }
+                    })
+                    .collect();
+                self.selector = Some(selector::Selector::new("Set Secret — pick a name", options));
+                self.selector_kind = Some(SelectorKind::SecretName);
+                SlashResult::Handled
+            }
+            // Everything else → send to bus handler
+            _ => {
+                let _ = tx.try_send(TuiCommand::BusCommand {
+                    name: "secrets".to_string(),
+                    args: args.to_string(),
+                });
+                SlashResult::Handled
             }
         }
     }
 
-    /// Queue a prompt to be sent when the agent finishes.
-    /// Handle /tutorial — start, resume, or manage the interactive tutorial.
+    /// Handle /tutorial — start, resume, or manage the interactive tutorial overlay.
     fn handle_tutorial(&mut self, args: &str) -> SlashResult {
         match args.trim() {
             "status" => {
-                if let Some(ref overlay) = self.tutorial_overlay
-                    && overlay.active {
-                        return SlashResult::Display(format!(
-                            "Tutorial: step {}/{} — \"{}\"",
-                            overlay.step_index() + 1,
-                            overlay.total_steps(),
-                            overlay.step().title,
-                        ));
-                    }
+                if let Some(ref overlay) = self.tutorial_overlay {
+                    return SlashResult::Display(format!(
+                        "Tutorial: step {}/{} — \"{}\"\nMode: {}",
+                        overlay.step_index() + 1,
+                        overlay.total_steps(),
+                        overlay.step().title,
+                        if overlay.is_demo { "demo" } else { "hands-on" },
+                    ));
+                }
                 if let Some(ref tut) = self.tutorial {
                     return SlashResult::Display(tut.status_line());
                 }
                 SlashResult::Display("No tutorial active. Type /tutorial to start.".into())
             }
             "reset" => {
-                self.tutorial_overlay = None;
+                if self.tutorial_overlay.is_some() {
+                    self.tutorial_overlay = None;
+                    return SlashResult::Display("Tutorial overlay reset. Type /tutorial to start again.".into());
+                }
                 if let Some(ref mut tut) = self.tutorial {
                     tut.reset();
+                    return SlashResult::Display("Tutorial reset to lesson 1. Type /tutorial to start.".into());
                 }
-                SlashResult::Display("Tutorial reset. Type /tutorial to start again.".into())
+                SlashResult::Display("No tutorial active.".into())
             }
             "demo" => {
-                // Scripted demo mode — clones omegon-demo and exec()s into it.
-                // The demo project has pre-seeded design nodes, OpenSpec change,
-                // and memory facts so the full lifecycle (including live cleave)
-                // runs as intended.
-                self.launch_tutorial_project()
+                // Resume existing overlay if still active
+                if let Some(ref overlay) = self.tutorial_overlay {
+                    if overlay.active {
+                        return SlashResult::Display(format!(
+                            "Tutorial overlay active (step {}/{}). Press Tab to advance, Esc to dismiss.",
+                            overlay.step_index() + 1, overlay.total_steps(),
+                        ));
+                    }
+                }
+                // Start demo overlay
+                let has_design = self.dashboard.status_counts.total > 0;
+                self.tutorial_overlay = Some(tutorial::Tutorial::new_demo(has_design));
+                SlashResult::Display("Tutorial demo started. Tab to advance, Esc to dismiss.".into())
             }
             _ => {
-                // Start/resume the overlay tutorial
-                if let Some(ref mut overlay) = self.tutorial_overlay {
-                    overlay.active = true;
-                    return SlashResult::Handled;
-                }
-                // Check for lesson-file tutorial (sandbox project)
-                let tutorial_dir = std::path::Path::new(&self.footer_data.cwd)
-                    .join(".omegon").join("tutorial");
-                if tutorial_dir.is_dir()
-                    && let Some(tut) = TutorialState::load(&tutorial_dir) {
-                        let lesson = tut.current_lesson().clone();
-                        let status = tut.status_line();
-                        self.tutorial = Some(tut);
-                        self.queue_prompt(lesson.content);
-                        return SlashResult::Display(format!("{status}\n\nLesson queued."));
+                // Resume existing overlay if still active
+                if let Some(ref overlay) = self.tutorial_overlay {
+                    if overlay.active {
+                        return SlashResult::Display(format!(
+                            "Tutorial overlay active (step {}/{}). Press Tab to advance, Esc to dismiss.",
+                            overlay.step_index() + 1, overlay.total_steps(),
+                        ));
                     }
-                // No lesson files — start the built-in overlay tutorial.
-                // Check design tree presence so Act 2/3 steps can adapt.
-                let cwd = std::path::Path::new(&self.footer_data.cwd);
-                let has_design_tree = crate::paths::design_docs_dir(cwd)
-                    .read_dir()
-                    .map(|mut d| d.next().is_some())
-                    .unwrap_or(false);
-                if !has_design_tree {
-                    // Toast max width is 50 chars — keep message short.
-                    self.show_toast(
-                        "No design tree — hands-on mode active",
-                        ratatui_toaster::ToastType::Warning,
-                    );
                 }
-                self.tutorial_overlay = Some(tutorial::Tutorial::with_context(has_design_tree)); // hands-on mode
-                SlashResult::Handled
+                // Check for lesson-based tutorial in this project
+                let tutorial_dir = self.cwd()
+                    .join(".omegon").join("tutorial");
+
+                if tutorial_dir.is_dir() {
+                    // Tutorial lessons exist in this project — run in-place
+                    match TutorialState::load(&tutorial_dir) {
+                        Some(tut) => {
+                            let lesson = tut.current_lesson().clone();
+                            let status = tut.status_line();
+                            self.tutorial = Some(tut);
+                            self.queue_prompt(lesson.content);
+                            SlashResult::Display(format!("{status}\n\nLesson queued. The agent will begin when ready."))
+                        }
+                        None => {
+                            // Fall through to overlay
+                            let has_design = self.dashboard.status_counts.total > 0;
+                            self.tutorial_overlay = Some(tutorial::Tutorial::with_context(has_design));
+                            SlashResult::Display("Tutorial started. Tab to advance, Esc to dismiss.".into())
+                        }
+                    }
+                } else {
+                    // No lesson files — start the overlay tutorial
+                    let has_design = self.dashboard.status_counts.total > 0;
+                    self.tutorial_overlay = Some(tutorial::Tutorial::with_context(has_design));
+                    SlashResult::Display("Tutorial started. Tab to advance, Esc to dismiss.".into())
+                }
             }
         }
     }
 
-    /// Advance to the next tutorial step (overlay or lesson-file).
+    /// Advance to the next tutorial step/lesson.
     fn handle_tutorial_next(&mut self) -> SlashResult {
-        if let Some(ref mut overlay) = self.tutorial_overlay
-            && overlay.active {
-                if !overlay.advance() {
-                    return SlashResult::Display("🎉 Tutorial complete!".into());
-                }
-                return SlashResult::Handled;
+        if let Some(ref mut overlay) = self.tutorial_overlay {
+            if overlay.active {
+                overlay.advance();
+                return SlashResult::Display(format!(
+                    "Tutorial step {}/{}",
+                    overlay.step_index() + 1, overlay.total_steps()
+                ));
             }
+        }
         if let Some(ref mut tut) = self.tutorial {
             if tut.advance() {
                 let lesson = tut.current_lesson().clone();
                 let status = tut.status_line();
                 self.queue_prompt(lesson.content);
-                return SlashResult::Display(format!("{status}\n\nLesson queued."));
+                SlashResult::Display(format!("{status}\n\nLesson queued."))
             } else {
-                return SlashResult::Display("🎉 Tutorial complete!".into());
+                SlashResult::Display("🎉 You've completed the tutorial! Type /tutorial reset to start over.".into())
             }
+        } else {
+            SlashResult::Display("No tutorial active. Type /tutorial to start.".into())
         }
-        SlashResult::Display("No tutorial active.".into())
     }
 
-    /// Go back to the previous tutorial step.
+    /// Go back to the previous tutorial step/lesson.
     fn handle_tutorial_prev(&mut self) -> SlashResult {
-        if let Some(ref mut overlay) = self.tutorial_overlay
-            && overlay.active {
-                if !overlay.go_back() {
-                    return SlashResult::Display("Already at the first step.".into());
-                }
-                return SlashResult::Handled;
+        if let Some(ref mut overlay) = self.tutorial_overlay {
+            if overlay.active {
+                overlay.go_back();
+                return SlashResult::Display(format!(
+                    "Tutorial step {}/{}",
+                    overlay.step_index() + 1, overlay.total_steps()
+                ));
             }
+        }
         if let Some(ref mut tut) = self.tutorial {
             if tut.go_back() {
                 let lesson = tut.current_lesson().clone();
                 let status = tut.status_line();
                 self.queue_prompt(lesson.content);
-                return SlashResult::Display(format!("{status}\n\nLesson queued."));
+                SlashResult::Display(format!("{status}\n\nLesson queued."))
+            } else {
+                SlashResult::Display("Already at the first lesson.".into())
             }
-            return SlashResult::Display("Already at the first lesson.".into());
+        } else {
+            SlashResult::Display("No tutorial active. Type /tutorial to start.".into())
         }
-        SlashResult::Display("No tutorial active.".into())
     }
 
     /// Clone the tutorial project and exec omegon inside it.
@@ -628,7 +814,11 @@ impl App {
                 .args(["clone", "--depth=1", TUTORIAL_REPO, &tutorial_dir.to_string_lossy()])
                 .output();
             if result.is_err() || !tutorial_dir.join(".git").exists() {
-                return SlashResult::Display("Failed to clone tutorial project. Check network connectivity.".into());
+                return SlashResult::Display(
+                    "Could not download the demo project.\n\n\
+                     Try /tutorial instead — it works with your current project,\n\
+                     no download needed. Or check your network and try /tutorial demo again.".into()
+                );
             }
         }
 
@@ -647,7 +837,6 @@ impl App {
                 .arg("--no-splash")
                 .arg("--context-class")
                 .arg("squad")
-                .arg("--tutorial")
                 .current_dir(&tutorial_dir)
                 .exec();
             SlashResult::Display(format!("Failed to launch tutorial: {err}"))
@@ -658,7 +847,6 @@ impl App {
                 .arg("--no-splash")
                 .arg("--context-class")
                 .arg("squad")
-                .arg("--tutorial")
                 .current_dir(&tutorial_dir)
                 .spawn();
             self.should_quit = true;
@@ -669,8 +857,8 @@ impl App {
     /// Handle /milestone command — release milestone management.
     fn handle_milestone(&self, args: &str) -> SlashResult {
         let parts: Vec<&str> = args.splitn(3, ' ').collect();
-        let cwd_path = std::path::Path::new(&self.footer_data.cwd);
-        let milestone_file = crate::paths::milestones_file(cwd_path);
+        let milestone_dir = self.cwd().join(".omegon");
+        let milestone_file = milestone_dir.join("milestones.json");
 
         match parts.as_slice() {
             // /milestone — list all milestones
@@ -721,6 +909,7 @@ impl App {
                 if !ms.nodes.contains(&node_id.to_string()) {
                     ms.nodes.push(node_id.to_string());
                 }
+                let _ = std::fs::create_dir_all(&milestone_dir);
                 let _ = save_milestones(&milestone_file, &milestones);
                 SlashResult::Display(format!("Added '{}' to milestone {}", node_id, version))
             }
@@ -811,27 +1000,6 @@ impl App {
         false
     }
 
-    /// Compute the footer height for a given terminal height.
-    /// Extracted for testability.
-    fn compute_footer_height(terminal_h: u16, focus_mode: bool) -> u16 {
-        if focus_mode {
-            0
-        } else if terminal_h < 18 {
-            0       // Tier 4: no footer
-        } else if terminal_h < 24 {
-            4       // Tier 3: compact footer
-        } else {
-            9       // Tier 1/2: full footer
-        }
-    }
-
-    /// Whether the dashboard panel was visible on the last rendered frame.
-    /// Set during draw() based on terminal dimensions + content availability.
-    /// Prevents activating sidebar navigation when the panel isn't on screen.
-    fn dashboard_visible(&self) -> bool {
-        self.last_dash_width > 0
-    }
-
     /// Update the dashboard with lifecycle context.
     pub fn update_dashboard_from_lifecycle(
         &mut self,
@@ -853,7 +1021,6 @@ impl App {
                     assumptions,
                     decisions: decisions_count,
                     readiness,
-                    openspec_change: n.openspec_change.clone(),
                 }
             })
         });
@@ -874,27 +1041,18 @@ impl App {
         self.dashboard.turns = self.turn;
         self.dashboard.tool_calls = self.tool_calls;
 
-        // Periodic lifecycle rescan — pick up filesystem changes from
-        // external processes (other Omegon instances, git pull, manual edits).
-        // Single lock acquisition via rescan_and_refresh avoids double-locking.
-        let needs_rescan = self.last_lifecycle_rescan.elapsed() >= Duration::from_secs(10);
-        let needs_refresh = self.turn != self.dashboard_refresh_turn;
-
-        if needs_rescan {
-            self.last_lifecycle_rescan = std::time::Instant::now();
-            self.dashboard_refresh_turn = self.turn;
-            self.dashboard_handles.rescan_and_refresh(&mut self.dashboard);
-        } else if needs_refresh {
+        // Refresh dashboard from shared feature handles (throttled)
+        if self.turn != self.dashboard_refresh_turn {
             self.dashboard_refresh_turn = self.turn;
             self.dashboard_handles.refresh_into(&mut self.dashboard);
-        }
-
-        if needs_rescan || needs_refresh {
+            // Write session stats for the web API
             if let Ok(mut ss) = self.dashboard_handles.session.lock() {
                 ss.turns = self.turn;
                 ss.tool_calls = self.tool_calls;
                 ss.compactions = self.dashboard.compactions;
             }
+
+            // Feed context gauge into dashboard
             self.dashboard.context_used_pct = self.footer_data.context_percent;
             self.dashboard.context_window_k = self.footer_data.context_window;
         }
@@ -922,49 +1080,18 @@ impl App {
 
         
 
-        // ── Responsive layout tiers ─────────────────────────────────
-        // Progressive degradation based on terminal size:
-        //   Tier 1 (full):     ≥120w, ≥30h — sidebar + full footer
-        //   Tier 2 (no side):  <120w or <30h — full footer, no sidebar
-        //   Tier 3 (compact):  <24h — compact 4-row footer
-        //   Tier 4 (no foot):  <18h — conversation + editor only
-        //   Tier 5 (too small): <10h or <40w — "terminal too small" message
-        let w = area.width;
-        let h = area.height;
-
-        if h < 10 || w < 40 {
-            // Tier 5: too small — centered message, no layout
-            let msg = " terminal too small ";
-            let y = area.y + h / 2;
-            if y < area.bottom() {
-                let line = Line::from(Span::styled(
-                    msg,
-                    Style::default().fg(self.theme.warning()).add_modifier(Modifier::BOLD),
-                ));
-                frame.render_widget(
-                    ratatui::widgets::Paragraph::new(line)
-                        .alignment(Alignment::Center),
-                    Rect { x: area.x, y, width: w, height: 1 },
-                );
-            }
-            return;
-        }
-
-        // Determine footer height based on responsive tier
-        // (focus_mode override: operator toggle always wins)
-        let footer_height = Self::compute_footer_height(h, self.focus_mode);
-
-        let has_dashboard_content = self.dashboard.status_counts.total > 0
-            || self.dashboard.focused_node.is_some()
-            || !self.dashboard.active_changes.is_empty()
-            || self.dashboard.cleave.as_ref().is_some_and(|c| c.active || c.total_children > 0);
-
-        let show_dashboard = w >= 120 && h >= 30 && has_dashboard_content;
+        // ── Horizontal split: main area | dashboard panel ───────────
+        // Dashboard appears as a right-side panel when terminal is wide enough.
+        let show_dashboard = area.width >= 120
+            && (self.dashboard.status_counts.total > 0
+                || self.dashboard.focused_node.is_some()
+                || !self.dashboard.active_changes.is_empty()
+                || self.dashboard.cleave.as_ref().is_some_and(|c| c.active || c.total_children > 0));
 
         let (main_area, dash_area) = if show_dashboard {
             let h = Layout::horizontal([
                 Constraint::Min(60),
-                Constraint::Length(40),
+                Constraint::Length(36),
             ]).split(area);
             (h[0], h[1])
         } else {
@@ -975,9 +1102,9 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(3),                    // [0] conversation (all remaining space)
-                Constraint::Length(3),                 // [1] editor (input box)
-                Constraint::Length(footer_height),     // [2] instrument panel (0 when collapsed)
+                Constraint::Min(3),     // [0] conversation (all remaining space)
+                Constraint::Length(3),  // [1] editor (input box)
+                Constraint::Length(12), // [2] instrument panel (CIC telemetry)
             ])
             .split(main_area);
 
@@ -1014,9 +1141,6 @@ impl App {
         }
 
         // Dashboard panel (right side)
-        // Record whether dashboard is visible for key handler checks
-        self.last_dash_width = if show_dashboard { dash_area.width } else { 0 };
-
         if show_dashboard && dash_area.width > 0 {
             self.dashboard.render_themed(dash_area, frame, t.as_ref());
         }
@@ -1029,6 +1153,7 @@ impl App {
             self.footer_data.context_class = s.context_class;
             self.footer_data.context_mode = s.context_mode;
             self.footer_data.thinking_level = s.thinking.as_str().to_string();
+            self.footer_data.provider_connected = s.provider_connected;
         }
         {
             self.footer_data.model_tier = self.footer_data.harness.capability_tier.clone();
@@ -1038,9 +1163,7 @@ impl App {
         self.footer_data.compactions = self.dashboard.compactions;
 
         // ── CIC Instrument Panel telemetry update ────
-        // Only update instrument telemetry when the instrument panel is rendered
-        // (full footer mode). Skip in compact/no-footer tiers to avoid wasted work.
-        if footer_height >= 9 {
+        {
             let thinking = match self.settings().thinking {
                 crate::settings::ThinkingLevel::Off => "off",
                 crate::settings::ThinkingLevel::Minimal => "minimal",
@@ -1084,33 +1207,18 @@ impl App {
             );
         }
 
-        // ── Sync tutorial highlight into widget state ──────────────
-        self.tutorial_highlight = self.tutorial_overlay.as_ref()
-            .and_then(|t| t.current_highlight());
-
         // ── Split-panel footer: text left, instruments right ─────────
         // Store inst_area for cleanup pass to skip
-        let inst_area = if footer_height >= 9 {
-            // Full footer: engine (40%) + instruments (60%)
+        let inst_area = if !self.focus_mode {
             let footer_area = chunks[2];
             let footer_cols = Layout::horizontal([
                 Constraint::Percentage(40),
                 Constraint::Percentage(60),
             ]).split(footer_area);
 
-            // Pulse engine panel border when tutorial highlights it
-            let engine_highlight = matches!(self.tutorial_highlight, Some(tutorial::Highlight::EnginePanel));
-            self.footer_data.render_left_panel_with_highlight(footer_cols[0], frame, t.as_ref(), engine_highlight);
-
-            // Pulse instrument panel border when tutorial highlights it
-            let inst_highlight = matches!(self.tutorial_highlight, Some(tutorial::Highlight::InstrumentPanel));
-            self.instrument_panel.render_with_highlight(footer_cols[1], frame, inst_highlight, t.as_ref());
+            self.footer_data.render_left_panel(footer_cols[0], frame, t.as_ref());
+            self.instrument_panel.render(footer_cols[1], frame, t.as_ref());
             footer_cols[1]
-        } else if footer_height > 0 {
-            // Compact footer (Tier 3): engine-only summary, no instruments
-            let footer_area = chunks[2];
-            self.footer_data.render_compact(footer_area, frame, t.as_ref());
-            Rect::ZERO
         } else {
             Rect::ZERO
         };
@@ -1118,8 +1226,16 @@ impl App {
         // Apply theme to textarea each frame (in case theme changed)
         self.editor.apply_theme(t.as_ref());
 
-        // Editor — shows reverse search prompt when active
-        let (editor_title, editor_content) = if let editor::EditorMode::ReverseSearch { ref query, ref match_idx } = *self.editor.mode() {
+        // Editor — shows reverse search prompt, secret input, or normal mode
+        let (editor_title, editor_content) = if let Some((label, masked)) = self.editor.secret_display() {
+            (
+                Span::styled(
+                    format!(" 🔒 {label} "),
+                    Style::default().fg(t.warning()).bg(t.surface_bg()).add_modifier(Modifier::BOLD),
+                ),
+                masked,
+            )
+        } else if let editor::EditorMode::ReverseSearch { ref query, ref match_idx } = *self.editor.mode() {
             let match_text = match_idx
                 .and_then(|i| self.history.get(i))
                 .map(|s| s.as_str())
@@ -1143,20 +1259,21 @@ impl App {
             (Span::styled(" ▸ ", t.style_accent()), String::new())
         };
 
-        let editor_border_style = if matches!(self.tutorial_highlight, Some(tutorial::Highlight::InputBar)) {
-            Style::default().fg(t.accent_bright()).bg(t.surface_bg())
-        } else {
-            Style::default().fg(t.accent_muted()).bg(t.surface_bg())
-        };
         let editor_block = Block::default()
             .borders(Borders::TOP)
-            .border_style(editor_border_style)
+            .border_style(Style::default().fg(t.accent_muted()).bg(t.surface_bg()))
             .title(editor_title);
 
-        if !editor_content.is_empty() {
-            // Reverse search mode — show the matched text
+        let is_secret_mode = matches!(self.editor.mode(), editor::EditorMode::SecretInput { .. });
+        if is_secret_mode || !editor_content.is_empty() {
+            // Secret mode or reverse search — render masked/matched text as Paragraph
+            let content_style = if is_secret_mode {
+                Style::default().fg(t.accent_muted()).bg(t.surface_bg())
+            } else {
+                Style::default().fg(t.fg()).bg(t.surface_bg())
+            };
             let editor_widget = Paragraph::new(editor_content)
-                .style(Style::default().fg(t.fg()).bg(t.surface_bg()))
+                .style(content_style)
                 .block(editor_block);
             frame.render_widget(editor_widget, chunks[1]);
         } else {
@@ -1207,6 +1324,12 @@ impl App {
         // ── Post-render effects (tachyonfx) — each zone processed separately ──
         self.effects.process(frame.buffer_mut(), chunks[0], chunks[2], chunks[1]);
 
+        // ── Tutorial overlay — rendered on top of everything except toasts ──
+        if let Some(ref overlay) = self.tutorial_overlay {
+            let footer_h = if self.focus_mode { 0 } else { chunks[2].height };
+            overlay.render(main_area, frame.buffer_mut(), self.theme.as_ref(), footer_h);
+        }
+
         // ── Toast notifications — rendered last, on top of everything ──
         self.toasts.set_area(frame.area());
         frame.render_widget(&self.toasts, frame.area());
@@ -1243,30 +1366,25 @@ impl App {
                 }
             }
         }
-
-        // ── Tutorial overlay — rendered absolutely last, on top of everything ──
-        if let Some(ref tut) = self.tutorial_overlay
-            && tut.active {
-                tut.render(area, frame.buffer_mut(), self.theme.as_ref(), footer_height);
-            }
-    }
-
-    /// Mark tutorial as completed so it doesn't auto-start again.
-    fn mark_tutorial_completed(&self) {
-        let marker = std::path::Path::new(&self.footer_data.cwd)
-            .join(".omegon").join("tutorial_completed");
-        let _ = std::fs::create_dir_all(marker.parent().unwrap_or(std::path::Path::new(".")));
-        let _ = std::fs::write(&marker, "");
     }
 
     /// Show a transient toast notification.
-    /// ⚠ ratatui_toaster default max width is 50 chars. Keep messages ≤48 chars
-    /// (2 chars for border padding) or they will be clipped without wrapping.
+    /// Try to paste a clipboard image. Shows visible feedback in conversation.
+    fn try_paste_clipboard_image(&mut self) {
+        if let Some(path) = clipboard_image_to_temp() {
+            let display_name = path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.display().to_string());
+            self.conversation.push_system(&format!("📎 Image attached: {display_name}"));
+            self.conversation.push_image(path.clone(), "clipboard paste");
+            self.show_toast("📎 Image pasted — send a message to include it", ratatui_toaster::ToastType::Info);
+            self.pending_image = Some(path);
+        }
+        // No feedback on failure — the user might just be pressing Ctrl+V
+        // for a normal text paste that crossterm handles separately.
+    }
+
     fn show_toast(&mut self, message: &str, toast_type: ratatui_toaster::ToastType) {
-        debug_assert!(
-            message.chars().count() <= 48,
-            "toast message too long ({} chars, max 48): {:?}", message.chars().count(), message
-        );
         use ratatui_toaster::{ToastBuilder, ToastPosition};
         self.toasts.show_toast(
             ToastBuilder::new(std::borrow::Cow::Owned(message.to_string()))
@@ -1287,24 +1405,28 @@ impl App {
         ("context",  "select context class (Squad/Maniple/Clan/Legion)",       &["squad", "maniple", "clan", "legion"]),
         ("sessions", "list saved sessions",                  &[]),
         ("memory",   "memory stats",                        &[]),
-        ("login",    "log in to provider (default: anthropic)", &["anthropic", "openai"]),
+        ("login",    "log in to a provider or service",         &["anthropic", "openai", "openrouter", "github"]),
         ("logout",   "log out of provider",                   &["anthropic", "openai"]),
         ("auth",     "authentication management",             &["status", "login", "logout", "unlock"]),
         ("chronos",  "date/time context",                      &["week", "month", "quarter", "relative", "iso", "epoch", "tz", "range", "all"]),
-        ("init",     "initialize project — scan & migrate agent conventions", &["scan", "migrate"]),
         ("migrate",  "import from other tools",               &["auto", "claude-code", "pi", "codex", "cursor", "aider"]),
-        ("dash",     "toggle dashboard panel / open web UI",  &["open"]),
+        ("dash",     "open web dashboard in browser",          &["status"]),
+        ("secrets",  "manage stored secrets",                 &["list", "set", "get", "delete"]),
         ("vault",    "Vault status and management",           &["status", "unseal", "login", "configure", "init-policy"]),
         ("persona",  "switch persona (or 'off' to deactivate)",  &["off"]),
         ("tone",     "switch tone (or 'off' to deactivate)",    &["off"]),
         ("delegate", "delegate task management",              &["status"]),
         ("status",   "show harness status (providers, MCP, secrets, routing)", &[]),
         ("focus",    "toggle instrument panel focus mode",   &[]),
-        ("tutorial", "interactive tutorial",                           &["demo", "status", "reset"]),
+        ("tutorial", "interactive tutorial (replaces /demo)",         &["status", "reset"]),
+        ("next",     "advance to next tutorial lesson",              &[]),
+        ("prev",     "go back to previous tutorial lesson",          &[]),
         ("milestone","release milestone management",                 &["freeze", "status"]),
-        ("calibrate","adjust display colors (gamma, saturation, hue)", &["reset"]),
         ("splash",   "replay splash animation",              &[]),
-        ("dashboard", "open web dashboard (alias for /dash open)", &[]),
+        ("dashboard", "open web dashboard (alias for /dash)",      &[]),
+        ("note",     "capture a note for later (persists across sessions)", &[]),
+        ("notes",    "show or clear pending notes",          &["clear"]),
+        ("checkin",  "triage what needs attention now",      &[]),
         ("version",  "show build version and git sha",       &[]),
         ("exit",     "quit (or double Ctrl+C)",              &[]),
     ];
@@ -1319,6 +1441,12 @@ impl App {
 
         // Absolute file paths (e.g. /home/user/file.txt) are not commands
         if cmd.contains('/') { return SlashResult::NotACommand; }
+
+        // Notify the tutorial overlay that a slash command was executed.
+        // This advances Command-triggered steps (e.g. /dash on the Web Dashboard step).
+        if let Some(ref mut overlay) = self.tutorial_overlay {
+            overlay.check_command(cmd);
+        }
 
         match cmd {
             "help" => {
@@ -1593,7 +1721,8 @@ impl App {
                         SlashResult::Handled
                     }
                     _ => {
-                        if let Some(provider) = args.strip_prefix("login ") {
+                        if args.starts_with("login ") {
+                            let provider = &args[6..];
                             if provider.is_empty() {
                                 SlashResult::Display("Usage: /auth login <provider>\nSupported: anthropic, openai".into())
                             } else {
@@ -1603,7 +1732,8 @@ impl App {
                                 });
                                 SlashResult::Handled
                             }
-                        } else if let Some(provider) = args.strip_prefix("logout ") {
+                        } else if args.starts_with("logout ") {
+                            let provider = &args[7..];
                             if provider.is_empty() {
                                 SlashResult::Display("Usage: /auth logout <provider>\nSupported: anthropic, openai".into())
                             } else {
@@ -1622,16 +1752,9 @@ impl App {
                 }
             }
 
-            "init" => {
-                let cwd = std::path::Path::new(&self.footer_data.cwd);
-                let move_all = args == "migrate";
-                let report = crate::migrate::init_project(cwd, move_all);
-                SlashResult::Display(report)
-            }
-
             "migrate" => {
                 let source = if args.is_empty() { "auto" } else { args };
-                let cwd = std::path::Path::new(&self.footer_data.cwd);
+                let cwd = self.cwd();
                 let report = crate::migrate::run(source, cwd);
                 SlashResult::Display(report.summary())
             }
@@ -1645,20 +1768,20 @@ impl App {
             }
 
             "dash" => {
-                if args == "open" {
-                    if let Some(addr) = self.web_server_addr {
-                        let url = format!("http://{addr}");
+                // /dash and /dash open both open the web dashboard.
+                // If the server is already running, open the browser.
+                // If not, start it (which auto-opens on ready).
+                if let Some(addr) = self.web_server_addr {
+                    let url = format!("http://{addr}");
+                    if args == "status" {
+                        SlashResult::Display(format!("Dashboard running at {url}"))
+                    } else {
                         open_browser(&url);
                         SlashResult::Display(format!("Dashboard at {url}"))
-                    } else {
-                        let _ = tx.try_send(TuiCommand::StartWebDashboard);
-                        SlashResult::Display("Starting web dashboard…".into())
                     }
-                } else if let Some(addr) = self.web_server_addr {
-                    let url = format!("http://{addr}");
-                    SlashResult::Display(format!("Dashboard running at {url}\nUse /dash open to open in browser"))
                 } else {
-                    SlashResult::Display("Use /dash open to start the web dashboard".into())
+                    let _ = tx.try_send(TuiCommand::StartWebDashboard);
+                    SlashResult::Display("Starting web dashboard…".into())
                 }
             }
 
@@ -1687,10 +1810,6 @@ impl App {
                 SlashResult::Display(format!("Instrument panel focus mode → {status}"))
             }
 
-            "calibrate" => {
-                self.handle_calibrate(args)
-            }
-
             "milestone" => {
                 self.handle_milestone(args)
             }
@@ -1699,7 +1818,17 @@ impl App {
                 self.handle_tutorial(args)
             }
 
-            // "next" and "prev" removed — tutorial uses Tab/Shift+Tab, not slash commands
+            "next" => {
+                self.handle_tutorial_next()
+            }
+
+            "prev" => {
+                self.handle_tutorial_prev()
+            }
+
+            "secrets" => {
+                self.handle_secrets(args, tx)
+            }
 
             "vault" => {
                 match args {
@@ -1789,14 +1918,18 @@ impl App {
                 }
             }
 
-            // /login [provider] — alias for /auth login <provider>
+            // /login [provider] — open selector or login directly
             "login" => {
-                let provider = if args.is_empty() { "anthropic" } else { args };
-                let _ = tx.try_send(TuiCommand::BusCommand {
-                    name: "auth_login".to_string(),
-                    args: provider.to_string(),
-                });
-                SlashResult::Handled
+                if args.is_empty() {
+                    self.open_login_selector();
+                    SlashResult::Handled
+                } else {
+                    let _ = tx.try_send(TuiCommand::BusCommand {
+                        name: "auth_login".to_string(),
+                        args: args.to_string(),
+                    });
+                    SlashResult::Handled
+                }
             }
 
             // /logout [provider] — alias for /auth logout <provider>
@@ -1809,10 +1942,118 @@ impl App {
                 SlashResult::Handled
             }
 
+            // /note <text> — append a deferred investigation note
+            "note" => {
+                if args.is_empty() {
+                    // Show pending notes
+                    return self.handle_slash_command("/notes", tx);
+                }
+                let notes_path = self.cwd().join(".omegon").join("notes.md");
+                if let Err(e) = std::fs::create_dir_all(notes_path.parent().unwrap()) {
+                    return SlashResult::Display(format!("❌ Can't create .omegon/: {e}"));
+                }
+                let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
+                let entry = format!("- [{timestamp}] {args}\n");
+                match std::fs::OpenOptions::new()
+                    .create(true).append(true).open(&notes_path)
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()))
+                {
+                    Ok(()) => SlashResult::Display(format!("📌 Noted. ({} entries)", Self::count_notes(self.cwd()))),
+                    Err(e) => SlashResult::Display(format!("❌ Failed to save note: {e}")),
+                }
+            }
+
+            // /notes [clear] — show or clear pending notes
+            "notes" => {
+                let notes_path = self.cwd().join(".omegon").join("notes.md");
+                if args == "clear" {
+                    let _ = std::fs::remove_file(&notes_path);
+                    return SlashResult::Display("📌 Notes cleared.".into());
+                }
+                match std::fs::read_to_string(&notes_path) {
+                    Ok(content) if !content.trim().is_empty() => {
+                        let count = content.lines().filter(|l| l.starts_with("- [")).count();
+                        SlashResult::Display(format!("📌 Pending notes ({count}):\n\n{content}\nClear with /notes clear"))
+                    }
+                    _ => SlashResult::Display("No pending notes. Use /note <text> to capture something for later.".into()),
+                }
+            }
+
+            // /checkin — interactive triage of what needs attention
+            "checkin" => {
+                let mut sections: Vec<String> = Vec::new();
+
+                // Git status (--no-optional-locks avoids contention with other git processes)
+                if let Ok(output) = std::process::Command::new("git")
+                    .args(["--no-optional-locks", "status", "--short"])
+                    .current_dir(&self.cwd())
+                    .stderr(std::process::Stdio::null())
+                    .output()
+                {
+                    let status = String::from_utf8_lossy(&output.stdout);
+                    if !status.trim().is_empty() {
+                        let count = status.lines().count();
+                        sections.push(format!("📂 Git: {count} uncommitted change{}", if count == 1 { "" } else { "s" }));
+                    }
+                }
+
+                // Unpushed commits
+                if let Ok(output) = std::process::Command::new("git")
+                    .args(["--no-optional-locks", "log", "--oneline", "@{u}..", "--"])
+                    .current_dir(&self.cwd())
+                    .stderr(std::process::Stdio::null())
+                    .output()
+                {
+                    let unpushed = String::from_utf8_lossy(&output.stdout);
+                    if !unpushed.trim().is_empty() {
+                        let count = unpushed.lines().count();
+                        sections.push(format!("⬆ {count} unpushed commit{}", if count == 1 { "" } else { "s" }));
+                    }
+                }
+
+                // Pending notes
+                let note_count = Self::count_notes(&self.cwd());
+                if note_count > 0 {
+                    sections.push(format!("📌 {note_count} pending note{}", if note_count == 1 { "" } else { "s" }));
+                }
+
+                // OpenSpec changes in progress
+                let opsx_dir = self.cwd().join("openspec").join("changes");
+                if opsx_dir.exists() {
+                    if let Ok(entries) = std::fs::read_dir(&opsx_dir) {
+                        let active: Vec<String> = entries.filter_map(|e| {
+                            let e = e.ok()?;
+                            if e.file_type().ok()?.is_dir() {
+                                Some(e.file_name().to_string_lossy().to_string())
+                            } else { None }
+                        }).collect();
+                        if !active.is_empty() {
+                            sections.push(format!("📋 {} OpenSpec change{}: {}",
+                                active.len(),
+                                if active.len() == 1 { "" } else { "s" },
+                                active.join(", ")));
+                        }
+                    }
+                }
+
+                // Memory facts
+                if self.footer_data.total_facts > 0 {
+                    sections.push(format!("🧠 {} facts ({} working)",
+                        self.footer_data.total_facts,
+                        self.footer_data.working_memory));
+                }
+
+                if sections.is_empty() {
+                    SlashResult::Display("✓ All clear — nothing needs attention.".into())
+                } else {
+                    SlashResult::Display(format!("🔍 Check-in:\n\n{}", sections.join("\n")))
+                }
+            }
+
             "exit" | "quit" => SlashResult::Quit,
 
             // ── Aliases ─────────────────────────────────────────────
-            "dashboard" => self.handle_slash_command("/dash open", tx),
+            "dashboard" => self.handle_slash_command("/dash", tx),
             "thinking"  => self.handle_slash_command(&format!("/think {args}"), tx),
             "models"    => self.handle_slash_command("/model", tx),
             "version"   => SlashResult::Display(format!(
@@ -2003,24 +2244,38 @@ impl App {
                 self.last_tool_name = Some(name);
             }
             AgentEvent::ToolEnd { id, result, is_error } => {
-                let summary = result.content.first().and_then(|c| match c {
-                    omegon_traits::ContentBlock::Text { text } => Some(text.as_str()),
+                let summary_text = result.content.first().and_then(|c| match c {
+                    omegon_traits::ContentBlock::Text { text } => Some(text.clone()),
                     _ => None,
                 });
-                self.conversation.push_tool_end(&id, is_error, summary);
+
+                // Append recovery hint for tool errors
+                let enriched: Option<String> = if is_error {
+                    summary_text.as_ref().and_then(|text| {
+                        let hint = Self::recovery_hint(self.last_tool_name.as_deref(), text);
+                        if hint.is_empty() { None } else { Some(format!("{text}\n\n💡 {hint}")) }
+                    })
+                } else {
+                    None
+                };
+
+                // Use enriched message if available, otherwise original summary
+                let display = enriched.as_deref().or(summary_text.as_deref());
+                self.conversation.push_tool_end(&id, is_error, display);
 
                 // Signal tool error to instrument panel
-                if is_error
-                    && let Some(ref name) = self.last_tool_name {
+                if is_error {
+                    if let Some(ref name) = self.last_tool_name {
                         self.instrument_panel.set_tool_error(name);
                     }
+                }
 
                 // Detect image results from view/render tools
                 if !is_error && image::is_available()
                     && let Some(ref name) = self.last_tool_name
                     && matches!(name.as_str(), "view" | "render_diagram" | "generate_image_local"
                         | "render_excalidraw" | "render_composition_still" | "render_native_diagram")
-                    && let Some(text) = summary
+                    && let Some(ref text) = summary_text
                 {
                     for line in text.lines() {
                         let trimmed = line.trim();
@@ -2059,10 +2314,9 @@ impl App {
                 self.agent_active = false;
                 self.conversation.finalize_message();
                 self.effects.stop_spinner_glow();
-                // Notify tutorial — AutoPrompt steps advance when agent finishes
-                if let Some(ref mut tut) = self.tutorial_overlay {
-                    tut.on_agent_turn_complete();
-                    if !tut.active { self.mark_tutorial_completed(); }
+                // Advance tutorial overlay if an AutoPrompt step just completed
+                if let Some(ref mut overlay) = self.tutorial_overlay {
+                    overlay.on_agent_turn_complete();
                 }
             }
             AgentEvent::PhaseChanged { phase } => {
@@ -2131,9 +2385,6 @@ pub struct TuiConfig {
     pub dashboard_handles: dashboard::DashboardHandles,
     /// Initial prompt to queue after startup (sent automatically, TUI stays open).
     pub initial_prompt: Option<String>,
-    /// Auto-start the tutorial overlay on first frame (used by --tutorial flag
-    /// when exec()'ing into the demo project).
-    pub auto_tutorial: bool,
 }
 
 /// Initial state snapshot gathered during setup, before the TUI event loop starts.
@@ -2156,11 +2407,37 @@ pub fn open_browser(url: &str) {
     { let _ = std::process::Command::new("cmd").args(["/c", "start", url]).spawn(); }
 }
 
+/// Monotonic counter for unique clipboard temp filenames.
+static CLIPBOARD_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Clipboard format markers → (extension, pasteboard type for AppleScript).
+/// `osascript -e 'clipboard info'` outputs markers like «class PNGf»,
+/// JPEG picture, TIFF picture — NOT UTI strings like public.png.
+const CLIPBOARD_FORMATS: &[(&str, &str, &str)] = &[
+    ("PNGf",           "png",  "«class PNGf»"),
+    ("JPEG picture",   "jpg",  "«class JPEG»"),
+    ("JPEG",           "jpg",  "«class JPEG»"),
+    ("TIFF picture",   "tiff", "«class TIFF»"),
+    ("TIFF",           "tiff", "«class TIFF»"),
+    ("GIF picture",    "gif",  "«class GIFf»"),
+    ("GIFf",           "gif",  "«class GIFf»"),
+    ("BMP",            "bmp",  "«class BMP »"),
+];
+
+/// Match clipboard info output against known image format markers.
+/// Returns (extension, pasteboard_type) if a known image format is found.
+#[cfg(target_os = "macos")]
+fn match_clipboard_image_format(info_str: &str) -> Option<(&'static str, &'static str)> {
+    CLIPBOARD_FORMATS.iter()
+        .find(|(marker, _, _)| info_str.contains(marker))
+        .map(|(_, ext, pb)| (*ext, *pb))
+}
+
 /// Try to read image data from the system clipboard and save to a temp file.
 ///
 /// Supports PNG, JPEG, TIFF, GIF, BMP, and WebP. On macOS uses `osascript`
-/// to probe clipboard info and `pbpaste` or AppleScript for extraction.
-/// On Linux uses `xclip`. Returns the temp file path on success.
+/// to probe clipboard info and AppleScript for extraction.
+/// On Linux uses `xclip` or `wl-paste`. Returns the temp file path on success.
 fn clipboard_image_to_temp() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "macos")]
     {
@@ -2171,19 +2448,7 @@ fn clipboard_image_to_temp() -> Option<std::path::PathBuf> {
             .ok()?;
         let info_str = String::from_utf8_lossy(&info.stdout);
 
-        // Map clipboard UTI → (extension, pasteboard type for AppleScript)
-        let formats: &[(&str, &str, &str)] = &[
-            ("public.png",          "png",  "«class PNGf»"),
-            ("public.jpeg",         "jpg",  "«class JPEG»"),
-            ("public.tiff",         "tiff", "«class TIFF»"),
-            ("com.compuserve.gif",  "gif",  "«class GIFf»"),
-            ("com.microsoft.bmp",   "bmp",  "«class BMP »"),
-            ("public.webp",         "webp", "«class PNGf»"), // WebP often comes as PNG on pasteboard
-        ];
-
-        let (ext, pb_type) = formats.iter()
-            .find(|(uti, _, _)| info_str.contains(uti))
-            .map(|(_, ext, pb)| (*ext, *pb))?;
+        let (ext, pb_type) = match_clipboard_image_format(&info_str)?;
 
         // Read the raw image data via AppleScript
         let script = format!(
@@ -2201,7 +2466,7 @@ fn clipboard_image_to_temp() -> Option<std::path::PathBuf> {
         // osascript returns the data with a «data ....» wrapper — extract raw bytes
         // Actually, osascript binary output is unreliable. Use a write-to-file approach instead.
         let tmp_dir = std::env::temp_dir();
-        let filename = format!("omegon-clipboard-{}.{ext}", std::process::id());
+        let filename = format!("omegon-clipboard-{}-{}.{ext}", std::process::id(), CLIPBOARD_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let tmp_path = tmp_dir.join(&filename);
 
         let write_script = format!(
@@ -2254,7 +2519,7 @@ close access fileRef"#,
                 if let Some(output) = output {
                     if output.status.success() && !output.stdout.is_empty() {
                         let tmp_dir = std::env::temp_dir();
-                        let filename = format!("omegon-clipboard-{}.{ext}", std::process::id());
+                        let filename = format!("omegon-clipboard-{}-{}.{ext}", std::process::id(), CLIPBOARD_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
                         let tmp_path = tmp_dir.join(&filename);
                         std::fs::write(&tmp_path, &output.stdout).ok()?;
                         return Some(tmp_path);
@@ -2285,7 +2550,7 @@ close access fileRef"#,
         }
 
         let tmp_dir = std::env::temp_dir();
-        let filename = format!("omegon-clipboard-{}.{ext}", std::process::id());
+        let filename = format!("omegon-clipboard-{}-{}.{ext}", std::process::id(), CLIPBOARD_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let tmp_path = tmp_dir.join(&filename);
 
         std::fs::write(&tmp_path, &output.stdout).ok()?;
@@ -2328,9 +2593,6 @@ fn load_milestones(path: &std::path::Path) -> std::collections::BTreeMap<String,
 }
 
 fn save_milestones(path: &std::path::Path, milestones: &std::collections::BTreeMap<String, Milestone>) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
     let json = serde_json::to_string_pretty(milestones)?;
     std::fs::write(path, json)
 }
@@ -2502,7 +2764,6 @@ pub async fn run_tui(
     cancel: SharedCancel,
     settings: crate::settings::SharedSettings,
 ) -> io::Result<()> {
-    // Set up terminal with mouse capture for scroll events
     enable_raw_mode()?;
 
     // Initialize image protocol detection AFTER raw mode (suppresses echo)
@@ -2516,10 +2777,14 @@ pub async fn run_tui(
     // diff optimizer may skip cells that haven't changed from the initial
     // state, leaving the terminal's native background visible.
     io::stdout().execute(crossterm::style::SetBackgroundColor(
-        crossterm::style::Color::Rgb { r: 0, g: 1, b: 3 },
+        crossterm::style::Color::Rgb { r: 2, g: 4, b: 8 },
     ))?;
     // Clear the screen with our bg so every pixel starts owned.
     io::stdout().execute(crossterm::terminal::Clear(crossterm::terminal::ClearType::All))?;
+    // Enable mouse capture for scroll-wheel support.
+    // This blocks native text selection — users must hold Option (macOS) or
+    // Shift (most terminals) to select text. Proper in-app selection with
+    // OSC 52 clipboard is tracked in design node: mouse-text-selection.
     io::stdout().execute(EnableMouseCapture)?;
     io::stdout().execute(crossterm::event::EnableBracketedPaste)?;
     let backend = CrosstermBackend::new(io::stdout());
@@ -2543,7 +2808,7 @@ pub async fn run_tui(
 
     let mut app = App::new(settings);
     app.history = App::load_history(&config.cwd);
-    app.footer_data.cwd = config.cwd;
+    app.footer_data.cwd = config.cwd.clone();
     app.footer_data.is_oauth = config.is_oauth;
     app.bus_commands = config.bus_commands;
     app.dashboard_handles = config.dashboard_handles;
@@ -2557,20 +2822,19 @@ pub async fn run_tui(
     // Build a contextual welcome message
     {
         let s = app.settings();
-        let model_short = s.model_short();
         let project = app.footer_data.cwd.split('/').next_back().unwrap_or("project");
         let facts = app.footer_data.total_facts;
-        let ctx = s.context_window / 1000;
 
         let version = env!("CARGO_PKG_VERSION");
         let sha = env!("OMEGON_GIT_SHA");
-        let cwd_path = std::path::Path::new(&app.footer_data.cwd);
-        let tutorial_done = crate::paths::config_dir(cwd_path).join("tutorial_completed");
-        let has_memory = crate::paths::has_memory_facts(cwd_path);
-        let is_first_run = !tutorial_done.exists() && !has_memory;
-
         let mut welcome = format!("Ω Omegon {version} ({sha}) — {project}");
-        welcome.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
+        if s.provider_connected {
+            let model_short = s.model_short();
+            let ctx = s.context_window / 1000;
+            welcome.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
+        } else {
+            welcome.push_str("\n  ⚠ No provider — use /login to connect");
+        }
         if facts > 0 {
             welcome.push_str(&format!("  ·  {facts} facts loaded"));
         }
@@ -2578,21 +2842,40 @@ pub async fn run_tui(
         welcome.push_str("\n  /model  switch provider    /think  reasoning level");
         welcome.push_str("\n  /context  context class      /help   all commands");
         welcome.push_str("\n  Ctrl+R  search history      Ctrl+C  cancel/quit");
-        if is_first_run {
-            welcome.push_str("\n\n  ▸ New here? Type /tutorial for an interactive guide.");
-        }
 
         app.conversation.push_system(&welcome);
+
+        // First-run hint: if no memory facts exist, this is likely a new user.
+        // Nudge them toward the tutorial without being pushy.
+        if facts == 0 {
+            app.conversation.push_system(
+                "💡 First time here? Type /tutorial for a guided tour, or just start typing."
+            );
+        }
     }
 
-    // ── Splash screen ───────────────────────────────────────────────
+    // ── Splash screen with real systems check ─────────────────────
     if !config.no_splash {
         let size = terminal.size()?;
         if let Some(mut splash) = splash::SplashScreen::new(size.width, size.height) {
-            // Mark loading items done immediately — we load fast
-            splash.set_load_state("providers", splash::LoadState::Active);
-            splash.set_load_state("memory", splash::LoadState::Active);
-            splash.set_load_state("tools", splash::LoadState::Active);
+            // Mark all items as scanning
+            for item in &["cloud", "local", "hardware", "memory", "tools", "design", "secrets", "container", "mcp"] {
+                splash.set_load_state(item, splash::LoadState::Active);
+            }
+
+            // Spawn probes on a background thread with its own tokio runtime.
+            // The splash loop blocks the main thread with event::poll(), so
+            // tokio::spawn would never make progress — the worker is blocked.
+            let (probe_tx, probe_rx) = std::sync::mpsc::channel();
+            let probe_cwd = config.cwd.clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("probe runtime");
+                rt.block_on(crate::startup::run_probes(probe_tx, probe_cwd));
+            });
+            let mut collected_probes: Vec<crate::startup::ProbeResult> = Vec::new();
 
             // Run splash animation loop
             let splash_start = std::time::Instant::now();
@@ -2617,22 +2900,13 @@ pub async fn run_tui(
 
                 splash.tick();
 
-                // Cosmetic loading animation — the binary loads in ~50ms so
-                // real subsystem tracking would be invisible. These frame
-                // thresholds create a visual cascade for branding purposes.
-                if splash.frame >= 8 {
-                    splash.set_load_state("providers", splash::LoadState::Done);
-                }
-                if splash.frame >= 12 {
-                    splash.set_load_state("memory", splash::LoadState::Done);
-                }
-                if splash.frame >= 16 {
-                    splash.set_load_state("tools", splash::LoadState::Done);
+                // Receive probe results as they complete
+                while let Ok(result) = probe_rx.try_recv() {
+                    splash.receive_probe(result.clone());
+                    collected_probes.push(result);
                 }
 
-                // Drain agent events to prevent broadcast buffer overflow.
-                // Events are silently discarded — the splash is a branding moment,
-                // not functional UI.
+                // Drain agent events to prevent broadcast buffer overflow
                 while events_rx.try_recv().is_ok() {}
 
                 // Safety timeout
@@ -2646,13 +2920,15 @@ pub async fn run_tui(
                     break;
                 }
             }
+
+            // Drain any stragglers that arrived after the last loop iteration
+            while let Ok(result) = probe_rx.try_recv() {
+                collected_probes.push(result);
+            }
+            // Classify capability tier from ALL collected results
+            app.capability_tier = Some(crate::startup::classify_tier(&collected_probes));
         }
     }
-
-    // Build provider inventory from credential checks (fast — env var probing only)
-    app.provider_inventory = Some(std::sync::Arc::new(
-        tokio::sync::RwLock::new(crate::routing::ProviderInventory::probe()),
-    ));
 
     // Queue startup reveal effects (footer sweep-in, conversation fade)
     {
@@ -2664,20 +2940,6 @@ pub async fn run_tui(
     if let Some(prompt) = config.initial_prompt {
         app.queue_prompt(prompt);
     }
-
-    // Auto-start tutorial overlay when --tutorial flag is passed (demo project launch).
-    if config.auto_tutorial {
-        let cwd_path = std::path::Path::new(&app.footer_data.cwd);
-        let has_design_tree = crate::paths::design_docs_dir(cwd_path)
-            .read_dir()
-            .map(|mut d| d.next().is_some())
-            .unwrap_or(false);
-        // Demo mode: use STEPS_DEMO with specific prompts referencing the
-        // pre-seeded demo content (output-formatting, add-validation).
-        app.tutorial_overlay = Some(tutorial::Tutorial::new_demo(has_design_tree));
-    }
-
-    // First-run hint is now baked into the welcome message above — no toast needed.
 
     loop {
         // ── Splash replay (/splash command) ─────────────────────────
@@ -2731,8 +2993,6 @@ pub async fn run_tui(
                 Event::Mouse(mouse) => {
                     match mouse.kind {
                         MouseEventKind::ScrollUp => {
-                            // Terminal sends ScrollUp = show older content
-                            // (natural scrolling is handled by the terminal emulator)
                             app.conversation.scroll_up(3);
                         }
                         MouseEventKind::ScrollDown => {
@@ -2743,17 +3003,25 @@ pub async fn run_tui(
                 }
                 // ── Paste — pass directly to textarea ──────────
                 Event::Paste(ref text) => {
-                    app.editor.textarea.insert_str(text);
+                    if matches!(app.editor.mode(), editor::EditorMode::SecretInput { .. }) {
+                        // In secret mode, paste goes into the hidden buffer
+                        for c in text.chars() {
+                            app.editor.secret_insert(c);
+                        }
+                    } else if text.is_empty() {
+                        app.try_paste_clipboard_image();
+                    } else {
+                        app.editor.textarea.insert_str(text);
+                    }
                 }
                 // ── Ctrl+V: check for clipboard image ──────────
                 Event::Key(KeyEvent { code: KeyCode::Char('v'), modifiers: KeyModifiers::CONTROL, .. }) => {
-                    if let Some(path) = clipboard_image_to_temp() {
-                        app.conversation.push_image(path.clone(), "clipboard paste");
-                        app.show_toast("📎 Image pasted", ratatui_toaster::ToastType::Info);
-                        // Store the path for attachment on next prompt
-                        app.pending_image = Some(path);
+                    if matches!(app.editor.mode(), editor::EditorMode::SecretInput { .. }) {
+                        // In secret mode, try to paste from clipboard into hidden buffer
+                        // (Ctrl+V may deliver text as a Key event on some terminals)
+                    } else {
+                        app.try_paste_clipboard_image();
                     }
-                    // If no image, Ctrl+V is handled by crossterm as bracketed paste
                 }
                 Event::Key(key) => {
                 // ── Selector popup intercepts all keys when open ────
@@ -2769,6 +3037,53 @@ pub async fn run_tui(
                         KeyCode::Esc => {
                             app.selector = None;
                             app.selector_kind = None;
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                // ── Secret input mode intercepts keys ────────────
+                if matches!(app.editor.mode(), editor::EditorMode::SecretInput { .. }) {
+                    match key.code {
+                        KeyCode::Char(c) => {
+                            app.editor.secret_insert(c);
+                        }
+                        KeyCode::Backspace => {
+                            app.editor.secret_backspace();
+                        }
+                        KeyCode::Enter => {
+                            if let Some((label, value)) = app.editor.take_secret() {
+                                if value.is_empty() {
+                                    app.conversation.push_system("Cancelled — no value entered.");
+                                } else {
+                                    // Store in secrets engine
+                                    let _ = command_tx.send(TuiCommand::BusCommand {
+                                        name: "secrets".to_string(),
+                                        args: format!("set {} {}", label, value),
+                                    }).await;
+
+                                    // For provider keys, also write to auth.json so the
+                                    // provider resolution chain finds them (/login checks
+                                    // auth.json, not the secrets keyring)
+                                    // Look up provider by env var name using canonical map
+                                    let provider = crate::auth::PROVIDERS.iter()
+                                        .find(|p| p.env_vars.contains(&label.as_str()));
+                                    if let Some(p) = provider {
+                                        let creds = crate::auth::OAuthCredentials {
+                                            cred_type: "api-key".into(),
+                                            access: value.clone(),
+                                            refresh: String::new(),
+                                            expires: u64::MAX,
+                                        };
+                                        let _ = crate::auth::write_credentials(p.auth_key, &creds);
+                                    }
+                                }
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.editor.cancel_secret();
+                            app.conversation.push_system("Secret input cancelled.");
                         }
                         _ => {}
                     }
@@ -2804,117 +3119,91 @@ pub async fn run_tui(
                     continue;
                 }
 
-                // ── Tutorial overlay input ────────────────────────
-                // Tab advances, Shift+Tab goes back, Escape dismisses.
-                // Tab is unambiguous — doesn't conflict with Enter (submit)
-                // or any other keybinding.
-                if let Some(ref mut tut) = app.tutorial_overlay
-                    && tut.active {
-                        // ── Project-choice widget (step 0, empty project) ──────
-                        if tut.showing_choice() {
-                            match key.code {
-                                KeyCode::Esc => {
-                                    tut.dismiss();
-                                    app.mark_tutorial_completed();
-                                }
-                                KeyCode::Left | KeyCode::Right => {
-                                    tut.toggle_choice();
-                                }
-                                KeyCode::Tab | KeyCode::Enter => {
-                                    let choice = tut.choice;
-                                    tut.confirm_choice();
-                                    if choice == tutorial::TutorialChoice::Demo {
-                                        // Extract bundled tarball + exec into demo project
-                                        let launch_result = crate::demo::launch_bundled_demo();
-                                        if let Err(e) = launch_result {
-                                            app.show_toast(
-                                                &format!("Demo launch failed: {e}")[..48.min(format!("Demo launch failed: {e}").len())],
-                                                ratatui_toaster::ToastType::Error,
-                                            );
+                // ── Tutorial overlay intercepts keys when active ────
+                if let Some(ref mut overlay) = app.tutorial_overlay {
+                    if overlay.active {
+                        let step_trigger = overlay.step().trigger.clone();
+                        match key.code {
+                            KeyCode::Esc => {
+                                overlay.dismiss();
+                                continue;
+                            }
+                            KeyCode::BackTab => {
+                                overlay.go_back();
+                                continue;
+                            }
+                            KeyCode::Tab => {
+                                match &step_trigger {
+                                    tutorial::Trigger::Tab => {
+                                        overlay.advance();
+                                        // After advancing, check if the new step has an auto-prompt
+                                        if let Some(prompt) = overlay.pending_auto_prompt() {
+                                            let prompt = prompt.to_string();
+                                            overlay.mark_auto_prompt_sent();
+                                            if !app.agent_active {
+                                                app.conversation.push_system("▸ tutorial step");
+                                                app.agent_active = true;
+                                                let _ = command_tx.send(TuiCommand::UserPrompt(prompt)).await;
+                                            } else {
+                                                app.queue_prompt(prompt);
+                                            }
                                         }
-                                        // exec() replaces the process; if we get here it failed
-                                    } else {
-                                        // My project — advance past choice into hands-on
-                                        tut.advance();
+                                        continue;
+                                    }
+                                    tutorial::Trigger::AutoPrompt(prompt) => {
+                                        if !overlay.auto_prompt_sent {
+                                            // Tab starts the auto-prompt
+                                            let prompt = prompt.to_string();
+                                            overlay.mark_auto_prompt_sent();
+                                            if !app.agent_active {
+                                                app.conversation.push_system("▸ tutorial step");
+                                                app.agent_active = true;
+                                                let _ = command_tx.send(TuiCommand::UserPrompt(prompt)).await;
+                                            } else {
+                                                app.queue_prompt(prompt);
+                                            }
+                                        }
+                                        // If already sent, Tab does nothing — wait for agent
+                                        continue;
+                                    }
+                                    tutorial::Trigger::Command(_) | tutorial::Trigger::AnyInput => {
+                                        // Tab passes through to normal key handling (e.g., command completion)
                                     }
                                 }
-                                _ => {}
                             }
-                            continue;
-                        }
-
-                        match (key.code, key.modifiers) {
-                            (KeyCode::Esc, _) => {
-                                tut.dismiss();
-                                app.mark_tutorial_completed();
+                            KeyCode::Left | KeyCode::Right if overlay.showing_choice() => {
+                                overlay.toggle_choice();
                                 continue;
                             }
-                            (KeyCode::BackTab, _) => {
-                                tut.go_back();
-                                continue;
-                            }
-                            (KeyCode::Tab, mods) if mods.contains(KeyModifiers::SHIFT) => {
-                                tut.go_back();
-                                continue;
-                            }
-                            (KeyCode::Tab, _) => {
-                                match &tut.step().trigger {
-                                    tutorial::Trigger::Enter => {
-                                        tut.advance();
-                                        if !tut.active { app.mark_tutorial_completed(); }
-                                    }
-                                    tutorial::Trigger::AutoPrompt(prompt) if !tut.auto_prompt_sent => {
-                                        // Tab triggers the auto-prompt — send it to the agent
-                                        let prompt = prompt.to_string();
-                                        tut.mark_auto_prompt_sent();
-                                        app.conversation.push_user(&prompt);
-                                        app.agent_active = true;
-                                        let _ = command_tx.send(TuiCommand::UserPrompt(prompt)).await;
-                                    }
-                                    _ => {
-                                        // Command/AnyInput/already-sent AutoPrompt:
-                                        // Tab does nothing — the operator must do the action
-                                        // or wait for the agent to finish
+                            KeyCode::Enter if overlay.showing_choice() => {
+                                overlay.confirm_choice();
+                                if overlay.choice == tutorial::TutorialChoice::Demo {
+                                    // Demo mode needs the demo project — dismiss overlay
+                                    // and launch the clone+exec flow
+                                    overlay.dismiss();
+                                    let result = app.launch_tutorial_project();
+                                    if let SlashResult::Display(msg) = result {
+                                        app.conversation.push_system(&msg);
                                     }
                                 }
+                                // MyProject: overlay stays, step 0 renders as welcome
                                 continue;
                             }
                             _ => {
-                                // Tutorial is active — swallow all other key events
-                                // so they don't trigger sidebar nav, editor input, etc.
-                                continue;
-                            }
-                        }
-                    }
-
-                // ── Sidebar navigation ─────────────────────────
-                // When sidebar is active, route keys to the dashboard tree.
-                // Enter on a selected node triggers design-focus via bus.
-                if app.dashboard.sidebar_active {
-                    if key.code == KeyCode::Enter {
-                        if let Some(node_id) = app.dashboard.selected_node_id().map(|s| s.to_string()) {
-                            if let Some(degraded_id) = node_id.strip_prefix("degraded:") {
-                                // Degraded node — show diagnostic info instead of focusing
-                                if let Some(d) = app.dashboard.degraded_nodes.iter().find(|d| d.id == degraded_id) {
-                                    app.conversation.push_system(&format!(
-                                        "⚠ Degraded node: {}\n  Title: {}\n  File: {}\n  Reason: {}\n\nThe file exists but no longer parses. Check git diff or git blame on the file to trace the change.",
-                                        d.id, d.title, d.file_path, d.reason
-                                    ));
+                                // For Command and AnyInput steps, let keys pass through
+                                // to the editor so the user can type.
+                                // For Enter and AutoPrompt steps, consume the key (overlay blocks).
+                                match &step_trigger {
+                                    tutorial::Trigger::Command(_) | tutorial::Trigger::AnyInput => {
+                                        // Fall through to normal key handling
+                                    }
+                                    _ => {
+                                        // Consume — overlay blocks input
+                                        continue;
+                                    }
                                 }
-                                app.dashboard.sidebar_active = false;
-                            } else {
-                                // Normal node — focus it in agent context
-                                let _ = command_tx.send(TuiCommand::BusCommand {
-                                    name: "design-focus".into(),
-                                    args: node_id,
-                                }).await;
-                                app.dashboard.sidebar_active = false;
                             }
                         }
-                        continue;
-                    }
-                    if app.dashboard.handle_key(key) {
-                        continue;
                     }
                 }
 
@@ -2979,16 +3268,6 @@ pub async fn run_tui(
                         app.editor.start_reverse_search();
                     }
 
-                    // Ctrl+D: enter sidebar navigation mode (if dashboard visible)
-                    (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                        if app.dashboard_visible() {
-                            app.dashboard.sidebar_active = !app.dashboard.sidebar_active;
-                            if app.dashboard.sidebar_active && app.dashboard.tree_state.selected().is_empty() {
-                                app.dashboard.tree_state.select_first();
-                            }
-                        }
-                    }
-
                     // Meta (Alt) key combos for word operations
                     (KeyCode::Backspace, KeyModifiers::ALT) => {
                         app.editor.delete_word_backward();
@@ -3003,22 +3282,21 @@ pub async fn run_tui(
                         app.editor.move_word_forward();
                     }
 
-                    // Tab: command completion when typing a slash command
+                    // Tab: command completion if typing, or toggle tool card expansion
                     (KeyCode::Tab, _) => {
                         let text = app.editor.render_text().to_string();
                         if text.starts_with('/') {
+                            // Command completion
                             let matches = app.matching_commands();
                             if matches.len() == 1 {
                                 let cmd = format!("/{}", matches[0].0);
                                 app.editor.set_text(&cmd);
                             }
-                        }
-                    }
-
-                    // Ctrl+O: toggle tool card expansion (shadows pi's output toggle)
-                    (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
-                        if let Some(idx) = app.conversation.focused_tool_card() {
-                            app.conversation.toggle_expand(idx);
+                        } else if text.is_empty() {
+                            // Toggle nearest tool card expansion
+                            if let Some(idx) = app.conversation.focused_tool_card() {
+                                app.conversation.toggle_expand(idx);
+                            }
                         }
                     }
 
@@ -3028,12 +3306,6 @@ pub async fn run_tui(
                         if !text.is_empty() {
                             // Slash commands always execute immediately
                             if text.starts_with('/') {
-                                // Notify tutorial overlay of slash command
-                                if let Some(ref mut tut) = app.tutorial_overlay {
-                                    let cmd = text[1..].split_whitespace().next().unwrap_or("");
-                                    tut.check_command(cmd);
-                                    if !tut.active { app.mark_tutorial_completed(); }
-                                }
                                 match app.handle_slash_command(&text, &command_tx) {
                                     SlashResult::Display(response) => {
                                         app.conversation.push_system(&response);
@@ -3044,11 +3316,7 @@ pub async fn run_tui(
                                         let _ = command_tx.send(TuiCommand::Quit).await;
                                     }
                                     SlashResult::NotACommand => {
-                                        // Tutorial overlay: AnyInput trigger
-                                        if let Some(ref mut tut) = app.tutorial_overlay {
-                                            tut.check_any_input();
-                                            if !tut.active { app.mark_tutorial_completed(); }
-                                        }
+                                        // Not a slash command (no / prefix) — send as prompt
                                         if app.agent_active {
                                             app.queue_prompt(text.clone());
                                         } else {
@@ -3060,27 +3328,27 @@ pub async fn run_tui(
                                         }
                                     }
                                 }
-                            } else {
-                                // Non-slash text — check tutorial AnyInput trigger
-                                if let Some(ref mut tut) = app.tutorial_overlay {
-                                    tut.check_any_input();
-                                    if !tut.active { app.mark_tutorial_completed(); }
+                            } else if app.agent_active {
+                                // Agent busy — queue the prompt
+                                app.queue_prompt(text.clone());
+                                // Notify tutorial overlay of user input
+                                if let Some(ref mut overlay) = app.tutorial_overlay {
+                                    overlay.check_any_input();
                                 }
-
-                                if app.agent_active {
-                                    // Agent busy — queue the prompt
-                                    app.queue_prompt(text.clone());
+                            } else {
+                                // Agent idle — send immediately
+                                app.conversation.push_user(&text);
+                                app.history.push(text.clone());
+                                app.history_idx = None;
+                                app.agent_active = true;
+                                if let Some(img) = app.pending_image.take() {
+                                    let _ = command_tx.send(TuiCommand::UserPromptWithImages(text, vec![img])).await;
                                 } else {
-                                    // Agent idle — send immediately
-                                    app.conversation.push_user(&text);
-                                    app.history.push(text.clone());
-                                    app.history_idx = None;
-                                    app.agent_active = true;
-                                    if let Some(img) = app.pending_image.take() {
-                                        let _ = command_tx.send(TuiCommand::UserPromptWithImages(text, vec![img])).await;
-                                    } else {
-                                        let _ = command_tx.send(TuiCommand::UserPrompt(text)).await;
-                                    }
+                                    let _ = command_tx.send(TuiCommand::UserPrompt(text)).await;
+                                }
+                                // Notify tutorial overlay of user input
+                                if let Some(ref mut overlay) = app.tutorial_overlay {
+                                    overlay.check_any_input();
                                 }
                             }
                         }

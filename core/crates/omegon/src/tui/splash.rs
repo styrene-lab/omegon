@@ -269,7 +269,7 @@ const SCAN_GLYPHS: &[&str] = &["░ ", "▒ ", "▓ ", "▒ ", "░ ", "▸ ", "
 /// Render the checklist as a multi-row grid (3 columns).
 fn render_grid<'a>(items: &[LoadItem], scan_frame: usize, col_width: usize, t: &dyn Theme) -> Vec<Line<'a>> {
     let cols = 3usize;
-    let rows = items.len().div_ceil(cols);
+    let rows = (items.len() + cols - 1) / cols;
     let mut output = Vec::with_capacity(rows);
 
     for row in 0..rows {

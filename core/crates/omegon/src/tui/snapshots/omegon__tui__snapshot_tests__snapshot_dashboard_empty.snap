@@ -2,10 +2,10 @@
 source: crates/omegon/src/tui/snapshot_tests.rs
 expression: render_to_string(&terminal)
 ---
-│ Ω Dashboard
+│Ω Dashboard
 │
-│ no active nodes
-│
+│── session ───────────────────
+│0 turns · 0 tool calls
 │
 │
 │

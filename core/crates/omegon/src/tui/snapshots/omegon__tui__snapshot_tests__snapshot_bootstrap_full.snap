@@ -6,7 +6,7 @@ expression: output
   Ω  Omegon
 
   ✓ Anthropic (Claude) (oauth)
-  ⚠ OpenAI       (none)
+  ⚠ OpenAI (ChatGPT) (none)
   ✓ Ollama       1 model
   ✓ podman       5.3.1
   ✓ mcp          1/1 connected, 5 tools

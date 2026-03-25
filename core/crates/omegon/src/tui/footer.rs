@@ -42,6 +42,8 @@ pub struct FooterData {
     pub thinking_level: String,
     /// Current model tier name (for engine panel display).
     pub model_tier: String,
+    /// Whether a live LLM provider is connected. False when NullBridge is active.
+    pub provider_connected: bool,
 }
 
 impl FooterData {
@@ -95,111 +97,6 @@ impl FooterData {
 
     /// Render the left panel for the split-panel layout (engine + memory).
     /// This replaces the 4-card layout when instruments are visible on the right.
-    /// Render with optional tutorial highlight — pulses the border bright.
-    pub fn render_left_panel_with_highlight(&self, area: Rect, frame: &mut Frame, t: &dyn Theme, highlight: bool) {
-        self.render_left_panel(area, frame, t);
-        if highlight && area.height >= 2 && area.width >= 2 {
-            // Tint the top and bottom border rows with accent color
-            // without overwriting cell content — just change fg color
-            let style = Style::default().fg(t.accent_bright());
-            let buf = frame.buffer_mut();
-            for x in area.x..area.right() {
-                if area.y < buf.area().height {
-                    buf[(x, area.y)].set_style(style);
-                }
-                let bot = area.bottom().saturating_sub(1);
-                if bot < buf.area().height {
-                    buf[(x, bot)].set_style(style);
-                }
-            }
-            for y in area.y..area.bottom() {
-                if y < buf.area().height {
-                    buf[(area.x, y)].set_style(style);
-                    let right = area.right().saturating_sub(1);
-                    if right < buf.area().width {
-                        buf[(right, y)].set_style(style);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Compact footer for Tier 3 (terminal height 18–23).
-    /// 4 rows: bordered box with 2 lines of essential telemetry.
-    pub fn render_compact(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
-        let bg = t.footer_bg();
-        let block = Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::Rgb(20, 40, 55)))
-            .style(Style::default().bg(bg));
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        if inner.height < 1 || inner.width < 20 {
-            return;
-        }
-
-        let model_short = short_model(&self.model_id);
-        let pct = self.context_percent as u32;
-        let tier_short = match self.model_tier.as_str() {
-            "gloriana" => "G",
-            "victory" => "V",
-            "retribution" => "R",
-            "local" => "L",
-            _ => "?",
-        };
-        let think_short = match self.thinking_level.as_str() {
-            "high" => "H",
-            "medium" => "M",
-            "low" => "L",
-            "minimal" => "m",
-            "off" => "·",
-            _ => "?",
-        };
-
-        // Line 1: model + tier + thinking + context%
-        let line1 = Line::from(vec![
-            Span::styled(
-                format!(" Ω {model_short}"),
-                Style::default().fg(t.fg()).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!(" {tier_short}·{think_short}"),
-                Style::default().fg(t.dim()),
-            ),
-            Span::styled(
-                format!(" {pct}%"),
-                Style::default().fg(if pct > 80 {
-                    t.warning()
-                } else {
-                    t.muted()
-                }),
-            ),
-        ]);
-
-        // Line 2: session counters + memory facts
-        let line2 = Line::from(vec![
-            Span::styled(
-                format!(" T·{} ⚙·{}", self.turn, self.tool_calls),
-                Style::default().fg(t.dim()),
-            ),
-            Span::styled(
-                format!(" ⌗{}", self.total_facts),
-                Style::default().fg(t.dim()),
-            ),
-        ]);
-
-        let mut lines = vec![line1];
-        if inner.height > 1 {
-            lines.push(line2);
-        }
-
-        frame.render_widget(
-            Paragraph::new(lines).style(Style::default().bg(bg)),
-            inner,
-        );
-    }
-
     pub fn render_left_panel(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         let bg = t.footer_bg();
         let bg_block = Block::default().style(Style::default().bg(bg));
@@ -223,26 +120,33 @@ impl FooterData {
 
     fn render_engine_section(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         let bg = t.footer_bg();
+        let inner = Rect {
+            x: area.x + 1,
+            y: area.y,
+            width: area.width.saturating_sub(2),
+            height: area.height,
+        };
 
-        // Bordered block matching instrument panels
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(20, 40, 55)))
-            .title(Span::styled(" engine ", Style::default().fg(Color::Rgb(64, 88, 112))));
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+        let mut lines: Vec<Line<'static>> = Vec::new();
 
-        if inner.width < 15 || inner.height < 3 { return; }
-        let w = inner.width as usize;
+        // Line 1: header
+        lines.push(Line::from(Span::styled(
+            " engine", Style::default().fg(t.accent_muted()).add_modifier(Modifier::BOLD),
+        )));
+
+        if !self.provider_connected {
+            // No provider — show clear disconnected state
+            lines.push(Line::from(vec![
+                Span::styled(" ⚠ ", Style::default().fg(t.warning())),
+                Span::styled("no provider", Style::default().fg(t.warning()).add_modifier(Modifier::BOLD)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("   /login to connect", Style::default().fg(t.muted())),
+            ]));
+        } else {
 
         let model_short = short_model(&self.model_id);
         let source_icon = if self.model_provider == "local" { "⚡" } else { "☁" };
-        let provider_name = match self.model_provider.as_str() {
-            "anthropic" => "Anthropic",
-            "openai" => "OpenAI",
-            "local" => "Local",
-            other => other,
-        };
         let auth_icon = if self.is_oauth { "●" } else { "○" };
         let auth_color = if self.is_oauth { t.success() } else { t.muted() };
         let ctx_class_color = match self.context_class {
@@ -250,6 +154,44 @@ impl FooterData {
             ContextClass::Clan => t.fg(),
             _ => t.dim(),
         };
+
+        // Line 2: model + class
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {source_icon} "), Style::default().fg(if self.model_provider == "local" { t.accent() } else { t.dim() })),
+            Span::styled(model_short.to_string(), Style::default().fg(t.fg()).add_modifier(Modifier::BOLD)),
+            Span::styled(" · ", Style::default().fg(t.border_dim())),
+            Span::styled(self.context_class.short(), Style::default().fg(ctx_class_color)),
+        ]));
+
+        // Line 3: auth + persona
+        let mut auth_parts: Vec<Span<'static>> = vec![
+            Span::styled(format!(" {auth_icon} "), Style::default().fg(auth_color)),
+            Span::styled(
+                if self.is_oauth { "subscription" } else { "api key" },
+                Style::default().fg(t.muted()),
+            ),
+        ];
+        if let Some(ref p) = self.harness.active_persona {
+            auth_parts.push(Span::styled(" · ", Style::default().fg(t.border_dim())));
+            auth_parts.push(Span::styled(format!("{} {}", p.badge, p.name), Style::default().fg(t.accent())));
+        }
+        lines.push(Line::from(auth_parts));
+
+        // Line 4: context summary (gauge is in the inference panel)
+        let pct = self.context_percent.min(100.0) as u32;
+        let ctx_color = widgets::percent_color(self.context_percent.min(100.0), t);
+        let mut ctx_parts: Vec<Span<'static>> = vec![
+            Span::styled(format!(" {}%", pct), Style::default().fg(ctx_color)),
+        ];
+        if self.context_window > 0 {
+            ctx_parts.push(Span::styled(
+                format!(" / {}", widgets::format_tokens(self.context_window)),
+                Style::default().fg(t.dim()),
+            ));
+        }
+        lines.push(Line::from(ctx_parts));
+
+        // Line 5: tier + thinking level
         let tier_color = match self.model_tier.as_str() {
             "gloriana" => t.accent(),
             "victory" => t.fg(),
@@ -262,80 +204,27 @@ impl FooterData {
             "low" => t.muted(),
             _ => t.dim(),
         };
-
-        let mut lines: Vec<Line<'static>> = Vec::new();
-
-        // ── Row 1: Model name (headline) + context class right-aligned ──
-        {
-            let model_display = format!("{source_icon} {model_short}");
-            let class_display = self.context_class.short();
-            let pad = w.saturating_sub(model_display.chars().count() + class_display.chars().count());
-            lines.push(Line::from(vec![
-                Span::styled(format!("{source_icon} "), Style::default().fg(
-                    if self.model_provider == "local" { t.accent() } else { t.muted() }
-                )),
-                Span::styled(model_short.to_string(), Style::default().fg(t.fg()).add_modifier(Modifier::BOLD)),
-                Span::raw(" ".repeat(pad)),
-                Span::styled(class_display, Style::default().fg(ctx_class_color)),
-            ]));
-        }
-
-        // ── Row 2: Provider + auth (supporting info) ──
-        {
-            let mut parts: Vec<Span<'static>> = vec![
-                Span::styled(provider_name.to_string(), Style::default().fg(t.dim())),
-                Span::styled(" · ", Style::default().fg(t.border_dim())),
-                Span::styled(format!("{auth_icon} "), Style::default().fg(auth_color)),
-                Span::styled(
-                    if self.is_oauth { "subscription" } else { "api key" }.to_string(),
-                    Style::default().fg(t.dim()),
-                ),
-            ];
-            if let Some(ref p) = self.harness.active_persona {
-                parts.push(Span::styled(" · ", Style::default().fg(t.border_dim())));
-                parts.push(Span::styled(format!("{} {}", p.badge, p.name), Style::default().fg(t.accent())));
-            }
-            lines.push(Line::from(parts));
-        }
-
-        // ── Row 3: spacer ──
-        lines.push(Line::from(""));
-
-        // ── Row 4: Tier + thinking level ──
         lines.push(Line::from(vec![
-            Span::styled(capitalize(&self.model_tier), Style::default().fg(tier_color)),
+            Span::styled(format!(" {}", capitalize(&self.model_tier)), Style::default().fg(tier_color)),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
             Span::styled(format!("◎ {}", capitalize(&self.thinking_level)), Style::default().fg(think_color)),
-        ]));
-
-        // ── Row 5: Context capacity (fill is shown by the inference panel) ──
-        {
-            let mut parts: Vec<Span<'static>> = Vec::new();
-            if self.context_window > 0 {
-                parts.push(Span::styled(
-                    widgets::format_tokens(self.context_window),
-                    Style::default().fg(t.dim()),
-                ));
-                parts.push(Span::styled(" · ", Style::default().fg(t.border_dim())));
-            }
-            parts.push(Span::styled(
+            Span::styled(" · ", Style::default().fg(t.border_dim())),
+            Span::styled(
                 format!("{} {}", self.context_mode.icon(), self.context_mode.as_str()),
                 Style::default().fg(t.dim()),
-            ));
-            lines.push(Line::from(parts));
-        }
+            ),
+        ]));
 
-        // ── Row 6: spacer ──
-        lines.push(Line::from(""));
-
-        // ── Row 8: Session counters ──
+        // Line 6: session counters (always visible, even at 0)
         lines.push(Line::from(vec![
-            Span::styled(format!("T·{}", self.turn), Style::default().fg(t.dim())),
+            Span::styled(format!(" T·{}", self.turn), Style::default().fg(t.muted())),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
-            Span::styled(format!("⚙ {}", self.tool_calls), Style::default().fg(t.dim())),
+            Span::styled(format!("⚙ {}", self.tool_calls), Style::default().fg(t.muted())),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
             Span::styled(format!("↻ {}", self.compactions), Style::default().fg(t.dim())),
         ]));
+
+        } // close else (provider_connected)
 
         let widget = Paragraph::new(lines).style(Style::default().bg(bg));
         frame.render_widget(widget, inner);
@@ -456,7 +345,7 @@ impl FooterData {
             memory_blocks,
         }, t));
 
-        let pct_str = format!("{}%", pct as u32);
+        let pct_str = format!(" {}%", pct as u32);
         bar_spans.push(Span::styled(pct_str, Style::default().fg(
             widgets::percent_color(pct, t)
         )));
@@ -755,46 +644,5 @@ mod tests {
         let data = FooterData::default();
         assert!(data.model_id.is_empty());
         assert_eq!(data.context_percent, 0.0);
-    }
-
-    #[test]
-    fn footer_compact_renders() {
-        let data = FooterData {
-            model_id: "claude-sonnet-4-6".into(),
-            model_provider: "anthropic".into(),
-            model_tier: "victory".into(),
-            thinking_level: "medium".into(),
-            context_percent: 35.0,
-            turn: 8,
-            tool_calls: 23,
-            total_facts: 150,
-            ..Default::default()
-        };
-        let backend = TestBackend::new(80, 4);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| {
-            data.render_compact(frame.area(), frame, &super::super::theme::Alpharius);
-        }).unwrap();
-
-        let text: String = {
-            let buf = terminal.backend().buffer();
-            let a = buf.area;
-            (0..a.height)
-                .flat_map(|y| (0..a.width).map(move |x| buf[(x, y)].symbol().to_string()))
-                .collect()
-        };
-        assert!(text.contains("sonnet"), "should show model: {text}");
-        assert!(text.contains("35%"), "should show context%: {text}");
-    }
-
-    #[test]
-    fn footer_compact_narrow() {
-        // Should not panic at very narrow widths
-        let data = FooterData::default();
-        let backend = TestBackend::new(15, 4);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| {
-            data.render_compact(frame.area(), frame, &super::super::theme::Alpharius);
-        }).unwrap();
     }
 }

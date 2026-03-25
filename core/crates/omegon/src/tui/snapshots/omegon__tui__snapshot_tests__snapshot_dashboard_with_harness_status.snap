@@ -2,16 +2,16 @@
 source: crates/omegon/src/tui/snapshot_tests.rs
 expression: render_to_string(&terminal)
 ---
-│ Ω Dashboard
+│Ω Dashboard
 │
-│ no active nodes
+│── harness ───────────────────
+│⚙ Systems Engineer (2)
+│♪ Concise (full)
+│MCP 1/1 (5 tools)
+│🔓  keyring (3 secrets)
 │
-│
-│
-│
-│
-│
-│
+│── session ───────────────────
+│0 turns · 0 tool calls
 │
 │
 │

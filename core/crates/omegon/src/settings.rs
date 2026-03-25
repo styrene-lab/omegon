@@ -463,44 +463,6 @@ pub struct Profile {
     /// Format: "Legion→Squad" (from_class→to_class).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub downgrade_overrides: Vec<String>,
-
-    // ── Theme calibration ──
-
-    /// Display calibration — adjusts theme colors for operator's display.
-    /// Applied as HSL transforms on top of alpharius.json base theme.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub calibration: Option<CalibrationParams>,
-}
-
-/// Theme calibration parameters — HSL transforms applied to all theme colors.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct CalibrationParams {
-    /// Lightness multiplier (gamma). 1.0 = unchanged, >1.0 = brighter, <1.0 = darker.
-    #[serde(default = "one_f32")]
-    pub gamma: f32,
-    /// Saturation multiplier. 1.0 = unchanged, >1.0 = more vivid, <1.0 = more muted.
-    #[serde(default = "one_f32")]
-    pub saturation: f32,
-    /// Hue shift in degrees. 0 = unchanged, positive = shift right on color wheel.
-    #[serde(default)]
-    pub hue_shift: f32,
-}
-
-fn one_f32() -> f32 { 1.0 }
-
-impl Default for CalibrationParams {
-    fn default() -> Self {
-        Self { gamma: 1.0, saturation: 1.0, hue_shift: 0.0 }
-    }
-}
-
-impl CalibrationParams {
-    /// Whether this calibration is the identity (no change).
-    pub fn is_identity(&self) -> bool {
-        (self.gamma - 1.0).abs() < 0.001
-            && (self.saturation - 1.0).abs() < 0.001
-            && self.hue_shift.abs() < 0.5
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -538,7 +500,6 @@ impl Profile {
             avoid_providers: Vec::new(),
             context_floor_pin: None,
             downgrade_overrides: Vec::new(),
-            calibration: None,
         }
     }
 
@@ -749,7 +710,6 @@ mod tests {
             avoid_providers: Vec::new(),
             context_floor_pin: None,
             downgrade_overrides: Vec::new(),
-            calibration: None,
         };
         assert!(!p.is_downgrade_accepted(ContextClass::Legion, ContextClass::Squad));
         p.accept_downgrade(ContextClass::Legion, ContextClass::Squad);
@@ -769,7 +729,6 @@ mod tests {
             avoid_providers: Vec::new(),
             context_floor_pin: None,
             downgrade_overrides: Vec::new(),
-            calibration: None,
         };
         assert_eq!(p.pinned_floor(), None);
         p.pin_floor(ContextClass::Clan);
@@ -796,7 +755,6 @@ mod tests {
             avoid_providers: vec![],
             context_floor_pin: Some("Clan".into()),
             downgrade_overrides: vec!["Legion→Squad".into()],
-            calibration: None,
         };
         let json = serde_json::to_string_pretty(&p).unwrap();
         let parsed: Profile = serde_json::from_str(&json).unwrap();

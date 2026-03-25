@@ -21,9 +21,7 @@ pub mod bus;
 mod cleave;
 pub mod features;
 mod context;
-mod demo;
 mod migrate;
-pub mod paths;
 mod switch;
 
 mod conversation;
@@ -133,11 +131,6 @@ struct Cli {
     /// Skip the splash screen animation on startup.
     #[arg(long)]
     no_splash: bool,
-
-    /// Auto-start the tutorial overlay on launch.
-    /// Used internally when exec()'ing into the demo project.
-    #[arg(long)]
-    tutorial: bool,
 
     /// Queue an initial prompt in the TUI (interactive mode, not headless).
     /// The prompt is sent automatically after startup. The TUI stays open.
@@ -305,7 +298,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| EnvFilter::new(&cli.log_level));
 
     // Interactive mode: tracing MUST NOT go to stderr (ratatui owns it).
-    // Logs go to --log-file or ~/.config/omegon/omegon.log as default.
+    // Logs go to --log-file or ~/.pi/agent/omegon.log as default.
     // Headless mode: stderr is fine.
     let _guard: Option<tracing_appender::non_blocking::WorkerGuard>;
 
@@ -313,7 +306,7 @@ async fn main() -> anyhow::Result<()> {
         let log_path = cli.log_file.clone().unwrap_or_else(|| {
             let dir = dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(".config/omegon");
+                .join(".pi/agent");
             let _ = std::fs::create_dir_all(&dir);
             dir.join("omegon.log")
         });
@@ -614,9 +607,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     {
         let model_id = cli.model.split(':').nth(1).unwrap_or(&cli.model);
         let provider = cli.model.split(':').next().unwrap_or("anthropic");
-        if provider == "anthropic"
-            && let Some(limits) = auth::probe_anthropic_model_limits(model_id).await
-                && let Ok(mut s) = shared_settings.lock() {
+        if provider == "anthropic" {
+            if let Some(limits) = auth::probe_anthropic_model_limits(model_id).await {
+                if let Ok(mut s) = shared_settings.lock() {
                     let old = s.context_window;
                     s.context_window = limits.max_input_tokens;
                     s.context_class = settings::ContextClass::from_tokens(limits.max_input_tokens);
@@ -627,6 +620,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         );
                     }
                 }
+            }
+        }
     }
 
     let is_oauth = providers::resolve_api_key_sync(
@@ -634,8 +629,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     ).is_some_and(|(_, oauth)| oauth);
 
     // ─── Apply CLI overrides ──────────────────────────────────────────
-    if let Some(ref class_str) = cli.context_class
-        && let Ok(mut s) = shared_settings.lock() {
+    if let Some(ref class_str) = cli.context_class {
+        if let Ok(mut s) = shared_settings.lock() {
             match class_str.to_lowercase().as_str() {
                 "squad" => { s.context_class = settings::ContextClass::Squad; s.context_window = 200_000; }
                 "maniple" => { s.context_class = settings::ContextClass::Maniple; s.context_window = 500_000; }
@@ -646,6 +641,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             s.apply_context_mode();
             tracing::info!(class = %class_str, window = s.context_window, "context class override applied");
         }
+    }
 
     // ─── Launch TUI ─────────────────────────────────────────────────────
     let initial = agent.initial_tui_state();
@@ -671,7 +667,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         bus_commands,
         dashboard_handles: agent.dashboard_handles.clone(),
         initial_prompt,
-        auto_tutorial: cli.tutorial,
     };
     let tui_cancel = shared_cancel.clone();
     let tui_settings = shared_settings.clone();
@@ -907,34 +902,17 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             let _ = events_tx.send(AgentEvent::SystemNotification { message });
                         }
                         "auth_login" => {
-                            // Parse "provider [oauth]" — e.g. "anthropic oauth" or just "anthropic"
-                            let parts: Vec<&str> = args.split_whitespace().collect();
-                            let provider = if parts.is_empty() { "anthropic" } else { parts[0] };
-                            let wants_oauth = parts.get(1) == Some(&"oauth");
+                            let provider = args.trim();
+                            let provider = if provider.is_empty() { "anthropic" } else { provider };
                             
-                            // OAuth is only supported for Anthropic right now.
-                            // OpenAI OAuth gives Codex JWT tokens that the native client can't use.
-                            if wants_oauth && provider != "anthropic" {
-                                let _ = events_tx.send(AgentEvent::SystemNotification {
-                                    message: format!("⚠ OAuth login not yet supported for {}. Use API key instead.", provider),
-                                });
-                                continue;
-                            }
-
-                            // Non-OAuth /login <provider> via the bus is only for OAuth flows.
-                            // API key entry goes through the TUI secret input mode, not here.
-                            if !wants_oauth && !matches!(provider, "anthropic" | "claude") {
-                                let _ = events_tx.send(AgentEvent::SystemNotification {
-                                    message: format!("Use the /login selector to enter an API key for {}.", provider),
-                                });
-                                continue;
-                            }
-
+                            // Run the login in a background task. Progress updates go
+                            // through SystemNotification instead of eprintln (which
+                            // would corrupt the ratatui display).
                             let events_tx_clone = events_tx.clone();
                             let progress_tx = events_tx.clone();
                             let provider_clone = provider.to_string();
                             let bridge_clone = bridge.clone();
-                            let _model_for_redetect = cli.model.clone();
+                            let model_for_redetect = cli.model.clone();
                             let settings_for_login = shared_settings.clone();
                             tokio::spawn(async move {
                                 let progress: auth::LoginProgress = Box::new(move |msg| {
@@ -946,7 +924,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                     "anthropic" | "claude" => {
                                         auth::login_anthropic_with_progress(progress).await
                                     }
-                                    _ => Err(anyhow::anyhow!("OAuth not supported for {}.", provider_clone)),
+                                    "openai" | "chatgpt" => {
+                                        auth::login_openai_with_progress(progress).await
+                                    }
+                                    _ => Err(anyhow::anyhow!("Unknown provider: {}. Use: anthropic, openai", provider_clone)),
                                 };
                                 let message = match &result {
                                     Ok(_) => format!("✓ Successfully logged in to {}", provider_clone),
@@ -954,29 +935,15 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 };
                                 let _ = events_tx_clone.send(AgentEvent::SystemNotification { message });
 
-                                // Hot-swap the bridge after successful login
+                                // Hot-swap the bridge if login succeeded and current bridge is NullBridge
                                 if result.is_ok() {
-                                    // Re-detect with the provider that just logged in, not the
-                                    // configured model (which might be anthropic while we just
-                                    // logged into openai)
-                                    let detect_model = format!("{}:auto", provider_clone);
-                                    if let Some(new_bridge) = providers::auto_detect_bridge(&detect_model).await {
+                                    if let Some(new_bridge) = providers::auto_detect_bridge(&model_for_redetect).await {
                                         let mut guard = bridge_clone.write().await;
                                         *guard = new_bridge;
                                         if let Ok(mut s) = settings_for_login.lock() { s.provider_connected = true; }
-                                        tracing::info!("bridge hot-swapped after successful login to {}", provider_clone);
+                                        tracing::info!("bridge hot-swapped after successful login");
                                         let _ = events_tx_clone.send(AgentEvent::SystemNotification {
                                             message: "Provider connected — you can send messages now.".to_string(),
-                                        });
-                                    } else {
-                                        // Login succeeded but we can't use the token (e.g. Codex OAuth JWT)
-                                        let _ = events_tx_clone.send(AgentEvent::SystemNotification {
-                                            message: format!(
-                                                "⚠ {} login saved, but this token type isn't supported yet by the native client.\n\
-                                                 ChatGPT OAuth tokens use the Codex Responses API (not yet implemented).\n\
-                                                 Use /login anthropic or /login openrouter instead.",
-                                                provider_clone
-                                            ),
                                         });
                                     }
                                 }
@@ -1316,7 +1283,7 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
                         .map(|c| match c {
                             omegon_traits::ContentBlock::Text { text } => {
                                 if text.len() > 200 {
-                                    crate::util::truncate(text, 200)
+                                    crate::util::truncate(&text, 200)
                                 } else {
                                     text.clone()
                                 }
@@ -1367,7 +1334,7 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
                 tracing::debug!("Cleave session save failed (non-fatal): {e}");
             }
         } else {
-            // Standalone agent: save to ~/.config/omegon/sessions/
+            // Standalone agent: save to ~/.pi/agent/sessions/
             match session::save_session(&agent.conversation, &agent.cwd) {
                 Ok(path) => tracing::info!(path = %path.display(), "Session saved"),
                 Err(e) => tracing::debug!("Session save failed (non-fatal): {e}"),

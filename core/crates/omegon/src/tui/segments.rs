@@ -213,12 +213,20 @@ fn render_assistant_text(
 ) {
     if area.width < 3 || area.height == 0 { return; }
 
-    // No gutter bar — agent text is the natural, undecorated state.
-    // Operator messages get the accent bar; agent output flows clean.
+    // Left gutter — accent-colored bar for the full height of the response
+    for row in 0..area.height {
+        if area.x + 1 < area.right() {
+            if let Some(cell) = buf.cell_mut((area.x + 1, area.y + row)) {
+                cell.set_symbol("│");
+                cell.set_style(Style::default().fg(t.success()));
+            }
+        }
+    }
+
     let inner = Rect {
-        x: area.x + 1,
+        x: area.x + 2,
         y: area.y,
-        width: area.width.saturating_sub(2),
+        width: area.width.saturating_sub(3),
         height: area.height,
     };
 
@@ -503,7 +511,7 @@ fn render_tool_card(
             let hint = if expanded {
                 format!("  ── {} lines ── Tab to collapse", result_lines.len())
             } else {
-                format!("  ── {} more lines ── Ctrl+O to expand", result_lines.len() - show)
+                format!("  ── {} more lines ── Tab to expand", result_lines.len() - show)
             };
             lines.push(Line::from(Span::styled(
                 hint,

@@ -45,22 +45,10 @@ impl LifecycleFeature {
     pub fn new(repo_path: &std::path::Path) -> Self {
         let provider = LifecycleContextProvider::new(repo_path);
         let store = JsonFileStore::new(repo_path);
-        let opsx = match OpsxLifecycle::load(store) {
-            Ok(lc) => lc,
-            Err(e) => {
-                tracing::warn!("opsx-core load failed, attempting fresh start: {e}");
-                // Delete corrupted state file and try again
-                let state_path = repo_path.join(".omegon").join("lifecycle").join("state.json");
-                let _ = std::fs::remove_file(&state_path);
-                OpsxLifecycle::load(JsonFileStore::new(repo_path)).unwrap_or_else(|e2| {
-                    tracing::error!("opsx-core fresh start also failed, using temp dir: {e2}");
-                    // Last resort: use a temp directory so the session can run
-                    let tmp = std::env::temp_dir().join("omegon-opsx-fallback");
-                    OpsxLifecycle::load(JsonFileStore::new(&tmp))
-                        .expect("temp dir lifecycle should not fail")
-                })
-            }
-        };
+        let opsx = OpsxLifecycle::load(store).unwrap_or_else(|e| {
+            tracing::warn!("opsx-core load failed, starting fresh: {e}");
+            OpsxLifecycle::load(JsonFileStore::new(repo_path)).unwrap()
+        });
         Self {
             provider: Arc::new(Mutex::new(provider)),
             repo_path: repo_path.to_path_buf(),
@@ -276,7 +264,7 @@ impl LifecycleFeature {
     fn execute_design_tree_update(&self, args: &Value) -> anyhow::Result<ToolResult> {
         let action = args["action"].as_str().unwrap_or("");
         let node_id = args["node_id"].as_str();
-        let docs_dir = crate::paths::design_docs_dir(&self.repo_path);
+        let docs_dir = self.repo_path.join("docs");
         // Helper macro-like pattern: read node data, drop borrow, then mutate
         let get_node_clone = |id: &str| -> anyhow::Result<DesignNode> {
             let p = self.provider.lock().unwrap();
@@ -303,12 +291,14 @@ impl LifecycleFeature {
                     // Don't require parent to exist in opsx-core — lazy sync
                     let _ = opsx.create_node(id, title, None);
                     // If a non-seed status was requested, transition to it
-                    if let Some(status_str) = status
-                        && let Some(target) = OpsxNodeState::parse(status_str)
-                            && target != OpsxNodeState::Seed {
+                    if let Some(status_str) = status {
+                        if let Some(target) = OpsxNodeState::parse(status_str) {
+                            if target != OpsxNodeState::Seed {
                                 // Use force_transition for bootstrap — the node was just created
                                 let _ = opsx.force_transition_node(id, target, "initial status on create");
                             }
+                        }
+                    }
                 }
 
                 let node = design::create_node(&docs_dir, id, title, parent, status, &tags, overview)?;
@@ -347,16 +337,6 @@ impl LifecycleFeature {
                 let id = node_id.ok_or_else(|| anyhow::anyhow!("node_id required"))?;
                 let question = args["question"].as_str().ok_or_else(|| anyhow::anyhow!("question required"))?;
 
-                // Sync to opsx-core
-                {
-                    let mut opsx = self.opsx.lock().unwrap();
-                    if opsx.get_node(id).is_none() {
-                        let node = get_node_clone(id)?;
-                        self.bootstrap_node_to_opsx(&mut opsx, &node);
-                    }
-                    let _ = opsx.add_question(id, question);
-                }
-
                 let mut node = get_node_clone(id)?;
                 design::update_node(&mut node, |n| {
                     n.open_questions.push(question.to_string());
@@ -368,16 +348,6 @@ impl LifecycleFeature {
             "remove_question" => {
                 let id = node_id.ok_or_else(|| anyhow::anyhow!("node_id required"))?;
                 let question = args["question"].as_str().ok_or_else(|| anyhow::anyhow!("question required"))?;
-
-                // Sync to opsx-core
-                {
-                    let mut opsx = self.opsx.lock().unwrap();
-                    if opsx.get_node(id).is_none() {
-                        let node = get_node_clone(id)?;
-                        self.bootstrap_node_to_opsx(&mut opsx, &node);
-                    }
-                    let _ = opsx.remove_question(id, question);
-                }
 
                 let mut node = get_node_clone(id)?;
                 design::update_node(&mut node, |n| {
@@ -470,21 +440,10 @@ impl LifecycleFeature {
                 let child_id = args["child_id"].as_str().ok_or_else(|| anyhow::anyhow!("child_id required"))?;
                 let child_title = args["child_title"].as_str().unwrap_or(question);
 
-                // Sync parent question removal and child creation to opsx-core
-                {
-                    let mut opsx = self.opsx.lock().unwrap();
-                    if opsx.get_node(id).is_none() {
-                        let node = get_node_clone(id)?;
-                        self.bootstrap_node_to_opsx(&mut opsx, &node);
-                    }
-                    let _ = opsx.remove_question(id, question);
-                    let _ = opsx.create_node(child_id, child_title, None);
-                }
-
-                // Create child node in markdown
+                // Create child node
                 design::create_node(&docs_dir, child_id, child_title, Some(id), None, &[], "")?;
 
-                // Remove question from parent in markdown
+                // Remove question from parent
                 let mut parent_node = get_node_clone(id)?;
                 design::update_node(&mut parent_node, |n| {
                     n.open_questions.retain(|q| q != question);
@@ -763,13 +722,13 @@ impl Feature for LifecycleFeature {
     fn commands(&self) -> Vec<CommandDefinition> {
         vec![
             CommandDefinition {
-                name: "design-focus".into(),
-                description: "Pin a design node (inject its context) — use via agent tool, not operator command".into(),
+                name: "focus".into(),
+                description: "Focus on a design node (inject its context)".into(),
                 subcommands: self.provider.lock().unwrap().all_nodes().keys().cloned().collect(),
             },
             CommandDefinition {
-                name: "design-unfocus".into(),
-                description: "Clear design node pin — use via agent tool, not operator command".into(),
+                name: "unfocus".into(),
+                description: "Clear design node focus".into(),
                 subcommands: vec![],
             },
             CommandDefinition {
@@ -782,29 +741,29 @@ impl Feature for LifecycleFeature {
 
     fn handle_command(&mut self, name: &str, args: &str) -> CommandResult {
         match name {
-            "design-focus" => {
+            "focus" => {
                 let id = args.trim();
                 if id.is_empty() {
                     let p = self.provider.lock().unwrap();
                     if let Some(focused) = p.focused_node_id() {
-                        return CommandResult::Display(format!("Currently pinned: {focused}"));
+                        return CommandResult::Display(format!("Currently focused on: {focused}"));
                     }
-                    return CommandResult::Display("No node pinned.".into());
+                    return CommandResult::Display("No node focused. Usage: /focus <node-id>".into());
                 }
                 let display = {
                     let p = self.provider.lock().unwrap();
                     let Some(node) = p.get_node(id) else {
                         return CommandResult::Display(format!("Node '{id}' not found"));
                     };
-                    format!("Pinned → {} {} — {}", node.status.icon(), node.id, node.title)
+                    format!("Focused → {} {} — {}", node.status.icon(), node.id, node.title)
                 };
                 self.provider.lock().unwrap().set_focus(Some(id.to_string()));
                 CommandResult::Display(display)
             }
 
-            "design-unfocus" => {
+            "unfocus" => {
                 self.provider.lock().unwrap().set_focus(None);
-                CommandResult::Display("Design pin cleared".into())
+                CommandResult::Display("Design focus cleared".into())
             }
 
             "design" => {
@@ -935,7 +894,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let feature = LifecycleFeature::new(dir.path());
         let commands = feature.commands();
-        assert!(commands.iter().any(|c| c.name == "design-focus"));
+        assert!(commands.iter().any(|c| c.name == "focus"));
         assert!(commands.iter().any(|c| c.name == "design"));
     }
 
@@ -1047,11 +1006,11 @@ mod tests {
         let (_dir, repo) = setup_test_repo();
         let mut feature = LifecycleFeature::new(&repo);
 
-        let result = feature.handle_command("design-focus", "test-node");
-        assert!(matches!(result, CommandResult::Display(ref s) if s.contains("Pinned")));
+        let result = feature.handle_command("focus", "test-node");
+        assert!(matches!(result, CommandResult::Display(ref s) if s.contains("Focused")));
         assert_eq!(feature.provider.lock().unwrap().focused_node_id().map(String::from), Some("test-node".to_string()));
 
-        let result = feature.handle_command("design-unfocus", "");
+        let result = feature.handle_command("unfocus", "");
         assert!(matches!(result, CommandResult::Display(ref s) if s.contains("cleared")));
         assert!(feature.provider.lock().unwrap().focused_node_id().is_none());
     }

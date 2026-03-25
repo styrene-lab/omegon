@@ -60,7 +60,6 @@ fn snapshot_dashboard_with_focused_node() {
         assumptions: 1,
         decisions: 3,
         readiness: 0.5,
-        openspec_change: None,
     });
     let backend = TestBackend::new(36, 25);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -127,26 +126,6 @@ fn snapshot_dashboard_with_harness_status() {
 // ═══════════════════════════════════════════════════════════════════
 // Footer snapshots
 // ═══════════════════════════════════════════════════════════════════
-
-#[test]
-fn snapshot_footer_compact() {
-    let footer = FooterData {
-        model_id: "claude-sonnet-4-6".into(),
-        model_provider: "anthropic".into(),
-        model_tier: "victory".into(),
-        thinking_level: "medium".into(),
-        context_percent: 42.0,
-        context_window: 200_000,
-        total_facts: 1500,
-        turn: 12,
-        tool_calls: 35,
-        ..Default::default()
-    };
-    let backend = TestBackend::new(80, 4);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|f| footer.render_compact(f.area(), f, &Alpharius)).unwrap();
-    insta::assert_snapshot!(render_to_string(&terminal));
-}
 
 #[test]
 fn snapshot_footer_default() {

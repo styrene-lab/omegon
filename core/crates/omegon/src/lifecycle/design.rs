@@ -306,103 +306,52 @@ fn parse_impl_notes(content: &str, sections: &mut DocumentSections) {
 }
 
 /// Scan a docs/ directory for design documents and build a tree.
-/// Maximum file size to read during scan (256 KB).
-/// Design docs are markdown with YAML frontmatter — anything larger is
-/// either not a design doc or is adversarial.
-const MAX_DESIGN_DOC_BYTES: u64 = 256 * 1024;
-
-/// Maximum files to scan per directory. Prevents resource exhaustion
-/// from directories with thousands of files.
-const MAX_SCAN_FILES: usize = 1000;
-
-/// Maximum length for a node ID. IDs longer than this are truncated
-/// to prevent memory bloat from adversarial frontmatter.
-const MAX_NODE_ID_LEN: usize = 128;
-
-/// Result of a design doc scan — successful nodes + files that had
-/// frontmatter but couldn't produce a valid node (e.g. missing `id`).
-pub struct ScanResult {
-    pub nodes: HashMap<String, DesignNode>,
-    /// Paths of .md files that had YAML frontmatter but failed to produce
-    /// a node (missing id, invalid structure). Used for degradation detection
-    /// without re-reading the files.
-    pub parse_failures: Vec<PathBuf>,
-}
-
 pub fn scan_design_docs(docs_dir: &Path) -> HashMap<String, DesignNode> {
-    scan_design_docs_full(docs_dir).nodes
-}
+    let mut nodes = HashMap::new();
 
-pub fn scan_design_docs_full(docs_dir: &Path) -> ScanResult {
-    let mut result = ScanResult {
-        nodes: HashMap::new(),
-        parse_failures: Vec::new(),
-    };
-    scan_dir(docs_dir, &mut result);
-
-    // Also scan docs/design/ subdirectory if it exists
-    let design_dir = docs_dir.join("design");
-    if design_dir.is_dir() {
-        scan_dir(&design_dir, &mut result);
-    }
-
-    result
-}
-
-/// Scan a single directory for design doc markdown files.
-fn scan_dir(dir: &Path, result: &mut ScanResult) {
-    let entries = match fs::read_dir(dir) {
+    let entries = match fs::read_dir(docs_dir) {
         Ok(entries) => entries,
-        Err(_) => return,
+        Err(_) => return nodes,
     };
 
-    let mut count = 0;
     for entry in entries.flatten() {
-        if count >= MAX_SCAN_FILES {
-            tracing::warn!(dir = %dir.display(), "scan capped at {MAX_SCAN_FILES} files");
-            break;
-        }
-
         let path = entry.path();
-
-        // Skip non-.md files
         if path.extension().and_then(|e| e.to_str()) != Some("md") {
             continue;
         }
 
-        // Skip symlinks to prevent loops and path traversal
-        if path.is_symlink() {
-            continue;
-        }
-
-        // Skip files larger than the size limit
-        if let Ok(meta) = path.metadata()
-            && meta.len() > MAX_DESIGN_DOC_BYTES {
-                tracing::debug!(path = %path.display(), size = meta.len(),
-                    "skipping oversized file (>{MAX_DESIGN_DOC_BYTES} bytes)");
-                continue;
-            }
-
-        count += 1;
-
         let content = match fs::read_to_string(&path) {
             Ok(c) => c,
-            Err(_) => continue, // binary file, permission error, etc.
+            Err(_) => continue,
         };
 
-        if let Some(fm) = parse_frontmatter(&content) {
-            if let Some(mut node) = node_from_frontmatter(&fm, path.clone()) {
-                // Truncate oversized IDs
-                if node.id.len() > MAX_NODE_ID_LEN {
-                    node.id.truncate(MAX_NODE_ID_LEN);
+        if let Some(fm) = parse_frontmatter(&content)
+            && let Some(node) = node_from_frontmatter(&fm, path) {
+                nodes.insert(node.id.clone(), node);
+            }
+    }
+
+    // Also scan docs/design/ subdirectory if it exists
+    let design_dir = docs_dir.join("design");
+    if design_dir.is_dir()
+        && let Ok(entries) = fs::read_dir(&design_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
                 }
-                result.nodes.insert(node.id.clone(), node);
-            } else {
-                // Had frontmatter but no valid node (missing id, etc.)
-                result.parse_failures.push(path);
+                let content = match fs::read_to_string(&path) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+                if let Some(fm) = parse_frontmatter(&content)
+                    && let Some(node) = node_from_frontmatter(&fm, path) {
+                        nodes.insert(node.id.clone(), node);
+                    }
             }
         }
-    }
+
+    nodes
 }
 
 /// Get children of a node.

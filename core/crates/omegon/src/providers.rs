@@ -3,7 +3,7 @@
 //! Replaces core/bridge/llm-bridge.mjs entirely. The Rust binary makes
 //! HTTPS requests directly to api.anthropic.com / api.openai.com.
 //!
-//! API keys resolved from: env vars → ~/.config/omegon/auth.json (OAuth tokens).
+//! API keys resolved from: env vars → ~/.pi/agent/auth.json (OAuth tokens).
 //! The upstream provider APIs are the only external dependency — no npm,
 //! no Node.js, no supply chain risk from package registries.
 
@@ -29,13 +29,10 @@ pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
     let env_keys = crate::auth::provider_env_vars(provider);
     let auth_key = crate::auth::auth_json_key(provider);
 
-    // Known OAuth env vars — these carry OAuth tokens, not API keys.
-    const OAUTH_ENV_VARS: &[&str] = &["ANTHROPIC_OAUTH_TOKEN", "CHATGPT_OAUTH_TOKEN"];
-
     // Env vars (not OAuth)
     for key in env_keys {
         // Skip OAuth token env vars — those are handled separately below
-        if OAUTH_ENV_VARS.contains(key) { continue; }
+        if *key == "ANTHROPIC_OAUTH_TOKEN" { continue; }
         if let Ok(val) = std::env::var(key)
             && !val.is_empty()
         {
@@ -44,15 +41,14 @@ pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
         }
     }
 
-    // OAuth token from env
-    for oauth_var in OAUTH_ENV_VARS {
-        if env_keys.contains(oauth_var)
-            && let Ok(val) = std::env::var(oauth_var)
-                && !val.is_empty()
-            {
-                tracing::debug!(provider, source = oauth_var, "OAuth token resolved from env");
-                return Some((val, true));
-            }
+    // OAuth token from env (Anthropic only — ANTHROPIC_OAUTH_TOKEN)
+    if env_keys.contains(&"ANTHROPIC_OAUTH_TOKEN") {
+        if let Ok(val) = std::env::var("ANTHROPIC_OAUTH_TOKEN")
+            && !val.is_empty()
+        {
+            tracing::debug!(provider, "OAuth token resolved from ANTHROPIC_OAUTH_TOKEN env");
+            return Some((val, true));
+        }
     }
 
     // auth.json — using canonical key
@@ -76,7 +72,7 @@ pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
     None
 }
 
-/// Resolve API key from env vars or auth.json (no refresh).
+/// Resolve API key from env vars or ~/.pi/agent/auth.json (legacy, no refresh).
 fn resolve_api_key(provider: &str) -> Option<String> {
     // Use canonical provider map for env vars
     let env_keys = crate::auth::provider_env_vars(provider);
@@ -94,9 +90,10 @@ fn resolve_api_key(provider: &str) -> Option<String> {
             return Some(val);
         }
 
-    // auth.json — OAuth tokens (primary: ~/.config/omegon/, legacy: ~/.pi/agent/)
+    // auth.json — use canonical key mapping
     let auth_key = crate::auth::auth_json_key(provider);
-    let auth_path = crate::auth::auth_json_path()?;
+    let home = dirs::home_dir()?;
+    let auth_path = home.join(".pi/agent/auth.json");
     let content = std::fs::read_to_string(&auth_path).ok()?;
     let auth: Value = serde_json::from_str(&content).ok()?;
     auth.get(auth_key)?
@@ -105,31 +102,19 @@ fn resolve_api_key(provider: &str) -> Option<String> {
         .map(String::from)
 }
 
-/// Resolve a single provider by ID. Handles proprietary protocols (Anthropic,
-/// Codex) separately, then falls through to the generic OpenAI-compat path.
+/// Resolve a single provider by ID.
 pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
     match provider_id {
         "anthropic" => {
             if let Some(client) = AnthropicClient::from_env() {
                 return Some(Box::new(client));
             }
-            return AnthropicClient::from_env_async().await.map(|c| Box::new(c) as Box<dyn LlmBridge>);
+            AnthropicClient::from_env_async().await.map(|c| Box::new(c) as Box<dyn LlmBridge>)
         }
-        "openai-codex" => {
-            if let Some(client) = CodexClient::from_env() {
-                return Some(Box::new(client));
-            }
-            return CodexClient::from_env_async().await.map(|c| Box::new(c) as Box<dyn LlmBridge>);
-        }
-        _ => {}
+        "openai" => OpenAIClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
+        "openrouter" => OpenRouterClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
+        _ => None,
     }
-
-    // OpenAI-compatible providers (including "openai" itself — it uses Chat Completions)
-    if let Some(client) = OpenAICompatClient::from_env(provider_id) {
-        return Some(Box::new(client));
-    }
-
-    None
 }
 
 /// Auto-detect the best available native provider from configured keys.
@@ -137,49 +122,51 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
 pub async fn auto_detect_bridge(model_spec: &str) -> Option<Box<dyn LlmBridge>> {
     let provider = model_spec.split(':').next().unwrap_or("anthropic");
 
-    // If a specific provider is requested, try it directly first (backward compat).
-    let primary = resolve_provider(provider).await;
+    // Try the requested provider first
+    let primary: Option<Box<dyn LlmBridge>> = match provider {
+        "anthropic" => {
+            if let Some(client) = AnthropicClient::from_env() {
+                Some(Box::new(client))
+            } else {
+                AnthropicClient::from_env_async().await.map(|c| Box::new(c) as Box<dyn LlmBridge>)
+            }
+        }
+        "openai" => OpenAIClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
+        "openrouter" => OpenRouterClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
+        _ => None,
+    };
+
     if primary.is_some() {
         return primary;
     }
 
-    // Primary provider not available — use the routing engine to find the best alternative.
+    // Primary provider not available — try the full fallback chain.
+    // This handles: user requests Anthropic but only has OpenAI credentials.
     tracing::warn!(
         requested = provider,
-        "requested provider not available — routing to best alternative"
+        "requested provider not available — trying fallback chain"
     );
 
-    let inventory = crate::routing::ProviderInventory::probe();
-    let req = crate::routing::CapabilityRequest::default(); // Frontier tier
-    let candidates = crate::routing::route(&req, &inventory);
-
-    for candidate in &candidates {
-        if candidate.provider_id == provider { continue; }
-        if let Some(client) = resolve_provider(&candidate.provider_id).await {
-            tracing::info!(
-                provider = %candidate.provider_id,
-                model = %candidate.model_id,
-                score = candidate.score,
-                "routed to fallback provider"
-            );
-            return Some(client);
+    if provider != "anthropic" {
+        if let Some(client) = AnthropicClient::from_env() {
+            tracing::info!("falling back to Anthropic");
+            return Some(Box::new(client));
+        }
+        if let Some(client) = AnthropicClient::from_env_async().await {
+            tracing::info!("falling back to Anthropic (after token refresh)");
+            return Some(Box::new(client));
         }
     }
-
-    // If route() returned nothing, fall back to legacy static order
-    // (covers edge cases where inventory probe missed something)
-    const FALLBACK_ORDER: &[&str] = &[
-        "anthropic", "openai", "openai-codex",
-        "groq", "xai", "mistral", "huggingface", "cerebras",
-        "openrouter",
-        "ollama",
-    ];
-
-    for &fallback_provider in FALLBACK_ORDER {
-        if fallback_provider == provider { continue; }
-        if let Some(client) = resolve_provider(fallback_provider).await {
-            tracing::info!(provider = fallback_provider, "legacy fallback to {}", fallback_provider);
-            return Some(client);
+    if provider != "openai" {
+        if let Some(client) = OpenAIClient::from_env() {
+            tracing::info!("falling back to OpenAI");
+            return Some(Box::new(client));
+        }
+    }
+    if provider != "openrouter" {
+        if let Some(client) = OpenRouterClient::from_env() {
+            tracing::info!("falling back to OpenRouter");
+            return Some(Box::new(client));
         }
     }
 
@@ -348,11 +335,13 @@ impl AnthropicClient {
             LlmMessage::Assistant { text, thinking, tool_calls, raw } => {
                 // Prefer raw content blocks if available — they preserve provider-specific
                 // fields like thinking signatures that are required for round-tripping.
-                if let Some(raw_val) = raw
-                    && let Some(raw_content) = raw_val.get("content").and_then(|c| c.as_array())
-                        && !raw_content.is_empty() {
+                if let Some(raw_val) = raw {
+                    if let Some(raw_content) = raw_val.get("content").and_then(|c| c.as_array()) {
+                        if !raw_content.is_empty() {
                             return json!({"role": "assistant", "content": raw_content});
                         }
+                    }
+                }
                 // Fallback: reconstruct from parsed fields (no signatures — works for
                 // providers that don't need them, or for decayed/compacted messages)
                 let mut content = Vec::new();
@@ -504,17 +493,17 @@ impl LlmBridge for AnthropicClient {
             )
             .header("anthropic-version", "2023-06-01")
             .header("anthropic-beta", {
-                
+                let flags = if is_oauth {
+                    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14".to_string()
+                } else {
+                    "interleaved-thinking-2025-05-14".to_string()
+                };
                 // NOTE: context-1m-2025-08-07 is NEVER sent. Sonnet 4.6 and
                 // Opus 4.6 support 1M context natively without a beta flag.
                 // Sending it triggers "Extra usage is required for long context
                 // requests" (429) on OAuth subscriptions — a deprecated billing
                 // gate that no longer corresponds to a capability gate.
-                if is_oauth {
-                    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14".to_string()
-                } else {
-                    "interleaved-thinking-2025-05-14".to_string()
-                }
+                flags
             })
             .header("content-type", "application/json")
             // Claude Code identity headers for OAuth subscription recognition
@@ -707,10 +696,11 @@ async fn parse_anthropic_stream(
                         None => current_thinking_signature = Some(sig.to_string()),
                     }
                     // Patch the last thinking block in content_blocks if it exists
-                    if let Some(last) = content_blocks.last_mut()
-                        && last.get("type").and_then(|t| t.as_str()) == Some("thinking") {
+                    if let Some(last) = content_blocks.last_mut() {
+                        if last.get("type").and_then(|t| t.as_str()) == Some("thinking") {
                             last["signature"] = json!(current_thinking_signature.as_deref().unwrap_or(""));
                         }
+                    }
                 }
                 tracing::trace!(event_type = etype, "signature event");
             }
@@ -760,15 +750,7 @@ impl OpenAIClient {
     }
 
     pub fn from_env() -> Option<Self> {
-        let key = resolve_api_key("openai")?;
-        // Codex OAuth tokens (JWT, starts with eyJ) are for the Responses API,
-        // not the Chat Completions API. They'll get 500s from api.openai.com.
-        // Only accept actual API keys (sk-*) or env-var-provided tokens.
-        if key.starts_with("eyJ") {
-            tracing::debug!("OpenAI credential is a Codex OAuth JWT — not usable with Chat Completions API");
-            return None;
-        }
-        Some(Self::new(key))
+        resolve_api_key("openai").map(Self::new)
     }
 }
 
@@ -912,690 +894,33 @@ async fn parse_openai_stream(
     }).await
 }
 
-// ─── OpenAI Codex Responses API ─────────────────────────────────────────────
+// ─── OpenRouter ─────────────────────────────────────────────────────────────
 //
-// The Codex Responses API is a different protocol from Chat Completions.
-// It uses ChatGPT OAuth JWT tokens (not API keys), talks to
-// chatgpt.com/backend-api/codex/responses, and has a different message format
-// (instructions/input instead of messages, response.output_item.* SSE events).
-//
-// This enables ChatGPT Pro/Plus subscribers to use their subscription
-// for inference without a separate OpenAI API key. The free-tier model
-// gpt-5.3-codex-spark costs $0/token.
+// OpenRouter speaks the OpenAI wire protocol but routes across 27+ free models.
+// Uses the OpenAI client internally with a different base URL and API key source.
 
-const CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
-
-pub struct CodexClient {
-    client: reqwest::Client,
-    jwt_token: String,
-    account_id: String,
-    base_url: String,
-}
-
-impl CodexClient {
-    pub fn new(jwt_token: String, account_id: String) -> Self {
-        Self {
-            client: reqwest::Client::new(),
-            jwt_token,
-            account_id,
-            base_url: std::env::var("CODEX_BASE_URL")
-                .unwrap_or_else(|_| CODEX_BASE_URL.into()),
-        }
-    }
-
-    /// Create from environment or auth.json.
-    /// Looks for: CHATGPT_OAUTH_TOKEN env var, then openai-codex in auth.json.
-    pub fn from_env() -> Option<Self> {
-        // 1. Try env var
-        if let Ok(token) = std::env::var("CHATGPT_OAUTH_TOKEN")
-            && !token.is_empty() && token.starts_with("eyJ")
-                && let Some(account_id) = crate::auth::extract_jwt_claim(
-                    &token, "https://api.openai.com/auth", "chatgpt_account_id"
-                ) {
-                    tracing::debug!("CodexClient: resolved from CHATGPT_OAUTH_TOKEN env var");
-                    return Some(Self::new(token, account_id));
-                }
-
-        // 2. Try auth.json (openai-codex entry) — JWT tokens stored by /login openai-codex oauth
-        let creds = crate::auth::read_credentials("openai-codex")?;
-        if creds.cred_type != "oauth" || creds.access.is_empty() {
-            return None;
-        }
-        // Must be a JWT (starts with eyJ)
-        if !creds.access.starts_with("eyJ") {
-            return None;
-        }
-        if creds.is_expired() {
-            tracing::debug!("CodexClient: auth.json token expired — needs refresh");
-            return None;
-        }
-
-        // Get account ID: stored in auth.json or extract from JWT
-        let account_id = crate::auth::read_credential_extra("openai-codex", "accountId")
-            .or_else(|| crate::auth::extract_jwt_claim(
-                &creds.access, "https://api.openai.com/auth", "chatgpt_account_id"
-            ))?;
-
-        tracing::debug!("CodexClient: resolved from auth.json");
-        Some(Self::new(creds.access, account_id))
-    }
-
-    /// Create with async token refresh.
-    pub async fn from_env_async() -> Option<Self> {
-        // Try sync first
-        if let Some(client) = Self::from_env() {
-            return Some(client);
-        }
-
-        // Try refresh
-        let (token, is_oauth) = crate::auth::resolve_with_refresh("openai-codex").await?;
-        if !is_oauth || !token.starts_with("eyJ") {
-            return None;
-        }
-
-        let account_id = crate::auth::read_credential_extra("openai-codex", "accountId")
-            .or_else(|| crate::auth::extract_jwt_claim(
-                &token, "https://api.openai.com/auth", "chatgpt_account_id"
-            ))?;
-
-        Some(Self::new(token, account_id))
-    }
-
-    /// Build the Responses API input messages from our LlmMessage format.
-    fn build_input(messages: &[LlmMessage]) -> Vec<Value> {
-        let mut input = Vec::new();
-        let mut msg_index = 0u32;
-
-        for msg in messages {
-            match msg {
-                LlmMessage::User { content, images } => {
-                    if images.is_empty() {
-                        input.push(json!({
-                            "role": "user",
-                            "content": [{"type": "input_text", "text": content}]
-                        }));
-                    } else {
-                        let mut parts: Vec<Value> = images.iter().map(|img| json!({
-                            "type": "input_image",
-                            "detail": "auto",
-                            "image_url": format!("data:{};base64,{}", img.media_type, img.data),
-                        })).collect();
-                        parts.push(json!({"type": "input_text", "text": content}));
-                        input.push(json!({"role": "user", "content": parts}));
-                    }
-                }
-                LlmMessage::Assistant { text, tool_calls, .. } => {
-                    // Text blocks → message items
-                    for t in text {
-                        if !t.is_empty() {
-                            input.push(json!({
-                                "type": "message",
-                                "role": "assistant",
-                                "content": [{"type": "output_text", "text": t, "annotations": []}],
-                                "status": "completed",
-                                "id": format!("msg_{msg_index}"),
-                            }));
-                            msg_index += 1;
-                        }
-                    }
-                    // Tool calls → function_call items
-                    for tc in tool_calls {
-                        // call_id is tc.id, generate an item_id with fc_ prefix
-                        let item_id = if tc.id.contains('|') {
-                            // Already compound format
-                            let parts: Vec<&str> = tc.id.splitn(2, '|').collect();
-                            parts.get(1).unwrap_or(&"fc_0").to_string()
-                        } else {
-                            format!("fc_{msg_index}")
-                        };
-                        let call_id = if tc.id.contains('|') {
-                            tc.id.split('|').next().unwrap_or(&tc.id).to_string()
-                        } else {
-                            tc.id.clone()
-                        };
-                        input.push(json!({
-                            "type": "function_call",
-                            "id": item_id,
-                            "call_id": call_id,
-                            "name": tc.name,
-                            "arguments": if tc.arguments.is_object() {
-                                tc.arguments.to_string()
-                            } else {
-                                "{}".to_string()
-                            },
-                        }));
-                        msg_index += 1;
-                    }
-                }
-                LlmMessage::ToolResult { call_id, content, .. } => {
-                    // Strip compound ID: use just the call_id part
-                    let cid = if call_id.contains('|') {
-                        call_id.split('|').next().unwrap_or(call_id).to_string()
-                    } else {
-                        call_id.clone()
-                    };
-                    input.push(json!({
-                        "type": "function_call_output",
-                        "call_id": cid,
-                        "output": content,
-                    }));
-                }
-            }
-        }
-
-        input
-    }
-
-    /// Build tools in Responses API format.
-    fn build_tools(tools: &[ToolDefinition]) -> Vec<Value> {
-        tools.iter().map(|t| {
-            let compact_props = t.parameters.get("properties")
-                .cloned()
-                .unwrap_or(json!({}));
-            let compact = strip_parameter_descriptions(&compact_props);
-            json!({
-                "type": "function",
-                "name": t.name,
-                "description": t.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": compact,
-                    "required": t.parameters.get("required").cloned().unwrap_or(json!([])),
-                },
-                "strict": null,
-            })
-        }).collect()
-    }
-}
-
-/// Retryable status codes for Codex API.
-fn is_codex_retryable(status: u16) -> bool {
-    matches!(status, 429 | 500 | 502 | 503 | 504)
-}
-
-#[async_trait]
-impl LlmBridge for CodexClient {
-    async fn stream(
-        &self,
-        system_prompt: &str,
-        messages: &[LlmMessage],
-        tools: &[ToolDefinition],
-        options: &StreamOptions,
-    ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
-        let (tx, rx) = mpsc::channel(256);
-
-        // Re-resolve credentials on each request (handles /login mid-session, token refresh)
-        let (jwt_token, account_id) = match crate::auth::resolve_with_refresh("openai-codex").await {
-            Some((token, true)) if token.starts_with("eyJ") => {
-                let aid = crate::auth::read_credential_extra("openai-codex", "accountId")
-                    .or_else(|| crate::auth::extract_jwt_claim(
-                        &token, "https://api.openai.com/auth", "chatgpt_account_id"
-                    ))
-                    .unwrap_or_else(|| self.account_id.clone());
-                (token, aid)
-            }
-            _ => {
-                tracing::warn!("Codex credential re-resolution failed — using startup credentials");
-                (self.jwt_token.clone(), self.account_id.clone())
-            }
-        };
-
-        let model = options.model.as_deref()
-            .and_then(|m| m.strip_prefix("openai-codex:"))
-            .or_else(|| options.model.as_deref().and_then(|m| m.strip_prefix("openai:")))
-            .unwrap_or("gpt-5.3-codex-spark");
-
-        let input = Self::build_input(messages);
-        let wire_tools = Self::build_tools(tools);
-        let tool_count = wire_tools.len();
-
-        let mut body = json!({
-            "model": model,
-            "store": false,
-            "stream": true,
-            "instructions": system_prompt,
-            "input": input,
-            "text": {"verbosity": "medium"},
-            "include": ["reasoning.encrypted_content"],
-            "tool_choice": "auto",
-            "parallel_tool_calls": true,
-        });
-
-        if !wire_tools.is_empty() {
-            body["tools"] = Value::Array(wire_tools);
-        }
-
-        if let Some(ref level) = options.reasoning {
-            body["reasoning"] = json!({
-                "effort": match level.as_str() {
-                    "low" | "minimal" => "low",
-                    "medium" => "medium",
-                    "high" | "xhigh" => "high",
-                    _ => "medium",
-                },
-                "summary": "auto",
-            });
-        }
-
-        let url = format!("{}/codex/responses", self.base_url.trim_end_matches('/'));
-        let msg_count = input.len();
-        let system_len = system_prompt.len();
-        let body_size = serde_json::to_string(&body).map(|s| s.len()).unwrap_or(0);
-
-        tracing::debug!(
-            model,
-            tool_count,
-            msg_count,
-            system_len,
-            body_size,
-            url = %url,
-            "Codex Responses API streaming request"
-        );
-        tracing::trace!(body = %serde_json::to_string(&body).unwrap_or_default(), "request body");
-
-        // Retry loop for transient errors
-        let max_retries = 3u32;
-        let base_delay = std::time::Duration::from_secs(1);
-        let mut last_error = String::new();
-
-        for attempt in 0..=max_retries {
-            let response = self.client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", jwt_token))
-                .header("chatgpt-account-id", &account_id)
-                .header("originator", "omegon")
-                .header("OpenAI-Beta", "responses=experimental")
-                .header("accept", "text/event-stream")
-                .header("content-type", "application/json")
-                .header("user-agent", format!("omegon ({} {}; {})",
-                    std::env::consts::OS, std::env::consts::ARCH, env!("CARGO_PKG_VERSION")))
-                .json(&body)
-                .send()
-                .await;
-
-            match response {
-                Ok(resp) if resp.status().is_success() => {
-                    tracing::debug!(status = %resp.status(), attempt, "Codex response OK — starting SSE stream");
-                    let tx_clone = tx.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = parse_codex_stream(resp, &tx_clone).await {
-                            let _ = tx_clone.send(LlmEvent::Error { message: format!("{e}") }).await;
-                        }
-                    });
-                    return Ok(rx);
-                }
-                Ok(resp) => {
-                    let status = resp.status().as_u16();
-                    let err_body = resp.text().await.unwrap_or_default();
-
-                    // Parse friendly error message
-                    let user_msg = serde_json::from_str::<Value>(&err_body).ok()
-                        .and_then(|v| {
-                            v["error"]["message"].as_str()
-                                .or_else(|| v["detail"].as_str())
-                                .map(String::from)
-                        })
-                        .unwrap_or_else(|| err_body.chars().take(200).collect());
-
-                    if attempt < max_retries && is_codex_retryable(status) {
-                        let delay = base_delay * 2u32.pow(attempt);
-                        tracing::warn!(status, attempt, delay_ms = delay.as_millis(), "Codex retryable error — waiting");
-                        tokio::time::sleep(delay).await;
-                        last_error = format!("Codex {status}: {user_msg}");
-                        continue;
-                    }
-
-                    tracing::error!(status, error = %user_msg, "Codex API error (non-retryable or max retries)");
-                    let _ = tx.send(LlmEvent::Error {
-                        message: format!("Codex {status}: {user_msg}")
-                    }).await;
-                    return Ok(rx);
-                }
-                Err(e) => {
-                    if attempt < max_retries {
-                        let delay = base_delay * 2u32.pow(attempt);
-                        tracing::warn!(error = %e, attempt, "Codex network error — retrying");
-                        tokio::time::sleep(delay).await;
-                        last_error = format!("Network error: {e}");
-                        continue;
-                    }
-                    let _ = tx.send(LlmEvent::Error {
-                        message: format!("Codex connection failed after {max_retries} retries: {last_error}")
-                    }).await;
-                    return Ok(rx);
-                }
-            }
-        }
-
-        let _ = tx.send(LlmEvent::Error {
-            message: format!("Codex request failed after {max_retries} retries: {last_error}")
-        }).await;
-        Ok(rx)
-    }
-}
-
-/// Parse the Codex Responses API SSE stream.
-///
-/// The Responses API uses a completely different event structure from Chat Completions.
-/// Key events:
-///   - response.output_item.added → new item (reasoning, message, function_call)
-///   - response.output_text.delta → text content delta
-///   - response.reasoning_summary_text.delta → thinking delta
-///   - response.function_call_arguments.delta → tool call arguments delta
-///   - response.output_item.done → item complete
-///   - response.completed → full response done with usage
-///   - response.failed / error → error
-async fn parse_codex_stream(
-    response: reqwest::Response,
-    tx: &mpsc::Sender<LlmEvent>,
-) -> anyhow::Result<()> {
-    let mut full_text = String::new();
-    let mut current_item_type: Option<String> = None;
-    let mut current_text = String::new();
-    let mut current_thinking = String::new();
-
-    // Tool call tracking: call_id, item_id, name, args_json
-    struct CodexToolCall {
-        call_id: String,
-        item_id: String,
-        name: String,
-        args_json: String,
-    }
-    let mut tool_calls: Vec<CodexToolCall> = Vec::new();
-    let mut completed_tool_calls: Vec<Value> = Vec::new();
-
-    let _ = tx.try_send(LlmEvent::Start);
-
-    let mut event_count = 0u32;
-
-    process_sse(response, |data| {
-        let Ok(event) = serde_json::from_str::<Value>(data) else {
-            tracing::warn!(data, "Codex: failed to parse SSE event");
-            return true;
-        };
-        let etype = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        event_count += 1;
-        tracing::trace!(event_type = etype, n = event_count, "Codex SSE event");
-
-        match etype {
-            // ── New output item ──────────────────────────────────────────
-            "response.output_item.added" => {
-                let item = &event["item"];
-                let item_type = item["type"].as_str().unwrap_or("");
-
-                match item_type {
-                    "reasoning" => {
-                        current_item_type = Some("reasoning".into());
-                        current_thinking.clear();
-                        let _ = tx.try_send(LlmEvent::ThinkingStart);
-                    }
-                    "message" => {
-                        current_item_type = Some("message".into());
-                        current_text.clear();
-                        let _ = tx.try_send(LlmEvent::TextStart);
-                    }
-                    "function_call" => {
-                        current_item_type = Some("function_call".into());
-                        let call_id = item["call_id"].as_str().unwrap_or("").to_string();
-                        let item_id = item["id"].as_str().unwrap_or("").to_string();
-                        let name = item["name"].as_str().unwrap_or("").to_string();
-                        tracing::debug!(call_id = %call_id, item_id = %item_id, name = %name, "Codex function_call started");
-                        tool_calls.push(CodexToolCall {
-                            call_id,
-                            item_id,
-                            name,
-                            args_json: String::new(),
-                        });
-                        let _ = tx.try_send(LlmEvent::ToolCallStart);
-                    }
-                    _ => {
-                        tracing::trace!(item_type, "Codex: unknown output item type");
-                    }
-                }
-            }
-
-            // ── Text deltas ──────────────────────────────────────────────
-            "response.output_text.delta" => {
-                let delta = event["delta"].as_str().unwrap_or("");
-                full_text.push_str(delta);
-                current_text.push_str(delta);
-                let _ = tx.try_send(LlmEvent::TextDelta { delta: delta.to_string() });
-            }
-
-            // ── Reasoning (thinking) deltas ──────────────────────────────
-            "response.reasoning_summary_text.delta" => {
-                let delta = event["delta"].as_str().unwrap_or("");
-                current_thinking.push_str(delta);
-                let _ = tx.try_send(LlmEvent::ThinkingDelta { delta: delta.to_string() });
-            }
-            "response.reasoning_summary_part.done" => {
-                // Add separator between reasoning summary parts
-                current_thinking.push_str("\n\n");
-                let _ = tx.try_send(LlmEvent::ThinkingDelta { delta: "\n\n".to_string() });
-            }
-
-            // ── Tool call argument deltas ────────────────────────────────
-            "response.function_call_arguments.delta" => {
-                let delta = event["delta"].as_str().unwrap_or("");
-                if let Some(tc) = tool_calls.last_mut() {
-                    tc.args_json.push_str(delta);
-                }
-            }
-            "response.function_call_arguments.done" => {
-                // Final arguments — overwrite partial
-                if let Some(tc) = tool_calls.last_mut()
-                    && let Some(args) = event["arguments"].as_str() {
-                        tc.args_json = args.to_string();
-                    }
-            }
-
-            // ── Content part events (for message items) ──────────────────
-            "response.content_part.added" | "response.reasoning_summary_part.added" => {
-                // Structural events — no action needed for streaming
-            }
-
-            // ── Item complete ────────────────────────────────────────────
-            "response.output_item.done" => {
-                let item = &event["item"];
-                let item_type = item["type"].as_str().unwrap_or("");
-
-                match item_type {
-                    "reasoning" => {
-                        let _ = tx.try_send(LlmEvent::ThinkingEnd);
-                    }
-                    "message" => {
-                        // Extract final text from the completed item
-                        if let Some(content) = item["content"].as_array() {
-                            let final_text: String = content.iter()
-                                .filter_map(|c| {
-                                    match c["type"].as_str() {
-                                        Some("output_text") => c["text"].as_str(),
-                                        Some("refusal") => c["refusal"].as_str(),
-                                        _ => None,
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                                .join("");
-                            if !final_text.is_empty() {
-                                current_text = final_text;
-                            }
-                        }
-                        let _ = tx.try_send(LlmEvent::TextEnd);
-                    }
-                    "function_call" => {
-                        let call_id = item["call_id"].as_str().unwrap_or("").to_string();
-                        let item_id = item["id"].as_str().unwrap_or("").to_string();
-                        let name = item["name"].as_str().unwrap_or("").to_string();
-                        let args_str = item["arguments"].as_str().unwrap_or("{}");
-                        let args: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
-                        let args = if args.is_object() { args } else { json!({}) };
-
-                        // Emit the compound tool call ID for multi-turn continuity
-                        let compound_id = format!("{call_id}|{item_id}");
-
-                        completed_tool_calls.push(json!({
-                            "id": compound_id,
-                            "name": name,
-                            "arguments": args,
-                        }));
-
-                        let _ = tx.try_send(LlmEvent::ToolCallEnd {
-                            tool_call: crate::bridge::WireToolCall {
-                                id: compound_id,
-                                name,
-                                arguments: args.clone(),
-                            }
-                        });
-                    }
-                    _ => {}
-                }
-                current_item_type = None;
-            }
-
-            // ── Response complete ────────────────────────────────────────
-            "response.completed" => {
-                tracing::debug!(
-                    text_len = full_text.len(),
-                    tool_calls = completed_tool_calls.len(),
-                    sse_events = event_count,
-                    "Codex response.completed — stream done"
-                );
-
-                let _ = tx.try_send(LlmEvent::Done {
-                    message: json!({
-                        "text": full_text,
-                        "tool_calls": completed_tool_calls,
-                    }),
-                });
-                return false; // stop
-            }
-
-            // ── Error events ─────────────────────────────────────────────
-            "response.failed" => {
-                let err_msg = event["response"]["error"]["message"]
-                    .as_str()
-                    .or_else(|| event["response"]["incomplete_details"]["reason"].as_str())
-                    .unwrap_or("Codex response failed");
-                tracing::error!(error = err_msg, "Codex response.failed");
-                let _ = tx.try_send(LlmEvent::Error {
-                    message: format!("Codex: {err_msg}")
-                });
-                return false;
-            }
-            "error" => {
-                let code = event["code"].as_str().unwrap_or("unknown");
-                let msg = event["message"].as_str().unwrap_or("unknown error");
-                tracing::error!(code, msg, "Codex error event");
-                let _ = tx.try_send(LlmEvent::Error {
-                    message: format!("Codex error ({code}): {msg}")
-                });
-                return false;
-            }
-
-            _ => {
-                tracing::trace!(event_type = etype, "Codex: unhandled SSE event type");
-            }
-        }
-        true
-    }).await
-}
-
-// ─── OpenAI-Compatible Providers ─────────────────────────────────────────────
-//
-// Many providers speak the OpenAI Chat Completions wire protocol with different
-// base URLs and API keys: OpenRouter, Groq, xAI, Cerebras, Mistral, HuggingFace,
-// and Ollama. Rather than creating N separate client structs, we parameterize
-// the OpenAIClient with the provider's base URL.
-//
-// Adding a new OpenAI-compatible provider:
-//   1. Add to auth::PROVIDERS with openai_compat_url = Some("https://...")
-//   2. That's it. auto_detect_bridge picks it up automatically.
-
-pub struct OpenAICompatClient {
+pub struct OpenRouterClient {
     inner: OpenAIClient,
-    provider_id: String,
-    default_model: Option<String>,
 }
 
-impl OpenAICompatClient {
-    pub fn new(api_key: String, base_url: String, provider_id: String) -> Self {
+impl OpenRouterClient {
+    pub fn new(api_key: String) -> Self {
         Self {
             inner: OpenAIClient {
                 client: reqwest::Client::new(),
                 api_key,
-                base_url,
+                base_url: "https://openrouter.ai/api".into(),
             },
-            default_model: None,
-            provider_id,
         }
     }
 
-    pub fn with_default_model(mut self, model: String) -> Self {
-        self.default_model = Some(model);
-        self
-    }
-
-    /// Resolve from env vars / auth.json using the canonical PROVIDERS map.
-    pub fn from_env(provider_id: &str) -> Option<Self> {
-        let provider = crate::auth::provider_by_id(provider_id)?;
-        let base_url = provider.openai_compat_url?;
-
-        // Ollama doesn't need an API key
-        if provider_id == "ollama" {
-            return Self::from_env_ollama();
-        }
-
-        let key = resolve_api_key(provider_id)?;
-
-        // OpenAI-specific: reject Codex OAuth JWTs — they need the
-        // Responses API (CodexClient), not Chat Completions.
-        if provider_id == "openai" && key.starts_with("eyJ") {
-            tracing::debug!("OpenAI credential is a Codex OAuth JWT — routing to CodexClient instead");
-            return None;
-        }
-
-        let mut client = Self::new(key, base_url.to_string(), provider_id.to_string());
-
-        // Provider-specific defaults
-        if provider_id == "openrouter" { client.default_model = Some("openrouter/auto".into()); }
-
-        Some(client)
-    }
-
-    /// Resolve Ollama specifically — no API key, just check if it's reachable.
-    /// This is a sync check that creates a client optimistically. The actual
-    /// connectivity is verified on first stream() call.
-    fn from_env_ollama() -> Option<Self> {
-        let host = std::env::var("OLLAMA_HOST")
-            .unwrap_or_else(|_| "http://localhost:11434".into());
-
-        // Quick check: can we connect? Use std::net to avoid async overhead.
-        let url_str = host.trim_end_matches('/');
-        let addr = url_str
-            .strip_prefix("http://").or_else(|| url_str.strip_prefix("https://"))
-            .unwrap_or(url_str);
-        match std::net::TcpStream::connect_timeout(
-            &addr.parse().unwrap_or_else(|_| std::net::SocketAddr::from(([127, 0, 0, 1], 11434))),
-            std::time::Duration::from_millis(200),
-        ) {
-            Ok(_) => {
-                tracing::debug!(host = %host, "Ollama server detected");
-                Some(Self::new(
-                    String::new(), // no API key
-                    host,
-                    "ollama".into(),
-                ))
-            }
-            Err(_) => {
-                tracing::trace!("Ollama not reachable at {} — skipping", host);
-                None
-            }
-        }
+    pub fn from_env() -> Option<Self> {
+        resolve_api_key("openrouter").map(Self::new)
     }
 }
 
 #[async_trait]
-impl LlmBridge for OpenAICompatClient {
+impl LlmBridge for OpenRouterClient {
     async fn stream(
         &self,
         system_prompt: &str,
@@ -1603,39 +928,21 @@ impl LlmBridge for OpenAICompatClient {
         tools: &[ToolDefinition],
         options: &StreamOptions,
     ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
+        // Delegate to the OpenAI client — OpenRouter is wire-compatible.
+        // Override model to use OpenRouter's free model selector if none specified.
         let mut opts = options.clone();
-
-        // Strip provider prefix from model name for the wire request
+        if opts.model.is_none() || opts.model.as_deref() == Some("") {
+            opts.model = Some("openrouter:openrouter/free".into());
+        }
+        // Rewrite model prefix: strip "openrouter:" for the wire request
         if let Some(ref mut m) = opts.model {
-            let prefix = format!("{}:", self.provider_id);
-            if let Some(stripped) = m.strip_prefix(&prefix) {
+            if let Some(stripped) = m.strip_prefix("openrouter:") {
                 *m = stripped.to_string();
             }
         }
-
-        // Apply default model if none specified
-        if (opts.model.is_none() || opts.model.as_deref() == Some(""))
-            && let Some(ref default) = self.default_model {
-                opts.model = Some(default.clone());
-            }
-
-        // For providers that aren't "openai", strip the "openai:" prefix
-        // that the OpenAI client expects (since it does strip_prefix("openai:"))
-        // We need the raw model name on the wire.
-        if self.provider_id != "openai"
-            && let Some(ref mut m) = opts.model {
-                // Wrap with a fake "openai:" prefix so OpenAIClient strips it correctly
-                if !m.starts_with("openai:") {
-                    *m = format!("openai:{m}");
-                }
-            }
-
         self.inner.stream(system_prompt, messages, tools, &opts).await
     }
 }
-
-// Legacy alias for backward compatibility in auto_detect_bridge
-pub type OpenRouterClient = OpenAICompatClient;
 
 #[cfg(test)]
 mod tests {
@@ -1914,365 +1221,5 @@ mod tests {
         };
         assert!(flags.contains("interleaved-thinking"), "API key must include thinking beta");
         assert!(!flags.contains("claude-code"), "API key must NOT include CC beta");
-    }
-
-    // ── Codex Responses API tests ───────────────────────────────────
-
-    #[test]
-    fn codex_build_input_user_message() {
-        let messages = vec![
-            LlmMessage::User { content: "hello".into(), images: vec![] },
-        ];
-        let input = CodexClient::build_input(&messages);
-        assert_eq!(input.len(), 1);
-        assert_eq!(input[0]["role"], "user");
-        assert_eq!(input[0]["content"][0]["type"], "input_text");
-        assert_eq!(input[0]["content"][0]["text"], "hello");
-    }
-
-    #[test]
-    fn codex_build_input_user_message_with_image() {
-        let messages = vec![
-            LlmMessage::User {
-                content: "describe this".into(),
-                images: vec![crate::bridge::ImageAttachment {
-                    data: "base64data".into(),
-                    media_type: "image/png".into(),
-                }],
-            },
-        ];
-        let input = CodexClient::build_input(&messages);
-        assert_eq!(input.len(), 1);
-        let content = input[0]["content"].as_array().unwrap();
-        assert_eq!(content.len(), 2); // image + text
-        assert_eq!(content[0]["type"], "input_image");
-        assert!(content[0]["image_url"].as_str().unwrap().starts_with("data:image/png;base64,"));
-        assert_eq!(content[1]["type"], "input_text");
-    }
-
-    #[test]
-    fn codex_build_input_assistant_text() {
-        let messages = vec![
-            LlmMessage::Assistant {
-                text: vec!["response text".into()],
-                thinking: vec![],
-                tool_calls: vec![],
-                raw: None,
-            },
-        ];
-        let input = CodexClient::build_input(&messages);
-        assert_eq!(input.len(), 1);
-        assert_eq!(input[0]["type"], "message");
-        assert_eq!(input[0]["role"], "assistant");
-        assert_eq!(input[0]["content"][0]["type"], "output_text");
-        assert_eq!(input[0]["content"][0]["text"], "response text");
-        assert_eq!(input[0]["status"], "completed");
-    }
-
-    #[test]
-    fn codex_build_input_tool_call() {
-        let messages = vec![
-            LlmMessage::Assistant {
-                text: vec![],
-                thinking: vec![],
-                tool_calls: vec![crate::bridge::WireToolCall {
-                    id: "call_abc123".into(),
-                    name: "bash".into(),
-                    arguments: json!({"command": "ls"}),
-                }],
-                raw: None,
-            },
-        ];
-        let input = CodexClient::build_input(&messages);
-        assert_eq!(input.len(), 1);
-        assert_eq!(input[0]["type"], "function_call");
-        assert_eq!(input[0]["call_id"], "call_abc123");
-        assert_eq!(input[0]["name"], "bash");
-        // id should have fc_ prefix
-        assert!(input[0]["id"].as_str().unwrap().starts_with("fc_"));
-    }
-
-    #[test]
-    fn codex_build_input_tool_call_compound_id() {
-        // When a tool call already has a compound ID (from a previous Codex response),
-        // preserve the existing call_id|item_id split
-        let messages = vec![
-            LlmMessage::Assistant {
-                text: vec![],
-                thinking: vec![],
-                tool_calls: vec![crate::bridge::WireToolCall {
-                    id: "call_abc|fc_xyz".into(),
-                    name: "read".into(),
-                    arguments: json!({"path": "test.rs"}),
-                }],
-                raw: None,
-            },
-        ];
-        let input = CodexClient::build_input(&messages);
-        assert_eq!(input[0]["call_id"], "call_abc");
-        assert_eq!(input[0]["id"], "fc_xyz");
-    }
-
-    #[test]
-    fn codex_build_input_tool_result() {
-        let messages = vec![
-            LlmMessage::ToolResult {
-                call_id: "call_abc|fc_xyz".into(),
-                tool_name: "bash".into(),
-                content: "output text".into(),
-                is_error: false,
-                args_summary: None,
-            },
-        ];
-        let input = CodexClient::build_input(&messages);
-        assert_eq!(input.len(), 1);
-        assert_eq!(input[0]["type"], "function_call_output");
-        assert_eq!(input[0]["call_id"], "call_abc"); // stripped compound ID
-        assert_eq!(input[0]["output"], "output text");
-    }
-
-    #[test]
-    fn codex_build_input_tool_result_simple_id() {
-        let messages = vec![
-            LlmMessage::ToolResult {
-                call_id: "call_abc".into(),
-                tool_name: "bash".into(),
-                content: "output".into(),
-                is_error: false,
-                args_summary: None,
-            },
-        ];
-        let input = CodexClient::build_input(&messages);
-        assert_eq!(input[0]["call_id"], "call_abc"); // preserved as-is
-    }
-
-    #[test]
-    fn codex_build_tools_format() {
-        let tools = vec![
-            ToolDefinition {
-                name: "bash".into(),
-                label: "bash".into(),
-                description: "run command".into(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "command": {"type": "string", "description": "command to run"},
-                    },
-                    "required": ["command"],
-                }),
-            },
-        ];
-        let wire = CodexClient::build_tools(&tools);
-        assert_eq!(wire.len(), 1);
-        assert_eq!(wire[0]["type"], "function");
-        assert_eq!(wire[0]["name"], "bash");
-        assert_eq!(wire[0]["description"], "run command");
-        assert!(wire[0]["strict"].is_null(), "strict should be null");
-        // Description should be stripped from parameters
-        assert!(wire[0]["parameters"]["properties"]["command"].get("description").is_none());
-        assert_eq!(wire[0]["parameters"]["properties"]["command"]["type"], "string");
-    }
-
-    #[test]
-    fn codex_retryable_status_codes() {
-        assert!(is_codex_retryable(429), "429 should be retryable");
-        assert!(is_codex_retryable(500), "500 should be retryable");
-        assert!(is_codex_retryable(502), "502 should be retryable");
-        assert!(is_codex_retryable(503), "503 should be retryable");
-        assert!(is_codex_retryable(504), "504 should be retryable");
-        assert!(!is_codex_retryable(400), "400 should not be retryable");
-        assert!(!is_codex_retryable(401), "401 should not be retryable");
-        assert!(!is_codex_retryable(403), "403 should not be retryable");
-        assert!(!is_codex_retryable(404), "404 should not be retryable");
-    }
-
-    #[test]
-    fn codex_client_construction() {
-        let client = CodexClient::new(
-            "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test".into(),
-            "account_123".into(),
-        );
-        assert_eq!(client.jwt_token, "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test");
-        assert_eq!(client.account_id, "account_123");
-        assert_eq!(client.base_url, CODEX_BASE_URL);
-    }
-
-    #[test]
-    fn codex_build_input_full_conversation() {
-        // Test a realistic multi-turn conversation
-        let messages = vec![
-            LlmMessage::User { content: "list files".into(), images: vec![] },
-            LlmMessage::Assistant {
-                text: vec!["I'll run ls.".into()],
-                thinking: vec![],
-                tool_calls: vec![crate::bridge::WireToolCall {
-                    id: "call_1|fc_1".into(),
-                    name: "bash".into(),
-                    arguments: json!({"command": "ls"}),
-                }],
-                raw: None,
-            },
-            LlmMessage::ToolResult {
-                call_id: "call_1|fc_1".into(),
-                tool_name: "bash".into(),
-                content: "file1.rs\nfile2.rs".into(),
-                is_error: false,
-                args_summary: None,
-            },
-        ];
-        let input = CodexClient::build_input(&messages);
-        assert_eq!(input.len(), 4); // user + message + function_call + function_call_output
-        assert_eq!(input[0]["role"], "user");
-        assert_eq!(input[1]["type"], "message");
-        assert_eq!(input[2]["type"], "function_call");
-        assert_eq!(input[3]["type"], "function_call_output");
-    }
-
-    #[test]
-    fn codex_build_input_empty_text_skipped() {
-        let messages = vec![
-            LlmMessage::Assistant {
-                text: vec!["".into()], // empty text should be skipped
-                thinking: vec![],
-                tool_calls: vec![],
-                raw: None,
-            },
-        ];
-        let input = CodexClient::build_input(&messages);
-        assert_eq!(input.len(), 0, "empty text blocks should be skipped");
-    }
-
-    #[test]
-    fn codex_build_input_null_arguments() {
-        // Tool call with null arguments should serialize as "{}"
-        let messages = vec![
-            LlmMessage::Assistant {
-                text: vec![],
-                thinking: vec![],
-                tool_calls: vec![crate::bridge::WireToolCall {
-                    id: "call_1".into(),
-                    name: "memory_query".into(),
-                    arguments: Value::Null,
-                }],
-                raw: None,
-            },
-        ];
-        let input = CodexClient::build_input(&messages);
-        assert_eq!(input[0]["arguments"], "{}");
-    }
-
-    // ── OpenAI-compatible provider tests ────────────────────────────
-
-    #[test]
-    fn openai_compat_providers_registered() {
-        // All OpenAI-compat inference providers must have openai_compat_url set
-        let compat_ids = ["openai", "openrouter", "groq", "xai", "mistral",
-                          "cerebras", "huggingface", "ollama"];
-        for id in &compat_ids {
-            let provider = crate::auth::provider_by_id(id);
-            assert!(provider.is_some(), "provider '{}' not found in PROVIDERS", id);
-            let p = provider.unwrap();
-            assert!(p.openai_compat_url.is_some(),
-                "provider '{}' should have openai_compat_url set", id);
-        }
-    }
-
-    #[test]
-    fn proprietary_providers_no_compat_url() {
-        // Anthropic and Codex use proprietary protocols
-        let anthropic = crate::auth::provider_by_id("anthropic").unwrap();
-        assert!(anthropic.openai_compat_url.is_none());
-        let codex = crate::auth::provider_by_id("openai-codex").unwrap();
-        assert!(codex.openai_compat_url.is_none());
-    }
-
-    #[test]
-    fn non_inference_providers_no_compat_url() {
-        let non_inference = ["brave", "tavily", "serper", "github", "gitlab"];
-        for id in &non_inference {
-            let p = crate::auth::provider_by_id(id).unwrap();
-            assert!(p.openai_compat_url.is_none(),
-                "non-inference provider '{}' should not have openai_compat_url", id);
-        }
-    }
-
-    #[test]
-    fn compat_client_construction() {
-        let client = OpenAICompatClient::new(
-            "sk-test".into(),
-            "https://api.groq.com/openai".into(),
-            "groq".into(),
-        );
-        assert_eq!(client.provider_id, "groq");
-        assert_eq!(client.inner.base_url, "https://api.groq.com/openai");
-    }
-
-    #[test]
-    fn compat_client_with_default_model() {
-        let client = OpenAICompatClient::new(
-            "sk-test".into(),
-            "https://openrouter.ai/api".into(),
-            "openrouter".into(),
-        ).with_default_model("openrouter/auto".into());
-        assert_eq!(client.default_model, Some("openrouter/auto".into()));
-    }
-
-    #[test]
-    fn compat_client_openai_jwt_rejected() {
-        // A JWT token for the "openai" provider should be rejected
-        // (it needs CodexClient, not Chat Completions)
-        let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test.sig";
-        let starts_with_eyj = jwt.starts_with("eyJ");
-        assert!(starts_with_eyj, "test JWT should start with eyJ");
-        // The from_env logic checks this — we verify the condition
-        let provider_id = "openai";
-        let should_reject = provider_id == "openai" && starts_with_eyj;
-        assert!(should_reject, "OpenAI provider should reject JWT tokens");
-    }
-
-    #[test]
-    fn ollama_provider_in_registry() {
-        let ollama = crate::auth::provider_by_id("ollama").unwrap();
-        assert_eq!(ollama.display_name, "Ollama (Local)");
-        assert_eq!(ollama.openai_compat_url, Some("http://localhost:11434"));
-        assert_eq!(ollama.env_vars, &["OLLAMA_HOST"]);
-    }
-
-    #[test]
-    fn huggingface_provider_has_correct_url() {
-        let hf = crate::auth::provider_by_id("huggingface").unwrap();
-        assert_eq!(hf.openai_compat_url, Some("https://router.huggingface.co"));
-        assert!(hf.env_vars.contains(&"HF_TOKEN"));
-    }
-
-    #[test]
-    fn all_provider_ids_unique() {
-        let ids: Vec<_> = crate::auth::PROVIDERS.iter().map(|p| p.id).collect();
-        let mut seen = std::collections::HashSet::new();
-        for id in &ids {
-            assert!(seen.insert(id), "duplicate provider id: {}", id);
-        }
-    }
-
-    #[test]
-    fn fallback_order_covers_inference_providers() {
-        // The FALLBACK_ORDER in auto_detect_bridge should include all
-        // inference-capable providers
-        let fallback: &[&str] = &[
-            "anthropic", "openai", "openai-codex",
-            "groq", "xai", "mistral", "huggingface", "cerebras",
-            "openrouter", "ollama",
-        ];
-        // Every provider with openai_compat_url should be in the fallback
-        for p in crate::auth::PROVIDERS.iter() {
-            if p.openai_compat_url.is_some() || p.id == "anthropic" || p.id == "openai-codex" {
-                // Skip non-inference providers
-                if ["brave", "tavily", "serper", "github", "gitlab"].contains(&p.id) {
-                    continue;
-                }
-                assert!(fallback.contains(&p.id),
-                    "inference provider '{}' missing from FALLBACK_ORDER", p.id);
-            }
-        }
     }
 }

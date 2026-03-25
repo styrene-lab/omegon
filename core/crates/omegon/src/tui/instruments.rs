@@ -16,6 +16,20 @@
 
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
+use super::theme::Theme;
+
+/// Scale an RGB color's brightness.
+fn dim_color(c: Color, factor: f64) -> Color {
+    if let Color::Rgb(r, g, b) = c {
+        Color::Rgb(
+            (r as f64 * factor) as u8,
+            (g as f64 * factor) as u8,
+            (b as f64 * factor) as u8,
+        )
+    } else {
+        c
+    }
+}
 
 // ─── Color ramp (CIE L* perceptual) ────────────────────────────────────
 
@@ -140,6 +154,8 @@ pub struct InstrumentPanel {
     minds: Vec<MindState>,
     tools: Vec<ToolEntry>,
     pub focus_mode: bool,
+    /// True after the first tool call — panel borders brighten on first fire.
+    has_ever_fired: bool,
 }
 
 impl Default for InstrumentPanel {
@@ -157,6 +173,7 @@ impl Default for InstrumentPanel {
             ],
             tools: Vec::new(),
             focus_mode: false,
+            has_ever_fired: false,
         }
     }
 }
@@ -194,6 +211,9 @@ impl InstrumentPanel {
         self.thinking_intensity += (target - self.thinking_intensity) * dt * 3.0;
 
         // Tool: register call
+        if tool_name.is_some() {
+            self.has_ever_fired = true;
+        }
         if let Some(name) = tool_name {
             if let Some(entry) = self.tools.iter_mut().find(|t| t.name == name) {
                 entry.last_called = self.time;
@@ -216,8 +236,8 @@ impl InstrumentPanel {
         }
 
         // Memory: pluck the string
-        if let Some((mind_idx, direction)) = memory_op
-            && mind_idx < self.minds.len() {
+        if let Some((mind_idx, direction)) = memory_op {
+            if mind_idx < self.minds.len() {
                 if !self.minds[mind_idx].active {
                     self.minds[mind_idx].active = true;
                     self.minds[mind_idx].wave = vec![0.0; 80];
@@ -225,6 +245,7 @@ impl InstrumentPanel {
                 }
                 self.minds[mind_idx].pluck(direction);
             }
+        }
 
         // Update wave physics
         for mind in &mut self.minds {
@@ -241,30 +262,30 @@ impl InstrumentPanel {
 
     pub fn toggle_focus(&mut self) { self.focus_mode = !self.focus_mode; }
 
-    /// Render the instrument panel, with optional tutorial highlight.
-    pub fn render_with_highlight(&mut self, area: Rect, frame: &mut Frame, highlight: bool, theme: &dyn super::theme::Theme) {
+    pub fn render(&mut self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         if area.width < 20 || area.height < 4 { return; }
+
+        // Dim borders at idle, theme-bright after first tool call
+        let (border, label) = if self.has_ever_fired {
+            (t.border_dim(), t.dim())
+        } else {
+            (dim_color(t.border_dim(), 0.5), dim_color(t.dim(), 0.55))
+        };
 
         let panels = Layout::horizontal([
             Constraint::Percentage(55),
             Constraint::Percentage(45),
         ]).split(area);
 
-        let border_color = if highlight { theme.accent_bright() } else { Color::Rgb(20, 40, 55) };
-        self.render_inference_with_border(panels[0], frame, border_color);
-        self.render_tools_with_border(panels[1], frame, border_color);
+        self.render_inference(panels[0], frame, border, label);
+        self.render_tools(panels[1], frame, border, label);
     }
 
-    fn render_inference_with_border(&self, area: Rect, frame: &mut Frame, border_color: Color) {
-        let title_color = if border_color == Color::Rgb(20, 40, 55) {
-            Color::Rgb(64, 88, 112) // default muted title
-        } else {
-            border_color // highlight: title matches border
-        };
+    fn render_inference(&self, area: Rect, frame: &mut Frame, border: Color, label: Color) {
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border_color))
-            .title(Span::styled(" inference ", Style::default().fg(title_color)));
+            .border_style(Style::default().fg(border))
+            .title(Span::styled(" inference ", Style::default().fg(label)));
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if inner.width < 10 || inner.height < 3 { return; }
@@ -273,41 +294,9 @@ impl InstrumentPanel {
         let active_minds: Vec<usize> = self.minds.iter().enumerate()
             .filter(|(_, m)| m.active).map(|(i, _)| i).collect();
 
-        // Idle state — show ready indicator when context is empty and no thinking
-        if self.context_fill < 0.001 && !self.thinking_active {
-            let hints = [
-                ("  ready", Color::Rgb(48, 80, 100)),
-                ("", Color::Rgb(36, 52, 68)),
-                ("  context fill and thinking", Color::Rgb(36, 52, 68)),
-                ("  activity shown here", Color::Rgb(36, 52, 68)),
-            ];
-            // Show hints in upper portion
-            for (row, (text, color)) in hints.iter().enumerate() {
-                let y = inner.y + row as u16;
-                if y >= inner.bottom() { break; }
-                for (i, ch) in text.chars().enumerate() {
-                    let x = inner.x + i as u16;
-                    if x >= inner.right() { break; }
-                    if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
-                        cell.set_char(ch); cell.set_fg(*color); cell.set_bg(bg_color());
-                    }
-                }
-            }
-            // Still render memory strings below the hints if minds exist
-            if !active_minds.is_empty() && inner.height > 5 {
-                let tree_area = Rect {
-                    x: area.x, y: inner.y + 5,
-                    width: inner.width + 1,
-                    height: inner.height.saturating_sub(5),
-                };
-                self.render_memory_strings(&active_minds, tree_area, buf);
-            }
-            return;
-        }
-
-        // Context bar: single row
-        let bar_h = 1u16;
-        let bar_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
+        // Context bar: top 2 rows
+        let bar_h = 2u16.min(inner.height);
+        let bar_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: bar_h };
         self.render_context_bar(bar_area, buf);
 
         // Tree + memory strings: break through the left border
@@ -325,11 +314,9 @@ impl InstrumentPanel {
 
     fn render_context_bar(&self, area: Rect, buf: &mut Buffer) {
         let w = area.width as usize;
-        // Reserve 5 chars at the end for " XX%" label
-        let bar_w = w.saturating_sub(5);
-        let fill_cols = (self.context_fill * bar_w as f64) as usize;
+        let fill_cols = (self.context_fill * w as f64) as usize;
 
-        for x in 0..bar_w {
+        for x in 0..w {
             let intensity = if x < fill_cols {
                 (x as f64 / fill_cols.max(1) as f64) * self.context_fill
             } else { 0.0 };
@@ -357,15 +344,14 @@ impl InstrumentPanel {
             }
         }
 
-        // Inline percentage at end of bar row
-        {
-            let pct = (self.context_fill * 70.0) as u32;
-            let label = format!("{:>3}%", pct);
+        // Row 2: percentage
+        if area.height > 1 {
+            let pct = (self.context_fill * 70.0) as u32; // show actual %, not normalized
+            let label = format!(" {}%", pct);
             let color = intensity_color(self.context_fill);
             for (i, ch) in label.chars().enumerate() {
-                let x = area.x + bar_w as u16 + 1 + i as u16;
-                if x >= area.right() { break; }
-                if let Some(cell) = buf.cell_mut(Position::new(x, area.y)) {
+                if i >= w { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(area.x + i as u16, area.y + 1)) {
                     cell.set_char(ch);
                     cell.set_fg(color);
                     cell.set_bg(bg_color());
@@ -396,11 +382,12 @@ impl InstrumentPanel {
             // Vertical trunk on earlier rows
             for prev in 0..row_idx {
                 let py = area.y + prev as u16;
-                if let Some(cell) = buf.cell_mut(Position::new(area.x, py))
-                    && cell.symbol() != "├" && cell.symbol() != "└" {
+                if let Some(cell) = buf.cell_mut(Position::new(area.x, py)) {
+                    if cell.symbol() != "├" && cell.symbol() != "└" {
                         cell.set_char('│');
                         cell.set_fg(Color::Rgb(32, 72, 96));
                     }
+                }
             }
 
             // Mind name + fact count
@@ -468,16 +455,11 @@ impl InstrumentPanel {
         }
     }
 
-    fn render_tools_with_border(&self, area: Rect, frame: &mut Frame, border_color: Color) {
-        let title_color = if border_color == Color::Rgb(20, 40, 55) {
-            Color::Rgb(64, 88, 112)
-        } else {
-            border_color
-        };
+    fn render_tools(&self, area: Rect, frame: &mut Frame, border: Color, label: Color) {
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border_color))
-            .title(Span::styled(" tools ", Style::default().fg(title_color)));
+            .border_style(Style::default().fg(border))
+            .title(Span::styled(" tools ", Style::default().fg(label)));
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if inner.width < 15 || inner.height < 2 { return; }
@@ -486,30 +468,6 @@ impl InstrumentPanel {
         let w = inner.width as usize;
         let name_w = 15.min(w / 2);
         let bar_w = w.saturating_sub(name_w + 6).max(2);
-
-        // Idle state — show hints when no tools have been called yet
-        if self.tools.is_empty() {
-            let hints = [
-                ("", Color::Rgb(48, 64, 80)),
-                ("  tools appear here as", Color::Rgb(48, 64, 80)),
-                ("  the agent calls them", Color::Rgb(48, 64, 80)),
-                ("", Color::Rgb(48, 64, 80)),
-                ("  each shows a recency", Color::Rgb(36, 52, 68)),
-                ("  bar and time elapsed", Color::Rgb(36, 52, 68)),
-            ];
-            for (row, (text, color)) in hints.iter().enumerate() {
-                let y = inner.y + row as u16;
-                if y >= inner.bottom() { break; }
-                for (i, ch) in text.chars().enumerate() {
-                    let x = inner.x + i as u16;
-                    if x >= inner.right() { break; }
-                    if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
-                        cell.set_char(ch); cell.set_fg(*color); cell.set_bg(bg_color());
-                    }
-                }
-            }
-            return;
-        }
 
         // Sort by recency
         let mut sorted: Vec<&ToolEntry> = self.tools.iter().collect();
@@ -621,7 +579,8 @@ mod tests {
         let area = Rect::new(0, 0, 96, 12);
         let backend = ratatui::backend::TestBackend::new(96, 12);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
-        terminal.draw(|f| panel.render_with_highlight(area, f, false, &crate::tui::theme::Alpharius)).unwrap();
+        let t = crate::tui::theme::Alpharius;
+        terminal.draw(|f| panel.render(area, f, &t)).unwrap();
     }
 
     #[test]
