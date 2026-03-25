@@ -899,6 +899,24 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         sub => format!("Unknown: /secrets {sub}\n\nType /secrets to see usage."),
                     };
                     let _ = events_tx.send(AgentEvent::SystemNotification { message });
+                } else if name == "bridge_redetect" {
+                    // Re-detect and hot-swap bridge after API key stored via /login
+                    let detect_model = format!("{args}:auto");
+                    let bridge_clone = bridge.clone();
+                    let settings_clone = shared_settings.clone();
+                    let events_tx_clone = events_tx.clone();
+                    let provider_name = args.clone();
+                    tokio::spawn(async move {
+                        if let Some(new_bridge) = providers::auto_detect_bridge(&detect_model).await {
+                            let mut guard = bridge_clone.write().await;
+                            *guard = new_bridge;
+                            if let Ok(mut s) = settings_clone.lock() { s.provider_connected = true; }
+                            tracing::info!("bridge hot-swapped after API key stored for {}", provider_name);
+                            let _ = events_tx_clone.send(AgentEvent::SystemNotification {
+                                message: "✓ Provider connected — you can send messages now.".to_string(),
+                            });
+                        }
+                    });
                 } else if name.starts_with("auth_") {
                     match name.as_str() {
                         "auth_status" => {
@@ -946,7 +964,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                     "anthropic" | "claude" => {
                                         auth::login_anthropic_with_progress(progress).await
                                     }
-                                    _ => Err(anyhow::anyhow!("OAuth not supported for {}.", provider_clone)),
+                                    "openai-codex" | "openai" => {
+                                        auth::login_openai_with_progress(progress).await
+                                    }
+                                    _ => Err(anyhow::anyhow!("OAuth not supported for {}. Use API key instead.", provider_clone)),
                                 };
                                 let message = match &result {
                                     Ok(_) => format!("✓ Successfully logged in to {}", provider_clone),

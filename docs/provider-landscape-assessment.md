@@ -1,11 +1,11 @@
 ---
 id: provider-landscape-assessment
 title: Provider landscape assessment — gap analysis against upstream and strategic positioning
-status: decided
+status: implemented
 parent: bridge-provider-routing
 tags: [providers, architecture, assessment, strategy, local-inference, google, huggingface]
 open_questions: []
-jj_change_id: mmmmlostyoqwkvrxnorxvkuysmymqtxs
+jj_change_id: syvtxqvswmlukkmvzlpmmoxxqlsluysu
 ---
 
 # Provider landscape assessment — gap analysis against upstream and strategic positioning

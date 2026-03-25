@@ -363,25 +363,28 @@ impl App {
 
     fn open_login_selector(&mut self) {
         // Build from canonical provider map — single source of truth
-        let options: Vec<selector::SelectOption> = crate::auth::PROVIDERS.iter().map(|p| {
-            let configured = p.env_vars.iter().any(|v| std::env::var(v).is_ok_and(|s| !s.is_empty()))
-                || crate::auth::read_credentials(p.auth_key)
-                    .is_some_and(|c| !c.access.is_empty());
-            selector::SelectOption {
-                value: p.id.to_string(),
-                label: if configured {
-                    format!("✓ {}", p.display_name)
-                } else {
-                    format!("  {}", p.display_name)
-                },
-                description: if configured {
-                    "configured ✓".into()
-                } else {
-                    p.description.to_string()
-                },
-                active: configured,
-            }
-        }).collect();
+        let options: Vec<selector::SelectOption> = crate::auth::PROVIDERS.iter()
+            // Skip providers that don't need login (Ollama = no auth, just needs to be running)
+            .filter(|p| p.id != "ollama")
+            .map(|p| {
+                let configured = p.env_vars.iter().any(|v| std::env::var(v).is_ok_and(|s| !s.is_empty()))
+                    || crate::auth::read_credentials(p.auth_key)
+                        .is_some_and(|c| !c.access.is_empty());
+                selector::SelectOption {
+                    value: p.id.to_string(),
+                    label: if configured {
+                        format!("✓ {}", p.display_name)
+                    } else {
+                        format!("  {}", p.display_name)
+                    },
+                    description: if configured {
+                        "configured ✓".into()
+                    } else {
+                        p.description.to_string()
+                    },
+                    active: configured,
+                }
+            }).collect();
         self.selector = Some(selector::Selector::new("Login — choose provider", options));
         self.selector_kind = Some(SelectorKind::LoginProvider);
     }
@@ -488,25 +491,13 @@ impl App {
                 }
             }
             SelectorKind::LoginProvider => {
-                // OAuth providers go through the auth login flow (opens browser)
-                // API key providers go through secret input mode (hidden input)
+                // Route login by auth method from the canonical provider map.
+                // OAuth providers open browser; API key providers show hidden input;
+                // Dynamic providers use CLI tools.
+                let provider_info = crate::auth::provider_by_id(&value);
+                let auth_method = provider_info.map(|p| p.auth_method);
+
                 match value.as_str() {
-                    // All LLM/search providers use API key input from the selector.
-                    // OAuth is available for Anthropic via `/login anthropic oauth`.
-                    "anthropic" | "openai" | "openrouter" | "brave" | "tavily" | "serper" | "huggingface" => {
-                        // Use canonical provider map to find the right env var
-                        let key_name = crate::auth::PROVIDERS.iter()
-                            .find(|p| p.id == value)
-                            .and_then(|p| p.env_vars.iter().find(|v| !v.contains("OAUTH")))
-                            .copied()
-                            .unwrap_or("API_KEY");
-                        self.editor.start_secret_input(key_name);
-                        let oauth_hint = match value.as_str() {
-                            "anthropic" => "\n  Or: /login anthropic oauth (Claude Pro/Max subscription)",
-                            _ => "",
-                        };
-                        Some(format!("🔒 Paste your {} API key (input is hidden):{oauth_hint}", value))
-                    }
                     "github" => {
                         // GitHub uses dynamic resolution via gh CLI
                         let _ = tx.try_send(TuiCommand::BusCommand {
@@ -515,11 +506,30 @@ impl App {
                         });
                         Some("✓ GITHUB_TOKEN → cmd:gh auth token (always fresh from gh CLI)".to_string())
                     }
-                    "gitlab" => {
-                        self.editor.start_secret_input("GITLAB_TOKEN");
-                        Some("🔒 Paste your GitLab token (input is hidden):".to_string())
+                    "openai-codex" => {
+                        // Codex uses OAuth flow
+                        let _ = tx.try_send(TuiCommand::BusCommand {
+                            name: "auth_login".to_string(),
+                            args: "openai-codex".to_string(),
+                        });
+                        Some("Opening browser for ChatGPT login…".to_string())
+                    }
+                    _ if auth_method == Some(crate::auth::AuthMethod::ApiKey) => {
+                        // API key providers: show hidden input with the right env var name
+                        let key_name = provider_info
+                            .and_then(|p| p.env_vars.iter().find(|v| !v.contains("OAUTH")))
+                            .copied()
+                            .unwrap_or("API_KEY");
+                        self.editor.start_secret_input(key_name);
+                        let oauth_hint = match value.as_str() {
+                            "anthropic" => "\n  Or: /login anthropic oauth (Claude Pro/Max subscription)",
+                            _ => "",
+                        };
+                        let display = provider_info.map(|p| p.display_name).unwrap_or(&value);
+                        Some(format!("🔒 Paste your {display} API key (input is hidden):{oauth_hint}"))
                     }
                     _ => {
+                        // OAuth or unknown providers — try the auth_login bus command
                         let _ = tx.try_send(TuiCommand::BusCommand {
                             name: "auth_login".to_string(),
                             args: value.clone(),
@@ -3073,6 +3083,13 @@ pub async fn run_tui(
                                             expires: u64::MAX,
                                         };
                                         let _ = crate::auth::write_credentials(p.auth_key, &creds);
+
+                                        // Hot-swap the bridge now that credentials are stored
+                                        let provider_id = p.id.to_string();
+                                        let _ = command_tx.send(TuiCommand::BusCommand {
+                                            name: "bridge_redetect".to_string(),
+                                            args: provider_id,
+                                        }).await;
                                     }
                                 }
                             }

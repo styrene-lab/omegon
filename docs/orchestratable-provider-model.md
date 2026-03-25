@@ -1,13 +1,13 @@
 ---
 id: orchestratable-provider-model
 title: Orchestratable provider model — treat providers as assignable resources, not user preferences
-status: implementing
+status: implemented
 parent: bridge-provider-routing
 tags: [architecture, providers, orchestration, cleave, local-inference, routing, strategic, epic]
 open_questions: []
 branches: ["feature/orchestratable-provider-model"]
 openspec_change: orchestratable-provider-model
-jj_change_id: nswxvwqzwlykkyuqxskszlmxkyvoqrol
+jj_change_id: syvtxqvswmlukkmvzlpmmoxxqlsluysu
 issue_type: epic
 priority: 1
 ---

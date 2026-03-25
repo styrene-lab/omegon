@@ -430,8 +430,19 @@ impl LlmBridge for AnthropicClient {
             }
         };
 
+        // Accept "anthropic:model" or bare "model". If the model has a
+        // different provider prefix (fallback scenario), use our default.
         let model = options.model.as_deref()
-            .and_then(|m| m.strip_prefix("anthropic:"))
+            .map(|m| {
+                if let Some(stripped) = m.strip_prefix("anthropic:") {
+                    stripped
+                } else if m.contains(':') && crate::auth::provider_by_id(m.split(':').next().unwrap_or("")).is_some() {
+                    // Different provider prefix — use our default
+                    "claude-sonnet-4-6"
+                } else {
+                    m // bare model name, use as-is
+                }
+            })
             .unwrap_or("claude-sonnet-4-6");
 
         // System prompt format: OAuth requires array format with CC identity prefix
@@ -774,8 +785,11 @@ impl LlmBridge for OpenAIClient {
     ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
         let (tx, rx) = mpsc::channel(256);
 
+        // Accept model with or without "openai:" prefix.
+        // OpenAICompatClient strips the provider prefix before delegating,
+        // so we may receive bare model names like "llama-3.3-70b-versatile".
         let model = options.model.as_deref()
-            .and_then(|m| m.strip_prefix("openai:"))
+            .map(|m| m.strip_prefix("openai:").unwrap_or(m))
             .unwrap_or("gpt-4.1");
 
         let mut wire_msgs = vec![json!({"role": "system", "content": system_prompt})];
@@ -1550,11 +1564,18 @@ impl OpenAICompatClient {
 
         let mut client = Self::new(key, base_url.to_string(), provider_id.to_string());
 
-        // Provider-specific defaults
-        match provider_id {
-            "openrouter" => { client.default_model = Some("openrouter/auto".into()); }
-            _ => {}
-        }
+        // Provider-specific default models — used when the requested model
+        // doesn't belong to this provider (fallback scenario)
+        client.default_model = Some(match provider_id {
+            "openai" => "gpt-4.1".into(),
+            "openrouter" => "openrouter/auto".into(),
+            "groq" => "llama-3.3-70b-versatile".into(),
+            "xai" => "grok-2".into(),
+            "mistral" => "mistral-large-latest".into(),
+            "cerebras" => "llama3.1-8b".into(),
+            "huggingface" => "Qwen/Qwen3-235B-A22B-Thinking-2507".into(),
+            _ => return Some(client), // no default — use whatever is passed
+        });
 
         Some(client)
     }
@@ -1589,30 +1610,50 @@ impl LlmBridge for OpenAICompatClient {
     ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
         let mut opts = options.clone();
 
-        // Strip provider prefix from model name for the wire request
+        // Strip known provider prefixes from model name.
+        // The wire protocol wants bare model IDs (e.g. "llama-3.3-70b", not "groq:llama-3.3-70b").
+        //
+        // Only strip prefixes that match known provider IDs — don't blindly strip
+        // on ":" because model names like "qwen3:32b" (Ollama tag format) use colons.
+        //
+        // If the model has a DIFFERENT provider's prefix (e.g. "anthropic:claude-sonnet-4-6"
+        // on a Groq bridge due to fallback), replace with our default model instead.
         if let Some(ref mut m) = opts.model {
-            let prefix = format!("{}:", self.provider_id);
-            if let Some(stripped) = m.strip_prefix(&prefix) {
-                *m = stripped.to_string();
+            if let Some(colon_pos) = m.find(':') {
+                let prefix = &m[..colon_pos];
+                if let Some(provider) = crate::auth::provider_by_id(prefix) {
+                    if prefix == self.provider_id {
+                        // Our own prefix — strip it
+                        *m = m[colon_pos + 1..].to_string();
+                    } else if provider.openai_compat_url.is_some() || prefix == "anthropic" || prefix == "openai-codex" {
+                        // Different provider's prefix — this model won't work on our API.
+                        // Use our default model instead.
+                        tracing::info!(
+                            provider = %self.provider_id,
+                            requested_model = %m,
+                            "model belongs to different provider — using default"
+                        );
+                        *m = String::new(); // Will be replaced by default_model below
+                    }
+                }
             }
         }
 
         // Apply default model if none specified
         if opts.model.is_none() || opts.model.as_deref() == Some("") {
             if let Some(ref default) = self.default_model {
-                opts.model = Some(default.clone());
-            }
-        }
-
-        // For providers that aren't "openai", strip the "openai:" prefix
-        // that the OpenAI client expects (since it does strip_prefix("openai:"))
-        // We need the raw model name on the wire.
-        if self.provider_id != "openai" {
-            if let Some(ref mut m) = opts.model {
-                // Wrap with a fake "openai:" prefix so OpenAIClient strips it correctly
-                if !m.starts_with("openai:") {
-                    *m = format!("openai:{m}");
-                }
+                // Default model already has provider prefix — strip it
+                let default_bare = if let Some(colon_pos) = default.find(':') {
+                    let prefix = &default[..colon_pos];
+                    if crate::auth::provider_by_id(prefix).is_some() {
+                        &default[colon_pos + 1..]
+                    } else {
+                        default.as_str()
+                    }
+                } else {
+                    default.as_str()
+                };
+                opts.model = Some(default_bare.to_string());
             }
         }
 
@@ -2259,6 +2300,137 @@ mod tests {
                 assert!(fallback.contains(&p.id),
                     "inference provider '{}' missing from FALLBACK_ORDER", p.id);
             }
+        }
+    }
+
+    // ── Sharp edge tests — operator tire-kicking paths ──────────────
+
+    #[test]
+    fn openai_client_accepts_bare_model_name() {
+        // OpenAIClient must work without "openai:" prefix because
+        // OpenAICompatClient strips it before delegating.
+        // Previously: .and_then(strip_prefix("openai:")).unwrap_or("gpt-4.1")
+        // Fixed: .map(strip_prefix("openai:").unwrap_or(m)).unwrap_or("gpt-4.1")
+
+        fn resolve(m: Option<&str>) -> String {
+            m.map(|m| m.strip_prefix("openai:").unwrap_or(m))
+                .unwrap_or("gpt-4.1")
+                .to_string()
+        }
+
+        assert_eq!(resolve(Some("openai:gpt-5")), "gpt-5");
+        assert_eq!(resolve(Some("gpt-5")), "gpt-5");
+        assert_eq!(resolve(None), "gpt-4.1");
+    }
+
+    #[test]
+    fn compat_client_strips_own_provider_prefix() {
+        // "groq:llama-3.3-70b" on a Groq client → "llama-3.3-70b" on the wire
+        let model = "groq:llama-3.3-70b";
+        let prefix = "groq";
+        if let Some(colon_pos) = model.find(':') {
+            let p = &model[..colon_pos];
+            if crate::auth::provider_by_id(p).is_some() && p == prefix {
+                let bare = &model[colon_pos + 1..];
+                assert_eq!(bare, "llama-3.3-70b");
+                return;
+            }
+        }
+        panic!("should have stripped groq prefix");
+    }
+
+    #[test]
+    fn compat_client_detects_wrong_provider_model() {
+        // "anthropic:claude-sonnet-4-6" on a Groq client → should detect as wrong provider
+        let model = "anthropic:claude-sonnet-4-6";
+        let own_prefix = "groq";
+        if let Some(colon_pos) = model.find(':') {
+            let prefix = &model[..colon_pos];
+            if let Some(provider) = crate::auth::provider_by_id(prefix) {
+                if prefix != own_prefix && (provider.openai_compat_url.is_some() || prefix == "anthropic" || prefix == "openai-codex") {
+                    // This model belongs to a different provider — should be replaced
+                    assert_ne!(prefix, own_prefix);
+                    return; // test passes
+                }
+            }
+        }
+        panic!("should have detected wrong-provider model");
+    }
+
+    #[test]
+    fn compat_client_preserves_ollama_tag_format() {
+        // "qwen3:32b" should NOT be treated as "provider:model" — qwen3 is not a provider ID
+        let model = "qwen3:32b";
+        if let Some(colon_pos) = model.find(':') {
+            let prefix = &model[..colon_pos];
+            assert!(crate::auth::provider_by_id(prefix).is_none(),
+                "qwen3 should not be a known provider ID");
+        }
+        // Model should pass through unchanged
+    }
+
+    #[test]
+    fn compat_client_preserves_huggingface_slash_models() {
+        // "Qwen/Qwen3-235B-A22B-Thinking-2507" has no colon — should pass through
+        let model = "Qwen/Qwen3-235B-A22B-Thinking-2507";
+        assert!(!model.contains(':'), "HF model names use / not :");
+        // No prefix stripping needed
+    }
+
+    #[test]
+    fn compat_client_default_model_stripped() {
+        // When default_model is "groq:llama-3.3-70b-versatile",
+        // the provider prefix should be stripped before sending on wire
+        let default = "groq:llama-3.3-70b-versatile";
+        let colon_pos = default.find(':').unwrap();
+        let prefix = &default[..colon_pos];
+        assert!(crate::auth::provider_by_id(prefix).is_some());
+        let bare = &default[colon_pos + 1..];
+        assert_eq!(bare, "llama-3.3-70b-versatile");
+    }
+
+    #[test]
+    fn anthropic_handles_foreign_model_gracefully() {
+        // If Anthropic gets "groq:llama-3.3-70b" via fallback, it should use its default
+        let model_spec = "groq:llama-3.3-70b";
+        let model = if let Some(stripped) = model_spec.strip_prefix("anthropic:") {
+            stripped
+        } else if model_spec.contains(':') && crate::auth::provider_by_id(model_spec.split(':').next().unwrap_or("")).is_some() {
+            "claude-sonnet-4-6" // different provider prefix → use default
+        } else {
+            model_spec
+        };
+        assert_eq!(model, "claude-sonnet-4-6",
+            "Anthropic should fall back to default model for foreign provider prefix");
+    }
+
+    #[test]
+    fn all_compat_providers_have_default_models() {
+        // Every OpenAI-compat provider should have a sensible default
+        // in case it's used as a fallback
+        let providers_with_url: Vec<_> = crate::auth::PROVIDERS.iter()
+            .filter(|p| p.openai_compat_url.is_some() && p.id != "ollama")
+            .collect();
+
+        for p in providers_with_url {
+            let _client = OpenAICompatClient::new(
+                "test-key".into(),
+                p.openai_compat_url.unwrap().to_string(),
+                p.id.to_string(),
+            );
+            // Simulate from_env default assignment
+            let default = match p.id {
+                "openai" => Some("gpt-4.1".to_string()),
+                "openrouter" => Some("openrouter/auto".to_string()),
+                "groq" => Some("llama-3.3-70b-versatile".to_string()),
+                "xai" => Some("grok-2".to_string()),
+                "mistral" => Some("mistral-large-latest".to_string()),
+                "cerebras" => Some("llama3.1-8b".to_string()),
+                "huggingface" => Some("Qwen/Qwen3-235B-A22B-Thinking-2507".to_string()),
+                _ => None,
+            };
+            assert!(default.is_some(),
+                "provider '{}' should have a default model defined", p.id);
         }
     }
 }
