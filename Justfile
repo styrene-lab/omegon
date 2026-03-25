@@ -294,6 +294,104 @@ setup-signing:
         echo "  → Get Info → Trust → Code Signing → Always Trust"
     fi
 
+# Publish: push to origin, trigger CI, build docs, link binary.
+# Run after `just sign` (or `just rc` if ad-hoc signing is fine).
+# Flow: just rc → just sign → just publish
+publish:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    BINARY="core/target/release/omegon"
+    VERSION=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+    TAG="v${VERSION}"
+
+    echo "╭──────────────────────────────────╮"
+    echo "│  Publishing omegon ${VERSION}    │"
+    echo "╰──────────────────────────────────╯"
+
+    # ── 1. Pre-flight checks ──────────────────────────────────
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "✗ Uncommitted changes. Commit or stash first."
+        exit 1
+    fi
+
+    if [ ! -f "$BINARY" ]; then
+        echo "✗ No binary at $BINARY — run 'just rc' first."
+        exit 1
+    fi
+
+    # Verify tag exists
+    if ! git tag --list "$TAG" | grep -q "$TAG"; then
+        echo "✗ Tag $TAG not found. Run 'just rc' or 'just release' first."
+        exit 1
+    fi
+
+    # Verify binary version matches
+    BINARY_VERSION=$("$BINARY" --version 2>/dev/null | head -1 || echo "unknown")
+    if ! echo "$BINARY_VERSION" | grep -q "$VERSION"; then
+        echo "✗ Binary version mismatch:"
+        echo "  Cargo.toml: $VERSION"
+        echo "  Binary:     $BINARY_VERSION"
+        echo "  Rebuild with: just rc"
+        exit 1
+    fi
+
+    echo "  Binary:  $BINARY_VERSION"
+
+    # Check signing status
+    SIGN_STATUS="unsigned"
+    if codesign -dvvv "$BINARY" 2>&1 | grep -q "Developer ID"; then
+        SIGN_STATUS="Developer ID (YubiKey)"
+    elif codesign -dvvv "$BINARY" 2>&1 | grep -q "Omegon Local Dev"; then
+        SIGN_STATUS="Omegon Local Dev (self-signed)"
+    elif codesign -dvvv "$BINARY" 2>&1 | grep -q "Signature=adhoc"; then
+        SIGN_STATUS="ad-hoc"
+    fi
+    echo "  Signing: $SIGN_STATUS"
+
+    # ── 2. Push to origin (triggers CI: release, npm, site) ──
+    echo ""
+    echo "Pushing to origin..."
+    git push origin main --tags
+
+    echo ""
+    echo "CI workflows triggered:"
+    echo "  • release.yml  → GitHub Release with cosign-signed binaries"
+    echo "  • publish.yml  → npm publish (if version changed)"
+    echo "  • site.yml     → omegon.styrene.dev docs rebuild"
+
+    # ── 3. Build docs site locally (verification) ─────────────
+    echo ""
+    echo "Building docs site locally..."
+    cd site
+    node scripts/build-design-tree.mjs 2>/dev/null
+    npx astro build 2>&1 | tail -5
+    PAGES=$(find dist -name '*.html' | wc -l | tr -d ' ')
+    echo "  Pages: $PAGES"
+    cd ..
+
+    # ── 4. Link the binary ────────────────────────────────────
+    echo ""
+    just link
+
+    # ── 5. Run post-publish smoke test ────────────────────────
+    echo ""
+    just smoke
+
+    # ── 6. Summary ────────────────────────────────────────────
+    echo ""
+    echo "╭──────────────────────────────────╮"
+    echo "│  ✓ Published ${VERSION}          │"
+    echo "╰──────────────────────────────────╯"
+    echo ""
+    echo "  Binary:   $(which omegon) → $BINARY"
+    echo "  Signing:  $SIGN_STATUS"
+    echo "  Docs:     $PAGES pages built → CI deploying to omegon.styrene.dev"
+    echo "  npm:      CI publishing to npmjs.com/package/omegon"
+    echo "  Release:  github.com/styrene-lab/omegon/releases/tag/$TAG"
+    echo ""
+    echo "  Monitor CI: gh run list --limit 3"
+
 # ─── TypeScript (omegon-pi) ─────────────────────────────────
 
 # Run all TS tests
