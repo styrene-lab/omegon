@@ -273,8 +273,8 @@ impl InstrumentPanel {
         };
 
         let panels = Layout::horizontal([
-            Constraint::Percentage(55),
-            Constraint::Percentage(45),
+            Constraint::Percentage(48),
+            Constraint::Percentage(52),
         ]).split(area);
 
         self.render_inference(panels[0], frame, border, label);
@@ -483,22 +483,23 @@ impl InstrumentPanel {
             let indicator = if age < 2.0 { "▸ " } else { "  " };
             let ind_color = if tool.is_error { Color::Rgb(224, 72, 72) }
                 else if age < 2.0 { Color::Rgb(42, 180, 200) }
-                else { Color::Rgb(20, 40, 55) };
-            // Tool colors: clean teal→amber gradient (not the CIE L* ramp which
-            // produces olive/muddy teal at mid-range that looks wrong for bars)
+                else { Color::Rgb(44, 80, 100) };
+            // Tool colors: accent teal family — bright when recent, muted when stale,
+            // always visible against the dark background.
             let tool_color = |r: f64| -> Color {
-                if r < 0.01 { return Color::Rgb(20, 30, 40); }
+                if r < 0.01 { return Color::Rgb(44, 80, 100); }
                 let r = r.clamp(0.0, 1.0);
-                // Dim teal at low recency, bright amber at high
+                // Teal ramp: dim teal → bright accent teal
                 Color::Rgb(
-                    (10.0 + r * 70.0) as u8,   // 10 → 80
-                    (30.0 + r * 20.0) as u8,    // 30 → 50
-                    (40.0 - r * 30.0) as u8,    // 40 → 10
+                    (24.0 + r * 20.0) as u8,    // 24 → 44
+                    (72.0 + r * 108.0) as u8,   // 72 → 180
+                    (92.0 + r * 108.0) as u8,    // 92 → 200
                 )
             };
             let name_color = if tool.is_error { Color::Rgb(224, 72, 72) }
-                else if recency > 0.1 { tool_color(recency) }
-                else { Color::Rgb(48, 64, 80) };
+                else if recency > 0.5 { Color::Rgb(42, 180, 200) }   // accent bright
+                else if recency > 0.1 { Color::Rgb(80, 140, 160) }   // mid teal
+                else { Color::Rgb(68, 108, 128) };                    // still readable
             let bar_filled = (recency * bar_w as f64) as usize;
             let bar_color = if tool.is_error { Color::Rgb(224, 72, 72) } else { tool_color(recency) };
 
@@ -527,19 +528,27 @@ impl InstrumentPanel {
                 if let Some(cell) = buf.cell_mut(Position::new(x, y)) { cell.set_char(' '); cell.set_bg(bg_color()); }
                 x += 1;
             }
+            // Activity bar: filled portion uses textured characters that
+            // alternate for visual rhythm. Empty portion uses dim dots.
+            const FILL_CHARS: [char; 4] = ['▰', '▰', '▱', '▰'];
             for i in 0..bar_w {
                 if x >= inner.right() { break; }
-                let ch = if i < bar_filled { '█' } else { '░' };
-                let c = if i < bar_filled { bar_color } else { Color::Rgb(10, 16, 24) };
+                let (ch, c) = if i < bar_filled {
+                    (FILL_CHARS[i % FILL_CHARS.len()], bar_color)
+                } else {
+                    ('·', Color::Rgb(32, 52, 64))
+                };
                 if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
                     cell.set_char(ch); cell.set_fg(c); cell.set_bg(bg_color());
                 }
                 x += 1;
             }
+            let time_color = if recency > 0.5 { Color::Rgb(100, 148, 164) }
+                else { Color::Rgb(72, 108, 128) };
             for ch in time_str.chars() {
                 if x >= inner.right() { break; }
                 if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
-                    cell.set_char(ch); cell.set_fg(Color::Rgb(48, 64, 80)); cell.set_bg(bg_color());
+                    cell.set_char(ch); cell.set_fg(time_color); cell.set_bg(bg_color());
                 }
                 x += 1;
             }
@@ -555,7 +564,7 @@ impl InstrumentPanel {
                 let x = inner.x + i as u16;
                 if x >= inner.right() { break; }
                 if let Some(cell) = buf.cell_mut(Position::new(x, footer_y)) {
-                    cell.set_char(ch); cell.set_fg(Color::Rgb(48, 64, 80)); cell.set_bg(bg_color());
+                    cell.set_char(ch); cell.set_fg(Color::Rgb(72, 108, 128)); cell.set_bg(bg_color());
                 }
             }
         }
