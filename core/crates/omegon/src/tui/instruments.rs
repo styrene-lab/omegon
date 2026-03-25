@@ -265,11 +265,12 @@ impl InstrumentPanel {
     pub fn render(&mut self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
         if area.width < 20 || area.height < 4 { return; }
 
-        // Dim borders at idle, theme-bright after first tool call
+        // Use same border brightness as other panels. Before first tool call,
+        // use the dim variant. After tools fire, use full border color.
         let (border, label) = if self.has_ever_fired {
-            (t.border_dim(), t.dim())
+            (t.border(), t.accent_muted())
         } else {
-            (dim_color(t.border_dim(), 0.5), dim_color(t.dim(), 0.55))
+            (t.border_dim(), t.dim())
         };
 
         let panels = Layout::horizontal([

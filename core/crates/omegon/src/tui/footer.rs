@@ -294,11 +294,11 @@ impl FooterData {
     fn card_block<'a>(title: &str, t: &dyn Theme) -> Block<'a> {
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(t.border_dim()).bg(t.footer_bg()))
+            .border_style(Style::default().fg(t.border()).bg(t.footer_bg()))
             .border_type(ratatui::widgets::BorderType::Rounded)
             .title(Span::styled(
                 format!(" {title} "),
-                Style::default().fg(t.muted()).bg(t.footer_bg()),
+                Style::default().fg(t.accent_muted()).bg(t.footer_bg()),
             ))
             .padding(Padding::horizontal(1))
             .style(Style::default().bg(t.footer_bg()))
