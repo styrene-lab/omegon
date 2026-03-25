@@ -35,19 +35,14 @@ fn dim_color(c: Color, factor: f64) -> Color {
 
 fn intensity_color(intensity: f64) -> Color {
     if intensity < 0.005 { return Color::Rgb(0, 1, 3); }
-    let linear = intensity.clamp(0.0, 1.0);
-    let i = if linear > 0.008856 { linear.cbrt() } else { linear * 7.787 + 16.0 / 116.0 };
-    let i = ((i - 0.138) / (1.0 - 0.138)).clamp(0.0, 1.0);
-    if i < 0.3 {
-        let t = i / 0.3;
-        Color::Rgb((1.0 + t * 3.0) as u8, (4.0 + t * 34.0) as u8, (6.0 + t * 30.0) as u8)
-    } else if i < 0.5 {
-        let t = (i - 0.3) / 0.2;
-        Color::Rgb((4.0 + t * 4.0) as u8, (38.0 + t * 10.0) as u8, (36.0 + t * 6.0) as u8)
-    } else {
-        let t = (i - 0.5) / 0.5;
-        Color::Rgb((8.0 + t * 82.0) as u8, (48.0 - t * 2.0) as u8, (42.0 - t * 34.0) as u8)
-    }
+    // Alpharius teal ramp — avoids the green/olive mid-range of the old CIE L* curve.
+    // sqrt for perceptual evenness: dim values get more color range.
+    let i = intensity.clamp(0.0, 1.0).sqrt();
+    Color::Rgb(
+        (1.0 + i * 41.0) as u8,    // 1 → 42
+        (2.0 + i * 178.0) as u8,   // 2 → 180
+        (3.0 + i * 197.0) as u8,   // 3 → 200
+    )
 }
 
 fn bg_color() -> Color { Color::Rgb(0, 1, 3) }
@@ -382,46 +377,60 @@ impl InstrumentPanel {
     fn render_context_bar(&self, area: Rect, buf: &mut Buffer) {
         let w = area.width as usize;
         let fill_cols = (self.context_fill * w as f64) as usize;
+        let thinking = self.thinking_intensity > 0.05;
+        let rows = area.height.min(2) as usize;
 
-        for x in 0..w {
-            let intensity = if x < fill_cols {
-                (x as f64 / fill_cols.max(1) as f64) * self.context_fill
-            } else { 0.0 };
+        for row in 0..rows {
+            for x in 0..w {
+                let intensity = if x < fill_cols {
+                    (x as f64 / fill_cols.max(1) as f64) * self.context_fill
+                } else { 0.0 };
 
-            let is_glitch = self.thinking_intensity > 0.05 && {
-                let hash = ((x * 17 + (self.time * 8.0) as usize) * 31) % 100;
-                (hash as f64) < self.thinking_intensity * 60.0
-            };
+                let is_glitch = thinking && {
+                    // Offset hash by row for visual variance between rows
+                    let hash = ((x * 17 + row * 53 + (self.time * 8.0) as usize) * 31) % 100;
+                    (hash as f64) < self.thinking_intensity * 60.0
+                };
 
-            if is_glitch {
-                let idx = ((x * 7 + (self.time * 12.0) as usize) * 13) % NOISE_CHARS.len();
-                let color = intensity_color((intensity + self.thinking_intensity * 0.3).min(1.0));
-                if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, area.y)) {
-                    cell.set_char(NOISE_CHARS[idx]);
-                    cell.set_fg(color);
-                    cell.set_bg(bg_color());
-                }
-            } else {
-                let color = intensity_color(intensity);
-                if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, area.y)) {
-                    cell.set_char(if intensity > 0.01 { '█' } else { ' ' });
-                    cell.set_fg(color);
-                    cell.set_bg(bg_color());
+                let y = area.y + row as u16;
+                if is_glitch {
+                    let idx = ((x * 7 + row * 23 + (self.time * 12.0) as usize) * 13) % NOISE_CHARS.len();
+                    let color = intensity_color((intensity + self.thinking_intensity * 0.3).min(1.0));
+                    if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, y)) {
+                        cell.set_char(NOISE_CHARS[idx]);
+                        cell.set_fg(color);
+                        cell.set_bg(bg_color());
+                    }
+                } else if row == 0 {
+                    // Row 0: context fill bar
+                    let color = intensity_color(intensity);
+                    if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, y)) {
+                        cell.set_char(if intensity > 0.01 { '█' } else { ' ' });
+                        cell.set_fg(color);
+                        cell.set_bg(bg_color());
+                    }
+                } else {
+                    // Row 1 (non-glitch): percentage label on left, rest blank
+                    // Handled after the x loop
                 }
             }
         }
 
-        // Row 2: percentage
-        if area.height > 1 {
-            let pct = (self.context_fill * 70.0) as u32; // show actual %, not normalized
+        // Row 1 label (only when not fully glitching)
+        if rows > 1 {
+            let pct = (self.context_fill * 70.0) as u32;
             let label = format!(" {}%", pct);
             let color = intensity_color(self.context_fill);
             for (i, ch) in label.chars().enumerate() {
                 if i >= w { break; }
-                if let Some(cell) = buf.cell_mut(Position::new(area.x + i as u16, area.y + 1)) {
-                    cell.set_char(ch);
-                    cell.set_fg(color);
-                    cell.set_bg(bg_color());
+                let pos = Position::new(area.x + i as u16, area.y + 1);
+                // Only write label if the cell wasn't already glitched
+                if let Some(cell) = buf.cell_mut(pos) {
+                    if !thinking || cell.symbol() == " " {
+                        cell.set_char(ch);
+                        cell.set_fg(color);
+                        cell.set_bg(bg_color());
+                    }
                 }
             }
         }
