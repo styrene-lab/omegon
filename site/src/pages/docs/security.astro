@@ -1,0 +1,74 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="Security & Supply Chain" description="Signing, SBOM, supply chain integrity, and credential management.">
+  <h1>Security &amp; Supply Chain</h1>
+
+  <h2>Release Signing</h2>
+  <p>Every release is signed at multiple levels:</p>
+  <table>
+    <thead><tr><th>Layer</th><th>Method</th><th>Verification</th></tr></thead>
+    <tbody>
+      <tr><td>CI builds</td><td>Sigstore cosign (keyless, OIDC)</td><td><code>cosign verify-blob</code></td></tr>
+      <tr><td>Local builds</td><td>Apple Developer ID (YubiKey)</td><td><code>codesign -dvvv</code></td></tr>
+      <tr><td>Provenance</td><td>GitHub Attestations (SLSA)</td><td><code>gh attestation verify</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Verify a Release</h3>
+  <pre><code># Cosign (CI-signed releases)
+cosign verify-blob omegon-*.tar.gz \
+  --signature omegon-*.tar.gz.sig \
+  --certificate omegon-*.tar.gz.pem \
+  --certificate-identity-regexp '.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# GitHub Attestations
+gh attestation verify omegon-*.tar.gz --repo styrene-lab/omegon</code></pre>
+
+  <h2>SBOM</h2>
+  <p>
+    Every release includes a CycloneDX Software Bill of Materials (<code>omegon-sbom.cdx.json</code>)
+    listing all Rust crate dependencies with versions. The SBOM is itself signed with cosign.
+  </p>
+
+  <h2>Credential Storage</h2>
+  <p>
+    API keys and OAuth tokens are stored in the system keychain:
+  </p>
+  <ul>
+    <li><strong>macOS</strong> — Keychain Services (via <code>security</code> CLI)</li>
+    <li><strong>Linux</strong> — Secret Service API (GNOME Keyring, KWallet)</li>
+    <li><strong>Fallback</strong> — Encrypted file in <code>~/.config/omegon/</code></li>
+  </ul>
+  <p>
+    OAuth tokens are refreshed automatically. JWT claims are extracted for account identity
+    (used by the Codex client for account ID routing).
+  </p>
+
+  <h2>HashiCorp Vault Integration</h2>
+  <pre><code>/vault status       # Check Vault connectivity
+/vault login        # Authenticate to Vault
+/vault configure    # Set Vault address and auth method
+/vault init-policy  # Create a least-privilege policy for omegon</code></pre>
+  <p>
+    For teams that manage secrets through Vault, Omegon can read credentials directly from
+    Vault paths instead of environment variables or the local keychain.
+  </p>
+
+  <h2>Process Safety</h2>
+  <ul>
+    <li>The agent executes tools directly — no sandbox. The operator is responsible for reviewing tool calls.</li>
+    <li>All tool calls are logged in the conversation with full arguments and results.</li>
+    <li><code>Esc</code> or <code>Ctrl+C</code> cancels the active turn immediately.</li>
+    <li>Session auto-save means you can always audit what happened.</li>
+    <li>The <code>--max-turns</code> flag limits how many turns the agent can take before stopping.</li>
+  </ul>
+
+  <h2>License</h2>
+  <p>
+    Omegon is licensed under the <a href="https://github.com/styrene-lab/omegon/blob/main/LICENSE">Business Source License 1.1</a>.
+    The BSL converts to Apache License 2.0 after 4 years. Production use is permitted;
+    competing commercial products using the source code are not (until the conversion date).
+  </p>
+</Docs>

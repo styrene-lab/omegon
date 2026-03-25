@@ -3,66 +3,89 @@ import Docs from "../../layouts/Docs.astro";
 ---
 
 <Docs title="Three-Axis Model" description="Capability tier, thinking level, and context class — three orthogonal axes for inference control.">
-  <h1>Three-Axis Routing Model</h1>
+  <h1>Three-Axis Model</h1>
   <p>
-    Omegon organizes inference along three independent axes. Each axis can be
-    adjusted without affecting the others, giving operators fine-grained control
-    over capability, cost, and context capacity.
+    Omegon organizes inference along three independent axes. The agent adjusts these
+    autonomously based on task complexity, or operators can override explicitly. This
+    gives fine-grained control over capability, cost, and context without coupling them.
   </p>
 
   <h2>Axis 1: Capability Tier</h2>
-  <p>Controls <em>which model</em> to use. Higher tiers use more capable (and expensive) models.</p>
+  <p>Controls which model family is used. The agent switches tiers with <code>set_model_tier</code>.</p>
   <table>
-    <thead><tr><th>Tier</th><th>Role</th><th>Use Case</th></tr></thead>
+    <thead><tr><th>Tier</th><th>Use Case</th><th>Typical Models</th></tr></thead>
     <tbody>
-      <tr><td><code>local</code></td><td>Servitor</td><td>On-device Ollama models. Zero API cost.</td></tr>
-      <tr><td><code>retribution</code></td><td>Adept</td><td>Fast cloud models (Haiku, GPT-5.1). Simple lookups, formatting.</td></tr>
-      <tr><td><code>victory</code></td><td>Magos</td><td>Capable cloud models (Sonnet, GPT-5.3). Routine coding.</td></tr>
-      <tr><td><code>gloriana</code></td><td>Archmagos</td><td>Frontier models (Opus, GPT-5.4). Architecture, complex debugging.</td></tr>
+      <tr><td><strong>local</strong></td><td>On-device, zero API cost</td><td>Ollama (qwen3, devstral, llama)</td></tr>
+      <tr><td><strong>retribution</strong></td><td>Simple lookups, boilerplate</td><td>Claude Haiku, GPT-4o-mini, Groq</td></tr>
+      <tr><td><strong>victory</strong></td><td>Routine coding, execution</td><td>Claude Sonnet, GPT-4o, Codestral</td></tr>
+      <tr><td><strong>gloriana</strong></td><td>Architecture, deep reasoning</td><td>Claude Opus, o1-pro</td></tr>
     </tbody>
   </table>
-  <p>The agent adjusts its own tier using <code>set_model_tier</code>, or operators use <code>/effort</code> to set a tier ceiling.</p>
+  <pre><code>/model                   # Opens selector with all available models
+set_model_tier(victory)  # Agent self-selects (automatic)</code></pre>
 
   <h2>Axis 2: Thinking Level</h2>
-  <p>Controls <em>how much reasoning</em> the model does before responding. Higher levels allocate more tokens for internal deliberation.</p>
+  <p>Controls extended reasoning budget — how many tokens the model spends "thinking" before responding.</p>
   <table>
-    <thead><tr><th>Level</th><th>Cognition Name</th><th>Token Budget</th><th>Use Case</th></tr></thead>
+    <thead><tr><th>Level</th><th>Use Case</th></tr></thead>
     <tbody>
-      <tr><td><code>off</code></td><td>Servitor</td><td>—</td><td>No extended thinking. Fastest.</td></tr>
-      <tr><td><code>minimal</code></td><td>Functionary</td><td>~2k</td><td>Light reasoning for simple tasks.</td></tr>
-      <tr><td><code>low</code></td><td>Adept</td><td>~5k</td><td>Straightforward execution.</td></tr>
-      <tr><td><code>medium</code></td><td>Magos</td><td>~10k</td><td>General development work.</td></tr>
-      <tr><td><code>high</code></td><td>Archmagos</td><td>~50k</td><td>Complex debugging, architecture decisions.</td></tr>
+      <tr><td><strong>off</strong></td><td>No extended thinking. Fastest, cheapest.</td></tr>
+      <tr><td><strong>minimal</strong></td><td>Brief sanity check.</td></tr>
+      <tr><td><strong>low</strong></td><td>Light reasoning for straightforward tasks.</td></tr>
+      <tr><td><strong>medium</strong></td><td>Default. Balanced reasoning for general work.</td></tr>
+      <tr><td><strong>high</strong></td><td>Deep reasoning for architecture, debugging, multi-step problems.</td></tr>
     </tbody>
   </table>
-  <p>
-    Thinking level and capability tier are orthogonal:
-    <code>victory</code> + <code>high</code> is cheaper than <code>gloriana</code> + <code>medium</code>
-    for tasks that need careful reasoning but not a frontier model.
-  </p>
+  <pre><code>/think high     # Manual override
+/think off      # Disable for speed</code></pre>
 
   <h2>Axis 3: Context Class</h2>
-  <p>Controls <em>how much context</em> the session can hold. Named after formation scales.</p>
+  <p>Controls context window capacity. Larger windows allow more conversation history and memory injection.</p>
   <table>
-    <thead><tr><th>Class</th><th>Window</th><th>Typical Models</th></tr></thead>
+    <thead><tr><th>Class</th><th>Window</th><th>Use Case</th></tr></thead>
     <tbody>
-      <tr><td><strong>Squad</strong></td><td>128k tokens</td><td>Copilot Claude routes, small local models</td></tr>
-      <tr><td><strong>Maniple</strong></td><td>272k tokens</td><td>OpenAI GPT-5.4, GPT-5.3</td></tr>
-      <tr><td><strong>Clan</strong></td><td>400k tokens</td><td>GPT-5.4 mini, Copilot GPT routes</td></tr>
-      <tr><td><strong>Legion</strong></td><td>1M+ tokens</td><td>Anthropic Claude (Opus/Sonnet), GPT-5.4 Pro</td></tr>
+      <tr><td><strong>Squad</strong></td><td>128k tokens</td><td>Quick tasks, simple edits</td></tr>
+      <tr><td><strong>Maniple</strong></td><td>272k tokens</td><td>Standard development work</td></tr>
+      <tr><td><strong>Clan</strong></td><td>400k tokens</td><td>Large refactors, multi-file analysis</td></tr>
+      <tr><td><strong>Legion</strong></td><td>1M tokens</td><td>Massive codebases, full-project comprehension</td></tr>
+    </tbody>
+  </table>
+  <pre><code>/context legion   # Pin to maximum context
+/context squad    # Minimize for cost</code></pre>
+
+  <h2>Orthogonality</h2>
+  <p>
+    The three axes are independent. You can run <code>gloriana + off + squad</code> (powerful model,
+    no thinking, small window) or <code>retribution + high + legion</code> (cheap model, deep reasoning,
+    huge context). The agent tunes these combinations based on what it's doing:
+  </p>
+  <ul>
+    <li>Simple file read → <code>victory + off</code></li>
+    <li>Architecture decision → <code>gloriana + high</code></li>
+    <li>Boilerplate generation → <code>retribution + minimal</code></li>
+    <li>Large codebase audit → <code>victory + medium + legion</code></li>
+  </ul>
+
+  <h2>Provider Matrix</h2>
+  <p>
+    Which providers serve which tiers depends on available credentials and model capabilities:
+  </p>
+  <table>
+    <thead><tr><th>Provider</th><th>local</th><th>retribution</th><th>victory</th><th>gloriana</th></tr></thead>
+    <tbody>
+      <tr><td>Anthropic</td><td>—</td><td>Haiku</td><td>Sonnet</td><td>Opus</td></tr>
+      <tr><td>OpenAI</td><td>—</td><td>4o-mini</td><td>4o / o3</td><td>o1-pro</td></tr>
+      <tr><td>Codex</td><td>—</td><td>—</td><td>codex-mini</td><td>—</td></tr>
+      <tr><td>OpenRouter</td><td>—</td><td>varies</td><td>varies</td><td>varies</td></tr>
+      <tr><td>Groq</td><td>—</td><td>✓</td><td>✓</td><td>—</td></tr>
+      <tr><td>xAI</td><td>—</td><td>—</td><td>Grok</td><td>—</td></tr>
+      <tr><td>Mistral</td><td>—</td><td>—</td><td>Codestral</td><td>—</td></tr>
+      <tr><td>Cerebras</td><td>—</td><td>✓</td><td>—</td><td>—</td></tr>
+      <tr><td>Ollama</td><td>✓</td><td>—</td><td>—</td><td>—</td></tr>
     </tbody>
   </table>
   <p>
-    The harness tracks the session's <em>required context floor</em> — the minimum context class
-    the session can tolerate without losing critical information. Downgrades that cross this
-    floor require explicit operator confirmation.
-  </p>
-  <p>Use <code>/context</code> to inspect the current routing state and <code>/context pin Clan</code> to lock the floor.</p>
-
-  <h2>Route Matrix</h2>
-  <p>
-    Omegon ships with a reviewed route matrix mapping every known provider/model combination
-    to its context ceiling and capability tier. This matrix is compiled into the binary and
-    updated through a scheduled refresh pipeline — runtime routing never trusts live provider claims.
+    The routing engine (<code>routing.rs</code>) scores available providers against the requested
+    tier and selects the best match. See <a href="/docs/providers">Providers</a> for details.
   </p>
 </Docs>

@@ -1,34 +1,81 @@
 ---
 import Docs from "../../layouts/Docs.astro";
 ---
-<Docs title="OpenSpec Lifecycle" description="Spec-driven development: propose, specify, execute, verify, archive.">
+<Docs title="OpenSpec Lifecycle" description="Spec-driven development: propose, specify, execute, verify, archive. Write specs before code.">
   <h1>OpenSpec Lifecycle</h1>
-  <p>OpenSpec is a spec-driven development workflow that ensures code is correct by defining what must be true <em>before</em> implementation begins.</p>
+  <p>
+    OpenSpec is the spec-driven development system in Omegon. Specs define what must be true
+    <em>before</em> code is written — they are the source of truth for correctness. The full
+    lifecycle: propose → spec → fast-forward → cleave → assess → archive.
+  </p>
 
   <h2>Lifecycle Stages</h2>
-  <pre><code>propose → spec → fast-forward → cleave → assess → archive</code></pre>
+  <ol>
+    <li><strong>Propose</strong> — create a change with a name, title, and intent</li>
+    <li><strong>Spec</strong> — write Given/When/Then scenarios defining acceptance criteria</li>
+    <li><strong>Fast-Forward</strong> — generate <code>design.md</code> (architecture) and <code>tasks.md</code> (work items) from specs</li>
+    <li><strong>Execute</strong> — implement via <code>/cleave</code> (parallel) or direct coding</li>
+    <li><strong>Verify</strong> — <code>/assess spec</code> checks that implementation satisfies all scenarios</li>
+    <li><strong>Archive</strong> — move completed change to baseline</li>
+  </ol>
+
+  <h2>Commands</h2>
   <table>
-    <thead><tr><th>Stage</th><th>Artifact</th><th>Purpose</th></tr></thead>
+    <thead><tr><th>Command</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><strong>Propose</strong></td><td><code>proposal.md</code></td><td>Intent, scope, and motivation</td></tr>
-      <tr><td><strong>Spec</strong></td><td><code>specs/*.md</code></td><td>Given/When/Then scenarios defining correct behavior</td></tr>
-      <tr><td><strong>Fast-Forward</strong></td><td><code>design.md</code> + <code>tasks.md</code></td><td>Architecture decisions and implementation plan</td></tr>
-      <tr><td><strong>Cleave</strong></td><td>Parallel children</td><td>Decompose tasks into parallel worktree executions</td></tr>
-      <tr><td><strong>Assess</strong></td><td><code>assessment.json</code></td><td>Verify specs are satisfied, adversarial review</td></tr>
-      <tr><td><strong>Archive</strong></td><td>Baseline specs</td><td>Merge specs to baseline, close the change</td></tr>
+      <tr><td><code>/opsx:propose</code></td><td>Create a new change proposal</td></tr>
+      <tr><td><code>/opsx:spec</code></td><td>Generate or add specs (Given/When/Then scenarios)</td></tr>
+      <tr><td><code>/opsx:ff</code></td><td>Fast-forward: generate design.md and tasks.md</td></tr>
+      <tr><td><code>/opsx:status</code></td><td>Show all active changes with lifecycle stage</td></tr>
+      <tr><td><code>/opsx:verify</code></td><td>Verify specs are satisfied by implementation</td></tr>
+      <tr><td><code>/opsx:archive</code></td><td>Archive completed change to baseline</td></tr>
     </tbody>
   </table>
 
   <h2>Spec Format</h2>
-  <p>Specs use Given/When/Then scenarios that are precise enough to be falsifiable:</p>
-  <pre><code>### Requirement: Context class classification
+  <pre><code>## Scenario: Provider routing selects best match
 
-#### Scenario: Token count below 128k maps to Squad
-Given a token count of 100,000
-When classifyContextWindow is called
-Then the result is `Squad`</code></pre>
-  <p>Specs live in <code>openspec/changes/&lt;name&gt;/specs/</code> during development and merge to <code>openspec/baseline/</code> on archive.</p>
+Given a routing request for tier "victory"
+And providers [anthropic, openai, ollama] are available
+When the routing engine scores providers
+Then anthropic is selected (highest capability match)
+And ollama is ranked last (local tier only)</code></pre>
 
-  <h2>Design Tree Binding</h2>
-  <p>OpenSpec changes bind to design tree nodes via <code>design_tree_update(implement)</code>. This creates the change directory, scaffolds tasks from implementation notes, and tracks the full lifecycle from design decision through verified implementation.</p>
+  <h2>Directory Structure</h2>
+  <pre><code>openspec/
+├── changes/
+│   └── my-feature/
+│       ├── proposal.md     # Intent and scope
+│       ├── specs/
+│       │   └── routing.md  # Given/When/Then scenarios
+│       ├── design.md       # Generated architecture (from /opsx:ff)
+│       └── tasks.md        # Generated work items (from /opsx:ff)
+└── baseline/
+    └── archived-change/    # Completed changes (from /opsx:archive)</code></pre>
+
+  <h2>Integration with Design Tree</h2>
+  <p>
+    The primary entry point for tracked work is <code>design_tree_update(implement)</code>
+    on a decided design node. This scaffolds the full OpenSpec change directory automatically,
+    linking the design node to the implementation lifecycle.
+  </p>
+  <ol>
+    <li>Design node reaches <code>decided</code> status</li>
+    <li><code>design_tree_update(implement)</code> creates the OpenSpec change</li>
+    <li>Specs are generated from the node's decisions and acceptance criteria</li>
+    <li><code>/opsx:ff</code> generates design.md and tasks.md</li>
+    <li><code>/cleave</code> executes the tasks in parallel</li>
+    <li><code>/assess spec</code> verifies against the original specs</li>
+    <li><code>/opsx:archive</code> closes the loop</li>
+  </ol>
+
+  <h2>Reconciliation</h2>
+  <p>
+    After implementation or assessment, the lifecycle may need reconciliation:
+  </p>
+  <ul>
+    <li>If <code>/assess spec</code> finds issues → <code>reconcile_after_assess</code> reopens work</li>
+    <li>If cleave adds files not in the original scope → tasks.md is updated</li>
+    <li>Archive refuses to proceed if tasks are incomplete or design-tree binding is stale</li>
+  </ul>
 </Docs>

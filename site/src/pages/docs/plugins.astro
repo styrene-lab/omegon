@@ -1,0 +1,73 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="Plugins & Personas" description="Personas with organic memory, tones, and memory layers.">
+  <h1>Plugins &amp; Personas</h1>
+
+  <h2>Personas</h2>
+  <p>
+    A persona is not just a system prompt. It's a system prompt <em>plus</em> a dedicated
+    mind and memory system that grows organically as you use it.
+  </p>
+  <p>
+    When a persona is active, every fact the agent learns, every decision it makes, and every
+    pattern it recognizes gets stored under that persona's identity. In future sessions with
+    the same persona, those facts are recalled — the persona remembers what it learned. This
+    is the difference between a prompt template and a living cognitive profile.
+  </p>
+
+  <h3>Usage</h3>
+  <pre><code># Activate a persona
+/persona architect
+
+# Deactivate
+/persona off
+
+# The agent shows active persona in the meta tag:
+# claude-sonnet-4-6 · anthropic · victory · ⌘ architect</code></pre>
+
+  <h3>What Personas Control</h3>
+  <ul>
+    <li><strong>System prompt</strong> — base instructions and cognitive style</li>
+    <li><strong>Memory namespace</strong> — facts stored under the persona's identity</li>
+    <li><strong>Badge</strong> — visual identifier in the TUI and meta tags</li>
+    <li><strong>Preferred tools</strong> — which tools the persona tends to reach for</li>
+  </ul>
+
+  <h2>Tones</h2>
+  <p>
+    Tones adjust the agent's communication style without changing its capabilities or memory.
+    They're lighter than personas — no dedicated memory, just a style overlay.
+  </p>
+  <pre><code>/tone concise    # Terse, minimal explanations
+/tone teaching   # Explains reasoning, suggests learning paths
+/tone off        # Default communication style</code></pre>
+
+  <h2>Plugin Registry</h2>
+  <p>
+    The plugin registry manages active persona, tone, and memory layers. It's responsible for:
+  </p>
+  <ul>
+    <li>Loading and validating persona definitions</li>
+    <li>Merging persona system prompts with the base Lex Imperialis (core system prompt)</li>
+    <li>Routing memory operations to the correct namespace</li>
+    <li>Showing persona/tone state changes as toast notifications</li>
+  </ul>
+
+  <h2>Tool Profiles</h2>
+  <p>
+    Tool profiles control which tools are visible in the agent's context. They reduce prompt
+    bloat by only exposing relevant tools based on project type:
+  </p>
+  <ul>
+    <li><strong>core</strong> — always active: read, edit, write, bash, view</li>
+    <li><strong>coding</strong> — activated when <code>.git</code> detected: git tools, test runners</li>
+    <li><strong>visual</strong> — activated for <code>.excalidraw</code> / <code>.d2</code> files</li>
+    <li><strong>local-ai</strong> — activated when Ollama is available</li>
+    <li><strong>web</strong> — always active: search tools</li>
+  </ul>
+  <p>
+    The agent can manage its own profiles with <code>manage_tools</code>, or operators can
+    override with <code>/profile</code>.
+  </p>
+</Docs>

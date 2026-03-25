@@ -17,23 +17,27 @@ const sections = [
       { label: "Introduction", href: "/docs/" },
       { label: "Installation", href: "/docs/install" },
       { label: "Quick Start", href: "/docs/quickstart" },
+      { label: "Tutorial", href: "/docs/tutorial" },
+      { label: "Migration Guide", href: "/docs/migration" },
     ],
   },
   {
     title: "Concepts",
     items: [
       { label: "Three-Axis Model", href: "/docs/three-axis-model" },
+      { label: "Providers", href: "/docs/providers" },
       { label: "Design Tree", href: "/docs/design-tree" },
       { label: "OpenSpec Lifecycle", href: "/docs/openspec" },
       { label: "Cleave Orchestrator", href: "/docs/cleave" },
       { label: "Project Memory", href: "/docs/memory" },
+      { label: "Sessions", href: "/docs/sessions" },
     ],
   },
   {
-    title: "Architecture",
+    title: "Interface",
     items: [
-      { label: "Design Graph", href: "/docs/architecture/graph" },
-      { label: "Routing Policy", href: "/docs/architecture/routing" },
+      { label: "TUI & Dashboard", href: "/docs/tui" },
+      { label: "Plugins & Personas", href: "/docs/plugins" },
     ],
   },
   {
@@ -41,7 +45,17 @@ const sections = [
     items: [
       { label: "Commands", href: "/docs/commands" },
       { label: "Skills", href: "/docs/skills" },
+      { label: "FAQ", href: "/docs/faq" },
       { label: "Changelog", href: "/changelog" },
+    ],
+  },
+  {
+    title: "Development",
+    items: [
+      { label: "Contributing", href: "/docs/contributing" },
+      { label: "Security & Supply Chain", href: "/docs/security" },
+      { label: "Architecture", href: "/docs/architecture/routing" },
+      { label: "Design Graph", href: "/docs/architecture/graph" },
     ],
   },
 ];
@@ -65,7 +79,7 @@ const currentPath = Astro.url.pathname;
     <div class="topnav-links">
       <a href="/docs/">Docs</a>
       <a href="/changelog">Changelog</a>
-      <a href="https://github.com/styrene-lab/omegon-core">GitHub</a>
+      <a href="https://github.com/styrene-lab/omegon">GitHub</a>
     </div>
   </nav>
 
@@ -96,9 +110,9 @@ const currentPath = Astro.url.pathname;
   </div>
 
   <footer class="docs-footer">
-    <a href="https://github.com/styrene-lab/omegon-core">GitHub</a> ·
-    <a href="https://github.com/styrene-lab/omegon-core/releases">Releases</a> ·
-    <a href="https://github.com/styrene-lab/omegon-core/blob/main/LICENSE">BSL 1.1</a> ·
+    <a href="https://github.com/styrene-lab/omegon">GitHub</a> ·
+    <a href="https://github.com/styrene-lab/omegon/releases">Releases</a> ·
+    <a href="https://github.com/styrene-lab/omegon/blob/main/LICENSE">BSL 1.1</a> ·
     © 2024–2026 Black Meridian, LLC
   </footer>
 </body>

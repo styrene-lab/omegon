@@ -5,60 +5,95 @@ import Docs from "../../layouts/Docs.astro";
 <Docs title="Quick Start" description="Get productive with omegon in 5 minutes.">
   <h1>Quick Start</h1>
 
-  <h2>1. Install</h2>
-  <pre><code>curl -fsSL https://omegon.styrene.dev/install.sh | sh</code></pre>
+  <h2>1. Install &amp; Authenticate</h2>
+  <pre><code>curl -fsSL https://omegon.styrene.dev/install.sh | sh
+export ANTHROPIC_API_KEY="sk-ant-..."   # or: omegon login
+omegon</code></pre>
+  <p>
+    You'll see the splash screen, then the TUI opens with an editor at the bottom,
+    the conversation view in the center, and the instrument panel on the right.
+  </p>
 
-  <h2>2. Authenticate</h2>
-  <pre><code># API key (Anthropic or OpenAI):
-export ANTHROPIC_API_KEY="sk-ant-..."
+  <h2>2. Your First Prompt</h2>
+  <p>Type a prompt and press <code>Enter</code>:</p>
+  <pre><code>Read README.md and summarize the project structure</code></pre>
+  <p>
+    The agent will call the <code>read</code> tool, display the file contents in a
+    collapsible tool card, and respond with a summary. Each tool card shows the tool
+    name and a one-line summary of its arguments.
+  </p>
 
-# Or OAuth (Claude Pro/Max):
-omegon login</code></pre>
-
-  <h2>3. Start a Session</h2>
-  <pre><code># Interactive mode (default):
-omegon
-
-# One-shot prompt:
-omegon --prompt "explain this codebase"
-
-# Resume last session:
-omegon --resume</code></pre>
-
-  <h2>4. Key Commands</h2>
+  <h2>3. Explore the Interface</h2>
   <table>
-    <thead>
-      <tr><th>Command</th><th>Description</th></tr>
-    </thead>
+    <thead><tr><th>Element</th><th>What It Shows</th></tr></thead>
     <tbody>
-      <tr><td><code>/effort</code></td><td>View or change inference tier (Servitor → Omnissiah)</td></tr>
-      <tr><td><code>/context</code></td><td>Inspect context class routing state, pin floor</td></tr>
-      <tr><td><code>/providers</code></td><td>Show provider auth status and routing summary</td></tr>
-      <tr><td><code>/dashboard</code></td><td>Toggle the live TUI dashboard overlay</td></tr>
-      <tr><td><code>/cleave</code></td><td>Decompose and parallelize a complex task</td></tr>
-      <tr><td><code>/init</code></td><td>Initialize project memory and orientation</td></tr>
+      <tr><td>Left gutter (│)</td><td>Teal bar marks assistant responses</td></tr>
+      <tr><td>Tool cards</td><td>Collapsible cards for each tool call. Press <code>Ctrl+O</code> to pin one open.</td></tr>
+      <tr><td>Meta tag</td><td>Dim header on each response: <code>model · provider · tier · think:level</code></td></tr>
+      <tr><td>Right panel</td><td>Instrument panel with context, memory, and tool telemetry</td></tr>
+      <tr><td>Footer</td><td>Model, context %, tool call count, session duration</td></tr>
     </tbody>
   </table>
 
+  <h2>4. Key Commands</h2>
+  <pre><code>/model         # Switch model (opens selector)
+/think high    # Enable extended reasoning
+/compact       # Free context window space
+/stats         # View session telemetry
+/status        # Check provider and system status
+/tutorial      # Launch the interactive tutorial overlay</code></pre>
+
   <h2>5. Project Memory</h2>
   <p>
-    Omegon automatically builds a persistent knowledge layer for your project.
-    Facts, decisions, and patterns survive across sessions. The agent uses
-    <code>memory_store</code>, <code>memory_recall</code>, and <code>memory_query</code>
-    tools to maintain context continuity.
+    Omegon automatically persists important facts across sessions. First time in a project:
   </p>
+  <pre><code>/init          # Scan project, set up memory, orient the agent</code></pre>
   <p>
-    Memory is stored in <code>.pi/memory/</code> in your project directory.
-    The <code>facts.jsonl</code> file is tracked in git for cross-session portability.
+    The agent will discover your project structure, record architectural facts, and offer
+    to help. Memory survives across sessions — the agent remembers what it learned.
   </p>
 
-  <h2>6. Design Tree</h2>
+  <h2>6. Multi-File Changes</h2>
   <p>
-    The design tree is a markdown-based knowledge graph in <code>docs/</code>.
-    Each node has a status lifecycle: <code>seed → exploring → resolved → decided → implementing → implemented</code>.
+    For complex changes that touch multiple files, the agent can decompose work and execute
+    in parallel:
   </p>
+  <pre><code># The agent will assess complexity and suggest /cleave if warranted:
+"Refactor the auth module to support OAuth2 PKCE flow"
+
+# Or decompose explicitly:
+/cleave</code></pre>
   <p>
-    The agent uses <code>design_tree</code> and <code>design_tree_update</code> tools
-    to explore, decide, and track implementation of architectural decisions.
+    Cleave creates isolated git worktree branches for each subtask, executes them in parallel,
+    detects conflicts, and merges results back to your working branch.
   </p>
+
+  <h2>7. Sessions</h2>
+  <p>
+    Sessions auto-save on exit. Resume where you left off:
+  </p>
+  <pre><code># Resume most recent session
+omegon --resume
+
+# List saved sessions
+/sessions
+
+# Resume a specific session
+omegon --resume abc123</code></pre>
+
+  <h2>8. Web Dashboard</h2>
+  <pre><code>/dash          # Opens browser to the live web dashboard</code></pre>
+  <p>
+    The web dashboard connects over WebSocket and shows real-time conversation, tool calls,
+    memory state, and design tree status. Useful for remote monitoring or sharing your screen.
+  </p>
+
+  <h2>Next Steps</h2>
+  <ul>
+    <li><a href="/docs/tutorial">Interactive Tutorial</a> — guided walkthrough of all features</li>
+    <li><a href="/docs/providers">Providers</a> — configure additional inference providers</li>
+    <li><a href="/docs/memory">Project Memory</a> — understand the memory system</li>
+    <li><a href="/docs/commands">Command Reference</a> — all 40+ slash commands</li>
+    <li><a href="/docs/faq">FAQ</a> — common questions, honest answers</li>
+  </ul>
 </Docs>

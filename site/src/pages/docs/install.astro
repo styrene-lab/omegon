@@ -5,51 +5,92 @@ import Docs from "../../layouts/Docs.astro";
 <Docs title="Installation" description="Install omegon on macOS or Linux.">
   <h1>Installation</h1>
 
-  <h2>Quick Install</h2>
+  <h2>Quick Install (Recommended)</h2>
   <pre><code>curl -fsSL https://omegon.styrene.dev/install.sh | sh</code></pre>
-  <p>This downloads the latest release for your platform, verifies the SHA-256 checksum, and installs to <code>/usr/local/bin</code>.</p>
+  <p>
+    Downloads the latest signed binary for your platform (macOS arm64/x86_64, Linux x86_64/aarch64),
+    verifies the SHA-256 checksum, and installs to <code>/usr/local/bin</code>.
+  </p>
 
-  <h2>Options</h2>
-  <table>
-    <thead>
-      <tr><th>Environment Variable</th><th>Default</th><th>Description</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><code>INSTALL_DIR</code></td><td><code>/usr/local/bin</code></td><td>Installation directory</td></tr>
-      <tr><td><code>VERSION</code></td><td>latest</td><td>Pin a specific release (e.g. <code>v0.14.0</code>)</td></tr>
-      <tr><td><code>NO_COLOR</code></td><td>unset</td><td>Disable colored output</td></tr>
-    </tbody>
-  </table>
+  <h3>Options</h3>
+  <pre><code># Install to a custom directory
+INSTALL_DIR=~/.local/bin curl -fsSL https://omegon.styrene.dev/install.sh | sh
 
-  <h3>Install to home directory</h3>
-  <pre><code>INSTALL_DIR=~/.local/bin curl -fsSL https://omegon.styrene.dev/install.sh | sh</code></pre>
+# Install a specific version
+VERSION=0.15.2 curl -fsSL https://omegon.styrene.dev/install.sh | sh
 
-  <h3>Pin a version</h3>
-  <pre><code>VERSION=v0.14.0 curl -fsSL https://omegon.styrene.dev/install.sh | sh</code></pre>
+# Non-interactive (CI)
+curl -fsSL https://omegon.styrene.dev/install.sh | sh -s -- --no-confirm</code></pre>
 
-  <h2>Supported Platforms</h2>
-  <table>
-    <thead>
-      <tr><th>OS</th><th>Architecture</th><th>Artifact</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>macOS</td><td>Apple Silicon (arm64)</td><td><code>omegon-darwin-arm64.tar.gz</code></td></tr>
-      <tr><td>macOS</td><td>Intel (x86_64)</td><td><code>omegon-darwin-x64.tar.gz</code></td></tr>
-      <tr><td>Linux</td><td>x86_64</td><td><code>omegon-linux-x64.tar.gz</code></td></tr>
-      <tr><td>Linux</td><td>arm64 / aarch64</td><td><code>omegon-linux-arm64.tar.gz</code></td></tr>
-    </tbody>
-  </table>
+  <h2>GitHub Releases</h2>
+  <p>
+    Download release artifacts directly from
+    <a href="https://github.com/styrene-lab/omegon/releases">GitHub Releases</a>.
+    Each release includes:
+  </p>
+  <ul>
+    <li>Pre-built binaries for macOS (arm64, x86_64) and Linux (x86_64, aarch64)</li>
+    <li>SHA-256 checksums</li>
+    <li><a href="https://www.sigstore.dev/">Sigstore cosign</a> signatures (keyless)</li>
+    <li>CycloneDX SBOM</li>
+    <li>GitHub Attestations (build provenance)</li>
+  </ul>
 
-  <h2>Authentication</h2>
-  <p>Omegon supports two authentication methods:</p>
-  <h3>API Key</h3>
+  <h3>Verify a Download</h3>
+  <pre><code># Verify cosign signature (keyless)
+cosign verify-blob omegon-0.15.2-aarch64-apple-darwin.tar.gz \
+  --signature omegon-0.15.2-aarch64-apple-darwin.tar.gz.sig \
+  --certificate omegon-0.15.2-aarch64-apple-darwin.tar.gz.pem \
+  --certificate-identity-regexp '.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com</code></pre>
+
+  <h2>npm (TypeScript Shim)</h2>
+  <p>
+    The npm package includes the TypeScript compatibility shim (omegon-pi) and will
+    download the Rust binary on first run. This method is being sunset — prefer the
+    install script or GitHub Releases.
+  </p>
+  <pre><code>npm install -g omegon</code></pre>
+
+  <h2>Provider Setup</h2>
+  <p>
+    After installing, you need at least one inference provider configured. The fastest path:
+  </p>
+
+  <h3>Option A: Claude Pro/Max Subscription (Free)</h3>
+  <pre><code>omegon login</code></pre>
+  <p>Opens a browser for OAuth authentication. No API key needed.</p>
+
+  <h3>Option B: API Key</h3>
   <pre><code>export ANTHROPIC_API_KEY="sk-ant-..."
 omegon</code></pre>
 
-  <h3>OAuth (Claude Pro/Max subscription)</h3>
-  <pre><code>omegon login</code></pre>
-  <p>This opens a browser for OAuth authentication. Your session persists across restarts.</p>
+  <h3>Option C: Local Inference (Ollama)</h3>
+  <pre><code># Install Ollama (https://ollama.ai)
+ollama pull qwen3:32b
+omegon</code></pre>
+  <p>Omegon auto-detects Ollama and routes local-tier requests to it.</p>
 
-  <h2>Manual Download</h2>
-  <p>Download release artifacts directly from <a href="https://github.com/styrene-lab/omegon-core/releases">GitHub Releases</a>.</p>
+  <p>See <a href="/docs/providers">Providers</a> for all 10 supported inference providers.</p>
+
+  <h2>Updates</h2>
+  <p>
+    Omegon checks for updates automatically at startup (5-second delay, non-blocking).
+    When a newer version is available, you'll see a toast notification and can run
+    <code>/update</code> to view release notes.
+  </p>
+  <pre><code># Re-run the install script to update
+curl -fsSL https://omegon.styrene.dev/install.sh | sh</code></pre>
+
+  <h2>Supported Platforms</h2>
+  <table>
+    <thead><tr><th>Platform</th><th>Architecture</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>macOS</td><td>aarch64 (Apple Silicon)</td><td>✓ Primary</td></tr>
+      <tr><td>macOS</td><td>x86_64 (Intel)</td><td>✓ Supported</td></tr>
+      <tr><td>Linux</td><td>x86_64</td><td>✓ Supported</td></tr>
+      <tr><td>Linux</td><td>aarch64</td><td>✓ Supported (cross-compiled)</td></tr>
+      <tr><td>Windows</td><td>—</td><td>Use WSL2</td></tr>
+    </tbody>
+  </table>
 </Docs>

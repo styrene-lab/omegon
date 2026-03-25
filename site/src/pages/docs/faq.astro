@@ -1,0 +1,163 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="FAQ" description="Frequently asked questions — honest answers.">
+  <h1>FAQ</h1>
+  <p class="faq-intro">
+    Honest answers to questions we actually get. Some serious, some less so.
+  </p>
+
+  <h2>Serious Questions</h2>
+
+  <h3>Why not just use Claude's built-in memory / CLAUDE.md / project knowledge?</h3>
+  <p>
+    Oh, another markdown file? If your work is simple enough to be fully represented in a
+    flat markdown file without loss, this harness is probably not for you. You don't use a
+    chainsaw to whittle.
+  </p>
+  <p>
+    Omegon's memory is a persistent knowledge base with semantic search, episodic narratives,
+    a knowledge graph with typed edges, working memory pinning, cross-session compaction, and
+    2,500+ facts in the Omegon project itself. It's the difference between a sticky note on
+    your monitor and an institutional knowledge base. If your project fits on a sticky note,
+    use the sticky note.
+  </p>
+
+  <h3>How is a persona not just a fancy system prompt or skill?</h3>
+  <p>
+    It <em>is</em> a system prompt — plus a dedicated mind and memory system that grows
+    organically as you use the persona in real sessions. Every fact the persona learns,
+    every decision it makes, every pattern it recognizes gets stored and recalled in future
+    sessions <em>under that persona's identity</em>.
+  </p>
+  <p>
+    It's the difference between scribbling a design on a napkin in crayon versus a proper
+    architectural drawing submitted to the Patent Office. Both communicate a design. One of
+    them accumulates institutional knowledge over time.
+  </p>
+
+  <h3>Won't Anthropic / OpenAI / Google just steal this and build it into their products?</h3>
+  <p>
+    It would be illegal under the license (BSL 1.1), but yeah, probably.
+  </p>
+  <p>
+    The protection isn't legal — it's velocity. By the time a large company decides to build
+    something like this, politics it through three VP layers, and ships it with enterprise
+    SSO and a $40/seat/month price tag, we'll be three major versions ahead. That's the
+    advantage of a single maintainer who ships every day over a committee that ships every quarter.
+  </p>
+
+  <h3>What's the relationship to pi (the coding agent)?</h3>
+  <p>
+    Omegon started as a fork of the <code>pi</code> TypeScript coding agent. The original
+    agent loop, extension system, and TUI were TypeScript (omegon-pi). Over time, we rewrote
+    the entire runtime in Rust: the agent loop, TUI, provider layer, memory system, cleave
+    orchestrator, and design tree. The TypeScript shim still exists for compatibility but is
+    being sunset. The Rust binary is the canonical runtime.
+  </p>
+
+  <h3>Is this production-ready?</h3>
+  <p>
+    It's what we use to build itself. 877 tests, zero compiler warnings, signed releases with
+    cosign and SBOM. The codebase is 65,000+ lines of Rust across 6 crates. It's been through
+    hundreds of sessions building real software.
+  </p>
+  <p>
+    That said — it's opinionated software built for a specific workflow. If your workflow
+    doesn't match, it will fight you. Read the <a href="/docs/quickstart">Quick Start</a>
+    before committing.
+  </p>
+
+  <h3>Why Rust?</h3>
+  <p>
+    Because we got tired of debugging <code>node_modules</code> resolution failures,
+    TypeScript compile times, and 400MB runtime directories. A 15MB binary that starts
+    in 50ms and uses 30MB of RAM is a better experience than anything that requires
+    <code>npm install</code>.
+  </p>
+
+  <hr />
+
+  <h2>Migration Questions</h2>
+
+  <h3>I'm coming from Claude Code. What changes?</h3>
+  <p>
+    What you gain: persistent project memory that survives across sessions, a 263-node design
+    tree for tracking architecture decisions, parallel execution via git worktrees, 10 inference
+    providers instead of 1, a TUI dashboard with instrument panels, session save/resume, and
+    spec-driven development lifecycle.
+  </p>
+  <p>
+    What changes: <code>/model</code> replaces the model picker, <code>/think</code> replaces
+    the thinking toggle, project memory replaces CLAUDE.md. The agent tools are the same
+    (read, edit, write, bash) — your muscle memory transfers. You can import your CLAUDE.md
+    with <code>/migrate claude-code</code>.
+  </p>
+  <p>
+    See <a href="/docs/migration">Migration Guide</a> for a detailed walkthrough.
+  </p>
+
+  <h3>I'm coming from Codex CLI. What changes?</h3>
+  <p>
+    Similar to Claude Code migration, plus: Omegon is fully local-first. The orchestration
+    engine, memory system, design tree, and cleave executor all run on your machine. You don't
+    need a cloud service for anything except inference — and even that's optional if you have
+    Ollama. Import with <code>/migrate codex</code>.
+  </p>
+
+  <h3>I'm coming from Cursor / Aider / Continue / Windsurf.</h3>
+  <p>
+    Omegon is terminal-native by design — no IDE plugin, no Electron wrapper, no VS Code dependency.
+    If you live in the terminal, you'll be faster. If you need inline code completions and GUI diff
+    views, keep your IDE tool for that and use Omegon for the heavy lifting (architecture, multi-file
+    refactors, parallel execution, design tracking).
+  </p>
+
+  <hr />
+
+  <h2>The Other Questions</h2>
+
+  <h3>"Why is this a terminal app?"</h3>
+  <p>Because most real work happens in the terminal.</p>
+
+  <h3>"How do I connect it to [some random crypto/web3 thing]?"</h3>
+  <p>Easily. Run <code>rm -rf / --no-preserve-root</code>.</p>
+
+  <h3>"Is this well tested and supported on Windows?"</h3>
+  <p>lol</p>
+  <p>lmao, even</p>
+  <p class="faq-fine-print">(Use WSL2. Seriously. It works fine under WSL2.)</p>
+
+  <h3>"This was written by AI"</h3>
+  <p>Apparently so was your personality.</p>
+  <p class="faq-fine-print">
+    (Yes, Omegon is substantially built using AI-assisted development — by Omegon itself.
+    That's kind of the point. The code is reviewed, tested, and signed by a human.
+    The commit history is public. Judge the output, not the process.)
+  </p>
+
+  <h3>"[Other tool] already does this"</h3>
+  <p>Neat. Go use it.</p>
+
+  <h3>"I want to help build this as a FOSS community project"</h3>
+  <p>Big if true.</p>
+  <p class="faq-fine-print">
+    (We're genuinely interested in contributions — see <a href="/docs/contributing">Contributing</a>.
+    The license is BSL 1.1 which converts to Apache 2.0 after 4 years. PRs are welcome for
+    bug fixes, provider integrations, and documentation. Feature proposals should start with
+    a design tree node.)
+  </p>
+</Docs>
+
+<style>
+  .faq-intro {
+    font-size: 16px;
+    color: var(--muted);
+    margin-bottom: 32px;
+  }
+  .faq-fine-print {
+    font-size: 13px;
+    color: var(--dim);
+    font-style: italic;
+  }
+</style>

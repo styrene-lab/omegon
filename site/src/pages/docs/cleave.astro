@@ -1,29 +1,79 @@
 ---
 import Docs from "../../layouts/Docs.astro";
 ---
-<Docs title="Cleave Orchestrator" description="Parallel task execution via git worktrees with automatic merge and conflict detection.">
+<Docs title="Cleave Orchestrator" description="Parallel task execution via git worktrees with automatic merge, conflict detection, and adversarial review.">
   <h1>Cleave Orchestrator</h1>
-  <p>Cleave decomposes complex tasks into independent children that execute in parallel, each in an isolated git worktree (or jj workspace when co-located). Results are merged back with automatic conflict detection.</p>
+  <p>
+    Cleave decomposes complex tasks into independent subtasks and executes them in parallel
+    across isolated git worktree branches. Each child runs in its own worktree with its own
+    branch, and results are merged back with conflict detection.
+  </p>
 
   <h2>How It Works</h2>
   <ol>
-    <li><strong>Assess</strong> — <code>cleave_assess</code> evaluates task complexity. Below threshold → execute directly. Above → decompose.</li>
-    <li><strong>Plan</strong> — The agent produces a JSON plan with labeled children, file scopes, and dependency ordering.</li>
-    <li><strong>Dispatch</strong> — Each child runs in its own worktree/workspace with an isolated branch. Children can run in parallel or sequentially based on <code>depends_on</code>.</li>
-    <li><strong>Merge</strong> — Completed children are squash-merged back to the parent branch. Conflicts are detected and reported.</li>
-    <li><strong>Review</strong> — Optional adversarial review loop checks for bugs, security issues, and spec compliance.</li>
+    <li><strong>Assess</strong> — <code>cleave_assess</code> evaluates task complexity (systems × modifiers). If score ≥ 2.0, recommends decomposition.</li>
+    <li><strong>Plan</strong> — the agent creates a split plan: children with labels, descriptions, file scopes, and dependency ordering.</li>
+    <li><strong>Execute</strong> — <code>cleave_run</code> creates git worktrees, dispatches child processes in parallel (up to 4 by default), and monitors progress.</li>
+    <li><strong>Merge</strong> — completed children are merged back to the parent branch. Conflicts are detected per-file (never bulk-resolved).</li>
+    <li><strong>Review</strong> — optional adversarial review loop checks for bugs, security issues, and spec compliance.</li>
   </ol>
 
-  <h2>Merge Policies</h2>
-  <table>
-    <thead><tr><th>Policy</th><th>Use Case</th><th>Method</th></tr></thead>
-    <tbody>
-      <tr><td><strong>Squash</strong></td><td>Cleave children</td><td>Single commit, no diary noise in history</td></tr>
-      <tr><td><strong>Cleanup</strong></td><td>Feature branches</td><td>Cherry-pick real commits, drop ceremony</td></tr>
-      <tr><td><strong>No-FF</strong></td><td>Explicit merges</td><td>Merge commit preserving branch topology</td></tr>
-    </tbody>
-  </table>
+  <h2>Usage</h2>
+  <pre><code># The agent suggests cleave when complexity is high:
+"Implement the provider routing engine with routing.rs, ollama.rs, and per-child cleave config"
+# Agent: cleave_assess → complexity 3.0 → recommends decomposition
 
-  <h2>jj Integration</h2>
-  <p>When jj is co-located (<code>.jj/</code> alongside <code>.git/</code>), cleave uses jj workspaces instead of git worktrees. This eliminates submodule initialization, provides lock-free concurrent access, and tracks changes automatically (no dirty tree concept).</p>
+# Or trigger explicitly:
+/cleave</code></pre>
+
+  <h2>With OpenSpec</h2>
+  <p>
+    When an OpenSpec change exists (from <code>design_tree_update(implement)</code>), cleave
+    integrates with the spec lifecycle:
+  </p>
+  <ul>
+    <li>Child tasks receive design context from <code>design.md</code></li>
+    <li><code>tasks.md</code> is reconciled after merge — marking completed tasks</li>
+    <li>Post-merge: <code>/assess spec</code> verifies specs are satisfied</li>
+    <li>Then <code>/opsx:archive</code> closes the change</li>
+  </ul>
+  <pre><code># Full lifecycle:
+# 1. design_tree_update(implement) on a decided node
+# 2. /opsx:ff generates tasks
+# 3. /cleave executes in parallel
+# 4. /assess spec verifies
+# 5. /opsx:archive closes</code></pre>
+
+  <h2>Complexity Formula</h2>
+  <p>
+    <code>complexity = systems × (1 + 0.5 × modifiers)</code>
+  </p>
+  <ul>
+    <li><strong>Systems</strong> — distinct subsystems touched (files, modules, layers)</li>
+    <li><strong>Modifiers</strong> — data migration, breaking changes, cross-cutting concerns</li>
+    <li><strong>Threshold</strong> — default 2.0; below this, execute directly</li>
+  </ul>
+
+  <h2>Child Isolation</h2>
+  <p>
+    Each child runs in a separate git worktree on its own branch. This means:
+  </p>
+  <ul>
+    <li>Children cannot interfere with each other's working trees</li>
+    <li>Each child sees the same starting state (parent branch HEAD)</li>
+    <li>File scope declarations prevent children from touching the same files</li>
+    <li>Merge order respects declared dependencies between children</li>
+  </ul>
+
+  <h2>Adversarial Review</h2>
+  <p>
+    Enable with <code>review: true</code> in cleave_run. After each child completes, a
+    reviewer checks for:
+  </p>
+  <ul>
+    <li>Bugs and logic errors</li>
+    <li>Security issues (injection, path traversal, unsafe patterns)</li>
+    <li>Spec compliance (if OpenSpec change is bound)</li>
+    <li>Churn detection — if the same issues reappear after fixes, bail</li>
+  </ul>
 </Docs>

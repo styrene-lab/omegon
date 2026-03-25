@@ -1,0 +1,60 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="Sessions" description="Auto-save and resume conversations across sessions.">
+  <h1>Sessions</h1>
+
+  <h2>Auto-Save</h2>
+  <p>
+    Sessions auto-save on exit. The full conversation history, memory state, and context are
+    preserved. Resume exactly where you left off.
+  </p>
+
+  <h2>Resume</h2>
+  <pre><code># Resume the most recent session
+omegon --resume
+
+# Resume a specific session (prefix match)
+omegon --resume abc123
+
+# List saved sessions
+/sessions</code></pre>
+
+  <h2>Session Contents</h2>
+  <p>A saved session includes:</p>
+  <ul>
+    <li>Full conversation history (all segments with metadata)</li>
+    <li>Model and provider state at time of save</li>
+    <li>Working memory pins</li>
+    <li>Active persona and tone</li>
+    <li>Turn count, tool call count, session duration</li>
+  </ul>
+
+  <h2>Disable Auto-Save</h2>
+  <pre><code>omegon --no-session</code></pre>
+  <p>
+    Disables session auto-save for this run. Useful for one-off queries or sensitive work
+    you don't want persisted to disk.
+  </p>
+
+  <h2>Headless Mode</h2>
+  <p>
+    For scripted/CI use, pass a prompt directly:
+  </p>
+  <pre><code># Execute a single prompt and exit
+omegon --prompt "Summarize README.md"
+
+# Read prompt from a file
+omegon --prompt-file task.md
+
+# Limit turns
+omegon --prompt "Fix the failing test" --max-turns 10</code></pre>
+
+  <h2>Smoke Tests</h2>
+  <pre><code>omegon --smoke</code></pre>
+  <p>
+    Runs 4 headless smoke tests through the LLM bridge: basic response, bash tool use,
+    file read, and arithmetic validation. Useful for verifying provider connectivity and
+    basic agent functionality after updates. 60-second timeout per test.
+  </p>
+</Docs>

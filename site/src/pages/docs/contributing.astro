@@ -1,0 +1,90 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="Contributing" description="How to contribute to Omegon — branch policy, commits, testing, and release workflow.">
+  <h1>Contributing</h1>
+
+  <h2>Development Setup</h2>
+  <pre><code>git clone https://github.com/styrene-lab/omegon.git
+cd omegon
+cd core && cargo build -p omegon
+cargo test -p omegon</code></pre>
+
+  <h2>Branch Policy</h2>
+  <p>
+    Trunk-based development on <code>main</code>. No long-lived feature branches.
+  </p>
+  <ul>
+    <li><strong>Direct commits to main</strong> for single-file fixes, typos, config tweaks</li>
+    <li><strong>Feature branches</strong> (<code>feature/&lt;name&gt;</code>) for multi-file work — must merge within one week</li>
+    <li><strong>No branch may accumulate more than ~50 commits</strong> before merging. If it does, decompose it.</li>
+  </ul>
+
+  <h2>Conventional Commits</h2>
+  <p>All commits must follow the <a href="https://www.conventionalcommits.org/">Conventional Commits</a> spec:</p>
+  <pre><code>feat(tui): surface SegmentMeta as response header tag
+fix(providers): handle rate-limit 429 with exponential backoff
+chore(release): 0.15.2-rc.5
+refactor(memory): extract semantic search into separate module
+docs: update provider matrix in FAQ
+test: add snapshot test for rounded borders</code></pre>
+
+  <h2>Testing Requirements</h2>
+  <ul>
+    <li>Every non-trivial code change must include tests</li>
+    <li><code>cargo test -p omegon</code> must pass with zero failures</li>
+    <li><code>cargo check</code> must produce zero warnings</li>
+    <li>Snapshot tests (via <code>cargo-insta</code>) are accepted with <code>cargo insta test --accept</code></li>
+    <li>Current test count: 877</li>
+  </ul>
+
+  <h2>Release Workflow</h2>
+  <p>Releases use the <code>just</code> task runner:</p>
+  <pre><code># Cut a release candidate (bump, test, commit, tag, build, sign)
+just rc
+
+# Sign with Apple Developer ID (YubiKey — optional)
+just sign
+
+# Publish: push to origin, trigger CI, build docs, link binary
+just publish
+
+# Cut a stable release (strip -rc.N suffix)
+just release</code></pre>
+
+  <h3>What <code>just publish</code> Does</h3>
+  <ol>
+    <li>Pre-flight: verifies clean working tree, binary exists, tag exists, version matches</li>
+    <li>Pushes to origin with tags — triggers three CI workflows:
+      <ul>
+        <li><code>release.yml</code> — builds binaries for 4 platforms, signs with cosign, creates GitHub Release</li>
+        <li><code>publish.yml</code> — publishes npm package (if version changed)</li>
+        <li><code>site.yml</code> — rebuilds docs site, pushes container to GHCR, ArgoCD auto-deploys</li>
+      </ul>
+    </li>
+    <li>Builds docs site locally (verification)</li>
+    <li>Links signed binary to <code>/opt/homebrew/bin/omegon</code></li>
+    <li>Runs post-publish smoke test</li>
+  </ol>
+
+  <h2>Crate Structure</h2>
+  <table>
+    <thead><tr><th>Crate</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>omegon</code></td><td>Binary — TUI, agent loop, providers, tools, cleave orchestrator</td></tr>
+      <tr><td><code>omegon-git</code></td><td>Git operations — worktree management, merge, diff</td></tr>
+      <tr><td><code>omegon-memory</code></td><td>Project memory — facts, episodes, semantic search, knowledge graph</td></tr>
+      <tr><td><code>omegon-secrets</code></td><td>Credential storage — keychain, encrypted file, Vault</td></tr>
+      <tr><td><code>omegon-traits</code></td><td>Shared traits and types across crates</td></tr>
+      <tr><td><code>opsx-core</code></td><td>OpenSpec engine — spec parsing, verification, lifecycle</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Feature Proposals</h2>
+  <p>
+    New features should start with a design tree node, not a PR. Use
+    <code>design_tree_update(create)</code> to propose a new exploration, add research and
+    open questions, and let the design converge before writing code. This prevents
+    throwaway work and ensures architectural coherence.
+  </p>
+</Docs>

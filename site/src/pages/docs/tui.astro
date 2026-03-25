@@ -1,0 +1,95 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="TUI & Dashboard" description="Terminal UI with instrument panels, segment rendering, and a live web dashboard.">
+  <h1>TUI &amp; Dashboard</h1>
+
+  <h2>Layout</h2>
+  <p>The terminal UI has four main regions:</p>
+  <ul>
+    <li><strong>Conversation view</strong> (center) — segments: user prompts, assistant responses, tool cards, system notifications, lifecycle events</li>
+    <li><strong>Instrument panel</strong> (right) — CIC telemetry: context bar, memory gauge, tool history, active model</li>
+    <li><strong>Editor</strong> (bottom) — multi-line input with history, slash command palette</li>
+    <li><strong>Footer</strong> (bottom bar) — model, provider, context %, tool calls, session duration</li>
+  </ul>
+
+  <h2>Segments</h2>
+  <p>
+    The conversation is rendered as a sequence of typed segments, each with metadata:
+  </p>
+  <table>
+    <thead><tr><th>Segment Type</th><th>Rendering</th></tr></thead>
+    <tbody>
+      <tr><td><strong>UserPrompt</strong></td><td>Your input, right-aligned with <code>&gt;</code> gutter</td></tr>
+      <tr><td><strong>AssistantText</strong></td><td>Response with teal <code>│</code> gutter, meta tag header, markdown highlighting</td></tr>
+      <tr><td><strong>ToolCard</strong></td><td>Collapsible card: tool name + glyph, args summary, result preview</td></tr>
+      <tr><td><strong>SystemNotification</strong></td><td>System messages (compaction, errors)</td></tr>
+      <tr><td><strong>LifecycleEvent</strong></td><td>Single-line status: turn separators, state changes</td></tr>
+      <tr><td><strong>TurnSeparator</strong></td><td>Thin horizontal rule between turns</td></tr>
+    </tbody>
+  </table>
+
+  <h3>SegmentMeta</h3>
+  <p>
+    Every segment carries metadata stamped at creation time — visible as a dim header line
+    on assistant responses:
+  </p>
+  <pre><code>claude-sonnet-4-6 · anthropic · victory · think:medium</code></pre>
+  <p>
+    Fields: model ID, provider, capability tier, thinking level, active persona, turn number,
+    estimated tokens, context fill percentage.
+  </p>
+
+  <h2>Tool Cards</h2>
+  <p>
+    Each tool call renders as a compact card with the tool name (glyph + label), a one-line
+    args summary, and a collapsible result preview. 48 tools are mapped to distinctive glyphs.
+  </p>
+  <ul>
+    <li><strong>Collapsed</strong> — shows tool name, args summary, first 12 lines of result</li>
+    <li><strong>Expanded</strong> — shows full result (up to 200 lines) with syntax highlighting</li>
+    <li><strong>Error cards</strong> — red separator, formatted error message</li>
+    <li>JSON results are automatically pretty-printed with <code>serde_json</code></li>
+  </ul>
+
+  <h3>Expansion</h3>
+  <table>
+    <thead><tr><th>Key</th><th>Behavior</th></tr></thead>
+    <tbody>
+      <tr><td><code>Ctrl+O</code></td><td>Pin/unpin: expands the nearest tool card and locks it visible. Press again to unpin and collapse.</td></tr>
+      <tr><td><code>Tab</code></td><td>Toggle expand on nearest tool card (when editor is empty). Backward compatibility.</td></tr>
+      <tr><td><code>Esc</code></td><td>Unpin any pinned segment.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Instrument Panel</h2>
+  <p>
+    The right-side instrument panel (CIC — Command Information Center) shows real-time telemetry:
+  </p>
+  <ul>
+    <li><strong>Context bar</strong> — two-row signal-density display (≋ ≈ ∿ · chars) showing context fill with perceptual teal ramp</li>
+    <li><strong>Memory gauge</strong> — active facts, working memory pins, injected count</li>
+    <li><strong>Tool history</strong> — recent tool calls with glyph labels and timing</li>
+    <li><strong>Thinking indicator</strong> — glitch-fill animation during extended reasoning</li>
+  </ul>
+  <p>Toggle focus mode with <code>/focus</code> to expand the instrument panel.</p>
+
+  <h2>Visual Style</h2>
+  <p>
+    The TUI uses the <strong>Alpharius</strong> theme — a teal-dominant dark palette:
+  </p>
+  <ul>
+    <li>All borders use rounded corners (╭╮╰╯) — no square corners anywhere</li>
+    <li>Teal accent ramp for intensity-dependent elements</li>
+    <li>IBM Plex Mono (or system monospace) for code</li>
+    <li>Tomorrow (Google Fonts) for UI chrome</li>
+  </ul>
+
+  <h2>Web Dashboard</h2>
+  <pre><code>/dash</code></pre>
+  <p>
+    Opens a live web dashboard in your browser that connects over WebSocket. Shows real-time
+    conversation, tool calls, memory state, design tree status, and session telemetry.
+    Useful for remote monitoring, screen sharing, or when you want a wider viewport.
+  </p>
+</Docs>

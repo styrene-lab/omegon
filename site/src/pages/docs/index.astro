@@ -2,19 +2,25 @@
 import Docs from "../../layouts/Docs.astro";
 ---
 
-<Docs title="Introduction" description="Omegon — native AI agent harness. Single binary, zero dependencies, full autonomy.">
+<Docs title="Introduction" description="Omegon — terminal-native AI agent harness. Single binary, ten providers, zero dependencies.">
   <h1>Omegon</h1>
   <p>
-    Native AI agent harness — for agents, by agents.
-    Single binary. Zero dependencies. Full autonomy.
+    Terminal-native AI agent harness — for operators who ship.
+    Single binary. Ten providers. Zero runtime dependencies.
   </p>
 
   <h2>What is Omegon?</h2>
   <p>
-    Omegon is a terminal-native AI coding agent that ships as a single ~12MB binary.
-    It provides a complete development environment with parallel task execution,
-    persistent project memory, spec-driven development lifecycle, and a design
-    exploration tree — all running locally with no external dependencies.
+    Omegon is a ~15MB Rust binary that provides a complete AI-assisted development
+    environment. It connects to 10 inference providers through native Rust clients
+    (no subprocess shims, no Node.js at runtime), manages persistent project memory
+    across sessions, decomposes work into parallel git worktree children, and tracks
+    design decisions in a 263-node knowledge graph — all from your terminal.
+  </p>
+  <p>
+    It is not a wrapper around <code>curl</code>. It is not an IDE plugin. It is not
+    a chatbot with a file picker. It is a <em>systems engineering harness</em> that
+    happens to use LLMs as one of its subsystems.
   </p>
 
   <h2>Three-Axis Routing Model</h2>
@@ -24,11 +30,7 @@ import Docs from "../../layouts/Docs.astro";
   </p>
   <table>
     <thead>
-      <tr>
-        <th>Axis</th>
-        <th>Values</th>
-        <th>Controls</th>
-      </tr>
+      <tr><th>Axis</th><th>Values</th><th>Controls</th></tr>
     </thead>
     <tbody>
       <tr>
@@ -38,7 +40,7 @@ import Docs from "../../layouts/Docs.astro";
       </tr>
       <tr>
         <td><strong>Thinking Level</strong></td>
-        <td>Servitor → Functionary → Adept → Magos → Archmagos</td>
+        <td>off → minimal → low → medium → high</td>
         <td>Extended reasoning budget</td>
       </tr>
       <tr>
@@ -48,15 +50,23 @@ import Docs from "../../layouts/Docs.astro";
       </tr>
     </tbody>
   </table>
+  <p>
+    The agent adjusts these axes autonomously based on task complexity, or operators
+    can override with <code>/model</code>, <code>/think</code>, and <code>/context</code>.
+    See <a href="/docs/three-axis-model">Three-Axis Model</a> for details.
+  </p>
 
   <h2>Key Features</h2>
   <ul>
-    <li><strong>Parallel Execution</strong> — Cleave tasks into parallel worktree children with automatic merge and conflict detection</li>
-    <li><strong>Project Memory</strong> — Persistent facts, episodes, and semantic recall across sessions. 1800+ facts in the omegon project itself</li>
-    <li><strong>Design Tree</strong> — 185-node knowledge graph tracking design decisions, dependencies, and implementation status</li>
-    <li><strong>OpenSpec Lifecycle</strong> — Spec-driven development: propose → spec → fast-forward → cleave → assess → archive</li>
-    <li><strong>Live Dashboard</strong> — Terminal TUI + web dashboard with real-time WebSocket protocol</li>
-    <li><strong>Provider Resilience</strong> — Automatic failover, rate-limit cooldowns, and context-aware downgrade policy</li>
+    <li><strong>10 Inference Providers</strong> — Anthropic, OpenAI, Codex, OpenRouter, Groq, xAI, Mistral, Cerebras, HuggingFace, Ollama. Native Rust clients with automatic failover.</li>
+    <li><strong>Parallel Execution</strong> — Cleave tasks into parallel worktree children with automatic merge, conflict detection, and adversarial review.</li>
+    <li><strong>Project Memory</strong> — Persistent facts, episodes, semantic recall, and knowledge graphs across sessions. Not a markdown file — a real memory system.</li>
+    <li><strong>Design Tree</strong> — 263-node knowledge graph tracking architecture decisions, dependencies, and implementation status.</li>
+    <li><strong>OpenSpec Lifecycle</strong> — Spec-driven development: propose → spec → fast-forward → cleave → assess → archive.</li>
+    <li><strong>Live Dashboard</strong> — Terminal TUI with instrument panels, segment rendering with model tags, plus a web dashboard over WebSocket.</li>
+    <li><strong>Plugins</strong> — Personas with organic memory growth, tones, and memory layers. Not prompt templates — living cognitive profiles.</li>
+    <li><strong>Sessions</strong> — Auto-save and resume. Pick up exactly where you left off across sessions.</li>
+    <li><strong>877 Tests</strong> — Comprehensive test suite. Zero compiler warnings. Supply chain signed with cosign.</li>
   </ul>
 
   <h2>Quick Start</h2>
@@ -66,6 +76,33 @@ import Docs from "../../layouts/Docs.astro";
 export ANTHROPIC_API_KEY="sk-ant-..."
 omegon
 
-# With Claude Pro/Max subscription:
+# With Claude Pro/Max subscription (free):
 omegon login</code></pre>
+
+  <p>
+    See <a href="/docs/install">Installation</a> for all methods, and
+    <a href="/docs/quickstart">Quick Start</a> for your first session walkthrough.
+  </p>
+
+  <h2>Where Did This Come From?</h2>
+  <p>
+    Omegon started as a fork of the <code>pi</code> TypeScript coding agent (omegon-pi),
+    then rewrote the entire agent loop, TUI, provider layer, memory system, and orchestration
+    engine in Rust. The TypeScript harness still exists as a compatibility shim but is being
+    sunset — the Rust binary is the canonical runtime. See <a href="/docs/migration">Migration Guide</a>
+    if you're coming from Claude Code, Codex, or another tool.
+  </p>
+
+  <h2>Codebase</h2>
+  <table>
+    <tbody>
+      <tr><td>Language</td><td>Rust (65,000+ lines across 6 crates)</td></tr>
+      <tr><td>Binary size</td><td>~15 MB (stripped, release profile)</td></tr>
+      <tr><td>Tests</td><td>877 (unit + integration + snapshot)</td></tr>
+      <tr><td>Providers</td><td>10 inference + 3 search</td></tr>
+      <tr><td>Design nodes</td><td>263+ tracked decisions</td></tr>
+      <tr><td>Memory facts</td><td>2,500+ persistent across sessions</td></tr>
+      <tr><td>License</td><td>BSL 1.1</td></tr>
+    </tbody>
+  </table>
 </Docs>

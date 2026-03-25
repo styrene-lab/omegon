@@ -1,18 +1,47 @@
 ---
 import Docs from "../../layouts/Docs.astro";
 ---
-<Docs title="Commands" description="Reference for slash commands available in omegon sessions.">
+<Docs title="Commands" description="Complete reference for slash commands available in omegon sessions.">
   <h1>Command Reference</h1>
+  <p>
+    Type <code>/</code> in the editor to see the command palette with fuzzy search.
+    All commands are prefixed with <code>/</code>.
+  </p>
 
-  <h2>Session Control</h2>
+  <h2>Model &amp; Inference</h2>
   <table>
     <thead><tr><th>Command</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>/effort [tier]</code></td><td>View or change effort tier (Servitor → Omnissiah). Controls model, thinking, extraction, compaction, and cleave settings.</td></tr>
-      <tr><td><code>/context [pin &lt;class&gt;]</code></td><td>Inspect context class routing state. Pin a minimum context floor.</td></tr>
-      <tr><td><code>/providers</code></td><td>Show provider auth status and per-tier routing summary.</td></tr>
-      <tr><td><code>/dashboard</code></td><td>Toggle the live TUI dashboard overlay.</td></tr>
+      <tr><td><code>/model [name]</code></td><td>View or switch model. Opens selector popup, or pass a model ID directly.</td></tr>
+      <tr><td><code>/think [level]</code></td><td>Set thinking level: <code>off</code>, <code>low</code>, <code>medium</code>, <code>high</code>.</td></tr>
+      <tr><td><code>/context [class]</code></td><td>Select context class: <code>squad</code> (128k), <code>maniple</code> (272k), <code>clan</code> (400k), <code>legion</code> (1M).</td></tr>
+      <tr><td><code>/detail [mode]</code></td><td>Toggle tool display: <code>compact</code> or <code>detailed</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Session &amp; Memory</h2>
+  <table>
+    <thead><tr><th>Command</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>/stats</code></td><td>Session telemetry — turns, tool calls, tokens, duration.</td></tr>
       <tr><td><code>/compact</code></td><td>Trigger context compaction to free context window space.</td></tr>
+      <tr><td><code>/clear</code></td><td>Clear conversation display (doesn't affect memory).</td></tr>
+      <tr><td><code>/memory</code></td><td>Memory statistics — facts, episodes, working memory.</td></tr>
+      <tr><td><code>/sessions</code></td><td>List saved sessions. Resume with <code>--resume</code> flag.</td></tr>
+      <tr><td><code>/note [text]</code></td><td>Capture a note for later (persists across sessions).</td></tr>
+      <tr><td><code>/notes [clear]</code></td><td>Show or clear pending notes.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Authentication</h2>
+  <table>
+    <thead><tr><th>Command</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>/login [provider]</code></td><td>Log in to a provider: <code>anthropic</code>, <code>openai</code>, <code>openrouter</code>, <code>github</code>.</td></tr>
+      <tr><td><code>/logout [provider]</code></td><td>Log out of a provider.</td></tr>
+      <tr><td><code>/auth [action]</code></td><td>Authentication management: <code>status</code>, <code>login</code>, <code>logout</code>, <code>unlock</code>.</td></tr>
+      <tr><td><code>/secrets [action]</code></td><td>Manage stored secrets: <code>list</code>, <code>set</code>, <code>get</code>, <code>delete</code>.</td></tr>
+      <tr><td><code>/vault [action]</code></td><td>HashiCorp Vault integration: <code>status</code>, <code>unseal</code>, <code>login</code>, <code>configure</code>, <code>init-policy</code>.</td></tr>
     </tbody>
   </table>
 
@@ -20,9 +49,13 @@ import Docs from "../../layouts/Docs.astro";
   <table>
     <thead><tr><th>Command</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>/cleave</code></td><td>Decompose and parallelize the current task via git worktrees.</td></tr>
-      <tr><td><code>/assess [cleave|diff|spec|design]</code></td><td>Run adversarial review, diff review, spec verification, or design readiness check.</td></tr>
-      <tr><td><code>/init</code></td><td>Initialize project memory and project orientation.</td></tr>
+      <tr><td><code>/init [action]</code></td><td>Initialize project — scan &amp; migrate agent conventions. Args: <code>scan</code>, <code>migrate</code>.</td></tr>
+      <tr><td><code>/migrate [source]</code></td><td>Import from other tools: <code>auto</code>, <code>claude-code</code>, <code>pi</code>, <code>codex</code>, <code>cursor</code>, <code>aider</code>.</td></tr>
+      <tr><td><code>/checkin</code></td><td>Triage what needs attention now — open designs, active changes, recent issues.</td></tr>
+      <tr><td><code>/status</code></td><td>Show harness status — providers, MCP servers, secrets, routing state.</td></tr>
+      <tr><td><code>/milestone [action]</code></td><td>Release milestone management: <code>freeze</code>, <code>status</code>.</td></tr>
+      <tr><td><code>/delegate [status]</code></td><td>Delegate task management across sessions.</td></tr>
+      <tr><td><code>/chronos [sub]</code></td><td>Date/time context: <code>week</code>, <code>month</code>, <code>quarter</code>, <code>relative</code>, <code>iso</code>, <code>epoch</code>, <code>tz</code>, <code>range</code>, <code>all</code>.</td></tr>
     </tbody>
   </table>
 
@@ -39,24 +72,67 @@ import Docs from "../../layouts/Docs.astro";
     </tbody>
   </table>
 
+  <h2>Plugins &amp; Personas</h2>
+  <table>
+    <thead><tr><th>Command</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>/persona [name|off]</code></td><td>Switch persona or deactivate. Personas carry their own memory and cognitive style.</td></tr>
+      <tr><td><code>/tone [name|off]</code></td><td>Switch tone or deactivate. Adjusts communication style without changing capabilities.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Interface</h2>
+  <table>
+    <thead><tr><th>Command</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>/dash</code></td><td>Open web dashboard in browser (real-time WebSocket connection).</td></tr>
+      <tr><td><code>/dashboard</code></td><td>Alias for <code>/dash</code>.</td></tr>
+      <tr><td><code>/focus</code></td><td>Toggle instrument panel focus mode.</td></tr>
+      <tr><td><code>/tutorial [action]</code></td><td>Interactive tutorial overlay. Args: <code>status</code>, <code>reset</code>. Legacy lessons: <code>/tutorial lessons</code>.</td></tr>
+      <tr><td><code>/next</code></td><td>Advance to next tutorial lesson.</td></tr>
+      <tr><td><code>/prev</code></td><td>Go back to previous tutorial lesson.</td></tr>
+      <tr><td><code>/splash</code></td><td>Replay the splash animation.</td></tr>
+    </tbody>
+  </table>
+
   <h2>System</h2>
   <table>
     <thead><tr><th>Command</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>/bootstrap</code></td><td>First-time setup — provider auth, capabilities, onboarding.</td></tr>
-      <tr><td><code>/update</code></td><td>Update omegon to the latest version.</td></tr>
-      <tr><td><code>/status</code></td><td>Project status overview — open designs, active changes, recent facts.</td></tr>
+      <tr><td><code>/update</code></td><td>Check for and install updates from GitHub Releases.</td></tr>
+      <tr><td><code>/version</code></td><td>Show build version, git SHA, and build date.</td></tr>
+      <tr><td><code>/help</code></td><td>Show available commands.</td></tr>
+      <tr><td><code>/exit</code></td><td>Quit (or double Ctrl+C).</td></tr>
     </tbody>
   </table>
 
   <h2>Agent Tools</h2>
-  <p>In addition to slash commands, the agent has access to structured tools that it calls autonomously:</p>
+  <p>In addition to slash commands, the agent has access to 48 structured tools that it calls autonomously:</p>
   <ul>
-    <li><code>set_model_tier</code> / <code>set_thinking_level</code> — adjust inference parameters</li>
-    <li><code>memory_store</code> / <code>memory_recall</code> / <code>memory_query</code> — manage project memory</li>
+    <li><code>set_model_tier</code> / <code>set_thinking_level</code> — adjust inference parameters mid-conversation</li>
+    <li><code>memory_store</code> / <code>memory_recall</code> / <code>memory_query</code> / <code>memory_episodes</code> — manage project memory</li>
     <li><code>design_tree</code> / <code>design_tree_update</code> — query and mutate the design tree</li>
-    <li><code>cleave_assess</code> / <code>cleave_run</code> — assess complexity and execute decomposition</li>
+    <li><code>cleave_assess</code> / <code>cleave_run</code> — assess complexity and execute parallel decomposition</li>
     <li><code>openspec_manage</code> — manage OpenSpec lifecycle</li>
+    <li><code>web_search</code> — multi-provider web search (Brave, Tavily, Serper)</li>
+    <li><code>ask_local_model</code> / <code>manage_ollama</code> — delegate to local inference</li>
     <li><code>read</code> / <code>edit</code> / <code>write</code> / <code>bash</code> / <code>view</code> — file and system operations</li>
+    <li><code>chronos</code> — authoritative date/time (never calculates dates manually)</li>
+    <li><code>whoami</code> — check auth status across all dev tools</li>
+    <li><code>manage_tools</code> — enable/disable tools and profiles</li>
   </ul>
+
+  <h2>Keyboard Shortcuts</h2>
+  <table>
+    <thead><tr><th>Key</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td><code>Ctrl+O</code></td><td>Pin/unpin segment expansion (locks tool card open at bottom of viewport)</td></tr>
+      <tr><td><code>Tab</code></td><td>Expand nearest tool card (when editor is empty)</td></tr>
+      <tr><td><code>Esc</code></td><td>Cancel active agent turn / unpin segment / close selector</td></tr>
+      <tr><td><code>Ctrl+C</code></td><td>Cancel turn (single) / quit (double-tap)</td></tr>
+      <tr><td><code>↑/↓</code></td><td>Scroll conversation / navigate history (in editor)</td></tr>
+      <tr><td><code>Enter</code></td><td>Send prompt</td></tr>
+      <tr><td><code>Shift+Enter</code></td><td>Newline in editor</td></tr>
+    </tbody>
+  </table>
 </Docs>

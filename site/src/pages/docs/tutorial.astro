@@ -1,0 +1,55 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="Tutorial" description="Interactive overlay tutorial that guides you through Omegon's features.">
+  <h1>Tutorial</h1>
+
+  <h2>Overlay Tutorial</h2>
+  <p>
+    The primary tutorial is a game-style overlay that renders on top of the TUI and guides
+    you through features step by step. Launch it with:
+  </p>
+  <pre><code>/tutorial</code></pre>
+  <p>
+    The overlay highlights relevant UI elements, explains what they do, and prompts you to
+    try each feature. Steps include:
+  </p>
+  <ol>
+    <li><strong>Welcome</strong> — choose "Start Fresh" (new project) or "My Project" (existing project auto-advances)</li>
+    <li><strong>Editor</strong> — type prompts, use <code>Shift+Enter</code> for multiline</li>
+    <li><strong>Tool Cards</strong> — how agent tool calls render, expand with <code>Ctrl+O</code></li>
+    <li><strong>Model Selection</strong> — <code>/model</code> to switch providers and models</li>
+    <li><strong>Thinking Levels</strong> — <code>/think</code> to control reasoning depth</li>
+    <li><strong>Project Memory</strong> — how facts persist, <code>/memory</code> for stats</li>
+    <li><strong>Web Dashboard</strong> — <code>/dash</code> opens the live browser dashboard</li>
+    <li><strong>Sessions</strong> — auto-save, <code>--resume</code> to continue</li>
+  </ol>
+
+  <h2>First-Run Behavior</h2>
+  <p>
+    On first launch, Omegon starts with the tutorial overlay active (unless <code>--no-splash</code>
+    is passed). You can also launch it explicitly at any time.
+  </p>
+  <pre><code># Start Omegon in tutorial mode
+omegon --tutorial
+
+# Launch tutorial from within a session
+/tutorial
+
+# Check tutorial progress
+/tutorial status
+
+# Reset tutorial state
+/tutorial reset</code></pre>
+
+  <h2>Legacy Lessons</h2>
+  <p>
+    The older lesson-based tutorial (sequential text lessons with <code>/next</code> and
+    <code>/prev</code> navigation) is still available:
+  </p>
+  <pre><code>/tutorial lessons</code></pre>
+  <p>
+    The overlay tutorial is the recommended path for new users. Legacy lessons are preserved
+    for users who prefer a text-only walkthrough.
+  </p>
+</Docs>

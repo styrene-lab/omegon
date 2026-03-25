@@ -1,35 +1,72 @@
 ---
 import Docs from "../../layouts/Docs.astro";
 ---
-<Docs title="Design Tree" description="A 185-node markdown knowledge graph tracking architecture decisions and implementation.">
+<Docs title="Design Tree" description="A 263-node knowledge graph tracking architecture decisions, dependencies, and implementation status.">
   <h1>Design Tree</h1>
-  <p>The design tree is a markdown-based knowledge graph stored in <code>docs/</code>. Each node is a markdown file with YAML frontmatter tracking status, tags, dependencies, and related nodes.</p>
+  <p>
+    The design tree is a markdown-backed knowledge graph for tracking architecture exploration.
+    Each node is a markdown file in <code>docs/</code> with structured sections: overview,
+    research, decisions, open questions, and implementation notes.
+  </p>
+  <p>
+    The Omegon project itself has <strong>263+ design nodes</strong> tracking everything from
+    provider routing policy to TUI color choices. The tree is visualized as an SVG on the
+    <a href="/docs/architecture/graph">Design Graph</a> page.
+  </p>
 
-  <h2>Lifecycle</h2>
-  <p>Every design node follows a status lifecycle:</p>
-  <pre><code>seed → exploring → resolved → decided → implementing → implemented</code></pre>
+  <h2>Node Lifecycle</h2>
   <table>
     <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
     <tbody>
-      <tr><td><code>seed</code></td><td>Idea captured, no exploration yet</td></tr>
-      <tr><td><code>exploring</code></td><td>Actively researching, open questions exist</td></tr>
-      <tr><td><code>resolved</code></td><td>Questions answered, not yet formally decided</td></tr>
-      <tr><td><code>decided</code></td><td>Design approved, ready to implement</td></tr>
-      <tr><td><code>implementing</code></td><td>Code being written (bound to OpenSpec change)</td></tr>
-      <tr><td><code>implemented</code></td><td>Complete with passing tests</td></tr>
+      <tr><td><code>seed</code></td><td>Idea captured, not yet explored</td></tr>
+      <tr><td><code>exploring</code></td><td>Active research and discussion</td></tr>
+      <tr><td><code>resolved</code></td><td>Questions answered, design clear — awaiting formal gate</td></tr>
+      <tr><td><code>decided</code></td><td>Ready for implementation. Can bridge to OpenSpec.</td></tr>
+      <tr><td><code>blocked</code></td><td>Waiting on a dependency or external input</td></tr>
+      <tr><td><code>deferred</code></td><td>Deliberately postponed</td></tr>
     </tbody>
   </table>
 
   <h2>Node Structure</h2>
-  <p>Each node can contain structured sections:</p>
+  <p>Each design node has structured sections:</p>
   <ul>
+    <li><strong>Overview</strong> — what this node is about</li>
     <li><strong>Research</strong> — findings with headings and content</li>
-    <li><strong>Decisions</strong> — choices with status (exploring/decided/rejected) and rationale</li>
-    <li><strong>Open Questions</strong> — unresolved unknowns that block progress</li>
-    <li><strong>Implementation Notes</strong> — file scope and constraints for the implementation phase</li>
+    <li><strong>Decisions</strong> — choices with title, status (exploring/decided/rejected), and rationale</li>
+    <li><strong>Open Questions</strong> — unknowns that need resolution before deciding</li>
+    <li><strong>Implementation Notes</strong> — file scope and constraints for implementation</li>
+    <li><strong>Acceptance Criteria</strong> — Given/When/Then scenarios and falsifiability tests</li>
   </ul>
 
-  <h2>Scale</h2>
-  <p>The omegon project's design tree currently has <strong>185 nodes</strong>, with 126 implemented, 29 decided, and 19 still exploring. The tree captures every major architectural decision from the initial fork through the Rust agent loop, memory system, cleave orchestrator, and provider routing.</p>
-  <p><a href="/docs/architecture/graph">View the design graph →</a></p>
+  <h2>Agent Tools</h2>
+  <table>
+    <thead><tr><th>Tool</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>design_tree(list)</code></td><td>List all nodes</td></tr>
+      <tr><td><code>design_tree(node, id)</code></td><td>Read full node content</td></tr>
+      <tr><td><code>design_tree(frontier)</code></td><td>Find nodes with open questions</td></tr>
+      <tr><td><code>design_tree(ready)</code></td><td>Find decided nodes ready for implementation</td></tr>
+      <tr><td><code>design_tree(blocked)</code></td><td>Find blocked nodes and what's blocking them</td></tr>
+      <tr><td><code>design_tree_update(create)</code></td><td>Create a new design node</td></tr>
+      <tr><td><code>design_tree_update(branch)</code></td><td>Spawn child node from a parent's open question</td></tr>
+      <tr><td><code>design_tree_update(implement)</code></td><td>Bridge to OpenSpec — scaffold a change directory</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Implementation Bridge</h2>
+  <p>
+    When a design node reaches <code>decided</code> status, it can be bridged to the
+    <a href="/docs/openspec">OpenSpec lifecycle</a> for implementation:
+  </p>
+  <ol>
+    <li><code>design_tree_update(implement)</code> scaffolds an OpenSpec change directory</li>
+    <li>Specs are generated from the node's decisions and acceptance criteria</li>
+    <li><code>/cleave</code> parallelizes the implementation across git worktrees</li>
+    <li><code>/assess spec</code> verifies the specs are satisfied</li>
+    <li>Node status updates as implementation progresses</li>
+  </ol>
+
+  <h2>Operator Commands</h2>
+  <pre><code>/checkin      # Triage: open designs, active changes, recent issues
+/status       # Harness status including design tree summary</code></pre>
 </Docs>

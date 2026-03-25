@@ -1,0 +1,78 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="Providers" description="10 inference providers with native Rust clients, automatic failover, and three-axis routing.">
+  <h1>Providers</h1>
+  <p>
+    Omegon connects to inference providers through native Rust HTTP clients — no subprocess
+    shims, no Node.js at runtime. Each provider has a dedicated client that handles authentication,
+    streaming, tool call wire formats, and error recovery natively.
+  </p>
+
+  <h2>Inference Providers</h2>
+  <table>
+    <thead><tr><th>Provider</th><th>Client</th><th>Auth</th><th>Env Var</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Anthropic</strong></td><td>AnthropicClient (native SSE)</td><td>OAuth or API key</td><td><code>ANTHROPIC_API_KEY</code></td></tr>
+      <tr><td><strong>OpenAI</strong></td><td>OpenAIClient (native)</td><td>OAuth or API key</td><td><code>OPENAI_API_KEY</code></td></tr>
+      <tr><td><strong>OpenAI Codex</strong></td><td>CodexClient (Responses API)</td><td>OAuth JWT</td><td><code>CHATGPT_OAUTH_TOKEN</code></td></tr>
+      <tr><td><strong>OpenRouter</strong></td><td>OpenRouterClient (wrapper)</td><td>API key</td><td><code>OPENROUTER_API_KEY</code></td></tr>
+      <tr><td><strong>Groq</strong></td><td>OpenAICompatClient</td><td>API key</td><td><code>GROQ_API_KEY</code></td></tr>
+      <tr><td><strong>xAI (Grok)</strong></td><td>OpenAICompatClient</td><td>API key</td><td><code>XAI_API_KEY</code></td></tr>
+      <tr><td><strong>Mistral</strong></td><td>OpenAICompatClient</td><td>API key</td><td><code>MISTRAL_API_KEY</code></td></tr>
+      <tr><td><strong>Cerebras</strong></td><td>OpenAICompatClient</td><td>API key</td><td><code>CEREBRAS_API_KEY</code></td></tr>
+      <tr><td><strong>HuggingFace</strong></td><td>OpenAICompatClient</td><td>API key</td><td><code>HF_TOKEN</code></td></tr>
+      <tr><td><strong>Ollama</strong></td><td>OpenAICompatClient</td><td>Local (no auth)</td><td><code>OLLAMA_HOST</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Search Providers</h2>
+  <table>
+    <thead><tr><th>Provider</th><th>Auth</th><th>Env Var</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Brave Search</strong></td><td>API key</td><td><code>BRAVE_API_KEY</code></td></tr>
+      <tr><td><strong>Tavily</strong></td><td>API key</td><td><code>TAVILY_API_KEY</code></td></tr>
+      <tr><td><strong>Serper</strong></td><td>API key</td><td><code>SERPER_API_KEY</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Client Architecture</h2>
+  <p>There are 5 distinct Rust client implementations:</p>
+  <ul>
+    <li><strong>AnthropicClient</strong> — Native SSE streaming against the Anthropic Messages API. Handles thinking blocks, tool use, and multi-turn continuity natively.</li>
+    <li><strong>OpenAIClient</strong> — Native client for the OpenAI Chat Completions API. Handles function calling, streaming, and structured outputs.</li>
+    <li><strong>CodexClient</strong> — Implements the OpenAI Responses API (completely different wire protocol from Chat Completions). Uses JWT OAuth with account ID extraction from claims. Handles compound tool call IDs and SSE parsing.</li>
+    <li><strong>OpenRouterClient</strong> — Wraps OpenAIClient with base URL override and model prefix handling for OpenRouter's 200+ model catalog.</li>
+    <li><strong>OpenAICompatClient</strong> — Generic client for the 6 providers that implement the OpenAI-compatible API (Groq, xAI, Mistral, Cerebras, HuggingFace, Ollama). Wraps OpenAIClient with per-provider base URL and model mapping.</li>
+  </ul>
+
+  <h2>Routing &amp; Failover</h2>
+  <p>
+    The routing engine (<code>routing.rs</code>) scores available providers against the requested
+    capability tier and selects the best match. If the primary provider fails, it automatically
+    falls back to the next-best provider. See <a href="/docs/three-axis-model">Three-Axis Model</a>.
+  </p>
+  <ul>
+    <li>Providers are scored by capability match, latency history, and rate-limit state</li>
+    <li>Rate-limited providers enter cooldown and are deprioritized until recovery</li>
+    <li>The agent can switch providers mid-session with <code>set_model_tier</code></li>
+    <li>Local inference (Ollama) is always available as a zero-cost fallback</li>
+  </ul>
+
+  <h2>Authentication</h2>
+  <p>
+    Credentials are stored in the system keychain (macOS Keychain, Linux Secret Service)
+    or encrypted on disk. OAuth tokens are refreshed automatically.
+  </p>
+  <pre><code># OAuth login (Claude Pro/Max, ChatGPT Plus/Pro)
+omegon login
+/login anthropic
+/login openai
+
+# API key (set in environment or via /secrets)
+export ANTHROPIC_API_KEY="sk-ant-..."
+/secrets set groq GROQ_API_KEY
+
+# Check status
+/auth status</code></pre>
+</Docs>

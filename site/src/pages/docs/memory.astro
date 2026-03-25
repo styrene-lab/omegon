@@ -1,37 +1,61 @@
 ---
 import Docs from "../../layouts/Docs.astro";
 ---
-<Docs title="Project Memory" description="Persistent knowledge layer with semantic recall, episodes, and cross-session continuity.">
+<Docs title="Project Memory" description="Persistent knowledge layer with semantic recall, episodes, knowledge graphs, and cross-session continuity.">
   <h1>Project Memory</h1>
-  <p>Omegon maintains a durable knowledge layer per project. Facts, episodes, and edges persist across sessions, giving the agent continuity without re-discovering the same information each time.</p>
+  <p>
+    Not a markdown file. Not a vector database. A persistent knowledge base with typed facts,
+    semantic search, episodic narratives, a knowledge graph with directional edges, working
+    memory pinning, and automatic compaction — all surviving across sessions.
+  </p>
 
-  <h2>Memory Types</h2>
+  <h2>Architecture</h2>
+  <ul>
+    <li><strong>Facts</strong> — individual knowledge atoms stored with section, confidence, and timestamp. Sections: Architecture, Decisions, Constraints, Known Issues, Patterns &amp; Conventions, Specs, Recent Work.</li>
+    <li><strong>Episodes</strong> — session narratives that capture goals, decisions, sequences, and outcomes. What happened and why.</li>
+    <li><strong>Knowledge Graph</strong> — typed edges between facts: <code>depends_on</code>, <code>contradicts</code>, <code>enables</code>, <code>replaces</code>, <code>motivated_by</code>.</li>
+    <li><strong>Working Memory</strong> — pinned facts that persist across context compaction. Priority injection into every turn.</li>
+    <li><strong>Archive</strong> — superseded or stale facts. Searchable but not injected into context.</li>
+  </ul>
+
+  <h2>Agent Tools</h2>
   <table>
-    <thead><tr><th>Type</th><th>Purpose</th><th>Storage</th></tr></thead>
+    <thead><tr><th>Tool</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td><strong>Facts</strong></td><td>Atomic knowledge units — decisions, patterns, constraints</td><td>SQLite + <code>facts.jsonl</code> (git-tracked)</td></tr>
-      <tr><td><strong>Episodes</strong></td><td>Session narratives — what happened, in what order, what was the outcome</td><td>SQLite (local only)</td></tr>
-      <tr><td><strong>Edges</strong></td><td>Relationships between facts — depends_on, contradicts, replaces</td><td>SQLite (local only)</td></tr>
-      <tr><td><strong>Working Memory</strong></td><td>Pinned facts that survive context compaction</td><td>In-memory (session-scoped)</td></tr>
+      <tr><td><code>memory_recall(query)</code></td><td>Semantic search — returns ranked facts by relevance × confidence</td></tr>
+      <tr><td><code>memory_query()</code></td><td>Load all active facts (expensive — prefer <code>memory_recall</code>)</td></tr>
+      <tr><td><code>memory_store(section, content)</code></td><td>Persist a new fact</td></tr>
+      <tr><td><code>memory_supersede(fact_id, content)</code></td><td>Atomically replace a fact with an updated version</td></tr>
+      <tr><td><code>memory_archive(fact_ids)</code></td><td>Archive stale facts (removed from active context)</td></tr>
+      <tr><td><code>memory_episodes(query)</code></td><td>Search session narratives for episodic context</td></tr>
+      <tr><td><code>memory_focus(fact_ids)</code></td><td>Pin facts to working memory (survives compaction)</td></tr>
+      <tr><td><code>memory_release()</code></td><td>Clear working memory buffer</td></tr>
+      <tr><td><code>memory_connect(source, target, relation)</code></td><td>Create a typed edge in the knowledge graph</td></tr>
+      <tr><td><code>memory_compact()</code></td><td>Trigger context compaction to free context window</td></tr>
     </tbody>
   </table>
 
-  <h2>Retrieval</h2>
-  <ul>
-    <li><code>memory_query</code> — Load all active facts (full context picture)</li>
-    <li><code>memory_recall(query)</code> — Semantic search via embeddings, ranked by relevance × confidence</li>
-    <li><code>memory_episodes(query)</code> — Search past session narratives</li>
-    <li><code>memory_focus(ids)</code> — Pin specific facts to working memory</li>
-  </ul>
-
   <h2>Lifecycle</h2>
-  <ul>
-    <li><strong>Store</strong> — <code>memory_store</code> persists a conclusion (not investigation steps)</li>
-    <li><strong>Supersede</strong> — <code>memory_supersede</code> atomically replaces an outdated fact</li>
-    <li><strong>Archive</strong> — <code>memory_archive</code> removes stale facts (searchable in archive)</li>
-    <li><strong>Decay</strong> — Unreferenced facts gradually lose relevance score</li>
-  </ul>
+  <ol>
+    <li><strong>Store</strong> — agent discovers something important, stores a fact</li>
+    <li><strong>Recall</strong> — on future turns, agent searches for relevant facts by query</li>
+    <li><strong>Supersede</strong> — when understanding changes, old fact is replaced atomically</li>
+    <li><strong>Connect</strong> — relationships between facts are recorded as graph edges</li>
+    <li><strong>Archive</strong> — stale facts are moved to archive (still searchable, not injected)</li>
+    <li><strong>Compact</strong> — when context fills, older conversation is summarized; pinned facts survive</li>
+  </ol>
 
-  <h2>Cross-Session Transport</h2>
-  <p><code>facts.jsonl</code> is exported on session end and tracked in git. On next session start, facts are imported from the JSONL file into the local SQLite database. This means facts travel with the repository — clone the repo, get the project's accumulated knowledge.</p>
+  <h2>Operator Commands</h2>
+  <pre><code>/memory       # Show memory stats: facts, episodes, working memory
+/compact      # Trigger context compaction manually
+/note [text]  # Quick-capture a note (persists across sessions)
+/notes        # Show pending notes</code></pre>
+
+  <h2>Storage</h2>
+  <p>
+    Facts are stored in <code>.pi/memory/facts.jsonl</code> (one JSON object per line).
+    This file is git-tracked with <code>merge=union</code> in <code>.gitattributes</code>,
+    allowing multiple branches to add facts without merge conflicts. SQLite databases
+    (<code>*.db</code>) are gitignored and rebuilt from the JSONL source of truth.
+  </p>
 </Docs>

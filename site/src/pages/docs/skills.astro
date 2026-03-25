@@ -1,36 +1,43 @@
 ---
 import Docs from "../../layouts/Docs.astro";
 ---
-<Docs title="Skills" description="Specialized instruction sets loaded on demand for specific task types.">
+<Docs title="Skills" description="12 specialized instruction sets loaded on demand for specific task types.">
   <h1>Skills Reference</h1>
-  <p>Skills are markdown instruction files that provide specialized guidance for specific task types. They're loaded on demand when the agent detects a matching task pattern.</p>
+  <p>
+    Skills are specialized instruction files that the agent loads on demand when a task matches
+    their domain. They provide conventions, patterns, and guardrails for specific task types.
+    Each skill is a <code>SKILL.md</code> file that gets injected into the agent's context
+    when relevant.
+  </p>
 
   <h2>Available Skills</h2>
   <table>
-    <thead><tr><th>Skill</th><th>Description</th></tr></thead>
+    <thead><tr><th>Skill</th><th>Domain</th><th>When Loaded</th></tr></thead>
     <tbody>
-      <tr><td><strong>cleave</strong></td><td>Task decomposition, code assessment, and OpenSpec integration. Parallel execution via <code>/cleave</code>, code review via <code>/assess</code>.</td></tr>
-      <tr><td><strong>git</strong></td><td>Conventional commits, semantic versioning, branch naming, tagging, changelogs, and release workflow.</td></tr>
-      <tr><td><strong>oci</strong></td><td>Containerfile authoring, multi-arch builds, registry auth, image tagging, security scanning.</td></tr>
-      <tr><td><strong>openspec</strong></td><td>OpenSpec lifecycle commands and conventions for spec-driven development.</td></tr>
-      <tr><td><strong>pi-extensions</strong></td><td>Extension API reference — registerCommand, registerTool, event handlers, UI context.</td></tr>
-      <tr><td><strong>pi-tui</strong></td><td>TUI component patterns — Component interface, overlays, keyboard handling, theming.</td></tr>
-      <tr><td><strong>python</strong></td><td>Project setup (pyproject.toml, src/ layout), testing (pytest), linting (ruff), type checking (mypy).</td></tr>
-      <tr><td><strong>rust</strong></td><td>Cargo project setup, testing, clippy, rustfmt, CI/CD, and Zellij WASM plugin development.</td></tr>
-      <tr><td><strong>security</strong></td><td>Input escaping, injection prevention, path traversal, process safety, secrets management.</td></tr>
-      <tr><td><strong>style</strong></td><td>Alpharius color system, typography, spacing, and semantic palette for visual consistency.</td></tr>
-      <tr><td><strong>typescript</strong></td><td>Strict typing, async patterns, error handling, Node.js API usage, node:test conventions.</td></tr>
-      <tr><td><strong>vault</strong></td><td>Obsidian-compatible markdown conventions for human-readable knowledge bases.</td></tr>
+      <tr><td><strong>cleave</strong></td><td>Task decomposition &amp; assessment</td><td>Using <code>/cleave</code>, <code>/assess</code>, or <code>cleave_assess</code></td></tr>
+      <tr><td><strong>git</strong></td><td>Git conventions</td><td>Committing, branching, tagging, releases</td></tr>
+      <tr><td><strong>oci</strong></td><td>Container &amp; OCI artifacts</td><td>Containerfile authoring, registry work, multi-arch builds</td></tr>
+      <tr><td><strong>openspec</strong></td><td>Spec-driven development</td><td>Using OpenSpec commands (<code>/opsx:*</code>)</td></tr>
+      <tr><td><strong>pi-extensions</strong></td><td>Pi extension API</td><td>Creating or modifying pi/omegon extensions</td></tr>
+      <tr><td><strong>pi-tui</strong></td><td>TUI component patterns</td><td>Building extension UIs</td></tr>
+      <tr><td><strong>python</strong></td><td>Python development</td><td>Working with Python projects (pyproject.toml, pytest, ruff)</td></tr>
+      <tr><td><strong>rust</strong></td><td>Rust development</td><td>Working with Rust projects (Cargo, clippy, Zellij plugins)</td></tr>
+      <tr><td><strong>security</strong></td><td>Security checklist</td><td>User-facing code, template rendering, process spawning</td></tr>
+      <tr><td><strong>style</strong></td><td>Visual style guide</td><td>Creating visual output (diagrams, themes, images)</td></tr>
+      <tr><td><strong>typescript</strong></td><td>TypeScript conventions</td><td>Working with TypeScript (strict typing, node:test)</td></tr>
+      <tr><td><strong>vault</strong></td><td>Obsidian markdown</td><td>Generating interlinked documentation</td></tr>
     </tbody>
   </table>
 
   <h2>How Skills Work</h2>
-  <p>Skills are stored in <code>skills/&lt;name&gt;/SKILL.md</code>. The agent loads a skill file when it detects a matching task pattern. Skills provide:</p>
-  <ul>
-    <li>Conventions and best practices for the specific domain</li>
-    <li>Required tool configurations and flags</li>
-    <li>Common pitfalls and error patterns to avoid</li>
-    <li>Testing requirements and verification steps</li>
-  </ul>
-  <p>Skills are injected into the agent's context on demand — they don't consume context budget when not relevant to the current task.</p>
+  <ol>
+    <li>The agent detects that a task matches a skill's domain</li>
+    <li>It reads the skill's <code>SKILL.md</code> file using the <code>read</code> tool</li>
+    <li>The skill's instructions are incorporated into the agent's reasoning</li>
+    <li>The agent follows the skill's conventions for the duration of the task</li>
+  </ol>
+  <p>
+    Skills are loaded lazily — they only consume context when actually needed. The agent
+    manages skill loading autonomously; operators don't need to specify which skills to use.
+  </p>
 </Docs>

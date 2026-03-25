@@ -1,0 +1,93 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="Migration Guide" description="Coming from Claude Code, Codex, Cursor, or Aider? Here's what transfers and what changes.">
+  <h1>Migration Guide</h1>
+  <p>
+    Omegon can import configuration and context from other AI coding tools.
+    Run <code>/migrate auto</code> to detect and import from all recognized sources,
+    or specify a source directly.
+  </p>
+
+  <h2>From Claude Code</h2>
+  <pre><code>/migrate claude-code</code></pre>
+  <p>Imports: <code>CLAUDE.md</code> project instructions → project memory facts.</p>
+
+  <h3>Concept Mapping</h3>
+  <table>
+    <thead><tr><th>Claude Code</th><th>Omegon</th></tr></thead>
+    <tbody>
+      <tr><td>CLAUDE.md</td><td>Project memory (2,500+ persistent facts with semantic search)</td></tr>
+      <tr><td>Model picker</td><td><code>/model</code> — 10 providers, tier-based routing</td></tr>
+      <tr><td>Extended thinking toggle</td><td><code>/think off|low|medium|high</code></td></tr>
+      <tr><td>Conversation history</td><td>Sessions — auto-save, <code>--resume</code>, full replay</td></tr>
+      <tr><td>—</td><td>Design tree (263+ node knowledge graph)</td></tr>
+      <tr><td>—</td><td>Parallel execution (cleave into git worktrees)</td></tr>
+      <tr><td>—</td><td>Spec-driven development (OpenSpec lifecycle)</td></tr>
+      <tr><td>—</td><td>Personas with organic memory growth</td></tr>
+      <tr><td>—</td><td>Instrument panel &amp; web dashboard</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What Transfers</h3>
+  <ul>
+    <li>Your muscle memory — <code>read</code>, <code>edit</code>, <code>write</code>, <code>bash</code> tools are identical</li>
+    <li>Anthropic OAuth — same <code>/login</code> flow, same credentials</li>
+    <li>Your prompting style — the agent responds to the same kinds of instructions</li>
+  </ul>
+
+  <h3>What's Different</h3>
+  <ul>
+    <li>Memory is a knowledge base, not a markdown file. Facts persist, get superseded, get archived.</li>
+    <li>The agent actively manages its own inference — switching models, thinking levels, and context classes based on task complexity.</li>
+    <li>Multi-file changes can be parallelized across git worktrees instead of executing sequentially.</li>
+    <li>Design decisions are tracked in a graph, not just discussed in conversation.</li>
+  </ul>
+
+  <h2>From OpenAI Codex CLI</h2>
+  <pre><code>/migrate codex</code></pre>
+  <p>Imports: <code>AGENTS.md</code> instructions, <code>codex.json</code> configuration.</p>
+
+  <h3>Key Differences</h3>
+  <table>
+    <thead><tr><th>Codex CLI</th><th>Omegon</th></tr></thead>
+    <tbody>
+      <tr><td>Cloud-dependent orchestration</td><td>Fully local orchestration — cloud only for inference</td></tr>
+      <tr><td>OpenAI models only</td><td>10 providers including Ollama (fully offline capable)</td></tr>
+      <tr><td>AGENTS.md</td><td>Project memory + AGENTS.md support</td></tr>
+      <tr><td>Sandbox execution</td><td>Direct execution (operator trusts the agent, or doesn't)</td></tr>
+    </tbody>
+  </table>
+
+  <h2>From Cursor / Aider / Continue / Windsurf</h2>
+  <pre><code>/migrate cursor   # or: aider
+/init</code></pre>
+  <p>
+    These are IDE-integrated tools. Omegon is terminal-native by design.
+    They're not mutually exclusive — use your IDE tool for inline completions and GUI diffs,
+    use Omegon for heavy lifting: architecture, multi-file refactors, parallel execution,
+    design tracking, spec-driven development.
+  </p>
+
+  <h3>What You Gain</h3>
+  <ul>
+    <li>Persistent project memory that survives across sessions and tools</li>
+    <li>Parallel task execution via git worktrees</li>
+    <li>Design tree for tracking architecture decisions</li>
+    <li>Spec-driven development lifecycle</li>
+    <li>10 inference providers with automatic routing</li>
+    <li>No IDE dependency — works over SSH, in tmux, in CI</li>
+  </ul>
+
+  <h2>From omegon-pi (TypeScript)</h2>
+  <pre><code>/migrate pi</code></pre>
+  <p>
+    If you were using the TypeScript version (omegon-pi / the npm package), the Rust binary
+    is a superset. All pi extensions, tools, and prompt templates are supported. Your project
+    memory (<code>.pi/memory/facts.jsonl</code>) transfers directly — same format.
+  </p>
+  <p>
+    The main change: the Rust binary is the canonical runtime. The TypeScript harness exists
+    as a compatibility shim and is being sunset.
+  </p>
+</Docs>
