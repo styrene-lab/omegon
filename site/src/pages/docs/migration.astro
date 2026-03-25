@@ -23,8 +23,8 @@ import Docs from "../../layouts/Docs.astro";
       <tr><td>Custom slash commands (.md)</td><td>12 skills — specialized instruction sets loaded on demand (git, rust, python, security, OCI, etc.)</td></tr>
       <tr><td>Conversation history</td><td>Sessions — auto-save, <code>--resume</code>, full replay with segment metadata</td></tr>
       <tr><td>Anthropic only</td><td>10 inference providers — Anthropic, OpenAI, Codex, OpenRouter, Groq, xAI, Mistral, Cerebras, HuggingFace, Ollama</td></tr>
-      <tr><td>—</td><td>Design tree — knowledge graph for tracking architecture decisions and dependencies</td></tr>
-      <tr><td>—</td><td>Parallel execution — cleave tasks into isolated git worktree branches with automatic merge</td></tr>
+      <tr><td>—</td><td>Design tree — a structured knowledge graph of architecture decisions, open questions, dependencies, and implementation status. Nodes have typed lifecycles (seed, exploring, decided, blocked, deferred) and bridge directly into the spec and implementation system. Not a TODO list — a design exploration space.</td></tr>
+      <tr><td>Subagents (shared working directory)</td><td>Cleave — each child runs in its own git worktree on its own branch. File scope enforcement, dependency-ordered dispatch waves, per-file conflict detection (never bulk-resolved), and adversarial review. See <a href="/docs/cleave">Cleave vs Subagents</a>.</td></tr>
       <tr><td>—</td><td>OpenSpec — spec-driven development lifecycle (propose, specify, execute, verify, archive)</td></tr>
       <tr><td>—</td><td>Personas — cognitive profiles with dedicated organic memory that grows across sessions</td></tr>
       <tr><td>—</td><td>Instrument panel and live web dashboard over WebSocket</td></tr>
@@ -49,6 +49,46 @@ import Docs from "../../layouts/Docs.astro";
     <li>Skills are specialized instruction sets (git conventions, security checklists, OCI best practices) that load contextually — not static markdown files you maintain by hand.</li>
   </ul>
 
+  <h3>Design Tree in Practice</h3>
+  <p>
+    The design tree isn't theoretical — it's how Omegon itself is built. At any point you can
+    see the state of every design decision in the project:
+  </p>
+  <pre><code>Design Tree: 267 nodes
+  207 implemented — 10 decided — 32 exploring
+  60 open questions — 18 deferred</code></pre>
+  <p>
+    Every node is a markdown file with structured sections: overview, research findings,
+    decisions with rationale, open questions, and implementation notes with file scope. Nodes
+    have typed relationships (dependencies, related work) and a lifecycle that bridges directly
+    into OpenSpec for implementation. When a node reaches <code>decided</code>, one command
+    scaffolds the full spec-driven implementation pipeline.
+  </p>
+  <p>
+    Claude Code has no equivalent. Design decisions live in conversation history and are
+    forgotten when context fills up. CLAUDE.md is a flat file — it can't track the state of
+    60 open questions across 267 nodes, or tell you which decisions are blocked on which
+    dependencies.
+  </p>
+
+  <h3>Cleave vs Subagents</h3>
+  <p>
+    Claude Code's subagents run child agents in the same working directory. Two subagents
+    editing the same file produce race conditions. There's no isolation, no merge strategy,
+    and no conflict detection.
+  </p>
+  <p>
+    Omegon's cleave orchestrator creates a separate git worktree for each child on its own
+    branch. File scopes are enforced at plan time. Dependencies between children are declared
+    and the orchestrator dispatches in waves. Merge happens per-file with conflict detection —
+    the system never silently overwrites one child's work with another's. An optional
+    adversarial review gate catches bugs and security issues before the merge lands.
+  </p>
+  <p>
+    See <a href="/docs/cleave">Cleave Orchestrator</a> for the full comparison table and
+    architecture diagram.
+  </p>
+
   <h2>From OpenAI Codex CLI</h2>
   <pre><code>/migrate codex</code></pre>
   <p>Imports <code>AGENTS.md</code> instructions and <code>codex.json</code> configuration into project memory.</p>
@@ -62,8 +102,8 @@ import Docs from "../../layouts/Docs.astro";
       <tr><td>Cloud-dependent orchestration</td><td>Fully local orchestration — cloud is only used for inference, and even that is optional with Ollama</td></tr>
       <tr><td>Sandbox execution</td><td>OCI-based isolation available via the OCI skill — Containerfile authoring, multi-arch builds, registry auth, and security scanning are first-class. Plus secrets management through system keychain and HashiCorp Vault, so credentials never touch environment variables or disk in plaintext.</td></tr>
       <tr><td>Single-turn execution</td><td>Multi-turn sessions with auto-save and resume. The agent maintains context across turns and sessions.</td></tr>
-      <tr><td>—</td><td>Parallel execution — cleave decomposes tasks into git worktree branches, executes in parallel, merges with conflict detection</td></tr>
-      <tr><td>—</td><td>Design tree — architecture decisions tracked in a knowledge graph, not lost in conversation</td></tr>
+      <tr><td>—</td><td>Parallel execution — cleave decomposes tasks into isolated git worktree branches with file scope enforcement, dependency waves, per-file merge, and adversarial review. Not shared-directory subagents.</td></tr>
+      <tr><td>—</td><td>Design tree — 267-node knowledge graph (in the Omegon project itself) tracking decisions, dependencies, open questions, and implementation status. Bridges directly into spec-driven implementation.</td></tr>
       <tr><td>—</td><td>OpenSpec lifecycle — specs define correctness before code is written, verified after implementation</td></tr>
       <tr><td>—</td><td>Project memory — persistent semantic knowledge base, not a flat file that gets stale</td></tr>
       <tr><td>—</td><td>12 skills — specialized instruction sets for git, security, OCI, Rust, Python, TypeScript, etc.</td></tr>
