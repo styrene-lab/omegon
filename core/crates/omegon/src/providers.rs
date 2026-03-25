@@ -735,7 +735,15 @@ impl OpenAIClient {
     }
 
     pub fn from_env() -> Option<Self> {
-        resolve_api_key("openai").map(Self::new)
+        let key = resolve_api_key("openai")?;
+        // Codex OAuth tokens (JWT, starts with eyJ) are for the Responses API,
+        // not the Chat Completions API. They'll get 500s from api.openai.com.
+        // Only accept actual API keys (sk-*) or env-var-provided tokens.
+        if key.starts_with("eyJ") {
+            tracing::debug!("OpenAI credential is a Codex OAuth JWT — not usable with Chat Completions API");
+            return None;
+        }
+        Some(Self::new(key))
     }
 }
 
