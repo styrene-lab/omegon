@@ -11,6 +11,7 @@ pub mod edit;
 pub mod local_inference;
 pub mod read;
 pub mod render;
+pub mod serve;
 pub mod speculate;
 pub mod validate;
 pub mod view;
@@ -368,6 +369,44 @@ impl ToolProvider for CoreTools {
                     }
                 }),
             },
+            ToolDefinition {
+                name: reg::SERVE.into(),
+                label: reg::SERVE.into(),
+                description: "Manage long-lived background processes (dev servers, watchers, \
+                    MCP servers, build daemons). Processes survive bash timeouts and run until \
+                    explicitly stopped or session exit.\n\nActions:\n- start: Launch a background \
+                    process (command required, name auto-generated)\n- stop: Stop a running \
+                    service by name\n- list: Show all managed services with status\n- logs: \
+                    Get recent log output from a service\n- check: Check if a service is alive"
+                    .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["start", "stop", "list", "logs", "check"],
+                            "description": "Action to perform"
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "Command to run (for 'start')"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Service name (auto-generated from command if omitted)"
+                        },
+                        "persist": {
+                            "type": "boolean",
+                            "description": "If true, service survives session exit (default: false)"
+                        },
+                        "lines": {
+                            "type": "number",
+                            "description": "Number of log lines to return (default: 50, for 'logs')"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+            },
             // NOTE: view, web_search, render_diagram, generate_image_local,
             // ask_local_model, list_local_models, manage_ollama are provided by
             // their dedicated ToolProvider implementations (ViewProvider,
@@ -643,6 +682,12 @@ impl ToolProvider for CoreTools {
                     Err(e) => anyhow::bail!("{e}"),
                 }
             }
+            reg::SERVE => {
+                let action = args["action"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'action' argument"))?;
+                serve::execute(action, &args, &self.cwd).await
+            }
             // view, web_search, render_*, local_inference tools are handled
             // by their dedicated providers registered in setup.rs.
             _ => anyhow::bail!("Unknown core tool: {tool_name}"),
@@ -730,7 +775,7 @@ mod tests {
         
         // Should have 11 core tools (bash, read, write, edit, change,
         // speculate_start/check/commit/rollback, commit, whoami, chronos)
-        assert_eq!(tool_names.len(), 12, "Expected 12 core tools, got {}", tool_names.len());
+        assert_eq!(tool_names.len(), 13, "Expected 13 core tools, got {}", tool_names.len());
     }
     
     #[test]

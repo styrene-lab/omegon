@@ -3654,6 +3654,7 @@ dependencies = [
  "image",
  "indexmap",
  "insta",
+ "libc",
  "omegon-git",
  "omegon-memory",
  "omegon-secrets",

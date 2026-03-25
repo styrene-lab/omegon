@@ -3534,6 +3534,9 @@ pub async fn run_tui(
         }
     }
 
+    // Stop non-persist background services
+    crate::tools::serve::cleanup_session_services();
+
     // Save history before restoring terminal
     app.save_history();
 

@@ -30,6 +30,7 @@ pub mod core {
     pub const COMMIT: &str = "commit";
     pub const WHOAMI: &str = "whoami";
     pub const CHRONOS: &str = "chronos";
+    pub const SERVE: &str = "serve";
 }
 
 /// View tool — owned by `tools::view::ViewProvider`
@@ -130,14 +131,15 @@ pub mod persona {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 48;
+pub const TOOL_COUNT: usize = 49;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
-        // core (12)
+        // core (13)
         core::BASH, core::READ, core::WRITE, core::EDIT, core::CHANGE,
         core::SPECULATE_START, core::SPECULATE_CHECK, core::SPECULATE_COMMIT,
         core::SPECULATE_ROLLBACK, core::COMMIT, core::WHOAMI, core::CHRONOS,
+        core::SERVE,
         // view (1)
         view::VIEW,
         // web_search (1)
@@ -172,7 +174,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         // persona (3)
         persona::SWITCH_PERSONA, persona::SWITCH_TONE, persona::LIST_PERSONAS,
     ]
-    // Total: 12+1+1+2+3+12+3+2+3+3+1+1+1+3 = 48
+    // Total: 13+1+1+2+3+12+3+2+3+3+1+1+1+3 = 49
 }
 
 #[cfg(test)]
