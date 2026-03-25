@@ -3,6 +3,46 @@
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.15.1] - 2026-03-25
+
+### Added
+
+- **Provider routing engine** (`routing.rs`) — CapabilityTier (Leaf/Mid/Frontier/Max), ProviderInventory, scored `route()` function, BridgeFactory, per-child cleave routing.
+- **OllamaManager** (`ollama.rs`) — structured Ollama server interaction with hardware profiling.
+- **OpenAICompatClient** — generic Chat Completions client covering Groq, xAI, Mistral, Cerebras, HuggingFace, Ollama.
+- **CodexClient** — OpenAI Responses API client for ChatGPT OAuth JWT tokens with full SSE parsing.
+- **10/10 provider matrix**: Anthropic, OpenAI, OpenAI Codex, OpenRouter, Groq, xAI, Mistral, Cerebras, HuggingFace, Ollama.
+- **SegmentMeta** — per-segment metadata (provider, model, tier, thinking level, turn, tokens, context%, persona) captured at creation time.
+- **Glyph+label tool names** in instrument panel — 48 tools mapped to compact domain-grouped glyphs.
+- **Signal-density bar characters** — tool bars degrade ≋ ≈ ∿ · as recency fades.
+- `--tutorial` CLI flag for demo overlay activation.
+- `read_credential_extra()` and `extract_jwt_claim()` in auth.rs.
+
+### Changed
+
+- **Node.js dependency removed.** SubprocessBridge, `--bridge`, and `--node` CLI flags deleted. The binary is fully self-contained — native Rust clients for all providers.
+- **Segment refactored** from flat enum to `Segment { meta: SegmentMeta, content: SegmentContent }`.
+- `auto_detect_bridge()` unified: uses `resolve_provider()` for both primary and fallback with priority ordering.
+- `intensity_color` uses alpharius teal ramp (was CIE L* with green/olive mid-range).
+- Glitch fills both context bar rows during thinking.
+- Rounded borders on all panels (instruments, dashboard, tool cards, footer).
+- Tutorial text: "AI" → "Omegon" / "the agent" throughout.
+- `/tutorial` always starts overlay; legacy lessons via `/tutorial lessons` only.
+- Dashboard auto-opens on leaving the "Web Dashboard" tutorial step.
+
+### Fixed
+
+- Tool card separator uses error color (red) when `is_error` is true.
+- Tutorial demo choice passes `--tutorial` to exec'd process.
+- Tutorial "My Project" choice advances past blank step 0.
+- Corrupted design tree titles (exponential backslash doubling).
+
+### Removed
+
+- **SubprocessBridge** — 214 lines of Node.js subprocess management.
+- **`--bridge` and `--node` CLI flags** — no longer needed.
+- 3 stale feature branches, 11 stale stashes, 3 stale remote tracking branches.
+
 ## [0.15.1-rc.76] - 2026-03-25
 
 ### Added

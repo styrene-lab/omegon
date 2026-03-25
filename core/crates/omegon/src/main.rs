@@ -44,7 +44,7 @@ mod tools;
 mod tui;
 mod web;
 
-use bridge::{LlmBridge, SubprocessBridge};
+use bridge::LlmBridge;
 use omegon_traits::AgentEvent;
 
 /// Short version: `0.14.0 (3a4b5c6 2026-03-21)`
@@ -88,14 +88,6 @@ struct Cli {
     /// Working directory
     #[arg(short, long, default_value = ".", global = true)]
     cwd: PathBuf,
-
-    /// Path to the LLM bridge script
-    #[arg(long, global = true)]
-    bridge: Option<PathBuf>,
-
-    /// Node.js binary path
-    #[arg(long, default_value = "node", global = true)]
-    node: String,
 
     /// Model identifier (provider:model format)
     #[arg(short, long, default_value = "anthropic:claude-sonnet-4-6", global = true)]
@@ -449,15 +441,11 @@ async fn run_cleave_command(
 
     // Resolve self binary path for spawning children
     let agent_binary = std::env::current_exe()?;
-    let bridge_path = cli
-        .bridge
-        .clone()
-        .unwrap_or_else(SubprocessBridge::default_bridge_path);
 
     let config = cleave::orchestrator::CleaveConfig {
         agent_binary,
-        bridge_path,
-        node: cli.node.clone(),
+        bridge_path: PathBuf::new(), // Legacy — not used by native dispatch
+        node: String::new(),
         model: cli.model.clone(),
         max_parallel,
         timeout_secs: timeout,
@@ -545,30 +533,17 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 
     // ─── LLM provider ──────────────────────────────────────────────────
     // Native Rust clients by default. --bridge flag forces the Node.js subprocess.
+    // ─── LLM provider (native Rust clients only) ─────────────────────
     let mut provider_connected = true;
-    let bridge: Box<dyn LlmBridge> = if let Some(ref bridge_path) = cli.bridge {
-        tracing::info!(bridge = %bridge_path.display(), "using Node.js LLM bridge");
-        Box::new(SubprocessBridge::spawn(bridge_path, &cli.node).await?)
-    } else {
-        match providers::auto_detect_bridge(&cli.model).await {
-            Some(native) => {
-                tracing::info!("using native LLM provider (no Node.js)");
-                native
-            }
-            None => {
-                // No native provider available — try Node.js bridge as last resort
-                let bridge_path = SubprocessBridge::default_bridge_path();
-                if bridge_path.exists() {
-                    tracing::info!(bridge = %bridge_path.display(), "no native provider — falling back to Node.js bridge");
-                    Box::new(SubprocessBridge::spawn(&bridge_path, &cli.node).await?)
-                } else {
-                    // No provider, no bridge — start TUI anyway with a null bridge
-                    // so the user can /login from within the session
-                    tracing::warn!("no LLM provider available — TUI will start but messages will fail until /login");
-                    provider_connected = false;
-                    Box::new(bridge::NullBridge)
-                }
-            }
+    let bridge: Box<dyn LlmBridge> = match providers::auto_detect_bridge(&cli.model).await {
+        Some(native) => {
+            tracing::info!("using native LLM provider");
+            native
+        }
+        None => {
+            tracing::warn!("no LLM provider available — TUI will start but messages will fail until /login");
+            provider_connected = false;
+            Box::new(bridge::NullBridge)
         }
     };
     // Update settings with provider status before TUI reads it
@@ -1239,21 +1214,14 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
         secrets: Some(agent.secrets.clone()),
     };
 
-    // ─── LLM provider ──────────────────────────────────────────────────
-    let bridge: Box<dyn LlmBridge> = if let Some(ref bridge_path) = cli.bridge {
-        tracing::info!(bridge = %bridge_path.display(), "using Node.js LLM bridge");
-        Box::new(SubprocessBridge::spawn(bridge_path, &cli.node).await?)
-    } else {
-        match providers::auto_detect_bridge(&cli.model).await {
-            Some(native) => {
-                tracing::info!("using native LLM provider (no Node.js)");
-                native
-            }
-            None => {
-                let path = SubprocessBridge::default_bridge_path();
-                tracing::info!(bridge = %path.display(), "falling back to Node.js bridge");
-                Box::new(SubprocessBridge::spawn(&path, &cli.node).await?)
-            }
+    // ─── LLM provider (native Rust clients only) ─────────────────────
+    let bridge: Box<dyn LlmBridge> = match providers::auto_detect_bridge(&cli.model).await {
+        Some(native) => {
+            tracing::info!("using native LLM provider");
+            native
+        }
+        None => {
+            anyhow::bail!("No LLM provider available. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or another provider credential.");
         }
     };
 

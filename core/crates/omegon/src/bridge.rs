@@ -1,23 +1,15 @@
-//! LLM Bridge — subprocess interface to LLM providers.
+//! LLM Bridge — trait abstraction for LLM providers.
 //!
-//! Spawns a long-lived Node.js process that translates between Omegon's
-//! wire format and pi-ai's provider-specific protocols. The bridge is a
-//! translator, not a passthrough — Omegon defines the message contract,
-//! the bridge adapts it for whatever provider library is on the other side.
-//!
-//! Wire format: ndjson over stdin/stdout. Rust defines the types; JS conforms.
+//! Native Rust clients (AnthropicClient, OpenAIClient, CodexClient,
+//! OpenAICompatClient) implement LlmBridge directly via reqwest + SSE.
+//! NullBridge handles the no-provider-configured case.
+//! MockBridge provides scripted responses for testing.
 
 use async_trait::async_trait;
 use omegon_traits::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 
 // ─── Omegon wire types ──────────────────────────────────────────────────────
 // These types define what Omegon sends and receives.
@@ -168,7 +160,7 @@ pub struct StreamOptions {
 }
 
 /// Abstraction over how we call LLM providers.
-/// Primary: SubprocessBridge (pi-ai via Node.js).
+/// Native: AnthropicClient, OpenAIClient, CodexClient, OpenAICompatClient.
 /// Test: MockBridge (scripted responses).
 #[async_trait]
 pub trait LlmBridge: Send + Sync {
@@ -208,220 +200,6 @@ impl LlmBridge for NullBridge {
         );
     }
 }
-
-// ─── Subprocess bridge ─────────────────────────────────────────────────────
-
-pub struct SubprocessBridge {
-    stdin: Arc<Mutex<tokio::process::ChildStdin>>,
-    next_id: AtomicU64,
-    // FIXME: single-consumer receiver can't support multiplexed requests.
-    // Phase 0 is sequential (one stream at a time). Phase 1+ needs a
-    // HashMap<u64, Sender> routing table for concurrent requests.
-    response_rx: Arc<Mutex<mpsc::Receiver<BridgeResponse>>>,
-    _child: Child,
-}
-
-impl SubprocessBridge {
-    /// Send a graceful shutdown message to the bridge subprocess.
-    /// The bridge JS exits cleanly on receiving this, which is better
-    /// than relying on kill_on_drop's SIGKILL.
-    pub async fn shutdown(&self) {
-        let _ = self.send_request("shutdown", serde_json::json!({})).await;
-        // Give the bridge 500ms to exit cleanly before kill_on_drop fires
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    }
-}
-
-impl SubprocessBridge {
-    /// Spawn the Node.js bridge subprocess.
-    pub async fn spawn(bridge_script: &Path, node_path: &str) -> anyhow::Result<Self> {
-        let mut child = Command::new(node_path)
-            .arg(bridge_script)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()?;
-
-        let stdin = child.stdin.take().expect("stdin piped");
-        let stdout = child.stdout.take().expect("stdout piped");
-        let stderr = child.stderr.take().expect("stderr piped");
-
-        // Wait for readiness signal on stderr, log everything else.
-        // The bridge emits exactly "llm-bridge: ready\n" — match the prefix
-        // to avoid false positives from unrelated warnings containing "ready".
-        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
-        let mut ready_tx = Some(ready_tx);
-        tokio::spawn(async move {
-            let reader = BufReader::new(stderr);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if line.starts_with("llm-bridge: ready")
-                    && let Some(tx) = ready_tx.take() {
-                        let _ = tx.send(());
-                    }
-                tracing::debug!(target: "llm_bridge", "{}", line);
-            }
-        });
-
-        // Wait up to 10s for the bridge to signal readiness
-        tokio::select! {
-            _ = ready_rx => {
-                tracing::debug!("Bridge signaled ready");
-            }
-            _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {
-                tracing::warn!("Bridge did not signal ready within 10s — proceeding anyway");
-            }
-        }
-
-        let (response_tx, response_rx) = mpsc::channel(256);
-
-        // Reader task: parse ndjson lines from stdout
-        tokio::spawn(async move {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                match serde_json::from_str::<BridgeResponse>(&line) {
-                    Ok(resp) => {
-                        if response_tx.send(resp).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(target: "llm_bridge", "Parse error: {e}\n  line: {line}");
-                    }
-                }
-            }
-        });
-
-        Ok(Self {
-            stdin: Arc::new(Mutex::new(stdin)),
-            next_id: AtomicU64::new(1),
-            response_rx: Arc::new(Mutex::new(response_rx)),
-            _child: child,
-        })
-    }
-
-    async fn send_request(&self, method: &str, params: Value) -> anyhow::Result<u64> {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let req = BridgeRequest {
-            id,
-            method: method.to_string(),
-            params,
-        };
-        let mut line = serde_json::to_string(&req)?;
-        line.push('\n');
-
-        let mut stdin = self.stdin.lock().await;
-        stdin.write_all(line.as_bytes()).await?;
-        stdin.flush().await?;
-        Ok(id)
-    }
-
-    pub fn default_bridge_path() -> PathBuf {
-        let exe = std::env::current_exe().unwrap_or_default();
-        let exe_dir = exe.parent().unwrap_or(Path::new("."));
-
-        for candidate in [
-            exe_dir.join("../bridge/llm-bridge.mjs"),
-            PathBuf::from("core/bridge/llm-bridge.mjs"),
-            PathBuf::from("bridge/llm-bridge.mjs"),
-        ] {
-            if candidate.exists() {
-                return candidate;
-            }
-        }
-
-        exe_dir.join("../bridge/llm-bridge.mjs")
-    }
-}
-
-#[async_trait]
-impl LlmBridge for SubprocessBridge {
-    async fn stream(
-        &self,
-        system_prompt: &str,
-        messages: &[LlmMessage],
-        tools: &[ToolDefinition],
-        options: &StreamOptions,
-    ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
-        let tool_schemas: Vec<Value> = tools
-            .iter()
-            .map(|t| {
-                serde_json::json!({
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.parameters,
-                })
-            })
-            .collect();
-
-        let model = options
-            .model
-            .as_deref()
-            .unwrap_or("anthropic:claude-sonnet-4-6");
-        let reasoning = options.reasoning.as_deref().unwrap_or("medium");
-
-        let params = serde_json::json!({
-            "systemPrompt": system_prompt,
-            "messages": messages,
-            "tools": tool_schemas,
-            "model": model,
-            "reasoning": reasoning,
-        });
-
-        let req_id = self.send_request("stream", params).await?;
-
-        let (event_tx, event_rx) = mpsc::channel(64);
-        let response_rx = self.response_rx.clone();
-
-        tokio::spawn(async move {
-            let idle_timeout = std::time::Duration::from_secs(120);
-            let mut rx = response_rx.lock().await;
-            loop {
-                let resp = match tokio::time::timeout(idle_timeout, rx.recv()).await {
-                    Ok(Some(resp)) => resp,
-                    Ok(None) => break, // channel closed
-                    Err(_) => {
-                        tracing::warn!("bridge stream idle for {}s — treating as stalled", idle_timeout.as_secs());
-                        let _ = event_tx.send(LlmEvent::Error {
-                            message: format!("Bridge stream idle timeout ({}s)", idle_timeout.as_secs()),
-                        }).await;
-                        break;
-                    }
-                };
-
-                if resp.id != req_id {
-                    continue;
-                }
-
-                if let Some(event) = resp.event {
-                    let is_terminal =
-                        matches!(event, LlmEvent::Done { .. } | LlmEvent::Error { .. });
-                    let _ = event_tx.send(event).await;
-                    if is_terminal {
-                        break;
-                    }
-                }
-
-                if resp.error.is_some() {
-                    let err_msg = resp.error.unwrap_or_default();
-                    let _ = event_tx
-                        .send(LlmEvent::Error { message: err_msg })
-                        .await;
-                    break;
-                }
-
-                if resp.result.is_some() {
-                    break;
-                }
-            }
-        });
-
-        Ok(event_rx)
-    }
-}
-
 // ─── Mock bridge for testing ────────────────────────────────────────────────
 
 #[cfg(test)]
