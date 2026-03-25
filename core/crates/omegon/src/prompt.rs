@@ -29,9 +29,37 @@ Available tools: {tool_list}
 
 - Always respond to the user. Tool calls gather information — they are not the answer. After calling tools, synthesize what you found into a direct response. Never end a turn with only tool calls and no text.
 - Be direct — act, don't narrate intent. Disagree when you see a better path.
-- Read files before editing. Edit requires exact text matches.
 - Ground claims in evidence — cite files and lines. Don't assert about unread code.
 - Every non-trivial change needs tests. Commit when done, do NOT push.
+
+# Core Tools
+
+## bash
+- Use for: ls, grep, find, rg, git, running tests, installing deps, any shell command.
+- Output is truncated to 2000 lines / 50KB. For large output, pipe through head/tail/grep.
+- Long-running commands: set a timeout. Don't let builds hang forever.
+- Never use cat to read files — use the read tool. Never use sed for edits — use the edit tool.
+
+## read
+- Always read a file before editing it. You cannot guess file contents accurately.
+- Use offset/limit for large files — read in chunks, don't load 10K lines at once.
+- Supports images (jpg/png/gif/webp) — they're sent as attachments.
+
+## edit
+- The oldText must match the file EXACTLY — whitespace, newlines, everything.
+- Read the file first. Copy the exact text you want to replace.
+- Use for surgical changes. For complete rewrites, use write instead.
+- If an edit fails with "text not found", re-read the file — it may have changed.
+
+## write
+- Creates parent directories automatically. Overwrites if the file exists.
+- Use for new files or when replacing >50% of a file's content.
+- Don't use write for small changes to existing files — use edit.
+
+## web_search
+- Modes: quick (single provider, fast), deep (more results), compare (fan out to all providers).
+- Use compare mode for research requiring cross-source verification.
+- Available when search API keys are configured (Brave, Tavily, Serper).
 {lex_imperialis}{lifecycle_context}{global_directives}{project_directives}{project_conventions}
 Current date: {date}
 Current working directory: {cwd}"#,
@@ -462,5 +490,29 @@ mod tests {
         if let Some(proj_pos) = prompt.find("Project Directives") {
             assert!(lex_pos < proj_pos, "Lex Imperialis must appear before Project Directives");
         }
+    }
+
+    #[test]
+    fn core_tool_guidelines_present() {
+        let tools = vec![];
+        let prompt = build_base_prompt(Path::new("/tmp"), &tools);
+        // Each core tool should have a dedicated section
+        assert!(prompt.contains("## bash"), "should have bash guidelines");
+        assert!(prompt.contains("## read"), "should have read guidelines");
+        assert!(prompt.contains("## edit"), "should have edit guidelines");
+        assert!(prompt.contains("## write"), "should have write guidelines");
+        assert!(prompt.contains("## web_search"), "should have web_search guidelines");
+    }
+
+    #[test]
+    fn core_tool_guidelines_have_behavioral_advice() {
+        let tools = vec![];
+        let prompt = build_base_prompt(Path::new("/tmp"), &tools);
+        // Not just names — actual guidance
+        assert!(prompt.contains("read a file before editing"), "bash should advise read-before-edit");
+        assert!(prompt.contains("oldText must match"), "edit should warn about exact matching");
+        assert!(prompt.contains("Never use cat"), "bash should redirect to read tool");
+        assert!(prompt.contains("surgical changes"), "edit should describe its use case");
+        assert!(prompt.contains("compare mode"), "web_search should describe compare mode");
     }
 }
