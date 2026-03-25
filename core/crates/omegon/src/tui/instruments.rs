@@ -485,22 +485,49 @@ impl InstrumentPanel {
             let ind_color = if tool.is_error { Color::Rgb(224, 72, 72) }
                 else if age < 2.0 { Color::Rgb(42, 180, 200) }
                 else { Color::Rgb(44, 80, 100) };
-            // Tool colors: accent teal family — bright when recent, muted when stale,
-            // always visible against the dark background.
+            // Per-tool color hue — each tool gets a distinct color from a
+            // curated palette that's visible on dark backgrounds.
+            // Hash the tool name to pick a stable hue.
+            let hue_index = tool.name.bytes().fold(0u32, |acc, b| acc.wrapping_add(b as u32)) as usize;
+            const TOOL_HUES: [(u8, u8, u8, u8, u8, u8); 8] = [
+                // (r_dim, g_dim, b_dim, r_bright, g_bright, b_bright)
+                (24, 100, 120, 42, 180, 200),   // teal (accent)
+                (28, 110, 90,  40, 190, 150),    // sea green
+                (60, 90,  130, 100, 150, 220),   // steel blue
+                (80, 80,  120, 140, 130, 200),   // lavender
+                (40, 110, 80,  70, 190, 130),    // emerald
+                (90, 85,  110, 160, 140, 180),   // mauve
+                (30, 105, 105, 50, 185, 185),    // cyan
+                (70, 95,  110, 120, 165, 190),   // slate blue
+            ];
+            let hue = TOOL_HUES[hue_index % TOOL_HUES.len()];
+
             let tool_color = |r: f64| -> Color {
-                if r < 0.01 { return Color::Rgb(44, 80, 100); }
+                if r < 0.01 {
+                    return Color::Rgb(hue.0.saturating_sub(10), hue.1.saturating_sub(30), hue.2.saturating_sub(20));
+                }
                 let r = r.clamp(0.0, 1.0);
-                // Teal ramp: dim teal → bright accent teal
                 Color::Rgb(
-                    (24.0 + r * 20.0) as u8,    // 24 → 44
-                    (72.0 + r * 108.0) as u8,   // 72 → 180
-                    (92.0 + r * 108.0) as u8,    // 92 → 200
+                    (hue.0 as f64 + r * (hue.3 as f64 - hue.0 as f64)) as u8,
+                    (hue.1 as f64 + r * (hue.4 as f64 - hue.1 as f64)) as u8,
+                    (hue.2 as f64 + r * (hue.5 as f64 - hue.2 as f64)) as u8,
                 )
             };
             let name_color = if tool.is_error { Color::Rgb(224, 72, 72) }
-                else if recency > 0.5 { Color::Rgb(42, 180, 200) }   // accent bright
-                else if recency > 0.1 { Color::Rgb(80, 140, 160) }   // mid teal
-                else { Color::Rgb(68, 108, 128) };                    // still readable
+                else if recency > 0.5 { Color::Rgb(hue.3, hue.4, hue.5) }
+                else if recency > 0.1 {
+                    let mid = 0.5;
+                    Color::Rgb(
+                        (hue.0 as f64 + mid * (hue.3 as f64 - hue.0 as f64)) as u8,
+                        (hue.1 as f64 + mid * (hue.4 as f64 - hue.1 as f64)) as u8,
+                        (hue.2 as f64 + mid * (hue.5 as f64 - hue.2 as f64)) as u8,
+                    )
+                }
+                else { Color::Rgb(
+                    hue.0.saturating_add(20),
+                    hue.1.saturating_add(10),
+                    hue.2.saturating_add(10),
+                ) };
             let bar_filled = (recency * bar_w as f64) as usize;
             let bar_color = if tool.is_error { Color::Rgb(224, 72, 72) } else { tool_color(recency) };
 
@@ -529,13 +556,15 @@ impl InstrumentPanel {
                 if let Some(cell) = buf.cell_mut(Position::new(x, y)) { cell.set_char(' '); cell.set_bg(bg_color()); }
                 x += 1;
             }
-            // Activity bar: filled portion uses textured characters that
-            // alternate for visual rhythm. Empty portion uses dim dots.
-            const FILL_CHARS: [char; 4] = ['▰', '▰', '▱', '▰'];
+            // Activity bar: filled portion uses ▰ (filled) with occasional ▱ (open)
+            // for texture. Per-tool phase offset prevents columnar alignment.
+            let phase = (hue_index * 3 + row * 7) % 5; // varies by tool + position
             for i in 0..bar_w {
                 if x >= inner.right() { break; }
                 let (ch, c) = if i < bar_filled {
-                    (FILL_CHARS[i % FILL_CHARS.len()], bar_color)
+                    // Vary the gap pattern per tool
+                    let is_gap = (i + phase) % 5 == 3 || (i + phase) % 7 == 5;
+                    (if is_gap { '▱' } else { '▰' }, bar_color)
                 } else {
                     ('·', Color::Rgb(32, 52, 64))
                 };

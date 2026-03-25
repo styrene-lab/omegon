@@ -149,6 +149,8 @@ pub struct App {
     /// Tutorial overlay — game-style first-play advisor.
     /// Renders on top of the UI and guides the operator through steps.
     tutorial_overlay: Option<tutorial::Tutorial>,
+    /// Pending tutorial side effect — drained by the event loop.
+    pending_tutorial_side_effect: Option<tutorial::SideEffect>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -226,6 +228,7 @@ impl App {
             capability_tier: None,
             tutorial: None,
             tutorial_overlay: None,
+            pending_tutorial_side_effect: None,
         }
     }
 
@@ -2347,7 +2350,10 @@ impl App {
                 self.effects.stop_spinner_glow();
                 // Advance tutorial overlay if an AutoPrompt step just completed
                 if let Some(ref mut overlay) = self.tutorial_overlay {
-                    overlay.on_agent_turn_complete();
+                    let side_effect = overlay.on_agent_turn_complete();
+                    if side_effect != tutorial::SideEffect::None {
+                        self.pending_tutorial_side_effect = Some(side_effect);
+                    }
                 }
             }
             AgentEvent::PhaseChanged { phase } => {
@@ -3175,14 +3181,9 @@ pub async fn run_tui(
                                     tutorial::Trigger::Tab => {
                                         overlay.advance();
                                         // Fire side effects for the new step
-                                        match overlay.pending_side_effect() {
-                                            tutorial::SideEffect::OpenDashboard => {
-                                                let _ = command_tx.send(TuiCommand::BusCommand {
-                                                    name: "open_dashboard".to_string(),
-                                                    args: String::new(),
-                                                }).await;
-                                            }
-                                            tutorial::SideEffect::None => {}
+                                        let effect = overlay.pending_side_effect();
+                                        if effect != tutorial::SideEffect::None {
+                                            app.pending_tutorial_side_effect = Some(effect);
                                         }
                                         // After advancing, check if the new step has an auto-prompt
                                         if let Some(prompt) = overlay.pending_auto_prompt() {
@@ -3466,6 +3467,16 @@ pub async fn run_tui(
         // Agent events already drained before draw (above).
 
         // Drain queued prompt after agent finishes (but not if quitting)
+        // Drain tutorial side effects (e.g. auto-open dashboard)
+        if let Some(effect) = app.pending_tutorial_side_effect.take() {
+            match effect {
+                tutorial::SideEffect::OpenDashboard => {
+                    let _ = command_tx.send(TuiCommand::StartWebDashboard).await;
+                }
+                tutorial::SideEffect::None => {}
+            }
+        }
+
         if !app.agent_active && !app.should_quit && app.queued_prompt.is_some() {
             let text = app.queued_prompt.take().unwrap();
             app.conversation.push_user(&text);

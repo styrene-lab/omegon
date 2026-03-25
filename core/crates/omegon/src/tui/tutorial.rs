@@ -420,13 +420,15 @@ impl Tutorial {
 
     /// Called when the agent finishes a turn. If the current step is an
     /// AutoPrompt that was sent, advance to the next step.
-    pub fn on_agent_turn_complete(&mut self) {
-        if !self.active { return; }
+    pub fn on_agent_turn_complete(&mut self) -> SideEffect {
+        if !self.active { return SideEffect::None; }
         if self.auto_prompt_sent {
             if let Trigger::AutoPrompt(_) = &self.step().trigger {
                 self.advance();
+                return self.pending_side_effect();
             }
         }
+        SideEffect::None
     }
 
     /// Dismiss the tutorial.
