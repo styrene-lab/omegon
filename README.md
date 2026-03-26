@@ -4,7 +4,7 @@
 
 Single binary. Zero dependencies. Full autonomy.
 
-Omegon is a Rust-native AI coding agent that runs entirely in your terminal. It connects to Anthropic and OpenAI models, manages project memory across sessions, decomposes complex tasks into parallel workers, and tracks design decisions in a persistent knowledge graph — all from a ~12MB binary with no runtime dependencies.
+Omegon is a Rust-native AI coding agent that runs entirely in your terminal. It connects to Anthropic and OpenAI models, manages project memory across sessions, decomposes complex tasks into parallel workers, and tracks design decisions in a persistent knowledge graph — all from a ~19MB binary with no runtime dependencies.
 
 [![omegon.styrene.dev](https://img.shields.io/badge/docs-omegon.styrene.dev-2ab4c8)](https://omegon.styrene.dev)
 
@@ -244,3 +244,5 @@ The original TypeScript/pi-based harness is archived at [omegon-pi](https://gith
 ## License
 
 [BSL 1.1](LICENSE) — © 2024–2026 Black Meridian, LLC
+
+BSL 1.1 means the source is fully visible and unrestricted for personal and production use. The one restriction: you cannot use Omegon to offer a competing hosted agent service. If that is not you, BSL 1.1 is functionally identical to MIT for your purposes.
