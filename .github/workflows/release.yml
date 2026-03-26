@@ -21,6 +21,7 @@ env:
 jobs:
   build:
     name: Build ${{ matrix.target }}
+    if: ${{ !contains(github.ref_name, '-nightly.') || matrix.nightly != false }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -36,9 +37,11 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-14
             archive: tar.gz
+            nightly: false
           - target: aarch64-apple-darwin
             os: macos-14
             archive: tar.gz
+            nightly: true
 
     steps:
       - uses: actions/checkout@v4
@@ -160,12 +163,15 @@ jobs:
 
       # ─── SBOM ─────────────────────────────────────────────────
       - name: Install Rust toolchain (for cargo-cyclonedx)
+        if: ${{ !contains(github.ref_name, '-nightly.') }}
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-cyclonedx
+        if: ${{ !contains(github.ref_name, '-nightly.') }}
         run: cargo install cargo-cyclonedx
 
       - name: Generate CycloneDX SBOM
+        if: ${{ !contains(github.ref_name, '-nightly.') }}
         run: |
           cd core
           cargo cyclonedx --manifest-path Cargo.toml --format json || true
@@ -192,6 +198,7 @@ jobs:
           done
 
       - name: Sign SBOM
+        if: ${{ !contains(github.ref_name, '-nightly.') }}
         run: |
           cd artifacts
           cosign sign-blob --yes omegon-sbom.cdx.json \
@@ -200,6 +207,7 @@ jobs:
 
       # ─── Provenance attestation ────────────────────────────────
       - name: Attest build provenance
+        if: ${{ !contains(github.ref_name, '-nightly.') }}
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: artifacts/omegon-*.tar.gz
@@ -208,6 +216,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-rc.') || contains(github.ref_name, '-nightly.') }}
           draft: ${{ contains(github.ref_name, '-nightly.') }}
