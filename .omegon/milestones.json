@@ -25,9 +25,9 @@
     "nodes": [],
     "frozen": false,
     "opened": "2026-03-26T01:28:41Z",
-    "last_rc": "2026-03-26T22:26:03Z",
-    "rc_version": "0.15.3-rc.15",
-    "rc_count": 16,
+    "last_rc": "2026-03-26T23:00:47Z",
+    "rc_version": "0.15.3-rc.16",
+    "rc_count": 17,
     "released": null,
     "notes": [
       "feat(cleave): inherit warmed session secrets in children",
@@ -44,6 +44,7 @@
       "feat(session): expose session log as tool",
       "feat(session-log): auto-write narrative entries on exit, strip file-op noise on resume",
       "feat(tui): multiline editor with Shift+Enter, cursor nav, proportional height",
+      "feat(tui): strengthen operator and assistant segment identity",
       "feat(update): add rc channel self-update flow",
       "feat(update): embed sigstore verification",
       "feat(update): verify release signatures before install",
@@ -86,7 +87,10 @@
       "fix: replace all omegon-core repo references with omegon",
       "perf(release): streamline nightly draft publishing",
       "refactor(secrets): narrow startup preflight scope",
+      "refactor(tui): classify tool segment visuals",
+      "refactor(tui): move toasts into engine event queue",
       "refactor(tui): render operator input with raw textarea widget",
+      "refactor(tui): scaffold segment presentation roles",
       "refactor(update): rename prerelease channel to nightly",
       "refactor: purge all .pi runtime path references — we are Omegon"
     ]
