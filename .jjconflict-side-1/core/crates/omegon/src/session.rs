@@ -95,26 +95,41 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 }
 
 /// Save a session after the agent loop completes.
-pub fn save_session(conversation: &ConversationState, cwd: &Path) -> anyhow::Result<PathBuf> {
+pub fn save_session(conversation: &ConversationState, cwd: &Path, resume_id: Option<&str>) -> anyhow::Result<PathBuf> {
     let dir = sessions_dir(cwd).ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     fs::create_dir_all(&dir)?;
 
-    let session_id = generate_session_id();
+    // When resuming, overwrite the original session file so the chain stays clean.
+    // When starting fresh, generate a new timestamped ID.
+    let session_id = resume_id
+        .map(|s| s.to_string())
+        .unwrap_or_else(generate_session_id);
     let filename = format!("{session_id}.json");
     let path = dir.join(&filename);
+
+    // Preserve the original created_at if overwriting; otherwise use now.
+    let created_at = if resume_id.is_some() {
+        // Read existing meta to preserve the original timestamp.
+        let existing_meta_path = path.with_extension("meta.json");
+        fs::read_to_string(&existing_meta_path)
+            .ok()
+            .and_then(|j| serde_json::from_str::<SessionMeta>(&j).ok())
+            .map(|m| m.created_at)
+            .unwrap_or_else(|| chrono_lite_timestamp().replace('T', " ").replace('-', ":"))
+    } else {
+        chrono_lite_timestamp().replace('T', " ").replace('-', ":")
+    };
 
     // Build metadata
     let meta = SessionMeta {
         session_id: session_id.clone(),
         cwd: cwd.to_string_lossy().to_string(),
-        created_at: chrono_lite_timestamp().replace('T', " ").replace('-', ":"),
+        created_at,
         turns: conversation.turn_count(),
         tool_calls: conversation.intent.stats.tool_calls,
         last_prompt_snippet: truncate_snippet(conversation.last_user_prompt(), 80),
     };
 
-    // Save: we prepend meta as a JSON comment-like first line, then the full snapshot
-    // Actually, just extend the snapshot format to include meta.
     let meta_path = path.with_extension("meta.json");
     let meta_json = serde_json::to_string_pretty(&meta)?;
     fs::write(&meta_path, &meta_json)?;

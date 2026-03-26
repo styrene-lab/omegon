@@ -17,6 +17,15 @@ use crate::prompt;
 use crate::session;
 use crate::tools;
 
+/// Summary of a resumed session, surfaced to the TUI for the welcome brief.
+#[derive(Debug, Clone)]
+pub struct ResumeInfo {
+    pub session_id: String,
+    pub turns: u32,
+    pub last_prompt_snippet: String,
+    pub created_at: String,
+}
+
 /// Everything needed to run an agent loop.
 pub struct AgentSetup {
     /// The event bus — owns all features. The loop dispatches tools and
@@ -35,6 +44,8 @@ pub struct AgentSetup {
     /// The agent loop broadcasts this as AgentEvent::HarnessStatusChanged
     /// when the events channel is created.
     pub initial_harness_status: crate::status::HarnessStatus,
+    /// Present when a prior session was loaded; None for fresh starts.
+    pub resume_info: Option<ResumeInfo>,
 }
 
 /// Pre-computed state gathered during setup for TUI initial display.
@@ -362,12 +373,27 @@ impl AgentSetup {
         let context_manager = ContextManager::new(base_prompt, vec![]);
 
         // ─── Conversation ───────────────────────────────────────────────
+        let mut resume_info: Option<ResumeInfo> = None;
         let conversation = if let Some(resume_arg) = resume {
             let resume_id = resume_arg;
+            // find_session returns the .json path; meta lives at .meta.json
             match session::find_session(&cwd, resume_id) {
                 Some(path) => {
                     tracing::info!(path = %path.display(), "Resuming session");
-                    ConversationState::load_session(&path)?
+                    let conv = ConversationState::load_session(&path)?;
+                    // Read the companion meta file to populate the resumption brief
+                    let meta_path = path.with_extension("meta.json");
+                    if let Ok(json) = std::fs::read_to_string(&meta_path) {
+                        if let Ok(meta) = serde_json::from_str::<session::SessionMeta>(&json) {
+                            resume_info = Some(ResumeInfo {
+                                session_id: meta.session_id,
+                                turns: meta.turns,
+                                last_prompt_snippet: meta.last_prompt_snippet,
+                                created_at: meta.created_at,
+                            });
+                        }
+                    }
+                    conv
                 }
                 None => {
                     if resume_id.is_some() {
@@ -393,6 +419,7 @@ impl AgentSetup {
             conversation,
             cwd,
             secrets,
+            resume_info,
             startup_snapshot,
             initial_harness_status,
             dashboard_handles: crate::tui::dashboard::DashboardHandles {

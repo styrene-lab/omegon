@@ -2482,6 +2482,8 @@ impl App {
 pub struct TuiConfig {
     pub cwd: String,
     pub is_oauth: bool,
+    /// Present when a prior session was resumed; drives the welcome brief.
+    pub resume_info: Option<crate::setup::ResumeInfo>,
     /// Pre-populated initial state so the first frame isn't empty.
     pub initial: TuiInitialState,
     /// Skip the splash animation on startup.
@@ -2933,7 +2935,7 @@ pub async fn run_tui(
     app.dashboard.focused_node = config.initial.focused_node;
     app.dashboard.active_changes = config.initial.active_changes;
 
-    // Build a contextual welcome message
+    // Build a contextual welcome / resumption message
     {
         let s = app.settings();
         let project = app.footer_data.cwd.split('/').next_back().unwrap_or("project");
@@ -2941,30 +2943,57 @@ pub async fn run_tui(
 
         let version = env!("CARGO_PKG_VERSION");
         let sha = env!("OMEGON_GIT_SHA");
-        let mut welcome = format!("Ω Omegon {version} ({sha}) — {project}");
-        if s.provider_connected {
-            let model_short = s.model_short();
-            let ctx = s.context_window / 1000;
-            welcome.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
+
+        if let Some(ref ri) = config.resume_info {
+            // ── Resumed session: orientate instead of greet ──────────────
+            let mut brief = format!("Ω Omegon {version} ({sha}) — {project} [resumed]");
+            if s.provider_connected {
+                let model_short = s.model_short();
+                let ctx = s.context_window / 1000;
+                brief.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
+            } else {
+                brief.push_str("\n  ⚠ No provider — use /login to connect");
+            }
+            if facts > 0 {
+                brief.push_str(&format!("  ·  {facts} facts loaded"));
+            }
+            brief.push('\n');
+            // Context brief — what the prior session was doing
+            brief.push_str(&format!(
+                "\n  Session {}  ·  {} turns",
+                &ri.session_id[..ri.session_id.len().min(12)],
+                ri.turns,
+            ));
+            if !ri.last_prompt_snippet.is_empty() {
+                brief.push_str(&format!("\n  Last prompt: {}", ri.last_prompt_snippet));
+            }
+            brief.push_str("\n\n  Session history is loaded. You have full context of prior work.");
+            app.conversation.push_system(&brief);
         } else {
-            welcome.push_str("\n  ⚠ No provider — use /login to connect");
-        }
-        if facts > 0 {
-            welcome.push_str(&format!("  ·  {facts} facts loaded"));
-        }
-        welcome.push('\n');
-        welcome.push_str("\n  /model  switch provider    /think  reasoning level");
-        welcome.push_str("\n  /context  context class      /help   all commands");
-        welcome.push_str("\n  Ctrl+R  search history      Ctrl+C  cancel/quit");
+            // ── Fresh session: standard welcome ───────────────────────────
+            let mut welcome = format!("Ω Omegon {version} ({sha}) — {project}");
+            if s.provider_connected {
+                let model_short = s.model_short();
+                let ctx = s.context_window / 1000;
+                welcome.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
+            } else {
+                welcome.push_str("\n  ⚠ No provider — use /login to connect");
+            }
+            if facts > 0 {
+                welcome.push_str(&format!("  ·  {facts} facts loaded"));
+            }
+            welcome.push('\n');
+            welcome.push_str("\n  /model  switch provider    /think  reasoning level");
+            welcome.push_str("\n  /context  context class      /help   all commands");
+            welcome.push_str("\n  Ctrl+R  search history      Ctrl+C  cancel/quit");
+            app.conversation.push_system(&welcome);
 
-        app.conversation.push_system(&welcome);
-
-        // First-run hint: if no memory facts exist, this is likely a new user.
-        // Nudge them toward the tutorial without being pushy.
-        if facts == 0 {
-            app.conversation.push_system(
-                "💡 First time here? Type /tutorial for a guided tour, or just start typing."
-            );
+            // First-run hint: if no memory facts exist, this is likely a new user.
+            if facts == 0 {
+                app.conversation.push_system(
+                    "💡 First time here? Type /tutorial for a guided tour, or just start typing."
+                );
+            }
         }
     }
 

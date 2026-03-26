@@ -656,6 +656,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         dashboard_handles: agent.dashboard_handles.clone(),
         initial_prompt,
         start_tutorial: cli.tutorial,
+        resume_info: agent.resume_info.clone(),
     };
     let tui_cancel = shared_cancel.clone();
     let tui_settings = shared_settings.clone();
@@ -1143,7 +1144,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 
     // Save session + profile
     if !cli.no_session
-        && let Err(e) = session::save_session(&agent.conversation, &agent.cwd) {
+        && let Err(e) = session::save_session(&agent.conversation, &agent.cwd, agent.resume_info.as_ref().map(|r| r.session_id.as_str())) {
             tracing::debug!("Session save failed: {e}");
         }
     // Always persist profile on exit (captures thinking level changes, etc.)
@@ -1333,7 +1334,7 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
             }
         } else {
             // Standalone agent: save to ~/.pi/agent/sessions/
-            match session::save_session(&agent.conversation, &agent.cwd) {
+            match session::save_session(&agent.conversation, &agent.cwd, agent.resume_info.as_ref().map(|r| r.session_id.as_str())) {
                 Ok(path) => tracing::info!(path = %path.display(), "Session saved"),
                 Err(e) => tracing::debug!("Session save failed (non-fatal): {e}"),
             }
