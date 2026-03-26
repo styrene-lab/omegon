@@ -1,6 +1,6 @@
 {
   "lastUsedModel": {
-    "provider": "openai",
+    "provider": "openai-codex",
     "modelId": "gpt-5.4"
   },
   "thinkingLevel": "low",

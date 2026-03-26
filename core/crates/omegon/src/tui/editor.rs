@@ -11,6 +11,7 @@
 
 use ratatui::prelude::*;
 use ratatui_textarea::TextArea;
+use unicode_width::UnicodeWidthStr;
 
 use super::theme::Theme;
 
@@ -75,6 +76,21 @@ impl Editor {
     /// Number of content lines in the editor (for dynamic height).
     pub fn line_count(&self) -> usize {
         self.textarea.lines().len().max(1)
+    }
+
+    /// Number of visual rows needed to display the current buffer within the
+    /// given content width, accounting for soft wrapping.
+    pub fn visual_line_count(&self, content_width: u16) -> usize {
+        let width = content_width.max(1) as usize;
+        self.textarea
+            .lines()
+            .iter()
+            .map(|line| {
+                let display_width = UnicodeWidthStr::width(line.as_str());
+                display_width.max(1).div_ceil(width)
+            })
+            .sum::<usize>()
+            .max(1)
     }
 
     pub fn mode(&self) -> &EditorMode {

@@ -1302,9 +1302,11 @@ impl App {
         };
 
         // ── Vertical layout in the main area ────────────────────────
-        // Editor height: 3 rows default, grows proportionally with terminal.
-        // Cap at 40% of available height or 20 rows, whichever is smaller.
-        let editor_lines = self.editor.line_count();
+        // Editor height: 3 rows default, grows with visual rows, not just
+        // logical newline count. Otherwise long wrapped lines can still force
+        // the textarea to scroll vertically and hide earlier content.
+        let editor_content_width = main_area.width.saturating_sub(2);
+        let editor_lines = self.editor.visual_line_count(editor_content_width);
         let max_editor = (main_area.height * 40 / 100).max(5).min(20);
         let editor_height = (editor_lines as u16 + 2).clamp(3, max_editor); // +2 for border
 

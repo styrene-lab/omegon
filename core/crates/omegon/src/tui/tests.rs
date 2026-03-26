@@ -28,6 +28,21 @@ fn test_tx() -> mpsc::Sender<TuiCommand> {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
+fn editor_visual_line_count_accounts_for_wrapping() {
+    let mut editor = crate::tui::editor::Editor::new();
+    editor.set_text("1234567890");
+    assert_eq!(editor.line_count(), 1, "logical lines should stay at 1");
+    assert_eq!(editor.visual_line_count(4), 3, "wrapped rows should expand to 3");
+}
+
+#[test]
+fn editor_visual_line_count_counts_newlines_and_wraps() {
+    let mut editor = crate::tui::editor::Editor::new();
+    editor.set_text("1234\n123456");
+    assert_eq!(editor.visual_line_count(4), 3, "1 row + 2 wrapped rows");
+}
+
+#[test]
 fn slash_update_channel_changes_setting() {
     let mut app = test_app();
     let tx = test_tx();

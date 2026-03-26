@@ -34,6 +34,12 @@ Inspected downloaded `sigstore-verification 0.2.1` source under cargo registry. 
 
 **Rationale:** Although the crate is useful for attestation-oriented workflows, source inspection shows its keyless Cosign verification path is intentionally incomplete and not appropriate as the sole cryptographic verification layer for a self-updating binary. Omegon should keep the current fail-closed cosign bridge until a stronger Rust-native verifier is implemented using lower-level APIs.
 
+### Defer full Rekor/trust-root verification beyond this RC
+
+**Status:** decided
+
+**Rationale:** For the next RC, the priority is shipping an updater that works in-process and can carry future upgrades through `/update` without external platform dependencies. Rust-native blob signature verification plus certificate identity policy is sufficient for this release candidate. Full Rekor/trust-root verification remains important, but is deferred to a follow-up hardening pass rather than blocking the updater milestone.
+
 ## Open Questions
 
 - Does `sigstore-verification` support verifying detached blob signatures + certificate identity constraints for GitHub Release assets directly, or do we need to use lower-level `sigstore` APIs?
