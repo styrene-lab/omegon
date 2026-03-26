@@ -1330,6 +1330,8 @@ impl App {
             ).right_aligned());
 
         let is_secret_mode = matches!(self.editor.mode(), editor::EditorMode::SecretInput { .. });
+        let show_cursor = !is_secret_mode && editor_content.is_empty() && !self.agent_active;
+        let editor_rect = chunks[1];
         if is_secret_mode || !editor_content.is_empty() {
             // Secret mode or reverse search — render masked/matched text as Paragraph
             let content_style = if is_secret_mode {
@@ -1340,11 +1342,18 @@ impl App {
             let editor_widget = Paragraph::new(editor_content)
                 .style(content_style)
                 .block(editor_block);
-            frame.render_widget(editor_widget, chunks[1]);
+            frame.render_widget(editor_widget, editor_rect);
         } else {
             // Normal mode — render the textarea widget directly
             self.editor.textarea.set_block(editor_block);
-            frame.render_widget(&self.editor.textarea, chunks[1]);
+            frame.render_widget(&self.editor.textarea, editor_rect);
+        }
+
+        // Show the terminal's blinking cursor at the editor cursor position.
+        // Only in normal mode (not secret/search) and when the editor is focused.
+        if show_cursor {
+            let (cx, cy) = self.editor.cursor_screen_position(editor_rect);
+            frame.set_cursor_position(ratatui::layout::Position { x: cx, y: cy });
         }
 
         // Command palette popup (above editor when typing /)

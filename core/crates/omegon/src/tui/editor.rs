@@ -38,6 +38,9 @@ pub struct Editor {
     mode: EditorMode,
     /// Kill ring — last killed text (Ctrl+K, Ctrl+U).
     kill_ring: Option<String>,
+    /// Tracked scroll offset for cursor positioning. Updated each frame
+    /// to match the textarea's internal viewport (which is pub(crate)).
+    scroll_row: u16,
 }
 
 impl Editor {
@@ -51,6 +54,7 @@ impl Editor {
             textarea: ta,
             mode: EditorMode::Normal,
             kill_ring: None,
+            scroll_row: 0,
         }
     }
 
@@ -340,6 +344,34 @@ impl Editor {
     /// within the editor or fall through to history/scroll.
     pub fn cursor_row(&self) -> usize {
         self.textarea.cursor().0
+    }
+
+    /// Compute the cursor's screen position within the given editor area.
+    /// Call this AFTER rendering the textarea widget so the scroll state
+    /// is current. Returns (x, y) in absolute screen coordinates.
+    pub fn cursor_screen_position(&mut self, editor_area: Rect) -> (u16, u16) {
+        let (crow, ccol) = self.textarea.cursor();
+        let crow = crow as u16;
+        let ccol = ccol as u16;
+
+        // The block has Borders::TOP only, so inner area is 1 row shorter at top.
+        let inner_y = editor_area.y + 1;
+        let inner_height = editor_area.height.saturating_sub(1);
+
+        // Mirror ratatui-textarea's scroll logic:
+        // keep cursor visible within the viewport.
+        if inner_height == 0 {
+            return (editor_area.x + ccol, inner_y);
+        }
+        if crow < self.scroll_row {
+            self.scroll_row = crow;
+        } else if crow >= self.scroll_row + inner_height {
+            self.scroll_row = crow + 1 - inner_height;
+        }
+
+        let screen_y = inner_y + (crow - self.scroll_row);
+        let screen_x = editor_area.x + ccol;
+        (screen_x, screen_y)
     }
 
     pub fn move_word_backward(&mut self) {
