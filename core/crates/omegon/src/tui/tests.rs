@@ -28,6 +28,17 @@ fn test_tx() -> mpsc::Sender<TuiCommand> {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
+fn editor_cursor_screen_position_wraps_without_horizontal_scroll() {
+    let mut editor = crate::tui::editor::Editor::new();
+    editor.set_text("1234567890\nabc");
+    editor.move_end();
+    let area = Rect { x: 0, y: 0, width: 4, height: 6 };
+    let (x, y) = editor.cursor_screen_position(area);
+    assert!(x < 4, "cursor x should stay within editor width: {x}");
+    assert!(y >= 1, "cursor y should account for wrapped rows: {y}");
+}
+
+#[test]
 fn editor_visual_line_count_accounts_for_wrapping() {
     let mut editor = crate::tui::editor::Editor::new();
     editor.set_text("1234567890");

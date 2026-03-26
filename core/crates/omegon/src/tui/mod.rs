@@ -1510,27 +1510,25 @@ impl App {
             );
 
         let is_secret_mode = matches!(self.editor.mode(), editor::EditorMode::SecretInput { .. });
-        let show_cursor = !is_secret_mode && editor_content.is_empty() && !self.agent_active;
+        let show_cursor = !is_secret_mode && !self.agent_active;
         let editor_rect = chunks[1];
-        if is_secret_mode || !editor_content.is_empty() {
-            // Secret mode or reverse search — render masked/matched text as Paragraph
-            let content_style = if is_secret_mode {
-                Style::default().fg(t.accent_muted()).bg(t.surface_bg())
-            } else {
-                Style::default().fg(t.fg()).bg(t.surface_bg())
-            };
-            let editor_widget = Paragraph::new(editor_content)
-                .style(content_style)
-                .block(editor_block);
-            frame.render_widget(editor_widget, editor_rect);
+        let content_style = if is_secret_mode {
+            Style::default().fg(t.accent_muted()).bg(t.surface_bg())
         } else {
-            // Normal mode — render the textarea widget directly
-            self.editor.textarea.set_block(editor_block);
-            frame.render_widget(&self.editor.textarea, editor_rect);
-        }
+            Style::default().fg(t.fg()).bg(t.surface_bg())
+        };
+        let editor_text = if is_secret_mode || !editor_content.is_empty() {
+            editor_content
+        } else {
+            self.editor.wrapped_text()
+        };
+        let editor_widget = Paragraph::new(editor_text)
+            .style(content_style)
+            .block(editor_block)
+            .wrap(ratatui::widgets::Wrap { trim: false });
+        frame.render_widget(editor_widget, editor_rect);
 
         // Show the terminal's blinking cursor at the editor cursor position.
-        // Only in normal mode (not secret/search) and when the editor is focused.
         if show_cursor {
             let (cx, cy) = self.editor.cursor_screen_position(editor_rect);
             frame.set_cursor_position(ratatui::layout::Position { x: cx, y: cy });

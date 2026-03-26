@@ -39,10 +39,8 @@ pub struct Editor {
     mode: EditorMode,
     /// Kill ring — last killed text (Ctrl+K, Ctrl+U).
     kill_ring: Option<String>,
-    /// Tracked scroll offset for cursor positioning. Updated each frame
-    /// to match the textarea's internal viewport (which is pub(crate)).
+    /// Tracked vertical scroll offset for wrapped multiline rendering.
     scroll_row: u16,
-    scroll_col: u16,
 }
 
 impl Editor {
@@ -57,7 +55,6 @@ impl Editor {
             mode: EditorMode::Normal,
             kill_ring: None,
             scroll_row: 0,
-            scroll_col: 0,
         }
     }
 
@@ -400,46 +397,45 @@ impl Editor {
         self.textarea.cursor().0
     }
 
-    /// Compute the cursor's screen position within the given editor area.
-    /// Call this AFTER rendering the textarea widget so the scroll state
-    /// is current. Returns (x, y) in absolute screen coordinates.
+    /// Compute the wrapped text used for multiline rendering.
+    pub fn wrapped_text(&self) -> String {
+        self.render_text()
+    }
+
+    /// Compute the cursor's screen position within the given editor area for
+    /// wrapped multiline rendering. Returns (x, y) in absolute coordinates.
     pub fn cursor_screen_position(&mut self, editor_area: Rect) -> (u16, u16) {
-        let (crow, ccol) = self.textarea.cursor();
-        let crow = crow as u16;
-        let ccol = ccol as u16;
-
-        // The block has Borders::TOP only, so inner area is 1 row shorter at top.
+        let (cursor_row, cursor_col) = self.textarea.cursor();
+        let content_width = editor_area.width.max(1) as usize;
         let inner_y = editor_area.y + 1;
-        let inner_height = editor_area.height.saturating_sub(1);
-        let inner_width = editor_area.width;
+        let inner_height = editor_area.height.saturating_sub(1).max(1);
 
-        // Mirror ratatui-textarea's scroll logic for both axes:
-        // keep cursor visible within the viewport.
-        if inner_height == 0 || inner_width == 0 {
-            return (editor_area.x, inner_y);
+        let mut visual_row: u16 = 0;
+        let mut visual_col: u16 = 0;
+
+        for (row_idx, line) in self.textarea.lines().iter().enumerate() {
+            if row_idx < cursor_row {
+                let display_width = UnicodeWidthStr::width(line.as_str());
+                visual_row = visual_row.saturating_add(display_width.max(1).div_ceil(content_width) as u16);
+                continue;
+            }
+
+            let prefix: String = line.chars().take(cursor_col).collect();
+            let prefix_width = UnicodeWidthStr::width(prefix.as_str());
+            visual_row = visual_row.saturating_add((prefix_width / content_width) as u16);
+            visual_col = (prefix_width % content_width) as u16;
+            break;
         }
 
-        // Vertical scroll
-        if crow < self.scroll_row {
-            self.scroll_row = crow;
-        } else if crow >= self.scroll_row + inner_height {
-            self.scroll_row = crow + 1 - inner_height;
+        if visual_row < self.scroll_row {
+            self.scroll_row = visual_row;
+        } else if visual_row >= self.scroll_row + inner_height {
+            self.scroll_row = visual_row + 1 - inner_height;
         }
 
-        // Horizontal scroll
-        if ccol < self.scroll_col {
-            self.scroll_col = ccol;
-        } else if ccol >= self.scroll_col + inner_width {
-            self.scroll_col = ccol + 1 - inner_width;
-        }
-
-        let screen_y = inner_y + (crow - self.scroll_row);
-        let screen_x = editor_area.x + (ccol - self.scroll_col);
-
-        // Clamp to editor area as a safety net
-        let screen_x = screen_x.min(editor_area.x + inner_width.saturating_sub(1));
-        let screen_y = screen_y.min(editor_area.y + editor_area.height.saturating_sub(1));
-        (screen_x, screen_y)
+        let screen_y = inner_y + visual_row.saturating_sub(self.scroll_row);
+        let screen_x = editor_area.x + visual_col.min(editor_area.width.saturating_sub(1));
+        (screen_x, screen_y.min(editor_area.y + editor_area.height.saturating_sub(1)))
     }
 
     pub fn move_word_backward(&mut self) {
