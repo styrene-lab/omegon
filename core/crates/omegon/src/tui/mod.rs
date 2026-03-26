@@ -1533,7 +1533,12 @@ impl App {
                 );
 
             self.editor.textarea.set_block(editor_block);
-            frame.render_widget(&self.editor.textarea, chunks[1]);
+            let editor_rect = chunks[1];
+            frame.render_widget(&self.editor.textarea, editor_rect);
+            if !self.agent_active {
+                let (cx, cy) = self.editor.raw_cursor_screen_position(editor_rect);
+                frame.set_cursor_position(ratatui::layout::Position { x: cx, y: cy });
+            }
         }
 
         // Command palette popup (above editor when typing /)

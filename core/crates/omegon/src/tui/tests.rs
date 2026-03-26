@@ -28,6 +28,16 @@ fn test_tx() -> mpsc::Sender<TuiCommand> {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
+fn editor_raw_cursor_screen_position_is_inside_editor_box() {
+    let mut editor = crate::tui::editor::Editor::new();
+    editor.set_text("hello\nworld");
+    let area = Rect { x: 10, y: 5, width: 20, height: 5 };
+    let (x, y) = editor.raw_cursor_screen_position(area);
+    assert!((11..29).contains(&x), "x should be inside bordered editor area: {x}");
+    assert!((6..9).contains(&y), "y should be inside bordered editor area: {y}");
+}
+
+#[test]
 fn editor_cursor_screen_position_wraps_without_horizontal_scroll() {
     let mut editor = crate::tui::editor::Editor::new();
     editor.set_text("1234567890\nabc");
