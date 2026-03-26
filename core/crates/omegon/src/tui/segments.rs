@@ -434,8 +434,11 @@ impl Segment {
             }
         }
 
-        // Add 1 row spacing after the segment
-        (last_used + 1).max(1)
+        let trailing_spacing = match self.role() {
+            SegmentRole::Operator | SegmentRole::Tool => 0,
+            _ => 1,
+        };
+        (last_used + trailing_spacing).max(1)
     }
 }
 
@@ -1458,6 +1461,27 @@ mod tests {
         let h_wide = tool.height(120, &t);
         assert!(h_narrow > h_wide, "narrow tool cards should get taller when output wraps");
         assert!(h_narrow >= 8, "wrapped tool output should materially increase card height: {h_narrow}");
+    }
+
+    #[test]
+    fn compact_tool_card_does_not_carry_extra_bottom_padding() {
+        let t = Alpharius;
+        let tool = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "bash".into(),
+                args_summary: None,
+                detail_args: Some("echo hi".into()),
+                result_summary: None,
+                detail_result: Some("hi".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        };
+        let h = tool.height(80, &t);
+        assert!(h <= 7, "compact tool cards should stay tight, got {h}");
     }
 
     #[test]
