@@ -3,5 +3,5 @@
     "provider": "anthropic",
     "modelId": "claude-opus-4-6"
   },
-  "thinkingLevel": "high"
+  "thinkingLevel": "low"
 }

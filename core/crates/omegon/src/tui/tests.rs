@@ -28,6 +28,17 @@ fn test_tx() -> mpsc::Sender<TuiCommand> {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
+fn editor_raw_cursor_screen_position_matches_top_border_only_input_box() {
+    let mut editor = crate::tui::editor::Editor::new();
+    editor.set_text("abc");
+    editor.move_end();
+    let area = Rect { x: 10, y: 5, width: 20, height: 5 };
+    let (x, y) = editor.raw_cursor_screen_position(area);
+    assert_eq!(x, 13, "cursor should align with text origin, not a fictitious left border");
+    assert_eq!(y, 6, "cursor should sit one row below the top border");
+}
+
+#[test]
 fn editor_raw_cursor_screen_position_is_inside_editor_box() {
     let mut editor = crate::tui::editor::Editor::new();
     editor.set_text("hello\nworld");

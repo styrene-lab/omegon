@@ -373,17 +373,17 @@ impl Editor {
             .move_cursor(ratatui_textarea::CursorMove::Head);
     }
 
-    /// Approximate hardware cursor position for raw textarea rendering.
-    /// This follows the textarea's logical row/column inside the bordered area.
-    /// It is intentionally simple: the widget owns actual rendering/viewport
-    /// behavior, and this gives the terminal a visible blinking cursor for the
-    /// common case where the cursor is within the visible editor box.
+    /// Hardware cursor position for raw textarea rendering.
+    ///
+    /// The operator input block uses `Borders::TOP`, not a full border box, so
+    /// the text origin is at `x` (no left border) and `y + 1` (one top border).
+    /// Match that geometry exactly or the terminal cursor drifts by one column.
     pub fn raw_cursor_screen_position(&self, editor_area: Rect) -> (u16, u16) {
         let (row, col) = self.textarea.cursor();
-        let inner_x = editor_area.x.saturating_add(1);
+        let inner_x = editor_area.x;
         let inner_y = editor_area.y.saturating_add(1);
-        let inner_w = editor_area.width.saturating_sub(2).max(1);
-        let inner_h = editor_area.height.saturating_sub(2).max(1);
+        let inner_w = editor_area.width.max(1);
+        let inner_h = editor_area.height.saturating_sub(1).max(1);
 
         let screen_x = inner_x + (col as u16).min(inner_w.saturating_sub(1));
         let screen_y = inner_y + (row as u16).min(inner_h.saturating_sub(1));
