@@ -988,6 +988,57 @@ mod tests {
         assert_eq!(config.idle_timeout_secs, 300);
         assert_eq!(config.timeout_secs, 900);
     }
+
+    #[test]
+    fn build_task_file_handles_sparse_child_state_ids() {
+        let siblings = vec![
+            crate::cleave::state::ChildState {
+                child_id: 0,
+                label: "alpha".into(),
+                description: "Do alpha work".into(),
+                scope: vec!["src/".into()],
+                depends_on: vec![],
+                status: crate::cleave::state::ChildStatus::Pending,
+                error: None,
+                branch: Some("cleave/0-alpha".into()),
+                worktree_path: None,
+                backend: "native".into(),
+                execute_model: None,
+                provider_id: None,
+                duration_secs: None,
+            },
+            crate::cleave::state::ChildState {
+                child_id: 2,
+                label: "gamma".into(),
+                description: "Do gamma work".into(),
+                scope: vec!["tests/".into()],
+                depends_on: vec!["alpha".into()],
+                status: crate::cleave::state::ChildStatus::Pending,
+                error: None,
+                branch: Some("cleave/2-gamma".into()),
+                worktree_path: None,
+                backend: "native".into(),
+                execute_model: None,
+                provider_id: None,
+                duration_secs: None,
+            },
+        ];
+
+        let task = build_task_file(
+            2,
+            "gamma",
+            "Do gamma work",
+            &["tests/".into()],
+            "Fix bugs",
+            &siblings,
+            "",
+            Path::new("/tmp/nonexistent"),
+        );
+
+        assert!(task.contains("siblings: [0:alpha]"));
+        assert!(task.contains("**alpha**: Do alpha work"));
+        assert!(!task.contains("1:"));
+    }
 }
 
 #[test]

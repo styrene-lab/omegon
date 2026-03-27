@@ -3958,9 +3958,9 @@ pub async fn run_tui(
                                 && mouse.row < area.y + area.height
                         });
                         if over_dashboard {
-                            app.dashboard.scroll_down(3);
+                            app.dashboard.scroll_up(3);
                         } else {
-                            app.conversation.scroll_down(3);
+                            app.conversation.scroll_up(3);
                         }
                     }
                     MouseEventKind::ScrollDown if app.mouse_capture_enabled => {
@@ -3971,9 +3971,9 @@ pub async fn run_tui(
                                 && mouse.row < area.y + area.height
                         });
                         if over_dashboard {
-                            app.dashboard.scroll_up(3);
+                            app.dashboard.scroll_down(3);
                         } else {
-                            app.conversation.scroll_up(3);
+                            app.conversation.scroll_down(3);
                         }
                     }
                     _ => {}

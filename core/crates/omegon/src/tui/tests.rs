@@ -200,12 +200,38 @@ fn operator_event_queue_keeps_most_recent_entries() {
 
 #[test]
 fn mouse_wheel_scroll_direction_latches_manual_scroll() {
-    let mut state = crate::tui::conv_widget::ConvState::new();
-    state.scroll_up(3);
-    assert!(state.user_scrolled, "scrolling away from bottom should latch manual scroll");
-    assert_eq!(state.scroll_offset, 3);
-    state.auto_scroll_to_bottom();
-    assert_eq!(state.scroll_offset, 3, "streaming should not pull the viewport back to bottom once manually scrolled");
+    let mut app = test_app();
+    app.conversation.push_user("user");
+    app.conversation.append_streaming("line 1\nline 2\nline 3\nline 4\nline 5\nline 6");
+
+    assert_eq!(app.conversation.conv_state.scroll_offset, 0);
+    app.conversation.scroll_up(3);
+    assert!(app.conversation.conv_state.user_scrolled);
+    assert_eq!(app.conversation.conv_state.scroll_offset, 3);
+
+    app.conversation.append_streaming("\nnew line");
+    assert_eq!(
+        app.conversation.conv_state.scroll_offset,
+        3,
+        "streaming should not pull the viewport back to bottom once manually scrolled"
+    );
+}
+
+#[test]
+fn mouse_wheel_scroll_up_matches_natural_scroll_direction() {
+    let mut app = test_app();
+    app.conversation.push_user("user");
+    app.conversation.append_streaming("line 1\nline 2\nline 3\nline 4\nline 5\nline 6");
+
+    app.conversation.scroll_up(3);
+    let after_scroll_up = app.conversation.conv_state.scroll_offset;
+    assert!(after_scroll_up > 0, "scroll up should move into history");
+
+    app.conversation.scroll_down(3);
+    assert!(
+        app.conversation.conv_state.scroll_offset < after_scroll_up,
+        "scroll down should move back toward the live bottom"
+    );
 }
 
 #[test]

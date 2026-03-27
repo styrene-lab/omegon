@@ -403,8 +403,13 @@ impl CleaveFeature {
 
         let plan = CleavePlan::from_json(plan_json)?;
 
-        // Create workspace directory
+        // Internal tool invocations should start from a fresh workspace.
+        // Reusing a stale state.json from a previous run can mismatch the new
+        // plan and panic when wave indices reference missing children.
         let workspace = self.repo_path.join(".omegon/cleave-workspace");
+        if workspace.exists() {
+            std::fs::remove_dir_all(&workspace)?;
+        }
         std::fs::create_dir_all(&workspace)?;
 
         // Resolve agent binary
