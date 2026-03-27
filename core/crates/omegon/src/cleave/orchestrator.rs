@@ -548,6 +548,40 @@ struct ChildOutput {
     stderr_log_path: Option<String>,
 }
 
+fn summarize_child_failure(stderr_full: &str) -> Option<String> {
+    let lines: Vec<&str> = stderr_full
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    for line in lines.iter().rev() {
+        let lower = line.to_ascii_lowercase();
+        let looks_causal = lower.contains("error")
+            || lower.contains("failed")
+            || lower.contains("panic")
+            || lower.contains("invalid_request")
+            || lower.contains("no llm provider available")
+            || lower.contains("authentication")
+            || lower.contains("unauthorized")
+            || lower.contains("forbidden")
+            || lower.contains("timeout");
+        let obviously_noise = lower.contains("event bus finalized")
+            || lower.contains("default tool profile applied")
+            || lower.contains("memory backend loaded")
+            || lower.contains("memory snapshot for tui")
+            || lower.contains("startup secret preflight")
+            || lower.contains("registered feature")
+            || lower.contains("repo model active")
+            || lower.contains("omegon-agent starting");
+        if looks_causal && !obviously_noise {
+            return Some(line.to_string());
+        }
+    }
+
+    lines.last().map(|s| s.to_string())
+}
+
 /// Configuration for dispatching a child agent process.
 struct ChildDispatchConfig<'a> {
     agent_binary: &'a Path,
@@ -724,6 +758,7 @@ async fn dispatch_child(
     }
     let _ = std::fs::write(&stdout_log_path, &stdout_buf);
     let stderr_tail_text = stderr_tail.into_iter().collect::<Vec<_>>().join("\n");
+    let stderr_full_text = std::fs::read_to_string(&stderr_log_path).unwrap_or_default();
     let session_path = cwd.join(".cleave-session.json");
     let session_path = session_path.exists().then(|| session_path.display().to_string());
 
@@ -739,18 +774,26 @@ async fn dispatch_child(
             stdout_log_path: Some(stdout_log_path.display().to_string()),
             stderr_log_path: Some(stderr_log_path.display().to_string()),
         }),
-        Ok(()) => Err(anyhow::anyhow!(
-            "Child exited with code {}\nlog: {}\n{}",
-            exit.code().unwrap_or(-1),
-            stderr_log_path.display(),
-            crate::util::truncate(&stderr_tail_text, 1200)
-        )),
-        Err(e) => Err(anyhow::anyhow!(
-            "{}\nlog: {}\n{}",
-            e,
-            stderr_log_path.display(),
-            crate::util::truncate(&stderr_tail_text, 1200)
-        )),
+        Ok(()) => {
+            let summary = summarize_child_failure(&stderr_full_text)
+                .unwrap_or_else(|| crate::util::truncate(&stderr_tail_text, 1200));
+            Err(anyhow::anyhow!(
+                "Child exited with code {}\nlog: {}\nsummary: {}",
+                exit.code().unwrap_or(-1),
+                stderr_log_path.display(),
+                summary
+            ))
+        }
+        Err(e) => {
+            let summary = summarize_child_failure(&stderr_full_text)
+                .unwrap_or_else(|| crate::util::truncate(&stderr_tail_text, 1200));
+            Err(anyhow::anyhow!(
+                "{}\nlog: {}\nsummary: {}",
+                e,
+                stderr_log_path.display(),
+                summary
+            ))
+        }
     }
 }
 
