@@ -9,13 +9,16 @@
 //! when background tasks complete.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use omegon_traits::{
@@ -37,6 +40,14 @@ pub enum DelegateTaskStatus {
     Running,
     Completed { success: bool },
     Failed { error: String },
+}
+
+#[derive(Debug, Clone)]
+struct DelegateExecutionSpec {
+    prompt: String,
+    cwd: PathBuf,
+    model: String,
+    max_turns: u32,
 }
 
 /// A delegate task entry in the result store
@@ -119,11 +130,20 @@ impl DelegateResultStore {
 pub struct DelegateRunner {
     cwd: PathBuf,
     result_store: Arc<DelegateResultStore>,
+    agent_binary: PathBuf,
 }
 
 impl DelegateRunner {
-    pub fn new(cwd: PathBuf, result_store: Arc<DelegateResultStore>) -> Self {
-        Self { cwd, result_store }
+    pub fn new(
+        cwd: PathBuf,
+        result_store: Arc<DelegateResultStore>,
+        agent_binary: PathBuf,
+    ) -> Self {
+        Self {
+            cwd,
+            result_store,
+            agent_binary,
+        }
     }
 
     pub async fn spawn_delegate(
@@ -131,50 +151,15 @@ impl DelegateRunner {
         task_id: String,
         agent_name: Option<String>,
         task: String,
-        _scope: Option<Vec<String>>,
-        _model: Option<String>,
-        _thinking_level: Option<String>,
+        scope: Option<Vec<String>>,
+        model: Option<String>,
+        thinking_level: Option<String>,
         facts: Option<Vec<String>>,
         mind: Option<String>,
     ) -> anyhow::Result<()> {
-        // Assemble field kit: load persona mind if specified
-        let mut field_kit_context = String::new();
-        if let Some(ref persona_id) = mind {
-            // Try to find the persona in installed plugins and load its directive + facts
-            let (personas, _) = crate::plugins::persona_loader::scan_available();
-            if let Some(available) = personas.iter().find(|p| {
-                p.id.contains(persona_id)
-                    || p.name.to_lowercase().contains(&persona_id.to_lowercase())
-            }) && let Ok(persona) = crate::plugins::persona_loader::load_persona(&available.path)
-            {
-                field_kit_context.push_str(&format!(
-                    "\n## Persona: {}\n{}\n",
-                    persona.name, persona.directive
-                ));
-                if !persona.mind_facts.is_empty() {
-                    field_kit_context.push_str(&format!(
-                        "\n## Mind Facts ({} facts)\n",
-                        persona.mind_facts.len()
-                    ));
-                    for fact in &persona.mind_facts {
-                        field_kit_context
-                            .push_str(&format!("- [{}] {}\n", fact.section, fact.content));
-                    }
-                }
-            }
-        }
-        if let Some(ref fact_list) = facts
-            && !fact_list.is_empty()
-        {
-            field_kit_context.push_str("\n## Injected Facts\n");
-            for f in fact_list {
-                field_kit_context.push_str(&format!("- {f}\n"));
-            }
-        }
-
         let task_entry = DelegateTask {
             task_id: task_id.clone(),
-            agent_name,
+            agent_name: agent_name.clone(),
             task_description: task.clone(),
             status: DelegateTaskStatus::Running,
             result: None,
@@ -184,23 +169,33 @@ impl DelegateRunner {
 
         self.result_store.store_task(task_entry);
 
-        // Spawn a background task that simulates work
-        // In a real implementation, this spawns a headless omegon child process
-        let store = self.result_store.clone();
-        let field_kit = field_kit_context;
-        tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        let spec = self.build_execution_spec(
+            &task,
+            agent_name.as_deref(),
+            scope.as_deref(),
+            model.as_deref(),
+            thinking_level.as_deref(),
+            facts.as_deref(),
+            mind.as_deref(),
+        )?;
 
-            let result = if field_kit.is_empty() {
-                format!("Task completed: {task}")
-            } else {
-                format!("Task completed: {task}\n\nField kit applied:{field_kit}")
-            };
-            store.update_task_status(
-                &task_id,
-                DelegateTaskStatus::Completed { success: true },
-                Some(result),
-            );
+        let store = self.result_store.clone();
+        let binary = self.agent_binary.clone();
+        tokio::spawn(async move {
+            match run_delegate_child(&binary, &spec).await {
+                Ok(result) => store.update_task_status(
+                    &task_id,
+                    DelegateTaskStatus::Completed { success: true },
+                    Some(result),
+                ),
+                Err(error) => store.update_task_status(
+                    &task_id,
+                    DelegateTaskStatus::Failed {
+                        error: error.to_string(),
+                    },
+                    None,
+                ),
+            }
         });
 
         Ok(())
@@ -209,31 +204,147 @@ impl DelegateRunner {
     pub async fn wait_for_result(
         &self,
         task_id: &str,
-        _cancel: CancellationToken,
+        cancel: CancellationToken,
     ) -> anyhow::Result<String> {
-        // Poll for completion (in real implementation, this would be more sophisticated)
-        for _ in 0..30 {
-            // 30 second timeout
-            if let Some(task) = self.result_store.get_task(task_id) {
-                match task.status {
-                    DelegateTaskStatus::Completed { success: true } => {
-                        return Ok(task.result.unwrap_or_else(|| "Task completed".to_string()));
-                    }
-                    DelegateTaskStatus::Completed { success: false } => {
-                        return Err(anyhow::anyhow!("Task failed"));
-                    }
-                    DelegateTaskStatus::Failed { error } => {
-                        return Err(anyhow::anyhow!("Task failed: {}", error));
-                    }
-                    DelegateTaskStatus::Running => {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    anyhow::bail!("Delegate cancelled");
+                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(250)) => {
+                    if let Some(task) = self.result_store.get_task(task_id) {
+                        match task.status {
+                            DelegateTaskStatus::Completed { success: true } => {
+                                return Ok(task.result.unwrap_or_else(|| "Task completed".to_string()));
+                            }
+                            DelegateTaskStatus::Completed { success: false } => {
+                                anyhow::bail!("Task failed");
+                            }
+                            DelegateTaskStatus::Failed { error } => {
+                                anyhow::bail!("Task failed: {}", error);
+                            }
+                            DelegateTaskStatus::Running => {}
+                        }
+                    } else {
+                        anyhow::bail!("Task not found");
                     }
                 }
-            } else {
-                return Err(anyhow::anyhow!("Task not found"));
             }
         }
-        Err(anyhow::anyhow!("Task timed out"))
+    }
+
+    fn build_execution_spec(
+        &self,
+        task: &str,
+        agent_name: Option<&str>,
+        scope: Option<&[String]>,
+        model: Option<&str>,
+        thinking_level: Option<&str>,
+        facts: Option<&[String]>,
+        mind: Option<&str>,
+    ) -> anyhow::Result<DelegateExecutionSpec> {
+        let mut prompt = String::new();
+        prompt.push_str("Execute the delegated task directly.\n");
+        prompt.push_str("Stay within the delegated scope if one is provided.\n");
+        prompt.push_str("Report concrete results and evidence.\n");
+        prompt.push_str("Commit your work if you modify files.\n\n");
+
+        if let Some(agent_name) = agent_name {
+            prompt.push_str(&format!("## Requested Agent\n\n{agent_name}\n\n"));
+        }
+        if let Some(level) = thinking_level {
+            prompt.push_str(&format!("## Requested Thinking Level\n\n{level}\n\n"));
+        }
+        if let Some(scope) = scope
+            && !scope.is_empty()
+        {
+            prompt.push_str("## Scope\n\n");
+            for path in scope {
+                prompt.push_str(&format!("- {path}\n"));
+            }
+            prompt.push('\n');
+        }
+        if let Some(mind) = mind {
+            prompt.push_str(&format!("## Mind Context\n\n{mind}\n\n"));
+        }
+        if let Some(facts) = facts
+            && !facts.is_empty()
+        {
+            prompt.push_str("## Injected Facts\n\n");
+            for fact in facts {
+                prompt.push_str(&format!("- {fact}\n"));
+            }
+            prompt.push('\n');
+        }
+
+        prompt.push_str("## Task\n\n");
+        prompt.push_str(task);
+        prompt.push('\n');
+
+        Ok(DelegateExecutionSpec {
+            prompt,
+            cwd: self.cwd.clone(),
+            model: model.unwrap_or("openai-codex:codex-mini-latest").to_string(),
+            max_turns: 24,
+        })
+    }
+}
+
+/// Run a delegate task in a real headless Omegon child process.
+async fn run_delegate_child(binary: &Path, spec: &DelegateExecutionSpec) -> anyhow::Result<String> {
+    let delegates_dir = spec.cwd.join(".omegon/delegates");
+    std::fs::create_dir_all(&delegates_dir)?;
+    let prompt_file = delegates_dir.join(format!(
+        "delegate-{}.md",
+        std::process::id()
+    ));
+    std::fs::write(&prompt_file, &spec.prompt)?;
+
+    let mut child = Command::new(binary);
+    child
+        .arg("--cwd")
+        .arg(&spec.cwd)
+        .arg("--model")
+        .arg(&spec.model)
+        .arg("--prompt-file")
+        .arg(&prompt_file)
+        .arg("--max-turns")
+        .arg(spec.max_turns.to_string())
+        .arg("--fresh")
+        .arg("--no-session")
+        .env("OMEGON_CHILD", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let mut child = child.spawn()?;
+
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+
+    if let Some(mut out) = child.stdout.take() {
+        out.read_to_string(&mut stdout).await?;
+    }
+    if let Some(mut err) = child.stderr.take() {
+        err.read_to_string(&mut stderr).await?;
+    }
+
+    let status = child.wait().await?;
+    let _ = std::fs::remove_file(&prompt_file);
+    if status.success() {
+        let text = stdout.trim();
+        if text.is_empty() {
+            Ok(String::from("Delegate completed successfully."))
+        } else {
+            Ok(text.to_string())
+        }
+    } else {
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        };
+        anyhow::bail!("delegate child failed: {}", detail);
     }
 }
 
@@ -247,7 +358,12 @@ pub struct DelegateFeature {
 impl DelegateFeature {
     pub fn new(cwd: &PathBuf, agents: Vec<AgentSpec>) -> Self {
         let result_store = Arc::new(DelegateResultStore::new());
-        let runner = Arc::new(DelegateRunner::new(cwd.clone(), result_store.clone()));
+        let agent_binary = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("omegon"));
+        let runner = Arc::new(DelegateRunner::new(
+            cwd.clone(),
+            result_store.clone(),
+            agent_binary,
+        ));
 
         Self {
             result_store,
@@ -715,6 +831,36 @@ mod tests {
             .execute("delegate", "test_call", args, CancellationToken::new())
             .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_build_execution_spec_includes_scope_and_facts() {
+        let temp_dir = TempDir::new().unwrap();
+        let store = Arc::new(DelegateResultStore::new());
+        let runner = DelegateRunner::new(
+            temp_dir.path().to_path_buf(),
+            store,
+            PathBuf::from("/bin/echo"),
+        );
+
+        let spec = runner
+            .build_execution_spec(
+                "fix the thing",
+                Some("analyzer"),
+                Some(&["src/lib.rs".into(), "tests/lib.rs".into()]),
+                Some("openai-codex:codex-mini-latest"),
+                Some("low"),
+                Some(&["fact one".into(), "fact two".into()]),
+                Some("debugger"),
+            )
+            .unwrap();
+
+        assert!(spec.prompt.contains("## Requested Agent\n\nanalyzer"));
+        assert!(spec.prompt.contains("## Scope"));
+        assert!(spec.prompt.contains("src/lib.rs"));
+        assert!(spec.prompt.contains("fact one"));
+        assert!(spec.prompt.contains("## Mind Context\n\ndebugger"));
+        assert_eq!(spec.model, "openai-codex:codex-mini-latest");
     }
 
     #[tokio::test]
