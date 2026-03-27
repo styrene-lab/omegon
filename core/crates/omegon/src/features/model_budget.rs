@@ -107,7 +107,7 @@ impl ModelTier {
             (Self::Retribution, "openai") => "gpt-4.1-mini",
             (Self::Gloriana, "openai-codex") => "gpt-5.4",
             (Self::Victory, "openai-codex") => "gpt-5.4",
-            (Self::Retribution, "openai-codex") => "codex-mini-latest",
+            (Self::Retribution, "openai-codex") => "gpt-5.4",
             (Self::Local, _) => "local",
             _ => "claude-sonnet-4-6",
         }
@@ -393,7 +393,7 @@ mod tests {
         );
         assert_eq!(
             ModelTier::Retribution.resolve_model("openai-codex", ""),
-            "codex-mini-latest"
+            "gpt-5.4"
         );
     }
 

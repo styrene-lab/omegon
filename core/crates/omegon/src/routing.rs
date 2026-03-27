@@ -245,7 +245,7 @@ fn default_model_for_provider(provider_id: &str, tier: CapabilityTier) -> String
         ("openai", CapabilityTier::Leaf) => "gpt-4.1-nano".to_string(),
         ("openai-codex", CapabilityTier::Max | CapabilityTier::Frontier) => "gpt-5.4".to_string(),
         ("openai-codex", CapabilityTier::Mid | CapabilityTier::Leaf) => {
-            "codex-mini-latest".to_string()
+            "gpt-5.4".to_string()
         }
         ("groq", _) => "llama-3.3-70b-versatile".to_string(),
         ("xai", _) => "grok-3-mini-fast".to_string(),
@@ -415,7 +415,7 @@ mod tests {
         );
         assert_eq!(
             default_model_for_provider("openai-codex", CapabilityTier::Leaf),
-            "codex-mini-latest"
+            "gpt-5.4"
         );
     }
 
