@@ -29,7 +29,8 @@
         "size": 4538,
         "sha256": "2b8ea578488e2bc83494fb8cb4d7f2748830d2be1398e6694c8ba9d3a51db687"
       }
-    ]
+    ],
+    "git": "4ca3e1a4c5d6f1a69edfca4cf5c6ec1d0183dead"
   },
   "reconciliation": {
     "reopen": false,
