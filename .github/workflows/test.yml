@@ -7,22 +7,35 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  rust:
+    name: Rust checks
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run cargo tests
+        run: cd core && cargo test -p omegon
+
+  site:
+    name: Site build
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: site/package-lock.json
 
-      - name: Install build tools (native deps)
-        run: sudo apt-get update && sudo apt-get install -y build-essential python3
+      - name: Install site dependencies
+        run: cd site && npm ci
 
-      - run: npm install
+      - name: Build design tree SVG
+        run: cd site && node scripts/build-design-tree.mjs
 
-      - run: npm test
+      - name: Build Astro site
+        run: cd site && npx astro build
