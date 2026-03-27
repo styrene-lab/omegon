@@ -335,8 +335,8 @@ impl DelegateRunner {
             (DelegateTier::Local, _) => "qwen3:30b",
             (DelegateTier::Gloriana, "openai-codex") => "gpt-5.4",
             (DelegateTier::Victory, "openai-codex") => "gpt-5.4",
-            (DelegateTier::Retribution, "openai-codex") => "codex-mini-latest",
-            _ => "codex-mini-latest",
+            (DelegateTier::Retribution, "openai-codex") => "gpt-5.4",
+            _ => "gpt-5.4",
         };
 
         Ok(format!("{provider}:{model}"))
@@ -940,7 +940,7 @@ mod tests {
 
         assert_eq!(
             runner.resolve_delegate_model(Some("retribution")).unwrap(),
-            "openai-codex:codex-mini-latest"
+            "openai-codex:gpt-5.4"
         );
         assert_eq!(
             runner.resolve_delegate_model(Some("victory")).unwrap(),
