@@ -810,6 +810,77 @@ fn auto_commit_worktree(wt_path: &Path, label: &str, scope: &[String]) -> usize 
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScopeKind {
+    Rust,
+    Python,
+    FrontendOrJs,
+    DocsOnly,
+    MixedOrUnknown,
+}
+
+fn classify_scope(scope: &[String]) -> ScopeKind {
+    let mut saw_rust = false;
+    let mut saw_python = false;
+    let mut saw_frontend = false;
+    let mut saw_docs_only = false;
+    let mut saw_unknown = false;
+
+    for entry in scope {
+        let lower = entry.to_ascii_lowercase();
+        if lower.ends_with(".rs") || lower.contains("/crates/") {
+            saw_rust = true;
+        } else if lower.ends_with(".py") || lower.contains("python") {
+            saw_python = true;
+        } else if lower.ends_with(".ts")
+            || lower.ends_with(".tsx")
+            || lower.ends_with(".js")
+            || lower.ends_with(".jsx")
+            || lower.ends_with("package.json")
+            || lower.ends_with("tsconfig.json")
+        {
+            saw_frontend = true;
+        } else if lower.ends_with(".md")
+            || lower.ends_with(".txt")
+            || lower.ends_with(".rst")
+            || lower.ends_with(".adoc")
+            || lower.starts_with("docs/")
+        {
+            saw_docs_only = true;
+        } else {
+            saw_unknown = true;
+        }
+    }
+
+    let categories = [saw_rust, saw_python, saw_frontend, saw_docs_only, saw_unknown]
+        .into_iter()
+        .filter(|v| *v)
+        .count();
+
+    if categories > 1 {
+        ScopeKind::MixedOrUnknown
+    } else if saw_rust {
+        ScopeKind::Rust
+    } else if saw_python {
+        ScopeKind::Python
+    } else if saw_frontend {
+        ScopeKind::FrontendOrJs
+    } else if saw_docs_only {
+        ScopeKind::DocsOnly
+    } else {
+        ScopeKind::MixedOrUnknown
+    }
+}
+
+fn scope_aware_guardrail_section(scope_kind: ScopeKind, discovered: &str) -> String {
+    match scope_kind {
+        ScopeKind::DocsOnly => String::from(
+            "\n## Project Guardrails\n\nThis task only changes documentation/text files.\n\nDo not run unrelated project-wide build or typecheck commands. Instead:\n\n1. Verify the edited file contents directly\n2. Ensure `git status --short` is clean after commit\n3. Mention that no automated tests were required for this docs-only change\n\n",
+        ),
+        _ => discovered.to_string(),
+    }
+}
+
 fn build_task_file(
     child_idx: usize,
     label: &str,
@@ -852,24 +923,30 @@ fn build_task_file(
         format!("\n## Siblings\n\n{sibling_list}\n")
     };
 
-    // Language-aware test convention
-    let test_convention = if scope
-        .iter()
-        .any(|s| s.ends_with(".rs") || s.contains("crates/"))
-    {
-        "Write tests as #[test] functions in the same file or a tests submodule"
-    } else if scope
-        .iter()
-        .any(|s| s.ends_with(".py") || s.contains("python"))
-    {
-        "Write tests using pytest in co-located test_*.py files"
-    } else {
-        "Write tests for new functions and changed behavior — co-locate as *.test.ts"
+    let scope_kind = classify_scope(scope);
+
+    // Language/scope-aware test convention
+    let test_convention = match scope_kind {
+        ScopeKind::Rust => {
+            "Write tests as #[test] functions in the same file or a tests submodule"
+        }
+        ScopeKind::Python => "Write tests using pytest in co-located test_*.py files",
+        ScopeKind::DocsOnly => {
+            "No automated tests are required for documentation-only changes; verify the edited files directly and keep the git state clean"
+        }
+        ScopeKind::FrontendOrJs => {
+            "Write tests for new functions and changed behavior — co-locate as *.test.ts"
+        }
+        ScopeKind::MixedOrUnknown => {
+            "Run only the smallest deterministic checks relevant to the files you changed. Do not run unrelated project-wide checks for docs/config-only work"
+        }
     };
 
     // Discover project context for this child's scope
     let ctx = super::context::discover_child_context(repo_path, scope);
     let context_sections = super::context::format_context_sections(&ctx);
+
+    let guardrail_section = scope_aware_guardrail_section(scope_kind, guardrail_section);
 
     // Testing section — includes convention and any directives from task content
     let testing_section = if let Some(ref example) = ctx.test_example {
@@ -1040,6 +1117,33 @@ mod tests {
         assert!(task.contains("siblings: [0:alpha]"));
         assert!(task.contains("**alpha**: Do alpha work"));
         assert!(!task.contains("1:"));
+    }
+
+    #[test]
+    fn classify_scope_detects_docs_only() {
+        assert_eq!(
+            classify_scope(&["docs/guide.md".into(), "README.md".into()]),
+            ScopeKind::DocsOnly
+        );
+    }
+
+    #[test]
+    fn docs_only_scope_gets_lightweight_guardrails() {
+        let task = build_task_file(
+            0,
+            "docs",
+            "Update docs",
+            &["docs/guide.md".into()],
+            "Refresh docs",
+            &[],
+            "## Project Guardrails\n\n1. **typecheck**: `npm run check`\n",
+            Path::new("/tmp/nonexistent"),
+        );
+
+        assert!(task.contains("This task only changes documentation/text files"));
+        assert!(task.contains("Do not run unrelated project-wide build or typecheck commands"));
+        assert!(task.contains("No automated tests are required for documentation-only changes"));
+        assert!(!task.contains("**typecheck**: `npm run check`"));
     }
 
     #[test]

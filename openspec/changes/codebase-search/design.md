@@ -1,30 +1,28 @@
----
-id: codebase-search
-title: codebase_search — AST-aware code retrieval with memory seeding
-status: implementing
-related: [lsp-integration]
-tags: [architecture, tools, code-intelligence, memory, lsp, retrieval]
-open_questions: []
-branches: ["feature/codebase-search"]
-openspec_change: codebase-search
-jj_change_id: zvxrluqvxlvwzrnymksqkzxxpmzkyyww
-issue_type: feature
-priority: 1
----
+# codebase_search — AST-aware code retrieval with memory seeding — Design
 
-# codebase_search — AST-aware code retrieval with memory seeding
+## Architecture Decisions
 
-## Overview
+### Decision: Two separate indexes (code_chunks + knowledge_chunks) in one SQLite cache, unified tool with scope parameter
 
-A `codebase_search(query, strategy)` tool backed by tree-sitter AST parsing and BM25 keyword
-indexing. Answers concept-retrieval questions ("find code about packet fragmentation") that LSP
-cannot answer and that the agent currently handles by guessing file paths and running grep.
+**Status:** decided
+**Rationale:** Code chunks need AST-based chunking (tree-sitter); knowledge chunks need heading/section-based chunking (markdown parsing, JSON flattening). Different chunking strategies, same BM25 ranking and SQLite cache. Keeping them in separate tables prevents cross-contamination of result scoring while allowing a unified search interface. The scope parameter (code/knowledge/all) lets callers target the layer they need.
 
-Inspired by ATLAS's PageIndex component (itigges22/ATLAS), which replaced Qdrant vector RAG with
-AST-aware chunking after finding that function/class boundaries are semantically meaningful chunk
-boundaries while arbitrary token windows are not.
+### Decision: Codescan cache is separate from session memory — stored in .omegon/codescan.db, keyed by (path, content_hash)
 
-## Research
+**Status:** decided
+**Rationale:** Code-structure and knowledge-structure facts have fundamentally different invalidation semantics from session facts: they go stale when files change, not when time passes. Mixing them into the main memory tier (facts.db) would corrupt the Ebbinghaus decay model and bloat the session context injection. A separate codescan.db with (path, content_hash, indexed_at) as the cache key allows per-file invalidation: only files whose content_hash has changed since last index need re-chunking. The main memory system remains focused on semantic/architectural facts curated by the agent; codescan is a mechanical index of raw structure.
+
+### Decision: Lazy indexing on first query; background incremental reindex when git HEAD changes
+
+**Status:** decided
+**Rationale:** Eager indexing at session startup adds latency for projects where codebase_search is never called. Lazy on first query is the right default. Background incremental reindex (checking git HEAD at query time, spawning a tokio::spawn task to rechunk changed files) gives freshness without blocking the agent turn. The incremental nature (per-file content_hash comparison) makes reindex fast — typically only a handful of files change between sessions.
+
+### Decision: Retrieval returns raw line-anchored chunks; no summarization pass; agent uses read tool for depth
+
+**Status:** decided
+**Rationale:** Summarizing chunks before returning them loses precision and adds latency/tokens. The agent's existing read tool (with offset/limit) is already the right mechanism for going deeper into a discovered chunk. codebase_search returns (file, start_line, end_line, chunk_type, score, content_preview) where content_preview is the first 300 chars. The agent then decides whether to read the full chunk. This keeps the retrieval tool cheap and composable.
+
+## Research Context
 
 ### Relationship to LSP
 
@@ -145,35 +143,7 @@ The knowledge index is what makes `codebase_search` the architectural reasoning 
 
 Total knowledge corpus: ~500-600 chunks at typical design-doc density. BM25 over this is trivial (no embedding needed, pure token overlap scoring).
 
-## Decisions
-
-### Decision: Two separate indexes (code_chunks + knowledge_chunks) in one SQLite cache, unified tool with scope parameter
-
-**Status:** decided
-**Rationale:** Code chunks need AST-based chunking (tree-sitter); knowledge chunks need heading/section-based chunking (markdown parsing, JSON flattening). Different chunking strategies, same BM25 ranking and SQLite cache. Keeping them in separate tables prevents cross-contamination of result scoring while allowing a unified search interface. The scope parameter (code/knowledge/all) lets callers target the layer they need.
-
-### Decision: Codescan cache is separate from session memory — stored in .omegon/codescan.db, keyed by (path, content_hash)
-
-**Status:** decided
-**Rationale:** Code-structure and knowledge-structure facts have fundamentally different invalidation semantics from session facts: they go stale when files change, not when time passes. Mixing them into the main memory tier (facts.db) would corrupt the Ebbinghaus decay model and bloat the session context injection. A separate codescan.db with (path, content_hash, indexed_at) as the cache key allows per-file invalidation: only files whose content_hash has changed since last index need re-chunking. The main memory system remains focused on semantic/architectural facts curated by the agent; codescan is a mechanical index of raw structure.
-
-### Decision: Lazy indexing on first query; background incremental reindex when git HEAD changes
-
-**Status:** decided
-**Rationale:** Eager indexing at session startup adds latency for projects where codebase_search is never called. Lazy on first query is the right default. Background incremental reindex (checking git HEAD at query time, spawning a tokio::spawn task to rechunk changed files) gives freshness without blocking the agent turn. The incremental nature (per-file content_hash comparison) makes reindex fast — typically only a handful of files change between sessions.
-
-### Decision: Retrieval returns raw line-anchored chunks; no summarization pass; agent uses read tool for depth
-
-**Status:** decided
-**Rationale:** Summarizing chunks before returning them loses precision and adds latency/tokens. The agent's existing read tool (with offset/limit) is already the right mechanism for going deeper into a discovered chunk. codebase_search returns (file, start_line, end_line, chunk_type, score, content_preview) where content_preview is the first 300 chars. The agent then decides whether to read the full chunk. This keeps the retrieval tool cheap and composable.
-
-## Open Questions
-
-*No open questions.*
-
-## Implementation Notes
-
-### File Scope
+## File Changes
 
 - `core/crates/omegon-codescan/` (new) — New crate — CodeScanner (tree-sitter AST over .rs/.ts/.py/.go), KnowledgeScanner (markdown/JSON/JSONL parsing), BM25Index, ScanCache (SQLite .omegon/codescan.db).
 - `core/crates/omegon-codescan/src/code.rs` (new) — tree-sitter-based chunker for Rust, TypeScript, Python, Go. Emits code_chunks: (path, start_line, end_line, item_name, item_kind, text).
@@ -184,7 +154,7 @@ Total knowledge corpus: ~500-600 chunks at typical design-doc density. BM25 over
 - `core/crates/omegon/src/tool_registry.rs` (modified) — Register CODEBASE_SEARCH and CODEBASE_INDEX tool names.
 - `core/Cargo.toml` (modified) — Add omegon-codescan to workspace members.
 
-### Constraints
+## Constraints
 
 - tree-sitter grammars must be embedded (linked at compile time, no runtime download) — use tree-sitter-rust, tree-sitter-typescript, tree-sitter-python, tree-sitter-go crates.
 - Knowledge indexer covers docs/, openspec/, .omegon/ (json/md), ai/memory/facts.jsonl — NOT ai/memory/facts.db (use JSONL export instead of querying SQLite directly).
@@ -192,10 +162,3 @@ Total knowledge corpus: ~500-600 chunks at typical design-doc density. BM25 over
 - codescan.db must not be committed — add to .gitignore.
 - Indexing a 263-file docs/ corpus must complete in under 2 seconds on a modern laptop.
 - Result chunks must include enough context for the agent to judge relevance without a follow-up read call (300-char preview minimum, 1000-char maximum).
-
-## Relations
-
-- Builds on: `lsp-integration` (shared tree-sitter dependency, complementary layer)
-- Feeds into: memory system (structural fact seeding, code-keyed invalidation)
-- Feeds into: persona mind stores (project-specific knowledge at instantiation time)
-- Inspired by: ATLAS PageIndex (itigges22/ATLAS — AST tree + BM25 hybrid retrieval)
