@@ -58,7 +58,6 @@ just release</code></pre>
     <li>Pushes to origin with tags — triggers three CI workflows:
       <ul>
         <li><code>release.yml</code> — builds binaries for 4 platforms, signs with cosign, creates GitHub Release</li>
-        <li><code>publish.yml</code> — publishes npm package (if version changed)</li>
         <li><code>site.yml</code> — rebuilds docs site, pushes container to GHCR, ArgoCD auto-deploys</li>
       </ul>
     </li>

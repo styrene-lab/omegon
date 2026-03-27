@@ -470,7 +470,6 @@ publish:
     echo ""
     echo "CI workflows triggered:"
     echo "  • release.yml  → GitHub Release with cosign-signed binaries"
-    echo "  • publish.yml  → npm publish (if version changed)"
     echo "  • site.yml     → omegon.styrene.dev docs rebuild"
 
     # ── 3. Build docs site locally (verification) ─────────────
@@ -500,7 +499,6 @@ publish:
     echo "  Binary:   $(which omegon) → $BINARY"
     echo "  Signing:  $SIGN_STATUS"
     echo "  Docs:     $PAGES pages built → CI deploying to omegon.styrene.dev"
-    echo "  npm:      CI publishing to npmjs.com/package/omegon"
     echo "  Release:  github.com/styrene-lab/omegon/releases/tag/$TAG"
     echo ""
     echo "  Monitor CI: gh run list --limit 3"

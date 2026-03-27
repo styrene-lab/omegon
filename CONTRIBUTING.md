@@ -220,7 +220,7 @@ Omegon uses a **release candidate** flow. All releases go through RC builds befo
 | **Install locally** | `just link` | Symlink built binary to `$PATH` |
 | **Sign (YubiKey)** | `just sign` | Developer ID + Apple notarization (optional, interactive) |
 | **Ship stable** | `just release` | Strip `-rc.N` → test → commit → tag → build → close milestone → open next cycle |
-| **Publish** | `just publish` | Push + tags → trigger CI → build docs → link → smoke test |
+| **Publish** | `just publish` | Push + tags → trigger release + site CI → build docs → link → smoke test |
 | **Quick dev build** | `just update` | Pull → build dev-release profile → no version bump |
 
 ### RC flow
