@@ -295,6 +295,19 @@ impl ConversationState {
     }
 
     /// Apply a compaction summary — evict old messages and replace with summary.
+    /// Emergency decay: drop the oldest N messages from the canonical history.
+    /// Used when compaction fails and the context is too large for the provider.
+    pub fn decay_oldest(&mut self, count: usize) {
+        let remove = count.min(self.canonical.len());
+        self.canonical.drain(..remove);
+        tracing::info!(removed = remove, remaining = self.canonical.len(), "Emergency decay applied");
+    }
+
+    /// Number of messages in the canonical conversation.
+    pub fn message_count(&self) -> usize {
+        self.canonical.len()
+    }
+
     pub fn apply_compaction(&mut self, summary: String) {
         let current_turn = self.intent.stats.turns;
         // Remove all messages older than the decay window

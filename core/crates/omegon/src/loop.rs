@@ -226,7 +226,38 @@ pub async fn run(
                 &stream_options,
                 events,
                 config,
-            ) => result?,
+            ) => {
+                match result {
+                    Ok(msg) => msg,
+                    Err(e) if is_context_overflow(&e.to_string()) => {
+                        // Context too large for the provider — emergency compact and retry
+                        tracing::warn!("Context overflow detected — forcing emergency compaction");
+                        let _ = events.send(AgentEvent::SystemNotification {
+                            message: "Context overflow — compacting conversation and retrying…".into(),
+                        });
+                        if let Some((payload, evict_count)) = conversation.build_compaction_payload() {
+                            tracing::info!(evict_count, "Emergency compaction: evicting messages");
+                            match compact_via_llm(bridge, &payload, &base_stream_options).await {
+                                Ok(summary) => conversation.apply_compaction(summary),
+                                Err(ce) => {
+                                    tracing::warn!("Emergency LLM compaction failed: {ce} — applying decay");
+                                    conversation.decay_oldest(evict_count);
+                                }
+                            }
+                        } else {
+                            // Can't build compaction payload — decay aggressively
+                            conversation.decay_oldest(conversation.message_count() / 2);
+                        }
+                        // Rebuild messages and retry once
+                        let llm_messages = conversation.build_llm_view();
+                        stream_with_retry(
+                            bridge, &system_prompt, &llm_messages, &tool_defs,
+                            &stream_options, events, config,
+                        ).await?
+                    }
+                    Err(e) => return Err(e),
+                }
+            },
             _ = cancel.cancelled() => {
                 tracing::info!("Agent loop cancelled during LLM streaming");
                 bus.emit(&omegon_traits::BusEvent::TurnEnd { turn });
@@ -475,6 +506,17 @@ async fn stream_with_retry(
             }
         }
     }
+}
+
+/// Detect context-too-large errors that can be recovered by compaction.
+fn is_context_overflow(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    lower.contains("long context")
+        || lower.contains("context length")
+        || lower.contains("maximum context")
+        || lower.contains("token limit")
+        || lower.contains("request too large")
+        || (lower.contains("extra usage") && lower.contains("context"))
 }
 
 /// Heuristic: is this error message transient (worth retrying)?
@@ -1083,6 +1125,16 @@ fn hash_value(v: &Value) -> u64 {
 mod tests {
     use super::*;
     use omegon_traits::ToolProvider;
+
+    #[test]
+    fn context_overflow_detection() {
+        assert!(is_context_overflow("Extra usage is required for long context requests."));
+        assert!(is_context_overflow("maximum context length exceeded"));
+        assert!(is_context_overflow("token limit reached for this request"));
+        assert!(is_context_overflow("request too large"));
+        assert!(!is_context_overflow("rate limit exceeded"));
+        assert!(!is_context_overflow("Invalid API key"));
+    }
 
     #[test]
     fn transient_error_detection() {
