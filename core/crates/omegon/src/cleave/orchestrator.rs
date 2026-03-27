@@ -248,7 +248,7 @@ pub async fn run_cleave(
 
             // Route per-child model: if inventory is available and child has no explicit model,
             // infer capability tier from scope size and route to best provider+model.
-            let model = if let Some(ref inv_lock) = config.inventory {
+            let (model, provider_id) = if let Some(ref inv_lock) = config.inventory {
                 let child_state = &state.children[info.child_idx];
                 if child_state
                     .execute_model
@@ -266,19 +266,28 @@ pub async fn run_cleave(
                     if let Some(best) = candidates.first() {
                         let routed = format!("{}:{}", best.provider_id, best.model_id);
                         tracing::info!(child = %info.label, tier = %tier, routed = %routed, "per-child routing");
-                        routed
+                        (routed, Some(best.provider_id.clone()))
                     } else {
-                        config.model.clone()
+                        (config.model.clone(), Some(crate::providers::infer_provider_id(&config.model)))
                     }
                 } else {
-                    child_state
+                    let model = child_state
                         .execute_model
                         .clone()
-                        .unwrap_or_else(|| config.model.clone())
+                        .unwrap_or_else(|| config.model.clone());
+                    let provider_id = child_state
+                        .provider_id
+                        .clone()
+                        .or_else(|| Some(crate::providers::infer_provider_id(&model)));
+                    (model, provider_id)
                 }
             } else {
-                config.model.clone()
+                let model = config.model.clone();
+                let provider_id = Some(crate::providers::infer_provider_id(&model));
+                (model, provider_id)
             };
+            state.children[info.child_idx].execute_model = Some(model.clone());
+            state.children[info.child_idx].provider_id = provider_id;
 
             let inherited_env = config.inherited_env.clone();
             let handle = tokio::spawn(async move {
@@ -389,6 +398,38 @@ pub async fn run_cleave(
         }
 
         let branch = child.branch.as_deref().unwrap();
+
+        // If the child failed before producing a mergeable branch or any salvaged
+        // work, preserve the original child failure instead of overwriting it with
+        // a branch-not-found merge error.
+        if child.status == ChildStatus::Failed {
+            let branch_exists = if omegon_git::jj::is_jj_repo(repo_path) {
+                false
+            } else {
+                std::process::Command::new("git")
+                    .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")])
+                    .current_dir(repo_path)
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            };
+            if !branch_exists {
+                let reason = child
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "child failed before producing mergeable work".into());
+                merge_results.push((
+                    child.label.clone(),
+                    MergeOutcome::Skipped(format!("preserving child failure: {reason}")),
+                ));
+                config.progress_sink.emit(&ProgressEvent::MergeResult {
+                    child: child.label.clone(),
+                    success: false,
+                    detail: Some(format!("preserving child failure: {reason}")),
+                });
+                continue;
+            }
+        }
 
         // Remove worktree first so the branch is unlocked.
         // Clear the path after removal so the final cleanup loop does not
@@ -989,6 +1030,13 @@ mod tests {
         };
         assert_eq!(config.idle_timeout_secs, 300);
         assert_eq!(config.timeout_secs, 900);
+    }
+
+    #[test]
+    fn infer_provider_id_from_model_spec_for_reporting() {
+        assert_eq!(crate::providers::infer_provider_id("anthropic:claude-sonnet-4-6"), "anthropic");
+        assert_eq!(crate::providers::infer_provider_id("openai:gpt-5.4"), "openai");
+        assert_eq!(crate::providers::infer_provider_id("openai-codex:gpt-5.4"), "openai-codex");
     }
 
     #[test]
