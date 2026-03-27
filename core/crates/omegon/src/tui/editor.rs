@@ -11,9 +11,43 @@
 
 use ratatui::prelude::*;
 use ratatui_textarea::TextArea;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::theme::Theme;
+
+/// Split `text` into visual rows of at most `width` display columns using
+/// character-boundary wrapping (not word-boundary wrapping).
+///
+/// Both the operator input renderer and `cursor_screen_position` use this
+/// function so they always agree on which visual cell each character occupies.
+/// Using different wrapping algorithms causes cursor drift that compounds
+/// across wrapped rows.
+pub fn wrap_chars_at(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut col: usize = 0;
+    for ch in text.chars() {
+        let ch_w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if ch_w == 0 {
+            current.push(ch);
+            continue;
+        }
+        if col + ch_w > width {
+            lines.push(std::mem::take(&mut current));
+            col = 0;
+        }
+        current.push(ch);
+        col += ch_w;
+    }
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
 
 /// Editor mode — normal input, reverse search, or secret input.
 #[derive(Debug, Clone, PartialEq)]
@@ -82,10 +116,7 @@ impl Editor {
         self.textarea
             .lines()
             .iter()
-            .map(|line| {
-                let display_width = UnicodeWidthStr::width(line.as_str());
-                display_width.max(1).div_ceil(width)
-            })
+            .map(|line| wrap_chars_at(line, width).len())
             .sum::<usize>()
             .max(1)
     }
@@ -421,6 +452,9 @@ impl Editor {
 
     /// Compute the cursor's screen position within the given editor area for
     /// wrapped multiline rendering. Returns (x, y) in absolute coordinates.
+    ///
+    /// Uses `wrap_chars_at` — same algorithm as the renderer — so the
+    /// terminal cursor always points to the correct visual cell.
     pub fn cursor_screen_position(&mut self, editor_area: Rect) -> (u16, u16) {
         let (cursor_row, cursor_col) = self.textarea.cursor();
         let content_width = editor_area.width.max(1) as usize;
@@ -432,21 +466,16 @@ impl Editor {
         let mut visual_col: u16 = 0;
 
         for (row_idx, line) in self.textarea.lines().iter().enumerate() {
-            let row_prefix_width = if row_idx == cursor_row {
-                let prefix: String = line.chars().take(cursor_col).collect();
-                UnicodeWidthStr::width(prefix.as_str())
-            } else {
-                UnicodeWidthStr::width(line.as_str())
-            };
-
             if row_idx < cursor_row {
                 visual_row = visual_row
-                    .saturating_add(row_prefix_width.max(1).div_ceil(content_width) as u16);
+                    .saturating_add(wrap_chars_at(line, content_width).len() as u16);
                 continue;
             }
-
-            visual_row = visual_row.saturating_add((row_prefix_width / content_width) as u16);
-            visual_col = (row_prefix_width % content_width) as u16;
+            // Cursor is in this logical row.
+            let prefix: String = line.chars().take(cursor_col).collect();
+            let prefix_width = UnicodeWidthStr::width(prefix.as_str());
+            visual_row = visual_row.saturating_add((prefix_width / content_width) as u16);
+            visual_col = (prefix_width % content_width) as u16;
             break;
         }
 

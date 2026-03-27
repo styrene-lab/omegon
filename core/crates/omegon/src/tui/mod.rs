@@ -1552,21 +1552,29 @@ impl App {
                 );
 
             let editor_rect = chunks[1];
-            let content = if self.editor.is_empty() {
-                Line::from(Span::styled(
+            // Pre-split using char-boundary wrapping (same algorithm as
+            // cursor_screen_position) so the terminal cursor always lands on
+            // the correct visual cell.  Paragraph::wrap uses word boundaries
+            // which diverge from cursor math and compound across rows.
+            let content_width = editor_rect.width.max(1) as usize;
+            let visual_lines: Vec<Line<'static>> = if self.editor.is_empty() {
+                vec![Line::from(Span::styled(
                     "Ask anything, or type / for commands",
                     Style::default().fg(t.dim()),
-                ))
+                ))]
             } else {
-                Line::from(Span::styled(
-                    self.editor.wrapped_text(),
-                    Style::default().fg(t.fg()),
-                ))
+                let raw = self.editor.wrapped_text();
+                raw.split('\n')
+                    .flat_map(|logical| {
+                        crate::tui::editor::wrap_chars_at(logical, content_width)
+                            .into_iter()
+                            .map(|vl| Line::from(Span::styled(vl, Style::default().fg(t.fg()))))
+                    })
+                    .collect()
             };
-            let editor_widget = Paragraph::new(content)
+            let editor_widget = Paragraph::new(visual_lines)
                 .style(Style::default().bg(t.surface_bg()))
-                .block(editor_block)
-                .wrap(ratatui::widgets::Wrap { trim: false });
+                .block(editor_block); // no .wrap() — pre-split above
             frame.render_widget(editor_widget, editor_rect);
             if !self.agent_active {
                 let (cx, cy) = self.editor.cursor_screen_position(editor_rect);
@@ -2841,16 +2849,18 @@ impl App {
                 self.working_verb = spinner::next_verb();
                 self.effects.start_spinner_glow();
             }
-            AgentEvent::TurnEnd { turn } => {
+            AgentEvent::TurnEnd { turn, estimated_tokens } => {
                 self.turn = turn;
-                // Estimate context usage from turn count + tool calls
-                // (rough heuristic: ~2k tokens per turn average)
-                let est_tokens = (turn as usize) * 2000 + (self.tool_calls as usize) * 500;
                 let ctx_window = self.footer_data.context_window;
                 if ctx_window > 0 {
-                    self.footer_data.estimated_tokens = est_tokens;
+                    let tokens = if estimated_tokens > 0 {
+                        estimated_tokens
+                    } else {
+                        (turn as usize) * 2000 + (self.tool_calls as usize) * 500
+                    };
+                    self.footer_data.estimated_tokens = tokens;
                     self.footer_data.context_percent =
-                        (est_tokens as f32 / ctx_window as f32 * 100.0).min(100.0);
+                        (tokens as f32 / ctx_window as f32 * 100.0).min(100.0);
                 }
             }
             AgentEvent::MessageChunk { text } => {

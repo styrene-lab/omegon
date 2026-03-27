@@ -100,7 +100,7 @@ pub async fn run(
             );
             let _ = events.send(AgentEvent::TurnStart { turn });
             bus.emit(&omegon_traits::BusEvent::TurnEnd { turn });
-            let _ = events.send(AgentEvent::TurnEnd { turn });
+            let _ = events.send(AgentEvent::TurnEnd { turn, estimated_tokens: conversation.estimate_tokens() });
             break;
         }
 
@@ -281,7 +281,7 @@ pub async fn run(
             _ = cancel.cancelled() => {
                 tracing::info!("Agent loop cancelled during LLM streaming");
                 bus.emit(&omegon_traits::BusEvent::TurnEnd { turn });
-                let _ = events.send(AgentEvent::TurnEnd { turn });
+                let _ = events.send(AgentEvent::TurnEnd { turn, estimated_tokens: conversation.estimate_tokens() });
                 break;
             }
         };
@@ -311,11 +311,11 @@ pub async fn run(
                         .to_string(),
                 );
                 bus.emit(&omegon_traits::BusEvent::TurnEnd { turn });
-                let _ = events.send(AgentEvent::TurnEnd { turn });
+                let _ = events.send(AgentEvent::TurnEnd { turn, estimated_tokens: conversation.estimate_tokens() });
                 continue; // give it one more turn to commit
             }
             bus.emit(&omegon_traits::BusEvent::TurnEnd { turn });
-            let _ = events.send(AgentEvent::TurnEnd { turn });
+            let _ = events.send(AgentEvent::TurnEnd { turn, estimated_tokens: conversation.estimate_tokens() });
             break;
         }
 
@@ -398,7 +398,7 @@ pub async fn run(
             }
         }
 
-        let _ = events.send(AgentEvent::TurnEnd { turn });
+        let _ = events.send(AgentEvent::TurnEnd { turn, estimated_tokens: conversation.estimate_tokens() });
     }
 
     let elapsed = session_start.elapsed();

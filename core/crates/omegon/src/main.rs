@@ -1556,7 +1556,7 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
                         .unwrap_or_default();
                     tracing::info!("  {status} {text}");
                 }
-                AgentEvent::TurnEnd { turn } => {
+                AgentEvent::TurnEnd { turn, .. } => {
                     tracing::info!("── Turn {turn} complete ──");
                 }
                 AgentEvent::AgentEnd => {

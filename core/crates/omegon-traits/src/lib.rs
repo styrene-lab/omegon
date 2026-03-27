@@ -360,6 +360,8 @@ pub enum AgentEvent {
     },
     TurnEnd {
         turn: u32,
+        /// Real token estimate from conversation history. Zero on early-exit paths.
+        estimated_tokens: usize,
     },
     AgentEnd,
     PhaseChanged {

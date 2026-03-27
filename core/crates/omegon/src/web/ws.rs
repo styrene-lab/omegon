@@ -201,7 +201,7 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "type": "turn_start",
             "turn": turn,
         }),
-        AgentEvent::TurnEnd { turn } => json!({
+        AgentEvent::TurnEnd { turn, .. } => json!({
             "type": "turn_end",
             "turn": turn,
         }),
@@ -341,7 +341,7 @@ mod tests {
     fn serialize_all_event_types() {
         let events = vec![
             AgentEvent::TurnStart { turn: 1 },
-            AgentEvent::TurnEnd { turn: 1 },
+            AgentEvent::TurnEnd { turn: 1, estimated_tokens: 0 },
             AgentEvent::MessageStart {
                 role: "assistant".into(),
             },
