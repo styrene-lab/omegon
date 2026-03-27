@@ -390,9 +390,11 @@ pub async fn run_cleave(
 
         let branch = child.branch.as_deref().unwrap();
 
-        // Remove worktree first so the branch is unlocked
-        if let Some(wt) = &child.worktree_path {
-            let _ = worktree::remove_worktree(repo_path, Path::new(wt));
+        // Remove worktree first so the branch is unlocked.
+        // Clear the path after removal so the final cleanup loop does not
+        // attempt a second removal and emit backend warnings.
+        if let Some(wt) = child.worktree_path.take() {
+            let _ = worktree::remove_worktree(repo_path, Path::new(&wt));
         }
 
         let is_salvage = child.status == ChildStatus::Failed;
@@ -1038,6 +1040,29 @@ mod tests {
         assert!(task.contains("siblings: [0:alpha]"));
         assert!(task.contains("**alpha**: Do alpha work"));
         assert!(!task.contains("1:"));
+    }
+
+    #[test]
+    fn merge_cleanup_takes_worktree_path_before_final_cleanup() {
+        let mut child = crate::cleave::state::ChildState {
+            child_id: 0,
+            label: "alpha".into(),
+            description: "Do alpha work".into(),
+            scope: vec!["src/".into()],
+            depends_on: vec![],
+            status: crate::cleave::state::ChildStatus::Completed,
+            error: None,
+            branch: Some("cleave/0-alpha".into()),
+            worktree_path: Some("/tmp/example-worktree".into()),
+            backend: "native".into(),
+            execute_model: None,
+            provider_id: None,
+            duration_secs: None,
+        };
+
+        let taken = child.worktree_path.take();
+        assert_eq!(taken.as_deref(), Some("/tmp/example-worktree"));
+        assert!(child.worktree_path.is_none());
     }
 }
 

@@ -451,29 +451,22 @@ fn build_finalization_section(submodules: &[String]) -> String {
 
     section.push_str("You MUST complete these steps before finishing:\n\n");
     section.push_str("1. Run all guardrail checks listed above and fix failures\n");
-    section.push_str("2. Ensure all new/modified files are staged with `git add`\n");
+    section.push_str("2. Commit your in-scope work with a clean git state when you are done\n");
 
     if !submodules.is_empty() {
-        section.push_str("3. **Submodule commits** (this repo has submodules):\n");
-        for sub in submodules {
-            section.push_str(&format!(
-                "   - `cd {sub} && git add -A && git commit -m \"feat(<your-label>): <summary>\" && cd ..`\n"
-            ));
-        }
-        section.push_str(&format!(
-            "   - Then stage the pointer: `git add {} && git commit -m \"chore: update submodule\"`\n",
-            submodules.join(" ")
-        ));
-        section.push_str("4. Verify clean state: `git status` should show nothing to commit\n");
-        section.push_str("5. Update the Result section below with status=COMPLETED\n");
+        section.push_str("3. **Submodule note**: if your scope crosses a submodule boundary, commit your edits normally. The orchestrator will handle submodule pointer updates during harvest/merge.\n");
+        section.push_str("4. Verify clean state for the files you changed: `git status` should show nothing left to commit in your worktree\n");
     } else {
         section.push_str(
             "3. Commit with a clear message: `git commit -m \"feat(<label>): <summary>\"`\n",
         );
         section.push_str("4. Verify clean state: `git status` should show nothing to commit\n");
-        section.push_str("5. Update the Result section below with status=COMPLETED\n");
     }
 
+    section.push_str("\nDo NOT edit `.cleave-prompt.md` or any task/result metadata files. Those are orchestrator-owned and may be ignored by git.\n");
+    section.push_str(
+        "Return your completion summary in your normal final response instead of modifying the prompt file.\n",
+    );
     section.push_str("\n> ⚠️ Uncommitted work will be lost. The orchestrator merges from your branch's commits.\n");
 
     section
@@ -539,16 +532,18 @@ async fn test_async() {
     fn finalization_without_submodules() {
         let section = build_finalization_section(&[]);
         assert!(section.contains("Finalization"));
-        assert!(!section.contains("Submodule"));
+        assert!(!section.contains("Submodule commits"));
         assert!(section.contains("git commit"));
+        assert!(section.contains("Do NOT edit `.cleave-prompt.md`"));
+        assert!(!section.contains("Update the Result section below"));
     }
 
     #[test]
     fn finalization_with_submodules() {
         let section = build_finalization_section(&["core".to_string()]);
-        assert!(section.contains("Submodule commits"));
-        assert!(section.contains("cd core"));
-        assert!(section.contains("git add core"));
+        assert!(section.contains("Submodule note"));
+        assert!(section.contains("orchestrator will handle submodule pointer updates"));
+        assert!(section.contains("Do NOT edit `.cleave-prompt.md`"));
     }
 
     #[test]

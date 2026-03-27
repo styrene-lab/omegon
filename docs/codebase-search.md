@@ -2,11 +2,12 @@
 id: codebase-search
 title: codebase_search — AST-aware code retrieval with memory seeding
 status: exploring
+related: [lsp-integration]
 tags: [architecture, tools, code-intelligence, memory, lsp, retrieval]
 open_questions:
-  - "Do code-structure facts live in the main memory tier with a different invalidation strategy, or in a separate git-SHA-keyed index?"
-  - "Should indexing be triggered lazily (first query) or eagerly (session start / git HEAD change)?"
-  - "Does the retrieval result format match what the context window needs, or does it need a summarization pass first?"
+  - Do code-structure facts live in the main memory tier with a different invalidation strategy,
+  - "Should indexing be triggered lazily (first query) or eagerly (session start / HEAD change)?"
+  - Does the retrieval result format match what the context window needs, or does it need a
 issue_type: feature
 priority: 1
 ---
@@ -104,10 +105,8 @@ Tool: codebase_index(invalidate: bool) -> IndexStats
 ## Open Questions
 
 - Do code-structure facts live in the main memory tier with a different invalidation strategy,
-  or in a separate git-SHA-keyed index that memory can query into?
 - Should indexing be triggered lazily (first query) or eagerly (session start / HEAD change)?
 - Does the retrieval result format match what the context window needs, or does it need a
-  summarization pass before injection?
 
 ## Relations
 

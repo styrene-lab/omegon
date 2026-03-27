@@ -1,10 +1,12 @@
 ---
 id: lsp-integration
 title: LSP integration — language server protocol for code-aware navigation and diagnostics
-status: exploring
+status: decided
+dependencies: [lsp-monorepo-workspace-handling]
+related: [codebase-search]
 tags: [architecture, lsp, code-intelligence, tools, navigation]
-open_questions:
-  - How should LSP tools handle multi-root workspaces (monorepos with multiple Cargo.toml files at different depths)?
+open_questions: []
+jj_change_id: ykqqlwnsttquosykvkzllqlnqkwqookt
 issue_type: feature
 priority: 1
 ---
@@ -84,6 +86,29 @@ The `codebase-search` node (exploring, P1) and this node share a key dependency:
 
 workspace_symbols and document_symbols are higher value than goto_definition alone because they answer the discovery question ("where is anything called X?") that the agent hits constantly.
 
+### Rust crate landscape — LSP client and tree-sitter options
+
+Available crates for the implementation stack:
+
+**LSP client:**
+- `async-lsp-client 0.2.3` — async LSP client, most relevant
+- `lsp-client 0.1.0` — simpler but minimal
+- `lsp-types` — the de-facto types crate (used by most LSP crates including tower-lsp)
+- No dominant high-quality async LSP client exists in crates.io; we'd likely wrap our own JSON-RPC stdio transport using `tokio::process::Command` + `tokio::io` (same pattern as dispatch_child in orchestrator)
+
+**tree-sitter:**
+- `tree-sitter 0.26.7` — stable Rust bindings
+- `tree-sitter-rust`, `tree-sitter-typescript`, `tree-sitter-python`, `tree-sitter-go` — per-language grammar crates (all embeddable, compiled into the binary)
+- `tree-sitter-grep 0.1.0` — structural grep via tree-sitter queries — potentially useful as a complement
+
+**Key constraint:** `tree-sitter-rust` bundles a C parser that compiles at build time via `cc` in a build.rs. It's an embedding-safe dependency (no runtime download), but it adds C compilation to the build pipeline. This is a one-time build cost, not a runtime concern.
+
+**Viable implementation pattern for LSP client:**
+Spawn `rust-analyzer`, `typescript-language-server`, etc. as `tokio::process::Command` with stdin/stdout piped — exactly the same pattern used in `dispatch_child` in the cleave orchestrator. Read/write JSON-RPC messages on those streams. The protocol is simple enough to implement without a full client library (initialize → initialized → capabilities → textDocument/didOpen → workspace/symbol → shutdown).
+
+**Language server availability assumption:**
+For Rust (the primary use case): rust-analyzer is present in almost every Rust dev environment (`rustup component add rust-analyzer`). For TypeScript: `typescript-language-server` requires npm install. For Python: `pyright` requires pip. The auto-detect must check for server presence before attempting to spawn and degrade gracefully if absent.
+
 ## Decisions
 
 ### Decision: Auto-detect LSP servers from project files, with optional .omegon/lsp.toml override
@@ -103,7 +128,7 @@ workspace_symbols and document_symbols are higher value than goto_definition alo
 
 ## Open Questions
 
-- How should LSP tools handle multi-root workspaces (monorepos with multiple Cargo.toml files at different depths)?
+*No open questions.*
 
 ## Implementation Notes
 
