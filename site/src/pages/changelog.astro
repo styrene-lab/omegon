@@ -3,8 +3,8 @@ import Docs from "../layouts/Docs.astro";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Read CHANGELOG.md — Astro will process this at build time
-const changelogPath = join(process.cwd(), "..", "core", "CHANGELOG.md");
+// Read root CHANGELOG.md — Astro will process this at build time
+const changelogPath = join(process.cwd(), "..", "CHANGELOG.md");
 let raw = "";
 try {
   raw = readFileSync(changelogPath, "utf-8");

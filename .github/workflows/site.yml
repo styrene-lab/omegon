@@ -6,7 +6,7 @@ on:
     paths:
       - 'core/site/**'
       - 'core/install.sh'
-      - 'core/CHANGELOG.md'
+      - 'CHANGELOG.md'
       - 'site/**'
       - 'docs/**'
       - 'openspec/baseline/**'
