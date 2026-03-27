@@ -36,6 +36,8 @@ pub struct LoopConfig {
     pub settings: Option<crate::settings::SharedSettings>,
     /// Secrets manager for output redaction and tool guards.
     pub secrets: Option<std::sync::Arc<omegon_secrets::SecretsManager>>,
+    /// Force a compaction pass before the next turn regardless of threshold.
+    pub force_compact: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl Default for LoopConfig {
@@ -50,6 +52,7 @@ impl Default for LoopConfig {
             extended_context: false,
             settings: None,
             secrets: None,
+            force_compact: None,
         }
     }
 }
@@ -132,13 +135,18 @@ pub async fn run(
             .as_ref()
             .and_then(|s| s.lock().ok().map(|g| g.context_window))
             .unwrap_or(200_000);
-        if conversation.needs_compaction(context_window, 0.75)
+        let forced_compact = config
+            .force_compact
+            .as_ref()
+            .is_some_and(|flag| flag.swap(false, std::sync::atomic::Ordering::SeqCst));
+        if (forced_compact || conversation.needs_compaction(context_window, 0.75))
             && let Some((payload, evict_count)) = conversation.build_compaction_payload()
         {
             tracing::info!(
                 estimated_tokens = conversation.estimate_tokens(),
                 evict_count,
-                "Context utilization high — requesting LLM compaction"
+                forced = forced_compact,
+                "Context compaction requested"
             );
             // Use the bridge to summarize the evictable messages
             match compact_via_llm(bridge, &payload, &base_stream_options).await {
@@ -1563,6 +1571,7 @@ mod tests {
             extended_context: false,
             settings: None,
             secrets: None,
+            force_compact: None,
         };
         // soft_limit_turns=0 → loop should compute 2/3 of max_turns (40)
         assert_eq!(config.soft_limit_turns, 0, "0 = auto-calculate in run()");

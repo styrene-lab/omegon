@@ -684,6 +684,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     // ─── Event channel ──────────────────────────────────────────────────
     let (events_tx, events_rx) = broadcast::channel::<AgentEvent>(256);
     let (command_tx, mut command_rx) = tokio::sync::mpsc::channel::<tui::TuiCommand>(16);
+    let pending_compact = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let web_command_tx = command_tx.clone(); // For forwarding web dashboard commands
 
     // Broadcast initial HarnessStatus — bridges BusEvent (emitted in setup)
@@ -915,8 +916,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 
             tui::TuiCommand::Compact => {
                 tracing::info!("manual compaction requested");
-                // Compaction runs automatically before the next turn
-                // via the needs_compaction check in the loop
+                pending_compact.store(true, std::sync::atomic::Ordering::SeqCst);
+                let _ = events_tx.send(AgentEvent::SystemNotification {
+                    message: "Compaction armed — next turn will compact regardless of threshold.".into(),
+                });
             }
 
             tui::TuiCommand::ListSessions => {
@@ -1301,6 +1304,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     extended_context: false,
                     settings: Some(shared_settings.clone()),
                     secrets: Some(agent.secrets.clone()),
+                    force_compact: Some(pending_compact.clone()),
                 };
 
                 let cancel = CancellationToken::new();
@@ -1351,6 +1355,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     extended_context: false,
                     settings: Some(shared_settings.clone()),
                     secrets: Some(agent.secrets.clone()),
+                    force_compact: Some(pending_compact.clone()),
                 };
 
                 let cancel = CancellationToken::new();
@@ -1500,6 +1505,7 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
         extended_context: false, // headless uses standard context
         settings: Some(shared_settings.clone()),
         secrets: Some(agent.secrets.clone()),
+        force_compact: None,
     };
 
     // ─── LLM provider (native Rust clients only) ─────────────────────

@@ -2148,7 +2148,9 @@ impl App {
 
             "compact" => {
                 let _ = tx.try_send(TuiCommand::Compact);
-                SlashResult::Display("Compaction queued — runs before next turn.".into())
+                SlashResult::Display(
+                    "Compaction armed — next turn will compact regardless of threshold.".into(),
+                )
             }
 
             "clear" => {
