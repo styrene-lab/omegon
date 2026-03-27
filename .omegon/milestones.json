@@ -20,15 +20,15 @@
     "notes": []
   },
   "0.15.3": {
-    "status": "rc",
+    "status": "released",
     "channel": "stable",
     "nodes": [],
-    "frozen": false,
+    "frozen": true,
     "opened": "2026-03-26T01:28:41Z",
     "last_rc": "2026-03-27T16:50:57Z",
     "rc_version": "0.15.3-rc.47",
     "rc_count": 45,
-    "released": null,
+    "released": "2026-03-27T17:00:41Z",
     "notes": [
       "feat(cleave): inherit warmed session secrets in children",
       "feat(cleave): pass session secrets through feature runs",
