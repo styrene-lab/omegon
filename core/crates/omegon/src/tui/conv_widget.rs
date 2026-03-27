@@ -65,6 +65,8 @@ impl ConvState {
 
     /// Ensure heights are computed for all segments at the given width.
     fn ensure_heights(&mut self, segments: &[Segment], width: u16, t: &dyn Theme) {
+        let previous_total = self.total_height();
+
         // Full recompute if width changed
         if width != self.cached_width {
             self.heights.clear();
@@ -94,6 +96,13 @@ impl ConvState {
                 self.heights.push(h);
             }
             self.cached_count += 1;
+        }
+
+        let new_total = self.total_height();
+        if self.user_scrolled && new_total > previous_total {
+            self.scroll_offset = self
+                .scroll_offset
+                .saturating_add(new_total.saturating_sub(previous_total));
         }
     }
 
@@ -400,5 +409,35 @@ mod tests {
         widget.render(area, &mut buf, &mut state);
         // Should render all three without panic
         assert!(state.heights.len() == 3);
+    }
+
+    #[test]
+    fn manual_scroll_stays_anchored_when_streaming_grows_last_segment() {
+        let area = Rect::new(0, 0, 20, 5);
+        let mut buf = Buffer::empty(area);
+        let mut state = ConvState::new();
+
+        let mut segments = vec![Segment {
+            meta: Default::default(),
+            content: SegmentContent::AssistantText {
+                text: (0..8).map(|i| format!("line {i}\n")).collect(),
+                thinking: String::new(),
+                complete: false,
+            },
+        }];
+
+        ConversationWidget::new(&segments, &Alpharius).render(area, &mut buf, &mut state);
+        state.scroll_up(3);
+        let anchored_offset = state.scroll_offset;
+
+        if let SegmentContent::AssistantText { text, .. } = &mut segments[0].content {
+            text.push_str("line 8\nline 9\n");
+        }
+
+        ConversationWidget::new(&segments, &Alpharius).render(area, &mut buf, &mut state);
+        assert!(
+            state.scroll_offset > anchored_offset,
+            "stream growth should increase scroll offset to keep the same content in view"
+        );
     }
 }

@@ -428,6 +428,35 @@ mod tests {
         assert_eq!(cv.conv_state.scroll_offset, 0);
     }
 
+    #[test]
+    fn manual_scroll_stays_anchored_across_streaming_rerender() {
+        let mut cv = ConversationView::new();
+        cv.append_streaming(&(0..8).map(|i| format!("line {i}\n")).collect::<String>());
+
+        let area = Rect::new(0, 0, 20, 5);
+        let mut buf = Buffer::empty(area);
+        {
+            let (segments, state) = cv.segments_and_state();
+            let widget = super::super::conv_widget::ConversationWidget::new(segments, &Alpharius);
+            widget.render(area, &mut buf, state);
+        }
+
+        cv.scroll_up(3);
+        let anchored_offset = cv.conv_state.scroll_offset;
+        cv.append_streaming("line 8\nline 9\n");
+
+        {
+            let (segments, state) = cv.segments_and_state();
+            let widget = super::super::conv_widget::ConversationWidget::new(segments, &Alpharius);
+            widget.render(area, &mut buf, state);
+        }
+
+        assert!(
+            cv.conv_state.scroll_offset > anchored_offset,
+            "new streamed lines should not drag the operator view toward the live tail"
+        );
+        assert!(cv.conv_state.user_scrolled);
+    }
 
     #[test]
     fn segments_render_via_widget() {
