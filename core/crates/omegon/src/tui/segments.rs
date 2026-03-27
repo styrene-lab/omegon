@@ -380,22 +380,30 @@ impl Segment {
                 wrapped_rows(text, width.saturating_sub(3)) + thinking_rows + 4 + meta_line
             }
             ToolCard {
+                name,
                 detail_args,
                 detail_result,
                 expanded,
                 ..
             } => {
                 let inner_width = width.saturating_sub(4).max(1);
-                let args_rows = detail_args
+                let compact_arg_rows = match name.as_str() {
+                    "bash" => detail_args
+                        .as_ref()
+                        .map(|a| a.lines().take(4).count() as u16)
+                        .unwrap_or(0),
+                    "edit" | "change" | "read" | "write" | "view" => u16::from(detail_args.is_some()),
+                    _ => detail_args
+                        .as_ref()
+                        .map(|a| wrapped_rows(a, inner_width).min(if *expanded { 80 } else { 4 }))
+                        .unwrap_or(0),
+                };
+                let compact_result_rows = detail_result
                     .as_ref()
-                    .map(|a| wrapped_rows(a, inner_width).min(if *expanded { 80 } else { 6 }))
+                    .map(|r| wrapped_rows(r, inner_width).min(if *expanded { 220 } else { 12 }))
                     .unwrap_or(0);
-                let result_rows = detail_result
-                    .as_ref()
-                    .map(|r| wrapped_rows(r, inner_width).min(if *expanded { 220 } else { 14 }))
-                    .unwrap_or(0);
-                let separator_rows = u16::from(args_rows > 0 && result_rows > 0);
-                args_rows + result_rows + separator_rows + 4
+                let separator_rows = u16::from(compact_arg_rows > 0 && compact_result_rows > 0);
+                compact_arg_rows + compact_result_rows + separator_rows + 4
             }
             SystemNotification { text } => wrapped_rows(text, width.saturating_sub(4)) + 3,
             _ => 4,
@@ -1482,6 +1490,27 @@ mod tests {
         };
         let h = tool.height(80, &t);
         assert!(h <= 7, "compact tool cards should stay tight, got {h}");
+    }
+
+    #[test]
+    fn read_tool_height_uses_compact_file_row_estimate() {
+        let t = Alpharius;
+        let tool = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "read".into(),
+                args_summary: None,
+                detail_args: Some("/tmp/example.rs".into()),
+                result_summary: None,
+                detail_result: Some("short result".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        };
+        let h = tool.height(80, &t);
+        assert!(h <= 7, "read cards should stay compact when args collapse to a single file row, got {h}");
     }
 
     #[test]
