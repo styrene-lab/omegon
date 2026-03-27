@@ -619,15 +619,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     // Load project profile → apply to settings (model, thinking, max_turns)
     let profile = settings::Profile::load(&cli.cwd);
     if let Ok(mut s) = shared_settings.lock() {
-        profile.apply_to(&mut s);
-        // CLI flags override profile
-        if cli.max_turns != 50 {
-            // 50 is the default — only override if explicitly set
-            s.max_turns = cli.max_turns;
-        }
+        apply_profile_with_cli_overrides(cli, &mut s);
         tracing::info!(
             model = %s.model, thinking = %s.thinking.as_str(),
-            max_turns = s.max_turns, "settings initialized from profile"
+            max_turns = s.max_turns, "settings initialized from profile + cli"
         );
     }
 
@@ -1455,6 +1450,18 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 
 /// Format an agent loop error into a concise user-facing message.
 /// Extracts the meaningful part from API error JSON blobs.
+fn apply_profile_with_cli_overrides(cli: &Cli, settings: &mut settings::Settings) {
+    let profile = settings::Profile::load(&cli.cwd);
+    profile.apply_to(settings);
+
+    // CLI flags express the operator's invocation-time intent and must win
+    // over persisted profile state for this process.
+    settings.set_model(&cli.model);
+    if cli.max_turns != 50 {
+        settings.max_turns = cli.max_turns;
+    }
+}
+
 fn format_agent_error(e: &anyhow::Error) -> String {
     let raw = format!("{e}");
     // Try to extract the "message" field from Anthropic/OpenAI error JSON
@@ -1516,12 +1523,8 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
 
     // ─── Shared setup ───────────────────────────────────────────────────
     let shared_settings = settings::shared(&cli.model);
-    let profile = settings::Profile::load(&cli.cwd);
     if let Ok(mut s) = shared_settings.lock() {
-        profile.apply_to(&mut s);
-        if cli.max_turns != 50 {
-            s.max_turns = cli.max_turns;
-        }
+        apply_profile_with_cli_overrides(cli, &mut s);
     }
 
     let resume = cli.resume.as_ref().map(|r| r.as_deref());
@@ -1945,5 +1948,37 @@ mod tests {
             }
             _ => panic!("Expected Login command"),
         }
+    }
+
+    #[test]
+    fn cli_model_overrides_profile_model() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".omegon")).unwrap();
+        std::fs::write(
+            dir.path().join(".omegon/profile.json"),
+            r#"{
+  "lastUsedModel": {"provider": "openai-codex", "modelId": "codex-mini-latest"},
+  "thinkingLevel": "low",
+  "maxTurns": 50
+}"#,
+        )
+        .unwrap();
+
+        let cli = Cli::try_parse_from(vec![
+            "omegon",
+            "--cwd",
+            dir.path().to_str().unwrap(),
+            "--model",
+            "openai-codex:gpt-5.4",
+            "--prompt",
+            "test",
+        ])
+        .unwrap();
+
+        let mut settings = settings::Settings::new("anthropic:claude-sonnet-4-6");
+        apply_profile_with_cli_overrides(&cli, &mut settings);
+
+        assert_eq!(settings.model, "openai-codex:gpt-5.4");
+        assert_eq!(settings.max_turns, 50);
     }
 }
