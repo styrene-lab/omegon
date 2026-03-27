@@ -63,6 +63,15 @@ pub enum MergeResult {
 /// This is the default for cleave children — their intermediate commit
 /// history has no bisect/revert value.
 pub fn squash_merge_branch(repo_path: &Path, branch: &str, message: &str) -> Result<MergeResult> {
+    if omegon_git::jj::is_jj_repo(repo_path) {
+        return match omegon_git::jj::squash_working_copy_into_parent(repo_path, message)? {
+            true => Ok(MergeResult::Success),
+            false => Ok(MergeResult::Failed(
+                "Workspace has no new changes — child did not produce any work".to_string(),
+            )),
+        };
+    }
+
     match omegon_git::merge::squash_merge(repo_path, branch, message)? {
         omegon_git::merge::MergeResult::Success { .. } => Ok(MergeResult::Success),
         omegon_git::merge::MergeResult::NoChanges => Ok(MergeResult::Failed(

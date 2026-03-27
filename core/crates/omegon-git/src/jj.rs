@@ -137,6 +137,22 @@ pub fn diff_summary(repo_path: &Path) -> Result<Vec<String>> {
     }
 }
 
+/// Squash the current jj workspace changes into the parent revision with a description.
+/// Returns true if there were changes to integrate, false if the workspace was empty.
+pub fn squash_working_copy_into_parent(repo_path: &Path, message: &str) -> Result<bool> {
+    if !is_jj_repo(repo_path) {
+        anyhow::bail!("not a jj repo")
+    }
+
+    let changed = diff_summary(repo_path)?;
+    if changed.is_empty() {
+        return Ok(false);
+    }
+
+    run_jj(repo_path, &["squash", "--into", "@-", "-m", message])?;
+    Ok(true)
+}
+
 // ── Internal helper ─────────────────────────────────────────────────────
 
 fn run_jj(repo_path: &Path, args: &[&str]) -> Result<()> {
