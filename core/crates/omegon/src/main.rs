@@ -49,6 +49,77 @@ mod web;
 use bridge::LlmBridge;
 use omegon_traits::AgentEvent;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RouteTransitionPlan {
+    requested_model: String,
+    effective_model: String,
+    old_model: String,
+    old_provider: String,
+    new_provider: String,
+    provider_changed: bool,
+}
+
+impl RouteTransitionPlan {
+    fn new(old_model: &str, requested_model: &str, effective_model: &str) -> Self {
+        let old_provider = crate::providers::infer_provider_id(old_model);
+        let new_provider = crate::providers::infer_provider_id(effective_model);
+        Self {
+            requested_model: requested_model.to_string(),
+            effective_model: effective_model.to_string(),
+            old_model: old_model.to_string(),
+            old_provider: old_provider.clone(),
+            new_provider,
+            provider_changed: old_provider != crate::providers::infer_provider_id(effective_model),
+        }
+    }
+
+    fn requested_route_changed(&self) -> bool {
+        self.requested_model != self.effective_model
+    }
+
+    fn model_changed(&self) -> bool {
+        self.old_model != self.effective_model
+    }
+}
+
+async fn resolve_transition_plan(
+    old_model: &str,
+    requested_model: &str,
+) -> RouteTransitionPlan {
+    let effective_model = providers::resolve_execution_model_spec(requested_model)
+        .await
+        .unwrap_or_else(|| requested_model.to_string());
+    RouteTransitionPlan::new(old_model, requested_model, &effective_model)
+}
+
+async fn install_model_route(
+    bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
+    shared_settings: &settings::SharedSettings,
+    cwd: Option<&std::path::Path>,
+    plan: &RouteTransitionPlan,
+) -> anyhow::Result<()> {
+    let new_bridge = providers::auto_detect_bridge(&plan.effective_model)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("no executable provider for {}", plan.effective_model))?;
+
+    {
+        let mut guard = bridge.write().await;
+        *guard = new_bridge;
+    }
+
+    let mut settings = shared_settings
+        .lock()
+        .map_err(|_| anyhow::anyhow!("settings lock poisoned during route install"))?;
+    settings.set_model(&plan.effective_model);
+    settings.provider_connected = true;
+    if let Some(cwd) = cwd {
+        let mut profile = settings::Profile::load(cwd);
+        profile.capture_from(&settings);
+        let _ = profile.save(cwd);
+    }
+    Ok(())
+}
+
 /// Short version: `0.14.0 (3a4b5c6 2026-03-21)`
 const fn build_version() -> &'static str {
     concat!(
@@ -827,91 +898,65 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 tracing::info!(model = %model, "model switched via /model command");
 
                 let requested_model = model.clone();
-                let effective_model = providers::resolve_execution_model_spec(&requested_model)
-                    .await
-                    .unwrap_or_else(|| requested_model.clone());
-
-                // Detect provider change — swap bridge if needed
-                let (old_model, old_provider) = shared_settings
+                let old_model = shared_settings
                     .lock()
                     .ok()
-                    .map(|s| {
-                        (
-                            s.model.clone(),
-                            crate::providers::infer_provider_id(&s.model),
-                        )
-                    })
-                    .unwrap_or_else(|| (String::new(), String::new()));
-                let new_provider = crate::providers::infer_provider_id(&effective_model);
+                    .map(|s| s.model.clone())
+                    .unwrap_or_default();
+                let plan = resolve_transition_plan(&old_model, &requested_model).await;
 
-                if let Ok(mut s) = shared_settings.lock() {
-                    s.set_model(&effective_model);
-                    // Persist to project profile
-                    let mut profile = settings::Profile::load(&agent.cwd);
-                    profile.capture_from(&s);
-                    let _ = profile.save(&agent.cwd);
-                }
-
-                if effective_model != requested_model {
-                    let provider_label = crate::auth::provider_by_id(&new_provider)
-                        .map(|p| p.display_name)
-                        .unwrap_or(new_provider.as_str());
-                    let _ = events_tx.send(AgentEvent::SystemNotification {
-                        message: format!(
-                            "Requested {requested_model}; using executable route {effective_model} via {provider_label}."
-                        ),
-                    });
-                }
-
-                // If provider changed, re-detect and hot-swap the bridge
-                if old_provider != new_provider {
-                    tracing::info!(
-                        old = %old_provider, new = %new_provider,
-                        "provider changed — re-detecting bridge"
-                    );
-                    // Bridge swap is awaited (not spawned) to prevent a race
-                    // where the user sends a message before the new bridge is
-                    // installed, causing the old provider to receive requests
-                    // with the new model name.
-                    let provider = crate::providers::infer_provider_id(&effective_model);
-                    if let Some(new_bridge) = providers::auto_detect_bridge(&effective_model).await
-                    {
-                        let mut guard = bridge.write().await;
-                        *guard = new_bridge;
-                        if let Ok(mut s) = shared_settings.lock() {
-                            s.provider_connected = true;
+                match install_model_route(&bridge, &shared_settings, Some(&agent.cwd), &plan).await {
+                    Ok(()) => {
+                        if plan.requested_route_changed() {
+                            let provider_label = crate::auth::provider_by_id(&plan.new_provider)
+                                .map(|p| p.display_name)
+                                .unwrap_or(plan.new_provider.as_str());
+                            let _ = events_tx.send(AgentEvent::SystemNotification {
+                                message: format!(
+                                    "Requested {}; using executable route {} via {}.",
+                                    plan.requested_model, plan.effective_model, provider_label
+                                ),
+                            });
                         }
-                        let provider_label = crate::auth::provider_by_id(&provider)
+
+                        let provider_label = crate::auth::provider_by_id(&plan.new_provider)
                             .map(|p| p.display_name)
-                            .unwrap_or(provider.as_str());
-                        tracing::info!("bridge hot-swapped for provider {}", provider);
-                        let _ = events_tx.send(AgentEvent::SystemNotification {
-                            message: format!(
-                                "Provider switched to {provider_label} ({effective_model})."
-                            ),
-                        });
-                    } else {
+                            .unwrap_or(plan.new_provider.as_str());
+                        if plan.provider_changed {
+                            tracing::info!(
+                                old = %plan.old_provider,
+                                new = %plan.new_provider,
+                                "provider changed — bridge installed atomically"
+                            );
+                            let _ = events_tx.send(AgentEvent::SystemNotification {
+                                message: format!(
+                                    "Provider switched to {} ({}).",
+                                    provider_label, plan.effective_model
+                                ),
+                            });
+                        } else if plan.model_changed() {
+                            let _ = events_tx.send(AgentEvent::SystemNotification {
+                                message: format!(
+                                    "Model switched to {} via {}.",
+                                    plan.effective_model, provider_label
+                                ),
+                            });
+                        }
+                    }
+                    Err(_) => {
                         if let Ok(mut s) = shared_settings.lock() {
                             s.provider_connected = false;
                         }
-                        let provider_label = crate::auth::provider_by_id(&provider)
+                        let provider_label = crate::auth::provider_by_id(&plan.new_provider)
                             .map(|p| p.display_name)
-                            .unwrap_or(provider.as_str());
+                            .unwrap_or(plan.new_provider.as_str());
                         let _ = events_tx.send(AgentEvent::SystemNotification {
                             message: format!(
-                                "⚠ No credentials for {provider_label}. Use /login to authenticate."
+                                "⚠ Could not switch to {} (requested {}). Route unchanged; use /login to authenticate.",
+                                provider_label, plan.requested_model
                             ),
                         });
                     }
-                } else if old_model != effective_model {
-                    let provider_label = crate::auth::provider_by_id(&new_provider)
-                        .map(|p| p.display_name)
-                        .unwrap_or(new_provider.as_str());
-                    let _ = events_tx.send(AgentEvent::SystemNotification {
-                        message: format!(
-                            "Model switched to {effective_model} via {provider_label}."
-                        ),
-                    });
                 }
             }
 
@@ -1196,30 +1241,41 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 let _ = events_tx_clone
                                     .send(AgentEvent::SystemNotification { message });
 
-                                // Hot-swap the bridge after login succeeds using the current model intent.
                                 if result.is_ok() {
-                                    let effective_model = providers::resolve_execution_model_spec(
-                                        &model_for_redetect,
+                                    let old_model = settings_for_login
+                                        .lock()
+                                        .ok()
+                                        .map(|s| s.model.clone())
+                                        .unwrap_or_else(|| model_for_redetect.clone());
+                                    let plan = resolve_transition_plan(&old_model, &provider_clone).await;
+                                    match install_model_route(
+                                        &bridge_clone,
+                                        &settings_for_login,
+                                        None,
+                                        &plan,
                                     )
                                     .await
-                                    .unwrap_or(model_for_redetect.clone());
-                                    if let Some(new_bridge) =
-                                        providers::auto_detect_bridge(&effective_model).await
                                     {
-                                        let mut guard = bridge_clone.write().await;
-                                        *guard = new_bridge;
-                                        if let Ok(mut s) = settings_for_login.lock() {
-                                            s.set_model(&effective_model);
-                                            s.provider_connected = true;
-                                        }
-                                        tracing::info!("bridge hot-swapped after successful login");
-                                        let _ =
-                                            events_tx_clone.send(AgentEvent::SystemNotification {
+                                        Ok(()) => {
+                                            tracing::info!(model = %plan.effective_model, provider = %provider_clone, "bridge hot-swapped after successful login");
+                                            let _ = events_tx_clone.send(AgentEvent::SystemNotification {
                                                 message: format!(
                                                     "Provider connected — active route {}.",
-                                                    effective_model
+                                                    plan.effective_model
                                                 ),
                                             });
+                                        }
+                                        Err(_) => {
+                                            if let Ok(mut s) = settings_for_login.lock() {
+                                                s.provider_connected = false;
+                                            }
+                                            let _ = events_tx_clone.send(AgentEvent::SystemNotification {
+                                                message: format!(
+                                                    "⚠ Login succeeded, but {} is not executable with the current credentials.",
+                                                    plan.effective_model
+                                                ),
+                                            });
+                                        }
                                     }
                                 }
                             });
@@ -1879,18 +1935,63 @@ mod tests {
         assert!(result.contains("status=429"), "got: {result}");
     }
 
+    #[tokio::test]
+    async fn transition_plan_detects_provider_switch() {
+        let plan = resolve_transition_plan(
+            "anthropic:claude-sonnet-4-6",
+            "openai-codex:gpt-5.4",
+        )
+        .await;
+        assert_eq!(plan.old_provider, "anthropic");
+        assert_eq!(plan.new_provider, "openai-codex");
+        assert!(plan.provider_changed);
+        assert!(plan.model_changed());
+    }
+
+    #[tokio::test]
+    async fn transition_plan_preserves_requested_model_when_unresolved() {
+        let plan = resolve_transition_plan(
+            "anthropic:claude-sonnet-4-6",
+            "openai-codex:gpt-5.4",
+        )
+        .await;
+        assert_eq!(plan.requested_model, "openai-codex:gpt-5.4");
+        assert!(!plan.effective_model.is_empty());
+    }
+
+    #[test]
+    fn transition_plan_flags_route_rewrites() {
+        let plan = RouteTransitionPlan::new(
+            "anthropic:claude-sonnet-4-6",
+            "openai:gpt-5.4",
+            "openai-codex:gpt-5.4",
+        );
+        assert!(plan.requested_route_changed());
+        assert!(plan.provider_changed);
+    }
+
+    #[test]
+    fn transition_plan_detects_noop() {
+        let plan = RouteTransitionPlan::new(
+            "anthropic:claude-sonnet-4-6",
+            "anthropic:claude-sonnet-4-6",
+            "anthropic:claude-sonnet-4-6",
+        );
+        assert!(!plan.requested_route_changed());
+        assert!(!plan.provider_changed);
+        assert!(!plan.model_changed());
+    }
+
     #[test]
     fn cli_auth_commands_parse_correctly() {
         // Test the auth status command
         let cli = Cli::try_parse_from(vec!["omegon", "auth", "status"])
             .expect("should parse auth status");
         match cli.command.unwrap() {
-            Commands::Auth { action } => {
-                match action {
-                    AuthAction::Status => {} // expected
-                    _ => panic!("Expected Status action"),
-                }
-            }
+            Commands::Auth { action } => match action {
+                AuthAction::Status => {} // expected
+                _ => panic!("Expected Status action"),
+            },
             _ => panic!("Expected Auth command"),
         }
 
@@ -1924,12 +2025,10 @@ mod tests {
         let cli = Cli::try_parse_from(vec!["omegon", "auth", "unlock"])
             .expect("should parse auth unlock");
         match cli.command.unwrap() {
-            Commands::Auth { action } => {
-                match action {
-                    AuthAction::Unlock => {} // expected
-                    _ => panic!("Expected Unlock action"),
-                }
-            }
+            Commands::Auth { action } => match action {
+                AuthAction::Unlock => {} // expected
+                _ => panic!("Expected Unlock action"),
+            },
             _ => panic!("Expected Auth command"),
         }
     }
