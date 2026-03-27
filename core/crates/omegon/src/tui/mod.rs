@@ -107,6 +107,8 @@ pub struct App {
     history: Vec<String>,
     history_idx: Option<usize>,
     dashboard: DashboardState,
+    /// Last on-screen dashboard area for mouse hit-testing.
+    dashboard_area: Option<Rect>,
     footer_data: FooterData,
     /// CIC instrument panel for telemetry visualization
     instrument_panel: InstrumentPanel,
@@ -238,6 +240,7 @@ impl App {
             history: Vec::new(),
             history_idx: None,
             dashboard: DashboardState::default(),
+            dashboard_area: None,
             footer_data: FooterData {
                 model_id,
                 model_provider,
@@ -1383,7 +1386,10 @@ impl App {
 
         // Dashboard panel (right side)
         if show_dashboard && dash_area.width > 0 {
+            self.dashboard_area = Some(dash_area);
             self.dashboard.render_themed(dash_area, frame, t.as_ref());
+        } else {
+            self.dashboard_area = None;
         }
 
         // ── Sync footer data from settings (every frame) ────
@@ -3917,10 +3923,30 @@ pub async fn run_tui(
                 // So: ScrollUp → scroll toward bottom, ScrollDown → scroll toward top.
                 Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::ScrollUp => {
-                        app.conversation.scroll_up(3);
+                        let over_dashboard = app.dashboard_area.is_some_and(|area| {
+                            mouse.column >= area.x
+                                && mouse.column < area.x + area.width
+                                && mouse.row >= area.y
+                                && mouse.row < area.y + area.height
+                        });
+                        if over_dashboard {
+                            app.dashboard.scroll_up(3);
+                        } else {
+                            app.conversation.scroll_up(3);
+                        }
                     }
                     MouseEventKind::ScrollDown => {
-                        app.conversation.scroll_down(3);
+                        let over_dashboard = app.dashboard_area.is_some_and(|area| {
+                            mouse.column >= area.x
+                                && mouse.column < area.x + area.width
+                                && mouse.row >= area.y
+                                && mouse.row < area.y + area.height
+                        });
+                        if over_dashboard {
+                            app.dashboard.scroll_down(3);
+                        } else {
+                            app.conversation.scroll_down(3);
+                        }
                     }
                     _ => {}
                 },

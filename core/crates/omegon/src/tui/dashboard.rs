@@ -259,6 +259,20 @@ impl DashboardState {
         let sel = self.tree_state.selected();
         sel.last().map(|s| s.as_str())
     }
+
+    /// Mouse wheel scrolling for the sidebar tree.
+    pub fn scroll_up(&mut self, lines: usize) {
+        for _ in 0..lines {
+            self.tree_state.key_up();
+        }
+    }
+
+    /// Mouse wheel scrolling for the sidebar tree.
+    pub fn scroll_down(&mut self, lines: usize) {
+        for _ in 0..lines {
+            self.tree_state.key_down();
+        }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -631,6 +645,13 @@ impl DashboardState {
             Style::default()
         };
 
+        let tree_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width.saturating_sub(1).max(1),
+            height: area.height,
+        };
+
         let scrollbar = Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight)
             .thumb_symbol("▐")
             .track_symbol(Some("░"))
@@ -646,7 +667,7 @@ impl DashboardState {
             .node_open_symbol("▾ ")
             .node_no_children_symbol("  ");
 
-        frame.render_stateful_widget(tree, area, &mut self.tree_state);
+        frame.render_stateful_widget(tree, tree_area, &mut self.tree_state);
     }
 }
 
