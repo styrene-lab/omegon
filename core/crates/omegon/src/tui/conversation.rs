@@ -63,7 +63,7 @@ impl ConversationView {
     pub fn push_system(&mut self, text: &str) {
         self.segments.push(Segment::system(text));
         self.conv_state.invalidate();
-        self.conv_state.force_scroll_to_bottom();
+        self.conv_state.auto_scroll_to_bottom();
     }
 
     pub fn push_image(&mut self, path: std::path::PathBuf, alt: &str) {
@@ -199,8 +199,7 @@ impl ConversationView {
         }
         self.streaming = false;
         self.conv_state.invalidate();
-        self.conv_state.user_scrolled = false;
-        self.conv_state.scroll_offset = 0;
+        self.conv_state.auto_scroll_to_bottom();
     }
 
     /// Stamp metadata on the most recent segment (call after segment creation
@@ -219,6 +218,11 @@ impl ConversationView {
 
     pub fn scroll_down(&mut self, amount: u16) {
         self.conv_state.scroll_down(amount);
+    }
+
+    /// Explicitly return to the live tail of the conversation.
+    pub fn snap_to_bottom(&mut self) {
+        self.conv_state.force_scroll_to_bottom();
     }
 
     /// Toggle expansion state of a tool card at the given segment index.
@@ -395,6 +399,25 @@ mod tests {
         cv.append_streaming("text");
         cv.scroll_up(10);
         cv.finalize_message();
+        assert!(!cv.conv_state.user_scrolled);
+        assert_eq!(cv.conv_state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn finalize_preserves_manual_scroll() {
+        let mut cv = ConversationView::new();
+        cv.append_streaming("text");
+        cv.scroll_up(10);
+        cv.finalize_message();
+        assert!(cv.conv_state.user_scrolled, "manual scroll should remain pinned after finalize");
+        assert_eq!(cv.conv_state.scroll_offset, 10);
+    }
+
+    #[test]
+    fn snap_to_bottom_resets_scroll() {
+        let mut cv = ConversationView::new();
+        cv.scroll_up(10);
+        cv.snap_to_bottom();
         assert!(!cv.conv_state.user_scrolled);
         assert_eq!(cv.conv_state.scroll_offset, 0);
     }

@@ -4331,6 +4331,7 @@ pub async fn run_tui(
                             if m.contains(KeyModifiers::SHIFT) || m.contains(KeyModifiers::ALT) =>
                         {
                             if !app.agent_active {
+                                app.conversation.snap_to_bottom();
                                 app.editor.insert_newline();
                             }
                         }
@@ -4396,9 +4397,11 @@ pub async fn run_tui(
                         // Basic editing — only insert if no Ctrl modifier
                         // (Ctrl+letter arms above handle those explicitly)
                         (KeyCode::Char(c), mods) if !mods.contains(KeyModifiers::CONTROL) => {
+                            app.conversation.snap_to_bottom();
                             app.editor.insert(c);
                         }
                         (KeyCode::Backspace, _) => {
+                            app.conversation.snap_to_bottom();
                             app.editor.backspace();
                         }
                         (KeyCode::Left, KeyModifiers::ALT) => {
