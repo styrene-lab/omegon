@@ -89,8 +89,15 @@ pub fn render_bootstrap(status: &HarnessStatus, color: bool) -> String {
 
     out.push('\n');
 
-    // Routing — single line
-    out.push_str(&format!("  {dim}Context:{reset} {cyan}{}{reset}  {dim}Thinking:{reset} {cyan}{}{reset}  {dim}Tier:{reset} {cyan}{}{reset}\n",
+    // Repo + routing — single line
+    let repo_state = if status.git_detached {
+        format!("{yellow}DETACHED HEAD{reset}")
+    } else if let Some(branch) = &status.git_branch {
+        format!("{cyan}{branch}{reset}")
+    } else {
+        format!("{dim}unknown{reset}")
+    };
+    out.push_str(&format!("  {dim}Git:{reset} {repo_state}  {dim}Context:{reset} {cyan}{}{reset}  {dim}Thinking:{reset} {cyan}{}{reset}  {dim}Tier:{reset} {cyan}{}{reset}\n",
         status.context_class, status.thinking_level, status.capability_tier));
 
     // Memory — single line
@@ -127,6 +134,7 @@ mod tests {
         let status = HarnessStatus::default();
         let output = render_bootstrap(&status, false);
         assert!(output.contains("Omegon"));
+        assert!(output.contains("Git:"));
         assert!(output.contains("Context:"));
         assert!(output.contains("Tier:"));
     }
@@ -201,6 +209,7 @@ mod tests {
             name: "Concise".into(),
             intensity_mode: "full".into(),
         });
+        status.git_branch = Some("main".into());
         status.memory.total_facts = 2440;
         status.memory.active_facts = 1800;
         status.memory.project_facts = 1790;
@@ -216,6 +225,7 @@ mod tests {
         assert!(output.contains("Ollama"), "should show Ollama");
         assert!(output.contains("mcp"), "should show MCP summary");
         assert!(output.contains("podman"), "should show container runtime");
+        assert!(output.contains("main"), "should show git branch");
         assert!(output.contains("Systems Engineer"), "should show persona");
         assert!(output.contains("2440"), "should show fact count");
     }
@@ -228,6 +238,14 @@ mod tests {
             !output.contains("\x1b["),
             "no-color mode should have no ANSI codes"
         );
+    }
+
+    #[test]
+    fn bootstrap_shows_detached_head_warning() {
+        let mut status = HarnessStatus::default();
+        status.git_detached = true;
+        let output = render_bootstrap(&status, false);
+        assert!(output.contains("DETACHED HEAD"), "output: {output}");
     }
 
     /// /status slash command use case: re-render with live data, no ANSI.

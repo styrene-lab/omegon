@@ -36,7 +36,12 @@ build:
 # Resolution order: /usr/local/bin → ~/.local/bin
 link:
     #!/usr/bin/env bash
-    set -e
+    set -euo pipefail
+    if ! git symbolic-ref -q HEAD >/dev/null 2>&1 && [ "${OMEGON_ALLOW_DETACHED_LINK:-0}" != "1" ]; then
+        echo "✗ Detached HEAD. Refusing to link from an unattached commit."
+        echo "  Check out main (or set OMEGON_ALLOW_DETACHED_LINK=1 for an intentional tagged/worktree build)."
+        exit 1
+    fi
     REL="$(pwd)/core/target/release/omegon"
     DEV="$(pwd)/core/target/dev-release/omegon"
     # Pick whichever exists and is newer

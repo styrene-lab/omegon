@@ -16,6 +16,10 @@ use serde::{Deserialize, Serialize};
 /// Clone + Serialize — crosses thread boundaries and goes over WebSocket.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarnessStatus {
+    // ── Repo state ───────────────────────────────────────────
+    pub git_branch: Option<String>,
+    pub git_detached: bool,
+
     // ── Persona system ───────────────────────────────────────
     pub active_persona: Option<PersonaSummary>,
     pub active_tone: Option<ToneSummary>,
@@ -247,6 +251,21 @@ impl HarnessStatus {
     pub fn assemble() -> Self {
         let mut status = Self::default();
 
+        if let Ok(output) = std::process::Command::new("git")
+            .args(["branch", "--show-current"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .output()
+            && output.status.success()
+        {
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if branch.is_empty() {
+                status.git_detached = true;
+            } else {
+                status.git_branch = Some(branch);
+            }
+        }
+
         // Probe container runtime (lazy — only if podman/docker likely available)
         status.container_runtime = probe_container_runtime();
 
@@ -430,6 +449,8 @@ fn probe_secret_store() -> Option<SecretBackendStatus> {
 impl Default for HarnessStatus {
     fn default() -> Self {
         Self {
+            git_branch: None,
+            git_detached: false,
             active_persona: None,
             active_tone: None,
             installed_plugins: vec![],
@@ -467,6 +488,8 @@ mod tests {
     fn default_status_is_minimal() {
         let status = HarnessStatus::default();
         assert!(status.active_persona.is_none());
+        assert!(status.git_branch.is_none());
+        assert!(!status.git_detached);
         assert!(status.mcp_servers.is_empty());
         assert_eq!(status.context_class, "Squad");
         assert!(!status.memory_available);
