@@ -22,6 +22,9 @@ pub struct ConvState {
     cached_width: u16,
     /// Number of segments when heights were last computed.
     cached_count: usize,
+    /// Total rendered height from the previous frame.
+    /// Used to preserve a detached viewport when streaming grows content.
+    last_total_height: u16,
 }
 
 impl ConvState {
@@ -32,6 +35,7 @@ impl ConvState {
             heights: Vec::new(),
             cached_width: 0,
             cached_count: 0,
+            last_total_height: 0,
         }
     }
 
@@ -191,11 +195,18 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
         let viewport_height = area.height;
         let total_height = state.total_height();
 
+        if state.user_scrolled && total_height > state.last_total_height {
+            state.scroll_offset = state
+                .scroll_offset
+                .saturating_add(total_height - state.last_total_height);
+        }
+
         // Clamp scroll offset so we don't scroll past the top
         let max_scroll = total_height.saturating_sub(viewport_height);
         if state.scroll_offset > max_scroll {
             state.scroll_offset = max_scroll;
         }
+        state.last_total_height = total_height;
 
         // The scroll_offset is from the BOTTOM (0 = at bottom).
         // Convert to a top-based offset for rendering.
@@ -400,5 +411,96 @@ mod tests {
         widget.render(area, &mut buf, &mut state);
         // Should render all three without panic
         assert!(state.heights.len() == 3);
+    }
+
+    #[test]
+    fn detached_viewport_keeps_anchor_when_streaming_grows_last_segment() {
+        let area = Rect::new(0, 0, 20, 4);
+        let mut state = ConvState::new();
+
+        let initial_segments = vec![
+            Segment::user_prompt("operator"),
+            Segment {
+                meta: Default::default(),
+                content: SegmentContent::AssistantText {
+                    text: "one two three four five six seven eight".into(),
+                    thinking: String::new(),
+                    complete: false,
+                },
+            },
+        ];
+
+        ConversationWidget::new(&initial_segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+
+        state.scroll_up(3);
+        let detached_offset = state.scroll_offset;
+        let old_total = state.last_total_height;
+
+        let grown_segments = vec![
+            Segment::user_prompt("operator"),
+            Segment {
+                meta: Default::default(),
+                content: SegmentContent::AssistantText {
+                    text: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen".into(),
+                    thinking: String::new(),
+                    complete: false,
+                },
+            },
+        ];
+
+        ConversationWidget::new(&grown_segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+
+        assert!(state.last_total_height > old_total, "test setup must grow content height");
+        assert!(
+            state.scroll_offset > detached_offset,
+            "detached viewport must compensate for appended height instead of visually sliding"
+        );
+    }
+
+    #[test]
+    fn live_tail_stays_at_bottom_when_streaming_grows_last_segment() {
+        let area = Rect::new(0, 0, 20, 4);
+        let mut state = ConvState::new();
+
+        let initial_segments = vec![Segment {
+            meta: Default::default(),
+            content: SegmentContent::AssistantText {
+                text: "one two three four five six seven eight".into(),
+                thinking: String::new(),
+                complete: false,
+            },
+        }];
+
+        ConversationWidget::new(&initial_segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+        assert_eq!(state.scroll_offset, 0);
+
+        let grown_segments = vec![Segment {
+            meta: Default::default(),
+            content: SegmentContent::AssistantText {
+                text: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen".into(),
+                thinking: String::new(),
+                complete: false,
+            },
+        }];
+
+        ConversationWidget::new(&grown_segments, &Alpharius).render(
+            area,
+            &mut Buffer::empty(area),
+            &mut state,
+        );
+
+        assert_eq!(state.scroll_offset, 0, "live tail should continue following output");
     }
 }
