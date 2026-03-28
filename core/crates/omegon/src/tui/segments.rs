@@ -587,7 +587,7 @@ fn tool_title_line(
     area_width: u16,
     timestamp: Option<&str>,
 ) -> Line<'static> {
-    let timestamp_width = timestamp.map(|s| s.chars().count()).unwrap_or(0);
+    let timestamp_width = timestamp.map(UnicodeWidthStr::width).unwrap_or(0);
     let reserved_right = if timestamp_width > 0 {
         timestamp_width + 3
     } else {
@@ -598,9 +598,12 @@ fn tool_title_line(
         .saturating_sub(reserved_right as u16)
         .max(6) as usize;
     let icon_prefix = format!(" {icon} ");
-    let icon_width = icon_prefix.chars().count();
+    let icon_width = UnicodeWidthStr::width(icon_prefix.as_str());
     let name_budget = left_budget.saturating_sub(icon_width).max(1);
     let title_name = crate::util::truncate(display_name, name_budget);
+    let title_text = format!("{icon_prefix}{title_name} ");
+    let used_width = UnicodeWidthStr::width(title_text.as_str());
+    let pad = left_budget.saturating_sub(used_width);
 
     Line::from(vec![
         Span::styled(icon_prefix, Style::default().fg(status_color)),
@@ -610,6 +613,7 @@ fn tool_title_line(
                 .fg(status_color)
                 .add_modifier(Modifier::BOLD),
         ),
+        Span::styled(" ".repeat(pad), Style::default().fg(status_color)),
     ])
 }
 
@@ -1587,6 +1591,51 @@ mod tests {
         assert!(top_row.contains("✓"), "top row should retain tool icon: {top_row}");
         assert!(top_row.contains("read") || top_row.contains("rea…"), "top row should retain truncated tool label: {top_row}");
         assert!(!top_row.contains("filename_that_used_to_bleed"), "long header text should be truncated before colliding with the rest of the title row: {top_row}");
+    }
+
+    #[test]
+    fn tool_title_redraw_clears_stale_suffix_characters() {
+        let long = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "read".into(),
+                args_summary: None,
+                detail_args: Some("/Users/cwilson/workspace/black-meridian/omegon/core/Cargo.toml".into()),
+                result_summary: None,
+                detail_result: Some("[package]".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        };
+        let short = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "read".into(),
+                args_summary: None,
+                detail_args: Some("package.json".into()),
+                result_summary: None,
+                detail_result: Some("{}".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        };
+
+        let (area, mut buf) = make_buf(24, 8);
+        long.render(area, &mut buf, &Alpharius);
+        short.render(area, &mut buf, &Alpharius);
+
+        let top_row = (0..area.width)
+            .map(|x| buf[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(top_row.contains("read"), "top row should contain the current tool label: {top_row}");
+        assert!(
+            !top_row.contains("Cargo.tomlm") && !top_row.contains("package.jsonon"),
+            "shorter redraw should not leave stale suffix characters in the title row: {top_row}"
+        );
     }
 
     #[test]
