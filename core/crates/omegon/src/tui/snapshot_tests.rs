@@ -8,6 +8,7 @@ use ratatui::backend::TestBackend;
 
 use super::dashboard::*;
 use super::footer::FooterData;
+use super::instruments::InstrumentPanel;
 use super::theme::Alpharius;
 use crate::lifecycle::types::*;
 use crate::settings::ContextClass;
@@ -226,6 +227,118 @@ fn snapshot_footer_with_persona_and_mcp() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| footer.render(f.area(), f, &Alpharius))
+        .unwrap();
+    insta::assert_snapshot!(render_to_string(&terminal));
+}
+
+#[test]
+fn snapshot_unified_footer_console() {
+    let mut footer = FooterData {
+        model_id: "ollama:qwen3".into(),
+        model_provider: "ollama".into(),
+        context_percent: 68.0,
+        context_window: 262_144,
+        context_class: ContextClass::Maniple,
+        total_facts: 2440,
+        injected_facts: 144,
+        working_memory: 8,
+        tool_calls: 23,
+        turn: 8,
+        compactions: 2,
+        thinking_level: "high".into(),
+        model_tier: "victory".into(),
+        provider_connected: true,
+        is_oauth: false,
+        ..Default::default()
+    };
+    footer.harness = HarnessStatus {
+        active_persona: Some(PersonaSummary {
+            id: "eng".into(),
+            name: "Systems Engineer".into(),
+            badge: "⚙".into(),
+            mind_facts_count: 42,
+            activated_skills: vec!["rust".into()],
+            disabled_tools: vec![],
+        }),
+        active_tone: Some(ToneSummary {
+            id: "concise".into(),
+            name: "Concise".into(),
+            intensity_mode: "full".into(),
+        }),
+        capability_tier: "victory".into(),
+        memory: MemoryStatus {
+            total_facts: 2440,
+            active_facts: 1800,
+            project_facts: 1790,
+            persona_facts: 10,
+            working_facts: 8,
+            episodes: 45,
+            edges: 120,
+            active_persona_mind: Some("Systems Engineer".into()),
+        },
+        mcp_servers: vec![McpServerStatus {
+            name: "filesystem".into(),
+            transport_mode: McpTransportMode::LocalProcess,
+            tool_count: 5,
+            connected: true,
+            error: None,
+        }],
+        secret_backend: Some(SecretBackendStatus {
+            backend: "keyring".into(),
+            stored_count: 3,
+            locked: false,
+        }),
+        ..Default::default()
+    };
+
+    let mut panel = InstrumentPanel::default();
+    panel.update_mind_facts(2440, 8, 45, 0.11);
+    panel.update_telemetry(68.0, None, false, "high", Some((0, super::instruments::WaveDirection::Right)), true, 0.2);
+    panel.tool_started("bash");
+    panel.update_telemetry(68.0, None, false, "high", None, true, 1.2);
+    panel.tool_finished("bash", false);
+    panel.tool_started("web_search");
+    panel.update_telemetry(68.0, None, false, "high", None, true, 8.1);
+    panel.tool_finished("web_search", true);
+    panel.tool_started("memory_recall");
+    panel.update_telemetry(68.0, None, false, "high", Some((0, super::instruments::WaveDirection::Left)), true, 0.22);
+    panel.tool_finished("memory_recall", false);
+
+    let backend = TestBackend::new(120, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let cols = ratatui::layout::Layout::horizontal([
+                ratatui::layout::Constraint::Percentage(32),
+                ratatui::layout::Constraint::Percentage(36),
+                ratatui::layout::Constraint::Percentage(32),
+            ])
+            .split(f.area());
+            footer.render_left_panel(cols[0], f, &Alpharius);
+            panel.render_inference_panel(cols[1], f, &Alpharius);
+            panel.render_tools_panel(cols[2], f, &Alpharius);
+        })
+        .unwrap();
+    insta::assert_snapshot!(render_to_string(&terminal));
+}
+
+#[test]
+fn snapshot_tools_panel_with_runtime_and_error() {
+    let mut panel = InstrumentPanel::default();
+    panel.tool_started("bash");
+    panel.update_telemetry(40.0, None, false, "off", None, false, 41.0);
+    panel.tool_finished("bash", false);
+    panel.tool_started("web_search");
+    panel.update_telemetry(40.0, None, false, "off", None, false, 8.1);
+    panel.tool_finished("web_search", true);
+    panel.tool_started("memory_recall");
+    panel.update_telemetry(40.0, None, false, "off", None, false, 0.22);
+    panel.tool_finished("memory_recall", false);
+
+    let backend = TestBackend::new(42, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| panel.render_tools_panel(f.area(), f, &Alpharius))
         .unwrap();
     insta::assert_snapshot!(render_to_string(&terminal));
 }

@@ -1,0 +1,15 @@
+---
+source: crates/omegon/src/tui/snapshot_tests.rs
+assertion_line: 343
+expression: render_to_string(&terminal)
+---
+╭ tools ─────────────────────────────────╮
+│▸ ▫ recall       220ms≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋│
+│✗ ⊕ search       8.1s ≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋·│
+│  ⌘ sh          41.0s ≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋··│
+│                                        │
+│                                        │
+│                                        │
+│                                        │
+│  3/3 active                            │
+╰────────────────────────────────────────╯
