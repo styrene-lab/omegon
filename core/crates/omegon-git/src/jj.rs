@@ -176,6 +176,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn squash_working_copy_into_parent_reports_error_outside_jj_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = squash_working_copy_into_parent(dir.path(), "msg");
+        assert!(result.is_err(), "non-jj repo should error");
+    }
+
+    #[test]
     fn detect_jj_repo() {
         let cwd = std::env::current_dir().unwrap();
         let mut path = cwd.as_path();

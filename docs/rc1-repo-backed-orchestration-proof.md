@@ -47,3 +47,9 @@ Release-checklist node for the third rc.1 acceptance criterion: at least one rea
 **Status:** decided
 
 **Rationale:** Close the last acceptance ambiguity. For the chosen rc.1 proof task, success means: the child reaches a successful terminal state, the concrete provider/model shown to the operator matches the executed route, the repo outcome is coherent (the expected single-file docs change exists, or the run clearly explains why no edit was required), and no bookkeeping layer reclassifies the run as failed after successful child execution. This is the minimum trustworthy end-to-end proof for rc.1.
+
+### Decision: OpenAI/Codex repo-backed docs proof completed successfully end-to-end on the jj workspace backend
+
+**Status:** decided
+
+**Rationale:** The same single-file docs proof shape was rerun with `openai-codex:gpt-5.4` after the jj-native success-path integration was implemented. The child executed successfully, reported the concrete route honestly, produced session/log artifacts, and the final integration back into the parent repo completed successfully via the jj-aware squash path. This satisfies the core rc.1 requirement that at least one realistic repo-backed orchestration path completes end-to-end without bookkeeping contradiction.

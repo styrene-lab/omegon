@@ -35,3 +35,9 @@ Release-checklist node for the second rc.1 acceptance criterion: OpenAI-family a
 **Status:** decided
 
 **Rationale:** The code already gives us four concrete surfaces that matter and are testable. The bootstrap panel renders provider/auth state from `HarnessStatus` (`tui/bootstrap.rs`). The model selector builds gated choices based on separate OpenAI API and OpenAI Codex auth inputs (`tui/mod.rs::build_model_selector_options`, with existing tests in `tui/tests.rs`). The engine panel in the footer shows provider label, model, and auth class (`tui/footer.rs`). And the rc.1 routed-run/report evidence should carry the final concrete provider/model route. These surfaces are enough to prove the split honestly without waiting for a full dashboard redesign.
+
+### Decision: OpenAI/Codex OAuth route has now passed a real repo-backed proof with honest route reporting
+
+**Status:** decided
+
+**Rationale:** A real repo-backed docs proof was executed using `openai-codex:gpt-5.4`. The child inherited `CHATGPT_OAUTH_TOKEN`, executed successfully, reported `openai-codex:gpt-5.4` as the concrete route, and completed end-to-end once the jj-native integration path was fixed. This converts the OpenAI/Codex OAuth route from a purely surface-level honesty claim into a validated execution path.
