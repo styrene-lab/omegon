@@ -3016,13 +3016,6 @@ impl App {
                 let display = enriched.as_deref().or(summary_text.as_deref());
                 self.conversation.push_tool_end(&id, is_error, display);
 
-                // Signal tool error to instrument panel
-                if is_error {
-                    if let Some(ref name) = self.last_tool_name {
-                        self.instrument_panel.set_tool_error(name);
-                    }
-                }
-
                 // Detect image results from view/render tools
                 if !is_error
                     && image::is_available()

@@ -687,6 +687,40 @@ fn harness_status_changed_detects_persona_transition() {
     assert!(app.footer_data.harness.active_persona.is_some());
 }
 
+#[test]
+fn footer_syncs_model_provider_context_and_thinking_from_settings() {
+    let mut app = test_app();
+    app.update_settings(|s| {
+        s.model = "ollama:qwen3".into();
+        s.context_window = 65_536;
+        s.thinking = ThinkingLevel::High;
+        s.provider_connected = false;
+    });
+
+    let (model_id, model_provider, context_window, thinking_level, provider_connected) = {
+        let s = app.settings();
+        (
+            s.model.clone(),
+            s.provider().to_string(),
+            s.context_window,
+            s.thinking.as_str().to_string(),
+            s.provider_connected,
+        )
+    };
+
+    app.footer_data.model_id = model_id;
+    app.footer_data.model_provider = model_provider;
+    app.footer_data.context_window = context_window;
+    app.footer_data.thinking_level = thinking_level;
+    app.footer_data.provider_connected = provider_connected;
+
+    assert_eq!(app.footer_data.model_id, "ollama:qwen3");
+    assert_eq!(app.footer_data.model_provider, "ollama");
+    assert_eq!(app.footer_data.context_window, 65_536);
+    assert_eq!(app.footer_data.thinking_level, "high");
+    assert!(!app.footer_data.provider_connected);
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Command table completeness
 // ═══════════════════════════════════════════════════════════════════

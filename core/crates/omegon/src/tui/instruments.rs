@@ -1175,6 +1175,18 @@ mod tests {
     }
 
     #[test]
+    fn tool_error_finish_records_runtime_once() {
+        let mut panel = InstrumentPanel::default();
+        panel.tool_started("bash");
+        panel.update_telemetry(0.0, None, false, "off", None, false, 0.5);
+        panel.tool_finished("bash", true);
+        let tool = panel.tools.iter().find(|t| t.name == "bash").unwrap();
+        assert!(tool.is_error);
+        assert!(!tool.running);
+        assert_eq!(tool.last_duration_ms, Some(500));
+    }
+
+    #[test]
     fn update_mind_facts_populates_project_working_and_episodes() {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(18, 3, 2, 0.25);
