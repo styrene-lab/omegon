@@ -18,6 +18,10 @@ use super::theme::Theme;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
 
+fn panel_bg(t: &dyn Theme) -> Color {
+    t.footer_bg()
+}
+
 /// Scale an RGB color's brightness.
 fn dim_color(c: Color, factor: f64) -> Color {
     if let Color::Rgb(r, g, b) = c {
@@ -44,10 +48,6 @@ fn intensity_color(intensity: f64) -> Color {
         return Color::Rgb(220, 170, 70);
     }
     Color::Rgb(240, 110, 90)
-}
-
-fn bg_color() -> Color {
-    Color::Rgb(0, 1, 3)
 }
 
 /// Compact glyph+label for the instrument panel. Keeps tool rows readable
@@ -279,6 +279,50 @@ enum ContextBand {
 }
 
 impl InstrumentPanel {
+    pub fn preferred_height(&self) -> u16 {
+        let active_minds = self.minds.iter().filter(|m| m.active).count().max(1) as u16;
+        let tool_rows = self.tools.len().clamp(1, 6) as u16;
+        let inference_height = 4u16 + active_minds.min(3);
+        let tools_height = 3u16 + tool_rows;
+        inference_height.max(tools_height).clamp(10, 16)
+    }
+
+    pub fn render_inference_panel(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        if area.width < 20 || area.height < 4 {
+            return;
+        }
+        let (border, label) = if self.has_ever_fired {
+            (t.border_dim(), t.dim())
+        } else {
+            (dim_color(t.border_dim(), 0.5), dim_color(t.dim(), 0.55))
+        };
+        self.render_inference(area, frame, border, label, t);
+    }
+
+    pub fn render_tools_panel(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        if area.width < 20 || area.height < 4 {
+            return;
+        }
+        let (border, label) = if self.has_ever_fired {
+            (t.border_dim(), t.dim())
+        } else {
+            (dim_color(t.border_dim(), 0.5), dim_color(t.dim(), 0.55))
+        };
+        self.render_tools(area, frame, border, label, t);
+    }
+
+    pub fn render(&mut self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        if area.width < 20 || area.height < 4 {
+            return;
+        }
+
+        let panels = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
+            .split(area);
+
+        self.render_inference_panel(panels[0], frame, t);
+        self.render_tools_panel(panels[1], frame, t);
+    }
+
     fn context_breakdown(&self) -> [(ContextBand, f64); 6] {
         let total_used = self.context_fill.clamp(0.0, 1.0);
         let system = 0.08_f64.min(total_used);
@@ -460,31 +504,16 @@ impl InstrumentPanel {
         self.focus_mode = !self.focus_mode;
     }
 
-    pub fn render(&mut self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
-        if area.width < 20 || area.height < 4 {
-            return;
-        }
-
-        // Dim borders at idle, theme-bright after first tool call
-        let (border, label) = if self.has_ever_fired {
-            (t.border_dim(), t.dim())
-        } else {
-            (dim_color(t.border_dim(), 0.5), dim_color(t.dim(), 0.55))
-        };
-
-        let panels = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
-            .split(area);
-
-        self.render_inference(panels[0], frame, border, label);
-        self.render_tools(panels[1], frame, border, label);
-    }
-
-    fn render_inference(&self, area: Rect, frame: &mut Frame, border: Color, label: Color) {
+    fn render_inference(&self, area: Rect, frame: &mut Frame, border: Color, label: Color, t: &dyn Theme) {
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border))
+            .border_style(Style::default().fg(border).bg(t.footer_bg()))
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .title(Span::styled(" inference ", Style::default().fg(label)));
+            .title(Span::styled(
+                " inference ",
+                Style::default().fg(label).bg(t.footer_bg()),
+            ))
+            .style(Style::default().bg(t.footer_bg()));
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if inner.width < 10 || inner.height < 3 {
@@ -508,7 +537,7 @@ impl InstrumentPanel {
             width: inner.width,
             height: bar_h,
         };
-        self.render_context_bar(bar_area, buf);
+        self.render_context_bar(bar_area, buf, t);
 
         // Tree + memory strings: break through the left border
         if inner.height > bar_h && !active_minds.is_empty() {
@@ -520,11 +549,11 @@ impl InstrumentPanel {
                 width: inner.width + 1, // include border column
                 height: inner.height - bar_h,
             };
-            self.render_memory_strings(&active_minds, tree_area, buf);
+            self.render_memory_strings(&active_minds, tree_area, buf, t);
         }
     }
 
-    fn render_context_bar(&self, area: Rect, buf: &mut Buffer) {
+    fn render_context_bar(&self, area: Rect, buf: &mut Buffer, t: &dyn Theme) {
         let w = area.width as usize;
         if w == 0 {
             return;
@@ -532,7 +561,7 @@ impl InstrumentPanel {
 
         let breakdown = self.context_breakdown();
         let activity = self.activity_mode();
-        let t = self.time;
+        let time = self.time;
 
         let mut spans: Vec<(ContextBand, usize, usize)> = Vec::new();
         let mut cursor = 0usize;
@@ -578,7 +607,7 @@ impl InstrumentPanel {
 
             match activity {
                 ActivityMode::Thinking if band == ContextBand::Thinking => {
-                    let phase = (t * 3.0) + (1.0 - center_rel) * 1.8;
+                    let phase = (time * 3.0) + (1.0 - center_rel) * 1.8;
                     let pulse = ((phase.sin() + 1.0) * 0.5 * self.thinking_intensity.max(0.15))
                         .clamp(0.0, 1.0);
                     let glyphs = ['░', '▒', '▓', '█'];
@@ -592,13 +621,13 @@ impl InstrumentPanel {
                     };
                 }
                 ActivityMode::ToolChurn if band == ContextBand::Tools => {
-                    let pulse = (((t * 10.0) + x as f64 * 0.9).sin() + 1.0) * 0.5;
+                    let pulse = (((time * 10.0) + x as f64 * 0.9).sin() + 1.0) * 0.5;
                     bottom_ch = if pulse > 0.75 { '█' } else if pulse > 0.4 { '▆' } else { '▄' };
                     top_ch = if pulse > 0.8 { '▂' } else { ' ' };
                     fg = if pulse > 0.75 { Color::Rgb(255, 196, 96) } else { color };
                 }
                 ActivityMode::Waiting if band == ContextBand::Tools => {
-                    let pulse = (((t * 2.2) + x as f64 * 0.1).sin() + 1.0) * 0.5;
+                    let pulse = (((time * 2.2) + x as f64 * 0.1).sin() + 1.0) * 0.5;
                     bottom_ch = if pulse > 0.6 { '▅' } else { '▃' };
                     fg = if pulse > 0.6 { Color::Rgb(232, 186, 104) } else { color };
                 }
@@ -619,13 +648,13 @@ impl InstrumentPanel {
                 if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, area.y + row)) {
                     cell.set_char(ch);
                     cell.set_fg(row_fg);
-                    cell.set_bg(bg_color());
+                    cell.set_bg(panel_bg(t));
                 }
             }
         }
     }
 
-    fn render_memory_strings(&self, active_minds: &[usize], area: Rect, buf: &mut Buffer) {
+    fn render_memory_strings(&self, active_minds: &[usize], area: Rect, buf: &mut Buffer, t: &dyn Theme) {
         let w = area.width as usize;
         let n = active_minds.len();
 
@@ -643,7 +672,7 @@ impl InstrumentPanel {
                 if let Some(cell) = buf.cell_mut(Position::new(area.x + i as u16, y)) {
                     cell.set_char(ch);
                     cell.set_fg(Color::Rgb(32, 72, 96));
-                    cell.set_bg(bg_color());
+                    cell.set_bg(panel_bg(t));
                 }
             }
             // Vertical trunk on earlier rows
@@ -677,7 +706,7 @@ impl InstrumentPanel {
                 if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, y)) {
                     cell.set_char(ch);
                     cell.set_fg(name_color);
-                    cell.set_bg(bg_color());
+                    cell.set_bg(panel_bg(t));
                 }
             }
 
@@ -687,6 +716,7 @@ impl InstrumentPanel {
             let wave_start = (name_start + label.len() + 1).min(w / 3);
             let wave_w = w.saturating_sub(wave_start);
             let wave_len = mind.wave.len();
+            let idle_phase = self.time;
             for wx in 0..wave_w {
                 let x = wave_start + wx;
                 if x >= w {
@@ -729,23 +759,29 @@ impl InstrumentPanel {
                 let color = if intensity > 0.01 {
                     intensity_color(intensity)
                 } else {
-                    Color::Rgb(20, 40, 55)
+                    let phase = ((idle_phase * 2.0) + wx as f64 * 0.08).sin() * 0.5 + 0.5;
+                    let base = (20.0 + phase * 10.0) as u8;
+                    Color::Rgb(base, base.saturating_add(18), base.saturating_add(28))
                 };
                 if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, y)) {
                     cell.set_char(ch);
                     cell.set_fg(color);
-                    cell.set_bg(bg_color());
+                    cell.set_bg(panel_bg(t));
                 }
             }
         }
     }
 
-    fn render_tools(&self, area: Rect, frame: &mut Frame, border: Color, label: Color) {
+    fn render_tools(&self, area: Rect, frame: &mut Frame, border: Color, label: Color, t: &dyn Theme) {
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border))
+            .border_style(Style::default().fg(border).bg(t.footer_bg()))
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .title(Span::styled(" tools ", Style::default().fg(label)));
+            .title(Span::styled(
+                " tools ",
+                Style::default().fg(label).bg(t.footer_bg()),
+            ))
+            .style(Style::default().bg(t.footer_bg()));
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if inner.width < 15 || inner.height < 2 {
@@ -830,7 +866,7 @@ impl InstrumentPanel {
                 if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
                     cell.set_char(ch);
                     cell.set_fg(ind_color);
-                    cell.set_bg(bg_color());
+                    cell.set_bg(panel_bg(t));
                 }
                 x += 1;
             }
@@ -847,7 +883,7 @@ impl InstrumentPanel {
                 if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
                     cell.set_char(ch);
                     cell.set_fg(name_color);
-                    cell.set_bg(bg_color());
+                    cell.set_bg(panel_bg(t));
                 }
                 x += 1;
             }
@@ -857,7 +893,7 @@ impl InstrumentPanel {
                 }
                 if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
                     cell.set_char(' ');
-                    cell.set_bg(bg_color());
+                    cell.set_bg(panel_bg(t));
                 }
                 x += 1;
             }
@@ -891,7 +927,7 @@ impl InstrumentPanel {
                 if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
                     cell.set_char(ch);
                     cell.set_fg(c);
-                    cell.set_bg(bg_color());
+                    cell.set_bg(panel_bg(t));
                 }
                 x += 1;
             }
@@ -902,7 +938,7 @@ impl InstrumentPanel {
                 if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
                     cell.set_char(ch);
                     cell.set_fg(Color::Rgb(48, 64, 80));
-                    cell.set_bg(bg_color());
+                    cell.set_bg(panel_bg(t));
                 }
                 x += 1;
             }
@@ -926,7 +962,7 @@ impl InstrumentPanel {
                 if let Some(cell) = buf.cell_mut(Position::new(x, footer_y)) {
                     cell.set_char(ch);
                     cell.set_fg(Color::Rgb(48, 64, 80));
-                    cell.set_bg(bg_color());
+                    cell.set_bg(panel_bg(t));
                 }
             }
         }
@@ -977,6 +1013,18 @@ mod tests {
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         let t = crate::tui::theme::Alpharius;
         terminal.draw(|f| panel.render(area, f, &t)).unwrap();
+    }
+
+    #[test]
+    fn preferred_height_grows_with_active_minds_and_tools() {
+        let mut panel = InstrumentPanel::default();
+        let base = panel.preferred_height();
+        panel.update_mind_facts(18, 3, 2, 0.08);
+        panel.update_telemetry(62.0, Some("read"), false, "medium", None, true, 0.016);
+        panel.update_telemetry(62.0, Some("bash"), false, "medium", None, true, 0.016);
+        let grown = panel.preferred_height();
+        assert!(grown >= base, "footer height should not shrink after activity");
+        assert!(grown >= 10 && grown <= 16, "preferred height stays bounded: {grown}");
     }
 
     #[test]

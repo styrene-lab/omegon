@@ -1360,12 +1360,18 @@ impl App {
         // a single infinitely wrapped line.
         let editor_height = editor_height_for(&self.editor, main_area);
 
+        let footer_height = if self.focus_mode {
+            0
+        } else {
+            self.instrument_panel.preferred_height()
+        };
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(3),                // [0] conversation
                 Constraint::Length(editor_height), // [1] editor (dynamic)
-                Constraint::Length(12),            // [2] instrument panel
+                Constraint::Length(footer_height), // [2] footer console (dynamic)
             ])
             .split(main_area);
 
@@ -1494,19 +1500,24 @@ impl App {
             );
         }
 
-        // ── Split-panel footer: text left, instruments right ─────────
-        // Store inst_area for cleanup pass to skip
+        // ── Unified footer console: engine | inference | tools ──────
+        // Store instrument areas for cleanup pass to skip.
         let inst_area = if !self.focus_mode {
             let footer_area = chunks[2];
-            let footer_cols =
-                Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
-                    .split(footer_area);
+            let footer_cols = Layout::horizontal([
+                Constraint::Percentage(32),
+                Constraint::Percentage(36),
+                Constraint::Percentage(32),
+            ])
+            .split(footer_area);
 
             self.footer_data
                 .render_left_panel(footer_cols[0], frame, t.as_ref());
             self.instrument_panel
-                .render(footer_cols[1], frame, t.as_ref());
-            footer_cols[1]
+                .render_inference_panel(footer_cols[1], frame, t.as_ref());
+            self.instrument_panel
+                .render_tools_panel(footer_cols[2], frame, t.as_ref());
+            footer_cols[1].union(footer_cols[2])
         } else {
             Rect::ZERO
         };
