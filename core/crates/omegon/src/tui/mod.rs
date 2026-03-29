@@ -56,7 +56,7 @@ use self::dashboard::DashboardState;
 use self::editor::Editor;
 use self::footer::FooterData;
 use self::instruments::InstrumentPanel;
-use self::segments::SegmentContent;
+use self::segments::{SegmentContent, SegmentExportMode};
 
 /// Messages from TUI to the agent coordinator.
 #[derive(Debug)]
@@ -1662,20 +1662,18 @@ impl App {
             // cursor_screen_position) so the terminal cursor always lands on
             // the correct visual cell.  Paragraph::wrap uses word boundaries
             // which diverge from cursor math and compound across rows.
-            let content_width = editor_rect.width.max(1) as usize;
+            let content_width = editor_rect.width.saturating_sub(2).max(1);
+            let visible_rows = editor_rect.height.saturating_sub(2).max(1);
             let visual_lines: Vec<Line<'static>> = if self.editor.is_empty() {
                 vec![Line::from(Span::styled(
                     "Ask anything, or type / for commands",
                     Style::default().fg(t.dim()),
                 ))]
             } else {
-                let raw = self.editor.wrapped_text();
-                raw.split('\n')
-                    .flat_map(|logical| {
-                        crate::tui::editor::wrap_chars_at(logical, content_width)
-                            .into_iter()
-                            .map(|vl| Line::from(Span::styled(vl, Style::default().fg(t.fg()))))
-                    })
+                self.editor
+                    .visible_visual_lines(content_width, visible_rows)
+                    .into_iter()
+                    .map(|vl| Line::from(Span::styled(vl, Style::default().fg(t.fg()))))
                     .collect()
             };
             let editor_widget = Paragraph::new(visual_lines)
@@ -1880,22 +1878,27 @@ impl App {
         }
     }
 
-    fn copy_selected_conversation_segment(&mut self) {
-        let Some(text) = self.conversation.selected_segment_text() else {
+    fn copy_selected_conversation_segment_with_mode(&mut self, mode: SegmentExportMode) {
+        let Some(text) = self.conversation.selected_segment_text_with_mode(mode) else {
             self.show_toast("Nothing selected to copy", ratatui_toaster::ToastType::Warning);
             return;
         };
         if self.copy_text_to_clipboard(&text) {
-            self.show_toast(
-                "Copied selected conversation segment",
-                ratatui_toaster::ToastType::Success,
-            );
+            let label = match mode {
+                SegmentExportMode::Raw => "Copied selected conversation segment",
+                SegmentExportMode::Plaintext => "Copied selected conversation segment as plaintext",
+            };
+            self.show_toast(label, ratatui_toaster::ToastType::Success);
         } else {
             self.show_toast(
                 "Clipboard unavailable — select text in your terminal or install pbcopy/wl-copy/xclip",
                 ratatui_toaster::ToastType::Warning,
             );
         }
+    }
+
+    fn copy_selected_conversation_segment(&mut self) {
+        self.copy_selected_conversation_segment_with_mode(SegmentExportMode::Raw);
     }
 
     fn show_toast(&mut self, message: &str, toast_type: ratatui_toaster::ToastType) {
@@ -1919,6 +1922,7 @@ impl App {
     /// Command registry: (name, description, subcommands).
     const COMMANDS: &'static [(&'static str, &'static str, &'static [&'static str])] = &[
         ("help", "show available commands", &[]),
+        ("copy", "copy selected segment", &["raw", "plain"]),
         ("mouse", "toggle pane mouse interaction mode", &["on", "off"]),
         ("model", "view or switch model", &["list"]),
         (
@@ -2620,6 +2624,18 @@ impl App {
                     "disabled"
                 };
                 SlashResult::Display(format!("Instrument panel focus mode → {status}"))
+            }
+
+            "copy" => match args {
+                "" | "raw" => {
+                    self.copy_selected_conversation_segment_with_mode(SegmentExportMode::Raw);
+                    SlashResult::Handled
+                }
+                "plain" | "plaintext" => {
+                    self.copy_selected_conversation_segment_with_mode(SegmentExportMode::Plaintext);
+                    SlashResult::Handled
+                }
+                _ => SlashResult::Display("Usage: /copy [raw|plain]".into()),
             }
 
             "tree" => {

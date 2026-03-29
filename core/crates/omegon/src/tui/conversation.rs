@@ -5,7 +5,7 @@
 
 use super::conv_widget::ConvState;
 use super::image::ImageCache;
-use super::segments::{Segment, SegmentContent, SegmentMeta};
+use super::segments::{Segment, SegmentContent, SegmentExportMode, SegmentMeta};
 
 /// Conversation view state — segment list + scroll.
 pub struct ConversationView {
@@ -324,9 +324,13 @@ impl ConversationView {
     }
 
     pub fn selected_segment_text(&self) -> Option<String> {
+        self.selected_segment_text_with_mode(SegmentExportMode::Raw)
+    }
+
+    pub fn selected_segment_text_with_mode(&self, mode: SegmentExportMode) -> Option<String> {
         self.selected_or_focused_segment()
             .and_then(|idx| self.segments.get(idx))
-            .map(Segment::plain_text)
+            .map(|segment| segment.export_text(mode))
     }
 
     pub fn segment_at(&self, viewport: ratatui::prelude::Rect, row: u16) -> Option<usize> {

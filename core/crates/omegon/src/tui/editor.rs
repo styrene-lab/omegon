@@ -464,10 +464,10 @@ impl Editor {
     /// terminal cursor always points to the correct visual cell.
     pub fn cursor_screen_position(&mut self, editor_area: Rect) -> (u16, u16) {
         let (cursor_row, cursor_col) = self.textarea.cursor();
-        let content_width = editor_area.width.max(1) as usize;
-        let inner_x = editor_area.x;
+        let content_width = editor_area.width.saturating_sub(2).max(1) as usize;
+        let inner_x = editor_area.x + 1;
         let inner_y = editor_area.y + 1;
-        let inner_height = editor_area.height.saturating_sub(1).max(1);
+        let inner_height = editor_area.height.saturating_sub(2).max(1);
 
         let mut visual_row: u16 = 0;
         let mut visual_col: u16 = 0;
@@ -493,11 +493,26 @@ impl Editor {
         }
 
         let screen_y = inner_y + visual_row.saturating_sub(self.scroll_row);
-        let screen_x = inner_x + visual_col.min(editor_area.width.saturating_sub(1));
+        let screen_x = inner_x + visual_col.min(content_width.saturating_sub(1) as u16);
         (
             screen_x,
-            screen_y.min(editor_area.y + editor_area.height.saturating_sub(1)),
+            screen_y.min(inner_y + inner_height.saturating_sub(1)),
         )
+    }
+
+    pub fn visible_visual_lines(&self, content_width: u16, visible_rows: u16) -> Vec<String> {
+        let width = content_width.max(1) as usize;
+        let mut lines = Vec::new();
+        if self.is_empty() {
+            return lines;
+        }
+        for logical in self.textarea.lines() {
+            lines.extend(wrap_chars_at(logical, width));
+        }
+        let max_start = lines.len().saturating_sub(visible_rows.max(1) as usize);
+        let start = (self.scroll_row as usize).min(max_start);
+        let end = (start + visible_rows.max(1) as usize).min(lines.len());
+        lines[start..end].to_vec()
     }
 
     pub fn move_word_backward(&mut self) {

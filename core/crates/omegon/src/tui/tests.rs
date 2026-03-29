@@ -138,10 +138,10 @@ fn editor_cursor_screen_position_wraps_at_expected_column() {
         height: 6,
     };
     let (x, y) = editor.cursor_screen_position(area);
-    assert_eq!(x, 3, "9 chars at width 6 should wrap to column 3");
+    assert_eq!(x, 2, "9 chars in 4 content columns should wrap to the second inner column");
     assert_eq!(
-        y, 2,
-        "9 chars at width 6 should land on the second wrapped row beneath the border"
+        y, 3,
+        "9 chars in 4 content columns should land on the third wrapped row beneath the border"
     );
 }
 
@@ -171,6 +171,28 @@ fn editor_height_expands_for_wrapped_input() {
         narrow_height >= 5,
         "wrapped input should grow beyond the minimum height"
     );
+}
+
+#[test]
+fn editor_visible_visual_lines_follow_cursor_scroll() {
+    let mut editor = crate::tui::editor::Editor::new();
+    editor.set_text("1234\n5678\n90ab\ncdef");
+    editor.move_down();
+    editor.move_down();
+    editor.move_down();
+    editor.move_end();
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width: 6,
+        height: 3,
+    };
+
+    let (_x, y) = editor.cursor_screen_position(area);
+    let visible = editor.visible_visual_lines(4, 1);
+
+    assert_eq!(y, 1, "cursor should stay inside the single visible editor row");
+    assert_eq!(visible, vec!["cdef"], "render should follow editor scroll state");
 }
 
 #[test]
@@ -262,6 +284,25 @@ fn selected_conversation_segment_exports_plain_text() {
 
     let selected = app.conversation.selected_segment_text();
     assert_eq!(selected.as_deref(), Some("assistant answer"));
+}
+
+#[test]
+fn assistant_plaintext_export_strips_markdown_fences() {
+    let mut app = test_app();
+    app.conversation.push_user("operator prompt");
+    app.conversation.append_streaming(
+        "Run this:\n\n```bash\ncargo test -q\n```\n\nThen edit:\n\n```rust\nfn main() {}\n```",
+    );
+    app.conversation.finalize_message();
+    app.conversation.select_segment(1);
+
+    let selected = app
+        .conversation
+        .selected_segment_text_with_mode(SegmentExportMode::Plaintext);
+    assert_eq!(
+        selected.as_deref(),
+        Some("Run this:\n\ncargo test -q\n\nThen edit:\n\nfn main() {}")
+    );
 }
 
 #[test]

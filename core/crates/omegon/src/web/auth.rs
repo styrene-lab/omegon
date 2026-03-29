@@ -241,7 +241,14 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, OnceLock};
+
     use super::*;
+
+    fn web_auth_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn ephemeral_state_round_trips_bearer_token() {
@@ -283,6 +290,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_web_auth_state_uses_env_override() {
+        let _guard = web_auth_env_lock().lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let secrets = omegon_secrets::SecretsManager::new(dir.path()).unwrap();
         unsafe { std::env::set_var(WEB_AUTH_SECRET_NAME, "env-root") };
@@ -296,6 +304,8 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_web_auth_state_falls_back_to_ephemeral() {
+        let _guard = web_auth_env_lock().lock().unwrap();
+        unsafe { std::env::remove_var(WEB_AUTH_SECRET_NAME) };
         let dir = tempfile::tempdir().unwrap();
         let secrets = omegon_secrets::SecretsManager::new(dir.path()).unwrap();
 

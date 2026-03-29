@@ -32,6 +32,24 @@ fn syntax_cache() -> &'static SyntaxCache {
     })
 }
 
+fn normalize_markdown_for_plaintext(text: &str) -> String {
+    let mut out = Vec::new();
+    let mut in_fence = false;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            out.push(line.to_string());
+        } else {
+            out.push(line.trim_end().to_string());
+        }
+    }
+    let normalized = out.join("\n");
+    normalized.trim_end().to_string()
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Segment — rich metadata wrapper + typed content
 // ═══════════════════════════════════════════════════════════════════════════
@@ -109,6 +127,13 @@ pub enum ToolVisualKind {
     Memory,
     Search,
     Generic,
+}
+
+/// Clipboard/export formatting mode for segment content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentExportMode {
+    Raw,
+    Plaintext,
 }
 
 /// The typed content of a conversation segment.
@@ -228,19 +253,28 @@ impl Segment {
 
 impl Segment {
     pub fn plain_text(&self) -> String {
+        self.export_text(SegmentExportMode::Raw)
+    }
+
+    pub fn export_text(&self, mode: SegmentExportMode) -> String {
         match &self.content {
             SegmentContent::UserPrompt { text } => text.clone(),
             SegmentContent::AssistantText { text, thinking, .. } => {
+                let thinking = match mode {
+                    SegmentExportMode::Raw => thinking.trim_end().to_string(),
+                    SegmentExportMode::Plaintext => normalize_markdown_for_plaintext(thinking),
+                };
+                let text = match mode {
+                    SegmentExportMode::Raw => text.trim_end().to_string(),
+                    SegmentExportMode::Plaintext => normalize_markdown_for_plaintext(text),
+                };
+
                 if thinking.trim().is_empty() {
-                    text.clone()
+                    text
                 } else if text.trim().is_empty() {
-                    format!("[thinking]\n{}", thinking.trim_end())
+                    format!("[thinking]\n{thinking}")
                 } else {
-                    format!(
-                        "[thinking]\n{}\n\n[text]\n{}",
-                        thinking.trim_end(),
-                        text.trim_end()
-                    )
+                    format!("[thinking]\n{thinking}\n\n[text]\n{text}")
                 }
             }
             SegmentContent::ToolCard {
