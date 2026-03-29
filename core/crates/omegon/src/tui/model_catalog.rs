@@ -128,7 +128,7 @@ impl ModelCatalog {
                 cost_tier: CostTier::Local,
                 capabilities: vec![Capability::Instruction],
                 description: "Meta's Llama 2, 7B params — fastest local option".to_string(),
-                available: false, // Checked at runtime
+                available: true, // Show in selector; runtime discovery will update
             },
             ModelInfo {
                 id: "ollama:mistral".to_string(),
@@ -139,7 +139,7 @@ impl ModelCatalog {
                 cost_tier: CostTier::Local,
                 capabilities: vec![Capability::Instruction, Capability::Coding],
                 description: "Mistral 7B — excellent instruction-following".to_string(),
-                available: false,
+                available: true,
             },
             ModelInfo {
                 id: "ollama:neural-chat".to_string(),
@@ -150,7 +150,7 @@ impl ModelCatalog {
                 cost_tier: CostTier::Local,
                 capabilities: vec![Capability::Instruction, Capability::Multilingual],
                 description: "Intel's Neural Chat — multilingual, conversation-optimized".to_string(),
-                available: false,
+                available: true,
             },
             ModelInfo {
                 id: "ollama:dolphin-mixtral".to_string(),
@@ -161,7 +161,7 @@ impl ModelCatalog {
                 cost_tier: CostTier::Local,
                 capabilities: vec![Capability::Reasoning, Capability::Coding],
                 description: "Mixtral MoE with extended context — best local reasoning".to_string(),
-                available: false,
+                available: true,
             },
         ]);
 

@@ -60,6 +60,10 @@ impl Selector {
 
     /// Render the selector popup centered in the given area.
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
+        // Two-line layout: label on line 1, description on line 2 (indented)
+        // This ensures proper alignment regardless of label length.
+        
+        // Calculate popup dimensions
         let max_label_w = self
             .options
             .iter()
@@ -72,60 +76,69 @@ impl Selector {
             .map(|o| o.description.len())
             .max()
             .unwrap_or(0);
-        let content_w = (max_label_w + max_desc_w + 6).min(area.width as usize - 4);
-        let popup_w = (content_w + 4) as u16;
-        let popup_h = (self.options.len() as u16 + 2).min(area.height - 2); // +2 for borders
+        
+        // Width: max of (label + marker) or (description + indent)
+        // Height: 2 lines per option (label + desc) + borders
+        let label_line_w = max_label_w + 2; // +2 for marker
+        let desc_line_w = max_desc_w + 4;   // +4 for indent
+        let content_w = label_line_w.max(desc_line_w).min(area.width as usize - 4);
+        let popup_w = (content_w + 4) as u16; // +4 for padding
+        let popup_h = ((self.options.len() * 2) as u16 + 2).min(area.height.saturating_sub(1));
 
-        // Center the popup
+        // Center the popup, but keep it within bounds
         let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
         let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
         let popup_area = Rect::new(x, y, popup_w, popup_h);
 
-        let items: Vec<Line<'static>> = self
-            .options
-            .iter()
-            .enumerate()
-            .map(|(i, opt)| {
-                let is_cursor = i == self.cursor;
-                let marker = if opt.active && is_cursor {
-                    "● "
-                } else if opt.active {
-                    "○ "
-                } else if is_cursor {
-                    "▸ "
-                } else {
-                    "  "
-                };
+        let mut items: Vec<Line<'static>> = Vec::new();
+        
+        for (i, opt) in self.options.iter().enumerate() {
+            let is_cursor = i == self.cursor;
+            let marker = if opt.active && is_cursor {
+                "● "
+            } else if opt.active {
+                "○ "
+            } else if is_cursor {
+                "▸ "
+            } else {
+                "  "
+            };
 
-                let label_style = if is_cursor {
-                    Style::default().fg(t.fg()).add_modifier(Modifier::BOLD)
-                } else if opt.active {
-                    Style::default().fg(t.accent())
-                } else {
-                    Style::default().fg(t.muted())
-                };
+            let label_style = if is_cursor {
+                Style::default().fg(t.fg()).add_modifier(Modifier::BOLD)
+            } else if opt.active {
+                Style::default().fg(t.accent())
+            } else {
+                Style::default().fg(t.muted())
+            };
 
-                let marker_style = if is_cursor {
-                    Style::default().fg(t.accent())
-                } else if opt.active {
-                    Style::default().fg(t.success())
-                } else {
-                    Style::default().fg(t.dim())
-                };
+            let marker_style = if is_cursor {
+                Style::default().fg(t.accent())
+            } else if opt.active {
+                Style::default().fg(t.success())
+            } else {
+                Style::default().fg(t.dim())
+            };
 
-                let mut spans = vec![
-                    Span::styled(marker.to_string(), marker_style),
-                    Span::styled(opt.label.clone(), label_style),
-                ];
-                if !opt.description.is_empty() {
-                    spans.push(Span::styled(
-                        format!("  {}", opt.description),
-                        Style::default().fg(if is_cursor { t.muted() } else { t.dim() }),
-                    ));
-                }
-                Line::from(spans)
-            })
-            .collect();
+            let desc_style = Style::default().fg(if is_cursor { t.muted() } else { t.dim() });
+
+            // Line 1: marker + label
+            items.push(Line::from(vec![
+                Span::styled(marker.to_string(), marker_style),
+                Span::styled(opt.label.clone(), label_style),
+            ]));
+            
+            // Line 2: description (indented under label)
+            if !opt.description.is_empty() {
+                items.push(Line::from(Span::styled(
+                    format!("  {}", opt.description),
+                    desc_style,
+                )));
+            } else {
+                // Empty line to maintain spacing
+                items.push(Line::from(""));
+            }
+        }
 
         let block = Block::default()
             .borders(Borders::ALL)
