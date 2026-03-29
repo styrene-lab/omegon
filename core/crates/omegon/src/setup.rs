@@ -36,6 +36,8 @@ pub struct AgentSetup {
     pub cwd: PathBuf,
     /// Secrets manager — redaction, guards, recipes.
     pub secrets: std::sync::Arc<omegon_secrets::SecretsManager>,
+    /// Resolved web auth state for the embedded dashboard.
+    pub web_auth_state: crate::web::WebAuthState,
     /// Resolved startup-approved secret env pairs for child/headless runs.
     pub session_secret_env: Vec<(String, String)>,
     /// Snapshot of lifecycle + memory state at startup for TUI pre-population.
@@ -431,6 +433,8 @@ impl AgentSetup {
             inference = harness_status.inference_backends.len(),
             container = harness_status.container_runtime.is_some(),
             facts = harness_status.memory.total_facts,
+            web_auth_mode = harness_status.web_auth_mode.as_deref().unwrap_or("unknown"),
+            web_auth_source = harness_status.web_auth_source.as_deref().unwrap_or("unknown"),
             "harness status assembled"
         );
 
@@ -502,6 +506,7 @@ impl AgentSetup {
             conversation,
             cwd,
             secrets: secrets.clone(),
+            web_auth_state,
             session_secret_env,
             resume_info,
             startup_snapshot,

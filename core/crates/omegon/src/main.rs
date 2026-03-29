@@ -998,8 +998,11 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::StartWebDashboard => {
-                let web_state =
-                    web::WebState::new(agent.dashboard_handles.clone(), events_tx.clone());
+                let web_state = web::WebState::with_auth_state(
+                    agent.dashboard_handles.clone(),
+                    events_tx.clone(),
+                    agent.web_auth_state.clone(),
+                );
                 let token = web_state.web_auth.issue_query_token();
                 match web::start_server(web_state, 7842).await {
                     Ok((addr, web_cmd_rx)) => {
