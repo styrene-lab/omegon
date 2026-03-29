@@ -410,7 +410,10 @@ pub async fn run(
                 }
                 omegon_traits::BusRequest::RefreshHarnessStatus => {
                     tracing::debug!("Bus: harness status refresh requested");
-                    // The TUI will pick this up on the next event cycle
+                    let status = crate::status::HarnessStatus::assemble();
+                    if let Ok(status_json) = serde_json::to_value(&status) {
+                        let _ = events.send(AgentEvent::HarnessStatusChanged { status_json });
+                    }
                 }
             }
         }

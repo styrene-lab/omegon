@@ -237,15 +237,33 @@ impl AgentSetup {
         let db_path = memory_dir.join("facts.db");
         let jsonl_path = memory_dir.join("facts.jsonl");
 
-        let mut initial_fact_count: usize = 0;
+        let mut initial_memory_status = crate::status::MemoryStatus {
+            total_facts: 0,
+            active_facts: 0,
+            project_facts: 0,
+            persona_facts: 0,
+            working_facts: 0,
+            episodes: 0,
+            edges: 0,
+            active_persona_mind: None,
+        };
         let mut memory_warning: Option<String> = None;
 
         if let Ok(backend) = omegon_memory::SqliteBackend::open(&db_path) {
             tracing::info!(mind = %mind, db = %db_path.display(), child = is_child, "memory backend loaded");
 
             if let Ok(stats) = backend.stats(&mind).await {
-                initial_fact_count = stats.active_facts;
-                tracing::info!(facts = initial_fact_count, "memory snapshot for TUI");
+                initial_memory_status = crate::status::MemoryStatus {
+                    total_facts: stats.total_facts,
+                    active_facts: stats.active_facts,
+                    project_facts: stats.active_facts,
+                    persona_facts: 0,
+                    working_facts: 0,
+                    episodes: stats.episodes,
+                    edges: stats.edges,
+                    active_persona_mind: None,
+                };
+                tracing::info!(facts = initial_memory_status.active_facts, episodes = initial_memory_status.episodes, edges = initial_memory_status.edges, "memory snapshot for TUI");
             }
 
             // Import JSONL if database is empty (but not in child processes)
@@ -408,17 +426,8 @@ impl AgentSetup {
         harness_status.web_auth_source = Some(web_auth_state.source_name().to_string());
 
         // Populate memory stats from the initial count captured during DB load
-        harness_status.update_memory(crate::status::MemoryStatus {
-            total_facts: initial_fact_count,
-            active_facts: initial_fact_count,
-            project_facts: initial_fact_count, // no persona layer yet
-            persona_facts: 0,
-            working_facts: 0,
-            episodes: 0, // not counted at startup — would require async query
-            edges: 0,
-            active_persona_mind: None,
-        });
-        if initial_fact_count == 0 {
+        harness_status.update_memory(initial_memory_status.clone());
+        if initial_memory_status.active_facts == 0 {
             // update_memory() marks memory_available=true even for an empty-but-working backend;
             // if startup failed earlier, restore the unavailable state and carry the warning.
             if let Some(ref warning) = memory_warning {
@@ -494,7 +503,7 @@ impl AgentSetup {
         };
 
         let startup_snapshot = StartupSnapshot {
-            total_facts: initial_fact_count,
+            total_facts: initial_memory_status.total_facts,
             lifecycle: lifecycle_snapshot,
         };
 

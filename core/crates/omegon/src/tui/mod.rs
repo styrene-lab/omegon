@@ -1520,7 +1520,7 @@ impl App {
             };
             self.instrument_panel.update_mind_facts(
                 self.footer_data.harness.memory.project_facts,
-                self.footer_data.working_memory,
+                self.footer_data.harness.memory.working_facts,
                 self.footer_data.harness.memory.episodes,
                 memory_fill,
             );

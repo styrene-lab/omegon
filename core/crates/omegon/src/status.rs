@@ -9,6 +9,7 @@
 //! - TUI footer: continuous, re-rendered on BusEvent::HarnessStatusChanged
 //! - Web dashboard: broadcast over WebSocket on the existing event bus
 
+use omegon_memory::MemoryBackend as _;
 use rusqlite;
 use serde::{Deserialize, Serialize};
 
@@ -248,6 +249,56 @@ impl HarnessStatus {
 }
 
 impl HarnessStatus {
+    fn project_root_from_cwd(cwd: &std::path::Path) -> std::path::PathBuf {
+        let output = std::process::Command::new("git")
+            .current_dir(cwd)
+            .args(["rev-parse", "--show-toplevel"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .output();
+        if let Ok(output) = output
+            && output.status.success()
+        {
+            let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !root.is_empty() {
+                return std::path::PathBuf::from(root);
+            }
+        }
+        cwd.to_path_buf()
+    }
+
+    fn probe_memory_status(cwd: &std::path::Path) -> Option<MemoryStatus> {
+        let project_root = Self::project_root_from_cwd(cwd);
+        let ai = project_root.join("ai").join("memory");
+        let omegon = project_root.join(".omegon").join("memory");
+        let memory_dir = if omegon.exists() && !ai.exists() {
+            omegon
+        } else {
+            ai
+        };
+        let db_path = memory_dir.join("facts.db");
+        if !db_path.exists() {
+            return None;
+        }
+
+        let backend = omegon_memory::SqliteBackend::open(&db_path).ok()?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+        let stats = rt.block_on(backend.stats("default")).ok()?;
+        Some(MemoryStatus {
+            total_facts: stats.total_facts,
+            active_facts: stats.active_facts,
+            project_facts: stats.active_facts,
+            persona_facts: 0,
+            working_facts: 0,
+            episodes: stats.episodes,
+            edges: stats.edges,
+            active_persona_mind: None,
+        })
+    }
+
     /// Probe the system and assemble the initial HarnessStatus at startup.
     /// This is the bootstrap probe — runs once before the event loop.
     pub fn assemble() -> Self {
@@ -276,6 +327,12 @@ impl HarnessStatus {
 
         // Probe Ollama (common local inference backend)
         status.inference_backends = probe_inference_backends();
+
+        if let Ok(cwd) = std::env::current_dir()
+            && let Some(memory) = Self::probe_memory_status(&cwd)
+        {
+            status.update_memory(memory);
+        }
 
         status
     }

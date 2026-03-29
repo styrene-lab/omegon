@@ -21,6 +21,7 @@
 use async_trait::async_trait;
 use omegon_traits::*;
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use omegon_memory::{
@@ -38,6 +39,9 @@ pub struct MemoryFeature {
     mind: String,
     /// Pinned fact IDs for working memory
     working_memory: Mutex<Vec<String>>,
+    /// Set by execute() when a successful memory mutation/focus change should
+    /// trigger a refreshed HarnessStatus snapshot after ToolEnd delivery.
+    pending_status_refresh: AtomicBool,
 }
 
 impl MemoryFeature {
@@ -48,6 +52,7 @@ impl MemoryFeature {
             renderer: MarkdownRenderer,
             mind,
             working_memory: Mutex::new(Vec::new()),
+            pending_status_refresh: AtomicBool::new(false),
         }
     }
 
@@ -292,6 +297,7 @@ impl Feature for MemoryFeature {
                     StoreAction::Reinforced => format!("Reinforced existing fact: {}", content),
                     StoreAction::Deduplicated => "Duplicate — fact already exists".to_string(),
                 };
+                self.pending_status_refresh.store(true, Ordering::Relaxed);
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: msg }],
                     details: serde_json::json!({ "id": result.fact.id, "action": format!("{:?}", result.action) }),
@@ -418,6 +424,7 @@ impl Feature for MemoryFeature {
                     .archive_facts(&id_refs)
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
+                self.pending_status_refresh.store(true, Ordering::Relaxed);
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: format!("Archived {count} fact(s)."),
@@ -446,6 +453,7 @@ impl Feature for MemoryFeature {
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
+                self.pending_status_refresh.store(true, Ordering::Relaxed);
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: format!("Superseded {} → new fact {}", fact_id, new_fact.id),
@@ -464,6 +472,7 @@ impl Feature for MemoryFeature {
                     })
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
+                self.pending_status_refresh.store(true, Ordering::Relaxed);
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: format!(
@@ -485,6 +494,7 @@ impl Feature for MemoryFeature {
                     .unwrap_or_default();
                 let count = ids.len();
                 self.working_memory.lock().unwrap().extend(ids);
+                self.pending_status_refresh.store(true, Ordering::Relaxed);
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: format!("Pinned {count} fact(s) to working memory."),
@@ -494,6 +504,7 @@ impl Feature for MemoryFeature {
             }
             crate::tool_registry::memory::MEMORY_RELEASE => {
                 self.working_memory.lock().unwrap().clear();
+                self.pending_status_refresh.store(true, Ordering::Relaxed);
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: "Working memory cleared.".into(),
@@ -600,12 +611,38 @@ impl Feature for MemoryFeature {
                         "Duplicate lifecycle fact — already exists".to_string()
                     }
                 };
+                self.pending_status_refresh.store(true, Ordering::Relaxed);
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text: msg }],
                     details: serde_json::json!({ "action": format!("{:?}", result.action), "id": result.fact.id }),
                 })
             }
             _ => anyhow::bail!("Unknown memory tool: {tool_name}"),
+        }
+    }
+
+    fn on_event(&mut self, event: &BusEvent) -> Vec<BusRequest> {
+        match event {
+            BusEvent::ToolEnd {
+                name,
+                is_error,
+                ..
+            } if !is_error
+                && matches!(
+                    name.as_str(),
+                    crate::tool_registry::memory::MEMORY_STORE
+                        | crate::tool_registry::memory::MEMORY_ARCHIVE
+                        | crate::tool_registry::memory::MEMORY_SUPERSEDE
+                        | crate::tool_registry::memory::MEMORY_CONNECT
+                        | crate::tool_registry::memory::MEMORY_FOCUS
+                        | crate::tool_registry::memory::MEMORY_RELEASE
+                        | crate::tool_registry::memory::MEMORY_INGEST_LIFECYCLE
+                )
+                && self.pending_status_refresh.swap(false, Ordering::Relaxed) =>
+            {
+                vec![BusRequest::RefreshHarnessStatus]
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -781,6 +818,62 @@ mod tests {
             let wm = feature.working_memory.lock().unwrap();
             assert!(wm.is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn memory_store_requests_harness_refresh_on_tool_end() {
+        let backend: Arc<dyn MemoryBackend> = Arc::new(InMemoryBackend::new());
+        let mut feature = MemoryFeature::new(backend, "test".into());
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        feature
+            .execute(
+                "memory_store",
+                "c1",
+                serde_json::json!({"section": "Architecture", "content": "System uses microservices"}),
+                cancel,
+            )
+            .await
+            .unwrap();
+
+        let requests = feature.on_event(&BusEvent::ToolEnd {
+            id: "c1".into(),
+            name: crate::tool_registry::memory::MEMORY_STORE.into(),
+            result: ToolResult {
+                content: vec![],
+                details: Value::Null,
+            },
+            is_error: false,
+        });
+        assert!(matches!(requests.as_slice(), [BusRequest::RefreshHarnessStatus]));
+    }
+
+    #[tokio::test]
+    async fn memory_focus_requests_harness_refresh_on_tool_end() {
+        let backend: Arc<dyn MemoryBackend> = Arc::new(InMemoryBackend::new());
+        let mut feature = MemoryFeature::new(backend, "test".into());
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        feature
+            .execute(
+                "memory_focus",
+                "c1",
+                serde_json::json!({"fact_ids": ["f1", "f2"]}),
+                cancel,
+            )
+            .await
+            .unwrap();
+
+        let requests = feature.on_event(&BusEvent::ToolEnd {
+            id: "c1".into(),
+            name: crate::tool_registry::memory::MEMORY_FOCUS.into(),
+            result: ToolResult {
+                content: vec![],
+                details: Value::Null,
+            },
+            is_error: false,
+        });
+        assert!(matches!(requests.as_slice(), [BusRequest::RefreshHarnessStatus]));
     }
 
     #[tokio::test]

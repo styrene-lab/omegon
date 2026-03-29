@@ -1122,7 +1122,7 @@ fn harness_status_changed_updates_footer() {
     assert_eq!(app.footer_data.working_memory, 4);
     app.instrument_panel.update_mind_facts(
         app.footer_data.harness.memory.project_facts,
-        app.footer_data.working_memory,
+        app.footer_data.harness.memory.working_facts,
         app.footer_data.harness.memory.episodes,
         0.08,
     );
@@ -1163,6 +1163,31 @@ fn harness_status_changed_detects_persona_transition() {
     assert!(app.previous_harness_status.is_some());
     // Current footer should have the persona
     assert!(app.footer_data.harness.active_persona.is_some());
+}
+
+#[test]
+fn harness_status_memory_drives_instrument_panel_working_row() {
+    let mut app = test_app();
+    app.footer_data.working_memory = 0;
+    app.footer_data.harness.memory = crate::status::MemoryStatus {
+        total_facts: 18,
+        active_facts: 18,
+        project_facts: 18,
+        persona_facts: 0,
+        working_facts: 4,
+        episodes: 2,
+        edges: 0,
+        active_persona_mind: None,
+    };
+
+    app.instrument_panel.update_mind_facts(
+        app.footer_data.harness.memory.project_facts,
+        app.footer_data.harness.memory.working_facts,
+        app.footer_data.harness.memory.episodes,
+        0.08,
+    );
+
+    assert_eq!(app.instrument_panel.debug_mind_fact_count(1), Some(4));
 }
 
 #[test]
