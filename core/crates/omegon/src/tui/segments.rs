@@ -1192,35 +1192,48 @@ fn render_tool_card(
         .render(card_inner, buf);
 
     // ── Post-render: OSC 8 hyperlinks for single-file tool paths ────────────
-    if matches!(name, "read" | "edit" | "write" | "view")
+    if matches!(name, "read" | "write" | "view")
         && let Some(args) = detail_args
     {
-        let file_path = match name {
-            "edit" => serde_json::from_str::<serde_json::Value>(args)
-                .ok()
-                .and_then(|v| {
-                    v.get("file")
-                        .or(v.get("path"))
-                        .and_then(|f| f.as_str().map(String::from))
-                })
-                .unwrap_or_else(|| args.lines().next().unwrap_or(args).trim().to_string()),
-            _ => args.lines().next().unwrap_or(args).trim().to_string(),
-        };
+        let file_path = args.lines().next().unwrap_or(args).trim().to_string();
         if !file_path.is_empty() && card_inner.height > 0 {
-            let url = format!("file://{file_path}");
-            let link_area = Rect {
-                x: card_inner.x,
-                y: card_inner.y,
-                width: card_inner.width.min(file_path.len() as u16),
-                height: 1,
-            };
-            let link = hyperrat::Link::new(file_path, url).style(
-                Style::default()
-                    .fg(t.accent_muted())
-                    .bg(bg)
-                    .add_modifier(Modifier::UNDERLINED),
-            );
-            link.render(link_area, buf);
+            let prefix = "▸ ";
+            let row_style = Style::default().bg(bg);
+            let link_style = Style::default()
+                .fg(t.accent_muted())
+                .bg(bg)
+                .add_modifier(Modifier::UNDERLINED);
+
+            for x in card_inner.left()..card_inner.right() {
+                if let Some(cell) = buf.cell_mut((x, card_inner.y)) {
+                    cell.set_symbol(" ");
+                    cell.set_style(row_style);
+                }
+            }
+
+            if card_inner.width >= prefix.len() as u16 {
+                if let Some(cell) = buf.cell_mut((card_inner.x, card_inner.y)) {
+                    cell.set_symbol("▸");
+                    cell.set_style(Style::default().fg(t.accent_muted()).bg(bg));
+                }
+                if let Some(cell) = buf.cell_mut((card_inner.x + 1, card_inner.y)) {
+                    cell.set_symbol(" ");
+                    cell.set_style(row_style);
+                }
+
+                let available = card_inner.width.saturating_sub(prefix.len() as u16);
+                if available > 0 {
+                    let url = format!("file://{file_path}");
+                    let link_area = Rect {
+                        x: card_inner.x + prefix.len() as u16,
+                        y: card_inner.y,
+                        width: available,
+                        height: 1,
+                    };
+                    let link = hyperrat::Link::new(file_path, url).style(link_style);
+                    link.render(link_area, buf);
+                }
+            }
         }
     }
 }
@@ -1755,6 +1768,51 @@ mod tests {
             "should have display name for ls: {text}"
         );
         assert!(text.contains("▸"), "completed tools should use the same teal indicator family as the tool instrument panel: {text}");
+    }
+
+    #[test]
+    fn read_tool_hyperlink_row_clears_stale_suffix_when_path_shrinks() {
+        let long = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "read".into(),
+                args_summary: None,
+                detail_args: Some("/Users/cwilson/workspace/black-meridian/omegon/core/crates/omegon/src/tui/really_long_filename.rs".into()),
+                result_summary: Some("fn main() {}".into()),
+                detail_result: Some("fn main() {}".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        };
+        let short = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "read".into(),
+                args_summary: None,
+                detail_args: Some("src/tui/mod.rs".into()),
+                result_summary: Some("mod tui;".into()),
+                detail_result: Some("mod tui;".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        };
+
+        let (area, mut buf) = make_buf(72, 8);
+        long.render(area, &mut buf, &Alpharius);
+        short.render(area, &mut buf, &Alpharius);
+
+        let row = (1..area.width.saturating_sub(1))
+            .map(|x| buf[(x, 1)].symbol())
+            .collect::<String>();
+        assert!(row.contains("src/tui/mod.rs"), "short path should render in filename row: {row}");
+        assert!(
+            !row.contains("really_long_filename"),
+            "filename row should not keep stale suffix text from prior render: {row}"
+        );
     }
 
     #[test]
