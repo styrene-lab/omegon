@@ -357,19 +357,8 @@ impl App {
         let catalog = self::model_catalog::ModelCatalog::new();
         let mut options: Vec<selector::SelectOption> = Vec::new();
         
-        // Determine if Ollama is available
-        let ollama_available = self.previous_harness_status.as_ref()
-            .map(|s| s.inference_backends.iter()
-                .any(|b| b.name == "Ollama" && b.available))
-            .unwrap_or(false);
-        
         // Group models by provider for visual organization
         for (provider_name, models) in &catalog.providers {
-            // Skip Ollama models if Ollama is not running
-            if provider_name == "Ollama" && !ollama_available {
-                continue;
-            }
-            
             for model in models {
                 // Format: "Provider: Model Name — description (context, cost tier, capabilities)"
                 let context = model.context_str();

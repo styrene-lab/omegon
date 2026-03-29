@@ -164,6 +164,20 @@ struct Cli {
     /// Write logs to a file in addition to stderr.
     #[arg(long, global = true)]
     log_file: Option<PathBuf>,
+
+    /// Set by Ollama when launching via `ollama launch omegon`.
+    /// Signals that we're running as an Ollama integration.
+    #[arg(long, global = true)]
+    ollama_integration: bool,
+
+    /// Ollama-provided model (set by `ollama launch omegon --model <model>`).
+    /// Overrides --model if present.
+    #[arg(long, global = true)]
+    ollama_model: Option<String>,
+
+    /// Auto-confirm prompts (set by `ollama launch omegon --yes`).
+    #[arg(short = 'y', long, global = true)]
+    yes: bool,
 }
 
 #[derive(Subcommand)]
@@ -312,7 +326,17 @@ enum PluginAction {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    // ─── Ollama integration detection ────────────────────────────────────
+    // When launched via `ollama launch omegon`, the --ollama-model flag
+    // (set by Ollama) should override the --model CLI flag.
+    if cli.ollama_integration {
+        if let Some(ref model) = cli.ollama_model {
+            cli.model = model.clone();
+            tracing::info!(model = %model, "using Ollama-provided model");
+        }
+    }
 
     // ─── Logging setup ──────────────────────────────────────────────────
     // Priority: RUST_LOG env > --log-level flag > "info" default
