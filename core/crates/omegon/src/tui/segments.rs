@@ -743,7 +743,7 @@ fn render_assistant_text(
 
     let mut lines: Vec<Line<'_>> = Vec::new();
 
-    // Assistant identity line.
+    // Assistant identity line — identify the source, not the current phase.
     lines.push(Line::from(vec![
         Span::styled(
             format!("{} ", presentation.sigil),
@@ -752,10 +752,7 @@ fn render_assistant_text(
                 .bg(bg)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            if complete { "response" } else { "thinking" },
-            Style::default().fg(t.border_dim()).bg(bg),
-        ),
+        Span::styled("assistant", Style::default().fg(t.border_dim()).bg(bg)),
     ]));
 
     // Meta tag line: model / provider / tier — dim secondary header
@@ -767,14 +764,14 @@ fn render_assistant_text(
         )));
     }
 
-    // Thinking block — stream full reasoning live, collapse after completion.
+    // Reasoning block — stream full reasoning live, collapse after completion.
     if !thinking.is_empty() {
         let think_lines: Vec<&str> = thinking.lines().collect();
         let show = if complete { think_lines.len().min(6) } else { think_lines.len() };
         lines.push(Line::from(vec![
             Span::styled("◌ ", Style::default().fg(t.border()).bg(bg)),
             Span::styled(
-                "thinking ",
+                "reasoning ",
                 Style::default()
                     .fg(t.dim())
                     .bg(bg)
@@ -804,6 +801,19 @@ fn render_assistant_text(
             "  ─ ─ ─",
             Style::default().fg(t.border_dim()).bg(bg),
         )));
+    }
+
+    if !text.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("◎ ", Style::default().fg(t.accent()).bg(bg)),
+            Span::styled(
+                "answer",
+                Style::default()
+                    .fg(t.accent_muted())
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
     }
 
     // Assistant text with markdown structural highlighting
@@ -1604,8 +1614,12 @@ mod tests {
             "assistant header should include Ω sigil: {text}"
         );
         assert!(
-            text.contains("response"),
-            "assistant header should describe the segment role: {text}"
+            text.contains("assistant"),
+            "assistant header should identify the source role: {text}"
+        );
+        assert!(
+            text.contains("answer"),
+            "assistant content should label the answer block explicitly: {text}"
         );
         assert!(
             text.contains("╭") || text.contains("╰") || text.contains("│"),
@@ -1688,7 +1702,7 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_assistant_renders_full_thinking_live() {
+    fn incomplete_assistant_renders_full_reasoning_live() {
         let seg = Segment {
             meta: SegmentMeta::default(),
             content: SegmentContent::AssistantText {
@@ -1700,15 +1714,17 @@ mod tests {
         let (area, mut buf) = make_buf(60, 16);
         seg.render(area, &mut buf, &Alpharius);
         let text = buf_text(&buf, area);
-        assert!(text.contains("l8"), "live thinking should render the tail: {text}");
+        assert!(text.contains("assistant"), "assistant header should name the source: {text}");
+        assert!(text.contains("reasoning"), "reasoning block should be labeled explicitly: {text}");
+        assert!(text.contains("l8"), "live reasoning should render the tail: {text}");
         assert!(
             !text.contains("⋯ 2 more"),
-            "incomplete assistant thinking should not be collapsed: {text}"
+            "incomplete assistant reasoning should not be collapsed: {text}"
         );
     }
 
     #[test]
-    fn complete_assistant_collapses_long_thinking_summary() {
+    fn complete_assistant_collapses_long_reasoning_summary_and_labels_answer() {
         let seg = Segment {
             meta: SegmentMeta::default(),
             content: SegmentContent::AssistantText {
@@ -1720,8 +1736,11 @@ mod tests {
         let (area, mut buf) = make_buf(60, 16);
         seg.render(area, &mut buf, &Alpharius);
         let text = buf_text(&buf, area);
-        assert!(text.contains("l6"), "collapsed thinking should keep the preview: {text}");
-        assert!(text.contains("⋯ 2 more"), "collapsed thinking should show a summary hint: {text}");
+        assert!(text.contains("assistant"), "assistant header should remain stable after completion: {text}");
+        assert!(text.contains("reasoning"), "reasoning block should stay labeled after completion: {text}");
+        assert!(text.contains("answer"), "answer block should be labeled explicitly: {text}");
+        assert!(text.contains("l6"), "collapsed reasoning should keep the preview: {text}");
+        assert!(text.contains("⋯ 2 more"), "collapsed reasoning should show a summary hint: {text}");
     }
 
     #[test]
