@@ -52,13 +52,14 @@ done
 # ── Color support ─────────────────────────────────────────────
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-  BOLD="\033[1m"
-  DIM="\033[2m"
-  CYAN="\033[0;36m"
-  GREEN="\033[0;32m"
-  YELLOW="\033[0;33m"
-  RED="\033[0;31m"
-  RESET="\033[0m"
+  ESC=$(printf '\033')
+  BOLD="${ESC}[1m"
+  DIM="${ESC}[2m"
+  CYAN="${ESC}[0;36m"
+  GREEN="${ESC}[0;32m"
+  YELLOW="${ESC}[0;33m"
+  RED="${ESC}[0;31m"
+  RESET="${ESC}[0m"
 else
   BOLD="" DIM="" CYAN="" GREEN="" YELLOW="" RED="" RESET=""
 fi
@@ -168,23 +169,20 @@ if [ -x "${INSTALL_DIR}/${BINARY}" ]; then
   [ -z "$EXISTING" ] && EXISTING="unknown"
 fi
 
-printf "${DIM}  ┌─────────────────────────────────────────────────────┐${RESET}\n"
-printf "${DIM}  │${RESET}  ${BOLD}Installation Plan${RESET}                                   ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}                                                       ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}  ${CYAN}Version:${RESET}    %-42s ${DIM}│${RESET}\n" "${VERSION}"
-printf "${DIM}  │${RESET}  ${CYAN}Platform:${RESET}   %-42s ${DIM}│${RESET}\n" "${PLATFORM}"
-printf "${DIM}  │${RESET}  ${CYAN}Install to:${RESET} %-42s ${DIM}│${RESET}\n" "~/.omegon/versions/${VERSION}/omegon"
-printf "${DIM}  │${RESET}  ${CYAN}Symlink at:${RESET} %-42s ${DIM}│${RESET}\n" "${INSTALL_DIR}/${BINARY}"
+printf "  ${BOLD}Installation Plan${RESET}\n"
+printf "  ${DIM}────────────────────────────────────────${RESET}\n"
+printf "  ${CYAN}Version:${RESET}     %s\n" "${VERSION}"
+printf "  ${CYAN}Platform:${RESET}    %s\n" "${PLATFORM}"
+printf "  ${CYAN}Install to:${RESET}  ~/.omegon/versions/%s/omegon\n" "${VERSION}"
+printf "  ${CYAN}Symlink at:${RESET}  %s\n" "${INSTALL_DIR}/${BINARY}"
 if [ -n "$EXISTING" ]; then
-printf "${DIM}  │${RESET}  ${YELLOW}Replaces:${RESET}   %-42s ${DIM}│${RESET}\n" "${EXISTING}"
+  printf "  ${YELLOW}Replaces:${RESET}    %s\n" "${EXISTING}"
 fi
 if [ "$NEEDS_SUDO" = true ]; then
-printf "${DIM}  │${RESET}  ${YELLOW}Requires:${RESET}   %-42s ${DIM}│${RESET}\n" "sudo (${INSTALL_DIR} not writable)"
+  printf "  ${YELLOW}Requires:${RESET}    sudo (%s is not writable)\n" "${INSTALL_DIR}"
 fi
-printf "${DIM}  │${RESET}                                                       ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}  ${DIM}Source: github.com/${REPO}${RESET}     ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}  ${DIM}Integrity: SHA-256 checksum verification${RESET}            ${DIM}│${RESET}\n"
-printf "${DIM}  └─────────────────────────────────────────────────────┘${RESET}\n"
+printf "  ${DIM}Source: github.com/%s${RESET}\n" "${REPO}"
+printf "  ${DIM}Integrity: SHA-256 checksum verification${RESET}\n"
 echo ""
 
 # ── Confirmation ──────────────────────────────────────────────
@@ -313,7 +311,7 @@ ok "Binary validated"
 VERSION_DIR="${HOME}/.omegon/versions/${VERSION}"
 INSTALL_TARGET="${INSTALL_DIR}/${BINARY}"
 
-step "Installing to versioned directory ${VERSION_DIR}/${BINARY}..."
+step "Installing ${VERSION}..."
 
 # Create versioned install directory
 mkdir -p "$VERSION_DIR" || die "could not create version directory ${VERSION_DIR}"
@@ -417,29 +415,27 @@ fi
 # ── Summary ───────────────────────────────────────────────────
 
 echo ""
-printf "${BOLD}${GREEN}  ✓ Omegon ${VERSION} installed successfully${RESET}\n"
+printf "${BOLD}${GREEN}  ✓ Omegon %s installed successfully${RESET}\n" "${VERSION}"
 if [ -n "$INSTALLED_VERSION" ]; then
-  printf "${DIM}    ${INSTALLED_VERSION}${RESET}\n"
+  printf "${DIM}    %s${RESET}\n" "${INSTALLED_VERSION}"
 fi
-printf "${DIM}    Receipt: ${RECEIPT_DIR}/install-receipt.json${RESET}\n"
+printf "${DIM}    Receipt: %s/install-receipt.json${RESET}\n" "${RECEIPT_DIR}"
 echo ""
-printf "${DIM}  ┌─────────────────────────────────────────────────┐${RESET}\n"
-printf "${DIM}  │${RESET}  ${BOLD}Quick start:${RESET}                                    ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}                                                   ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}  ${CYAN}With API key:${RESET}                                  ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}    export ANTHROPIC_API_KEY=\"sk-ant-...\"          ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}    omegon                                         ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}                                                   ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}  ${CYAN}With Claude Pro/Max subscription:${RESET}               ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}    omegon login                                   ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}                                                   ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}  ${CYAN}One-shot prompt:${RESET}                                ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}    omegon --prompt \"hello world\"                  ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}                                                   ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}  ${DIM}Uninstall:${RESET}                                     ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}    ${DIM}rm ${INSTALL_DIR}/${BINARY}${RESET}                    ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}    ${DIM}rm -rf ~/.omegon/versions${RESET}                      ${DIM}│${RESET}\n"
-printf "${DIM}  │${RESET}    ${DIM}rm -rf ~/.config/omegon${RESET}                        ${DIM}│${RESET}\n"
-printf "${DIM}  └─────────────────────────────────────────────────┘${RESET}\n"
+printf "  ${BOLD}Quick start${RESET}\n"
+printf "  ${DIM}────────────────────────────────────────${RESET}\n"
+printf "  ${CYAN}With API key:${RESET}\n"
+printf "    ${DIM}export ANTHROPIC_API_KEY=\"sk-ant-...\"${RESET}\n"
+printf "    omegon\n"
+echo ""
+printf "  ${CYAN}With Claude Pro/Max subscription:${RESET}\n"
+printf "    omegon login\n"
+echo ""
+printf "  ${CYAN}One-shot:${RESET}\n"
+printf "    omegon --prompt \"hello world\"\n"
+echo ""
+printf "  ${DIM}Uninstall:${RESET}\n"
+printf "    ${DIM}rm %s/%s${RESET}\n" "${INSTALL_DIR}" "${BINARY}"
+printf "    ${DIM}rm -rf ~/.omegon/versions${RESET}\n"
+printf "    ${DIM}rm -rf ~/.config/omegon${RESET}\n"
 echo ""
 # Rebuilt 2026-03-25T22:34:14Z
