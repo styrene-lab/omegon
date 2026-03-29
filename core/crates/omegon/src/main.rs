@@ -21,6 +21,7 @@ pub mod bus;
 mod cleave;
 mod context;
 pub mod features;
+mod ipc;
 mod migrate;
 mod smoke;
 mod switch;
@@ -742,6 +743,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     let (command_tx, mut command_rx) = tokio::sync::mpsc::channel::<tui::TuiCommand>(16);
     let pending_compact = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let web_command_tx = command_tx.clone(); // For forwarding web dashboard commands
+    let ipc_command_tx = command_tx.clone(); // For forwarding IPC commands
 
     // Broadcast initial HarnessStatus — bridges BusEvent (emitted in setup)
     // to AgentEvent (consumed by TUI + WebSocket)
@@ -855,6 +857,23 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             tracing::error!("TUI error: {e}");
         }
     });
+
+    // ─── IPC server (native Auspex/host control plane) ────────────────
+    let ipc_cancel = tokio_util::sync::CancellationToken::new();
+    {
+        let ipc_cfg = ipc::IpcServerConfig::from_cwd(
+            &agent.cwd,
+            env!("CARGO_PKG_VERSION"),
+        );
+        ipc::start_ipc_server(
+            ipc_cfg,
+            agent.dashboard_handles.clone(),
+            events_tx.clone(),
+            ipc_command_tx,
+            shared_cancel.clone(),
+            ipc_cancel.clone(),
+        );
+    }
 
     // ─── Emit session start to bus features ────────────────────────────
     agent.bus.emit(&omegon_traits::BusEvent::SessionStart {

@@ -318,6 +318,16 @@ pub struct IpcDesignCounts {
     pub open_questions: usize,
 }
 
+impl Default for IpcDesignCounts {
+    fn default() -> Self {
+        Self {
+            total: 0, seed: 0, exploring: 0, resolved: 0, decided: 0,
+            implementing: 0, implemented: 0, blocked: 0, deferred: 0,
+            open_questions: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpcFocusedNode {
     pub id: String,
