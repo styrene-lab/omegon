@@ -641,12 +641,8 @@ impl App {
 
         match kind {
             SelectorKind::Model => {
-                self.update_settings(|s| {
-                    s.model = value.clone();
-                    s.context_window = crate::settings::Settings::new(&value).context_window;
-                });
                 let _ = tx.try_send(TuiCommand::SetModel(value.clone()));
-                Some(format!("Model → {value}"))
+                Some(format!("Switching model → {value}"))
             }
             SelectorKind::ThinkingLevel => {
                 if let Some(level) = crate::settings::ThinkingLevel::parse(&value) {
@@ -2102,12 +2098,8 @@ impl App {
                     SlashResult::Handled
                 } else {
                     // Direct switch: /model anthropic:claude-opus-4-6
-                    self.update_settings(|s| {
-                        s.model = args.to_string();
-                        s.context_window = crate::settings::Settings::new(args).context_window;
-                    });
                     let _ = tx.try_send(TuiCommand::SetModel(args.to_string()));
-                    SlashResult::Display(format!("Model → {args}"))
+                    SlashResult::Display(format!("Switching model → {args}"))
                 }
             }
 

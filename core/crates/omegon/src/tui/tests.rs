@@ -1012,6 +1012,49 @@ fn harness_status_changed_detects_persona_transition() {
 }
 
 #[test]
+fn slash_model_command_does_not_optimistically_mutate_settings() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let original_model = app.settings().model.clone();
+
+    let result = app.handle_slash_command("/model openai-codex:gpt-5.4", &tx);
+
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert_eq!(
+        app.settings().model,
+        original_model,
+        "/model should wait for runtime confirmation before changing visible settings"
+    );
+}
+
+#[test]
+fn model_selector_confirmation_does_not_optimistically_mutate_settings() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let original_model = app.settings().model.clone();
+
+    app.selector = Some(selector::Selector::new(
+        "Select Model",
+        vec![selector::SelectOption {
+            value: "openai-codex:gpt-5.4".into(),
+            label: "GPT-5.4".into(),
+            description: "Codex".into(),
+            active: false,
+        }],
+    ));
+    app.selector_kind = Some(SelectorKind::Model);
+
+    let result = app.confirm_selector(&tx);
+
+    assert_eq!(result.as_deref(), Some("Switching model → openai-codex:gpt-5.4"));
+    assert_eq!(
+        app.settings().model,
+        original_model,
+        "model selector should wait for runtime confirmation before changing visible settings"
+    );
+}
+
+#[test]
 fn footer_syncs_model_provider_context_and_thinking_from_settings() {
     let mut app = test_app();
     app.update_settings(|s| {
