@@ -24,6 +24,125 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Native IPC contract — transport-facing Auspex/Omegon boundary
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub const IPC_PROTOCOL_VERSION: u16 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpcEnvelopeKind {
+    Hello,
+    Request,
+    Response,
+    Event,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IpcError {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IpcEnvelope {
+    pub protocol_version: u16,
+    pub kind: IpcEnvelopeKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<[u8; 16]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<IpcError>,
+}
+
+impl IpcEnvelope {
+    pub fn encode_msgpack(&self) -> Result<Vec<u8>, rmp_serde::encode::Error> {
+        rmp_serde::to_vec_named(self)
+    }
+
+    pub fn decode_msgpack(raw: &[u8]) -> Result<Self, rmp_serde::decode::Error> {
+        rmp_serde::from_slice(raw)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HelloRequest {
+    pub client_name: String,
+    pub client_version: String,
+    pub supported_protocol_versions: Vec<u16>,
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HelloResponse {
+    pub protocol_version: u16,
+    pub omegon_version: String,
+    pub server_name: String,
+    pub server_pid: u32,
+    pub cwd: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PingRequest {
+    pub nonce: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PingResponse {
+    pub nonce: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubmitPromptRequest {
+    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcceptedResponse {
+    pub accepted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubscriptionRequest {
+    pub events: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubscriptionResponse {
+    pub events: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IpcStateSnapshot {
+    pub schema_version: u16,
+    pub omegon_version: String,
+    pub session: Value,
+    pub design_tree: Value,
+    pub openspec: Value,
+    pub cleave: Value,
+    pub harness: Value,
+    pub health: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IpcEvent {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<Value>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Tool types
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -436,5 +555,66 @@ pub trait SessionHook: Send + Sync {
     }
     async fn on_session_end(&mut self, _stats: &SessionStats) -> anyhow::Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn ipc_envelope_msgpack_roundtrip_preserves_contract_shape() {
+        let env = IpcEnvelope {
+            protocol_version: IPC_PROTOCOL_VERSION,
+            kind: IpcEnvelopeKind::Request,
+            request_id: Some(*b"1234567890abcdef"),
+            method: Some("get_state".into()),
+            payload: Some(json!({"verbose": false})),
+            error: None,
+        };
+
+        let raw = env.encode_msgpack().unwrap();
+        let decoded = IpcEnvelope::decode_msgpack(&raw).unwrap();
+
+        assert_eq!(decoded, env);
+    }
+
+    #[test]
+    fn hello_request_roundtrip_is_stable() {
+        let req = HelloRequest {
+            client_name: "auspex".into(),
+            client_version: "0.1.0".into(),
+            supported_protocol_versions: vec![1],
+            capabilities: vec!["state.snapshot".into(), "events.stream".into()],
+        };
+
+        let raw = rmp_serde::to_vec_named(&req).unwrap();
+        let decoded: HelloRequest = rmp_serde::from_slice(&raw).unwrap();
+        assert_eq!(decoded, req);
+    }
+
+    #[test]
+    fn ipc_state_snapshot_serializes_public_fields() {
+        let snap = IpcStateSnapshot {
+            schema_version: 1,
+            omegon_version: "0.15.4-rc.20".into(),
+            session: json!({"turns": 1}),
+            design_tree: json!({"counts": {"total": 0}}),
+            openspec: json!({"total_tasks": 0}),
+            cleave: json!({"active": false}),
+            harness: json!({"memory_available": true}),
+            health: json!({"state": "ready"}),
+        };
+
+        let v = serde_json::to_value(&snap).unwrap();
+        assert!(v.get("schema_version").is_some());
+        assert!(v.get("omegon_version").is_some());
+        assert!(v.get("session").is_some());
+        assert!(v.get("design_tree").is_some());
+        assert!(v.get("openspec").is_some());
+        assert!(v.get("cleave").is_some());
+        assert!(v.get("harness").is_some());
+        assert!(v.get("health").is_some());
     }
 }
