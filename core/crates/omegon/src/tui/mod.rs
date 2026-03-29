@@ -168,6 +168,9 @@ pub struct App {
     update_rx: Option<crate::update::UpdateReceiver>,
     /// Update checker sender — allows re-checking when channel changes.
     update_tx: Option<crate::update::UpdateSender>,
+    /// Headless login prompt — when set, the next Enter submits to the login
+    /// flow instead of the agent. Populated by the LoginPrompt callback.
+    login_prompt_tx: std::sync::Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<String>>>>,
     /// Whether we enabled the Kitty keyboard protocol (must pop on cleanup).
     keyboard_enhancement: bool,
     /// Whether crossterm mouse capture is enabled. Disable this to let the
@@ -280,6 +283,7 @@ impl App {
             tutorial_overlay: None,
             update_rx: None,
             update_tx: None,
+            login_prompt_tx: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
             keyboard_enhancement: false,
             mouse_capture_enabled: true,
         }
@@ -3167,6 +3171,9 @@ pub struct TuiConfig {
     pub initial_prompt: Option<String>,
     /// Start with tutorial overlay active (--tutorial flag).
     pub start_tutorial: bool,
+    /// Shared channel for headless login prompt input. The login task stores a
+    /// oneshot sender here; the TUI Enter handler consumes it.
+    pub login_prompt_tx: std::sync::Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<String>>>>,
 }
 
 /// Initial state snapshot gathered during setup, before the TUI event loop starts.
@@ -3727,6 +3734,7 @@ pub async fn run_tui(
     crate::update::spawn_check(update_tx.clone(), channel);
     app.update_rx = Some(update_rx);
     app.update_tx = Some(update_tx);
+    app.login_prompt_tx = config.login_prompt_tx;
 
     // Pre-populate from initial state so first frame isn't empty
     app.footer_data.total_facts = config.initial.total_facts;
@@ -4369,6 +4377,14 @@ pub async fn run_tui(
                         (KeyCode::Enter, _) => {
                             let text = app.editor.take_text();
                             if !text.is_empty() {
+                                // Check if a headless login prompt is waiting for input
+                                if let Ok(mut guard) = app.login_prompt_tx.try_lock() {
+                                    if let Some(tx) = guard.take() {
+                                        let _ = tx.send(text.clone());
+                                        app.conversation.push_system(&format!("> {text}"));
+                                        continue;
+                                    }
+                                }
                                 // Slash commands always execute immediately
                                 if text.starts_with('/') {
                                     match app.handle_slash_command(&text, &command_tx) {

@@ -10,7 +10,9 @@ use crate::status::ProviderStatus;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 // ─── Canonical provider credential map ──────────────────────────────────────
 // Single source of truth for every provider's auth.json key, env vars,
@@ -543,22 +545,86 @@ fn generate_pkce() -> (String, String) {
     (verifier, challenge)
 }
 
+// ─── Headless detection ────────────────────────────────────────────────────
+
+/// Detect headless environments where a browser cannot be opened locally.
+/// Returns true for SSH sessions and Linux systems without a display server.
+pub fn is_headless() -> bool {
+    // SSH session — browser would open on the remote, not the user's machine
+    if std::env::var("SSH_CONNECTION").is_ok() || std::env::var("SSH_CLIENT").is_ok() {
+        return true;
+    }
+    // Linux without display server
+    #[cfg(target_os = "linux")]
+    if std::env::var("DISPLAY").is_err() && std::env::var("WAYLAND_DISPLAY").is_err() {
+        return true;
+    }
+    false
+}
+
+/// Parse `code` and `state` query parameters from a full callback URL pasted
+/// by the user (e.g. `http://localhost:53692/callback?code=abc&state=xyz`).
+fn parse_callback_url(url: &str) -> anyhow::Result<(String, String)> {
+    let url = url.trim();
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|_| anyhow::anyhow!("Invalid URL. Paste the full URL from your browser's address bar."))?;
+    let code = parsed
+        .query_pairs()
+        .find(|(k, _)| k == "code")
+        .map(|(_, v)| v.to_string())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'code' parameter in the pasted URL"))?;
+    let state = parsed
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .map(|(_, v)| v.to_string())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'state' parameter in the pasted URL"))?;
+    Ok((code, state))
+}
+
+// ─── Login callbacks ───────────────────────────────────────────────────────
+
 /// Run the Anthropic OAuth login flow.
 /// Opens a browser, listens for the callback, exchanges the code for tokens.
 /// Progress callback for OAuth login — allows TUI to receive status updates
 /// without writing to stderr.
 pub type LoginProgress = Box<dyn Fn(&str) + Send + Sync>;
 
+/// Prompt callback for headless login — requests a line of input from the user.
+/// The closure receives a prompt string and returns the user's input.
+pub type LoginPrompt = Box<
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send>> + Send + Sync,
+>;
+
 fn default_progress() -> LoginProgress {
     Box::new(|msg| eprintln!("{msg}"))
 }
 
+fn default_prompt() -> LoginPrompt {
+    Box::new(|prompt| {
+        Box::pin(async move {
+            eprint!("{prompt}");
+            let mut line = String::new();
+            std::io::stdin()
+                .read_line(&mut line)
+                .map_err(|e| anyhow::anyhow!("Failed to read input: {e}"))?;
+            Ok(line)
+        })
+    })
+}
+
 pub async fn login_anthropic() -> anyhow::Result<OAuthCredentials> {
-    login_anthropic_with_progress(default_progress()).await
+    login_anthropic_with_callbacks(default_progress(), default_prompt()).await
 }
 
 pub async fn login_anthropic_with_progress(
     progress: LoginProgress,
+) -> anyhow::Result<OAuthCredentials> {
+    login_anthropic_with_callbacks(progress, default_prompt()).await
+}
+
+pub async fn login_anthropic_with_callbacks(
+    progress: LoginProgress,
+    prompt: LoginPrompt,
 ) -> anyhow::Result<OAuthCredentials> {
     let (verifier, challenge) = generate_pkce();
 
@@ -570,30 +636,45 @@ pub async fn login_anthropic_with_progress(
         urlencoding_encode(SCOPES),
     );
 
-    // Start local HTTP server for the callback
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{CALLBACK_PORT}")).await?;
-    tracing::debug!(port = CALLBACK_PORT, "OAuth callback server listening");
+    let (code, state) = if is_headless() {
+        // ── Headless paste-back flow ───────────────────────────────────
+        tracing::info!("headless environment detected, using paste-back OAuth flow");
+        progress("Headless environment detected — using manual login flow.");
+        progress(&format!(
+            "\n  1. Open this URL in your browser:\n     {auth_url}\n\n  \
+             2. Complete the login in your browser.\n\n  \
+             3. Your browser will redirect to a URL starting with:\n     \
+             http://localhost:{CALLBACK_PORT}/callback?code=...\n     \
+             (The page will fail to load — this is expected.)\n\n  \
+             4. Copy the full URL from your browser's address bar and paste it below.\n"
+        ));
+        let pasted = prompt("Paste callback URL: ".into()).await?;
+        parse_callback_url(&pasted)?
+    } else {
+        // ── Normal browser flow ────────────────────────────────────────
+        let listener =
+            tokio::net::TcpListener::bind(format!("127.0.0.1:{CALLBACK_PORT}")).await?;
+        tracing::debug!(port = CALLBACK_PORT, "OAuth callback server listening");
 
-    // Open browser
-    progress("Opening browser for Anthropic login…");
-    let browser_ok = open::that(&auth_url).is_ok();
-    if !browser_ok {
-        progress(&format!("Could not open browser. Visit:\n  {auth_url}"));
-    }
+        progress("Opening browser for Anthropic login…");
+        let browser_ok = open::that(&auth_url).is_ok();
+        if !browser_ok {
+            progress(&format!("Could not open browser. Visit:\n  {auth_url}"));
+        }
 
-    // Wait for callback
-    let (mut stream, _addr) = listener.accept().await?;
-    let mut buf = [0u8; 4096];
-    let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await?;
-    let request = String::from_utf8_lossy(&buf[..n]);
+        let (mut stream, _addr) = listener.accept().await?;
+        let mut buf = [0u8; 4096];
+        let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await?;
+        let request = String::from_utf8_lossy(&buf[..n]);
 
-    // Parse the code from the GET request
-    let (code, state) = parse_callback(&request)?;
+        let result = parse_callback(&request)?;
 
-    // Send success response
-    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                    <html><body><p>Authentication successful. Return to your terminal.</p></body></html>";
-    tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes()).await?;
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
+                        <html><body><p>Authentication successful. Return to your terminal.</p></body></html>";
+        tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes()).await?;
+
+        result
+    };
 
     // Verify state
     if state != verifier {
@@ -654,11 +735,18 @@ const OPENAI_SCOPE: &str = "openid profile email offline_access";
 
 /// Run the OpenAI Codex OAuth login flow (ChatGPT Plus/Pro subscription).
 pub async fn login_openai() -> anyhow::Result<OAuthCredentials> {
-    login_openai_with_progress(default_progress()).await
+    login_openai_with_callbacks(default_progress(), default_prompt()).await
 }
 
 pub async fn login_openai_with_progress(
     progress: LoginProgress,
+) -> anyhow::Result<OAuthCredentials> {
+    login_openai_with_callbacks(progress, default_prompt()).await
+}
+
+pub async fn login_openai_with_callbacks(
+    progress: LoginProgress,
+    prompt: LoginPrompt,
 ) -> anyhow::Result<OAuthCredentials> {
     let (verifier, challenge) = generate_pkce();
 
@@ -676,29 +764,48 @@ pub async fn login_openai_with_progress(
         urlencoding_encode(OPENAI_SCOPE),
     );
 
-    let listener =
-        tokio::net::TcpListener::bind(format!("127.0.0.1:{OPENAI_CALLBACK_PORT}")).await?;
-    tracing::debug!(
-        port = OPENAI_CALLBACK_PORT,
-        "OpenAI OAuth callback server listening"
-    );
+    let (code, recv_state) = if is_headless() {
+        // ── Headless paste-back flow ───────────────────────────────────
+        tracing::info!("headless environment detected, using paste-back OAuth flow (OpenAI)");
+        progress("Headless environment detected — using manual login flow.");
+        progress(&format!(
+            "\n  1. Open this URL in your browser:\n     {auth_url}\n\n  \
+             2. Complete the login in your browser.\n\n  \
+             3. Your browser will redirect to a URL starting with:\n     \
+             http://localhost:{OPENAI_CALLBACK_PORT}/auth/callback?code=...\n     \
+             (The page will fail to load — this is expected.)\n\n  \
+             4. Copy the full URL from your browser's address bar and paste it below.\n"
+        ));
+        let pasted = prompt("Paste callback URL: ".into()).await?;
+        parse_callback_url(&pasted)?
+    } else {
+        // ── Normal browser flow ────────────────────────────────────────
+        let listener =
+            tokio::net::TcpListener::bind(format!("127.0.0.1:{OPENAI_CALLBACK_PORT}")).await?;
+        tracing::debug!(
+            port = OPENAI_CALLBACK_PORT,
+            "OpenAI OAuth callback server listening"
+        );
 
-    progress("Opening browser for OpenAI login…");
-    let browser_ok = open::that(&auth_url).is_ok();
-    if !browser_ok {
-        progress(&format!("Could not open browser. Visit:\n  {auth_url}"));
-    }
+        progress("Opening browser for OpenAI login…");
+        let browser_ok = open::that(&auth_url).is_ok();
+        if !browser_ok {
+            progress(&format!("Could not open browser. Visit:\n  {auth_url}"));
+        }
 
-    let (mut stream, _addr) = listener.accept().await?;
-    let mut buf = [0u8; 4096];
-    let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await?;
-    let request = String::from_utf8_lossy(&buf[..n]);
+        let (mut stream, _addr) = listener.accept().await?;
+        let mut buf = [0u8; 4096];
+        let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await?;
+        let request = String::from_utf8_lossy(&buf[..n]);
 
-    let (code, recv_state) = parse_callback_at_path(&request, "/auth/callback")?;
+        let result = parse_callback_at_path(&request, "/auth/callback")?;
 
-    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                    <html><body><p>Authentication successful. Return to your terminal.</p></body></html>";
-    tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes()).await?;
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
+                        <html><body><p>Authentication successful. Return to your terminal.</p></body></html>";
+        tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes()).await?;
+
+        result
+    };
 
     if recv_state != state {
         anyhow::bail!("OAuth state mismatch");
@@ -1240,5 +1347,68 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&auth_path).unwrap()).unwrap();
         assert_eq!(contents["test-provider"]["access"], "test-access-token");
         assert_eq!(contents["test-provider"]["refresh"], "test-refresh-token");
+    }
+
+    #[test]
+    fn is_headless_detects_ssh() {
+        // SAFETY: test-only env manipulation — test runner is single-threaded
+        // for this test (no parallel readers of these vars).
+        unsafe {
+            let orig_conn = std::env::var("SSH_CONNECTION").ok();
+            let orig_client = std::env::var("SSH_CLIENT").ok();
+
+            std::env::set_var("SSH_CONNECTION", "10.0.0.1 12345 10.0.0.2 22");
+            assert!(is_headless(), "should detect SSH_CONNECTION");
+            std::env::remove_var("SSH_CONNECTION");
+
+            std::env::set_var("SSH_CLIENT", "10.0.0.1 12345 22");
+            assert!(is_headless(), "should detect SSH_CLIENT");
+            std::env::remove_var("SSH_CLIENT");
+
+            // Restore
+            if let Some(v) = orig_conn {
+                std::env::set_var("SSH_CONNECTION", v);
+            }
+            if let Some(v) = orig_client {
+                std::env::set_var("SSH_CLIENT", v);
+            }
+        }
+    }
+
+    #[test]
+    fn parse_callback_url_extracts_code_and_state() {
+        let url = "http://localhost:53692/callback?code=abc123&state=xyz789";
+        let (code, state) = parse_callback_url(url).unwrap();
+        assert_eq!(code, "abc123");
+        assert_eq!(state, "xyz789");
+    }
+
+    #[test]
+    fn parse_callback_url_handles_openai_path() {
+        let url = "http://localhost:1455/auth/callback?code=oai_code&state=oai_state";
+        let (code, state) = parse_callback_url(url).unwrap();
+        assert_eq!(code, "oai_code");
+        assert_eq!(state, "oai_state");
+    }
+
+    #[test]
+    fn parse_callback_url_rejects_garbage() {
+        assert!(parse_callback_url("not a url").is_err());
+        assert!(parse_callback_url("http://localhost/callback").is_err());
+        assert!(parse_callback_url("http://localhost/callback?state=x").is_err());
+    }
+
+    #[test]
+    fn parse_callback_url_trims_whitespace() {
+        let url = "  http://localhost:53692/callback?code=abc&state=xyz  \n";
+        let (code, state) = parse_callback_url(url).unwrap();
+        assert_eq!(code, "abc");
+        assert_eq!(state, "xyz");
+    }
+
+    #[tokio::test]
+    async fn default_prompt_type_is_constructible() {
+        // Verify the LoginPrompt type compiles and the default factory works
+        let _prompt = default_prompt();
     }
 }

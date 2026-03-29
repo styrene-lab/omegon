@@ -780,6 +780,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         _ => None,
     };
 
+    let login_prompt_tx: std::sync::Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<String>>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(None));
     let tui_config = tui::TuiConfig {
         cwd: agent.cwd.to_string_lossy().to_string(),
         is_oauth,
@@ -790,6 +792,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         initial_prompt,
         start_tutorial: cli.tutorial,
         resume_info: agent.resume_info.clone(),
+        login_prompt_tx: login_prompt_tx.clone(),
     };
     let tui_cancel = shared_cancel.clone();
     let tui_settings = shared_settings.clone();
@@ -1154,6 +1157,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             // would corrupt the ratatui display).
                             let events_tx_clone = events_tx.clone();
                             let progress_tx = events_tx.clone();
+                            let prompt_tx_for_login = events_tx.clone();
+                            let login_prompt_slot = login_prompt_tx.clone();
                             let provider_clone = provider.to_string();
                             let bridge_clone = bridge.clone();
                             let model_for_redetect = shared_settings
@@ -1168,12 +1173,27 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                         message: msg.to_string(),
                                     });
                                 });
+                                let prompt: auth::LoginPrompt = Box::new(move |msg| {
+                                    let slot = login_prompt_slot.clone();
+                                    let tx = prompt_tx_for_login.clone();
+                                    Box::pin(async move {
+                                        let (otx, orx) = tokio::sync::oneshot::channel();
+                                        {
+                                            let mut guard = slot.lock().await;
+                                            *guard = Some(otx);
+                                        }
+                                        let _ = tx.send(AgentEvent::SystemNotification {
+                                            message: msg,
+                                        });
+                                        orx.await.map_err(|_| anyhow::anyhow!("Login prompt cancelled"))
+                                    })
+                                });
                                 let result = match provider_clone.as_str() {
                                     "anthropic" | "claude" => {
-                                        auth::login_anthropic_with_progress(progress).await
+                                        auth::login_anthropic_with_callbacks(progress, prompt).await
                                     }
                                     "openai-codex" | "chatgpt" | "codex" => {
-                                        auth::login_openai_with_progress(progress).await
+                                        auth::login_openai_with_callbacks(progress, prompt).await
                                     }
                                     "openai" => Err(anyhow::anyhow!(
                                         "OpenAI API login in the TUI uses hidden API-key entry. Run /login and choose OpenAI API, or set OPENAI_API_KEY."
