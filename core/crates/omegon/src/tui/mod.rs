@@ -3075,6 +3075,18 @@ impl App {
         }
     }
 
+    fn history_recall_up(&mut self) {
+        if self.history_idx.is_some() || self.editor.is_empty() {
+            self.history_up();
+        }
+    }
+
+    fn history_recall_down(&mut self) {
+        if self.history_idx.is_some() {
+            self.history_down();
+        }
+    }
+
     fn handle_agent_event(&mut self, event: AgentEvent) {
         match event {
             AgentEvent::TurnStart { turn } => {
@@ -3872,8 +3884,8 @@ pub async fn run_tui(
 
     let mut app = App::new(settings);
     app.keyboard_enhancement = has_keyboard_enhancement;
-    app.mouse_capture_enabled = false;
-    app.terminal_copy_mode = true;
+    app.mouse_capture_enabled = true;
+    app.terminal_copy_mode = false;
     app.history = App::load_history(&config.cwd);
     app.footer_data.cwd = config.cwd.clone();
     app.footer_data.is_oauth = config.is_oauth;
@@ -4689,6 +4701,12 @@ pub async fn run_tui(
                         (KeyCode::Down, KeyModifiers::SHIFT) => {
                             app.conversation.scroll_down(3);
                         }
+                        (KeyCode::Up, KeyModifiers::CONTROL) => {
+                            app.history_recall_up();
+                        }
+                        (KeyCode::Down, KeyModifiers::CONTROL) => {
+                            app.history_recall_down();
+                        }
                         (KeyCode::PageUp, _) => {
                             app.conversation.scroll_up(20);
                         }
@@ -4705,10 +4723,6 @@ pub async fn run_tui(
                             } else if app.editor.line_count() > 1 && app.editor.cursor_row() > 0 {
                                 // Multiline: move cursor up within editor
                                 app.editor.move_up();
-                            } else if app.editor.is_empty() || app.history_idx.is_some() {
-                                // History recall is explicit: only from an empty composer, or
-                                // while already walking recalled entries.
-                                app.history_up();
                             }
                         }
                         (KeyCode::Down, _) => {
@@ -4718,8 +4732,6 @@ pub async fn run_tui(
                                 app.dashboard.scroll_down(3);
                             } else if app.agent_active {
                                 app.conversation.scroll_down(3);
-                            } else if app.history_idx.is_some() {
-                                app.history_down();
                             } else if app.editor.line_count() > 1
                                 && app.editor.cursor_row() < app.editor.line_count() - 1
                             {

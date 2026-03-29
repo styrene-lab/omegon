@@ -476,6 +476,16 @@ fn ctrl_y_keeps_editor_yank_outside_conversation_focus() {
 }
 
 #[test]
+fn startup_initialization_prefers_mouse_interaction_mode() {
+    let mut app = test_app();
+    app.mouse_capture_enabled = true;
+    app.terminal_copy_mode = false;
+
+    assert!(!app.terminal_copy_mode, "startup should prefer robust mouse interaction");
+    assert!(app.mouse_capture_enabled, "startup should enable mouse capture to receive wheel events directly");
+}
+
+#[test]
 fn terminal_copy_mode_disables_mouse_capture() {
     let mut app = test_app();
     app.mouse_capture_enabled = true;
@@ -506,59 +516,74 @@ fn mouse_slash_command_toggles_interaction_mode() {
 }
 
 #[test]
-fn empty_editor_up_recalls_latest_history_entry() {
+fn ctrl_up_recalls_latest_history_entry() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];
 
     assert!(app.editor.is_empty());
     assert_eq!(app.history_idx, None);
 
-    app.history_up();
+    app.history_recall_up();
     assert_eq!(app.editor.render_text(), "third");
     assert_eq!(app.history_idx, Some(2));
 }
 
 #[test]
-fn history_up_walks_back_multiple_entries_after_recall_starts() {
+fn ctrl_up_walks_back_multiple_entries_after_recall_starts() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];
 
-    app.history_up();
+    app.history_recall_up();
     assert_eq!(app.editor.render_text(), "third");
     assert_eq!(app.history_idx, Some(2));
 
-    app.history_up();
+    app.history_recall_up();
     assert_eq!(app.editor.render_text(), "second");
     assert_eq!(app.history_idx, Some(1));
 
-    app.history_up();
+    app.history_recall_up();
     assert_eq!(app.editor.render_text(), "first");
     assert_eq!(app.history_idx, Some(0));
 }
 
 #[test]
-fn non_empty_editor_up_does_not_start_history_recall() {
+fn bare_up_does_not_start_history_recall_from_empty_editor() {
+    let mut app = test_app();
+    app.history = vec!["first".into(), "second".into()];
+
+    if matches!(app.pane_focus, PaneFocus::Conversation) {
+        app.conversation.scroll_up(3);
+    } else if matches!(app.pane_focus, PaneFocus::Dashboard) {
+        app.dashboard.scroll_up(3);
+    } else if app.agent_active {
+        app.conversation.scroll_up(3);
+    } else if app.editor.line_count() > 1 && app.editor.cursor_row() > 0 {
+        app.editor.move_up();
+    }
+
+    assert_eq!(app.editor.render_text(), "");
+    assert_eq!(app.history_idx, None);
+}
+
+#[test]
+fn non_empty_editor_ctrl_up_does_not_start_history_recall() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into()];
     app.editor.set_text("draft");
 
-    if app.editor.line_count() > 1 && app.editor.cursor_row() > 0 {
-        app.editor.move_up();
-    } else if app.editor.is_empty() || app.history_idx.is_some() {
-        app.history_up();
-    }
+    app.history_recall_up();
 
     assert_eq!(app.editor.render_text(), "draft");
     assert_eq!(app.history_idx, None);
 }
 
 #[test]
-fn history_down_clears_editor_after_latest_entry() {
+fn ctrl_down_clears_editor_after_latest_entry() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into()];
 
-    app.history_up();
-    app.history_down();
+    app.history_recall_up();
+    app.history_recall_down();
     assert_eq!(app.editor.render_text(), "");
     assert_eq!(app.history_idx, None);
 }
