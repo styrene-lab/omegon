@@ -38,6 +38,9 @@ pub struct LifecycleFeature {
     /// markdown is written. The FSM is the authority for what transitions
     /// are legal; markdown is the content store.
     opsx: Mutex<OpsxLifecycle<JsonFileStore>>,
+    /// Memory facts queued from execute() to be returned from on_event(TurnEnd).
+    /// execute() takes &self so can't return BusRequests directly — this bridges the gap.
+    pending_memory: Mutex<Vec<BusRequest>>,
 }
 
 impl LifecycleFeature {
@@ -53,6 +56,7 @@ impl LifecycleFeature {
             repo_path: repo_path.to_path_buf(),
             turn_counter: 0,
             opsx: Mutex::new(opsx),
+            pending_memory: Mutex::new(vec![]),
         }
     }
 
@@ -395,10 +399,26 @@ impl LifecycleFeature {
 
                 // FSM approved — now write the markdown
                 let mut node = get_node_clone(id)?;
+                let node_title = node.title.clone();
                 design::update_node(&mut node, |n| {
                     n.status = status;
                 })?;
                 self.provider.lock().unwrap().refresh();
+
+                // Auto-ingest to memory when node reaches a terminal milestone
+                if matches!(status_str, "resolved" | "decided" | "implementing") {
+                    let content = format!(
+                        "Design node '{id}' ({node_title}) status → {status_str}"
+                    );
+                    if let Ok(mut q) = self.pending_memory.lock() {
+                        q.push(BusRequest::AutoStoreFact {
+                            section: "Decisions".into(),
+                            content,
+                            source: "lifecycle:node-transition".into(),
+                        });
+                    }
+                }
+
                 Ok(text_result(&format!("Set '{id}' status to {status_str}")))
             }
 
@@ -460,6 +480,21 @@ impl LifecycleFeature {
                 let node = &node;
                 design::add_decision(node, title, status, rationale)?;
                 self.provider.lock().unwrap().refresh();
+
+                // Auto-ingest decisions to memory
+                let content = if rationale.is_empty() {
+                    format!("Decision on '{id}': {title} [{status}]")
+                } else {
+                    format!("Decision on '{id}': {title} [{status}]. {rationale}")
+                };
+                if let Ok(mut q) = self.pending_memory.lock() {
+                    q.push(BusRequest::AutoStoreFact {
+                        section: "Decisions".into(),
+                        content,
+                        source: "lifecycle:add-decision".into(),
+                    });
+                }
+
                 Ok(text_result(&format!("Added decision '{title}' to '{id}'")))
             }
 
@@ -865,7 +900,7 @@ impl Feature for LifecycleFeature {
                             "type": "string",
                             "enum": ["create", "set_status", "add_question", "remove_question", "add_research", "add_decision", "add_dependency", "add_related", "add_impl_notes", "branch", "focus", "unfocus", "implement", "set_priority", "set_issue_type"]
                         },
-                        "node_id": { "type": "string", "description": "Target node ID" },
+                        "node_id": { "type": "string" },
                         "title": { "type": "string" },
                         "parent": { "type": "string" },
                         "status": { "type": "string" },
@@ -880,7 +915,7 @@ impl Feature for LifecycleFeature {
                         "target_id": { "type": "string" },
                         "child_id": { "type": "string" },
                         "child_title": { "type": "string" },
-                        "file_scope": { "type": "array", "items": { "type": "object", "properties": { "path": { "type": "string" }, "description": { "type": "string" }, "action": { "type": "string" } }, "required": ["path", "description"] } },
+                        "file_scope": { "type": "array", "items": { "type": "object" } },
                         "constraints": { "type": "array", "items": { "type": "string" } },
                         "priority": { "type": "number" },
                         "issue_type": { "type": "string" }
@@ -895,17 +930,13 @@ impl Feature for LifecycleFeature {
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["status", "get", "propose", "add_spec", "archive"],
-                            "description": "Lifecycle action"
-                        },
+                        "action": { "type": "string", "enum": ["status", "get", "propose", "add_spec", "archive"] },
                         "change_name": { "type": "string" },
-                        "name": { "type": "string", "description": "Change name for propose" },
-                        "title": { "type": "string", "description": "Change title for propose" },
-                        "intent": { "type": "string", "description": "Change intent for propose" },
-                        "domain": { "type": "string", "description": "Spec domain (for add_spec)" },
-                        "spec_content": { "type": "string", "description": "Spec markdown (for add_spec)" }
+                        "name": { "type": "string" },
+                        "title": { "type": "string" },
+                        "intent": { "type": "string" },
+                        "domain": { "type": "string" },
+                        "spec_content": { "type": "string" }
                     },
                     "required": ["action"]
                 }),
@@ -917,22 +948,8 @@ impl Feature for LifecycleFeature {
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "node_id": { "type": "string", "description": "Optional node ID filter" },
-                        "kinds": {
-                            "type": "array",
-                            "items": {
-                                "type": "string",
-                                "enum": [
-                                    "implemented_has_open_questions",
-                                    "resolved_without_questions",
-                                    "seed_without_questions",
-                                    "exploring_without_questions",
-                                    "parent_implemented_with_active_children",
-                                    "question_appears_answered_by_decision"
-                                ]
-                            },
-                            "description": "Optional finding-kind filter"
-                        }
+                        "node_id": { "type": "string" },
+                        "kinds": { "type": "array", "items": { "type": "string", "enum": ["implemented_has_open_questions", "resolved_without_questions", "seed_without_questions", "exploring_without_questions", "parent_implemented_with_active_children", "question_appears_answered_by_decision"] } }
                     }
                 }),
             },
@@ -1094,7 +1111,11 @@ impl Feature for LifecycleFeature {
                 if self.turn_counter.is_multiple_of(5) {
                     self.provider.lock().unwrap().refresh();
                 }
-                vec![]
+                // Drain auto-store facts queued by execute() handlers
+                self.pending_memory
+                    .lock()
+                    .map(|mut q| std::mem::take(&mut *q))
+                    .unwrap_or_default()
             }
             _ => vec![],
         }

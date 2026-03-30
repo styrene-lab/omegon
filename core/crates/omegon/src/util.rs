@@ -1,5 +1,6 @@
 //! Shared utilities.
 
+use omegon_traits::ContentBlock;
 use unicode_truncate::UnicodeTruncateStr;
 
 /// Truncate a string to at most `max_width` display columns, appending "…" if truncated.
@@ -18,6 +19,33 @@ pub fn truncate(s: &str, max_width: usize) -> String {
 pub fn truncate_str(s: &str, max_width: usize) -> &str {
     let (truncated, _width) = s.unicode_truncate(max_width);
     truncated
+}
+
+/// Truncate a single text string to at most `max_chars` characters.
+/// Appends a summary line showing how many characters were dropped.
+/// Used to cap feature tool output before injecting it into LLM context.
+pub fn truncate_output(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let truncated: String = s.chars().take(max_chars).collect();
+    let dropped = s.chars().count() - max_chars;
+    format!("{truncated}\n[output truncated: {dropped} chars dropped — limit {max_chars}]")
+}
+
+/// Cap all Text blocks in a ToolResult content vec to `max_chars` each.
+/// Non-text blocks (images, tool_use, etc.) are passed through unchanged.
+pub fn truncate_content_blocks(
+    blocks: &mut Vec<ContentBlock>,
+    max_chars: usize,
+) {
+    for block in blocks.iter_mut() {
+        if let ContentBlock::Text { text } = block {
+            if text.chars().count() > max_chars {
+                *text = truncate_output(text, max_chars);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

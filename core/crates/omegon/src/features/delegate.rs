@@ -276,37 +276,13 @@ impl Feature for DelegateFeature {
                             "type": "string",
                             "description": "Task description for the delegate"
                         },
-                        "agent": {
-                            "type": "string",
-                            "description": "Optional specific agent to use"
-                        },
-                        "scope": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional file scope for the delegate"
-                        },
-                        "model": {
-                            "type": "string",
-                            "description": "Optional model override for the delegate"
-                        },
-                        "thinking_level": {
-                            "type": "string",
-                            "description": "Optional thinking level for the delegate"
-                        },
-                        "facts": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional facts to inject"
-                        },
-                        "mind": {
-                            "type": "string",
-                            "description": "Optional mind context for the delegate"
-                        },
-                        "background": {
-                            "type": "boolean",
-                            "description": "Run in background (default: true)",
-                            "default": true
-                        }
+                        "agent": { "type": "string" },
+                        "scope": { "type": "array", "items": {"type": "string"} },
+                        "model": { "type": "string" },
+                        "thinking_level": { "type": "string" },
+                        "facts": { "type": "array", "items": {"type": "string"} },
+                        "mind": { "type": "string" },
+                        "background": { "type": "boolean", "default": true }
                     },
                     "required": ["task"]
                 }),

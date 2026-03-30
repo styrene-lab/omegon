@@ -419,7 +419,8 @@ pub async fn run(
         bus.emit(&omegon_traits::BusEvent::TurnEnd { turn });
 
         // ─── Handle bus requests from features ──────────────────────
-        for request in bus.drain_requests() {
+        let turn_requests = bus.drain_requests();
+        for request in turn_requests {
             match request {
                 omegon_traits::BusRequest::Notify { message, level } => {
                     tracing::info!(level = ?level, "Bus: {message}");
@@ -435,6 +436,15 @@ pub async fn run(
                     let status = crate::status::HarnessStatus::assemble();
                     if let Ok(status_json) = serde_json::to_value(&status) {
                         let _ = events.send(AgentEvent::HarnessStatusChanged { status_json });
+                    }
+                }
+                omegon_traits::BusRequest::AutoStoreFact { section, content, source } => {
+                    let args = serde_json::json!({ "content": content, "section": section });
+                    if let Err(e) = bus
+                        .execute_tool("memory_store", "auto_ingest", args, cancel.clone())
+                        .await
+                    {
+                        tracing::debug!(source, "auto-store fact skipped: {e}");
                     }
                 }
             }
@@ -473,6 +483,9 @@ pub async fn run(
                 tracing::info!("Bus requested compaction (post-loop — ignored)");
             }
             omegon_traits::BusRequest::RefreshHarnessStatus => {}
+            omegon_traits::BusRequest::AutoStoreFact { source, .. } => {
+                tracing::debug!(source, "auto-store fact (post-loop — ignored, loop complete)");
+            }
         }
     }
 
@@ -1012,6 +1025,14 @@ async fn dispatch_tools(
         if let Some(sm) = secrets {
             sm.redact_content(&mut final_content);
         }
+
+        // ── Cap feature tool output ───────────────────────────────
+        // Native tools (bash, read, view) self-limit; this catches
+        // feature tools (memory_*, design_tree, cleave_*) that can
+        // return unbounded JSON/markdown. 16K chars ≈ 4K tokens —
+        // generous enough for any legitimate tool response.
+        const MAX_TOOL_OUTPUT_CHARS: usize = 16_000;
+        crate::util::truncate_content_blocks(&mut final_content, MAX_TOOL_OUTPUT_CHARS);
 
         let _ = events.send(AgentEvent::ToolEnd {
             id: call.id.clone(),
