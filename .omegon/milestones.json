@@ -202,7 +202,7 @@
     "opened": "2026-03-29T16:13:57Z",
     "nodes": [],
     "frozen": false,
-    "rc_count": 5,
+    "rc_count": 6,
     "notes": [
       "feat(auth): restructure /login by company=api-key / product=subscription paradigm",
       "feat(auth): support headless OAuth login via paste-back flow",
@@ -220,6 +220,7 @@
       "fix(context): wire actual provider token counts end-to-end to TUI",
       "fix(homebrew): bump formula to 0.15.4 and wire brew-tap into publish",
       "fix(install): fix escape sequence rendering and replace broken box layout",
+      "fix(loop): persist commit_nudged across TUI run() invocations\\n\\nThe TUI calls loop::run() once per user turn, so a local\\n`commit_nudged` variable reset to false every message — causing\\nthe \\\"you made file changes\\\" nudge to fire on every turn even\\nafter a successful commit.\\n\\nMove commit_nudged onto IntentDocument (which persists for the\\nentire session lifetime). Also reset it when the commit tool\\nclears files_modified, so a second commit after further changes\\nstill gets a nudge.\\n\\nFixes: commit nudge regression introduced in rc.7\"",
       "fix(loop): suppress spurious commit nudge; refresh tool_defs per turn",
       "fix(tui): filter model selector by actual availability",
       "fix(tui): process harness status during splash event drain",
@@ -227,7 +228,7 @@
       "fix(tui,providers): dynamic Ollama catalog, auth-gated cloud providers, expanded routing",
       "refactor(providers): remove MLX as dedicated provider — use Ollama instead"
     ],
-    "last_rc": "2026-03-30T12:18:59Z",
-    "rc_version": "0.15.5-rc.7"
+    "last_rc": "2026-03-30T13:02:53Z",
+    "rc_version": "0.15.5-rc.8"
   }
 }
