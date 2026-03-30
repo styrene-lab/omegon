@@ -202,7 +202,7 @@
     "opened": "2026-03-29T16:13:57Z",
     "nodes": [],
     "frozen": false,
-    "rc_count": 21,
+    "rc_count": 22,
     "notes": [
       "feat(auth): restructure /login by company=api-key / product=subscription paradigm",
       "feat(auth): support headless OAuth login via paste-back flow",
@@ -212,6 +212,7 @@
       "feat(instruments): per-turn token stats row + fix sys-band sizing",
       "feat(instruments): unified braille context bar + polished legend icons",
       "feat(models): interactive model selector — browse providers and models with context/cost info",
+      "feat(ollama): warmup cold models before streaming, surface progress in TUI",
       "feat(providers): add MLX local inference server support",
       "feat(site): show current version and copy button on homepage install block",
       "feat(tui): fix model selector — add Ollama models, align columns, prevent overflow",
@@ -239,7 +240,7 @@
       "fix: D2 render timing, MCP per-server timeout, stale Esc mouse hint",
       "refactor(providers): remove MLX as dedicated provider — use Ollama instead"
     ],
-    "last_rc": "2026-03-30T23:02:40Z",
-    "rc_version": "0.15.5-rc.23"
+    "last_rc": "2026-03-30T23:30:12Z",
+    "rc_version": "0.15.5-rc.24"
   }
 }
