@@ -331,8 +331,8 @@ impl InstrumentPanel {
 
     fn context_legend_entries() -> [(&'static str, &'static str, Color); 5] {
         [
-            ("◌", "conv", Self::band_color(ContextBand::Conversation)),
-            ("✉", "sys", Self::band_color(ContextBand::System)),
+            ("≡", "conv", Self::band_color(ContextBand::Conversation)),
+            ("⊟", "sys", Self::band_color(ContextBand::System)),
             ("◈", "mem", Self::band_color(ContextBand::Memory)),
             ("⚒", "tools", Self::band_color(ContextBand::Tools)),
             ("◔", "think", Self::band_color(ContextBand::Thinking)),
@@ -785,96 +785,117 @@ impl InstrumentPanel {
             return;
         }
 
+        // ── Braille left-fill levels (left column top→bottom, then right column) ──
+        // Fills dots in this order: 1,2,3,7 (left col) then 4,5,6,8 (right col).
+        // Each level = one more dot lit, giving 8-step sub-cell precision.
+        const FILL: [char; 9] = [
+            '\u{2800}', // ⠀ 0/8 empty
+            '\u{2840}', // ⡀ 1/8
+            '\u{2844}', // ⡄ 2/8
+            '\u{2846}', // ⡆ 3/8
+            '\u{2847}', // ⡇ 4/8 — left col full
+            '\u{28C7}', // ⣇ 5/8
+            '\u{28E7}', // ⣏ 6/8
+            '\u{28F7}', // ⣟ 7/8
+            '\u{28FF}', // ⣿ 8/8 full
+        ];
+
         let breakdown = self.context_breakdown();
         let activity = self.activity_mode();
         let time = self.time;
 
-        let mut spans: Vec<(ContextBand, usize, usize)> = Vec::new();
-        let mut cursor = 0usize;
-        for (idx, (band, frac)) in breakdown.iter().enumerate() {
-            let mut width = if idx == breakdown.len() - 1 {
-                w.saturating_sub(cursor)
-            } else {
-                ((*frac * w as f64).round() as usize).min(w.saturating_sub(cursor))
-            };
-            if *frac > 0.0 && width == 0 && cursor < w {
-                width = 1;
-            }
-            let end = (cursor + width).min(w);
-            spans.push((*band, cursor, end));
+        // Compute continuous band boundaries in column-space (0.0 .. w as f64).
+        // Each band occupies a contiguous float range; no integer rounding yet.
+        let mut boundaries: Vec<(ContextBand, f64, f64)> = Vec::new();
+        let mut cursor = 0.0_f64;
+        for &(band, frac) in &breakdown {
+            let end = (cursor + frac * w as f64).min(w as f64);
+            boundaries.push((band, cursor, end));
             cursor = end;
-        }
-        if let Some((_, _, end)) = spans.last_mut() {
-            *end = w;
         }
 
         for x in 0..w {
-            let (band, start, end) = spans
-                .iter()
-                .copied()
-                .find(|(_, start, end)| x >= *start && x < *end)
-                .unwrap_or((ContextBand::Free, x, x + 1));
-            let color = Self::band_color(band);
-            let rel = if end > start {
-                (x - start) as f64 / (end - start).max(1) as f64
-            } else {
-                0.0
-            };
-            let center_rel = ((rel - 0.5).abs() * 2.0).min(1.0);
+            let col_start = x as f64;
+            let col_end = col_start + 1.0;
 
-            let (mut top_ch, mut bottom_ch, mut fg) = match band {
-                ContextBand::Conversation => (' ', '█', color),
-                ContextBand::System => ('─', '═', color),
-                ContextBand::Memory => ('╌', '≈', color),
-                ContextBand::Tools => ('┆', '┆', color),
-                ContextBand::Thinking => ('·', '⠂', color),
-                ContextBand::Free => ('·', '·', color),
-            };
+            // Dominant band = greatest overlap with this column.
+            let mut dominant = ContextBand::Free;
+            let mut best_coverage = 0.0_f64;
+            let mut fill_frac = 0.0_f64;
 
-            match activity {
-                ActivityMode::Thinking if band == ContextBand::Thinking => {
-                    let phase = (time * 3.0) + (1.0 - center_rel) * 1.8;
-                    let pulse = ((phase.sin() + 1.0) * 0.5 * self.thinking_intensity.max(0.15))
-                        .clamp(0.0, 1.0);
-                    let glyphs = ['·', '⠂', '⠒', '⠶'];
-                    let idx = (pulse * (glyphs.len() as f64 - 1.0)).round() as usize;
-                    bottom_ch = glyphs[idx.min(glyphs.len() - 1)];
-                    top_ch = if pulse > 0.72 && center_rel < 0.72 { '⠤' } else { '·' };
-                    fg = if pulse > 0.72 {
-                        Color::Rgb(198, 178, 255)
-                    } else {
-                        color
-                    };
+            for &(band, band_start, band_end) in &boundaries {
+                let lo = col_start.max(band_start);
+                let hi = col_end.min(band_end);
+                if hi > lo {
+                    let coverage = hi - lo;
+                    if coverage > best_coverage {
+                        best_coverage = coverage;
+                        dominant = band;
+                        fill_frac = coverage; // fraction of this column
+                    }
                 }
-                ActivityMode::ToolChurn if band == ContextBand::Tools => {
-                    let pulse = (((time * 10.0) + x as f64 * 0.9).sin() + 1.0) * 0.5;
-                    bottom_ch = if pulse > 0.75 { '▮' } else if pulse > 0.4 { '┇' } else { '┆' };
-                    top_ch = if pulse > 0.8 { '╻' } else { ' ' };
-                    fg = if pulse > 0.75 { Color::Rgb(255, 196, 96) } else { color };
-                }
-                ActivityMode::Waiting if band == ContextBand::Tools => {
-                    let pulse = (((time * 2.2) + x as f64 * 0.1).sin() + 1.0) * 0.5;
-                    bottom_ch = if pulse > 0.6 { '╎' } else { '┆' };
-                    top_ch = ' ';
-                    fg = if pulse > 0.6 { Color::Rgb(232, 186, 104) } else { color };
-                }
-                ActivityMode::Idle if band == ContextBand::Free => {
-                    top_ch = '·';
-                    bottom_ch = '·';
-                }
-                _ => {}
             }
 
-            let divider = spans.iter().any(|(_, _, end)| *end == x && x < w.saturating_sub(1));
-            for row in 0..area.height.min(2) {
-                let (mut ch, mut row_fg) = if row == 0 { (top_ch, fg) } else { (bottom_ch, fg) };
-                if divider {
-                    ch = if row == 0 { '╷' } else { '│' };
-                    row_fg = Color::Rgb(34, 54, 72);
+            // Free band: show as a uniform very-sparse texture rather than fill level.
+            let base_ch = if dominant == ContextBand::Free {
+                '\u{2802}' // ⠂ single mid-dot
+            } else {
+                let level = (fill_frac * 8.0).round() as usize;
+                FILL[level.min(8)]
+            };
+
+            // Animated overrides (thinking pulse, tool churn) — all in braille vocabulary.
+            let (ch, fg) = match (activity, dominant) {
+                (ActivityMode::Thinking, ContextBand::Thinking) => {
+                    let phase = (time * 3.0) + x as f64 * 0.35;
+                    let pulse = ((phase.sin() + 1.0) * 0.5
+                        * self.thinking_intensity.max(0.15))
+                    .clamp(0.0, 1.0);
+                    let level = (pulse * 8.0).round() as usize;
+                    let c = FILL[level.min(8)];
+                    let color = if pulse > 0.72 {
+                        Color::Rgb(198, 178, 255)
+                    } else {
+                        Self::band_color(ContextBand::Thinking)
+                    };
+                    (c, color)
                 }
-                if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, area.y + row)) {
+                (ActivityMode::ToolChurn, ContextBand::Tools) => {
+                    let pulse = (((time * 10.0) + x as f64 * 0.9).sin() + 1.0) * 0.5;
+                    let c = if pulse > 0.75 {
+                        '\u{28FF}' // ⣿ full
+                    } else if pulse > 0.4 {
+                        '\u{28F7}' // ⣟ 7/8
+                    } else {
+                        '\u{28E7}' // ⣏ 6/8
+                    };
+                    let color = if pulse > 0.75 {
+                        Color::Rgb(255, 196, 96)
+                    } else {
+                        Self::band_color(ContextBand::Tools)
+                    };
+                    (c, color)
+                }
+                (ActivityMode::Waiting, ContextBand::Tools) => {
+                    let pulse = (((time * 2.2) + x as f64 * 0.1).sin() + 1.0) * 0.5;
+                    let c = if pulse > 0.6 { '\u{28C7}' } else { '\u{2847}' }; // ⣇ / ⡇
+                    let color = if pulse > 0.6 {
+                        Color::Rgb(232, 186, 104)
+                    } else {
+                        Self::band_color(ContextBand::Tools)
+                    };
+                    (c, color)
+                }
+                _ => (base_ch, Self::band_color(dominant)),
+            };
+
+            // Both rows identical — the 2-row height reinforces density visually.
+            for row in 0..area.height.min(2) {
+                if let Some(cell) =
+                    buf.cell_mut(Position::new(area.x + x as u16, area.y + row))
+                {
                     cell.set_char(ch);
-                    cell.set_fg(row_fg);
+                    cell.set_fg(fg);
                     cell.set_bg(panel_bg(t));
                 }
             }
@@ -1534,8 +1555,8 @@ mod tests {
             .map(|x| buf[(x, 3)].symbol().to_string())
             .collect();
 
-        assert!(legend_row.contains("◌ conv"), "conversation bucket legend should be visible: {legend_row}");
-        assert!(legend_row.contains("✉ sys"), "system bucket legend should be visible: {legend_row}");
+        assert!(legend_row.contains("≡ conv"), "conversation bucket legend should be visible: {legend_row}");
+        assert!(legend_row.contains("⊟ sys"), "system bucket legend should be visible: {legend_row}");
         assert!(legend_row.contains("◈ mem"), "memory bucket legend should be visible: {legend_row}");
         assert!(legend_row.contains("⚒ tools"), "tools bucket legend should be visible: {legend_row}");
         assert!(legend_row.contains("◔ think"), "thinking bucket legend should be visible: {legend_row}");
