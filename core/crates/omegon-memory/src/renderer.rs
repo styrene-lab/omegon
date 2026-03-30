@@ -114,7 +114,12 @@ impl ContextRenderer for MarkdownRenderer {
         let markdown = if lines.is_empty() {
             String::new()
         } else {
-            format!("# Project Memory\n\n{}", lines.join("\n"))
+            format!(
+                "# Project Memory\n\
+                _Use `memory_store` proactively when you learn facts worth persisting. \
+                Use `memory_recall` before non-trivial tasks to surface relevant context._\n\n{}",
+                lines.join("\n")
+            )
         };
 
         RenderedContext {

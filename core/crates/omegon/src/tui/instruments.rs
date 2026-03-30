@@ -769,16 +769,16 @@ impl InstrumentPanel {
             };
             let token_str = if self.last_input_tokens > 0 {
                 format!(
-                    "↑{}  ↓{}  ⊙ {}%",
+                    "↑ {}  ↓ {}  ⊙ {}%",
                     fmt_k(self.last_input_tokens),
                     fmt_k(self.last_output_tokens),
                     cache_pct,
                 )
             } else {
-                "↑—  ↓—  ⊙ —".to_string()
+                "↑ —  ↓ —  ⊙ —".to_string()
             };
             let mem_str = format!(
-                "   ✦{}  ◎ {} recalled",
+                "   ✦ {}  ◎ {} recalled",
                 self.session_stores, self.session_recalls
             );
             let full = format!("{token_str}{mem_str}");

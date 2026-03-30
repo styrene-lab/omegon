@@ -6,11 +6,11 @@ expression: render_to_string(&terminal)
   provider ⚡  Ollama (Local)          │⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣇⣿⣧⣿⣿⣿⣿⣇⣿⣿⣿⡇⡀⡀⡀⡀⡀⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂││▸ ▫ recall       220ms≋≋≋≋≋≋≋≋≋≋≋≋≋≋│
   model   qwen3                       │⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣇⣿⣧⣿⣿⣿⣿⣇⣿⣿⣿⡇⡀⡀⡀⡀⡀⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂││✗ ⊕ search       8.1s ≋≋≋≋≋≋≋≋≋≋≋≋≋·│
   auth    ○ api key                   │≡  conv  ⊟ sys  ◈  mem  ⚒ tools  ◔ think  ││  ⌘ sh           1.2s ≋≋≋≋≋≋≋≋≋≋≋≋≋·│
-  persona ⚙ Systems Engineer          │↑ —   ↓ —   ⊙  —    ✦0  ◎  0 recalled     ││                                    │
+  persona ⚙ Systems Engineer          │↑  —   ↓  —   ⊙  —    ✦ 0  ◎  0 recalled  ││                                    │
   context Maniple 68% / 262k          ├─ project ⌗2440  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠒⠒⠤⢄││                                    │
   path    ~/workspace/black-…/omegon  ├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
   mode    Victory · ◎ High · ◆ native └─ episodes ⌗45  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
   session T·8 · ⚙ 23 · ↻ 2            │                                          ││                                    │
-  version v0.15.5-rc.17 → v0.15.5     │                                          ││                                    │
+  version v0.15.5-rc.18 → v0.15.5     │                                          ││                                    │
                                       │                                          ││  3/3 active                        │
                                       ╰──────────────────────────────────────────╯╰────────────────────────────────────╯

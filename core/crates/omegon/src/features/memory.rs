@@ -78,7 +78,11 @@ impl Feature for MemoryFeature {
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_STORE.into(),
                 label: "memory_store".into(),
-                description: "Store a fact in project memory. Facts persist across sessions.".into(),
+                description: "Store a fact in project memory. Facts persist across sessions. \
+Use this PROACTIVELY — without being asked — whenever you learn something worth remembering: \
+an architectural decision, a constraint, a bug pattern, a project convention, a tradeoff that was made, \
+or any fact that would help you (or a future session) avoid re-discovering the same thing. \
+If in doubt, store it. Over-storing is better than forgetting.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "required": ["section", "content"],
@@ -98,7 +102,9 @@ impl Feature for MemoryFeature {
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_RECALL.into(),
                 label: "memory_recall".into(),
-                description: "Search project memory for facts relevant to a query. Returns ranked results.".into(),
+                description: "Search project memory for facts relevant to a query. Returns ranked results. \
+Use this PROACTIVELY at the start of any non-trivial task to surface relevant context before acting. \
+Also use it when you notice a gap — if you're unsure whether something was already decided, search first.".into(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "required": ["query"],
