@@ -17,9 +17,50 @@
 use super::theme::Theme;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
+use unicode_width::UnicodeWidthChar;
 
 fn panel_bg(t: &dyn Theme) -> Color {
     t.footer_bg()
+}
+
+/// Write `text` left-to-right starting at `(x, y)`, clipped to `max_x`.
+/// Each character advances by its CJK-aware cell width (wide chars consume 2 cells;
+/// the second cell is blanked so subsequent characters land in the right column).
+/// Returns the x position after the last written character.
+fn render_str_colored<F>(
+    text: &str,
+    x: u16,
+    y: u16,
+    max_x: u16,
+    bg: Color,
+    buf: &mut Buffer,
+    color_for: F,
+) -> u16
+where
+    F: Fn(char) -> Color,
+{
+    let mut cur_x = x;
+    for ch in text.chars() {
+        if cur_x >= max_x {
+            break;
+        }
+        let w = UnicodeWidthChar::width_cjk(ch).unwrap_or(1) as u16;
+        if let Some(cell) = buf.cell_mut(Position::new(cur_x, y)) {
+            cell.set_char(ch);
+            cell.set_fg(color_for(ch));
+            cell.set_bg(bg);
+        }
+        // Blank the overflow cell for wide characters so we don't draw into it.
+        if w == 2 {
+            if let Some(cell) = buf.cell_mut(Position::new(cur_x + 1, y)) {
+                cell.set_char(' ');
+                cell.set_fg(bg);
+                cell.set_bg(bg);
+            }
+        }
+        cur_x = cur_x.saturating_add(w);
+    }
+    cur_x
 }
 
 fn clear_area(area: Rect, buf: &mut Buffer, bg: Color) {
@@ -691,19 +732,16 @@ impl InstrumentPanel {
                 } else {
                     format!("  {icon} {label_text}")
                 };
-                for (i, ch) in entry.chars().enumerate() {
-                    let draw_x = x + i as u16;
-                    if draw_x >= inner.right() {
-                        break;
-                    }
-                    if let Some(cell) = buf.cell_mut(Position::new(draw_x, inner.y + bar_h)) {
-                        cell.set_char(ch);
-                        let fg = if icon.contains(ch) { color } else { t.dim() };
-                        cell.set_fg(fg);
-                        cell.set_bg(panel_bg(t));
-                    }
-                }
-                x = x.saturating_add(entry.chars().count() as u16);
+                let icon_chars: Vec<char> = icon.chars().collect();
+                x = render_str_colored(
+                    &entry,
+                    x,
+                    inner.y + bar_h,
+                    inner.right(),
+                    panel_bg(t),
+                    buf,
+                    |ch| if icon_chars.contains(&ch) { color } else { t.dim() },
+                );
                 if x >= inner.right() {
                     break;
                 }
@@ -731,38 +769,34 @@ impl InstrumentPanel {
             };
             let token_str = if self.last_input_tokens > 0 {
                 format!(
-                    "↑{} ↓{} ⊙{}%",
+                    "↑{}  ↓{}  ⊙ {}%",
                     fmt_k(self.last_input_tokens),
                     fmt_k(self.last_output_tokens),
                     cache_pct,
                 )
             } else {
-                "↑— ↓— ⊙—".to_string()
+                "↑—  ↓—  ⊙ —".to_string()
             };
             let mem_str = format!(
-                "  ✦{} stored  ◎{} recalled",
+                "   ✦{}  ◎ {} recalled",
                 self.session_stores, self.session_recalls
             );
             let full = format!("{token_str}{mem_str}");
 
             let dim = t.dim();
             let accent = Color::Rgb(42, 180, 200);
-            let mut x = inner.x;
-            for ch in full.chars() {
-                if x >= inner.right() {
-                    break;
-                }
-                if let Some(cell) = buf.cell_mut(Position::new(x, stats_row_y)) {
-                    cell.set_char(ch);
-                    let fg = match ch {
-                        '↑' | '↓' | '⊙' | '✦' | '◎' => accent,
-                        _ => dim,
-                    };
-                    cell.set_fg(fg);
-                    cell.set_bg(panel_bg(t));
-                }
-                x += 1;
-            }
+            render_str_colored(
+                &full,
+                inner.x,
+                stats_row_y,
+                inner.right(),
+                panel_bg(t),
+                buf,
+                |ch| match ch {
+                    '↑' | '↓' | '⊙' | '✦' | '◎' => accent,
+                    _ => dim,
+                },
+            );
         }
 
         // Tree + memory strings: break through the left border
@@ -1555,11 +1589,16 @@ mod tests {
             .map(|x| buf[(x, 3)].symbol().to_string())
             .collect();
 
-        assert!(legend_row.contains("≡ conv"), "conversation bucket legend should be visible: {legend_row}");
-        assert!(legend_row.contains("⊟ sys"), "system bucket legend should be visible: {legend_row}");
-        assert!(legend_row.contains("◈ mem"), "memory bucket legend should be visible: {legend_row}");
-        assert!(legend_row.contains("⚒ tools"), "tools bucket legend should be visible: {legend_row}");
-        assert!(legend_row.contains("◔ think"), "thinking bucket legend should be visible: {legend_row}");
+        // Spacing is intentionally not checked exactly: these icons have ambiguous East-Asian
+        // width (width_cjk = 2). In a real terminal they occupy 2 cells, so we advance by 2
+        // and the format's single space lands at the correct column. TestBackend treats every
+        // character as width-1, so it sees an extra blank cell between the icon and the label.
+        // We check icon and label independently to be robust to that 1-cell difference.
+        assert!(legend_row.contains('≡') && legend_row.contains("conv"), "conversation bucket legend should be visible: {legend_row}");
+        assert!(legend_row.contains('⊟') && legend_row.contains("sys"), "system bucket legend should be visible: {legend_row}");
+        assert!(legend_row.contains('◈') && legend_row.contains("mem"), "memory bucket legend should be visible: {legend_row}");
+        assert!(legend_row.contains('⚒') && legend_row.contains("tools"), "tools bucket legend should be visible: {legend_row}");
+        assert!(legend_row.contains('◔') && legend_row.contains("think"), "thinking bucket legend should be visible: {legend_row}");
     }
 }
 
