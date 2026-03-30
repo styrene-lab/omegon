@@ -202,7 +202,7 @@
     "opened": "2026-03-29T16:13:57Z",
     "nodes": [],
     "frozen": false,
-    "rc_count": 15,
+    "rc_count": 16,
     "notes": [
       "feat(auth): restructure /login by company=api-key / product=subscription paradigm",
       "feat(auth): support headless OAuth login via paste-back flow",
@@ -234,7 +234,7 @@
       "fix: D2 render timing, MCP per-server timeout, stale Esc mouse hint",
       "refactor(providers): remove MLX as dedicated provider — use Ollama instead"
     ],
-    "last_rc": "2026-03-30T21:55:45Z",
-    "rc_version": "0.15.5-rc.17"
+    "last_rc": "2026-03-30T22:08:00Z",
+    "rc_version": "0.15.5-rc.18"
   }
 }
