@@ -467,4 +467,34 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   c88e0e4b chore(release): 0.15.6-rc.2
   4615aea2 feat: wire command_tx to ContextProvider for tool dispatch
   89998a18 feat: SharedContextMetrics for real-time status collection
+## 2026-03-31 — main (11t 6853tc 5m7s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  d09240ed chore(release): 0.15.6-rc.3
+  d19ee8f0 feat(scribe): implement rust-native extension — RPC sidecar integration
+  c88e0e4b chore(release): 0.15.6-rc.2
+## 2026-03-31 — main (1t 6853tc 12s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  d09240ed chore(release): 0.15.6-rc.3
+  d19ee8f0 feat(scribe): implement rust-native extension — RPC sidecar integration
+  c88e0e4b chore(release): 0.15.6-rc.2
 

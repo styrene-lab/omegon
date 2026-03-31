@@ -1,28 +1,30 @@
 # Scribe RPC — First Rust-Native Omegon Extension
 
-This is the canonical implementation of the **Rust-native extension** pattern for omegon, as defined in `design/rust-native-extension-boundary.md`.
+This is the canonical implementation of the **Rust-native extension** pattern for omegon. Scribe is fully integrated into the Rust runtime via the `Feature` trait.
 
 ## Architecture
 
 ```
-omegon (Node.js/TypeScript)
-  ↓ spawns
-extensions/scribe/src/
-  ├── index.ts           tool/command registration (~160 lines)
-  ├── client.ts          typed RPC wrapper (~110 lines)
-  └── (pi-tui components)
-  
-      ↕ ndjson over stdin/stdout
-      
-core/crates/scribe-rpc/ (Rust binary)
-  ├── main.rs            entry point: --rpc flag check (~80 lines)
-  ├── rpc/
-  │   ├── mod.rs         JSON-RPC loop, message parsing (~120 lines)
-  │   └── dispatch.rs    method handlers (~110 lines)
-  ├── cli/
-  │   └── mod.rs         standalone CLI mode (~30 lines)
-  └── scribe/
-      └── mod.rs         business logic, transport-agnostic (~100 lines)
+omegon (Rust binary)
+  │
+  ├─ setup.rs: Create ScribeFeature, spawn scribe-rpc sidecar
+  │
+  ├─ features/scribe.rs (ScribeFeature)
+  │   └─ Implements Feature trait
+  │   └─ Registers 3 tools: scribe_context, scribe_log, scribe_list
+  │   └─ Manages RPC communication
+  │
+  ↕ ndjson (JSON-RPC 2.0) over stdin/stdout
+  │
+  └─ core/crates/scribe-rpc/ (Rust binary, spawned as sidecar)
+     ├─ main.rs            entry point: --rpc flag for sidecar mode
+     ├─ rpc/
+     │  ├─ mod.rs          JSON-RPC loop, message parsing
+     │  └─ dispatch.rs     method handlers → business logic
+     ├─ cli/
+     │  └─ mod.rs          standalone CLI mode (scribe log, status, sync)
+     └─ scribe/
+        └─ mod.rs          business logic, transport-agnostic
 ```
 
 ## Running
@@ -125,76 +127,73 @@ Rust can push unsolicited notifications to omegon (e.g., when engagement context
 
 ## Implementation Status
 
-### Complete (First Pass)
+### Complete (Phase 3: Pure Rust)
 
-- ✅ Rust binary: main, RPC loop, method dispatch, CLI mode
-- ✅ Business logic stubs: resolve_context, get_status, write_log, get_timeline, sync
-- ✅ TypeScript: RpcSidecar transport, ScribeClient wrapper, extension registration
-- ✅ Build: integrated into workspace Cargo.toml
+- ✅ Rust binary: main.rs, RPC loop, method dispatch, CLI mode
+- ✅ ScribeFeature: Feature trait implementation, tool registration, RPC communication
+- ✅ omegon integration: Spawned in setup.rs, registered with EventBus
+- ✅ Tools: scribe_context, scribe_log, scribe_list (callable by agent)
+- ✅ Build: Integrated into workspace, binary included in release
 
-### TODO: Backend Integration
+### TODO: Backend Implementation
 
 - [ ] .scribe file format (TOML) — read engagement metadata
-- [ ] HTTP client — call SCRIBE_URL endpoints (reqwest setup)
+- [ ] HTTP client — call SCRIBE_URL endpoints (reqwest)
 - [ ] Token caching — refresh engagement context every 30 turns
 - [ ] Filesystem watcher (notify crate) — push notifications on changes
 - [ ] Git integration — read recent commits, associate with logs
-- [ ] omegon integration — session lifecycle hooks
-
-### TODO: UI Components
-
-- [ ] Footer component — display partnership/engagement in omegon footer
-- [ ] Engagement picker — dialog to select engagement
-- [ ] Log composer — text input for work log entries
+- [ ] Session lifecycle hooks — sync on session start/end
 
 ## Design Patterns
 
 ### Transport-Agnostic Business Logic
 
-All functions in `scribe-rpc/src/scribe/` are pure async functions with no transport awareness. This means:
-- Same code runs in CLI mode, RPC mode, and (future) napi-rs FFI
+All functions in `scribe-rpc/src/scribe/` are pure async functions with no transport awareness:
+- Same code runs in CLI mode, RPC mode, and future FFI bindings
 - No coupling to JSON serialization
-- Tests call the business logic directly, no mocking of RPC
+- Tests call the business logic directly
 
 ### Dual-Mode Binary
 
 ```rust
 // main.rs
 if args.rpc {
-    rpc::run_rpc_loop().await?;
+    rpc::run_rpc_loop().await?;    // Spawned by omegon, reads JSON-RPC on stdin
 } else if let Some(cmd) = args.command {
-    cli::execute(cmd).await?;
+    cli::execute(cmd).await?;      // Standalone CLI: scribe log, scribe status
 }
 ```
 
 One binary, two consumers: omegon (sidecar) and terminal users.
 
-### TypeScript Adapter is Render-Only
-
-```typescript
-// ScribeExtension.registerTools() — just serializes/deserializes RPC
-// No business logic: no context resolution, no API calls, no file I/O
-// All of that happens in Rust
-```
-
-## Migration Path (Future)
-
-### Phase 2: napi-rs FFI (no business logic changes)
-
-The Rust codebase gains a `[lib] crate-type = ["cdylib"]` and thin napi wrappers:
+### Feature-Based Integration
 
 ```rust
-#[napi]
-pub fn get_context(cwd: String) -> napi::Result<ContextResult> {
-    scribe::resolve_context(&cwd).map_err(|e| /* convert to napi::Error */)
+// features/scribe.rs
+#[async_trait]
+impl Feature for ScribeFeature {
+    fn tools(&self) -> Vec<ToolDefinition> { /* register 3 tools */ }
+    async fn execute(&self, tool_name: &str, args: Value, _cancel: Token) -> Result<ToolResult> {
+        /* send JSON-RPC request to sidecar */
+    }
 }
 ```
 
-TypeScript adapter shrinks from 160 lines to ~50 lines of type bindings. No changes to business logic.
+No intermediate adapters. Rust talks directly to Rust.
 
-### Phase 3: Omegon goes Rust
+## Why This Pattern
 
-The TypeScript adapter disappears. Extensions implement a Rust trait. Same `src/scribe/` business logic is untouched.
+**Phase 1 (Historical)**: Omegon was TypeScript + pi. Extensions were plugins loaded at runtime. Scribe was a separate TS extension communicating with a Rust RPC binary.
+
+**Phase 2 (Completed)**: Omegon became Rust. The TypeScript extension layer became unnecessary. Omegon now spawns the RPC sidecar directly and consumes it via the Feature trait.
+
+**Phase 3 (Current)**: Scribe is fully integrated. No bridge, no adapter, no intermediate process. Just Feature trait ↔ RPC binary.
+
+Future Rust-native extensions follow the same pattern:
+1. Write business logic in Rust (transport-agnostic)
+2. Add RPC dispatch layer (JSON-RPC 2.0 over stdin/stdout)
+3. Implement Feature trait in omegon to spawn and communicate
+4. Done — no TypeScript layer needed
 
 ## Testing
 
@@ -202,25 +201,30 @@ The TypeScript adapter disappears. Extensions implement a Rust trait. Same `src/
 # Unit tests for business logic (Rust)
 cargo test -p scribe-rpc
 
-# Integration tests for RPC protocol (TODO)
-npm run test:scribe
+# Integration test: spawn sidecar, send RPC requests
+# (TODO: implement via child_process in tests)
 
 # Standalone CLI smoke tests (TODO)
-scribe-rpc log "test" && scribe-rpc status
+scribe-rpc log "test entry" --category development
+scribe-rpc status
 ```
 
 ## Resources
 
-- **Design**: `docs/rust-native-extension-boundary.md`
-- **Example manifest** (reference): `core/examples/plugins/scribe/plugin.toml`
-- **RPC spec**: ndjson, JSON-RPC 2.0
-- **Transport**: `extensions/lib/rpc-sidecar.ts` (reusable for all Rust extensions)
+- **Feature integration**: `core/crates/omegon/src/features/scribe.rs`
+- **RPC binary**: `core/crates/scribe-rpc/`
+- **RPC spec**: JSON-RPC 2.0 over ndjson (stdin/stdout)
+- **Protocol reference**: Method signatures in `scribe-rpc/src/rpc/dispatch.rs`
 
 ---
 
-**This is the template for all future omegon-native Rust extensions.** The pattern:
-1. Write business logic in Rust (transport-agnostic)
-2. Add RPC dispatch layer for sidecar communication
-3. Add CLI for standalone use
-4. Write thin TypeScript adapter (~100-200 lines) for tool/command registration
-5. Profit.
+**This is the template for all future omegon-native Rust extensions:**
+
+1. Write business logic in Rust (scribe-rpc/src/scribe/mod.rs)
+2. Add RPC dispatch layer (scribe-rpc/src/rpc/dispatch.rs)
+3. Add CLI for standalone use (scribe-rpc/src/cli/mod.rs)
+4. Implement Feature trait in omegon (features/{name}.rs)
+5. Spawn sidecar in setup.rs, register with EventBus
+6. Done — pure Rust, no bridge layer needed
+
+No TypeScript. No plugin API. Just Rust traits talking to Rust binaries.
