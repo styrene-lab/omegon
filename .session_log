@@ -62,4 +62,64 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   0a878151 chore(release): 0.15.6-rc.1
   8e567f3d chore(release): 0.15.5
   7cbd40a1 docs: documentation pass for 0.15.5 release
+## 2026-03-31 — main (50t 6474tc 14m52s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  1101bb2b fix(ci): fix malformed YAML in release.yml workflow_dispatch edit
+  b9d14341 fix(ci): add workflow_dispatch to release.yml; use RELEASE_TAG env var
+  2b913a6f fix(justfile): smoke and publish robust to post-release RC cycle bump
+## 2026-03-31 — main (1t 6474tc 34s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  1101bb2b fix(ci): fix malformed YAML in release.yml workflow_dispatch edit
+  b9d14341 fix(ci): add workflow_dispatch to release.yml; use RELEASE_TAG env var
+  2b913a6f fix(justfile): smoke and publish robust to post-release RC cycle bump
+## 2026-03-31 — main (2t 6475tc 21s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  1101bb2b fix(ci): fix malformed YAML in release.yml workflow_dispatch edit
+  b9d14341 fix(ci): add workflow_dispatch to release.yml; use RELEASE_TAG env var
+  2b913a6f fix(justfile): smoke and publish robust to post-release RC cycle bump
+## 2026-03-31 — main (1t 6475tc 6s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  1101bb2b fix(ci): fix malformed YAML in release.yml workflow_dispatch edit
+  b9d14341 fix(ci): add workflow_dispatch to release.yml; use RELEASE_TAG env var
+  2b913a6f fix(justfile): smoke and publish robust to post-release RC cycle bump
 

@@ -1,0 +1,21 @@
+---
+import Docs from "../layouts/Docs.astro";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const termsPath = join(process.cwd(), "..", "TERMS.md");
+let raw = "";
+try {
+  raw = readFileSync(termsPath, "utf-8");
+} catch {
+  raw = "# Terms of Use\n\n*Not available during this build.*";
+}
+
+const { default: markdownit } = await import("markdown-it");
+const md = markdownit({ html: true, linkify: true });
+const html = md.render(raw);
+---
+
+<Docs title="Terms of Use" description="Terms of use, licensing, and legal information for Omegon by Black Meridian, LLC.">
+  <Fragment set:html={html} />
+</Docs>
