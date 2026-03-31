@@ -557,4 +557,49 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   a26cbfa9 chore(release): 0.15.6-rc.4
   d677bf49 refactor: remove dead TypeScript extension bridge — scribe is pure Rust
   d09240ed chore(release): 0.15.6-rc.3
+## 2026-03-31 — main (26t 6921tc 7m14s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  f38d445f docs: comprehensive extension contract and manifest documentation
+  f0f29c41 chore(release): 0.15.6-rc.5
+  edee575a feat: generic extension manifest + discovery system — all extensions equal
+## 2026-03-31 — main (1t 6921tc 15s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  f38d445f docs: comprehensive extension contract and manifest documentation
+  f0f29c41 chore(release): 0.15.6-rc.5
+  edee575a feat: generic extension manifest + discovery system — all extensions equal
+## 2026-03-31 — main (1t 6921tc 20s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  f38d445f docs: comprehensive extension contract and manifest documentation
+  f0f29c41 chore(release): 0.15.6-rc.5
+  edee575a feat: generic extension manifest + discovery system — all extensions equal
 

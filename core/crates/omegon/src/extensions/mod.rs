@@ -2,6 +2,7 @@
 //!
 //! Handles both native (binary) and OCI (container) extensions.
 //! All extensions communicate via JSON-RPC 2.0 over stdin/stdout.
+//! Stateful widgets stream updates via separate TCP connection.
 
 use omegon_traits::{Feature, ToolDefinition, ToolResult, ContentBlock};
 use anyhow::{anyhow, Result};
@@ -10,11 +11,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 use tokio_util::sync::CancellationToken;
 
 pub mod manifest;
-pub use manifest::{ExtensionManifest, RuntimeConfig};
+pub mod widgets;
+pub use manifest::{ExtensionManifest, RuntimeConfig, WidgetConfig};
+pub use widgets::{WidgetDeclaration, WidgetEvent, ExtensionTabWidget};
 
 /// Handles for communicating with an extension process.
 pub struct ProcessHandles {
@@ -41,6 +44,8 @@ pub struct ExtensionFeature {
     tools: Vec<ToolDefinition>,
     handles: Arc<Mutex<Option<ProcessHandles>>>,
     request_id: Arc<AtomicU64>,
+    widgets: Vec<WidgetDeclaration>,
+    widget_tx: broadcast::Sender<WidgetEvent>,
 }
 
 impl ExtensionFeature {
@@ -48,15 +53,22 @@ impl ExtensionFeature {
     pub fn new(
         name: String,
         tools: Vec<ToolDefinition>,
+        widgets: Vec<WidgetDeclaration>,
         stdin: tokio::process::ChildStdin,
         stdout: tokio::process::ChildStdout,
-    ) -> Self {
-        Self {
-            name,
-            tools,
-            handles: Arc::new(Mutex::new(Some(ProcessHandles::new(stdin, stdout)))),
-            request_id: Arc::new(AtomicU64::new(1)),
-        }
+    ) -> (Self, broadcast::Receiver<WidgetEvent>) {
+        let (widget_tx, widget_rx) = broadcast::channel::<WidgetEvent>(100);
+        (
+            Self {
+                name,
+                tools,
+                handles: Arc::new(Mutex::new(Some(ProcessHandles::new(stdin, stdout)))),
+                request_id: Arc::new(AtomicU64::new(1)),
+                widgets,
+                widget_tx,
+            },
+            widget_rx,
+        )
     }
 
     /// Send a JSON-RPC request and receive the response.
@@ -111,6 +123,26 @@ impl ExtensionFeature {
     }
 }
 
+impl ExtensionFeature {
+    /// Get widgets declared by this extension.
+    pub fn widgets(&self) -> &[WidgetDeclaration] {
+        &self.widgets
+    }
+
+    /// Broadcast a widget event (for internal use).
+    pub fn send_widget_event(&self, event: WidgetEvent) -> Result<()> {
+        self.widget_tx
+            .send(event)
+            .map_err(|e| anyhow!("widget event broadcast failed: {}", e))?;
+        Ok(())
+    }
+
+    /// Subscribe to widget events.
+    pub fn widget_events(&self) -> broadcast::Receiver<WidgetEvent> {
+        self.widget_tx.subscribe()
+    }
+}
+
 #[async_trait::async_trait]
 impl Feature for ExtensionFeature {
     fn name(&self) -> &str {
@@ -143,18 +175,38 @@ impl Feature for ExtensionFeature {
     }
 }
 
+/// Result of spawning an extension: feature + widgets
+pub struct SpawnedExtension {
+    pub feature: Box<dyn Feature>,
+    pub widgets: Vec<ExtensionTabWidget>,
+    pub widget_rx: broadcast::Receiver<WidgetEvent>,
+}
+
 /// Spawn an extension from its manifest directory.
-pub async fn spawn_from_manifest(ext_dir: &PathBuf) -> Result<Box<dyn Feature>> {
+pub async fn spawn_from_manifest(ext_dir: &PathBuf) -> Result<SpawnedExtension> {
     let manifest = ExtensionManifest::from_extension_dir(ext_dir)?;
+
+    // Parse widgets from manifest
+    let widgets: Vec<WidgetDeclaration> = manifest
+        .widgets
+        .iter()
+        .map(|(id, config)| WidgetDeclaration {
+            id: id.clone(),
+            label: config.label.clone(),
+            kind: config.kind.clone(),
+            renderer: config.renderer.clone(),
+            description: config.description.clone(),
+        })
+        .collect();
 
     match manifest.runtime {
         RuntimeConfig::Native { .. } => {
             let binary = manifest.native_binary_path(ext_dir)?;
-            spawn_native(&manifest, &binary).await
+            spawn_native(&manifest, &binary, widgets).await
         }
         RuntimeConfig::Oci { .. } => {
             let image = manifest.oci_image()?;
-            spawn_container(&manifest, &image).await
+            spawn_container(&manifest, &image, widgets).await
         }
     }
 }
@@ -162,7 +214,8 @@ pub async fn spawn_from_manifest(ext_dir: &PathBuf) -> Result<Box<dyn Feature>> 
 async fn spawn_native(
     manifest: &ExtensionManifest,
     binary: &PathBuf,
-) -> Result<Box<dyn Feature>> {
+    widgets: Vec<WidgetDeclaration>,
+) -> Result<SpawnedExtension> {
     let mut child = tokio::process::Command::new(binary)
         .arg("--rpc")
         .stdin(std::process::Stdio::piped())
@@ -174,8 +227,9 @@ async fn spawn_native(
     let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
 
     // Create temporary feature to fetch tools
-    let temp_feature = ExtensionFeature::new(
+    let (temp_feature, _) = ExtensionFeature::new(
         manifest.extension.name.clone(),
+        vec![],
         vec![],
         stdin,
         stdout,
@@ -193,10 +247,11 @@ async fn spawn_native(
         name = %manifest.extension.name,
         binary = %binary.display(),
         tools = tools.len(),
+        widgets = widgets.len(),
         "spawned native extension"
     );
 
-    // Create final feature with tools
+    // Create final feature with tools and widgets
     // We need to re-spawn because we consumed the handles getting tools
     let mut child = tokio::process::Command::new(binary)
         .arg("--rpc")
@@ -208,18 +263,32 @@ async fn spawn_native(
     let stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
     let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
 
-    Ok(Box::new(ExtensionFeature::new(
+    let (feature, widget_rx) = ExtensionFeature::new(
         manifest.extension.name.clone(),
         tools,
+        widgets.clone(),
         stdin,
         stdout,
-    )))
+    );
+
+    // Convert widget declarations to tab widgets
+    let tab_widgets: Vec<ExtensionTabWidget> = widgets
+        .into_iter()
+        .map(|w| ExtensionTabWidget::new(w.id, w.label, w.renderer, w.kind))
+        .collect();
+
+    Ok(SpawnedExtension {
+        feature: Box::new(feature),
+        widgets: tab_widgets,
+        widget_rx,
+    })
 }
 
 async fn spawn_container(
     manifest: &ExtensionManifest,
     image: &str,
-) -> Result<Box<dyn Feature>> {
+    widgets: Vec<WidgetDeclaration>,
+) -> Result<SpawnedExtension> {
     let mut child = tokio::process::Command::new("podman")
         .args(&["run", "--rm", "-i", image])
         .stdin(std::process::Stdio::piped())
@@ -231,8 +300,9 @@ async fn spawn_container(
     let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
 
     // Create temporary feature to fetch tools
-    let temp_feature = ExtensionFeature::new(
+    let (temp_feature, _) = ExtensionFeature::new(
         manifest.extension.name.clone(),
+        vec![],
         vec![],
         stdin,
         stdout,
@@ -250,6 +320,7 @@ async fn spawn_container(
         name = %manifest.extension.name,
         image = image,
         tools = tools.len(),
+        widgets = widgets.len(),
         "spawned OCI extension"
     );
 
@@ -264,12 +335,25 @@ async fn spawn_container(
     let stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
     let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
 
-    Ok(Box::new(ExtensionFeature::new(
+    let (feature, widget_rx) = ExtensionFeature::new(
         manifest.extension.name.clone(),
         tools,
+        widgets.clone(),
         stdin,
         stdout,
-    )))
+    );
+
+    // Convert widget declarations to tab widgets
+    let tab_widgets: Vec<ExtensionTabWidget> = widgets
+        .into_iter()
+        .map(|w| ExtensionTabWidget::new(w.id, w.label, w.renderer, w.kind))
+        .collect();
+
+    Ok(SpawnedExtension {
+        feature: Box::new(feature),
+        widgets: tab_widgets,
+        widget_rx,
+    })
 }
 
 #[cfg(test)]

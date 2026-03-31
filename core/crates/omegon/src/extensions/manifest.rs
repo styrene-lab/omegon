@@ -16,6 +16,8 @@ pub struct ExtensionManifest {
     pub runtime: RuntimeConfig,
     #[serde(default)]
     pub startup: StartupConfig,
+    #[serde(default)]
+    pub widgets: std::collections::HashMap<String, WidgetConfig>,
 }
 
 /// Extension metadata.
@@ -65,6 +67,20 @@ impl Default for StartupConfig {
             timeout_ms: 5000,
         }
     }
+}
+
+/// Widget configuration — declared per-widget in manifest.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WidgetConfig {
+    /// Human-readable label for the tab/modal
+    pub label: String,
+    /// Widget kind: "stateful" (tab) or "ephemeral" (modal)
+    pub kind: String,  // "stateful" | "ephemeral"
+    /// How to render: "timeline", "tree", "table", "graph", etc.
+    pub renderer: String,
+    /// Optional description of the widget
+    #[serde(default)]
+    pub description: String,
 }
 
 impl ExtensionManifest {
@@ -143,11 +159,19 @@ binary = "target/release/scribe-rpc"
 [startup]
 ping_method = "get_tools"
 timeout_ms = 5000
+
+[widgets.timeline]
+label = "Work Timeline"
+kind = "stateful"
+renderer = "timeline"
+description = "Timeline of engagement activity"
 "#;
         let manifest: ExtensionManifest = toml::from_str(toml).unwrap();
         assert_eq!(manifest.extension.name, "scribe-rpc");
         assert!(manifest.is_native());
         assert!(!manifest.is_oci());
+        assert_eq!(manifest.widgets.len(), 1);
+        assert_eq!(manifest.widgets["timeline"].label, "Work Timeline");
     }
 
     #[test]

@@ -632,18 +632,22 @@ async fn discover_and_register_extensions(bus: &mut crate::bus::EventBus) -> any
 
         // Try to spawn this extension
         match crate::extensions::spawn_from_manifest(&path).await {
-            Ok(feature) => {
+            Ok(spawned) => {
                 let ext_name = path.file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown");
-                let tool_count = feature.tools().len();
+                let tool_count = spawned.feature.tools().len();
+                let widget_count = spawned.widgets.len();
                 tracing::info!(
                     name = ext_name,
                     path = %path.display(),
                     tools = tool_count,
+                    widgets = widget_count,
                     "discovered and spawned extension"
                 );
-                bus.register(feature);
+                bus.register(spawned.feature);
+                // TODO: Store widget_rx for TUI integration
+                drop(spawned.widget_rx);
                 count += 1;
             }
             Err(e) => {
