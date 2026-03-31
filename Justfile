@@ -37,13 +37,8 @@ build:
 link:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Same jj→git normalization as 'rc' — keeps HEAD attached after harness commits.
-    if command -v jj &>/dev/null 2>&1 && [ -d ".jj" ]; then
-        jj git export 2>/dev/null || true
-        if [ -z "$(git branch --show-current 2>/dev/null)" ]; then
-            git checkout main 2>/dev/null || true
-        fi
-    fi
+    # Reconcile jj+git colocated state before HEAD checks.
+    ./scripts/sync-jj-to-git.sh
     if ! git symbolic-ref -q HEAD >/dev/null 2>&1 && [ "${OMEGON_ALLOW_DETACHED_LINK:-0}" != "1" ]; then
         echo "✗ Detached HEAD. Refusing to link from an unattached commit."
         echo "  Check out main (or set OMEGON_ALLOW_DETACHED_LINK=1 for an intentional tagged/worktree build)."
@@ -184,15 +179,10 @@ rc:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    # In a colocated jj+git repo the 'commit' harness tool uses jj, which leaves
-    # git HEAD detached (pointing at jj's empty working-copy commit rather than the
-    # main branch).  Auto-sync and reattach so the guards below always see clean state.
-    if command -v jj &>/dev/null 2>&1 && [ -d ".jj" ]; then
-        jj git export 2>/dev/null || true
-        if [ -z "$(git branch --show-current 2>/dev/null)" ]; then
-            git checkout main 2>/dev/null || true
-        fi
-    fi
+    # Reconcile jj+git colocated state: fast-forward refs/heads/main to include
+    # any jj commits that the harness created, then re-attach HEAD.
+    # Must run before any guard that reads git branch/HEAD state.
+    ./scripts/sync-jj-to-git.sh
 
     # Refuse detached HEAD or non-main release cuts.
     BRANCH=$(git branch --show-current)
@@ -209,23 +199,6 @@ rc:
     if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
         echo "✗ HEAD is not the tip of main. Check out main and retry."
         exit 1
-    fi
-
-    # In a colocated jj+git repo, jj commits don't automatically advance the git
-    # main branch ref. If jj's working-copy parent differs from git main, there
-    # are commits that would be silently excluded from this RC.
-    if command -v jj &>/dev/null 2>&1 && [ -d ".jj" ]; then
-        JJ_PARENT=$(jj log --no-graph -r '@-' --template 'commit_id' 2>/dev/null | head -c 40 || true)
-        if [ -n "$JJ_PARENT" ] && [ "$JJ_PARENT" != "$MAIN_SHA" ]; then
-            echo "✗ jj has commits not on git main — they would be silently excluded from this RC."
-            echo ""
-            echo "  jj @- : $JJ_PARENT"
-            echo "  git main: $MAIN_SHA"
-            echo ""
-            echo "  To include them:  jj bookmark set main -r @-"
-            echo "  To abandon them:  jj abandon @-"
-            exit 1
-        fi
     fi
 
     # Refuse to run with uncommitted changes (core/ and milestones)
@@ -312,6 +285,9 @@ release:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    # Reconcile jj+git colocated state before any guards read HEAD.
+    ./scripts/sync-jj-to-git.sh
+
     BRANCH=$(git branch --show-current)
     if [ -z "$BRANCH" ]; then
         echo "✗ Detached HEAD. Check out main before cutting a stable release."
@@ -326,20 +302,6 @@ release:
     if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
         echo "✗ HEAD is not the tip of main. Check out main and retry."
         exit 1
-    fi
-
-    if command -v jj &>/dev/null 2>&1 && [ -d ".jj" ]; then
-        JJ_PARENT=$(jj log --no-graph -r '@-' --template 'commit_id' 2>/dev/null | head -c 40 || true)
-        if [ -n "$JJ_PARENT" ] && [ "$JJ_PARENT" != "$MAIN_SHA" ]; then
-            echo "✗ jj has commits not on git main — they would be silently excluded from this release."
-            echo ""
-            echo "  jj @- : $JJ_PARENT"
-            echo "  git main: $MAIN_SHA"
-            echo ""
-            echo "  To include them:  jj bookmark set main -r @-"
-            echo "  To abandon them:  jj abandon @-"
-            exit 1
-        fi
     fi
 
     DIRTY=$(git status --porcelain -- core/ .omegon/milestones.json)
