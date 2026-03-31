@@ -20,6 +20,7 @@ mod bridge;
 pub mod bus;
 mod cleave;
 mod context;
+pub mod extensions;
 pub mod features;
 mod ipc;
 mod migrate;

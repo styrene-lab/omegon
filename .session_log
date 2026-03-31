@@ -497,4 +497,64 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   d09240ed chore(release): 0.15.6-rc.3
   d19ee8f0 feat(scribe): implement rust-native extension — RPC sidecar integration
   c88e0e4b chore(release): 0.15.6-rc.2
+## 2026-03-31 — main (15t 6867tc 6m45s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  a26cbfa9 chore(release): 0.15.6-rc.4
+  d677bf49 refactor: remove dead TypeScript extension bridge — scribe is pure Rust
+  d09240ed chore(release): 0.15.6-rc.3
+## 2026-03-31 — main (1t 6867tc 16s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  a26cbfa9 chore(release): 0.15.6-rc.4
+  d677bf49 refactor: remove dead TypeScript extension bridge — scribe is pure Rust
+  d09240ed chore(release): 0.15.6-rc.3
+## 2026-03-31 — main (1t 6867tc 17s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  a26cbfa9 chore(release): 0.15.6-rc.4
+  d677bf49 refactor: remove dead TypeScript extension bridge — scribe is pure Rust
+  d09240ed chore(release): 0.15.6-rc.3
+## 2026-03-31 — main (30t 6896tc 3m42s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  a26cbfa9 chore(release): 0.15.6-rc.4
+  d677bf49 refactor: remove dead TypeScript extension bridge — scribe is pure Rust
+  d09240ed chore(release): 0.15.6-rc.3
 

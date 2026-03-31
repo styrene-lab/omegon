@@ -374,13 +374,10 @@ impl AgentSetup {
         let command_tx = features::context::new_shared_command_tx();
         bus.register(Box::new(features::context::ContextProvider::new(context_metrics.clone(), command_tx.clone())));
 
-        // ─── Scribe RPC integration (engagement tracking) ─────────────
-        let scribe_feature = features::scribe::ScribeFeature::new(cwd.clone());
-        if let Err(e) = scribe_feature.spawn().await {
-            tracing::warn!("scribe-rpc spawn failed: {}", e);
-            // Continue without scribe — it's optional
-        } else {
-            bus.register(Box::new(scribe_feature));
+        // ─── Operator-installed extensions (RPC + OCI) ────────────────
+        // All extensions, including bundled ones (scribe-rpc), are discovered here
+        if let Err(e) = discover_and_register_extensions(&mut bus).await {
+            tracing::warn!("extension discovery failed: {}", e);
         }
 
         // ─── External plugins (TOML manifests) ────────────────────────
@@ -605,4 +602,67 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
         }
     }
     cwd.to_path_buf()
+}
+
+/// Discover and spawn operator-installed extensions from ~/.omegon/extensions/.
+/// Each subdirectory with a manifest.toml is treated as an extension.
+async fn discover_and_register_extensions(bus: &mut crate::bus::EventBus) -> anyhow::Result<()> {
+    let ext_dir = dirs::home_dir()
+        .map(|h| h.join(".omegon/extensions"))
+        .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?;
+
+    if !ext_dir.exists() {
+        tracing::debug!("extension directory not found: {}", ext_dir.display());
+        return Ok(());
+    }
+
+    let mut count = 0;
+    for entry in std::fs::read_dir(&ext_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if !path.is_dir() {
+            continue;
+        }
+
+        let manifest_path = path.join("manifest.toml");
+        if !manifest_path.exists() {
+            continue;
+        }
+
+        // Try to spawn this extension
+        match crate::extensions::spawn_from_manifest(&path).await {
+            Ok(feature) => {
+                let ext_name = path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                let tool_count = feature.tools().len();
+                tracing::info!(
+                    name = ext_name,
+                    path = %path.display(),
+                    tools = tool_count,
+                    "discovered and spawned extension"
+                );
+                bus.register(feature);
+                count += 1;
+            }
+            Err(e) => {
+                let ext_name = path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                tracing::warn!(
+                    name = ext_name,
+                    path = %path.display(),
+                    error = %e,
+                    "failed to spawn extension"
+                );
+            }
+        }
+    }
+
+    if count > 0 {
+        tracing::info!(count = count, "extension discovery complete");
+    }
+
+    Ok(())
 }

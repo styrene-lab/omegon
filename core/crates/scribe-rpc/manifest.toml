@@ -1,0 +1,12 @@
+[extension]
+name = "scribe-rpc"
+version = "0.1.0"
+description = "Engagement and partnership tracking via Scribe RPC"
+
+[runtime]
+type = "native"
+binary = "target/release/scribe-rpc"
+
+[startup]
+ping_method = "get_tools"
+timeout_ms = 5000
