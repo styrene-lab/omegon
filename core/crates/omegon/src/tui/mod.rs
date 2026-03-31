@@ -4787,7 +4787,10 @@ pub async fn run_tui(
                     match (key.code, key.modifiers) {
                         // ── Interrupt: Escape or Ctrl+C ─────────────────
                         (KeyCode::Esc, _) => {
-                            if app.agent_active {
+                            // Dismiss modal if active, otherwise interrupt agent
+                            if app.active_modal.is_some() {
+                                app.active_modal = None;
+                            } else if app.agent_active {
                                 app.interrupt();
                                 app.agent_active = false; // Unblock editor immediately
                                 app.conversation.finalize_message();
