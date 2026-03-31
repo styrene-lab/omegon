@@ -201,6 +201,8 @@ pub struct App {
     last_left_click: Option<(u16, u16, std::time::Instant)>,
     /// Extension widgets discovered during setup — keyed by widget_id.
     extension_widgets: std::collections::HashMap<String, crate::extensions::ExtensionTabWidget>,
+    /// Broadcast receivers for widget events — one per extension.
+    widget_receivers: Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -317,6 +319,7 @@ impl App {
             terminal_copy_mode: false,
             last_left_click: None,
             extension_widgets: std::collections::HashMap::new(),
+            widget_receivers: Vec::new(),
         }
     }
 
@@ -3529,6 +3532,8 @@ pub struct TuiConfig {
     pub login_prompt_tx: std::sync::Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<String>>>>,
     /// Extension widgets discovered during setup — for tab rendering.
     pub extension_widgets: Vec<crate::extensions::ExtensionTabWidget>,
+    /// Widget event receivers — one per discovered extension.
+    pub widget_receivers: Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
 }
 
 /// Initial state snapshot gathered during setup, before the TUI event loop starts.
@@ -4075,10 +4080,11 @@ pub async fn run_tui(
     let mouse_enabled = settings.lock().map(|s| s.mouse).unwrap_or(true);
     let mut app = App::new(settings.clone());
     app.keyboard_enhancement = has_keyboard_enhancement;
-    // Populate extension widgets from config
+    // Populate extension widgets and receivers from config
     for widget in config.extension_widgets {
         app.extension_widgets.insert(widget.widget_id.clone(), widget);
     }
+    app.widget_receivers = config.widget_receivers;
     // Respect the persisted mouse setting (default: true).
     if mouse_enabled {
         app.enable_mouse_interaction_mode();
@@ -4097,6 +4103,12 @@ pub async fn run_tui(
             widget.label.clone(),
         );
     }
+
+    // Spawn widget event listener task
+    // This task polls all widget_receivers for WidgetEvent updates and relays them to the app
+    // via a crossbeam channel. For now, just keep receivers alive (they're stored in app).
+    // TODO: Spawn tokio::spawn task with tokio::select! over all receivers
+    // and send updates back via a crossbeam channel to the main event loop.
 
     // Spawn background update check
     let (update_tx, update_rx) = crate::update::channel();
@@ -4327,6 +4339,30 @@ pub async fn run_tui(
         // (memory_ops, tool_calls) are current when draw reads them
         while let Ok(agent_event) = events_rx.try_recv() {
             app.handle_agent_event(agent_event);
+        }
+
+        // Poll widget receivers for updates
+        for rx in &mut app.widget_receivers {
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    crate::extensions::WidgetEvent::Update {
+                        widget_id,
+                        title,
+                        data,
+                    } => {
+                        if let Some(widget) = app.extension_widgets.get_mut(&widget_id) {
+                            if let Some(new_title) = title {
+                                widget.label = new_title;
+                            }
+                            widget.current_data = data;
+                            // Frame will automatically re-render with updated data
+                        }
+                    }
+                    _ => {
+                        // Ignore other widget events for now (ShowModal, ActionRequired)
+                    }
+                }
+            }
         }
 
         // Draw

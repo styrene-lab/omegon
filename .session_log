@@ -647,4 +647,34 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   778a5c3d feat: add tab switching key bindings (Ctrl+Tab, Ctrl+Shift+Tab)
   d1e3f819 feat: add Tab and TabState for conversation widget tabbed interface
   76b138b2 docs: scribe manifest declares timeline widget for work tracking
+## 2026-03-31 — main (38t 7178tc 4m37s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  9029b454 feat: extension widget tab rendering
+  778a5c3d feat: add tab switching key bindings (Ctrl+Tab, Ctrl+Shift+Tab)
+  d1e3f819 feat: add Tab and TabState for conversation widget tabbed interface
+## 2026-03-31 — main (5t 7182tc 33s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  9029b454 feat: extension widget tab rendering
+  778a5c3d feat: add tab switching key bindings (Ctrl+Tab, Ctrl+Shift+Tab)
+  d1e3f819 feat: add Tab and TabState for conversation widget tabbed interface
 

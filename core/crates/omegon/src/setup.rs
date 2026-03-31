@@ -56,6 +56,8 @@ pub struct AgentSetup {
     pub resume_info: Option<ResumeInfo>,
     /// Extension widgets discovered during setup — passed to TUI for rendering.
     pub extension_widgets: Vec<crate::extensions::ExtensionTabWidget>,
+    /// Widget event receivers — one per discovered extension.
+    pub widget_receivers: Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
 }
 
 /// Pre-computed state gathered during setup for TUI initial display.
@@ -378,11 +380,11 @@ impl AgentSetup {
 
         // ─── Operator-installed extensions (RPC + OCI) ────────────────
         // All extensions, including bundled ones (scribe-rpc), are discovered here
-        let extension_widgets = match discover_and_register_extensions(&mut bus).await {
-            Ok(widgets) => widgets,
+        let (extension_widgets, widget_receivers) = match discover_and_register_extensions(&mut bus).await {
+            Ok((widgets, receivers)) => (widgets, receivers),
             Err(e) => {
                 tracing::warn!("extension discovery failed: {}", e);
-                vec![]
+                (vec![], vec![])
             }
         };
 
@@ -555,6 +557,7 @@ impl AgentSetup {
             startup_snapshot,
             initial_harness_status,
             extension_widgets,
+            widget_receivers,
             dashboard_handles: crate::tui::dashboard::DashboardHandles {
                 lifecycle: Some(lifecycle_handle),
                 cleave: Some(cleave_handle),
@@ -613,19 +616,20 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
 
 /// Discover and spawn operator-installed extensions from ~/.omegon/extensions/.
 /// Each subdirectory with a manifest.toml is treated as an extension.
-/// Returns collected ExtensionTabWidgets for TUI rendering.
-async fn discover_and_register_extensions(bus: &mut crate::bus::EventBus) -> anyhow::Result<Vec<crate::extensions::ExtensionTabWidget>> {
+/// Returns collected ExtensionTabWidgets and all widget event receivers.
+async fn discover_and_register_extensions(bus: &mut crate::bus::EventBus) -> anyhow::Result<(Vec<crate::extensions::ExtensionTabWidget>, Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>)> {
     let ext_dir = dirs::home_dir()
         .map(|h| h.join(".omegon/extensions"))
         .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?;
 
     if !ext_dir.exists() {
         tracing::debug!("extension directory not found: {}", ext_dir.display());
-        return Ok(vec![]);
+        return Ok((vec![], vec![]));
     }
 
     let mut count = 0;
     let mut extension_widgets = vec![];
+    let mut widget_receivers = vec![];
     for entry in std::fs::read_dir(&ext_dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -655,9 +659,9 @@ async fn discover_and_register_extensions(bus: &mut crate::bus::EventBus) -> any
                     "discovered and spawned extension"
                 );
                 bus.register(spawned.feature);
-                // Collect widgets for TUI; drop widget_rx for now (TODO: wire events)
+                // Collect widgets and receivers for TUI
                 extension_widgets.extend(spawned.widgets);
-                drop(spawned.widget_rx);
+                widget_receivers.push(spawned.widget_rx);
                 count += 1;
             }
             Err(e) => {
@@ -678,5 +682,5 @@ async fn discover_and_register_extensions(bus: &mut crate::bus::EventBus) -> any
         tracing::info!(count = count, "extension discovery complete");
     }
 
-    Ok(extension_widgets)
+    Ok((extension_widgets, widget_receivers))
 }
