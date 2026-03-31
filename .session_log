@@ -692,4 +692,19 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   a3187007 feat: wire widget event updates to live refresh extension widgets
   9029b454 feat: extension widget tab rendering
   778a5c3d feat: add tab switching key bindings (Ctrl+Tab, Ctrl+Shift+Tab)
+## 2026-03-31 — main (51t 7277tc 5m60s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  9e094400 feat: action prompt rendering for extension widgets
+  6c4b3bfd feat: modal dismiss on Esc key
+  6105c148 feat: ephemeral modal rendering for extension widgets
 

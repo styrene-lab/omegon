@@ -4839,12 +4839,34 @@ pub async fn run_tui(
                         }
                     }
 
+                    // Handle action prompt input (1-9 keys) before other keys
+                    if let Some((widget_id, actions)) = &app.active_action_prompt {
+                        if let KeyCode::Char(c) = key.code {
+                            if let Some(digit) = c.to_digit(10) {
+                                let idx = (digit - 1) as usize;
+                                if idx < actions.len() {
+                                    let action = actions[idx].clone();
+                                    // Log the action selection
+                                    app.conversation.push_system(&format!(
+                                        "✓ {}: {}",
+                                        widget_id, action
+                                    ));
+                                    app.active_action_prompt = None;
+                                    // TODO: Send action back to extension via IPC
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+
                     match (key.code, key.modifiers) {
                         // ── Interrupt: Escape or Ctrl+C ─────────────────
                         (KeyCode::Esc, _) => {
                             // Dismiss modal if active, otherwise interrupt agent
                             if app.active_modal.is_some() {
                                 app.active_modal = None;
+                            } else if app.active_action_prompt.is_some() {
+                                app.active_action_prompt = None;
                             } else if app.agent_active {
                                 app.interrupt();
                                 app.agent_active = false; // Unblock editor immediately
