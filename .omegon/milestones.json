@@ -257,10 +257,11 @@
     "frozen": false,
     "opened": "2026-03-31T02:04:48Z",
     "released": null,
-    "rc_count": 1,
+    "rc_count": 2,
     "notes": [
       "feat(ci): integrate THIRD_PARTY_NOTICES with SBOM in release workflow",
       "feat(scribe): implement first Rust-native extension",
+      "feat(scribe): implement rust-native extension — RPC sidecar integration",
       "feat: /context subcommand interface for organic context management",
       "feat: SharedContextMetrics for real-time status collection",
       "feat: wire command_tx to ContextProvider for tool dispatch",
@@ -272,7 +273,7 @@
       "fix(legal): update contact address to admin@styrene.io",
       "fix(site): add nginx location blocks for /terms and /privacy"
     ],
-    "rc_version": "0.15.6-rc.2",
-    "last_rc": "2026-03-31T20:36:40Z"
+    "rc_version": "0.15.6-rc.3",
+    "last_rc": "2026-03-31T21:40:19Z"
   }
 }
