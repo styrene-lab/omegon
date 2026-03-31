@@ -108,6 +108,7 @@ async fn run_single(
         model: None,
         reasoning: None,
         extended_context: false,
+        ..Default::default()
     };
 
     let bridge_guard = bridge.read().await;

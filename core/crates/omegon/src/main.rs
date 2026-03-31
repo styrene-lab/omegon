@@ -1030,6 +1030,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         model: Some(s.model.clone()),
                         reasoning: Some(s.thinking.as_str().to_string()),
                         extended_context: false,
+                        ..Default::default()
                     }
                 };
                 if let Some((payload, _evict_count)) = agent.conversation.build_compaction_payload()

@@ -82,6 +82,7 @@ pub async fn run(
         model: Some(config.model.clone()),
         reasoning: None,
         extended_context: config.extended_context,
+        ..Default::default()
     };
 
     let mut stuck_detector = StuckDetector::new();

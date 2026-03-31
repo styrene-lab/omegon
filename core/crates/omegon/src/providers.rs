@@ -1079,6 +1079,10 @@ impl LlmBridge for OpenAIClient {
         if !wire_tools.is_empty() {
             body["tools"] = Value::Array(wire_tools);
         }
+        // Merge any extra fields (e.g. Ollama num_ctx, keep_alive)
+        for (k, v) in &options.extra_body {
+            body[k] = v.clone();
+        }
 
         let response = self
             .client
@@ -1863,8 +1867,20 @@ impl LlmBridge for OpenAICompatClient {
             }
         }
 
-        // No prefix wrapping needed — OpenAIClient now uses model_id_from_spec()
-        // which handles both prefixed and bare model names.
+        // For Ollama: inject num_ctx and keep_alive so the model doesn't
+        // silently truncate the prompt at Ollama's default 2048-token KV cache.
+        if self.provider_id == "ollama" {
+            let num_ctx = std::env::var("OMEGON_OLLAMA_NUM_CTX")
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(32_768);
+            let keep_alive = std::env::var("OMEGON_OLLAMA_KEEP_ALIVE")
+                .unwrap_or_else(|_| "30m".to_string());
+            opts.extra_body
+                .insert("options".to_string(), serde_json::json!({"num_ctx": num_ctx}));
+            opts.extra_body
+                .insert("keep_alive".to_string(), serde_json::Value::String(keep_alive));
+        }
 
         self.inner
             .stream(system_prompt, messages, tools, &opts)

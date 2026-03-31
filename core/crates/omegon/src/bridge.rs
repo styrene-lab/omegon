@@ -172,6 +172,10 @@ pub struct StreamOptions {
     /// Deprecated — 1M context is native on Sonnet/Opus 4.6, no flag needed.
     /// Kept for struct compatibility but never read.
     pub extended_context: bool,
+    /// Extra top-level fields to merge into the HTTP request body.
+    /// Used by OpenAICompatClient to inject provider-specific options
+    /// (e.g. `options: { num_ctx }` and `keep_alive` for Ollama).
+    pub extra_body: std::collections::HashMap<String, serde_json::Value>,
 }
 
 /// Abstraction over how we call LLM providers.
