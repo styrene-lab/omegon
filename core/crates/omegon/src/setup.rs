@@ -155,6 +155,11 @@ impl AgentSetup {
                 preflight.insert((*env_var).to_string());
             }
         }
+        // Extension-declared required secrets — read manifests early so keyring-backed
+        // secrets (e.g. GITHUB_TOKEN) are resolved before extension subprocesses spawn.
+        for name in collect_extension_secret_requirements() {
+            preflight.insert(name);
+        }
         // NOTE: OMEGON_WEB_AUTH_SECRET is NOT preflighted here.
         // Web auth (Brave, Google, etc.) is only needed on-demand during web search.
         // Resolving it lazily avoids an extra keychain prompt at startup.
@@ -633,6 +638,46 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
         }
     }
     cwd.to_path_buf()
+}
+
+/// Scan installed extension manifests and collect all `secrets.required` entries.
+/// Called during the startup preflight phase — before extensions are spawned —
+/// so keyring-backed secrets are resolved and in process env when subprocesses start.
+fn collect_extension_secret_requirements() -> Vec<String> {
+    let ext_dir = match dirs::home_dir() {
+        Some(h) => h.join(".omegon/extensions"),
+        None => return vec![],
+    };
+    if !ext_dir.exists() {
+        return vec![];
+    }
+    let mut names = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&ext_dir) else {
+        return vec![];
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if let Ok(manifest) = crate::extensions::ExtensionManifest::from_extension_dir(&path) {
+            for name in manifest.secrets.required {
+                tracing::debug!(
+                    extension = %path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown"),
+                    secret = %name,
+                    "extension declared required secret"
+                );
+                names.push(name);
+            }
+            // Optional secrets are preflighted too — extension degrades gracefully if absent,
+            // but we still want the keyring prompt to happen at the startup boundary,
+            // not mid-session.
+            for name in manifest.secrets.optional {
+                names.push(name);
+            }
+        }
+    }
+    names
 }
 
 /// Discover and spawn operator-installed extensions from ~/.omegon/extensions/.

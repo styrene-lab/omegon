@@ -1262,4 +1262,19 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   2ac7ef8c chore(release): 0.15.6-rc.25
   94e4a565 fix(secrets): harden secret resolution precedence and file permissions
   7a079791 chore(release): 0.15.6-rc.24
+## 2026-04-01 — main (32t 8134tc 4m5s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  b2927546 chore: update footer snapshot for rc.25 and profile model preference
+  2ac7ef8c chore(release): 0.15.6-rc.25
+  94e4a565 fix(secrets): harden secret resolution precedence and file permissions
 

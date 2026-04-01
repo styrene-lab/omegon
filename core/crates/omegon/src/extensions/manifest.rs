@@ -18,6 +18,8 @@ pub struct ExtensionManifest {
     pub startup: StartupConfig,
     #[serde(default)]
     pub widgets: std::collections::HashMap<String, WidgetConfig>,
+    #[serde(default)]
+    pub secrets: SecretsConfig,
 }
 
 /// Extension metadata.
@@ -67,6 +69,22 @@ impl Default for StartupConfig {
             timeout_ms: 5000,
         }
     }
+}
+
+/// Secrets required by this extension.
+/// Names declared here are preflighted at startup alongside the LLM provider key,
+/// so extension subprocesses receive them via inherited process environment.
+/// Names must match entries in omegon-secrets WELL_KNOWN_SECRET_ENVS or
+/// operator-configured recipes.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct SecretsConfig {
+    /// Secrets that must be resolved before the extension is spawned.
+    /// Example: ["GITHUB_TOKEN", "MY_API_KEY"]
+    #[serde(default)]
+    pub required: Vec<String>,
+    /// Secrets that are optional (extension degrades gracefully without them).
+    #[serde(default)]
+    pub optional: Vec<String>,
 }
 
 /// Widget configuration — declared per-widget in manifest.
@@ -172,6 +190,27 @@ description = "Timeline of engagement activity"
         assert!(!manifest.is_oci());
         assert_eq!(manifest.widgets.len(), 1);
         assert_eq!(manifest.widgets["timeline"].label, "Work Timeline");
+        assert!(manifest.secrets.required.is_empty());
+    }
+
+    #[test]
+    fn parse_manifest_with_secrets() {
+        let toml = r#"
+[extension]
+name = "scribe-rpc"
+version = "0.1.0"
+
+[runtime]
+type = "native"
+binary = "bin/scribe-rpc"
+
+[secrets]
+required = ["GITHUB_TOKEN"]
+optional = ["SCRIBE_API_KEY"]
+"#;
+        let manifest: ExtensionManifest = toml::from_str(toml).unwrap();
+        assert_eq!(manifest.secrets.required, vec!["GITHUB_TOKEN"]);
+        assert_eq!(manifest.secrets.optional, vec!["SCRIBE_API_KEY"]);
     }
 
     #[test]
