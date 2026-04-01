@@ -257,7 +257,7 @@
     "frozen": false,
     "opened": "2026-03-31T02:04:48Z",
     "released": null,
-    "rc_count": 20,
+    "rc_count": 21,
     "notes": [
       "feat(ci): integrate THIRD_PARTY_NOTICES with SBOM in release workflow",
       "feat(omegon): implement extension mind persistence (Phase 3 of BYOM)",
@@ -296,13 +296,14 @@
       "fix(secrets): defer redactor rebuild until after batch preflight",
       "fix(site): add nginx location blocks for /terms and /privacy",
       "fix(startup): consolidate dual keychain prompts into single OS request",
+      "fix(startup): eliminate web auth secret from preflight keychain access",
       "fix(startup): warm only preferred auth method, not all alternatives",
       "fix: change tab navigation keybindings from Ctrl+Tab to Alt+N/P",
       "fix: install scribe-rpc extension to ~/.omegon/extensions",
       "refactor: remove dead TypeScript extension bridge — scribe is pure Rust",
       "refactor: remove scribe-rpc crate from omegon workspace"
     ],
-    "rc_version": "0.15.6-rc.21",
-    "last_rc": "2026-04-01T11:56:57Z"
+    "rc_version": "0.15.6-rc.22",
+    "last_rc": "2026-04-01T12:29:32Z"
   }
 }
