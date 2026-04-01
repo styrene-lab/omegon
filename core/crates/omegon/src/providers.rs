@@ -1608,6 +1608,15 @@ async fn parse_codex_stream(
     let mut completed_tool_calls: Vec<Value> = Vec::new();
     let _ = tx.try_send(LlmEvent::Start);
 
+    // Terminal events (Done / Error) are deferred and sent *after* process_sse
+    // returns, using `.send().await` for guaranteed delivery. `try_send` inside
+    // the sync closure can silently drop on a full channel (capacity 256).
+    enum TerminalEvent {
+        Done { input_tokens: u64, output_tokens: u64 },
+        Error(String),
+    }
+    let mut terminal: Option<TerminalEvent> = None;
+
     process_sse(response, |data| {
         let Ok(event) = serde_json::from_str::<Value>(data) else {
             return true;
@@ -1705,8 +1714,9 @@ async fn parse_codex_stream(
                 }
                 _current_item_type = None;
             }
-            "response.completed" => {
-                // Extract usage from the completed response
+            // "response.done" is an alias used by some Codex endpoint variants;
+            // handle it alongside the documented "response.completed".
+            "response.completed" | "response.done" => {
                 let mut codex_input: u64 = 0;
                 let mut codex_output: u64 = 0;
                 if let Some(usage) = event.pointer("/response/usage") {
@@ -1719,11 +1729,9 @@ async fn parse_codex_stream(
                         "Codex usage"
                     );
                 }
-                let _ = tx.try_send(LlmEvent::Done {
-                    message: json!({"text": full_text, "tool_calls": completed_tool_calls}),
+                terminal = Some(TerminalEvent::Done {
                     input_tokens: codex_input,
                     output_tokens: codex_output,
-                    cache_read_tokens: 0,
                 });
                 return false;
             }
@@ -1731,17 +1739,17 @@ async fn parse_codex_stream(
                 let msg = event["response"]["error"]["message"]
                     .as_str()
                     .or(event["response"]["incomplete_details"]["reason"].as_str())
-                    .unwrap_or("Codex response failed");
-                let _ = tx.try_send(LlmEvent::Error {
-                    message: format!("Codex: {msg}"),
-                });
+                    .unwrap_or("Codex response failed")
+                    .to_string();
+                terminal = Some(TerminalEvent::Error(format!("Codex: {msg}")));
                 return false;
             }
             "error" => {
-                let msg = event["message"].as_str().unwrap_or("unknown error");
-                let _ = tx.try_send(LlmEvent::Error {
-                    message: format!("Codex error: {msg}"),
-                });
+                let msg = event["message"]
+                    .as_str()
+                    .unwrap_or("unknown error")
+                    .to_string();
+                terminal = Some(TerminalEvent::Error(format!("Codex error: {msg}")));
                 return false;
             }
             "response.content_part.added" | "response.reasoning_summary_part.added" => {}
@@ -1749,7 +1757,53 @@ async fn parse_codex_stream(
         }
         true
     })
-    .await
+    .await?;
+
+    // Deliver the terminal event with guaranteed async send.
+    match terminal {
+        Some(TerminalEvent::Done { input_tokens, output_tokens }) => {
+            let _ = tx
+                .send(LlmEvent::Done {
+                    message: json!({"text": full_text, "tool_calls": completed_tool_calls}),
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens: 0,
+                })
+                .await;
+        }
+        Some(TerminalEvent::Error(msg)) => {
+            let _ = tx.send(LlmEvent::Error { message: msg }).await;
+        }
+        None => {
+            // SSE stream closed without a completion or error event — server
+            // dropped the connection mid-response (network drop, server restart,
+            // etc.).  If we accumulated content, synthesise a Done so the turn
+            // isn't silently lost; otherwise surface a clear error.
+            if !full_text.is_empty() || !completed_tool_calls.is_empty() {
+                tracing::warn!(
+                    text_len = full_text.len(),
+                    tool_calls = completed_tool_calls.len(),
+                    "Codex stream closed without completion event — synthesising Done from partial content"
+                );
+                let _ = tx
+                    .send(LlmEvent::Done {
+                        message: json!({"text": full_text, "tool_calls": completed_tool_calls}),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cache_read_tokens: 0,
+                    })
+                    .await;
+            } else {
+                let _ = tx
+                    .send(LlmEvent::Error {
+                        message: "Codex: stream closed without a completion event".into(),
+                    })
+                    .await;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 // ─── OpenAI-Compatible Generic Client ────────────────────────────────────────
