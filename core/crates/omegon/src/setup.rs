@@ -169,7 +169,16 @@ impl AgentSetup {
             child = is_child,
             "startup secret preflight plan"
         );
-        secrets.preflight_session_cache(preflight);
+
+        // Initialize vault client BEFORE preflight so vault: recipes can resolve.
+        // Fail-open: vault unavailability is warned, not fatal — keyring/env still work.
+        if let Err(e) = secrets.init_vault(&secrets_dir).await {
+            tracing::warn!(error = %e, "vault init failed — vault: recipes will return None");
+        }
+
+        // Async preflight resolves ALL recipe types including vault:.
+        // Replaces the sync preflight_session_cache() which silently skips vault recipes.
+        secrets.preflight_session_cache_async(preflight).await;
         let session_secret_env = secrets.session_env();
         
         // Web auth secret: Try to load from preflight cache; fall back to ephemeral.
@@ -717,13 +726,16 @@ async fn discover_and_register_extensions(
 
         // Resolve declared secrets from session cache — these were preflighted
         // at startup so no new Keychain prompts happen here.
+        // Use resolve_async so vault: recipes (which require an async client) work.
         let resolved_secrets: Vec<(String, String)> = {
             if let Ok(manifest) = crate::extensions::ExtensionManifest::from_extension_dir(&path) {
-                let all_names = manifest.secrets.required.iter()
-                    .chain(manifest.secrets.optional.iter());
-                all_names
-                    .filter_map(|name| secrets.resolve(name).map(|v| (name.clone(), v)))
-                    .collect()
+                let mut pairs = Vec::new();
+                for name in manifest.secrets.required.iter().chain(manifest.secrets.optional.iter()) {
+                    if let Some(v) = secrets.resolve_async(name).await {
+                        pairs.push((name.clone(), v));
+                    }
+                }
+                pairs
             } else {
                 vec![]
             }

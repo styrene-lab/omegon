@@ -1307,4 +1307,34 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   13dd8c2c fix(extensions): refuse to spawn extension when required secrets are absent
   88a7bd05 feat(extensions): preflight extension-declared secrets at startup
   b2927546 chore: update footer snapshot for rc.25 and profile model preference
+## 2026-04-01 — main (19t 8181tc 7m16s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  ab947ced feat(extensions): deliver secrets via bootstrap_secrets RPC, not env vars
+  13dd8c2c fix(extensions): refuse to spawn extension when required secrets are absent
+  88a7bd05 feat(extensions): preflight extension-declared secrets at startup
+## 2026-04-01 — main (3t 8183tc 4m5s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  73d99e93 chore(release): 0.15.6-rc.26
+  ab947ced feat(extensions): deliver secrets via bootstrap_secrets RPC, not env vars
+  13dd8c2c fix(extensions): refuse to spawn extension when required secrets are absent
 

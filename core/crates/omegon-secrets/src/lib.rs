@@ -207,6 +207,68 @@ impl SecretsManager {
         true
     }
 
+    /// Async preflight: resolves all names via resolve_async(), which handles
+    /// vault: recipes in addition to keyring, shell, file, and env sources.
+    ///
+    /// Use this in async contexts (AgentSetup::new) — it replaces the sync
+    /// preflight_session_cache() when vault is configured. In interactive mode
+    /// the behavior is identical to the sync variant; in headless/vault mode
+    /// it's the only path that actually resolves vault: recipes.
+    pub async fn preflight_session_cache_async<I, S>(&self, names: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let requested: Vec<String> = names.into_iter().map(|n| n.as_ref().to_string()).collect();
+        tracing::info!(
+            requested = requested.len(),
+            names = ?requested,
+            "secrets preflight (async) starting"
+        );
+
+        let mut warmed = Vec::new();
+        let mut missing = Vec::new();
+
+        for name in &requested {
+            match self.resolve_async(name).await {
+                Some(value) => {
+                    let mut cache = self.session_cache.write().unwrap();
+                    cache.insert(name.clone(), SecretString::from(value));
+                    let use_case = match name.as_str() {
+                        "BRAVE_API_KEY" | "TAVILY_API_KEY" | "SERPER_API_KEY" => SecretUse::WebSearch,
+                        _ => SecretUse::LlmProvider,
+                    };
+                    let mut meta = self.session_meta.write().unwrap();
+                    meta.entry(name.clone())
+                        .and_modify(|m| {
+                            m.warmed = true;
+                            m.required_at_startup = true;
+                            m.used_by.insert(use_case);
+                        })
+                        .or_insert_with(|| CachedSecretMeta {
+                            source: "resolved",
+                            warmed: true,
+                            required_at_startup: true,
+                            used_by: HashSet::from([use_case]),
+                        });
+                    warmed.push(name.clone());
+                }
+                None => missing.push(name.clone()),
+            }
+        }
+
+        self.rebuild_redactor();
+        tracing::info!(
+            requested = requested.len(),
+            warmed = warmed.len(),
+            missing = missing.len(),
+            warmed_names = ?warmed,
+            missing_names = ?missing,
+            "secrets preflight (async) finished"
+        );
+        self.hydrate_process_env();
+    }
+
     /// Startup preflight: warm known interactive/runtime secrets once so the
     /// rest of the session can read them headlessly from memory/env.
     /// 
