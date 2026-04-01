@@ -257,7 +257,7 @@
     "frozen": false,
     "opened": "2026-03-31T02:04:48Z",
     "released": null,
-    "rc_count": 15,
+    "rc_count": 16,
     "notes": [
       "feat(ci): integrate THIRD_PARTY_NOTICES with SBOM in release workflow",
       "feat(omegon): implement extension mind persistence (Phase 3 of BYOM)",
@@ -299,7 +299,7 @@
       "refactor: remove dead TypeScript extension bridge — scribe is pure Rust",
       "refactor: remove scribe-rpc crate from omegon workspace"
     ],
-    "rc_version": "0.15.6-rc.16",
-    "last_rc": "2026-04-01T03:02:46Z"
+    "rc_version": "0.15.6-rc.17",
+    "last_rc": "2026-04-01T03:10:42Z"
   }
 }
