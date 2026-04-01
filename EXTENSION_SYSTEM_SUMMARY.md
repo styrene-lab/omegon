@@ -184,3 +184,113 @@ c4e98b58 - chore(release): 0.15.6-rc.10
 ---
 
 **The extension system is ready for real-world use.** Next step: build a few example extensions to validate the patterns, then invest in the registry/installation infrastructure for Phase 1.
+
+---
+
+## Session 2 Addition: Extension Lifecycle & BYOM
+
+### New Requirements Addressed
+
+1. **Enable/Disable from TUI** — Extensions can be toggled without restart
+2. **BYOM (Bring Your Own Mind)** — Extensions maintain persistent cross-repo knowledge
+
+### Lifecycle Management (New Design)
+
+**Enable/Disable/Reload:**
+- Click UI to enable disabled extension → spawn, health check, load mind
+- Click UI to disable active extension → save mind, SIGTERM, SIGKILL if needed
+- Click reload during development → rebuild binary, restart extension
+- Crash monitoring: auto-disable after 3+ crashes in one session
+
+**State Persistence:**
+- `~/.omegon/extensions/{name}/.omegon/state.toml` tracks enabled status
+- Survives Omegon restarts
+
+**RPC Additions:**
+- `shutdown()` — extension initiates graceful exit
+- `set_enabled_state(enabled)` — notify before disable
+- `get_stability()` — query health metrics
+
+### BYOM System (Bring Your Own Mind)
+
+**What it enables:**
+Extensions maintain their own persistent knowledge base. Example: scribe-rpc keeps engagement knowledge (team communication style, code review pace, architectural decisions) that:
+- Persists across projects (knowledge doesn't die when switching repos)
+- Persists across sessions (knowledge survives closing Omegon)
+- Is queryable (integrated into memory_recall() results)
+
+**Four-Tier Memory System:**
+1. **Project Memory** — per-repo, persistent, in `.git/omegon/`
+2. **Episodic Memory** — per-session, ephemeral, in-memory
+3. **Extension Minds** — cross-repo/session, persistent, in `~/.omegon/extensions/{name}/mind/`
+4. **Harness State** — per-repo (design tree, openspec)
+
+**Storage Format:**
+```
+~/.omegon/extensions/scribe-rpc/mind/
+├── facts.jsonl                    # JSONL facts (BM25 indexed)
+├── episodes.jsonl                 # Episode groupings
+└── metadata.json                  # Version, timestamps, size
+```
+
+**RPC Interface:**
+- `get_mind(query, limit)` — search facts
+- `load_mind()` — restore from disk on enable
+- `store_mind(facts, checkpoint)` — persist to disk
+- `add_fact(content, section, tags, confidence)` — add fact
+- `update_fact(id, ...)` — modify fact
+- `reinforce_fact(id)` — increment usage count
+- `delete_fact(id)` — remove fact
+
+**Query Integration:**
+When `memory_recall(query)` called, searches:
+1. Project memory
+2. Episodic memory
+3. All active extension minds
+
+Results tagged with source:
+- `source: "project"` — from project memory
+- `source: "episodic"` — from episodic memory
+- `source: "extension:scribe-rpc"` — from scribe-rpc mind
+
+Facts ranked by: BM25 score (50%) + reinforcement (30%) + confidence (20%)
+
+User can filter: `/memory recall "foo" --from extension:scribe-rpc`
+
+### Design Documents Added
+
+| Document | Lines | Purpose |
+|----------|-------|---------|
+| extension-lifecycle-management.md | 266 | Enable/disable/reload architecture |
+| extension-byom-system.md | 460 | BYOM core design and motivation |
+| extension-mind-interface.md | 409 | Complete RPC method spec |
+| extension-mind-persistence.md | 312 | Storage format and lifecycle |
+| extension-mind-integration.md | 388 | Query pipeline integration |
+
+### Implementation Roadmap
+
+**Phase 1 (0.16):** Basic enable/disable
+- Spawn/SIGTERM/SIGKILL
+- State persistence
+
+**Phase 2 (0.17):** Stability monitoring
+- Crash counting
+- Auto-disable
+
+**Phase 3 (0.18):** TUI management
+- `/extensions` command
+- List, enable, disable, delete UI
+
+**Phase 4 (0.19):** BYOM full integration
+- Mind RPC methods in SDK
+- Persistence layer
+- Query pipeline wiring
+
+**Phase 5 (0.20+):** Developer experience
+- Hot-reload
+- Mind management UI
+- Cloud sync (future)
+
+---
+
+**Total Extension System Work:** 14 design documents, 2 SDK implementations (current + planned), production-ready SDK released.
