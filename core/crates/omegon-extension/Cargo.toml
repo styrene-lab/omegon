@@ -1,0 +1,21 @@
+[package]
+name = "omegon-extension"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors = ["Styrene Lab <hello@styrene-lab.com>"]
+description = "Omegon extension SDK — safe, versioned interface for third-party extensions"
+
+[dependencies]
+tokio = { workspace = true, features = ["io-util", "rt", "sync", "process", "macros"] }
+serde = { workspace = true }
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+toml = "0.8"
+
+[dev-dependencies]
+tokio-test = "0.4"

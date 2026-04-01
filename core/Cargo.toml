@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/omegon",
+    "crates/omegon", "crates/omegon-extension",
     "crates/omegon-git",
     "crates/omegon-memory",
     "crates/omegon-secrets",

@@ -4362,6 +4362,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "omegon-extension"
+version = "0.15.6-rc.10"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "omegon-git"
 version = "0.15.6-rc.10"
 dependencies = [
