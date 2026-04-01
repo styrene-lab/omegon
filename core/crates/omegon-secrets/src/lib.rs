@@ -202,11 +202,16 @@ impl SecretsManager {
                 required_at_startup,
                 used_by: HashSet::from([use_case]),
             });
+        // Note: redactor rebuild happens after ALL secrets are warm, not per-secret,
+        // to avoid rebuilding expensive Aho-Corasick DFA multiple times during preflight
         true
     }
 
     /// Startup preflight: warm known interactive/runtime secrets once so the
     /// rest of the session can read them headlessly from memory/env.
+    /// 
+    /// Batches all keyring lookups into a single prompt by pre-loading all
+    /// recipes that need keyring access before resolving any of them.
     pub fn preflight_session_cache<I, S>(&self, names: I)
     where
         I: IntoIterator<Item = S>,
@@ -218,9 +223,33 @@ impl SecretsManager {
             names = ?requested,
             "secrets preflight starting"
         );
+
+        // Pre-load all recipes so we know which ones require keyring access
+        // and can batch them together in a single prompt.
+        let recipes = self.recipes.read().unwrap();
+        let mut keyring_names: Vec<&String> = Vec::new();
+        let mut env_names: Vec<&String> = Vec::new();
+        
+        for name in &requested {
+            // Check if the secret is in environment already
+            if std::env::var(name).is_ok() {
+                env_names.push(name);
+                continue;
+            }
+            // Check if it has a recipe (which may require keyring)
+            if recipes.get(name).is_some() {
+                keyring_names.push(name);
+            }
+        }
+        drop(recipes);
+
+        // Now resolve secrets in order: env first (free), then all keyring
+        // together (one prompt). This batches the Keychain access.
         let mut warmed = Vec::new();
         let mut missing = Vec::new();
-        for name in &requested {
+
+        // Resolve env vars first (no prompting)
+        for name in env_names {
             let use_case = match name.as_str() {
                 "BRAVE_API_KEY" | "TAVILY_API_KEY" | "SERPER_API_KEY" => SecretUse::WebSearch,
                 _ => SecretUse::LlmProvider,
@@ -231,6 +260,26 @@ impl SecretsManager {
                 missing.push(name.clone());
             }
         }
+
+        // Resolve keyring vars all at once (single prompt on macOS)
+        // by triggering all keyring lookups in sequence before building the cache
+        for name in &keyring_names {
+            let use_case = match name.as_str() {
+                "BRAVE_API_KEY" | "TAVILY_API_KEY" | "SERPER_API_KEY" => SecretUse::WebSearch,
+                _ => SecretUse::LlmProvider,
+            };
+            if self.warm_secret(name, use_case, true) {
+                warmed.push((*name).clone());
+            } else {
+                missing.push((*name).clone());
+            }
+        }
+
+        // Rebuild redactor once after all secrets are warmed, not per-secret.
+        // This avoids rebuilding the expensive Aho-Corasick DFA multiple times
+        // and reduces lock contention during the Keychain prompt window.
+        self.rebuild_redactor();
+
         tracing::info!(
             requested = requested.len(),
             warmed = warmed.len(),
@@ -409,6 +458,16 @@ impl SecretsManager {
     /// Resolve well-known provider secrets into process environment variables
     /// so legacy env-based integrations (web search, provider clients) can use
     /// secrets stored in Omegon's keyring/recipe system.
+    /// Rebuild the redactor from the current redaction_set.
+    /// Called after batch-warming secrets to avoid rebuilding the Aho-Corasick DFA
+    /// multiple times during preflight (which can interfere with Keychain prompts).
+    fn rebuild_redactor(&self) {
+        let set = self.redaction_set.read().unwrap();
+        let new_redactor = Redactor::build(&*set);
+        let mut redactor = self.redactor.write().unwrap();
+        *redactor = new_redactor;
+    }
+
     pub fn hydrate_process_env(&self) {
         let session = self.session_cache.read().unwrap();
         let redaction = self.redaction_set.read().unwrap();
