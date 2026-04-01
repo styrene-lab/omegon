@@ -257,7 +257,7 @@
     "frozen": false,
     "opened": "2026-03-31T02:04:48Z",
     "released": null,
-    "rc_count": 11,
+    "rc_count": 12,
     "notes": [
       "feat(ci): integrate THIRD_PARTY_NOTICES with SBOM in release workflow",
       "feat(omegon): implement extension mind persistence (Phase 3 of BYOM)",
@@ -265,6 +265,7 @@
       "feat(omegon-extension): add BYOM (Bring Your Own Mind) types and manifest support",
       "feat(scribe): implement first Rust-native extension",
       "feat(scribe): implement rust-native extension — RPC sidecar integration",
+      "feat(tui): add session-long token counters to footer engine stats",
       "feat: /context subcommand interface for organic context management",
       "feat: SharedContextMetrics for real-time status collection",
       "feat: action prompt input handling — numeric key selection",
@@ -285,6 +286,7 @@
       "fix(ci): add workflow_dispatch to release.yml; use RELEASE_TAG env var",
       "fix(ci): direct git push to vanderlyn instead of polling",
       "fix(ci): fix malformed YAML in release.yml workflow_dispatch edit",
+      "fix(context): sync footer display on compaction and clear operations",
       "fix(justfile): publish reads version from binary, not Cargo.toml",
       "fix(justfile): smoke and publish robust to post-release RC cycle bump",
       "fix(legal): update contact address to admin@styrene.io",
@@ -294,7 +296,7 @@
       "refactor: remove dead TypeScript extension bridge — scribe is pure Rust",
       "refactor: remove scribe-rpc crate from omegon workspace"
     ],
-    "rc_version": "0.15.6-rc.12",
-    "last_rc": "2026-04-01T02:23:10Z"
+    "rc_version": "0.15.6-rc.13",
+    "last_rc": "2026-04-01T02:39:48Z"
   }
 }
