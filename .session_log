@@ -842,4 +842,19 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   106b3c18 refactor: remove scribe-rpc crate from omegon workspace
   c4e98b58 chore(release): 0.15.6-rc.10
   2ece4d15 feat: auto-fetch widget initial data on extension spawn
+## 2026-04-01 — main (33t 7428tc 11m59s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  5743abd4 chore(release): 0.15.6-rc.11
+  94f157de docs: add comprehensive extensions ecosystem overview
+  c5ece93f docs: add comprehensive extension integration guide
 
