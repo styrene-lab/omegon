@@ -15,8 +15,10 @@ use tokio::sync::{Mutex, broadcast};
 use tokio_util::sync::CancellationToken;
 
 pub mod manifest;
+pub mod state;
 pub mod widgets;
 pub use manifest::{ExtensionManifest, RuntimeConfig, WidgetConfig};
+pub use state::{ExtensionState, StabilityMetrics};
 pub use widgets::{WidgetDeclaration, WidgetEvent, ExtensionTabWidget};
 
 /// Handles for communicating with an extension process.
@@ -41,31 +43,37 @@ impl ProcessHandles {
 /// Manages RPC communication via stdin/stdout, agnostic to runtime type.
 pub struct ExtensionFeature {
     name: String,
+    ext_dir: PathBuf,
     tools: Vec<ToolDefinition>,
     handles: Arc<Mutex<Option<ProcessHandles>>>,
     request_id: Arc<AtomicU64>,
     widgets: Vec<WidgetDeclaration>,
     widget_tx: broadcast::Sender<WidgetEvent>,
+    state: Arc<Mutex<ExtensionState>>,
 }
 
 impl ExtensionFeature {
     /// Create a new extension feature from process handles and pre-fetched tools.
     pub fn new(
         name: String,
+        ext_dir: PathBuf,
         tools: Vec<ToolDefinition>,
         widgets: Vec<WidgetDeclaration>,
         stdin: tokio::process::ChildStdin,
         stdout: tokio::process::ChildStdout,
+        state: ExtensionState,
     ) -> (Self, broadcast::Receiver<WidgetEvent>) {
         let (widget_tx, widget_rx) = broadcast::channel::<WidgetEvent>(100);
         (
             Self {
                 name,
+                ext_dir,
                 tools,
                 handles: Arc::new(Mutex::new(Some(ProcessHandles::new(stdin, stdout)))),
                 request_id: Arc::new(AtomicU64::new(1)),
                 widgets,
                 widget_tx,
+                state: Arc::new(Mutex::new(state)),
             },
             widget_rx,
         )
@@ -121,12 +129,22 @@ impl ExtensionFeature {
             // Continue reading (may be out-of-order notifications)
         }
     }
-}
 
-impl ExtensionFeature {
     /// Get widgets declared by this extension.
     pub fn widgets(&self) -> &[WidgetDeclaration] {
         &self.widgets
+    }
+
+    /// Get extension state.
+    pub async fn state(&self) -> ExtensionState {
+        self.state.lock().await.clone()
+    }
+
+    /// Record an error in the extension state and persist it.
+    pub async fn record_error(&self, error: String) {
+        let mut state = self.state.lock().await;
+        state.record_error(error);
+        let _ = state.save(&self.ext_dir);
     }
 
     /// Broadcast a widget event (for internal use).
@@ -186,6 +204,9 @@ pub struct SpawnedExtension {
 pub async fn spawn_from_manifest(ext_dir: &PathBuf) -> Result<SpawnedExtension> {
     let manifest = ExtensionManifest::from_extension_dir(ext_dir)?;
 
+    // Load extension state
+    let state = ExtensionState::load(ext_dir)?;
+
     // Parse widgets from manifest
     let widgets: Vec<WidgetDeclaration> = manifest
         .widgets
@@ -202,19 +223,21 @@ pub async fn spawn_from_manifest(ext_dir: &PathBuf) -> Result<SpawnedExtension> 
     match manifest.runtime {
         RuntimeConfig::Native { .. } => {
             let binary = manifest.native_binary_path(ext_dir)?;
-            spawn_native(&manifest, &binary, widgets).await
+            spawn_native(&manifest, ext_dir, &binary, widgets, state).await
         }
         RuntimeConfig::Oci { .. } => {
             let image = manifest.oci_image()?;
-            spawn_container(&manifest, &image, widgets).await
+            spawn_container(&manifest, ext_dir, &image, widgets, state).await
         }
     }
 }
 
 async fn spawn_native(
     manifest: &ExtensionManifest,
+    ext_dir: &PathBuf,
     binary: &PathBuf,
     widgets: Vec<WidgetDeclaration>,
+    state: ExtensionState,
 ) -> Result<SpawnedExtension> {
     let mut child = tokio::process::Command::new(binary)
         .arg("--rpc")
@@ -229,10 +252,12 @@ async fn spawn_native(
     // Create temporary feature to fetch tools
     let (temp_feature, _) = ExtensionFeature::new(
         manifest.extension.name.clone(),
+        ext_dir.clone(),
         vec![],
         vec![],
         stdin,
         stdout,
+        ExtensionState::default(),
     );
 
     // Fetch tools via RPC
@@ -265,10 +290,12 @@ async fn spawn_native(
 
     let (feature, widget_rx) = ExtensionFeature::new(
         manifest.extension.name.clone(),
+        ext_dir.clone(),
         tools,
         widgets.clone(),
         stdin,
         stdout,
+        state,
     );
 
     // Convert widget declarations to tab widgets with initial data
@@ -293,8 +320,10 @@ async fn spawn_native(
 
 async fn spawn_container(
     manifest: &ExtensionManifest,
+    ext_dir: &PathBuf,
     image: &str,
     widgets: Vec<WidgetDeclaration>,
+    state: ExtensionState,
 ) -> Result<SpawnedExtension> {
     let mut child = tokio::process::Command::new("podman")
         .args(&["run", "--rm", "-i", image])
@@ -309,10 +338,12 @@ async fn spawn_container(
     // Create temporary feature to fetch tools
     let (temp_feature, _) = ExtensionFeature::new(
         manifest.extension.name.clone(),
+        ext_dir.clone(),
         vec![],
         vec![],
         stdin,
         stdout,
+        ExtensionState::default(),
     );
 
     // Fetch tools via RPC
@@ -344,10 +375,12 @@ async fn spawn_container(
 
     let (feature, widget_rx) = ExtensionFeature::new(
         manifest.extension.name.clone(),
+        ext_dir.clone(),
         tools,
         widgets.clone(),
         stdin,
         stdout,
+        state,
     );
 
     // Convert widget declarations to tab widgets with initial data

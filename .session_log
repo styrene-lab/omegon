@@ -887,4 +887,19 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   fb798eec docs: update extension system summary with lifecycle and BYOM additions
   f24901b9 design: add extension lifecycle and BYOM (Bring Your Own Mind) system
   f7b22e81 docs: add extension system summary and design completion
+## 2026-04-01 — main (22t 7479tc 3m45s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  661ff673 feat(omegon-extension): add BYOM (Bring Your Own Mind) types and manifest support
+  fb798eec docs: update extension system summary with lifecycle and BYOM additions
+  f24901b9 design: add extension lifecycle and BYOM (Bring Your Own Mind) system
 
