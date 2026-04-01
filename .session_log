@@ -767,4 +767,19 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   feaab97d chore(release): 0.15.6-rc.8
   64804f79 fix: change tab navigation keybindings from Ctrl+Tab to Alt+N/P
   0bcfefaa chore(release): 0.15.6-rc.7
+## 2026-04-01 — main (18t 7328tc 6m3s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  65734aaa chore(release): 0.15.6-rc.9
+  f921c350 feat: scribe timeline widget Phase 1 — emit formatted timeline events
+  feaab97d chore(release): 0.15.6-rc.8
 
