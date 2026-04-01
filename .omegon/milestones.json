@@ -257,9 +257,12 @@
     "frozen": false,
     "opened": "2026-03-31T02:04:48Z",
     "released": null,
-    "rc_count": 10,
+    "rc_count": 11,
     "notes": [
       "feat(ci): integrate THIRD_PARTY_NOTICES with SBOM in release workflow",
+      "feat(omegon): implement extension mind persistence (Phase 3 of BYOM)",
+      "feat(omegon): implement extension state management (Phase 2 of BYOM)",
+      "feat(omegon-extension): add BYOM (Bring Your Own Mind) types and manifest support",
       "feat(scribe): implement first Rust-native extension",
       "feat(scribe): implement rust-native extension — RPC sidecar integration",
       "feat: /context subcommand interface for organic context management",
@@ -291,7 +294,7 @@
       "refactor: remove dead TypeScript extension bridge — scribe is pure Rust",
       "refactor: remove scribe-rpc crate from omegon workspace"
     ],
-    "rc_version": "0.15.6-rc.11",
-    "last_rc": "2026-04-01T01:08:30Z"
+    "rc_version": "0.15.6-rc.12",
+    "last_rc": "2026-04-01T02:23:10Z"
   }
 }
