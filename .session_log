@@ -1037,4 +1037,34 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   3d454a71 chore(release): 0.15.6-rc.16
   3809b066 fix(context): prevent deadlock in /context clear operation
   4df9a2c5 chore(release): 0.15.6-rc.15
+## 2026-04-01 — main (22t 7726tc 6m3s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  928e64e4 chore(release): 0.15.6-rc.17
+  6ea87624 fix(startup): consolidate dual keychain prompts into single OS request
+  3d454a71 chore(release): 0.15.6-rc.16
+## 2026-04-01 — main (33t 7758tc 2m5s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  928e64e4 chore(release): 0.15.6-rc.17
+  6ea87624 fix(startup): consolidate dual keychain prompts into single OS request
+  3d454a71 chore(release): 0.15.6-rc.16
 

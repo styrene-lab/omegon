@@ -418,25 +418,54 @@ impl InstrumentPanel {
 
     fn context_breakdown(&self) -> [(ContextBand, f64); 6] {
         let total_used = self.context_fill.clamp(0.0, 1.0);
-        // System prompt: ~10k tokens of directives/AGENTS.md — fixed size regardless of model.
-        // Express as a fraction of the actual context window so it stays accurate at any size
-        // (100k → 10%, 200k → 5%, 1M → 1%). Cap at 0.15 for tiny windows.
+        let ctx_window_f = self.context_window.max(1) as f64;
+
+        // ── SYSTEM PROMPT ──
+        // Fixed ~10k tokens of directives/AGENTS.md.
+        // Express as fraction of context window (100k → 10%, 200k → 5%, 1M → 1%).
+        // Cap at 0.15 for very small windows.
         const SYS_PROMPT_TOKENS: f64 = 10_000.0;
-        let sys_fraction =
-            (SYS_PROMPT_TOKENS / self.context_window.max(1) as f64).min(0.15);
-        let system = sys_fraction.min(total_used);
+        let system = (SYS_PROMPT_TOKENS / ctx_window_f).min(0.15).min(total_used);
+
+        // ── MEMORY FACTS ──
+        // Pre-computed by update_memory_context as actual fact injection.
+        // Already clamped to 0.0..0.12 to stay visually proportionate.
         let memory = self.memory_fill.min((total_used - system).max(0.0));
-        let thinking = (self.thinking_level_pct * 0.12).min((total_used - system - memory).max(0.0));
-        let recent_tool_load = ((self.active_tool_load() * 0.10).min(0.10))
-            .min((total_used - system - memory - thinking).max(0.0));
-        let conversation =
-            (total_used - system - memory - thinking - recent_tool_load).max(0.0);
+
+        // ── THINKING (extended reasoning) ──
+        // Thinking is only active when enabled by the user.
+        // Estimate: ~5-15% overhead depending on setting.
+        let thinking = if self.thinking_active {
+            let estimate: f64 = match self.thinking_level_pct {
+                p if p >= 0.9 => 0.08,   // "high" → 8% of window
+                p if p >= 0.5 => 0.05,   // "medium" → 5%
+                p if p >= 0.3 => 0.03,   // "low" → 3%
+                _ => 0.015,              // "minimal" → 1.5%
+            };
+            estimate.min((total_used - system - memory).max(0.0))
+        } else {
+            0.0
+        };
+
+        // ── CONVERSATION ──
+        // Everything else: user input, conversation history, message text.
+        // Note: tool calls are part of conversation tokens, so tools don't subtract.
+        // The tool band is purely visual (animation overlay), not a space allocation.
+        let conversation = (total_used - system - memory - thinking).max(0.0);
+
+        // ── FREE SPACE ──
         let free = (1.0 - total_used).max(0.0);
+
+        // ── TOOLS ──
+        // Not a real token allocation — tool calls are part of conversation.
+        // Show as 0.0 here; visual emphasis comes from animated color shifts.
+        let tools = 0.0;
+
         [
             (ContextBand::Conversation, conversation),
             (ContextBand::System, system),
             (ContextBand::Memory, memory),
-            (ContextBand::Tools, recent_tool_load),
+            (ContextBand::Tools, tools),
             (ContextBand::Thinking, thinking),
             (ContextBand::Free, free),
         ]
@@ -879,6 +908,7 @@ impl InstrumentPanel {
             };
 
             // Animated overrides (thinking pulse, tool churn) — all in braille vocabulary.
+            // Note: Tools are no longer a separate band, so tool animations apply to conversation.
             let (ch, fg) = match (activity, dominant) {
                 (ActivityMode::Thinking, ContextBand::Thinking) => {
                     let phase = (time * 3.0) + x as f64 * 0.35;
@@ -894,7 +924,8 @@ impl InstrumentPanel {
                     };
                     (c, color)
                 }
-                (ActivityMode::ToolChurn, ContextBand::Tools) => {
+                // Tool churn animates on conversation band (tools are now part of conversation)
+                (ActivityMode::ToolChurn, ContextBand::Conversation) => {
                     let pulse = (((time * 10.0) + x as f64 * 0.9).sin() + 1.0) * 0.5;
                     let c = if pulse > 0.75 {
                         '\u{28FF}' // ⣿ full
@@ -904,19 +935,20 @@ impl InstrumentPanel {
                         '\u{28E7}' // ⣏ 6/8
                     };
                     let color = if pulse > 0.75 {
-                        Color::Rgb(255, 196, 96)
+                        Color::Rgb(255, 196, 96)  // Bright orange on peak
                     } else {
-                        Self::band_color(ContextBand::Tools)
+                        Self::band_color(ContextBand::Conversation)
                     };
                     (c, color)
                 }
-                (ActivityMode::Waiting, ContextBand::Tools) => {
+                // Waiting for tool results (also animates on conversation)
+                (ActivityMode::Waiting, ContextBand::Conversation) => {
                     let pulse = (((time * 2.2) + x as f64 * 0.1).sin() + 1.0) * 0.5;
                     let c = if pulse > 0.6 { '\u{28C7}' } else { '\u{2847}' }; // ⣇ / ⡇
                     let color = if pulse > 0.6 {
-                        Color::Rgb(232, 186, 104)
+                        Color::Rgb(232, 186, 104)  // Lighter orange while waiting
                     } else {
-                        Self::band_color(ContextBand::Tools)
+                        Self::band_color(ContextBand::Conversation)
                     };
                     (c, color)
                 }
