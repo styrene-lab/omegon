@@ -2,7 +2,7 @@ import { defineConfig } from "astro/config";
 import sitemap from "@astrojs/sitemap";
 
 export default defineConfig({
-  site: "https://omegon.styrene.dev",
+  site: "https://omegon.styrene.io",
   integrations: [sitemap()],
   markdown: {
     shikiConfig: {
