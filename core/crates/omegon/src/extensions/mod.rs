@@ -206,6 +206,37 @@ pub struct SpawnedExtension {
 pub async fn spawn_from_manifest(ext_dir: &PathBuf) -> Result<SpawnedExtension> {
     let manifest = ExtensionManifest::from_extension_dir(ext_dir)?;
 
+    // Enforce required secrets before spending any resources on spawning.
+    // By this point, preflight_session_cache() + hydrate_process_env() have run,
+    // so any resolved keyring/recipe secret is already in the process environment.
+    let missing: Vec<&str> = manifest
+        .secrets
+        .required
+        .iter()
+        .filter(|name| std::env::var(name).map(|v| v.is_empty()).unwrap_or(true))
+        .map(|s| s.as_str())
+        .collect();
+    if !missing.is_empty() {
+        return Err(anyhow!(
+            "extension '{}' requires secrets that could not be resolved: {}. \
+             Configure them with: omegon secret set {}",
+            manifest.extension.name,
+            missing.join(", "),
+            missing[0],
+        ));
+    }
+
+    // Log optional secrets that are absent — extension will degrade gracefully.
+    for name in &manifest.secrets.optional {
+        if std::env::var(name).map(|v| v.is_empty()).unwrap_or(true) {
+            tracing::debug!(
+                extension = %manifest.extension.name,
+                secret = %name,
+                "optional secret absent — extension may have reduced functionality"
+            );
+        }
+    }
+
     // Load extension state
     let state = ExtensionState::load(ext_dir)?;
 
@@ -412,5 +443,36 @@ mod tests {
     #[test]
     fn extension_manifest_paths() {
         // Placeholder for integration tests
+    }
+
+    #[test]
+    fn required_secret_check_detects_missing() {
+        // Simulate the guard logic with a known-absent env var name.
+        // Uses a synthetic name that will never be set in the test environment.
+        let required = vec![
+            "__OMEGON_TEST_ABSENT_SECRET_XYZ__".to_string(),
+        ];
+        let missing: Vec<&str> = required
+            .iter()
+            .filter(|name| std::env::var(name).map(|v| v.is_empty()).unwrap_or(true))
+            .map(|s| s.as_str())
+            .collect();
+        assert_eq!(missing, vec!["__OMEGON_TEST_ABSENT_SECRET_XYZ__"]);
+    }
+
+    #[test]
+    fn required_secret_check_passes_when_present() {
+        // Simulate the guard logic with a secret that IS in the environment.
+        let key = "__OMEGON_TEST_PRESENT_SECRET_XYZ__";
+        // SAFETY: test-only env mutation, no concurrent env access in unit tests.
+        unsafe { std::env::set_var(key, "test-value") };
+        let required = vec![key.to_string()];
+        let missing: Vec<&str> = required
+            .iter()
+            .filter(|name| std::env::var(name).map(|v| v.is_empty()).unwrap_or(true))
+            .map(|s| s.as_str())
+            .collect();
+        assert!(missing.is_empty());
+        unsafe { std::env::remove_var(key) };
     }
 }

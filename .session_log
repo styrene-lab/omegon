@@ -1277,4 +1277,19 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   b2927546 chore: update footer snapshot for rc.25 and profile model preference
   2ac7ef8c chore(release): 0.15.6-rc.25
   94e4a565 fix(secrets): harden secret resolution precedence and file permissions
+## 2026-04-01 — main (14t 8152tc 3m28s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  88a7bd05 feat(extensions): preflight extension-declared secrets at startup
+  b2927546 chore: update footer snapshot for rc.25 and profile model preference
+  2ac7ef8c chore(release): 0.15.6-rc.25
 
