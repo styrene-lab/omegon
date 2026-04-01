@@ -257,7 +257,7 @@
     "frozen": false,
     "opened": "2026-03-31T02:04:48Z",
     "released": null,
-    "rc_count": 7,
+    "rc_count": 8,
     "notes": [
       "feat(ci): integrate THIRD_PARTY_NOTICES with SBOM in release workflow",
       "feat(scribe): implement first Rust-native extension",
@@ -274,6 +274,7 @@
       "feat: generic extension manifest + discovery system — all extensions equal",
       "feat: modal dismiss on Esc key",
       "feat: schema-aware widget rendering — timeline, table, tree",
+      "feat: scribe timeline widget Phase 1 — emit formatted timeline events",
       "feat: wire command_tx to ContextProvider for tool dispatch",
       "feat: wire widget event updates to live refresh extension widgets",
       "fix(ci): add workflow_dispatch to release.yml; use RELEASE_TAG env var",
@@ -286,7 +287,7 @@
       "fix: change tab navigation keybindings from Ctrl+Tab to Alt+N/P",
       "refactor: remove dead TypeScript extension bridge — scribe is pure Rust"
     ],
-    "rc_version": "0.15.6-rc.8",
-    "last_rc": "2026-04-01T00:01:01Z"
+    "rc_version": "0.15.6-rc.9",
+    "last_rc": "2026-04-01T00:18:36Z"
   }
 }
