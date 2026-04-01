@@ -251,12 +251,12 @@
     "released": "2026-03-31T01:53:33Z"
   },
   "0.15.6": {
-    "status": "rc",
+    "status": "released",
     "channel": "stable",
     "nodes": [],
-    "frozen": false,
+    "frozen": true,
     "opened": "2026-03-31T02:04:48Z",
-    "released": null,
+    "released": "2026-04-01T16:55:27Z",
     "rc_count": 27,
     "notes": [
       "feat(ci): integrate THIRD_PARTY_NOTICES with SBOM in release workflow",
