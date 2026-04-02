@@ -939,8 +939,8 @@ mod tests {
     }
 
     #[test]
-    fn session_text_omits_cost_when_pricing_unknown() {
-        let text = format_session_text("openai-codex:codex-mini-latest", 2, 12_000, 3_000);
+    fn session_text_falls_back_to_tokens_when_model_is_not_in_catalog() {
+        let text = format_session_text("groq:llama-3.3-70b-versatile", 2, 12_000, 3_000);
         assert_eq!(text, "T2 12k/3k");
     }
 }

@@ -3935,9 +3935,9 @@ fn build_model_selector_options(
             current,
         ));
         options.push(sel_opt(
-            "openai-codex:codex-mini-latest",
-            "Codex Mini",
-            &format!("ChatGPT/Codex · codex route · 200k · {auth}"),
+            "openai-codex:gpt-5.4-mini",
+            "GPT-5.4 mini",
+            &format!("ChatGPT/Codex · fast coding · 1M · {auth}"),
             current,
         ));
     }

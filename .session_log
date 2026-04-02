@@ -1562,4 +1562,34 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   bce689a2 feat(footer): add session cost estimate to engine block
   577d6261 chore(release): 0.15.7-rc.1
   1c95899e docs(changelog): add 0.15.7 release notes for Codex bridge fixes
+## 2026-04-02 — main (5t 113tc 1m1s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  e0c7589e fix(pricing): add verified GPT-5.4 footer cost rates
+  bce689a2 feat(footer): add session cost estimate to engine block
+  577d6261 chore(release): 0.15.7-rc.1
+## 2026-04-02 — main (1t 113tc 9s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  e0c7589e fix(pricing): add verified GPT-5.4 footer cost rates
+  bce689a2 feat(footer): add session cost estimate to engine block
+  577d6261 chore(release): 0.15.7-rc.1
 

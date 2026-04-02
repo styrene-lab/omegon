@@ -1477,7 +1477,7 @@ impl LlmBridge for CodexClient {
                 m.strip_prefix("openai-codex:")
                     .or_else(|| m.strip_prefix("openai:"))
             })
-            .unwrap_or("codex-mini-latest");
+            .unwrap_or("gpt-5.4-mini");
 
         let input = Self::build_input(messages);
         let wire_tools = Self::build_tools(tools);
@@ -1982,7 +1982,7 @@ mod tests {
         assert_eq!(infer_provider_id("local"), "ollama");
         assert_eq!(infer_provider_id("claude-opus-4-6"), "anthropic");
         assert_eq!(infer_provider_id("gpt-5.4"), "openai");
-        assert_eq!(infer_provider_id("codex-mini-latest"), "openai-codex");
+        assert_eq!(infer_provider_id("gpt-5.4-mini"), "openai-codex");
     }
 
     #[test]
@@ -2392,7 +2392,7 @@ mod tests {
         assert_eq!(model_id_from_spec("openai:gpt-5.4"), "gpt-5.4");
         assert!(is_openai_family_model("openai:gpt-5.4"));
         assert!(is_openai_family_model("gpt-5.4"));
-        assert!(!is_openai_family_model("codex-mini-latest"));
+        assert!(!is_openai_family_model("gpt-5.4-mini"));
     }
 
     // ── CodexClient tests ───────────────────────────────────────
@@ -2474,19 +2474,19 @@ mod tests {
     fn codex_model_prefix_stripping() {
         // The stream() method strips "openai-codex:" and "openai:" prefixes
         // Verify the logic conceptually (can't call stream without a server)
-        let full = "openai-codex:codex-mini-latest";
+        let full = "openai-codex:gpt-5.4-mini";
         let stripped = full
             .strip_prefix("openai-codex:")
             .or_else(|| full.strip_prefix("openai:"))
-            .unwrap_or("codex-mini-latest");
-        assert_eq!(stripped, "codex-mini-latest");
+            .unwrap_or("gpt-5.4-mini");
+        assert_eq!(stripped, "gpt-5.4-mini");
 
         let bare = "some-model";
         let stripped = bare
             .strip_prefix("openai-codex:")
             .or_else(|| bare.strip_prefix("openai:"))
-            .unwrap_or("codex-mini-latest");
-        assert_eq!(stripped, "codex-mini-latest"); // fallback
+            .unwrap_or("gpt-5.4-mini");
+        assert_eq!(stripped, "gpt-5.4-mini"); // fallback
     }
 
     #[test]
@@ -2517,8 +2517,8 @@ mod tests {
         );
         assert_eq!(model_id_from_spec("openai:gpt-4.1"), "gpt-4.1");
         assert_eq!(
-            model_id_from_spec("openai-codex:codex-mini-latest"),
-            "codex-mini-latest"
+            model_id_from_spec("openai-codex:gpt-5.4-mini"),
+            "gpt-5.4-mini"
         );
         assert_eq!(model_id_from_spec("ollama:qwen3:32b"), "qwen3:32b");
 
