@@ -1333,6 +1333,42 @@ fn handled_commands_are_in_commands_table() {
 }
 
 #[test]
+fn slash_skills_returns_display() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/skills", &tx);
+    match result {
+        SlashResult::Display(text) => {
+            assert!(text.contains("Bundled skills"), "{text}");
+            assert!(text.contains("Use /skills install"), "{text}");
+        }
+        _ => panic!("/skills should display bundled skill summary, got: {result:?}"),
+    }
+}
+
+#[test]
+fn hidden_model_aliases_do_not_appear_in_palette() {
+    let mut app = test_app();
+    app.bus_commands = vec![
+        omegon_traits::CommandDefinition {
+            name: "sonnet".into(),
+            description: "hidden alias".into(),
+            subcommands: vec![],
+        },
+        omegon_traits::CommandDefinition {
+            name: "victory".into(),
+            description: "visible tier".into(),
+            subcommands: vec![],
+        },
+    ];
+    app.editor.set_text("/");
+    let matches = app.matching_commands();
+    assert!(matches.iter().any(|(name, _)| name == "victory"));
+    assert!(!matches.iter().any(|(name, _)| name == "sonnet"));
+}
+
+#[test]
 fn slash_command_aliases_dispatch_correctly() {
     let mut app = test_app();
     let tx = test_tx();

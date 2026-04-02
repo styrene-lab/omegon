@@ -2567,4 +2567,79 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   2929552c fix(loop): surface transient failure class in upstream retry notices
   83fda8fc fix(tools): add nearest-context hints for exact-text edit failures
   35a172b3 chore(release): 0.15.7-rc.16
+## 2026-04-02 — main (13t 1212tc 8m45s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  71a4ad39 chore(release): 0.15.7-rc.17
+  bf2f7c48 feat(loop): persist transient upstream failures for provider audit
+  2929552c fix(loop): surface transient failure class in upstream retry notices
+## 2026-04-02 — main (10t 1225tc 8m15s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  71a4ad39 chore(release): 0.15.7-rc.17
+  bf2f7c48 feat(loop): persist transient upstream failures for provider audit
+  2929552c fix(loop): surface transient failure class in upstream retry notices
+## 2026-04-02 — main (7t 1231tc 39s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  71a4ad39 chore(release): 0.15.7-rc.17
+  bf2f7c48 feat(loop): persist transient upstream failures for provider audit
+  2929552c fix(loop): surface transient failure class in upstream retry notices
+## 2026-04-02 — main (1t 1231tc 12s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  71a4ad39 chore(release): 0.15.7-rc.17
+  bf2f7c48 feat(loop): persist transient upstream failures for provider audit
+  2929552c fix(loop): surface transient failure class in upstream retry notices
+## 2026-04-02 — main (2t 1234tc 34s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  71a4ad39 chore(release): 0.15.7-rc.17
+  bf2f7c48 feat(loop): persist transient upstream failures for provider audit
+  2929552c fix(loop): surface transient failure class in upstream retry notices
 

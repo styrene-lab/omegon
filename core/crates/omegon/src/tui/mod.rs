@@ -2169,6 +2169,7 @@ impl App {
         ),
         ("sessions", "list saved sessions", &[]),
         ("memory", "memory stats", &[]),
+        ("skills", "list or install bundled skills", &["list", "install"]),
         (
             "cleave",
             "show cleave status or trigger decomposition",
@@ -2356,6 +2357,40 @@ impl App {
                     ))
                 }
             }
+
+            "skills" => match args {
+                "" | "list" => {
+                    let install_dir = dirs::home_dir()
+                        .map(|h| h.join(".omegon").join("skills"))
+                        .unwrap_or_else(|| std::path::PathBuf::from("~/.omegon/skills"));
+                    let mut lines = vec![format!(
+                        "Bundled skills ({})\n",
+                        crate::skills::BUNDLED.len()
+                    )];
+                    for (name, content) in crate::skills::BUNDLED {
+                        let installed = install_dir.join(name).join("SKILL.md").exists();
+                        let desc = content
+                            .split("\n")
+                            .find_map(|line| line.strip_prefix("description:"))
+                            .map(str::trim)
+                            .unwrap_or("(no description)");
+                        let status = if installed { "✓" } else { "○" };
+                        lines.push(format!("  {status} {name:<14} {desc}"));
+                    }
+                    lines.push(String::new());
+                    lines.push(format!("Install location: {}", install_dir.display()));
+                    lines.push("Use /skills install to install or refresh bundled skills.".into());
+                    SlashResult::Display(lines.join("\n"))
+                }
+                "install" => match crate::skills::cmd_install() {
+                    Ok(()) => SlashResult::Display(
+                        "Installed bundled skills to ~/.omegon/skills. New sessions will load them."
+                            .into(),
+                    ),
+                    Err(err) => SlashResult::Display(format!("/skills install failed: {err}")),
+                },
+                _ => SlashResult::Display("Usage: /skills [list|install]".into()),
+            },
 
             "stats" => {
                 let s = self.settings();
@@ -3230,6 +3265,10 @@ impl App {
         }
     }
 
+    fn is_hidden_bus_command(name: &str) -> bool {
+        matches!(name, "opus" | "sonnet" | "haiku")
+    }
+
     /// Palette: matching commands + subcommands for the current editor text.
     fn matching_commands(&self) -> Vec<(String, String)> {
         let text = self.editor.render_text();
@@ -3255,6 +3294,9 @@ impl App {
             };
             // Append bus feature commands
             for cmd in &self.bus_commands {
+                if Self::is_hidden_bus_command(&cmd.name) {
+                    continue;
+                }
                 if prefix.is_empty() || cmd.name.starts_with(prefix) {
                     matches.push((cmd.name.clone(), cmd.description.clone()));
                 }
