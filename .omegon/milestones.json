@@ -320,15 +320,23 @@
     "nodes": [],
     "frozen": false,
     "opened": "2026-04-01T23:29:18Z",
-    "last_rc": "2026-04-01T23:29:18Z",
-    "rc_version": "0.15.7-rc.1",
-    "rc_count": 1,
+    "last_rc": "2026-04-02T00:39:58Z",
+    "rc_version": "0.15.7-rc.2",
+    "rc_count": 2,
     "released": null,
     "notes": [
-      "fix(codex): harden parse_codex_stream against bridge crash false-positives",
-      "fix(model-catalog): add openai-codex section to ModelCatalog",
+      "feat(footer): add session cost estimate to engine block",
       "feat: deploy omegon.styrene.io via Cloudflare Pages",
-      "fix(justfile): push specific tag only in rc/publish to avoid GitHub Actions trigger drops"
+      "fix(codex): harden parse_codex_stream against bridge crash false-positives",
+      "fix(footer): make session cost lookup independent of auth-gated catalog",
+      "fix(footer): mark session cost as an estimate",
+      "fix(justfile): push specific tag only in rc/publish to avoid GitHub Actions trigger drops",
+      "fix(loop): retry stalled llm streams instead of hanging",
+      "fix(loop): use aggressive bounded retries for upstream stalls",
+      "fix(model-catalog): add openai-codex section to ModelCatalog",
+      "fix(openai-codex): replace bogus codex mini model with gpt-5.4-mini",
+      "fix(pricing): add verified GPT-5.4 footer cost rates",
+      "fix(tui): show upstream retry state clearly during transient failures"
     ]
   }
 }

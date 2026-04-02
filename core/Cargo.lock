@@ -4275,7 +4275,7 @@ dependencies = [
 
 [[package]]
 name = "omegon"
-version = "0.15.7-rc.1"
+version = "0.15.7-rc.2"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
@@ -4341,7 +4341,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-codescan"
-version = "0.15.7-rc.1"
+version = "0.15.7-rc.2"
 dependencies = [
  "anyhow",
  "glob",
@@ -4364,7 +4364,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-extension"
-version = "0.15.7-rc.1"
+version = "0.15.7-rc.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4380,7 +4380,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-git"
-version = "0.15.7-rc.1"
+version = "0.15.7-rc.2"
 dependencies = [
  "anyhow",
  "git2",
@@ -4392,7 +4392,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-memory"
-version = "0.15.7-rc.1"
+version = "0.15.7-rc.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4410,7 +4410,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-secrets"
-version = "0.15.7-rc.1"
+version = "0.15.7-rc.2"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -4440,7 +4440,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-traits"
-version = "0.15.7-rc.1"
+version = "0.15.7-rc.2"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -10,7 +10,7 @@ expression: render_to_string(&terminal)
   context Maniple 68% / 262k          ├─ project ⌗2440  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠒⠒⠤⢄││                                    │
   path    ~/workspace/black-…/omegon  ├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
   mode    Victory · think High        └─ episodes ⌗45  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
-  session T·8 · ⚙ 23 · ↻ 2            │                                          ││                                    │
-  version v0.15.7-rc.1 → v0.15.7      │                                          ││                                    │
+  session T8 ~$0                      │                                          ││                                    │
+  version v0.15.7-rc.2 → v0.15.7      │                                          ││                                    │
                                       │                                          ││  3/3 active                        │
                                       ╰──────────────────────────────────────────╯╰────────────────────────────────────╯

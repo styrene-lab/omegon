@@ -1982,7 +1982,7 @@ mod tests {
         assert_eq!(infer_provider_id("local"), "ollama");
         assert_eq!(infer_provider_id("claude-opus-4-6"), "anthropic");
         assert_eq!(infer_provider_id("gpt-5.4"), "openai");
-        assert_eq!(infer_provider_id("gpt-5.4-mini"), "openai-codex");
+        assert_eq!(infer_provider_id("gpt-5.4-mini"), "openai");
     }
 
     #[test]
@@ -2392,7 +2392,7 @@ mod tests {
         assert_eq!(model_id_from_spec("openai:gpt-5.4"), "gpt-5.4");
         assert!(is_openai_family_model("openai:gpt-5.4"));
         assert!(is_openai_family_model("gpt-5.4"));
-        assert!(!is_openai_family_model("gpt-5.4-mini"));
+        assert!(is_openai_family_model("gpt-5.4-mini"));
     }
 
     // ── CodexClient tests ───────────────────────────────────────
