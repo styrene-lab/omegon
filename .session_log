@@ -2057,4 +2057,199 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   a0132a9b feat(date-utc): Print today's UTC date in YYYY-MM-DD format. Output only that string.
   1b0812b9 chore: gitignore .session_log and update snapshot for rc.11 version bump
   e2a9f67c chore(release): 0.15.7-rc.11
+## 2026-04-02 — main (11t 670tc 6m53s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+  de2bf67d fix(cleave): fail cli on upstream-exhausted children
+## 2026-04-02 — main (16t 698tc 2m16s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+  de2bf67d fix(cleave): fail cli on upstream-exhausted children
+## 2026-04-02 — main (1t 739tc 1m23s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+  de2bf67d fix(cleave): fail cli on upstream-exhausted children
+## 2026-04-02 — main (1t 739tc 2m0s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+  de2bf67d fix(cleave): fail cli on upstream-exhausted children
+## 2026-04-02 — main (1t 739tc 4s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+  de2bf67d fix(cleave): fail cli on upstream-exhausted children
+## 2026-04-02 — main (12t 751tc 5m21s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+  de2bf67d fix(cleave): fail cli on upstream-exhausted children
+## 2026-04-02 — main (5t 755tc 1m25s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+  de2bf67d fix(cleave): fail cli on upstream-exhausted children
+## 2026-04-02 — main (1t 755tc 15s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+  de2bf67d fix(cleave): fail cli on upstream-exhausted children
+## 2026-04-02 — main (2t 756tc 37s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+  de2bf67d fix(cleave): fail cli on upstream-exhausted children
+## 2026-04-02 — main (2t 672tc 12s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  74a619c7 feat(cleave): cancel-bounded transient retry, smoke harness, fallback env fix
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+## 2026-04-02 — main (9t 683tc 1m2s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  74a619c7 feat(cleave): cancel-bounded transient retry, smoke harness, fallback env fix
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+## 2026-04-02 — main (13t 699tc 9m22s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  74a619c7 feat(cleave): cancel-bounded transient retry, smoke harness, fallback env fix
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
+## 2026-04-02 — main (51t 770tc 7m38s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  74a619c7 feat(cleave): cancel-bounded transient retry, smoke harness, fallback env fix
+  47afea04 chore(release): 0.15.7-rc.13
+  1202136f fix(cleave): report upstream exhaustion honestly
 

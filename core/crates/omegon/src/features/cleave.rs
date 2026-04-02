@@ -264,13 +264,27 @@ pub struct CleaveProgress {
     pub completed: usize,
     pub failed: usize,
     pub children: Vec<ChildProgress>,
+    /// Accumulated child input tokens — for parent session rollup.
+    pub total_tokens_in: u64,
+    /// Accumulated child output tokens — for parent session rollup.
+    pub total_tokens_out: u64,
 }
 
 #[derive(Clone)]
 pub struct ChildProgress {
     pub label: String,
-    pub status: String, // "pending", "running", "completed", "failed"
+    pub status: String, // "pending", "running", "completed", "failed", "upstream_exhausted"
     pub duration_secs: Option<f64>,
+    /// Most recent tool active inside this child (e.g. "bash", "write").
+    pub last_tool: Option<String>,
+    /// Most recent turn number reported by this child.
+    pub last_turn: Option<u32>,
+    /// Wall-clock instant when status transitioned to "running".
+    pub started_at: Option<std::time::Instant>,
+    /// Cumulative input tokens consumed by this child.
+    pub tokens_in: u64,
+    /// Cumulative output tokens consumed by this child.
+    pub tokens_out: u64,
 }
 
 fn recompute_progress_counts(progress: &mut CleaveProgress) {
@@ -295,13 +309,33 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
             if let Some(existing) = progress.children.iter_mut().find(|c| c.label == *child) {
                 existing.status = "running".into();
                 existing.duration_secs = None;
+                existing.started_at = Some(std::time::Instant::now());
             } else {
                 progress.children.push(ChildProgress {
                     label: child.clone(),
                     status: "running".into(),
                     duration_secs: None,
+                    last_tool: None,
+                    last_turn: None,
+                    started_at: Some(std::time::Instant::now()),
+                    tokens_in: 0,
+                    tokens_out: 0,
                 });
                 progress.total_children = progress.children.len();
+            }
+        }
+        ProgressEvent::ChildActivity { child, turn, tool, .. } => {
+            if let Some(c) = progress.children.iter_mut().find(|c| c.label == *child) {
+                if let Some(t) = turn { c.last_turn = Some(*t); }
+                if let Some(t) = tool { c.last_tool = Some(t.clone()); }
+            }
+        }
+        ProgressEvent::ChildTokens { child, input_tokens, output_tokens } => {
+            progress.total_tokens_in += input_tokens;
+            progress.total_tokens_out += output_tokens;
+            if let Some(c) = progress.children.iter_mut().find(|c| c.label == *child) {
+                c.tokens_in += input_tokens;
+                c.tokens_out += output_tokens;
             }
         }
         ProgressEvent::ChildStatus {
@@ -323,6 +357,11 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
                     label: child.clone(),
                     status: status_text.into(),
                     duration_secs: *duration_secs,
+                    last_tool: None,
+                    last_turn: None,
+                    started_at: None,
+                    tokens_in: 0,
+                    tokens_out: 0,
                 });
                 progress.total_children = progress.children.len();
             }
@@ -430,8 +469,15 @@ impl CleaveFeature {
                     label: c.label.clone(),
                     status: "pending".into(),
                     duration_secs: None,
+                    last_tool: None,
+                    last_turn: None,
+                    started_at: None,
+                    tokens_in: 0,
+                    tokens_out: 0,
                 })
                 .collect();
+            prog.total_tokens_in = 0;
+            prog.total_tokens_out = 0;
         }
 
         let progress_sink = {
@@ -828,7 +874,14 @@ mod tests {
                 label: "alpha".into(),
                 status: "pending".into(),
                 duration_secs: None,
+                last_tool: None,
+                last_turn: None,
+                started_at: None,
+                tokens_in: 0,
+                tokens_out: 0,
             }],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
         }));
 
         apply_progress_event(
@@ -869,6 +922,8 @@ mod tests {
             completed: 1,
             failed: 0,
             children: vec![],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
         }));
 
         apply_progress_event(

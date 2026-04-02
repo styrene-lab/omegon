@@ -1024,7 +1024,14 @@ mod tests {
                 label: "task-a".into(),
                 status: "completed".into(),
                 duration_secs: Some(12.0),
+                last_tool: None,
+                last_turn: None,
+                started_at: None,
+                tokens_in: 0,
+                tokens_out: 0,
             }],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
         });
         assert!(state.cleave.as_ref().unwrap().active);
         assert_eq!(state.cleave.as_ref().unwrap().total_children, 3);
@@ -1455,7 +1462,14 @@ mod tests {
                 label: "task-1".into(),
                 status: "completed".into(),
                 duration_secs: Some(5.0),
+                last_tool: None,
+                last_turn: None,
+                started_at: None,
+                tokens_in: 0,
+                tokens_out: 0,
             }],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
         });
 
         let backend = TestBackend::new(50, 30);

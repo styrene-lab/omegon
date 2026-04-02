@@ -166,6 +166,9 @@ pub struct App {
     dashboard_handles: dashboard::DashboardHandles,
     /// Last instrument telemetry update timestamp.
     last_instrument_update: std::time::Instant,
+    /// Child tokens already rolled into session_input/output_tokens to avoid double-counting.
+    cleave_tokens_accounted_in: u64,
+    cleave_tokens_accounted_out: u64,
     /// Turn counter for throttled dashboard refresh.
     dashboard_refresh_turn: u32,
     /// Web dashboard server address (if running).
@@ -307,6 +310,8 @@ impl App {
             bus_commands: Vec::new(),
             dashboard_handles: dashboard::DashboardHandles::default(),
             last_instrument_update: std::time::Instant::now(),
+            cleave_tokens_accounted_in: 0,
+            cleave_tokens_accounted_out: 0,
             dashboard_refresh_turn: u32::MAX, // force refresh on first frame
             web_server_addr: None,
             queued_prompt: None,
@@ -1637,6 +1642,28 @@ impl App {
                 self.agent_active,
                 dt,
             );
+
+            // Push live cleave progress into the instrument panel each render tick
+            // so the tools→cleave swap happens without turn-boundary latency.
+            if let Some(ref cp_lock) = self.dashboard_handles.cleave {
+                if let Ok(cp) = cp_lock.lock() {
+                    let snapshot = if cp.active || cp.total_children > 0 {
+                        Some(cp.clone())
+                    } else {
+                        None
+                    };
+                    self.instrument_panel.set_cleave_progress(snapshot);
+                    // Roll new child tokens into session totals (delta only).
+                    let new_in = cp.total_tokens_in.saturating_sub(self.cleave_tokens_accounted_in);
+                    let new_out = cp.total_tokens_out.saturating_sub(self.cleave_tokens_accounted_out);
+                    if new_in > 0 || new_out > 0 {
+                        self.footer_data.session_input_tokens += new_in;
+                        self.footer_data.session_output_tokens += new_out;
+                        self.cleave_tokens_accounted_in += new_in;
+                        self.cleave_tokens_accounted_out += new_out;
+                    }
+                }
+            }
         }
 
         // ── Unified footer console: engine | inference | tools ──────

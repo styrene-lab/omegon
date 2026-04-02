@@ -15,6 +15,7 @@
 //! All use unified navy→teal→amber CIE L* perceptual color ramp.
 
 use super::theme::Theme;
+use crate::features::cleave::CleaveProgress;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
 use unicode_width::UnicodeWidthChar;
@@ -312,6 +313,8 @@ pub struct InstrumentPanel {
     session_recalls: u32,
     /// Actual context window size in tokens — used to compute realistic sys fraction.
     context_window: usize,
+    /// Live cleave progress snapshot — if active, tools panel becomes cleave panel.
+    cleave_progress: Option<CleaveProgress>,
 }
 
 impl Default for InstrumentPanel {
@@ -339,6 +342,7 @@ impl Default for InstrumentPanel {
             session_stores: 0,
             session_recalls: 0,
             context_window: 200_000,
+            cleave_progress: None,
         }
     }
 }
@@ -396,12 +400,27 @@ impl InstrumentPanel {
         if area.width < 20 || area.height < 4 {
             return;
         }
+        // When a cleave run is active (or just completed with children), swap the
+        // tools panel to show the cleave child grid instead.
+        if let Some(ref cp) = self.cleave_progress {
+            if cp.active || cp.total_children > 0 {
+                let border = t.border_dim();
+                let label = t.dim();
+                self.render_cleave_panel(area, frame, border, label, t, cp);
+                return;
+            }
+        }
         let (border, label) = if self.has_ever_fired {
             (t.border_dim(), t.dim())
         } else {
             (dim_color(t.border_dim(), 0.5), dim_color(t.dim(), 0.55))
         };
         self.render_tools(area, frame, border, label, t);
+    }
+
+    /// Push an updated cleave progress snapshot from the orchestrator thread.
+    pub fn set_cleave_progress(&mut self, cp: Option<CleaveProgress>) {
+        self.cleave_progress = cp;
     }
 
     pub fn render(&mut self, area: Rect, frame: &mut Frame, t: &dyn Theme) {
@@ -1087,6 +1106,198 @@ impl InstrumentPanel {
                     cell.set_bg(panel_bg(t));
                 }
             }
+        }
+    }
+
+    /// Cleave panel — displayed in place of the tools panel while a cleave run
+    /// is active. Shows one row per child with: status icon, label, current
+    /// tool/turn, and elapsed wall-clock time.
+    fn render_cleave_panel(
+        &self,
+        area: Rect,
+        frame: &mut Frame,
+        border: Color,
+        _label_color: Color,
+        t: &dyn Theme,
+        cp: &CleaveProgress,
+    ) {
+        // ── Title: " ⟁ cleave N/M " ─────────────────────────────────────
+        let done = cp.completed + cp.failed;
+        let title_text = if cp.active {
+            format!(" ⟁ cleave {done}/{} ", cp.total_children)
+        } else {
+            format!(" ⟁ cleave {} done ", cp.total_children)
+        };
+        let title_color = if cp.failed > 0 {
+            Color::Rgb(224, 72, 72)
+        } else if cp.active {
+            Color::Rgb(232, 186, 104) // amber — in-flight
+        } else {
+            Color::Rgb(42, 180, 200) // teal — complete
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border).bg(t.footer_bg()))
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .title(Span::styled(
+                title_text,
+                Style::default().fg(title_color).bg(t.footer_bg()),
+            ))
+            .style(Style::default().bg(t.footer_bg()));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        if inner.width < 18 || inner.height < 2 {
+            return;
+        }
+
+        let buf = frame.buffer_mut();
+        clear_area(inner, buf, panel_bg(t));
+
+        let w = inner.width as usize;
+        // Layout: [ind 2] [label 11] [activity fill] [elapsed 5]
+        let elapsed_w: usize = 5;
+        let label_w: usize = 11.min(w.saturating_sub(elapsed_w + 4));
+        let activity_w: usize = w.saturating_sub(2 + label_w + 1 + elapsed_w);
+
+        // Leave the last row for an aggregate summary line.
+        let child_rows = (inner.height as usize).saturating_sub(1);
+
+        for (row, child) in cp.children.iter().enumerate() {
+            if row >= child_rows {
+                break;
+            }
+            let y = inner.y + row as u16;
+
+            // ── Status indicator ──
+            let (ind_ch, ind_color) = match child.status.as_str() {
+                "running" => ("▶ ", Color::Rgb(232, 186, 104)),
+                "completed" => ("✓ ", Color::Rgb(42, 180, 200)),
+                "failed" => ("✗ ", Color::Rgb(224, 72, 72)),
+                "upstream_exhausted" => ("⚡ ", Color::Rgb(214, 170, 40)),
+                _ => ("○ ", Color::Rgb(40, 56, 72)), // pending / unknown
+            };
+            let mut x = inner.x;
+            for ch in ind_ch.chars() {
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(ch);
+                    cell.set_fg(ind_color);
+                    cell.set_bg(panel_bg(t));
+                }
+                x += 1;
+            }
+
+            // ── Label (padded to label_w) ──
+            let label_color = match child.status.as_str() {
+                "running" => Color::Rgb(232, 186, 104),
+                "completed" => Color::Rgb(42, 180, 200),
+                "failed" | "upstream_exhausted" => Color::Rgb(224, 72, 72),
+                _ => Color::Rgb(48, 68, 84),
+            };
+            let display_label: String = child.label.chars().take(label_w).collect();
+            for ch in display_label.chars() {
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(ch);
+                    cell.set_fg(label_color);
+                    cell.set_bg(panel_bg(t));
+                }
+                x += 1;
+            }
+            // Pad to label_w
+            while x < inner.x + 2 + label_w as u16 {
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(' ');
+                    cell.set_bg(panel_bg(t));
+                }
+                x += 1;
+            }
+
+            // ── Activity: tool or turn (dim) ──
+            let activity = if let Some(ref tool) = child.last_tool {
+                format!("→{tool}")
+            } else if let Some(turn) = child.last_turn {
+                format!("T{turn}")
+            } else if child.status == "running" {
+                "…".to_string()
+            } else {
+                String::new()
+            };
+            let act_color = Color::Rgb(36, 80, 96);
+            let act_display: String = activity.chars().take(activity_w).collect();
+            for ch in act_display.chars() {
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(ch);
+                    cell.set_fg(act_color);
+                    cell.set_bg(panel_bg(t));
+                }
+                x += 1;
+            }
+            // Pad to activity_w
+            let act_end_x = inner.x + 2 + label_w as u16 + activity_w as u16;
+            while x < act_end_x {
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(' ');
+                    cell.set_bg(panel_bg(t));
+                }
+                x += 1;
+            }
+
+            // ── Elapsed time ──
+            let elapsed_secs = if let Some(s) = child.started_at {
+                s.elapsed().as_secs_f64()
+            } else {
+                child.duration_secs.unwrap_or(0.0)
+            };
+            let elapsed_str = Self::format_elapsed(elapsed_secs);
+            let elapsed_color = Color::Rgb(36, 60, 76);
+            for ch in elapsed_str.chars().take(elapsed_w) {
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(ch);
+                    cell.set_fg(elapsed_color);
+                    cell.set_bg(panel_bg(t));
+                }
+                x += 1;
+            }
+        }
+
+        // ── Summary row ──────────────────────────────────────────────────
+        let summary_y = inner.y + child_rows as u16;
+        if summary_y < inner.bottom() {
+            let summary = if cp.total_tokens_in > 0 || cp.total_tokens_out > 0 {
+                format!(
+                    "{}↓ {}↑",
+                    crate::tui::widgets::format_tokens_compact(cp.total_tokens_in as usize),
+                    crate::tui::widgets::format_tokens_compact(cp.total_tokens_out as usize),
+                )
+            } else {
+                format!("{}/{} done", done, cp.total_children)
+            };
+            let summary_color = Color::Rgb(36, 60, 76);
+            let mut x = inner.x;
+            for ch in summary.chars().take(w) {
+                if x >= inner.right() { break; }
+                if let Some(cell) = buf.cell_mut(Position::new(x, summary_y)) {
+                    cell.set_char(ch);
+                    cell.set_fg(summary_color);
+                    cell.set_bg(panel_bg(t));
+                }
+                x += 1;
+            }
+        }
+    }
+
+    fn format_elapsed(secs: f64) -> String {
+        if secs < 60.0 {
+            format!("{:4.0}s", secs)
+        } else {
+            let m = (secs / 60.0) as u64;
+            let s = secs as u64 % 60;
+            format!("{m}:{s:02}m")
         }
     }
 

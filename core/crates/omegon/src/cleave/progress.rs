@@ -38,6 +38,12 @@ pub enum ProgressEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         target: Option<String>,
     },
+    /// Token usage reported at child turn-end — rolled into parent session totals.
+    ChildTokens {
+        child: String,
+        input_tokens: u64,
+        output_tokens: u64,
+    },
     AutoCommit {
         child: String,
         files: usize,
@@ -173,8 +179,21 @@ pub fn parse_child_activity(child: &str, line: &str) -> Option<ProgressEvent> {
         }
     }
 
-    // Turn boundary: find "Turn N" anywhere in the line
+    // Turn boundary with optional token counts:
+    //   "── Turn N complete — in:1234 out:567 ──" (headless child log)
+    //   "── Turn N ──"
     if let Some(turn) = extract_turn_number(trimmed) {
+        let (input_tokens, output_tokens) = extract_token_counts(trimmed);
+        if input_tokens > 0 || output_tokens > 0 {
+            // Emit tokens as a separate event so the caller can handle them independently.
+            // Return a ChildTokens event; the orchestrator will also see the turn via
+            // the next parse pass — throttling means one event per second anyway.
+            return Some(ProgressEvent::ChildTokens {
+                child: child.to_string(),
+                input_tokens,
+                output_tokens,
+            });
+        }
         return Some(ProgressEvent::ChildActivity {
             child: child.to_string(),
             turn: Some(turn),
@@ -184,6 +203,23 @@ pub fn parse_child_activity(child: &str, line: &str) -> Option<ProgressEvent> {
     }
 
     None
+}
+
+/// Extract `in:N out:M` token counts from a log line like
+/// `"── Turn 3 complete — in:1234 out:567 ──"`.
+/// Returns (0, 0) when the pattern is absent.
+fn extract_token_counts(s: &str) -> (u64, u64) {
+    let input_tokens = s
+        .find("in:")
+        .and_then(|p| s[p + 3..].split_whitespace().next())
+        .and_then(|v| v.trim_end_matches(|c: char| !c.is_ascii_digit()).parse().ok())
+        .unwrap_or(0);
+    let output_tokens = s
+        .find("out:")
+        .and_then(|p| s[p + 4..].split_whitespace().next())
+        .and_then(|v| v.trim_end_matches(|c: char| !c.is_ascii_digit()).parse().ok())
+        .unwrap_or(0);
+    (input_tokens, output_tokens)
 }
 
 fn extract_turn_number(s: &str) -> Option<u32> {

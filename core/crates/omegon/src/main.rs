@@ -1965,8 +1965,12 @@ async fn run_agent_command(cli: &Cli) -> anyhow::Result<()> {
                         .unwrap_or_default();
                     tracing::info!("  {status} {text}");
                 }
-                AgentEvent::TurnEnd { turn, .. } => {
-                    tracing::info!("── Turn {turn} complete ──");
+                AgentEvent::TurnEnd { turn, actual_input_tokens, actual_output_tokens, .. } => {
+                    if actual_input_tokens > 0 || actual_output_tokens > 0 {
+                        tracing::info!("── Turn {turn} complete — in:{actual_input_tokens} out:{actual_output_tokens} ──");
+                    } else {
+                        tracing::info!("── Turn {turn} complete ──");
+                    }
                 }
                 AgentEvent::AgentEnd => {
                     tracing::info!("Agent complete");
