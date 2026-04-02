@@ -352,9 +352,14 @@ mod tests {
             if let Ok(wt_path) = result {
                 assert!(wt_path.exists(), "worktree should exist");
 
-                let repo = git2::Repository::open(model.repo_path()).unwrap();
+                let branch_exists = std::process::Command::new("git")
+                    .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch_name}")])
+                    .current_dir(model.repo_path())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
                 assert!(
-                    repo.find_branch(&branch_name, git2::BranchType::Local).is_ok(),
+                    branch_exists,
                     "cleave worktree must create a git branch so merge can address it"
                 );
 
