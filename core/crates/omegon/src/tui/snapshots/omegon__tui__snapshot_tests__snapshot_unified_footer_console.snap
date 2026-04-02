@@ -11,6 +11,6 @@ expression: render_to_string(&terminal)
   path    ~/workspace/black-…/omegon  ├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
   mode    Victory · think High        └─ episodes ⌗45  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
   session T8 ~$0                      │                                          ││                                    │
-  version v0.15.7-rc.7 → v0.15.7      │                                          ││                                    │
+  version v0.15.7-rc.8 → v0.15.7      │                                          ││                                    │
                                       │                                          ││  3/3 active                        │
                                       ╰──────────────────────────────────────────╯╰────────────────────────────────────╯

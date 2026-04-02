@@ -15,6 +15,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use std::collections::VecDeque;
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
@@ -605,6 +606,8 @@ async fn dispatch_child(
 
     let stderr = child.stderr.take().unwrap();
     let mut reader = BufReader::new(stderr).lines();
+    // Rolling tail of the last 30 stderr lines — surfaced on non-zero exit.
+    let mut stderr_tail: VecDeque<String> = VecDeque::with_capacity(30);
 
     let wall_timeout = tokio::time::Duration::from_secs(config.timeout_secs);
     let idle_timeout = tokio::time::Duration::from_secs(config.idle_timeout_secs);
@@ -630,6 +633,10 @@ async fn dispatch_child(
                     Ok(Ok(Some(line))) => {
                         last_activity = Instant::now();
                         line_count += 1;
+
+                        // Keep a rolling tail for error diagnostics.
+                        if stderr_tail.len() == 30 { stderr_tail.pop_front(); }
+                        stderr_tail.push_back(line.clone());
 
                         // Emit activity events (throttled to 1/sec)
                         if last_activity.duration_since(last_activity_event).as_secs() >= 1
@@ -680,16 +687,26 @@ async fn dispatch_child(
 
     let duration_secs = started.elapsed().as_secs_f64();
 
+    // Build a diagnostic snippet from the stderr tail for failure cases.
+    let tail_snippet = |tail: &VecDeque<String>| -> String {
+        if tail.is_empty() {
+            return String::new();
+        }
+        let lines: Vec<&str> = tail.iter().map(|s| s.as_str()).collect();
+        format!("\n--- last {} stderr lines ---\n{}\n---", lines.len(), lines.join("\n"))
+    };
+
     match io_result {
         Ok(()) if exit.success() => Ok(ChildOutput {
             duration_secs,
             stdout: stdout_buf,
         }),
         Ok(()) => Err(anyhow::anyhow!(
-            "Child exited with code {}",
-            exit.code().unwrap_or(-1)
+            "Child exited with code {}{}",
+            exit.code().unwrap_or(-1),
+            tail_snippet(&stderr_tail)
         )),
-        Err(e) => Err(e),
+        Err(e) => Err(anyhow::anyhow!("{}{}", e, tail_snippet(&stderr_tail))),
     }
 }
 

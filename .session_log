@@ -1757,4 +1757,124 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   51ebbf8f chore(release): 0.15.7-rc.6
   3bf71aa2 test(cleave): avoid git2 dependency in worktree branch assertion
   02623eaa fix(cleave): handle no-change merge outcomes in cli reporting
+## 2026-04-02 — main (24t 325tc 12m24s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  23ab0ee4 fix(cleave): resolve child prompt files from agent cwd
+  173f6a13 fix(cleave): pass absolute child cwd and prompt-file paths
+  42189e2e fix(cleave): stabilize child prompt-file dispatch paths
+## 2026-04-02 — main (1t 325tc 11s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  23ab0ee4 fix(cleave): resolve child prompt files from agent cwd
+  173f6a13 fix(cleave): pass absolute child cwd and prompt-file paths
+  42189e2e fix(cleave): stabilize child prompt-file dispatch paths
+## 2026-04-02 — main (3t 327tc 7m41s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  23ab0ee4 fix(cleave): resolve child prompt files from agent cwd
+  173f6a13 fix(cleave): pass absolute child cwd and prompt-file paths
+  42189e2e fix(cleave): stabilize child prompt-file dispatch paths
+## 2026-04-02 — main (2t 328tc 4m23s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  179cc51a chore(release): 0.15.7-rc.7
+  23ab0ee4 fix(cleave): resolve child prompt files from agent cwd
+  173f6a13 fix(cleave): pass absolute child cwd and prompt-file paths
+## 2026-04-02 — main (4t 331tc 35s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  179cc51a chore(release): 0.15.7-rc.7
+  23ab0ee4 fix(cleave): resolve child prompt files from agent cwd
+  173f6a13 fix(cleave): pass absolute child cwd and prompt-file paths
+## 2026-04-02 — main (1t 343tc 25s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  179cc51a chore(release): 0.15.7-rc.7
+  23ab0ee4 fix(cleave): resolve child prompt files from agent cwd
+  173f6a13 fix(cleave): pass absolute child cwd and prompt-file paths
+## 2026-04-02 — main (13t 375tc 7m21s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  179cc51a chore(release): 0.15.7-rc.7
+  23ab0ee4 fix(cleave): resolve child prompt files from agent cwd
+  173f6a13 fix(cleave): pass absolute child cwd and prompt-file paths
+## 2026-04-02 — main (1t 375tc 39s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  179cc51a chore(release): 0.15.7-rc.7
+  23ab0ee4 fix(cleave): resolve child prompt files from agent cwd
+  173f6a13 fix(cleave): pass absolute child cwd and prompt-file paths
 
