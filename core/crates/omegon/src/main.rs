@@ -635,6 +635,9 @@ async fn run_cleave_command(
     for (label, outcome) in &result.merge_results {
         match outcome {
             cleave::orchestrator::MergeOutcome::Success => eprintln!("  ✓ {} merged", label),
+            cleave::orchestrator::MergeOutcome::NoChanges => {
+                eprintln!("  ○ {} completed (no changes)", label)
+            }
             cleave::orchestrator::MergeOutcome::Conflict(d) => {
                 eprintln!("  ✗ {} CONFLICT: {}", label, d.lines().next().unwrap_or(""))
             }
@@ -648,10 +651,13 @@ async fn run_cleave_command(
     }
 
     // Post-merge guardrails (CLI only — TS wrapper runs its own)
-    let all_merged = result
-        .merge_results
-        .iter()
-        .all(|(_, o)| matches!(o, cleave::orchestrator::MergeOutcome::Success));
+    let all_merged = result.merge_results.iter().all(|(_, o)| {
+        matches!(
+            o,
+            cleave::orchestrator::MergeOutcome::Success
+                | cleave::orchestrator::MergeOutcome::NoChanges
+        )
+    });
     if all_merged && failed == 0 {
         let checks = cleave::guardrails::discover_guardrails(&repo_path);
         if !checks.is_empty() {
