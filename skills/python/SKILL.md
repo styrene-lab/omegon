@@ -1,15 +1,6 @@
 ---
 name: python
 description: Python development guidance. Covers project setup (pyproject.toml, src/ layout), testing (pytest), linting (ruff), type checking (mypy), packaging, venv management, and CI/CD patterns. Use when creating, modifying, or debugging Python code.
-guardrails:
-  - name: typecheck
-    cmd: mypy src/
-    timeout: 60
-    condition: file_exists(pyproject.toml)
-  - name: lint
-    cmd: ruff check .
-    timeout: 30
-    condition: file_exists(pyproject.toml)
 ---
 
 # Python Development Skill

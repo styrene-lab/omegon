@@ -2357,4 +2357,19 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   6b8b4131 feat(lex): add §VII Capabilities — harness sensoria baked into bedrock
   bdd81ffe test(cleave,tui,loop): add token accumulation, snapshot replacement, backoff cap tests
   2b099d29 feat(retry-test): In core/crates/omegon/src/loop.rs, find the retry backoff constants (RETRY_BASE_MS, RETRY_MAX_MS or similar) and the delay formula. Add a #[cfg(test)] test named `retry_backoff_is_capped` that reconstructs the backoff formula inline and asserts that for attempt indices 0, 1, 2, 10, and 100 the computed delay never exceeds the cap constant. Run cargo test -p omegon to confirm it passes.
+## 2026-04-02 — main (31t 939tc 5m57s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  ed4ca9c9 feat(skills): two-tier skill loading from ~/.omegon/skills/ and .omegon/skills/
+  6b8b4131 feat(lex): add §VII Capabilities — harness sensoria baked into bedrock
+  bdd81ffe test(cleave,tui,loop): add token accumulation, snapshot replacement, backoff cap tests
 

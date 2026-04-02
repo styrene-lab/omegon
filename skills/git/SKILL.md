@@ -206,12 +206,4 @@ git tag v0.5.0
 git push origin main --tags
 ```
 
-## Pre-Publish Checklist
 
-Before tagging a release or merging work that will trigger a publish:
-
-1. **Verify manifest registration** — If new extensions, skills, prompts, or themes were added as files/directories, confirm they are listed in `package.json` under the appropriate `pi.*` array (`pi.extensions`, `pi.skills`, etc.). Autodiscovery is **bypassed** when a manifest field exists; unlisted entries won't load.
-2. **Verify imports and wiring** — New modules that are referenced by other modules (e.g. shared state, cross-extension calls) must actually be reachable at runtime. Check that import paths resolve and that the consuming code isn't silently swallowing missing-module errors.
-3. **Smoke-test the feature** — If the change adds user-visible behavior (UI, commands, startup effects), confirm it actually fires in a local run before publishing. A feature that loads but never activates is the same as a feature that was never shipped.
-
-See `_reference/ci-validation.md` for CI workflow templates that enforce these conventions.

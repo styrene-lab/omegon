@@ -51,7 +51,7 @@ Derived from `themes/alpharius.json`. These are the ground-truth tokens.
 
 ### Excalidraw Semantic Palette
 
-For diagram elements. Maps purpose → fill/stroke pairs. Defined in `extensions/render/excalidraw/types.ts`.
+For diagram elements. Maps purpose → fill/stroke pairs.
 
 | Purpose | Fill | Stroke | When to Use |
 |---------|------|--------|-------------|
