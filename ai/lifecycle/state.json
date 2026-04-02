@@ -330,6 +330,36 @@
       "bound_change": null,
       "created_at": "2026-04-01T01:30:37Z",
       "updated_at": "2026-04-01T01:30:37Z"
+    },
+    {
+      "id": "cleave-refinements-post-instrumentation",
+      "title": "Cleave refinements: panel restore, segment rendering, schema hardening",
+      "state": "resolved",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-04-02T20:22:07Z",
+      "updated_at": "2026-04-02T20:27:03Z"
+    },
+    {
+      "id": "skill-location-architecture",
+      "title": "Skill location standard and bundled skill distribution",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-04-02T20:37:12Z",
+      "updated_at": "2026-04-02T20:37:24Z"
     }
   ],
   "changes": [],
@@ -656,6 +686,51 @@
       "entity_id": "extension-mind-integration",
       "from_state": "(new)",
       "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-04-02T20:22:07Z",
+      "entity_type": "node",
+      "entity_id": "cleave-refinements-post-instrumentation",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-04-02T20:27:03Z",
+      "entity_type": "node",
+      "entity_id": "cleave-refinements-post-instrumentation",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-04-02T20:27:03Z",
+      "entity_type": "node",
+      "entity_id": "cleave-refinements-post-instrumentation",
+      "from_state": "exploring",
+      "to_state": "resolved",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-04-02T20:37:12Z",
+      "entity_type": "node",
+      "entity_id": "skill-location-architecture",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-04-02T20:37:24Z",
+      "entity_type": "node",
+      "entity_id": "skill-location-architecture",
+      "from_state": "seed",
+      "to_state": "exploring",
       "reason": null,
       "forced": false
     }

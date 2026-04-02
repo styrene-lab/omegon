@@ -2282,4 +2282,64 @@ Edited: core/crates/omegon/src/providers.rs, core/crates/omegon/src/providers.rs
   75ceeb2d chore(release): 0.15.7-rc.15
   f5b4ba90 feat(tui): cleave panel swaps tools display during active runs
   74a619c7 feat(cleave): cancel-bounded transient retry, smoke harness, fallback env fix
+## 2026-04-02 — main (28t 831tc 10m19s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  bdd81ffe test(cleave,tui,loop): add token accumulation, snapshot replacement, backoff cap tests
+  2b099d29 feat(retry-test): In core/crates/omegon/src/loop.rs, find the retry backoff constants (RETRY_BASE_MS, RETRY_MAX_MS or similar) and the delay formula. Add a #[cfg(test)] test named `retry_backoff_is_capped` that reconstructs the backoff formula inline and asserts that for attempt indices 0, 1, 2, 10, and 100 the computed delay never exceeds the cap constant. Run cargo test -p omegon to confirm it passes.
+  f4ce81ae feat(instruments-test): In core/crates/omegon/src/tui/instruments.rs, add a #[cfg(test)] mod with a test named `set_cleave_progress_replaces_snapshot`. Create an InstrumentPanel, call set_cleave_progress with a CleaveProgress (active=true, run_id='r1', total_children=2, completed=0, failed=0, children=vec![], total_tokens_in=0, total_tokens_out=0), assert cleave_progress is Some and run_id=='r1', then call set_cleave_progress again with run_id='r2' and assert the new run_id=='r2'. Run cargo test -p omegon to confirm it passes.
+## 2026-04-02 — main (31t 875tc 6m32s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  bdd81ffe test(cleave,tui,loop): add token accumulation, snapshot replacement, backoff cap tests
+  2b099d29 feat(retry-test): In core/crates/omegon/src/loop.rs, find the retry backoff constants (RETRY_BASE_MS, RETRY_MAX_MS or similar) and the delay formula. Add a #[cfg(test)] test named `retry_backoff_is_capped` that reconstructs the backoff formula inline and asserts that for attempt indices 0, 1, 2, 10, and 100 the computed delay never exceeds the cap constant. Run cargo test -p omegon to confirm it passes.
+  f4ce81ae feat(instruments-test): In core/crates/omegon/src/tui/instruments.rs, add a #[cfg(test)] mod with a test named `set_cleave_progress_replaces_snapshot`. Create an InstrumentPanel, call set_cleave_progress with a CleaveProgress (active=true, run_id='r1', total_children=2, completed=0, failed=0, children=vec![], total_tokens_in=0, total_tokens_out=0), assert cleave_progress is Some and run_id=='r1', then call set_cleave_progress again with run_id='r2' and assert the new run_id=='r2'. Run cargo test -p omegon to confirm it passes.
+## 2026-04-02 — main (11t 890tc 2m21s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  bdd81ffe test(cleave,tui,loop): add token accumulation, snapshot replacement, backoff cap tests
+  2b099d29 feat(retry-test): In core/crates/omegon/src/loop.rs, find the retry backoff constants (RETRY_BASE_MS, RETRY_MAX_MS or similar) and the delay formula. Add a #[cfg(test)] test named `retry_backoff_is_capped` that reconstructs the backoff formula inline and asserts that for attempt indices 0, 1, 2, 10, and 100 the computed delay never exceeds the cap constant. Run cargo test -p omegon to confirm it passes.
+  f4ce81ae feat(instruments-test): In core/crates/omegon/src/tui/instruments.rs, add a #[cfg(test)] mod with a test named `set_cleave_progress_replaces_snapshot`. Create an InstrumentPanel, call set_cleave_progress with a CleaveProgress (active=true, run_id='r1', total_children=2, completed=0, failed=0, children=vec![], total_tokens_in=0, total_tokens_out=0), assert cleave_progress is Some and run_id=='r1', then call set_cleave_progress again with run_id='r2' and assert the new run_id=='r2'. Run cargo test -p omegon to confirm it passes.
+## 2026-04-02 — main (2t 891tc 1m10s)
+
+**Active:**
+- knowledge-quadrant-lifecycle (0/8)
+- openai-provider-identity-and-routing-honesty (0/13)
+- orchestratable-provider-model (43/43)
+- splash-systems-integration (0/29)
+- styrene-identity-secrets (0/3)
+- tui-footer-engine-display (0/41)
+- tutorial-system (37/39)
+
+**Commits:**
+  bdd81ffe test(cleave,tui,loop): add token accumulation, snapshot replacement, backoff cap tests
+  2b099d29 feat(retry-test): In core/crates/omegon/src/loop.rs, find the retry backoff constants (RETRY_BASE_MS, RETRY_MAX_MS or similar) and the delay formula. Add a #[cfg(test)] test named `retry_backoff_is_capped` that reconstructs the backoff formula inline and asserts that for attempt indices 0, 1, 2, 10, and 100 the computed delay never exceeds the cap constant. Run cargo test -p omegon to confirm it passes.
+  f4ce81ae feat(instruments-test): In core/crates/omegon/src/tui/instruments.rs, add a #[cfg(test)] mod with a test named `set_cleave_progress_replaces_snapshot`. Create an InstrumentPanel, call set_cleave_progress with a CleaveProgress (active=true, run_id='r1', total_children=2, completed=0, failed=0, children=vec![], total_tokens_in=0, total_tokens_out=0), assert cleave_progress is Some and run_id=='r1', then call set_cleave_progress again with run_id='r2' and assert the new run_id=='r2'. Run cargo test -p omegon to confirm it passes.
 
