@@ -1,6 +1,6 @@
 //! Session log — append-only session tracking with context injection.
 //!
-//! On session start, reads the last 3 narrative entries from `.session_log`
+//! On session start, reads the last 3 narrative entries from `.omegon/agent-journal.md`
 //! and injects them as context. Raw file-op lines are stripped.
 //!
 //! On session end, auto-appends a structured entry:
@@ -29,8 +29,10 @@ pub struct SessionLog {
 
 impl SessionLog {
     pub fn new(cwd: &Path) -> Self {
+        let omegon_dir = cwd.join(".omegon");
+        let _ = fs::create_dir_all(&omegon_dir);
         Self {
-            log_path: cwd.join(".session_log"),
+            log_path: omegon_dir.join("agent-journal.md"),
             cwd: cwd.to_path_buf(),
             context_snippet: None,
         }
@@ -155,7 +157,7 @@ impl SessionLog {
         format!("{y:04}-{m:02}-{d:02}")
     }
 
-    /// Append a structured entry to `.session_log`.
+    /// Append a structured entry to `.omegon/agent-journal.md`.
     fn append_entry(&self, turns: u32, tool_calls: u32, duration_secs: f64) {
         let date = Self::today();
         let branch = self
@@ -205,7 +207,7 @@ impl SessionLog {
         let entry = lines.join("\n");
 
         // Bootstrap header if file doesn't exist
-        let header = "# Session Log\n\nAppend-only record of development sessions. Read recent entries for context.\n\n";
+        let header = "# Agent Journal\n\nAppend-only record of agent sessions. Read recent entries for context.\n\n";
         let prefix = if self.log_path.exists() {
             String::new()
         } else {
@@ -225,7 +227,7 @@ impl SessionLog {
     fn read_entries_text(&self, n: usize) -> anyhow::Result<(String, Value)> {
         if !self.log_path.exists() {
             return Ok((
-                format!("No .session_log found at {}", self.log_path.display()),
+                format!("No agent journal found at {}", self.log_path.display()),
                 json!({"entries": [], "total": 0}),
             ));
         }
@@ -243,7 +245,7 @@ impl SessionLog {
 
         if total == 0 {
             return Ok((
-                "No entries found in .session_log".into(),
+                "No entries found in agent journal".into(),
                 json!({"entries": [], "total": 0}),
             ));
         }
@@ -264,7 +266,7 @@ impl SessionLog {
 
         Ok((
             format!(
-                "Recent .session_log entries ({} of {}):\n\n{}",
+                "Recent agent journal entries ({} of {}):\n\n{}",
                 recent_text.len(),
                 total,
                 recent_text.join("\n")
@@ -291,7 +293,7 @@ impl Feature for SessionLog {
         vec![ToolDefinition {
             name: crate::tool_registry::session_log::SESSION_LOG.into(),
             label: "session_log".into(),
-            description: "Read recent session-log narrative so the harness can inspect prior work without operator slash commands.".into(),
+            description: "Read recent agent-journal narrative so the harness can inspect prior work without operator slash commands.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -338,7 +340,7 @@ impl Feature for SessionLog {
     fn commands(&self) -> Vec<CommandDefinition> {
         vec![CommandDefinition {
             name: "session-log".into(),
-            description: "Read .session_log entries".into(),
+            description: "Read .omegon/agent-journal.md entries".into(),
             subcommands: vec!["read".into()],
         }]
     }
@@ -411,7 +413,7 @@ mod tests {
     #[test]
     fn read_narrative_strips_file_ops() {
         let dir = tempfile::tempdir().unwrap();
-        let log_path = dir.path().join(".session_log");
+        let log_path = { let d = dir.path().join(".omegon"); std::fs::create_dir_all(&d).unwrap(); d.join("agent-journal.md") };
         fs::write(
             &log_path,
             "# Session Log\n\n\
@@ -450,7 +452,7 @@ mod tests {
     #[test]
     fn read_narrative_last_n_entries() {
         let dir = tempfile::tempdir().unwrap();
-        let log_path = dir.path().join(".session_log");
+        let log_path = { let d = dir.path().join(".omegon"); std::fs::create_dir_all(&d).unwrap(); d.join("agent-journal.md") };
         let mut content = "# Session Log\n\n".to_string();
         for i in 1..=5 {
             content.push_str(&format!(
@@ -479,17 +481,17 @@ mod tests {
 
         assert!(feature.log_path.exists(), "log file should be created");
         let content = fs::read_to_string(&feature.log_path).unwrap();
-        assert!(content.contains("# Session Log"), "should have header");
+        assert!(content.contains("# Agent Journal"), "should have header");
         assert!(content.contains("(5t 20tc 5m0s)"), "should have stats");
     }
 
     #[test]
     fn append_entry_appends_not_overwrites() {
         let dir = tempfile::tempdir().unwrap();
-        let log_path = dir.path().join(".session_log");
+        let log_path = { let d = dir.path().join(".omegon"); std::fs::create_dir_all(&d).unwrap(); d.join("agent-journal.md") };
         fs::write(
             &log_path,
-            "# Session Log\n\n## 2026-03-01 — existing entry\n",
+            "# Agent Journal\n\n## 2026-03-01 — existing entry\n",
         )
         .unwrap();
 
@@ -546,7 +548,7 @@ mod tests {
     #[test]
     fn read_entries_command() {
         let dir = tempfile::tempdir().unwrap();
-        let log_path = dir.path().join(".session_log");
+        let log_path = { let d = dir.path().join(".omegon"); std::fs::create_dir_all(&d).unwrap(); d.join("agent-journal.md") };
         fs::write(
             &log_path,
             "# Session Log\n\n\
@@ -567,7 +569,7 @@ mod tests {
     #[tokio::test]
     async fn session_log_tool_reads_entries_via_bus() {
         let dir = tempfile::tempdir().unwrap();
-        let log_path = dir.path().join(".session_log");
+        let log_path = { let d = dir.path().join(".omegon"); std::fs::create_dir_all(&d).unwrap(); d.join("agent-journal.md") };
         fs::write(
             &log_path,
             "# Session Log\n\n\
@@ -599,7 +601,7 @@ mod tests {
     #[test]
     fn context_injection_after_session_start() {
         let dir = tempfile::tempdir().unwrap();
-        let log_path = dir.path().join(".session_log");
+        let log_path = { let d = dir.path().join(".omegon"); std::fs::create_dir_all(&d).unwrap(); d.join("agent-journal.md") };
         fs::write(
             &log_path,
             "# Log\n\n## 2026-03-18 — main (5t 20tc 3m)\n\nContext here.\n",

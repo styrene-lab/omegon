@@ -36,4 +36,4 @@ dist/
 .omegon/codescan.db-shm
 .omegon/codescan.db-wal
 *.snap.new
-.session_log
+.omegon/agent-journal.md
