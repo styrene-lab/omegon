@@ -372,5 +372,12 @@
       "fix(tui): tighten segment rendering and preserve multiline layout",
       "fix: use npx wrangler@latest for CF Pages deploy"
     ]
+  },
+  "nightly": {
+    "status": "nightly",
+    "channel": "nightly",
+    "version": "0.15.7-nightly.20260403",
+    "last_build": "2026-04-03T08:09:54Z",
+    "build_count": 1
   }
 }
