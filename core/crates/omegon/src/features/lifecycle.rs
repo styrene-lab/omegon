@@ -898,29 +898,47 @@ impl Feature for LifecycleFeature {
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["create", "set_status", "add_question", "remove_question", "add_research", "add_decision", "add_dependency", "add_related", "add_impl_notes", "branch", "focus", "unfocus", "implement", "set_priority", "set_issue_type"]
+                            "enum": ["create", "set_status", "add_question", "remove_question", "add_research", "add_decision", "add_dependency", "add_related", "add_impl_notes", "branch", "focus", "unfocus", "implement", "set_priority", "set_issue_type"],
+                            "description": "Mutation action"
                         },
-                        "node_id": { "type": "string" },
-                        "title": { "type": "string" },
-                        "parent": { "type": "string" },
-                        "status": { "type": "string" },
+                        "node_id": { "type": "string", "description": "Primary design node ID. Required for most actions; for create, this is the new node ID." },
+                        "title": { "type": "string", "description": "Node title. Required for create." },
+                        "parent": { "type": "string", "description": "Parent node ID for create, branch, or implement." },
+                        "status": { "type": "string", "description": "Lifecycle status. Required for set_status; optional initial status for create." },
                         "tags": { "type": "array", "items": { "type": "string" } },
-                        "overview": { "type": "string" },
-                        "question": { "type": "string" },
-                        "heading": { "type": "string" },
-                        "content": { "type": "string" },
-                        "decision_title": { "type": "string" },
+                        "overview": { "type": "string", "description": "Node overview/summary. Required for create." },
+                        "question": { "type": "string", "description": "Open question text. Required for add_question/remove_question." },
+                        "heading": { "type": "string", "description": "Research heading or impl-notes heading. Required for add_research/add_impl_notes." },
+                        "content": { "type": "string", "description": "Body content. Required for add_research/add_impl_notes." },
+                        "decision_title": { "type": "string", "description": "Decision title. Required for add_decision." },
                         "decision_status": { "type": "string" },
                         "rationale": { "type": "string" },
-                        "target_id": { "type": "string" },
-                        "child_id": { "type": "string" },
-                        "child_title": { "type": "string" },
+                        "target_id": { "type": "string", "description": "Target node ID. Required for add_dependency/add_related/focus/unfocus/set_priority/set_issue_type when applicable." },
+                        "child_id": { "type": "string", "description": "Child node ID. Required for branch." },
+                        "child_title": { "type": "string", "description": "Child node title. Required for branch." },
                         "file_scope": { "type": "array", "items": { "type": "object" } },
                         "constraints": { "type": "array", "items": { "type": "string" } },
-                        "priority": { "type": "number" },
-                        "issue_type": { "type": "string" }
+                        "priority": { "type": "number", "description": "Priority value. Required for set_priority." },
+                        "issue_type": { "type": "string", "description": "Issue classification. Required for set_issue_type." }
                     },
-                    "required": ["action"]
+                    "required": ["action"],
+                    "allOf": [
+                        { "if": { "properties": { "action": { "const": "create" } } }, "then": { "required": ["action", "node_id", "title", "overview"] } },
+                        { "if": { "properties": { "action": { "const": "set_status" } } }, "then": { "required": ["action", "node_id", "status"] } },
+                        { "if": { "properties": { "action": { "const": "add_question" } } }, "then": { "required": ["action", "node_id", "question"] } },
+                        { "if": { "properties": { "action": { "const": "remove_question" } } }, "then": { "required": ["action", "node_id", "question"] } },
+                        { "if": { "properties": { "action": { "const": "add_research" } } }, "then": { "required": ["action", "node_id", "heading", "content"] } },
+                        { "if": { "properties": { "action": { "const": "add_decision" } } }, "then": { "required": ["action", "node_id", "decision_title"] } },
+                        { "if": { "properties": { "action": { "const": "add_dependency" } } }, "then": { "required": ["action", "node_id", "target_id"] } },
+                        { "if": { "properties": { "action": { "const": "add_related" } } }, "then": { "required": ["action", "node_id", "target_id"] } },
+                        { "if": { "properties": { "action": { "const": "add_impl_notes" } } }, "then": { "required": ["action", "node_id", "heading", "content"] } },
+                        { "if": { "properties": { "action": { "const": "branch" } } }, "then": { "required": ["action", "node_id", "child_id", "child_title"] } },
+                        { "if": { "properties": { "action": { "const": "focus" } } }, "then": { "required": ["action", "node_id"] } },
+                        { "if": { "properties": { "action": { "const": "unfocus" } } }, "then": { "required": ["action", "node_id"] } },
+                        { "if": { "properties": { "action": { "const": "implement" } } }, "then": { "required": ["action", "node_id"] } },
+                        { "if": { "properties": { "action": { "const": "set_priority" } } }, "then": { "required": ["action", "node_id", "priority"] } },
+                        { "if": { "properties": { "action": { "const": "set_issue_type" } } }, "then": { "required": ["action", "node_id", "issue_type"] } }
+                    ]
                 }),
             },
             ToolDefinition {
@@ -1173,6 +1191,59 @@ mod tests {
         let commands = feature.commands();
         assert!(commands.iter().any(|c| c.name == "design-focus"));
         assert!(commands.iter().any(|c| c.name == "design"));
+    }
+
+    #[test]
+    fn design_tree_update_schema_requires_create_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = LifecycleFeature::new(dir.path());
+        let tools = feature.tools();
+        let schema = tools
+            .iter()
+            .find(|t| t.name == "design_tree_update")
+            .expect("design_tree_update tool")
+            .parameters
+            .clone();
+
+        let all_of = schema["allOf"].as_array().expect("allOf array");
+        let create_rule = all_of
+            .iter()
+            .find(|rule| rule["if"]["properties"]["action"]["const"] == "create")
+            .expect("create rule");
+        let required = create_rule["then"]["required"]
+            .as_array()
+            .expect("create required array");
+        let required: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+
+        assert!(required.contains(&"node_id"), "create must require node_id");
+        assert!(required.contains(&"title"), "create must require title");
+        assert!(required.contains(&"overview"), "create must require overview");
+    }
+
+    #[test]
+    fn design_tree_update_schema_requires_node_id_for_set_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let feature = LifecycleFeature::new(dir.path());
+        let tools = feature.tools();
+        let schema = tools
+            .iter()
+            .find(|t| t.name == "design_tree_update")
+            .expect("design_tree_update tool")
+            .parameters
+            .clone();
+
+        let all_of = schema["allOf"].as_array().expect("allOf array");
+        let set_status_rule = all_of
+            .iter()
+            .find(|rule| rule["if"]["properties"]["action"]["const"] == "set_status")
+            .expect("set_status rule");
+        let required = set_status_rule["then"]["required"]
+            .as_array()
+            .expect("set_status required array");
+        let required: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+
+        assert!(required.contains(&"node_id"), "set_status must require node_id");
+        assert!(required.contains(&"status"), "set_status must require status");
     }
 
     #[test]
