@@ -379,9 +379,9 @@
     "nodes": [],
     "frozen": false,
     "opened": "2026-04-03T17:38:05Z",
-    "last_rc": "2026-04-03T18:12:11Z",
-    "rc_version": "0.15.9-rc.1",
-    "rc_count": 3,
+    "last_rc": "2026-04-03T18:13:56Z",
+    "rc_version": "0.15.9-rc.2",
+    "rc_count": 4,
     "released": null,
     "notes": [
       "feat(ipc): surface degraded provider runtime state",
