@@ -372,5 +372,30 @@
       "fix(tui): tighten segment rendering and preserve multiline layout",
       "fix: use npx wrangler@latest for CF Pages deploy"
     ]
+  },
+  "0.15.9": {
+    "status": "rc",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": false,
+    "opened": "2026-04-03T17:38:05Z",
+    "last_rc": "2026-04-03T17:38:05Z",
+    "rc_version": "0.15.9-rc.1",
+    "rc_count": 1,
+    "released": null,
+    "notes": [
+      "refactor(loop): extract upstream error matrix into dedicated module",
+      "refactor(loop): make provider error mapping table-driven",
+      "refactor(loop): add provider-specific upstream error matrix overrides",
+      "refactor(loop): classify upstream failures into explicit recovery classes",
+      "fix(status): require repeated failures before provider degradation",
+      "feat(ipc): surface degraded provider runtime state",
+      "fix(status): separate provider auth from runtime degradation",
+      "fix(context): report dispatch truthfully and soften upstream warnings",
+      "refactor(session-log): move to .omegon/agent-journal.md",
+      "fix(tests): use machine-neutral cwd fixture in footer snapshot test",
+      "fix(ci): push homebrew formula update from detached HEAD",
+      "fix(tests): decouple CI-hostile test and snapshot coupling from auth/version state"
+    ]
   }
 }

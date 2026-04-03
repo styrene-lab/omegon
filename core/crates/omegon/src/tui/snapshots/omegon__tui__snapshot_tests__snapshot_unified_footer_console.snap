@@ -11,6 +11,6 @@ expression: render_to_string(&terminal)
   path    /home/user/workspa…/omegon  ├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
   mode    Victory · think High        └─ episodes ⌗45  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
   session T8 ~$0                      │                                          ││                                    │
-  version v<current> → v<next>           │                                          ││                                    │
+  version v<current> → v<next>      │                                          ││                                    │
                                       │                                          ││  3/3 active                        │
                                       ╰──────────────────────────────────────────╯╰────────────────────────────────────╯
