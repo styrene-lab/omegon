@@ -320,9 +320,9 @@
     "nodes": [],
     "frozen": false,
     "opened": "2026-04-01T23:29:18Z",
-    "last_rc": "2026-04-03T00:51:05Z",
-    "rc_version": "0.15.7-rc.18",
-    "rc_count": 17,
+    "last_rc": "2026-04-03T01:13:11Z",
+    "rc_version": "0.15.7-rc.19",
+    "rc_count": 18,
     "released": null,
     "notes": [
       "feat(cleave): cancel-bounded transient retry, smoke harness, fallback env fix",
@@ -355,6 +355,7 @@
       "fix(footer): make session cost lookup independent of auth-gated catalog",
       "fix(footer): mark session cost as an estimate",
       "fix(justfile): push specific tag only in rc/publish to avoid GitHub Actions trigger drops",
+      "fix(lifecycle): align design-tree update schema with runtime requirements",
       "fix(loop): normalize decode-body retry notices for operators",
       "fix(loop): retry stalled llm streams instead of hanging",
       "fix(loop): rewrite transient retry details in operator language",
@@ -368,6 +369,7 @@
       "fix(tui): cleave panel restores to tools view after run, clean segment rendering",
       "fix(tui): expose skills and hide model alias slash commands",
       "fix(tui): show upstream retry state clearly during transient failures",
+      "fix(tui): tighten segment rendering and preserve multiline layout",
       "fix: use npx wrangler@latest for CF Pages deploy"
     ]
   }
