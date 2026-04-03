@@ -209,38 +209,31 @@ impl FooterData {
                 .providers
                 .iter()
                 .find(|p| p.name.eq_ignore_ascii_case(&self.model_provider));
-            let provider_icon = if self.model_provider == "ollama" { "⚡" } else { "☁" };
-            let auth_text = if self.is_oauth {
-                "● subscription"
+            let provider_icon = if is_local_provider(&self.model_provider) {
+                "⤵"
             } else {
-                "○ api key"
+                "⤴"
+            };
+            let auth_text = if is_local_provider(&self.model_provider) {
+                "● local"
+            } else if self.is_oauth {
+                "↻ sub"
+            } else {
+                "○ api"
             };
             let provider_text = format!("{provider_icon} {provider_label} · {auth_text}");
-            let persona_text = self
-                .harness
-                .active_persona
-                .as_ref()
-                .map(|p| format!("{} {}", p.badge, p.name))
-                .unwrap_or_else(|| "—".to_string());
             let context_text = format_context_text(
                 self.context_class,
                 self.context_percent.min(100.0),
                 self.context_window,
             );
-            let tier_text = format!("{} / {}", capitalize(&self.model_tier), capitalize(&self.thinking_level));
-            let session_text = format_session_text(
-                &self.model_id,
-                self.turn,
-                self.session_input_tokens,
-                self.session_output_tokens,
-            );
             let version_text = format_version_text(self.update_available.as_deref());
-            let model_line = if persona_text == "—" {
-                model_short.to_string()
-            } else {
-                format!("{model_short} · {persona_text}")
-            };
-            let state_line = format!("{context_text} · {tier_text} · {session_text}");
+            let model_line = format!(
+                "{} ({model_short}) · {}",
+                capitalize(&self.model_tier),
+                capitalize(&self.thinking_level)
+            );
+            let state_line = context_text;
 
             push_row(&mut lines, "provider", provider_text, t.border_dim(), t.fg(), true);
             if let Some(provider) = provider_runtime
@@ -254,7 +247,7 @@ impl FooterData {
                 push_row(
                     &mut lines,
                     "status",
-                    format!("≈ degraded · {failures}× {kind}"),
+                    format!("≈ degraded · {failures}× {kind} / 5m"),
                     t.border_dim(),
                     t.warning(),
                     false,
@@ -787,7 +780,7 @@ fn shorten_cwd(cwd: &str, max_chars: usize) -> String {
 fn format_context_text(context_class: ContextClass, context_percent: f32, context_window: usize) -> String {
     if context_window > 0 {
         format!(
-            "{} {:.0}% / {}",
+            "{} {:.0}% / ¤{}",
             context_class.short(),
             context_percent,
             widgets::format_tokens(context_window)
@@ -795,6 +788,10 @@ fn format_context_text(context_class: ContextClass, context_percent: f32, contex
     } else {
         format!("{} {:.0}%", context_class.short(), context_percent)
     }
+}
+
+fn is_local_provider(provider: &str) -> bool {
+    matches!(provider, "ollama" | "local")
 }
 
 fn format_version_text(update_available: Option<&str>) -> String {
@@ -813,7 +810,7 @@ fn format_session_text(model_id: &str, turn: u32, session_input_tokens: u64, ses
 
     if session_input_tokens > 0 || session_output_tokens > 0 {
         parts.push(format!(
-            "{}/{}",
+            "¤{}/¤{}",
             widgets::format_tokens_compact(session_input_tokens as usize),
             widgets::format_tokens_compact(session_output_tokens as usize)
         ));
@@ -956,7 +953,7 @@ mod tests {
     fn session_text_is_compact_and_includes_cost_when_priced() {
         let text = format_session_text("anthropic:claude-sonnet-4-6", 1, 12_000, 3_000);
         assert!(text.starts_with("T1 "), "got {text}");
-        assert!(text.contains("12k/3k"), "got {text}");
+        assert!(text.contains("¤12k/¤3k"), "got {text}");
         assert!(text.contains("~$"), "got {text}");
         assert!(!text.contains('⚙'), "got {text}");
         assert!(!text.contains('↻'), "got {text}");
@@ -966,7 +963,7 @@ mod tests {
     #[test]
     fn session_text_falls_back_to_tokens_when_pricing_unknown() {
         let text = format_session_text("unknown:custom-model", 2, 12_000, 3_000);
-        assert_eq!(text, "T2 12k/3k");
+        assert_eq!(text, "T2 ¤12k/¤3k");
     }
 
     #[test]
@@ -988,9 +985,25 @@ mod tests {
     fn context_text_compacts_class_percent_and_window() {
         assert_eq!(
             format_context_text(ContextClass::Maniple, 68.0, 272_000),
-            "Maniple 68% / 272k"
+            "Maniple 68% / ¤272k"
         );
         assert_eq!(format_context_text(ContextClass::Clan, 42.0, 0), "Clan 42%");
+    }
+
+    fn render_left_panel_text(data: &FooterData, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                data.render_left_panel(frame.area(), frame, &super::super::theme::Alpharius);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let a = buf.area;
+        (0..a.height)
+            .flat_map(|y| (0..a.width).map(move |x| buf[(x, y)].symbol().to_string()))
+            .collect()
     }
 
     #[test]
@@ -1011,23 +1024,62 @@ mod tests {
             update_available: Some("9.9.9".into()),
             ..Default::default()
         };
-        let backend = TestBackend::new(38, 8);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal
-            .draw(|frame| {
-                data.render_left_panel(frame.area(), frame, &super::super::theme::Alpharius);
-            })
-            .unwrap();
-
-        let text: String = {
-            let buf = terminal.backend().buffer();
-            let a = buf.area;
-            (0..a.height)
-                .flat_map(|y| (0..a.width).map(move |x| buf[(x, y)].symbol().to_string()))
-                .collect()
-        };
+        let text = render_left_panel_text(&data, 38, 8);
 
         assert!(text.contains("v<version> → v9.9.9") || text.contains("v0.15."), "got {text}");
         assert!(text.contains("gpt-5.4"), "got {text}");
+        assert!(text.contains("Victory") || text.contains("victory"), "got {text}");
+        assert!(text.contains("High") || text.contains("high"), "got {text}");
+    }
+
+    #[test]
+    fn left_panel_uses_new_engine_provider_and_token_symbols() {
+        let data = FooterData {
+            model_id: "openai:gpt-5.4".into(),
+            model_provider: "openai".into(),
+            context_percent: 68.0,
+            context_window: 272_000,
+            context_class: ContextClass::Maniple,
+            session_input_tokens: 12_000,
+            session_output_tokens: 3_000,
+            turn: 7,
+            thinking_level: "high".into(),
+            model_tier: "victory".into(),
+            provider_connected: true,
+            is_oauth: true,
+            ..Default::default()
+        };
+        let text = render_left_panel_text(&data, 64, 8);
+
+        assert!(text.contains("⤴ OpenAI") || text.contains("⤴ openai"), "got {text}");
+        assert!(text.contains("↻ sub"), "got {text}");
+        assert!(text.contains("Victory (gpt-5.4) · High"), "got {text}");
+        assert!(text.contains("Maniple 68% / ¤272k"), "got {text}");
+    }
+
+    #[test]
+    fn left_panel_marks_degraded_status_as_five_minute_window() {
+        let data = FooterData {
+            model_id: "openai:gpt-5.4".into(),
+            model_provider: "openai".into(),
+            provider_connected: true,
+            harness: crate::status::HarnessStatus {
+                providers: vec![crate::status::ProviderStatus {
+                    name: "openai".into(),
+                    authenticated: true,
+                    auth_method: Some("oauth".into()),
+                    model: Some("gpt-5.4".into()),
+                    runtime_status: Some(crate::status::ProviderRuntimeStatus::Degraded),
+                    recent_failure_count: Some(6),
+                    last_failure_kind: Some("stalled stream".into()),
+                    last_failure_at: Some("2026-04-03T00:00:00Z".into()),
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let text = render_left_panel_text(&data, 72, 8);
+
+        assert!(text.contains("6× stalled stream / 5m"), "got {text}");
     }
 }
