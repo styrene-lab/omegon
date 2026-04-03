@@ -191,6 +191,9 @@ mod tests {
             openspec_change: None,
             issue_type: None,
             priority: None,
+            archive_reason: None,
+            superseded_by: None,
+            archived_at: None,
             file_path: PathBuf::from(format!("docs/{id}.md")),
         }
     }

@@ -44,6 +44,28 @@ pub struct LifecycleFeature {
 }
 
 impl LifecycleFeature {
+    fn is_archived(node: &DesignNode) -> bool {
+        matches!(node.status, NodeStatus::Archived)
+    }
+
+    fn has_non_archived_descendants(nodes: &std::collections::HashMap<String, DesignNode>, node_id: &str) -> bool {
+        for child in design::get_children(nodes, node_id) {
+            if !Self::is_archived(child) || Self::has_non_archived_descendants(nodes, &child.id) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn archive_timestamp() -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        secs.to_string()
+    }
+
     pub fn new(repo_path: &std::path::Path) -> Self {
         let provider = LifecycleContextProvider::new(repo_path);
         let store = JsonFileStore::new(repo_path);
@@ -99,6 +121,7 @@ impl LifecycleFeature {
                 let nodes = p.all_nodes();
                 let list: Vec<Value> = nodes
                     .values()
+                    .filter(|n| !Self::is_archived(n))
                     .map(|n| {
                         let children_count = design::get_children(nodes, &n.id).len();
                         json!({
@@ -146,6 +169,9 @@ impl LifecycleFeature {
                     "branches": node.branches,
                     "openspec_change": node.openspec_change,
                     "priority": node.priority,
+                    "archive_reason": node.archive_reason,
+                    "superseded_by": node.superseded_by,
+                    "archived_at": node.archived_at,
                     "children": children.iter().map(|c| json!({
                         "id": c.id,
                         "title": c.title,
@@ -202,6 +228,7 @@ impl LifecycleFeature {
                 let nodes = p.all_nodes();
                 let frontier: Vec<Value> = nodes
                     .values()
+                    .filter(|n| !Self::is_archived(n))
                     .filter(|n| !n.open_questions.is_empty())
                     .map(|n| {
                         json!({
@@ -220,6 +247,7 @@ impl LifecycleFeature {
                 let children = design::get_children(p.all_nodes(), id);
                 let list: Vec<Value> = children
                     .iter()
+                    .filter(|c| !Self::is_archived(c))
                     .map(|c| {
                         json!({
                             "id": c.id,
@@ -256,6 +284,7 @@ impl LifecycleFeature {
                 let nodes = p.all_nodes();
                 let ready: Vec<Value> = nodes
                     .values()
+                    .filter(|n| !Self::is_archived(n))
                     .filter(|n| matches!(n.status, NodeStatus::Decided))
                     .filter(|n| {
                         n.dependencies.iter().all(|dep_id| {
@@ -383,6 +412,15 @@ impl LifecycleFeature {
                 let status = NodeStatus::parse(status_str)
                     .ok_or_else(|| anyhow::anyhow!("Invalid status: {status_str}"))?;
 
+                if matches!(status, NodeStatus::Archived) {
+                    let nodes = self.provider.lock().unwrap().all_nodes().clone();
+                    if Self::has_non_archived_descendants(&nodes, id) {
+                        anyhow::bail!(
+                            "cannot archive '{id}' while non-archived descendants remain"
+                        );
+                    }
+                }
+
                 // Validate transition via opsx-core FSM
                 let opsx_target = OpsxNodeState::parse(status_str)
                     .ok_or_else(|| anyhow::anyhow!("Invalid status for FSM: {status_str}"))?;
@@ -402,6 +440,15 @@ impl LifecycleFeature {
                 let node_title = node.title.clone();
                 design::update_node(&mut node, |n| {
                     n.status = status;
+                    if matches!(status, NodeStatus::Archived) {
+                        n.archive_reason = args["archive_reason"].as_str().map(str::to_string);
+                        n.superseded_by = args["superseded_by"].as_str().map(str::to_string);
+                        n.archived_at = Some(Self::archive_timestamp());
+                    } else {
+                        n.archive_reason = None;
+                        n.superseded_by = None;
+                        n.archived_at = None;
+                    }
                 })?;
                 self.provider.lock().unwrap().refresh();
 
@@ -1558,6 +1605,95 @@ mod tests {
             text.contains("test-node"),
             "openspec should have the change: {text}"
         );
+    }
+
+    #[test]
+    fn archived_nodes_are_hidden_from_active_views() {
+        let (_dir, repo) = setup_test_repo();
+        let feature = LifecycleFeature::new(&repo);
+
+        feature
+            .execute_design_tree_update(&json!({
+                "action": "create",
+                "node_id": "archive-me",
+                "title": "Archive Me",
+                "overview": "old work",
+            }))
+            .unwrap();
+
+        feature
+            .execute_design_tree_update(&json!({
+                "action": "set_status",
+                "node_id": "archive-me",
+                "status": "archived",
+                "archive_reason": "obsolete",
+                "superseded_by": "replacement-node"
+            }))
+            .unwrap();
+
+        let list = feature
+            .execute_design_tree(&json!({"action": "list"}))
+            .unwrap();
+        let text = list.content[0].as_text().unwrap();
+        assert!(!text.contains("archive-me"), "archived node leaked into list: {text}");
+
+        let ready = feature
+            .execute_design_tree(&json!({"action": "ready"}))
+            .unwrap();
+        let ready_text = ready.content[0].as_text().unwrap();
+        assert!(
+            !ready_text.contains("archive-me"),
+            "archived node leaked into ready: {ready_text}"
+        );
+
+        let node = feature
+            .execute_design_tree(&json!({"action": "node", "node_id": "archive-me"}))
+            .unwrap();
+        let node_text = node.content[0].as_text().unwrap();
+        assert!(node_text.contains("\"status\": \"archived\""), "{node_text}");
+        assert!(
+            node_text.contains("\"archive_reason\": \"obsolete\""),
+            "{node_text}"
+        );
+        assert!(
+            node_text.contains("\"superseded_by\": \"replacement-node\""),
+            "{node_text}"
+        );
+    }
+
+    #[test]
+    fn archive_rejects_non_archived_descendants() {
+        let (_dir, repo) = setup_test_repo();
+        let feature = LifecycleFeature::new(&repo);
+
+        feature
+            .execute_design_tree_update(&json!({
+                "action": "create",
+                "node_id": "archive-parent",
+                "title": "Archive Parent",
+                "overview": "parent",
+            }))
+            .unwrap();
+
+        feature
+            .execute_design_tree_update(&json!({
+                "action": "create",
+                "node_id": "archive-child",
+                "title": "Archive Child",
+                "overview": "child",
+                "parent": "archive-parent",
+            }))
+            .unwrap();
+
+        let result = feature.execute_design_tree_update(&json!({
+            "action": "set_status",
+            "node_id": "archive-parent",
+            "status": "archived",
+            "archive_reason": "obsolete"
+        }));
+        assert!(result.is_err(), "archive should reject active descendants");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("non-archived descendants"), "{err}");
     }
 
     #[test]

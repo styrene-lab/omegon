@@ -173,6 +173,18 @@ pub fn node_from_frontmatter(
             .get("priority")
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse().ok()),
+        archive_reason: fm
+            .get("archive_reason")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        superseded_by: fm
+            .get("superseded_by")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        archived_at: fm
+            .get("archived_at")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         file_path,
     })
 }
@@ -548,8 +560,24 @@ fn serialize_frontmatter(node: &DesignNode) -> String {
         lines.push(format!("priority: {priority}"));
     }
 
+    if let Some(ref archive_reason) = node.archive_reason {
+        lines.push(format!("archive_reason: {}", quote_yaml_scalar(archive_reason)));
+    }
+
+    if let Some(ref superseded_by) = node.superseded_by {
+        lines.push(format!("superseded_by: {}", quote_yaml_scalar(superseded_by)));
+    }
+
+    if let Some(ref archived_at) = node.archived_at {
+        lines.push(format!("archived_at: {}", quote_yaml_scalar(archived_at)));
+    }
+
     lines.push("---".into());
     lines.join("\n")
+}
+
+fn quote_yaml_scalar(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 /// Serialize a full design document (frontmatter + sections).
@@ -657,6 +685,9 @@ pub fn create_node(
         openspec_change: None,
         issue_type: None,
         priority: None,
+        archive_reason: None,
+        superseded_by: None,
+        archived_at: None,
         file_path: file_path.clone(),
     };
 
@@ -932,6 +963,9 @@ Content of the second topic.
             openspec_change: None,
             issue_type: None,
             priority: None,
+            archive_reason: None,
+            superseded_by: None,
+            archived_at: None,
             file_path: PathBuf::new(),
         };
         let sections = DocumentSections {

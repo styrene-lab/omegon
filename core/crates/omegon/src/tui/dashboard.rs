@@ -828,6 +828,7 @@ fn status_icon_color(status: NodeStatus, t: &dyn Theme) -> (&'static str, Color)
         NodeStatus::Implemented => ("✓", t.dim()),
         NodeStatus::Blocked => ("✕", t.error()),
         NodeStatus::Deferred => ("◑", t.caution()),
+        NodeStatus::Archived => ("🗄", t.dim()),
     }
 }
 
@@ -841,6 +842,7 @@ fn status_sort_key(status: NodeStatus) -> u8 {
         NodeStatus::Seed => 5,
         NodeStatus::Deferred => 6,
         NodeStatus::Implemented => 7,
+        NodeStatus::Archived => 8,
     }
 }
 
@@ -863,6 +865,7 @@ fn status_color(status: NodeStatus, t: &dyn Theme) -> Color {
         NodeStatus::Implementing => t.warning(),
         NodeStatus::Blocked => t.error(),
         NodeStatus::Deferred => t.caution(),
+        NodeStatus::Archived => t.dim(),
     }
 }
 

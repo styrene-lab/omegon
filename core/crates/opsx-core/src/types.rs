@@ -14,6 +14,7 @@ pub enum NodeState {
     Implemented,
     Blocked,
     Deferred,
+    Archived,
 }
 
 impl std::fmt::Display for NodeState {
@@ -27,16 +28,17 @@ impl NodeState {
     pub fn valid_transitions(self) -> &'static [NodeState] {
         use NodeState::*;
         match self {
-            Seed => &[Exploring, Deferred],
-            Exploring => &[Resolved, Decided, Blocked, Deferred],
-            Resolved => &[Decided, Exploring, Blocked, Deferred],
-            Decided => &[Implementing, Exploring, Blocked, Deferred],
-            Implementing => &[Implemented, Decided, Blocked, Deferred],
+            Seed => &[Exploring, Deferred, Archived],
+            Exploring => &[Resolved, Decided, Blocked, Deferred, Archived],
+            Resolved => &[Decided, Exploring, Blocked, Deferred, Archived],
+            Decided => &[Implementing, Exploring, Blocked, Deferred, Archived],
+            Implementing => &[Implemented, Decided, Blocked, Deferred, Archived],
             // Implemented can reopen — "the implementation was wrong"
-            Implemented => &[Exploring, Decided, Deferred],
+            Implemented => &[Exploring, Decided, Deferred, Archived],
             // Blocked can resume to where it was interrupted
-            Blocked => &[Exploring, Decided, Implementing, Deferred],
-            Deferred => &[Seed, Exploring],
+            Blocked => &[Exploring, Decided, Implementing, Deferred, Archived],
+            Deferred => &[Seed, Exploring, Archived],
+            Archived => &[Seed, Exploring],
         }
     }
 
@@ -55,6 +57,7 @@ impl NodeState {
             Self::Implemented => "implemented",
             Self::Blocked => "blocked",
             Self::Deferred => "deferred",
+            Self::Archived => "archived",
         }
     }
 
@@ -68,6 +71,7 @@ impl NodeState {
             "implemented" => Some(Self::Implemented),
             "blocked" => Some(Self::Blocked),
             "deferred" => Some(Self::Deferred),
+            "archived" => Some(Self::Archived),
             _ => None,
         }
     }
@@ -279,6 +283,8 @@ mod tests {
         assert!(NodeState::Blocked.can_transition_to(NodeState::Implementing));
         assert!(NodeState::Blocked.can_transition_to(NodeState::Decided));
         assert!(NodeState::Blocked.can_transition_to(NodeState::Exploring));
+        assert!(NodeState::Deferred.can_transition_to(NodeState::Archived));
+        assert!(NodeState::Archived.can_transition_to(NodeState::Exploring));
     }
 
     #[test]
@@ -308,6 +314,7 @@ mod tests {
             NodeState::Implementing,
             NodeState::Implemented,
             NodeState::Blocked,
+            NodeState::Archived,
         ] {
             assert_eq!(NodeState::parse(state.as_str()), Some(state));
         }

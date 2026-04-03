@@ -23,6 +23,7 @@ pub enum NodeStatus {
     Implemented,
     Blocked,
     Deferred,
+    Archived,
 }
 
 impl NodeStatus {
@@ -36,6 +37,7 @@ impl NodeStatus {
             Self::Implemented => "implemented",
             Self::Blocked => "blocked",
             Self::Deferred => "deferred",
+            Self::Archived => "archived",
         }
     }
 
@@ -49,6 +51,7 @@ impl NodeStatus {
             "implemented" => Some(Self::Implemented),
             "blocked" => Some(Self::Blocked),
             "deferred" => Some(Self::Deferred),
+            "archived" => Some(Self::Archived),
             _ => None,
         }
     }
@@ -63,6 +66,7 @@ impl NodeStatus {
             Self::Implemented => "✓",
             Self::Blocked => "✕",
             Self::Deferred => "◑",
+            Self::Archived => "🗄",
         }
     }
 }
@@ -106,6 +110,9 @@ pub struct DesignNode {
     pub openspec_change: Option<String>,
     pub issue_type: Option<IssueType>,
     pub priority: Option<u8>,
+    pub archive_reason: Option<String>,
+    pub superseded_by: Option<String>,
+    pub archived_at: Option<String>,
     pub file_path: PathBuf,
 }
 
@@ -378,6 +385,9 @@ mod tests {
             openspec_change: None,
             issue_type: None,
             priority: None,
+            archive_reason: None,
+            superseded_by: None,
+            archived_at: None,
             file_path: std::path::PathBuf::from("test.md"),
         };
         assert_eq!(node.assumption_count(), 2);

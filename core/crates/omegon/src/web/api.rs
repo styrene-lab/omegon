@@ -211,7 +211,7 @@ pub async fn get_graph(State(state): State<WebState>) -> Json<GraphData> {
                 NodeStatus::Implementing => 3,
                 NodeStatus::Implemented => 4,
                 NodeStatus::Blocked => 5,
-                NodeStatus::Deferred => 6,
+                NodeStatus::Deferred | NodeStatus::Archived => 6,
             };
             nodes.push(GraphNode {
                 id: node.id.clone(),
@@ -294,7 +294,7 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                 NodeStatus::Implementing => design.counts.implementing += 1,
                 NodeStatus::Implemented => design.counts.implemented += 1,
                 NodeStatus::Blocked => design.counts.blocked += 1,
-                NodeStatus::Deferred => design.counts.deferred += 1,
+                NodeStatus::Deferred | NodeStatus::Archived => design.counts.deferred += 1,
             }
             design.counts.open_questions += node.open_questions.len();
 

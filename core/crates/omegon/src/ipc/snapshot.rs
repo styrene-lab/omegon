@@ -110,7 +110,7 @@ fn project_design_tree(handles: &DashboardHandles) -> IpcDesignTreeSnapshot {
             NodeStatus::Implementing => counts.implementing += 1,
             NodeStatus::Implemented => counts.implemented += 1,
             NodeStatus::Blocked => counts.blocked += 1,
-            NodeStatus::Deferred => counts.deferred += 1,
+            NodeStatus::Deferred | NodeStatus::Archived => counts.deferred += 1,
         }
         counts.open_questions += node.open_questions.len();
 
