@@ -318,7 +318,7 @@ fn snapshot_unified_footer_console() {
         tool_calls: 23,
         turn: 8,
         compactions: 2,
-        cwd: "/Users/cwilson/workspace/black-meridian/omegon".into(),
+        cwd: "/home/user/workspace/black-meridian/omegon".into(),
         thinking_level: "high".into(),
         model_tier: "victory".into(),
         provider_connected: true,

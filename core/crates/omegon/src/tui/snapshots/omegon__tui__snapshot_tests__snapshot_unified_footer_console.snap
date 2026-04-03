@@ -8,7 +8,7 @@ expression: render_to_string(&terminal)
   auth    ○ api key                   │≡  conv  ⊟ sys  ◈  mem  ⚒ tools  ◔ think  ││  ⌘ sh           1.2s ≋≋≋≋≋≋≋≋≋≋≋≋≋·│
   persona ⚙ Systems Engineer          │↑  —   ↓  —   ⊙  —    ✦ 0  ◎  0 recalled  ││                                    │
   context Maniple 68% / 262k          ├─ project ⌗2440  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠒⠒⠤⢄││                                    │
-  path    ~/workspace/black-…/omegon  ├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
+  path    /home/user/workspa…/omegon  ├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
   mode    Victory · think High        └─ episodes ⌗45  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
   session T8 ~$0                      │                                          ││                                    │
   version v<current> → v<next>           │                                          ││                                    │
