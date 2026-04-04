@@ -2020,14 +2020,6 @@ impl App {
     /// Try to paste a clipboard image. Shows visible feedback in conversation.
     fn try_paste_clipboard_image(&mut self) {
         if let Some(path) = clipboard_image_to_temp() {
-            let display_name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.display().to_string());
-            self.conversation
-                .push_system(&format!("📎 Image attached: {display_name}"));
-            self.conversation
-                .push_image(path.clone(), "clipboard paste");
             self.show_toast(
                 "📎 Image pasted — send a message to include it",
                 ratatui_toaster::ToastType::Info,
@@ -5302,10 +5294,12 @@ pub async fn run_tui(
                                     app.history_idx = None;
                                     app.agent_active = true;
                                     if let Some(img) = app.pending_image.take() {
+                                        app.conversation.push_user_with_attachments(&text, &[img.clone()]);
                                         let _ = command_tx
                                             .send(TuiCommand::UserPromptWithImages(text, vec![img]))
                                             .await;
                                     } else {
+                                        app.conversation.push_user(&text);
                                         let _ = command_tx.send(TuiCommand::UserPrompt(text)).await;
                                     }
                                     // Notify tutorial overlay of user input

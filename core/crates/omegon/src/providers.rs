@@ -2130,6 +2130,29 @@ mod tests {
     }
 
     #[test]
+    fn upstream_multimodal_provider_matrix_serializes_image_inputs() {
+        let user = LlmMessage::User {
+            content: "describe this".into(),
+            images: vec![crate::bridge::ImageAttachment {
+                data: "abc123".into(),
+                media_type: "image/png".into(),
+            }],
+        };
+
+        let anthropic = AnthropicClient::build_messages(std::slice::from_ref(&user));
+        assert_eq!(anthropic[0]["content"][0]["type"], "image");
+        assert_eq!(anthropic[0]["content"][0]["source"]["media_type"], "image/png");
+
+        let openai = OpenAIClient::build_wire_messages("system", std::slice::from_ref(&user));
+        assert_eq!(openai[1]["content"][0]["type"], "image_url");
+        assert_eq!(openai[1]["content"][0]["image_url"]["url"], "data:image/png;base64,abc123");
+
+        let codex = CodexClient::build_input(&[user]);
+        assert_eq!(codex[0]["content"][0]["type"], "input_image");
+        assert_eq!(codex[0]["content"][0]["image_url"], "data:image/png;base64,abc123");
+    }
+
+    #[test]
     fn error_message_extraction_from_api_json() {
         // Simulate what happens when Anthropic returns a 400 error
         let raw_body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.1.tool_use.input: Input should be a valid dictionary"},"request_id":"req_abc123"}"#;

@@ -97,6 +97,36 @@ pub struct ConversationView {
     pub tabs: TabState,
 }
 
+fn attachment_placeholder(path: &std::path::Path, idx: usize) -> String {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    let kind = match ext.as_deref() {
+        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif") => "image",
+        Some("pdf") => "pdf",
+        _ => "attachment",
+    };
+    format!("[{kind}{idx}]")
+}
+
+fn format_user_prompt_with_attachments(text: &str, attachments: &[std::path::PathBuf]) -> String {
+    if attachments.is_empty() {
+        return text.to_string();
+    }
+    let placeholders = attachments
+        .iter()
+        .enumerate()
+        .map(|(idx, path)| attachment_placeholder(path, idx))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if text.trim().is_empty() {
+        placeholders
+    } else {
+        format!("{text}\n{placeholders}")
+    }
+}
+
 impl ConversationView {
     pub fn new() -> Self {
         Self {
@@ -130,10 +160,19 @@ impl ConversationView {
     // ─── Push methods ───────────────────────────────────────────
 
     pub fn push_user(&mut self, text: &str) {
+        self.push_user_with_attachments(text, &[]);
+    }
+
+    pub fn push_user_with_attachments(&mut self, text: &str, attachments: &[std::path::PathBuf]) {
         if !self.segments.is_empty() {
             self.segments.push(Segment::separator());
         }
-        self.segments.push(Segment::user_prompt(text));
+        let rendered = if attachments.is_empty() {
+            text.to_string()
+        } else {
+            format_user_prompt_with_attachments(text, attachments)
+        };
+        self.segments.push(Segment::user_prompt(rendered));
         self.conv_state.invalidate();
         self.conv_state.force_scroll_to_bottom();
     }
@@ -482,6 +521,30 @@ mod tests {
                 content: SegmentContent::TurnSeparator,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn attachment_placeholders_render_inline_in_user_prompt() {
+        let mut cv = ConversationView::new();
+        cv.push_user_with_attachments(
+            "describe this",
+            &[
+                std::path::PathBuf::from("/tmp/paste.png"),
+                std::path::PathBuf::from("/tmp/spec.pdf"),
+                std::path::PathBuf::from("/tmp/blob.bin"),
+            ],
+        );
+        assert_eq!(cv.segments.len(), 1);
+        assert!(matches!(
+            &cv.segments[0],
+            Segment {
+                content: SegmentContent::UserPrompt { text },
+                ..
+            } if text.contains("describe this")
+                && text.contains("[image0]")
+                && text.contains("[pdf1]")
+                && text.contains("[attachment2]")
         ));
     }
 
