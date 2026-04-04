@@ -3,6 +3,31 @@
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.15.9] - 2026-04-03
+
+### Added
+
+- **Archived design-tree lifecycle** — design nodes now support an explicit archived state and archive action, with filtering/reporting surfaces updated to distinguish archived work from active lifecycle states.
+- **Provider runtime degradation surfacing** — runtime state now carries degraded-provider information so the TUI and status surfaces can distinguish authentication problems from upstream reliability degradation.
+- **Release manifest for downstream packaging** — release CI now emits a canonical `release-manifest.json` describing version, channel, commit, assets, checksums, signatures, and release URLs. Homebrew automation consumes this manifest instead of ad-hoc checksum scraping.
+- **Scripted release preflight** — stable release gating is now enforced by `scripts/release_preflight.py`, checking branch cleanliness, RC/stable version coherence, changelog readiness, install-doc placeholder policy, and manifest-based packaging wiring.
+
+### Changed
+
+- **Package publishing ownership** — `just publish` no longer mutates Homebrew/tap state from a workstation. Downstream packaging is CI-owned and derived from published GitHub release artifacts.
+- **Install docs version policy** — versioned install and verification examples are now explicitly documented as placeholders to avoid stale RC-by-RC doc churn.
+- **Session journal path** — session narrative logging moved from `.session_log` to `.omegon/agent-journal.md`.
+
+### Fixed
+
+- **Upstream stall handling in the agent loop** — retries and idle timeout behavior were hardened across the 0.15.9 RC line: provider-specific upstream errors are classified into explicit recovery classes, persistent stalls now exhaust cleanly instead of hanging, and OpenAI/Codex idle timeout behavior was raised to align with real upstream streaming behavior.
+- **Codex incomplete/heartbeat stream handling** — Codex SSE parsing now handles `response.incomplete`, treats unhandled heartbeat traffic as liveness, and avoids poisoning partial-content state on incomplete responses.
+- **TUI provider/runtime honesty** — footer/status rendering now separates auth failures from degraded provider recency, tightens engine footer status semantics, and compacts footer metadata without losing state clarity.
+- **Bash tool TUI robustness** — interactive commands are prevented from wedging the TUI, terminal control noise is stripped from bash output, and `cd`-prefixed tool summaries are rendered more honestly.
+- **Settings/profile persistence scope** — root profile persistence is anchored at the repo level instead of drifting by invocation path.
+- **CI/Homebrew detached-HEAD publishing** — formula update automation was fixed to push correctly even when running from detached release contexts.
+- **Release validation hygiene** — tracked Python bytecode artifacts were removed and `__pycache__/` / `*.pyc` are now ignored so Python-based release validation no longer dirties the tree.
+
 ## [0.15.7] - 2026-04-03
 
 ### Fixed
