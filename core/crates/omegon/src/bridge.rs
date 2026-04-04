@@ -140,6 +140,9 @@ pub enum LlmEvent {
         /// Cache-read tokens (Anthropic prompt caching; 0 if not applicable)
         #[serde(default)]
         cache_read_tokens: u64,
+        /// Parsed provider quota/headroom telemetry from response headers or status endpoints.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_telemetry: Option<omegon_traits::ProviderTelemetrySnapshot>,
     },
     #[serde(rename = "error")]
     Error { message: String },

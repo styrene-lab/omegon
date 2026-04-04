@@ -1,30 +1,31 @@
 ---
 task_id: 1
-label: display-plumbing
-siblings: [0:conversation-model]
+label: telemetry-ui
+siblings: [0:telemetry-core]
 ---
 
-# Task 1: display-plumbing
+# Task 1: telemetry-ui
 
 ## Root Directive
 
-> Implement ability for the agent to display previously attached images back to the operator using the existing filesystem-backed view/display pipeline in the TUI/chat flow.
+> Implement unified provider telemetry from response headers/status sources, starting with Anthropic/OpenAI/OpenRouter header parsing and session/footer surfacing of current provider quota/headroom snapshots, with room for Codex status telemetry later.
 
 ## Mission
 
-Inspect and implement the TUI/tool plumbing that reuses the existing image display/render pipeline to redisplay an attachment from a stored filesystem path, including tests for the trigger path and rendering behavior.
+Consume provider telemetry snapshots in the TUI/footer and session-log/audit surfaces, showing honest compact provider-specific quota/headroom info for the current provider and preserving per-turn telemetry for later audit. Add UI/tests.
 
 ## Scope
 
+- `core/crates/omegon/src/tui/footer.rs`
 - `core/crates/omegon/src/tui/mod.rs`
-- `core/crates/omegon/src/tools/view.rs`
+- `core/crates/omegon/src/features/session_log.rs`
 - `core/crates/omegon/src/tui/tests.rs`
 
-**Depends on:** conversation-model
+**Depends on:** telemetry-core
 
 ## Siblings
 
-- **conversation-model**: Inspect and implement the conversation/model changes needed to preserve and expose attachment file paths for redisplay from prior operator messages, including tests covering selection/export or lookup behavior.
+- **telemetry-core**: Add a typed provider telemetry snapshot model and wire provider response-header parsing/emission through the runtime for Anthropic, OpenAI, and OpenAI-compatible/OpenRouter-style headers. Update shared event contracts and provider tests.
 
 ## Dependency Versions
 

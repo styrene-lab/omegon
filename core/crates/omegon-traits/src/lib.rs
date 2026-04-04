@@ -444,6 +444,24 @@ pub enum IpcHealthState {
 /// - Adding a new variant is non-breaking if Auspex ignores unknown event names.
 /// - Changing a variant's payload is a breaking change (requires protocol bump).
 /// - Unknown variants must be silently ignored by the client, not crashed on.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ProviderTelemetrySnapshot {
+    pub provider: String,
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unified_5h_utilization_pct: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unified_7d_utilization_pct: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requests_remaining: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_remaining: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "name", content = "data", rename_all = "snake_case")]
 pub enum IpcEventPayload {
@@ -466,6 +484,9 @@ pub enum IpcEventPayload {
         /// Provider-reported cache-read tokens (Anthropic). 0 if not applicable.
         #[serde(default)]
         cache_read_tokens: u64,
+        /// Parsed provider quota/headroom telemetry from response headers or status endpoints.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_telemetry: Option<ProviderTelemetrySnapshot>,
     },
 
     // ── Message streaming ──────────────────────────────────────────────────
@@ -897,6 +918,8 @@ pub enum AgentEvent {
         actual_output_tokens: u64,
         /// Cache-read tokens (Anthropic). 0 if not applicable.
         cache_read_tokens: u64,
+        /// Parsed provider quota/headroom telemetry from response headers or status endpoints.
+        provider_telemetry: Option<ProviderTelemetrySnapshot>,
     },
     AgentEnd,
     PhaseChanged {

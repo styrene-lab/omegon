@@ -40,6 +40,8 @@ pub struct AssistantMessage {
     pub raw: Value,
     /// Actual billing tokens reported by the provider. (0,0,0) = not reported.
     pub provider_tokens: (u64, u64, u64), // (input, output, cache_read)
+    /// Parsed provider quota/headroom telemetry for this turn, when available.
+    pub provider_telemetry: Option<omegon_traits::ProviderTelemetrySnapshot>,
 }
 
 impl Default for AssistantMessage {
@@ -50,6 +52,7 @@ impl Default for AssistantMessage {
             tool_calls: Vec::new(),
             raw: Value::Null,
             provider_tokens: (0, 0, 0),
+            provider_telemetry: None,
         }
     }
 }

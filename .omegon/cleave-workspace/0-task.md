@@ -1,30 +1,31 @@
 ---
 task_id: 0
-label: conversation-model
-siblings: [1:display-plumbing]
+label: telemetry-core
+siblings: [1:telemetry-ui]
 ---
 
-# Task 0: conversation-model
+# Task 0: telemetry-core
 
 ## Root Directive
 
-> Implement ability for the agent to display previously attached images back to the operator using the existing filesystem-backed view/display pipeline in the TUI/chat flow.
+> Implement unified provider telemetry from response headers/status sources, starting with Anthropic/OpenAI/OpenRouter header parsing and session/footer surfacing of current provider quota/headroom snapshots, with room for Codex status telemetry later.
 
 ## Mission
 
-Inspect and implement the conversation/model changes needed to preserve and expose attachment file paths for redisplay from prior operator messages, including tests covering selection/export or lookup behavior.
+Add a typed provider telemetry snapshot model and wire provider response-header parsing/emission through the runtime for Anthropic, OpenAI, and OpenAI-compatible/OpenRouter-style headers. Update shared event contracts and provider tests.
 
 ## Scope
 
-- `core/crates/omegon/src/tui/conversation.rs`
-- `core/crates/omegon/src/tui/segments.rs`
-- `core/crates/omegon/src/tui/tests.rs`
+- `core/crates/omegon/src/providers.rs`
+- `core/crates/omegon-traits/src/lib.rs`
+- `core/crates/omegon/src/bridge.rs`
+- `core/crates/omegon/src/loop.rs`
 
 **Depends on:** none (independent)
 
 ## Siblings
 
-- **display-plumbing**: Inspect and implement the TUI/tool plumbing that reuses the existing image display/render pipeline to redisplay an attachment from a stored filesystem path, including tests for the trigger path and rendering behavior.
+- **telemetry-ui**: Consume provider telemetry snapshots in the TUI/footer and session-log/audit surfaces, showing honest compact provider-specific quota/headroom info for the current provider and preserving per-turn telemetry for later audit. Add UI/tests.
 
 ## Dependency Versions
 
@@ -94,6 +95,21 @@ rpassword = "7"
 
 [dev-dependencies]
 insta = "1.46"
+tempfile = "3.27.0"
+
+```
+
+```toml
+# core/crates/omegon-traits/Cargo.toml
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+tokio-util = { workspace = true }
+rmp-serde = "1.3"
+
+[dev-dependencies]
 tempfile = "3.27.0"
 
 ```
