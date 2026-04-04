@@ -412,5 +412,15 @@
       "refactor(loop): make provider error mapping table-driven",
       "refactor(session-log): move to .omegon/agent-journal.md"
     ]
+  },
+  "0.15.10": {
+    "status": "open",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": false,
+    "opened": "2026-04-04T04:08:34Z",
+    "released": null,
+    "rc_count": 0,
+    "notes": []
   }
 }
