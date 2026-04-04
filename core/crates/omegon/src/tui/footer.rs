@@ -277,6 +277,16 @@ impl FooterData {
                 widgets::percent_color(self.context_percent.min(100.0), t),
                 false,
             );
+            if let Some(quota_line) = format_provider_telemetry_line(&self.provider_telemetry) {
+                push_row(
+                    &mut lines,
+                    "quota",
+                    quota_line,
+                    t.border_dim(),
+                    t.accent_muted(),
+                    false,
+                );
+            }
             push_row(&mut lines, "version", version_text, t.border_dim(), t.accent(), false);
 
             if !self.cwd.is_empty() {
@@ -1163,6 +1173,34 @@ mod tests {
         let text = render_left_panel_text(&data, 72, 8);
 
         assert!(text.contains("6× stalled stream · last 2m ago"), "got {text}");
+    }
+
+    #[test]
+    fn left_panel_renders_provider_telemetry_when_present() {
+        let data = FooterData {
+            model_id: "openai-codex:gpt-5.4".into(),
+            model_provider: "openai-codex".into(),
+            provider_connected: true,
+            is_oauth: true,
+            thinking_level: "high".into(),
+            model_tier: "victory".into(),
+            provider_telemetry: Some(omegon_traits::ProviderTelemetrySnapshot {
+                provider: "openai-codex".into(),
+                source: "response_headers".into(),
+                unified_5h_utilization_pct: None,
+                unified_7d_utilization_pct: None,
+                requests_remaining: Some(42),
+                tokens_remaining: Some(12_000),
+                retry_after_secs: None,
+                request_id: None,
+            }),
+            ..Default::default()
+        };
+        let text = render_left_panel_text(&data, 72, 9);
+
+        assert!(text.contains("quota"), "got {text}");
+        assert!(text.contains("req 42"), "got {text}");
+        assert!(text.contains("tok 12k") || text.contains("tok 12K"), "got {text}");
     }
 
     #[test]
