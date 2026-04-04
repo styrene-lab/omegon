@@ -1897,6 +1897,43 @@ mod tests {
     }
 
     #[test]
+    fn assistant_markdown_tables_survive_surrounding_prose() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::AssistantText {
+                text: "Here are the strongest matches:\n\n| File | Score |\n| ---- | ----- |\n| src/app.rs | 45.38 |\n| src/lib.rs | 11.20 |\n\nUse `read` for the top result.".into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        };
+        let (area, mut buf) = make_buf(70, 14);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+        assert!(text.contains("Here are the strongest matches:"), "leading prose should remain visible: {text}");
+        assert!(text.contains("│ File │ Score │"), "table header should still render structurally inside surrounding prose: {text}");
+        assert!(text.contains("│ src/app.rs │ 45.38 │"), "table body should still render structurally inside surrounding prose: {text}");
+        assert!(text.contains("Use "), "trailing prose should remain visible: {text}");
+    }
+
+    #[test]
+    fn assistant_markdown_tables_accept_aligned_separator_rows() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::AssistantText {
+                text: "| Name | Value | Notes |\n| ---- | :----: | ----- |\n| foo | bar | baz |".into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        };
+        let (area, mut buf) = make_buf(60, 12);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+        assert!(text.contains("│ Name │ Value │ Notes │"), "header row should render with aligned separator syntax: {text}");
+        assert!(text.contains("├") || text.contains("┼"), "aligned separator row should still render box drawing characters: {text}");
+        assert!(text.contains("│ foo │ bar │ baz │"), "body row should render with aligned separator syntax: {text}");
+    }
+
+    #[test]
     fn tool_card_has_borders() {
         let seg = Segment {
             meta: SegmentMeta::default(),
