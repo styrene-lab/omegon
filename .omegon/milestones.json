@@ -420,8 +420,9 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 1,
+    "rc_count": 2,
     "notes": [
+      "fix(multimodal): preserve attachment source paths for redisplay",
       "fix(multimodal): store user attachments in canonical conversation state",
       "fix(release): derive Homebrew updates from published release manifest",
       "fix(release): harden signing detection and brew push flow",
@@ -429,7 +430,7 @@
       "fix(tui): render operator attachments as inline placeholders",
       "fix(tui): support queued prompts with attachment lists"
     ],
-    "rc_version": "0.15.10-rc.2",
-    "last_rc": "2026-04-04T13:38:09Z"
+    "rc_version": "0.15.10-rc.3",
+    "last_rc": "2026-04-04T14:13:04Z"
   }
 }
