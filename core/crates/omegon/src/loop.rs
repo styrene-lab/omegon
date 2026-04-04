@@ -812,9 +812,10 @@ async fn consume_llm_stream(
     // Two-phase idle timeout:
     // - Before first content: 300s (OpenAI documents stream_idle_timeout_ms=300000
     //   as their default — reasoning models can be silent for minutes)
-    // - After first content: 30s (mid-stream silence is a genuine stall)
+    // - After first content: 90s (Claude Code's CLAUDE_STREAM_IDLE_TIMEOUT_MS
+    //   default is 90s; nobody in the industry uses less than 60s)
     let initial_idle_timeout = std::time::Duration::from_secs(300);
-    let content_idle_timeout = std::time::Duration::from_secs(30);
+    let content_idle_timeout = std::time::Duration::from_secs(90);
     let received_content = std::cell::Cell::new(false);
     let idle_timeout = || if received_content.get() { content_idle_timeout } else { initial_idle_timeout };
     while let Some(event) = match tokio::time::timeout(idle_timeout(), rx.recv()).await {
