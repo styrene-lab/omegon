@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 6,
+    "rc_count": 7,
     "notes": [
       "feat(session-log): record provider telemetry per turn",
       "feat(telemetry): scaffold provider usage snapshot events",
@@ -434,10 +434,11 @@
       "fix(tui): render operator attachments as inline placeholders",
       "fix(tui): render tool result markdown tables",
       "fix(tui): show provider telemetry in split footer",
+      "fix(tui): show session stats and broaden codex telemetry parsing",
       "fix(tui): support queued prompts with attachment lists",
       "fix(tui): unify tool result block backgrounds"
     ],
-    "rc_version": "0.15.10-rc.7",
-    "last_rc": "2026-04-04T16:39:43Z"
+    "rc_version": "0.15.10-rc.8",
+    "last_rc": "2026-04-04T17:23:57Z"
   }
 }
