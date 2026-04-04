@@ -414,13 +414,22 @@
     ]
   },
   "0.15.10": {
-    "status": "open",
+    "status": "rc",
     "channel": "stable",
     "nodes": [],
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 0,
-    "notes": []
+    "rc_count": 1,
+    "notes": [
+      "fix(multimodal): store user attachments in canonical conversation state",
+      "fix(release): derive Homebrew updates from published release manifest",
+      "fix(release): harden signing detection and brew push flow",
+      "fix(release): script preflight checks and ignore python bytecode",
+      "fix(tui): render operator attachments as inline placeholders",
+      "fix(tui): support queued prompts with attachment lists"
+    ],
+    "rc_version": "0.15.10-rc.2",
+    "last_rc": "2026-04-04T13:38:09Z"
   }
 }
