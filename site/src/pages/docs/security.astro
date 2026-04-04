@@ -5,15 +5,19 @@ import Docs from "../../layouts/Docs.astro";
   <h1>Security &amp; Supply Chain</h1>
 
   <h2>Release Signing</h2>
-  <p>Every release is signed at multiple levels:</p>
+  <p>Every release is signed at multiple levels, but not all signatures cover the same artifact boundary:</p>
   <table>
-    <thead><tr><th>Layer</th><th>Method</th><th>Verification</th></tr></thead>
+    <thead><tr><th>Layer</th><th>Method</th><th>What it covers</th><th>Verification</th></tr></thead>
     <tbody>
-      <tr><td>CI builds</td><td>Sigstore cosign (keyless, OIDC)</td><td><code>cosign verify-blob</code></td></tr>
-      <tr><td>Local builds</td><td>Apple Developer ID (YubiKey)</td><td><code>codesign -dvvv</code></td></tr>
-      <tr><td>Provenance</td><td>GitHub Attestations (SLSA)</td><td><code>gh attestation verify</code></td></tr>
+      <tr><td>CI release artifacts</td><td>Sigstore cosign (keyless, OIDC)</td><td>Published GitHub release archives consumed by downstream packaging</td><td><code>cosign verify-blob</code></td></tr>
+      <tr><td>Local macOS validation binary</td><td>Apple Developer ID (YubiKey)</td><td>Operator workstation build produced before publish</td><td><code>codesign -dvvv</code></td></tr>
+      <tr><td>Provenance</td><td>GitHub Attestations (SLSA)</td><td>CI build provenance for published release assets</td><td><code>gh attestation verify</code></td></tr>
     </tbody>
   </table>
+  <p>
+    The manual YubiKey step signs the local validation binary. Homebrew and other package surfaces are
+    derived from CI-built release assets, not from the locally signed binary.
+  </p>
 
   <h3>Verify a Release</h3>
   <pre><code># Cosign (CI-signed releases)

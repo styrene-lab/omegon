@@ -374,8 +374,10 @@ release:
     echo ""
     echo "Stable release committed and tagged. Run 'just publish' to push and trigger CI."
     echo "  (RC tag is created by 'just rc' when there's something to release)"
-# Sign the release binary with Apple Developer ID (YubiKey).
+# Sign the local macOS validation binary with Apple Developer ID (YubiKey).
 # Interactive — prompts for PIN and touch.
+# This signs the workstation build used for local validation; distributable
+# release artifacts are built and signed separately in CI after `just publish`.
 # Run after `just rc` if SMARTCARD_PIN wasn't set.
 sign:
     #!/usr/bin/env bash
@@ -511,9 +513,11 @@ setup-signing:
         echo "  → Get Info → Trust → Code Signing → Always Trust"
     fi
 
-# Publish: push to origin, trigger CI, build docs, link binary.
-# Run after `just sign` (or `just rc` if ad-hoc signing is fine).
-# Flow: just rc → just sign → just publish
+# Publish: push refs, trigger CI release/site workflows, build docs locally,
+# link the local binary, and run a smoke test.
+# Optional local YubiKey signing (`just sign`) is for workstation validation.
+# Downstream package surfaces consume CI-built release artifacts, not the local binary.
+# Flow: just rc → just sign (optional) → just publish
 publish:
     #!/usr/bin/env bash
     set -euo pipefail

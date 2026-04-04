@@ -43,10 +43,10 @@ test: add snapshot test for rounded borders</code></pre>
   <pre><code># Cut a release candidate (bump, test, commit, tag, build, sign)
 just rc
 
-# Sign with Apple Developer ID (YubiKey — optional)
+# Sign the local macOS validation binary with Apple Developer ID (YubiKey — optional)
 just sign
 
-# Publish: push to origin, trigger CI, build docs, link binary
+# Publish refs and trigger CI-built release artifacts
 just publish
 
 # Cut a stable release (strip -rc.N suffix)
@@ -57,14 +57,19 @@ just release</code></pre>
     <li>Pre-flight: verifies clean working tree, binary exists, tag exists, version matches</li>
     <li>Pushes to origin with tags — triggers three CI workflows:
       <ul>
-        <li><code>release.yml</code> — builds binaries for 4 platforms, signs with cosign, creates GitHub Release</li>
+        <li><code>release.yml</code> — builds distributable binaries for 4 platforms, signs release archives with cosign, and creates the GitHub Release</li>
         <li><code>site.yml</code> — rebuilds docs site, pushes container to GHCR, ArgoCD auto-deploys</li>
       </ul>
     </li>
     <li>Builds docs site locally (verification)</li>
-    <li>Links signed binary to <code>/opt/homebrew/bin/omegon</code></li>
+    <li>Links the local binary to <code>/opt/homebrew/bin/omegon</code></li>
     <li>Runs post-publish smoke test</li>
   </ol>
+  <p>
+    <code>just sign</code> and <code>just publish</code> operate in different trust boundaries: <code>just sign</code>
+    signs the operator's local macOS validation binary with Apple Developer ID, while the downloadable
+    release artifacts and downstream package updates are produced from CI-built GitHub release assets.
+  </p>
 
   <h2>Crate Structure</h2>
   <table>

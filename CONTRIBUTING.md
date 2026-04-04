@@ -218,9 +218,9 @@ Omegon uses a **release candidate** flow. All releases go through RC builds befo
 |---|---|---|
 | **Cut RC** | `just rc` | Bump version → test → commit → tag → build → sign → update milestones |
 | **Install locally** | `just link` | Symlink built binary to `$PATH` |
-| **Sign (YubiKey)** | `just sign` | Developer ID + Apple notarization (optional, interactive) |
+| **Sign (YubiKey)** | `just sign` | Sign and optionally notarize the local macOS validation binary with Apple Developer ID |
 | **Ship stable** | `just release` | Strip `-rc.N` → test → commit → tag → build → close milestone → open next cycle |
-| **Publish** | `just publish` | Push + tags → trigger release + site CI → build docs → link → smoke test |
+| **Publish** | `just publish` | Push refs → trigger CI release/site workflows → build docs locally → link local binary → smoke test |
 | **Quick dev build** | `just update` | Pull → build dev-release profile → no version bump |
 
 ### RC flow
@@ -236,7 +236,7 @@ just release     # 0.15.3-rc.2 → 0.15.3 (stable)
 just publish     # push to GitHub, trigger CI
 ```
 
-Package publishing is CI-owned. `just publish` pushes the release refs and verifies the local install path; downstream package surfaces such as Homebrew update from the published GitHub release artifacts rather than from workstation-side scripts.
+Package publishing is CI-owned. `just sign` signs the local macOS validation binary on the operator workstation; `just publish` pushes the release refs and verifies the local install path; downstream package surfaces such as Homebrew update from the published GitHub release artifacts rather than from workstation-side scripts. The distributable archives that packages consume are built and signed in CI, not copied from the locally YubiKey-signed binary.
 
 ### Milestone tracking
 
