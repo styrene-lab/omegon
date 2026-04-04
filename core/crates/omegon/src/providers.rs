@@ -370,36 +370,65 @@ fn parse_rate_limit_snapshot(
     has_any.then_some(snapshot)
 }
 
-fn log_rate_limit_headers(provider: &str, headers: &reqwest::header::HeaderMap) {
-    // Collect all rate-limit-related headers into a structured log
-    let mut limits: Vec<(String, String)> = Vec::new();
-
-    for (name, value) in headers.iter() {
-        let name_str = name.as_str().to_lowercase();
-        if name_str.contains("ratelimit")
-            || name_str.contains("rate-limit")
-            || name_str.contains("retry-after")
-            || name_str.contains("x-request-id")
-        {
-            if let Ok(v) = value.to_str() {
-                limits.push((name_str, v.to_string()));
+fn collect_headers(
+    headers: &reqwest::header::HeaderMap,
+    predicate: impl Fn(&str) -> bool,
+) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            let name_str = name.as_str().to_lowercase();
+            if !predicate(&name_str) {
+                return None;
             }
-        }
-    }
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name_str, v.to_string()))
+        })
+        .collect()
+}
 
-    if limits.is_empty() {
+fn log_rate_limit_headers(provider: &str, headers: &reqwest::header::HeaderMap) {
+    // Collect all rate-limit-related headers into a structured log.
+    let limits = collect_headers(headers, |name| {
+        name.contains("ratelimit")
+            || name.contains("rate-limit")
+            || name.contains("retry-after")
+            || name.contains("x-request-id")
+            || name.contains("request-id")
+            || name.contains("quota")
+            || name.contains("usage")
+            || name.contains("limit")
+            || name.contains("remaining")
+            || name.contains("reset")
+    });
+
+    if !limits.is_empty() {
+        let pairs: Vec<String> = limits.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        tracing::info!(
+            provider,
+            header_count = limits.len(),
+            headers = %pairs.join(", "),
+            "provider telemetry-related headers"
+        );
         return;
     }
 
-    // Log as structured fields for tracing consumers
-    // Use info level — this data is operationally important, not noise
-    let pairs: Vec<String> = limits.iter().map(|(k, v)| format!("{k}={v}")).collect();
-    tracing::info!(
-        provider,
-        header_count = limits.len(),
-        headers = %pairs.join(", "),
-        "provider rate limit headers"
-    );
+    // Codex via chatgpt.com may expose quota state through non-standard header
+    // names or a separate endpoint. When no telemetry-like headers matched,
+    // log the full header set once per response so we can see what the upstream
+    // actually returned instead of guessing.
+    if provider == "openai-codex" {
+        let all_headers = collect_headers(headers, |_| true);
+        let pairs: Vec<String> = all_headers.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        tracing::info!(
+            provider,
+            header_count = all_headers.len(),
+            headers = %pairs.join(", "),
+            "provider response headers (no telemetry headers matched)"
+        );
+    }
 }
 
 /// Sanitize a tool call ID to match Anthropic's `^[a-zA-Z0-9_-]+$` pattern.
@@ -2111,6 +2140,26 @@ mod tests {
         assert_eq!(snapshot.tokens_remaining, Some(159976));
         assert_eq!(snapshot.retry_after_secs, Some(1));
         assert_eq!(snapshot.request_id.as_deref(), Some("req_123"));
+    }
+
+    #[test]
+    fn collect_headers_filters_and_normalizes_names() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "X-Request-ID",
+            reqwest::header::HeaderValue::from_static("req_123"),
+        );
+        headers.insert(
+            "Content-Type",
+            reqwest::header::HeaderValue::from_static("text/event-stream"),
+        );
+
+        let filtered = collect_headers(&headers, |name| name.contains("request"));
+        assert_eq!(filtered, vec![("x-request-id".into(), "req_123".into())]);
+
+        let all = collect_headers(&headers, |_| true);
+        assert!(all.iter().any(|(k, v)| k == "x-request-id" && v == "req_123"));
+        assert!(all.iter().any(|(k, v)| k == "content-type" && v == "text/event-stream"));
     }
 
     #[test]
