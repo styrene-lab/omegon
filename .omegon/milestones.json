@@ -420,16 +420,24 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 14,
+    "rc_count": 15,
     "notes": [
       "feat(compliance): enforce Anthropic subscription ToS interactive-only boundary",
       "feat(compliance): subscription-aware cleave fallback routing",
       "feat(docs): Write user-facing documentation about Anthropic subscription ToS compliance. Two deliverables: (1) A new markdown doc at docs/anthropic-subscription-tos.md covering: what the restriction is (exact ToS quote), which Omegon entry points are allowed vs blocked, the interactive-vs-automated distinction, what to do if you need automation (get an API key), and how this compares to other providers (GitHub Copilot has no such restriction). Include a clear table: TUI mode=allowed, --initial-prompt=allowed, --prompt/--prompt-file=blocked, --smoke=blocked, /cleave=blocked. Include the exact Anthropic ToS URL. Make it factual and non-alarmist — this is a clear boundary that Omegon enforces for the operator's protection. (2) A new Astro page at site/src/pages/docs/providers.astro covering all provider auth modes: Anthropic API key (unrestricted), Anthropic OAuth/subscription (interactive TUI only), OpenAI API key, Codex OAuth, Ollama (local, unrestricted), GitHub Models (official PAT, coming soon), Copilot seat (coming soon). For each: how to configure, what's allowed, any restrictions. Follow the structure and style of existing pages like site/src/pages/docs/quickstart.astro or site/src/pages/docs/security.astro. Files: docs/anthropic-subscription-tos.md, site/src/pages/docs/providers.astro",
+      "feat(docs-copy): Update long-lived docs that currently frame the browser experience around `/dash` or the embedded web dashboard. Rewrite them to present Auspex as the primary browser surface, while keeping any necessary historical/local compatibility notes. Focus on docs/embedded-web-dashboard.md, docs/display-tool-artifacts.md, docs/native-plan-mode.md, docs/conversation-rendering-engine.md, and other directly relevant docs that mention `/dash` as the primary browser path.",
+      "feat(ipc): add canonical omegon instance descriptor",
       "feat(session-log): record provider telemetry per turn",
       "feat(telemetry): parse ChatGPT Codex x-codex-* quota headers into provider telemetry",
       "feat(telemetry): scaffold provider usage snapshot events",
       "feat(telemetry): surface provider quota snapshots in footer",
+      "feat(tui): add auspex status handoff probe",
+      "feat(tui): add transitional auspex open bridge",
+      "feat(tui-copy): Update in-product copy in the TUI/tutorial/help surfaces so operator-facing text points to Auspex as the primary browser UI, while leaving current `/dash` command behavior intact as compatibility wording. Focus on core/crates/omegon/src/tui/mod.rs, core/crates/omegon/src/tui/tutorial.rs, and nearby help/command descriptions only.",
       "feat(tutorial): add tutorial gate and orientation mode",
+      "feat(validate-note): After the contract changes land, validate the resulting control-plane surface against the current Auspex client expectations and write a concise migration note documenting the canonical backend fields/events now guaranteed for Auspex. Keep this note in Omegon docs near the control-plane/Auspex contract docs and ensure tests/builds cover the touched code.",
+      "feat(web): mirror omegon instance descriptor into startup and state",
+      "feat(ws-contract): Audit and implement WebSocket event contract changes needed for Auspex compatibility. Focus on core/crates/omegon/src/web/ws.rs plus any upstream event types it serializes so streamed events expose the fields Auspex expects or can safely ignore, especially turn-end/session/harness updates and state snapshot refresh semantics. Add tests for event serialization.",
       "fix(agent): hide attachment redisplay hints from user messages",
       "fix(compliance): warn instead of blocking Anthropic subscription automation",
       "fix(context): sync compact status with authoritative snapshot",
@@ -442,6 +450,7 @@
       "fix(release): derive Homebrew updates from published release manifest",
       "fix(release): harden signing detection and brew push flow",
       "fix(release): script preflight checks and ignore python bytecode",
+      "fix(session): give interactive omegon runs stable live session ids",
       "fix(telemetry): format provider usage by active backend",
       "fix(tui): render operator attachments as inline placeholders",
       "fix(tui): render tool result markdown tables",
@@ -449,9 +458,10 @@
       "fix(tui): show session stats and broaden codex telemetry parsing",
       "fix(tui): support queued prompts with attachment lists",
       "fix(tui): unify tool result block backgrounds",
-      "fix(tutorial): restore Tutorial::with_context() as gate-free constructor"
+      "fix(tutorial): restore Tutorial::with_context() as gate-free constructor",
+      "fix(web): expose harness state for auspex bootstrap"
     ],
-    "rc_version": "0.15.10-rc.15",
-    "last_rc": "2026-04-05T16:35:13Z"
+    "rc_version": "0.15.10-rc.16",
+    "last_rc": "2026-04-05T20:09:38Z"
   }
 }
