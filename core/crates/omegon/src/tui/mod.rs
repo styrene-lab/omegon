@@ -211,6 +211,9 @@ pub struct App {
     active_modal: Option<(String, serde_json::Value, Option<u64>, std::time::Instant)>,
     /// Active action prompt from extension widget (widget_id, actions).
     active_action_prompt: Option<(String, Vec<String>)>,
+    /// Whether the Anthropic subscription ToS notice has been shown this session.
+    /// Shown once on first interactive session with an OAuth-only credential.
+    oauth_tos_notice_shown: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -332,6 +335,7 @@ impl App {
             widget_receivers: Vec::new(),
             active_modal: None,
             active_action_prompt: None,
+            oauth_tos_notice_shown: false,
         }
     }
 
@@ -1031,7 +1035,9 @@ impl App {
                 ));
                 SlashResult::Display(
                     "Consent recorded. Starting interactive tutorial.\n\
-                     Omegon will perform real work using your Anthropic subscription.\n\
+                     Omegon will perform real work using your Anthropic subscription.\n\n\
+                     Note: Anthropic's ToS permits interactive TUI use only.\n\
+                     Background tasks, /cleave, and --prompt require ANTHROPIC_API_KEY.\n\n\
                      Tab to advance, Esc to dismiss.".into()
                 )
             }
@@ -3295,6 +3301,39 @@ impl App {
             )),
             "q" => SlashResult::Quit,
 
+            "cleave" => {
+                // Anthropic subscription guard — /cleave spawns background worker processes
+                // which violates the Consumer ToS "non-automated use" restriction.
+                if self.footer_data.is_oauth
+                    && crate::providers::anthropic_credential_mode()
+                        == crate::providers::AnthropicCredentialMode::OAuthOnly
+                {
+                    return SlashResult::Display(
+                        "Cannot run /cleave with a Claude.ai subscription.\n\n\
+                         Anthropic's ToS prohibits automated/background use of subscription \
+                         credentials. /cleave spawns parallel agent workers, which counts as \
+                         automated use.\n\n\
+                         To enable /cleave, set ANTHROPIC_API_KEY (billed per-token, \
+                         no automation restrictions).\n\n\
+                         Reference: https://www.anthropic.com/legal/consumer-terms"
+                            .into(),
+                    );
+                }
+                // Forward to bus (cleave extension handles it)
+                if self.bus_commands.iter().any(|c| c.name == "cleave") {
+                    let _ = tx.try_send(TuiCommand::BusCommand {
+                        name: "cleave".to_string(),
+                        args: args.to_string(),
+                    });
+                    SlashResult::Handled
+                } else {
+                    SlashResult::Display(
+                        "Cleave extension not loaded. Run omegon from a project directory."
+                            .into(),
+                    )
+                }
+            }
+
             _ => {
                 // Check if a bus feature handles this command
                 if self.bus_commands.iter().any(|c| c.name == cmd) {
@@ -4681,6 +4720,24 @@ pub async fn run_tui(
             // Classify capability tier from ALL collected results
             app.capability_tier = Some(crate::startup::classify_tier(&collected_probes));
         }
+    }
+
+    // ── Anthropic subscription ToS one-time startup notice ──────────────────
+    // Shown once per session when only an OAuth/subscription token is present.
+    // Informs the operator of the interactive-only constraint before they try
+    // something that would be blocked (like /cleave or --prompt).
+    if app.footer_data.is_oauth
+        && crate::providers::anthropic_credential_mode()
+            == crate::providers::AnthropicCredentialMode::OAuthOnly
+        && !app.oauth_tos_notice_shown
+    {
+        app.oauth_tos_notice_shown = true;
+        app.show_toast(
+            "Claude.ai subscription active — interactive use only. \
+             Background tasks, /cleave, and --prompt require ANTHROPIC_API_KEY. \
+             See: anthropic.com/legal/consumer-terms",
+            ratatui_toaster::ToastType::Warning,
+        );
     }
 
     // Queue startup reveal effects (footer sweep-in, conversation fade)

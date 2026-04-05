@@ -517,6 +517,44 @@ async fn main() -> anyhow::Result<()> {
         }
         None => {
             // No subcommand: interactive if no --prompt, headless if --prompt given
+
+            // ── Anthropic ToS gate ──────────────────────────────────────────
+            // Anthropic's Consumer Terms prohibit automated/non-human use of
+            // subscription (OAuth) credentials. Hard-block all headless entry
+            // points when only an OAuth token is present.
+            //   https://www.anthropic.com/legal/consumer-terms
+            let is_automated = cli.smoke
+                || cli.smoke_cleave
+                || cli.prompt.is_some()
+                || cli.prompt_file.is_some();
+            if is_automated {
+                use crate::providers::AnthropicCredentialMode;
+                if crate::providers::anthropic_credential_mode()
+                    == AnthropicCredentialMode::OAuthOnly
+                {
+                    eprintln!(
+                        "error: Anthropic subscription credentials cannot be used in \
+                         automated or headless mode.\n\
+                         \n\
+                         Anthropic\'s Consumer Terms of Service prohibit accessing Claude \
+                         through automated or non-human means when using a subscription \
+                         (Claude.ai / Claude Pro) credential. This includes --prompt, \
+                         --smoke, and background agent processes.\n\
+                         \n\
+                         To use Omegon in headless or automated mode, set ANTHROPIC_API_KEY \
+                         instead. API keys are billed per-token and have no automation \
+                         restrictions.\n\
+                         \n\
+                         For interactive (TUI) use, your subscription credential will work \
+                         normally — just run omegon without --prompt.\n\
+                         \n\
+                         Reference: https://www.anthropic.com/legal/consumer-terms"
+                    );
+                    std::process::exit(1);
+                }
+            }
+            // ── end ToS gate ────────────────────────────────────────────────
+
             if cli.smoke {
                 run_smoke_command(&cli).await
             } else if cli.smoke_cleave {

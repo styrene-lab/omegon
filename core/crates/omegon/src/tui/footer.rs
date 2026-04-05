@@ -571,7 +571,7 @@ impl FooterData {
             Span::styled(format!("{auth_icon} "), Style::default().fg(auth_color)),
             Span::styled(
                 if self.is_oauth {
-                    "subscription"
+                    "subscription · interactive only"
                 } else {
                     "api key"
                 },

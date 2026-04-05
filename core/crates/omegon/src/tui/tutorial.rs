@@ -254,7 +254,7 @@ pub const STEPS_ORIENTATION: &[Step] = &[
     STEP_WEB_DASHBOARD,
     Step {
         title: "Unlock Interactive Mode",
-        body: "To run the full tutorial with real agent\nwork, add a cloud model:\n\n  Any API key:\n    export ANTHROPIC_API_KEY=sk-ant-...\n    export OPENAI_API_KEY=sk-...\n\n  ChatGPT Plus/Pro (free quota):\n    /login openai-codex\n\nThen restart and type /tutorial.\n/help for all commands.",
+        body: "To run the full tutorial with real agent\nwork, add a cloud model:\n\n  Any API key (fully unrestricted):\n    export ANTHROPIC_API_KEY=sk-ant-...\n    export OPENAI_API_KEY=sk-...\n\n  ChatGPT Plus/Pro (free quota):\n    /login openai-codex\n\nNote: Claude.ai subscriptions enable\ninteractive TUI use only. API keys\nare required for /cleave and --prompt.\n\nThen restart and type /tutorial.",
         anchor: Anchor::Center,
         trigger: Trigger::Tab,
         highlight: None,

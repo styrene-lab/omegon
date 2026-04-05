@@ -1,31 +1,30 @@
 ---
 task_id: 0
-label: telemetry-core
-siblings: [1:telemetry-ui]
+label: enforcement
+siblings: [1:tui-surfaces, 2:docs]
 ---
 
-# Task 0: telemetry-core
+# Task 0: enforcement
 
 ## Root Directive
 
-> Implement unified provider telemetry from response headers/status sources, starting with Anthropic/OpenAI/OpenRouter header parsing and session/footer surfacing of current provider quota/headroom snapshots, with room for Codex status telemetry later.
+> Implement Anthropic subscription ToS compliance enforcement with documentation
 
 ## Mission
 
-Add a typed provider telemetry snapshot model and wire provider response-header parsing/emission through the runtime for Anthropic, OpenAI, and OpenAI-compatible/OpenRouter-style headers. Update shared event contracts and provider tests.
+Hard-block automated/headless entry points in main.rs when ANTHROPIC_OAUTH_TOKEN is the sole Anthropic credential (no ANTHROPIC_API_KEY present). At the top of the main() startup path, before any LLM call or TUI launch, check: if (prompt.is_some() || smoke || smoke_cleave) AND the resolved Anthropic credential is OAuth-only, exit immediately with a clear error message. Error must name the exact ToS URL (https://www.anthropic.com/legal/consumer-terms), explain why, and tell the operator what to do (use ANTHROPIC_API_KEY instead). Also update providers.rs: add a helper function `anthropic_credential_mode() -> AnthropicCredentialMode` enum (OAuthOnly, ApiKey, None) that checks ANTHROPIC_API_KEY first then ANTHROPIC_OAUTH_TOKEN, and use it to ensure headless paths never select the OAuth token even when it's present. The block must fire BEFORE any network request. Write a test in main.rs test module that mocks the env vars and verifies the block triggers. Files: core/crates/omegon/src/main.rs, core/crates/omegon/src/providers.rs
 
 ## Scope
 
+- `core/crates/omegon/src/main.rs`
 - `core/crates/omegon/src/providers.rs`
-- `core/crates/omegon-traits/src/lib.rs`
-- `core/crates/omegon/src/bridge.rs`
-- `core/crates/omegon/src/loop.rs`
 
 **Depends on:** none (independent)
 
 ## Siblings
 
-- **telemetry-ui**: Consume provider telemetry snapshots in the TUI/footer and session-log/audit surfaces, showing honest compact provider-specific quota/headroom info for the current provider and preserving per-turn telemetry for later audit. Add UI/tests.
+- **tui-surfaces**: Add four Anthropic subscription ToS disclosure surfaces to the TUI. All gated on `app.footer_data.is_oauth == true && no ANTHROPIC_API_KEY`. (1) /cleave guard in handle_slash_command in tui/mod.rs: when cmd == 'cleave' and subscription-only, return SlashResult::Display with message 'Cannot run /cleave with a Claude.ai subscription — Anthropic\'s ToS prohibits automated/background use. Add ANTHROPIC_API_KEY to enable parallel agent work. See: anthropic.com/legal/consumer-terms'. (2) Startup one-time banner: add a `oauth_tos_notice_shown: bool` field to App struct. On first render after startup when is_oauth is true and no API key, queue a TUI message (via the notification/message system) telling the operator they are in interactive-only mode. Only show once per session. (3) Footer badge: in footer.rs, when is_oauth is true, append '· interactive only' to the subscription label (currently shows 'subscription' at line ~574). (4) Update tutorial.rs: in the /tutorial consent text and STEPS_ORIENTATION 'Unlock Interactive Mode' step body, add a sentence noting that background tasks and /cleave require an API key, not the subscription. Files: core/crates/omegon/src/tui/mod.rs, core/crates/omegon/src/tui/footer.rs, core/crates/omegon/src/tui/tutorial.rs
+- **docs**: Write user-facing documentation about Anthropic subscription ToS compliance. Two deliverables: (1) A new markdown doc at docs/anthropic-subscription-tos.md covering: what the restriction is (exact ToS quote), which Omegon entry points are allowed vs blocked, the interactive-vs-automated distinction, what to do if you need automation (get an API key), and how this compares to other providers (GitHub Copilot has no such restriction). Include a clear table: TUI mode=allowed, --initial-prompt=allowed, --prompt/--prompt-file=blocked, --smoke=blocked, /cleave=blocked. Include the exact Anthropic ToS URL. Make it factual and non-alarmist — this is a clear boundary that Omegon enforces for the operator's protection. (2) A new Astro page at site/src/pages/docs/providers.astro covering all provider auth modes: Anthropic API key (unrestricted), Anthropic OAuth/subscription (interactive TUI only), OpenAI API key, Codex OAuth, Ollama (local, unrestricted), GitHub Models (official PAT, coming soon), Copilot seat (coming soon). For each: how to configure, what's allowed, any restrictions. Follow the structure and style of existing pages like site/src/pages/docs/quickstart.astro or site/src/pages/docs/security.astro. Files: docs/anthropic-subscription-tos.md, site/src/pages/docs/providers.astro
 
 ## Dependency Versions
 
@@ -95,21 +94,6 @@ rpassword = "7"
 
 [dev-dependencies]
 insta = "1.46"
-tempfile = "3.27.0"
-
-```
-
-```toml
-# core/crates/omegon-traits/Cargo.toml
-[dependencies]
-serde = { workspace = true }
-serde_json = { workspace = true }
-async-trait = { workspace = true }
-anyhow = { workspace = true }
-tokio-util = { workspace = true }
-rmp-serde = "1.3"
-
-[dev-dependencies]
 tempfile = "3.27.0"
 
 ```
