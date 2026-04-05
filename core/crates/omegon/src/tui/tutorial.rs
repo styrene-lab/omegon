@@ -367,9 +367,12 @@ impl Tutorial {
         Self::with_context(false)
     }
 
-    /// Create a tutorial with project context and auto-detected gate.
+    /// Create a tutorial with project context.
+    /// Always uses Interactive mode — use `with_mode()` for gated construction.
+    /// The gate (`tutorial_gate()`) is the caller's responsibility and is applied
+    /// in the TUI's `/tutorial` handler, not here.
     pub fn with_context(has_design_tree: bool) -> Self {
-        Self::new_mode(has_design_tree, false, tutorial_gate())
+        Self::new_mode(has_design_tree, false, TutorialMode::Interactive)
     }
 
     /// Create a tutorial with an explicit mode (e.g. after consent granted).
