@@ -677,6 +677,21 @@
       "bound_change": null,
       "created_at": "2026-04-05T10:32:03Z",
       "updated_at": "2026-04-05T10:34:35Z"
+    },
+    {
+      "id": "subscription-first-provider-access-architecture",
+      "title": "Subscription-first provider access architecture",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-04-05T14:59:22Z",
+      "updated_at": "2026-04-05T15:00:55Z"
     }
   ],
   "changes": [],
@@ -1534,6 +1549,24 @@
       "entity_id": "anthropic-subscription-interactive-boundary",
       "from_state": "exploring",
       "to_state": "decided",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-04-05T14:59:22Z",
+      "entity_type": "node",
+      "entity_id": "subscription-first-provider-access-architecture",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-04-05T15:00:55Z",
+      "entity_type": "node",
+      "entity_id": "subscription-first-provider-access-architecture",
+      "from_state": "seed",
+      "to_state": "exploring",
       "reason": null,
       "forced": false
     }
