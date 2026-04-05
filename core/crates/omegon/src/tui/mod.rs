@@ -47,7 +47,7 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -458,7 +458,29 @@ impl App {
 
     fn enable_mouse_interaction_mode(&mut self) {
         self.terminal_copy_mode = false;
+        self.focus_mode = false;
         self.set_mouse_capture(true);
+    }
+
+    fn set_focus_mode(&mut self, enabled: bool) {
+        if self.focus_mode == enabled {
+            return;
+        }
+        self.focus_mode = enabled;
+        if enabled {
+            self.terminal_copy_mode = false;
+            self.set_mouse_capture(false);
+            self.show_toast(
+                "Focus mode active — selected segment isolated for terminal-native selection",
+                ratatui_toaster::ToastType::Info,
+            );
+        } else {
+            self.set_mouse_capture(true);
+            self.show_toast(
+                "Focus mode disabled — full conversation and mouse interaction restored",
+                ratatui_toaster::ToastType::Info,
+            );
+        }
     }
 
     fn set_terminal_copy_mode(&mut self, enabled: bool) {
@@ -466,6 +488,7 @@ impl App {
             return;
         }
         self.terminal_copy_mode = enabled;
+        self.focus_mode = false;
         self.set_mouse_capture(!enabled);
         if enabled {
             self.show_toast(
@@ -1592,6 +1615,18 @@ impl App {
             }
         }
 
+        // ── Focus mode: isolate the selected conversation segment ─────────
+        if self.focus_mode && self.conversation.tabs.is_conversation_active() {
+            self.conversation_area = Some(area);
+            self.editor_area = None;
+            self.dashboard_area = None;
+            self.render_focus_view(frame, area);
+
+            let now = std::time::Instant::now();
+            self.operator_events.retain(|e| e.expires_at > now);
+            return;
+        }
+
         // ── Horizontal split: main area | dashboard panel ───────────
         // Dashboard appears as a right-side panel when terminal is wide enough.
         let show_dashboard = area.width >= 120
@@ -2088,6 +2123,43 @@ impl App {
         if let Some((widget_id, actions)) = &self.active_action_prompt {
             self.render_action_prompt(frame, widget_id, actions);
         }
+    }
+
+    fn render_focus_view(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .border_style(Style::default().fg(self.theme.accent_muted()).bg(self.theme.surface_bg()))
+            .title(Span::styled(
+                " focus — selected segment ",
+                Style::default()
+                    .fg(self.theme.accent())
+                    .bg(self.theme.surface_bg())
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .title_bottom(
+                Line::from(Span::styled(
+                    " drag to select · Ctrl+Y copy · Esc or /focus to return ",
+                    Style::default().fg(self.theme.dim()).bg(self.theme.surface_bg()),
+                ))
+                .centered(),
+            )
+            .padding(Padding::uniform(1))
+            .style(Style::default().bg(self.theme.surface_bg()));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let Some(idx) = self.conversation.selected_or_focused_segment() else {
+            let empty = Paragraph::new("No segment selected.")
+                .style(Style::default().fg(self.theme.dim()).bg(self.theme.surface_bg()));
+            frame.render_widget(empty, inner);
+            return;
+        };
+
+        let Some(segment) = self.conversation.segments().get(idx).cloned() else {
+            return;
+        };
+        segment.render(inner, frame.buffer_mut(), self.theme.as_ref());
     }
 
     /// Render an ephemeral modal from an extension widget.
@@ -3084,7 +3156,7 @@ impl App {
                                 auth_mode: "unknown".into(),
                                 auth_source: "tui-cached".into(),
                                 control_plane_state: crate::web::ControlPlaneState::Ready,
-                                instance: None,
+                                instance_descriptor: None,
                             };
                             match launch_auspex_with_startup(&startup) {
                                 Ok(target) => SlashResult::Display(format!(
@@ -3142,14 +3214,15 @@ impl App {
             }
 
             "focus" => {
-                // Toggle instrument panel focus mode
-                self.focus_mode = !self.focus_mode;
+                self.set_focus_mode(!self.focus_mode);
                 let status = if self.focus_mode {
                     "enabled"
                 } else {
                     "disabled"
                 };
-                SlashResult::Display(format!("Instrument panel focus mode → {status}"))
+                SlashResult::Display(format!(
+                    "Focus mode → {status} (selected segment isolated for terminal-native selection)"
+                ))
             }
 
             "copy" => match args {
@@ -5368,11 +5441,13 @@ pub async fn run_tui(
                     match (key.code, key.modifiers) {
                         // ── Interrupt: Escape or Ctrl+C ─────────────────
                         (KeyCode::Esc, _) => {
-                            // Dismiss modal if active, otherwise interrupt agent
+                            // Dismiss modal/focus if active, otherwise interrupt agent
                             if app.active_modal.is_some() {
                                 app.active_modal = None;
                             } else if app.active_action_prompt.is_some() {
                                 app.active_action_prompt = None;
+                            } else if app.focus_mode {
+                                app.set_focus_mode(false);
                             } else if app.agent_active {
                                 app.interrupt();
                                 app.agent_active = false; // Unblock editor immediately

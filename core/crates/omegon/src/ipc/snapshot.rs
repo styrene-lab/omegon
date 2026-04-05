@@ -219,6 +219,7 @@ pub fn project_instance_descriptor(
     session: &IpcSessionSnapshot,
     harness: &IpcHarnessSnapshot,
     health: &IpcHealthSnapshot,
+    omegon_version: &str,
     server_instance_id: &str,
 ) -> OmegonInstanceDescriptor {
     let host = std::env::var("HOSTNAME")
@@ -260,6 +261,8 @@ pub fn project_instance_descriptor(
         control_plane: OmegonControlPlane {
             server_instance_id: server_instance_id.to_string(),
             protocol_version: omegon_traits::IPC_PROTOCOL_VERSION,
+            schema_version: omegon_traits::IPC_PROTOCOL_VERSION,
+            omegon_version: omegon_version.to_string(),
             capabilities: omegon_traits::IpcCapability::v1_server_set()
                 .into_iter()
                 .map(str::to_string)
@@ -296,10 +299,10 @@ fn project_instance(
     session: &IpcSessionSnapshot,
     harness: &IpcHarnessSnapshot,
     health: &IpcHealthSnapshot,
-    _omegon_version: &str,
+    omegon_version: &str,
     server_instance_id: &str,
 ) -> OmegonInstanceDescriptor {
-    project_instance_descriptor(handles, cwd, session, harness, health, server_instance_id)
+    project_instance_descriptor(handles, cwd, session, harness, health, omegon_version, server_instance_id)
 }
 
 fn workspace_id_from_cwd(cwd: &str) -> String {
@@ -440,6 +443,8 @@ mod tests {
         assert_eq!(snap.instance.identity.session_id, "session-abc");
         assert_eq!(snap.instance.identity.workspace_id, "tmp::example-project");
         assert_eq!(snap.instance.control_plane.server_instance_id, "instance-123");
+        assert_eq!(snap.instance.control_plane.schema_version, omegon_traits::IPC_PROTOCOL_VERSION);
+        assert_eq!(snap.instance.control_plane.omegon_version, "0.15.10-rc.15");
         assert_eq!(snap.session.session_id.as_deref(), Some("session-abc"));
         assert_eq!(snap.instance.runtime.thinking_level.as_deref(), Some("high"));
     }

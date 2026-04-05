@@ -863,7 +863,16 @@ fn render_assistant_text(
             lines.push(render_table_line(trimmed, is_header, t));
         } else {
             table_state = TableState::None;
-            lines.push(super::widgets::highlight_line(line, t));
+            let line = super::widgets::highlight_line(line, t);
+            let spans: Vec<Span<'_>> = line
+                .spans
+                .into_iter()
+                .map(|mut s| {
+                    s.style = s.style.bg(bg);
+                    s
+                })
+                .collect();
+            lines.push(Line::from(spans));
         }
     }
 
@@ -1094,11 +1103,7 @@ fn render_tool_card(
         if !lines.is_empty() {
             // Separator line — matches card border color (red on error)
             let sep_color = if is_error { t.error() } else { t.border_dim() };
-            let sep_bg = if is_error {
-                t.tool_error_bg()
-            } else {
-                t.surface_bg()
-            };
+            let sep_bg = bg;
             lines.push(Line::from(Span::styled(
                 "─".repeat(card_inner.width as usize),
                 Style::default().fg(sep_color).bg(sep_bg),
@@ -1133,23 +1138,23 @@ fn render_tool_card(
 
         if let Some(highlighted_lines) = highlighted {
             for line in highlighted_lines {
-                // Apply surface_bg to each span
+                // Apply card bg to each span so result rows stay visually unified.
                 let spans: Vec<Span<'_>> = line
                     .spans
                     .into_iter()
                     .map(|mut s| {
-                        s.style = s.style.bg(t.surface_bg());
+                        s.style = s.style.bg(bg);
                         s
                     })
                     .collect();
                 lines.push(Line::from(spans));
-                result_row_fills.push((lines.len().saturating_sub(1) as u16, t.surface_bg()));
+                result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
             }
         } else {
             let result_style = if is_error {
-                Style::default().fg(t.error()).bg(t.surface_bg())
+                Style::default().fg(t.error()).bg(bg)
             } else {
-                Style::default().fg(t.muted()).bg(t.surface_bg())
+                Style::default().fg(t.muted()).bg(bg)
             };
 
             let mut table_state = TableState::None;
@@ -1166,18 +1171,13 @@ fn render_tool_card(
                         } else {
                             table_state = TableState::Header;
                         }
-                        let row_bg = if is_header {
-                            t.card_bg()
-                        } else {
-                            t.surface_bg()
-                        };
+                        let row_bg = bg;
                         lines.push(render_table_line(trimmed, is_header, t));
                         result_row_fills.push((lines.len().saturating_sub(1) as u16, row_bg));
                     } else {
                         table_state = TableState::None;
                         lines.push(Line::from(Span::styled(line.to_string(), result_style)));
-                        result_row_fills
-                            .push((lines.len().saturating_sub(1) as u16, t.surface_bg()));
+                        result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
                     }
                 }
             } else {
@@ -1193,8 +1193,8 @@ fn render_tool_card(
                                 .spans
                                 .into_iter()
                                 .map(|mut s| {
-                                    // Preserve ANSI foreground, apply surface_bg
-                                    s.style = s.style.bg(t.surface_bg());
+                                    // Preserve ANSI foreground, apply card background
+                                    s.style = s.style.bg(bg);
                                     // If no foreground was set by ANSI, use muted
                                     if s.style.fg.is_none() {
                                         s.style = s.style.fg(t.muted());
@@ -1203,22 +1203,19 @@ fn render_tool_card(
                                 })
                                 .collect();
                             lines.push(Line::from(spans));
-                            result_row_fills
-                                .push((lines.len().saturating_sub(1) as u16, t.surface_bg()));
+                            result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
                         }
                     } else {
                         // ANSI parse failed — fall back to plain
                         for line in &result_lines[..show] {
                             lines.push(Line::from(Span::styled(line.to_string(), result_style)));
-                            result_row_fills
-                                .push((lines.len().saturating_sub(1) as u16, t.surface_bg()));
+                            result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
                         }
                     }
                 } else {
                     for line in &result_lines[..show] {
                         lines.push(Line::from(Span::styled(line.to_string(), result_style)));
-                        result_row_fills
-                            .push((lines.len().saturating_sub(1) as u16, t.surface_bg()));
+                        result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
                     }
                 }
             }
@@ -1235,9 +1232,9 @@ fn render_tool_card(
             };
             lines.push(Line::from(Span::styled(
                 hint,
-                Style::default().fg(t.accent_muted()).bg(t.surface_bg()),
+                Style::default().fg(t.accent_muted()).bg(bg),
             )));
-            result_row_fills.push((lines.len().saturating_sub(1) as u16, t.surface_bg()));
+            result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
         }
     }
 
@@ -1772,7 +1769,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_result_highlight_rows_fill_full_surface_background() {
+    fn tool_result_highlight_rows_fill_full_card_background() {
         let seg = Segment {
             meta: SegmentMeta::default(),
             content: SegmentContent::ToolCard {
@@ -1794,8 +1791,26 @@ mod tests {
         let trailing_content_cell = &buf[(area.right() - 3, code_row)];
         assert_eq!(
             trailing_content_cell.style().bg,
-            Some(Alpharius.surface_bg())
+            Some(Alpharius.tool_success_bg())
         );
+    }
+
+    #[test]
+    fn assistant_markdown_rows_inherit_segment_background() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::AssistantText {
+                text: "plain text with `inline code`".into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 8);
+        seg.render(area, &mut buf, &Alpharius);
+
+        let row = find_row_containing(&buf, area, "plain text with").expect("assistant row in buffer");
+        let trailing_content_cell = &buf[(area.right() - 3, row)];
+        assert_eq!(trailing_content_cell.style().bg, Some(Alpharius.surface_bg()));
     }
 
     #[test]

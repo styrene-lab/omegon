@@ -532,9 +532,25 @@ fn terminal_copy_mode_disables_mouse_capture() {
     app.set_terminal_copy_mode(true);
     assert!(app.terminal_copy_mode);
     assert!(!app.mouse_capture_enabled);
+    assert!(!app.focus_mode);
 
     app.set_terminal_copy_mode(false);
     assert!(!app.terminal_copy_mode);
+    assert!(app.mouse_capture_enabled);
+}
+
+#[test]
+fn focus_mode_disables_mouse_capture_and_restores_it() {
+    let mut app = test_app();
+    app.mouse_capture_enabled = true;
+
+    app.set_focus_mode(true);
+    assert!(app.focus_mode);
+    assert!(!app.mouse_capture_enabled);
+    assert!(!app.terminal_copy_mode);
+
+    app.set_focus_mode(false);
+    assert!(!app.focus_mode);
     assert!(app.mouse_capture_enabled);
 }
 
@@ -548,10 +564,12 @@ fn mouse_slash_command_toggles_interaction_mode() {
     assert!(matches!(app.handle_slash_command("/mouse", &tx), SlashResult::Handled));
     assert!(!app.terminal_copy_mode);
     assert!(app.mouse_capture_enabled);
+    assert!(!app.focus_mode);
 
     assert!(matches!(app.handle_slash_command("/mouse off", &tx), SlashResult::Handled));
     assert!(app.terminal_copy_mode);
     assert!(!app.mouse_capture_enabled);
+    assert!(!app.focus_mode);
 }
 
 #[test]
@@ -740,6 +758,26 @@ fn toggle_pin_prefers_selected_tool_card() {
     cv.toggle_pin();
 
     assert_eq!(cv.pinned_segment, Some(0));
+}
+
+#[test]
+fn slash_focus_toggles_segment_isolation_mode() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.conversation.push_user("operator prompt");
+    app.conversation.append_streaming("assistant answer");
+    app.conversation.finalize_message();
+    app.conversation.select_segment(1);
+
+    let result = app.handle_slash_command("/focus", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(app.focus_mode);
+    assert!(!app.mouse_capture_enabled);
+
+    let result = app.handle_slash_command("/focus", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(!app.focus_mode);
+    assert!(app.mouse_capture_enabled);
 }
 
 #[test]
@@ -1532,7 +1570,7 @@ fn web_dashboard_started_event_updates_cached_addr() {
         auth_mode: "ephemeral-bearer".into(),
         auth_source: "generated".into(),
         control_plane_state: crate::web::ControlPlaneState::Ready,
-        instance: None,
+        instance_descriptor: None,
     };
 
     app.handle_agent_event(AgentEvent::WebDashboardStarted {

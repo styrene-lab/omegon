@@ -52,7 +52,7 @@ pub struct WebStartupInfo {
     pub auth_mode: String,
     pub auth_source: String,
     pub control_plane_state: ControlPlaneState,
-    pub instance: Option<omegon_traits::OmegonInstanceDescriptor>,
+    pub instance_descriptor: Option<omegon_traits::OmegonInstanceDescriptor>,
 }
 
 fn project_web_instance(
@@ -146,8 +146,9 @@ fn project_web_instance(
         &session,
         &harness_projection,
         &health,
+        env!("CARGO_PKG_VERSION"),
         startup
-            .instance
+            .instance_descriptor
             .as_ref()
             .map(|instance| instance.identity.instance_id.as_str())
             .unwrap_or("web-compat"),
@@ -282,9 +283,9 @@ pub async fn start_server_with_options(
         auth_mode: auth_mode.to_string(),
         auth_source,
         control_plane_state: ControlPlaneState::Ready,
-        instance: None,
+        instance_descriptor: None,
     };
-    startup.instance = Some(project_web_instance(&app_state_handles, &startup));
+    startup.instance_descriptor = Some(project_web_instance(&app_state_handles, &startup));
     if let Ok(mut slot) = startup_info.lock() {
         *slot = Some(startup.clone());
     }
@@ -396,7 +397,7 @@ mod tests {
             auth_mode: state.web_auth.mode_name().into(),
             auth_source: state.web_auth.source_name().into(),
             control_plane_state: ControlPlaneState::Ready,
-            instance: None,
+            instance_descriptor: None,
         };
 
         assert_eq!(startup.token, "token-123");

@@ -326,6 +326,8 @@ pub struct OmegonPlacement {
 pub struct OmegonControlPlane {
     pub server_instance_id: String,
     pub protocol_version: u16,
+    pub schema_version: u16,
+    pub omegon_version: String,
     pub capabilities: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ipc_socket_path: Option<String>,

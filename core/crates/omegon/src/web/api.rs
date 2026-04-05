@@ -421,7 +421,7 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
         .startup_info
         .lock()
         .ok()
-        .and_then(|guard| guard.as_ref().and_then(|startup| startup.instance.clone()))
+        .and_then(|guard| guard.as_ref().and_then(|startup| startup.instance_descriptor.clone()))
         .unwrap_or_else(|| {
             let cwd = std::env::current_dir()
                 .ok()
@@ -471,6 +471,7 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                 &session,
                 &harness_projection,
                 &health,
+                env!("CARGO_PKG_VERSION"),
                 "web-compat",
             )
         });
@@ -511,7 +512,7 @@ mod tests {
                 auth_mode: "ephemeral-bearer".into(),
                 auth_source: "generated".into(),
                 control_plane_state: ControlPlaneState::Ready,
-                instance: None,
+                instance_descriptor: None,
             }))),
             control_plane_state: std::sync::Arc::new(std::sync::Mutex::new(
                 ControlPlaneState::Ready,
@@ -561,7 +562,14 @@ mod tests {
         assert_eq!(payload.health_url, "http://127.0.0.1:7842/api/healthz");
         assert_eq!(payload.ready_url, "http://127.0.0.1:7842/api/readyz");
         assert_eq!(payload.auth_mode, "ephemeral-bearer");
-        assert!(payload.instance.is_none());
+        assert!(payload.instance_descriptor.is_none());
+    }
+
+    #[test]
+    fn fallback_instance_descriptor_carries_control_plane_version_identity() {
+        let snap = build_snapshot(&test_state());
+        assert_eq!(snap.instance.control_plane.schema_version, omegon_traits::IPC_PROTOCOL_VERSION);
+        assert_eq!(snap.instance.control_plane.omegon_version, env!("CARGO_PKG_VERSION"));
     }
 
     #[tokio::test]
