@@ -319,24 +319,40 @@ fn format_turn_summary(summary: &TurnSummary) -> String {
     )];
 
     if let Some(telemetry) = &summary.provider_telemetry {
-        if let Some(pct) = telemetry.unified_5h_utilization_pct {
-            parts.push(format!("5h {:.0}%", pct));
-        }
-        if let Some(pct) = telemetry.unified_7d_utilization_pct {
-            parts.push(format!("7d {:.0}%", pct));
-        }
-        if let Some(rem) = telemetry.requests_remaining {
-            parts.push(format!("req {}", rem));
-        }
-        if let Some(rem) = telemetry.tokens_remaining {
-            parts.push(format!("tok {}", rem));
-        }
-        // Codex-specific
-        if let Some(pct) = telemetry.codex_primary_pct {
-            parts.push(format!("5h {}%", pct));
-        }
-        if let Some(ref name) = telemetry.codex_limit_name {
-            parts.push(name.clone());
+        match telemetry.provider.as_str() {
+            "anthropic" => {
+                if let Some(pct) = telemetry.unified_5h_utilization_pct {
+                    parts.push(format!("5h {:.0}%", pct));
+                }
+                if let Some(pct) = telemetry.unified_7d_utilization_pct {
+                    parts.push(format!("7d {:.0}%", pct));
+                }
+            }
+            "openai-codex" => {
+                if let Some(ref name) = telemetry.codex_limit_name {
+                    parts.push(name.clone());
+                }
+                if let Some(active) = &telemetry.codex_active_limit {
+                    parts.push(active.clone());
+                }
+                if let Some(pct) = telemetry.codex_primary_pct {
+                    parts.push(format!("primary {}%", pct));
+                }
+                if let Some(secs) = telemetry.codex_primary_reset_secs {
+                    parts.push(format!("primary↻ {}s", secs));
+                }
+            }
+            _ => {
+                if let Some(rem) = telemetry.requests_remaining {
+                    parts.push(format!("req {}", rem));
+                }
+                if let Some(rem) = telemetry.tokens_remaining {
+                    parts.push(format!("tok {}", rem));
+                }
+                if let Some(secs) = telemetry.retry_after_secs {
+                    parts.push(format!("retry {}s", secs));
+                }
+            }
         }
     }
 
@@ -622,6 +638,34 @@ mod tests {
         assert!(content.contains("7t"), "should record turns");
         assert!(content.contains("anthropic / anthropic:claude-sonnet-4-6"), "should record provider/model");
         assert!(content.contains("5h 42%"), "should record telemetry");
+    }
+
+    #[test]
+    fn format_turn_summary_formats_codex_session_specific_fields() {
+        let summary = TurnSummary {
+            turn: 1,
+            model: Some("openai-codex:gpt-5.4".into()),
+            provider: Some("openai-codex".into()),
+            actual_input_tokens: 100,
+            actual_output_tokens: 20,
+            cache_read_tokens: 0,
+            provider_telemetry: Some(omegon_traits::ProviderTelemetrySnapshot {
+                provider: "openai-codex".into(),
+                source: "response_headers".into(),
+                codex_active_limit: Some("codex".into()),
+                codex_primary_pct: Some(0),
+                codex_primary_reset_secs: Some(13648),
+                codex_limit_name: Some("GPT-5.3-Codex-Spark".into()),
+                ..Default::default()
+            }),
+        };
+
+        let text = format_turn_summary(&summary);
+        assert!(text.contains("GPT-5.3-Codex-Spark"), "got: {text}");
+        assert!(text.contains("codex"), "got: {text}");
+        assert!(text.contains("primary 0%"), "got: {text}");
+        assert!(text.contains("primary↻ 13648s"), "got: {text}");
+        assert!(!text.contains("5h 0%"), "got: {text}");
     }
 
     #[test]

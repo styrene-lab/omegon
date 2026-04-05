@@ -911,41 +911,53 @@ fn format_provider_telemetry_line(
 ) -> Option<String> {
     let t = telemetry.as_ref()?;
     let mut parts = Vec::new();
-    // ── Anthropic ────────────────────────────────────────────────────
-    if let Some(pct) = t.unified_5h_utilization_pct {
-        parts.push(format!("5h {:.0}%", pct));
+
+    match t.provider.as_str() {
+        "anthropic" => {
+            if let Some(pct) = t.unified_5h_utilization_pct {
+                parts.push(format!("5h {:.0}%", pct));
+            }
+            if let Some(pct) = t.unified_7d_utilization_pct {
+                parts.push(format!("7d {:.0}%", pct));
+            }
+            if let Some(secs) = t.retry_after_secs {
+                parts.push(format!("retry {}", format_duration_compact(secs)));
+            }
+        }
+        "openai-codex" => {
+            if let Some(ref name) = t.codex_limit_name {
+                parts.push(name.clone());
+            }
+            if let Some(active) = &t.codex_active_limit {
+                parts.push(active.clone());
+            }
+            if let Some(pct) = t.codex_primary_pct {
+                parts.push(format!("primary {}%", pct));
+            }
+            if let Some(secs) = t.codex_primary_reset_secs {
+                parts.push(format!("primary↻ {}", format_duration_compact(secs)));
+            }
+            if let Some(secs) = t.codex_secondary_reset_secs {
+                parts.push(format!("secondary↻ {}", format_duration_compact(secs)));
+            }
+            if let Some(unlimited) = t.codex_credits_unlimited {
+                parts.push(if unlimited { "credits ∞".into() } else { "credits metered".into() });
+            }
+        }
+        _ => {
+            if let Some(rem) = t.requests_remaining {
+                parts.push(format!("req {}", rem));
+            }
+            if let Some(rem) = t.tokens_remaining {
+                parts.push(format!("tok {}", widgets::format_tokens_compact(rem as usize)));
+            }
+            if let Some(secs) = t.retry_after_secs {
+                parts.push(format!("retry {}", format_duration_compact(secs)));
+            }
+        }
     }
-    if let Some(pct) = t.unified_7d_utilization_pct {
-        parts.push(format!("7d {:.0}%", pct));
-    }
-    // ── OpenAI / generic ────────────────────────────────────────────
-    if let Some(rem) = t.requests_remaining {
-        parts.push(format!("req {}", rem));
-    }
-    if let Some(rem) = t.tokens_remaining {
-        parts.push(format!("tok {}", widgets::format_tokens_compact(rem as usize)));
-    }
-    if let Some(secs) = t.retry_after_secs {
-        parts.push(format!("retry {}", format_duration_compact(secs)));
-    }
-    // ── ChatGPT Codex ───────────────────────────────────────────────
-    if let Some(pct) = t.codex_primary_pct {
-        parts.push(format!("5h {}%", pct));
-    }
-    if let Some(secs) = t.codex_primary_reset_secs {
-        parts.push(format!("↻ {}", format_duration_compact(secs)));
-    }
-    if let Some(secs) = t.codex_secondary_reset_secs {
-        parts.push(format!("7d↻ {}", format_duration_compact(secs)));
-    }
-    if let Some(ref name) = t.codex_limit_name {
-        parts.push(name.clone());
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" · "))
-    }
+
+    if parts.is_empty() { None } else { Some(parts.join(" · ")) }
 }
 
 fn format_failure_age(timestamp: &str) -> Option<String> {
@@ -1126,17 +1138,22 @@ mod tests {
         let text = format_provider_telemetry_line(&Some(omegon_traits::ProviderTelemetrySnapshot {
             provider: "openai-codex".into(),
             source: "response_headers".into(),
+            codex_active_limit: Some("codex".into()),
             codex_primary_pct: Some(0),
             codex_primary_reset_secs: Some(13648),
             codex_secondary_reset_secs: Some(348644),
+            codex_credits_unlimited: Some(false),
             codex_limit_name: Some("GPT-5.3-Codex-Spark".into()),
             ..Default::default()
         }))
         .expect("telemetry line");
-        assert!(text.contains("5h 0%"), "got {text}");
-        assert!(text.contains("↻ 3h47m"), "got {text}");
-        assert!(text.contains("7d↻ 4d"), "got {text}");
         assert!(text.contains("GPT-5.3-Codex-Spark"), "got {text}");
+        assert!(text.contains("codex"), "got {text}");
+        assert!(text.contains("primary 0%"), "got {text}");
+        assert!(text.contains("primary↻ 3h47m"), "got {text}");
+        assert!(text.contains("secondary↻ 4d"), "got {text}");
+        assert!(text.contains("credits metered"), "got {text}");
+        assert!(!text.contains("5h 0%"), "got {text}");
     }
 
     #[test]
