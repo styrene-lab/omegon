@@ -2255,7 +2255,7 @@ impl App {
             "import from other tools",
             &["auto", "claude-code", "pi", "codex", "cursor", "aider"],
         ),
-        ("dash", "open web dashboard in browser", &["status"]),
+        ("dash", "open Auspex browser view (/dash compatibility command)", &["status"]),
         (
             "secrets",
             "manage stored secrets",
@@ -2297,7 +2297,7 @@ impl App {
             &["freeze", "status"],
         ),
         ("splash", "replay splash animation", &[]),
-        ("dashboard", "open web dashboard (alias for /dash)", &[]),
+        ("dashboard", "open Auspex browser view (alias for /dash)", &[]),
         (
             "note",
             "capture a note for later (persists across sessions)",
@@ -2325,7 +2325,7 @@ impl App {
         }
 
         // Notify the tutorial overlay that a slash command was executed.
-        // This advances Command-triggered steps (e.g. /dash on the Web Dashboard step).
+        // This advances Command-triggered steps (e.g. compatibility commands during the Auspex step).
         if let Some(ref mut overlay) = self.tutorial_overlay {
             overlay.check_command(cmd);
         }
@@ -2953,20 +2953,22 @@ impl App {
             }
 
             "dash" => {
-                // /dash and /dash open both open the web dashboard.
+                // /dash remains the compatibility command for opening the browser UI.
                 // If the server is already running, open the browser.
                 // If not, start it (which auto-opens on ready).
                 if let Some(addr) = self.web_server_addr {
                     let url = format!("http://{addr}");
                     if args == "status" {
-                        SlashResult::Display(format!("Dashboard running at {url}"))
+                        SlashResult::Display(format!(
+                            "Auspex browser view running at {url} (/dash compatibility command)"
+                        ))
                     } else {
                         open_browser(&url);
-                        SlashResult::Display(format!("Dashboard at {url}"))
+                        SlashResult::Display(format!("Opening Auspex browser view at {url}"))
                     }
                 } else {
                     let _ = tx.try_send(TuiCommand::StartWebDashboard);
-                    SlashResult::Display("Starting web dashboard…".into())
+                    SlashResult::Display("Starting Auspex browser view…".into())
                 }
             }
 
@@ -5071,7 +5073,7 @@ pub async fn run_tui(
                                             // Check BEFORE advance — fire side-effects for the step being dismissed
                                             let leaving_step_title = overlay.step().title;
                                             let should_open_dash =
-                                                leaving_step_title == "Web Dashboard";
+                                                leaving_step_title == "Auspex Browser View";
                                             overlay.advance();
                                             let auto_prompt = overlay
                                                 .pending_auto_prompt()
@@ -5558,4 +5560,25 @@ pub async fn run_tui(
     disable_raw_mode()?;
     io::stdout().execute(LeaveAlternateScreen)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod auspex_copy_tests {
+    use super::*;
+
+    #[test]
+    fn dash_command_copy_mentions_auspex_compatibility() {
+        let dash = App::COMMANDS
+            .iter()
+            .find(|(name, _, _)| *name == "dash")
+            .expect("/dash command must exist");
+        assert!(dash.1.contains("Auspex browser view"));
+        assert!(dash.1.contains("compatibility"));
+
+        let dashboard = App::COMMANDS
+            .iter()
+            .find(|(name, _, _)| *name == "dashboard")
+            .expect("/dashboard command must exist");
+        assert!(dashboard.1.contains("Auspex browser view"));
+    }
 }
