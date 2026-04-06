@@ -382,9 +382,51 @@ impl InstrumentPanel {
             ("◈", "mem", Self::band_color(ContextBand::Memory)),
             ("◔", "think", Self::band_color(ContextBand::Thinking)),
             ("~", "idle", Self::activity_color(ActivityMode::Idle, 0.5)),
-            ("✦", "tools", Self::activity_color(ActivityMode::ToolChurn, 0.9)),
-            ("…", "wait", Self::activity_color(ActivityMode::Waiting, 0.9)),
+            (
+                "✦",
+                "tools",
+                Self::activity_color(ActivityMode::ToolChurn, 0.9),
+            ),
+            (
+                "…",
+                "wait",
+                Self::activity_color(ActivityMode::Waiting, 0.9),
+            ),
         ]
+    }
+
+    fn render_context_legend_row(&self, y: u16, inner: Rect, buf: &mut Buffer, t: &dyn Theme) {
+        clear_row(y, inner.x, inner.right(), buf, panel_bg(t));
+
+        let separator = " ";
+        let separator_width = visible_width(separator) as u16;
+        let mut x = inner.x;
+
+        for (idx, (icon, label_text, color)) in
+            Self::context_legend_entries().into_iter().enumerate()
+        {
+            let entry = format!("{icon} {label_text}");
+            let entry_width = visible_width(&entry) as u16;
+            let gap = if idx == 0 { 0 } else { separator_width };
+
+            if x.saturating_add(gap).saturating_add(entry_width) > inner.right() {
+                break;
+            }
+            if gap > 0 {
+                x = render_str_colored(separator, x, y, inner.right(), panel_bg(t), buf, |_| {
+                    t.dim()
+                });
+            }
+
+            let icon_chars: Vec<char> = icon.chars().collect();
+            x = render_str_colored(&entry, x, y, inner.right(), panel_bg(t), buf, |ch| {
+                if icon_chars.contains(&ch) {
+                    color
+                } else {
+                    t.dim()
+                }
+            });
+        }
     }
 
     fn activity_color(mode: ActivityMode, intensity: f64) -> Color {
@@ -808,36 +850,7 @@ impl InstrumentPanel {
         self.render_context_bar(bar_area, buf, t);
 
         if inner.height > bar_h {
-            clear_row(inner.y + bar_h, inner.x, inner.right(), buf, panel_bg(t));
-            let mut x = inner.x;
-            for (idx, (icon, label_text, color)) in
-                Self::context_legend_entries().into_iter().enumerate()
-            {
-                let entry = if idx == 0 {
-                    format!("{icon} {label_text}")
-                } else {
-                    format!("  {icon} {label_text}")
-                };
-                let icon_chars: Vec<char> = icon.chars().collect();
-                x = render_str_colored(
-                    &entry,
-                    x,
-                    inner.y + bar_h,
-                    inner.right(),
-                    panel_bg(t),
-                    buf,
-                    |ch| {
-                        if icon_chars.contains(&ch) {
-                            color
-                        } else {
-                            t.dim()
-                        }
-                    },
-                );
-                if x >= inner.right() {
-                    break;
-                }
-            }
+            self.render_context_legend_row(inner.y + bar_h, inner, buf, t);
         }
 
         // Stats row: token counts + memory op tallies
@@ -981,7 +994,8 @@ impl InstrumentPanel {
                 ActivityMode::ToolChurn => (((time * 9.0) + x as f64 * 0.7).sin() + 1.0) * 0.5,
                 ActivityMode::Waiting => (((time * 2.2) + x as f64 * 0.18).sin() + 1.0) * 0.5,
                 ActivityMode::Thinking => {
-                    (((time * 3.0) + x as f64 * 0.35).sin() + 1.0) * 0.5
+                    (((time * 3.0) + x as f64 * 0.35).sin() + 1.0)
+                        * 0.5
                         * self.thinking_intensity.max(0.15)
                 }
             }
@@ -1000,11 +1014,17 @@ impl InstrumentPanel {
                     } else {
                         '·'
                     };
-                    (c, Self::activity_color(ActivityMode::ToolChurn, activity_phase))
+                    (
+                        c,
+                        Self::activity_color(ActivityMode::ToolChurn, activity_phase),
+                    )
                 }
                 ActivityMode::Waiting => {
                     let c = if activity_phase > 0.66 { '…' } else { '·' };
-                    (c, Self::activity_color(ActivityMode::Waiting, activity_phase))
+                    (
+                        c,
+                        Self::activity_color(ActivityMode::Waiting, activity_phase),
+                    )
                 }
                 ActivityMode::Thinking => {
                     let c = if activity_phase > 0.72 {
@@ -1014,7 +1034,10 @@ impl InstrumentPanel {
                     } else {
                         '·'
                     };
-                    (c, Self::activity_color(ActivityMode::Thinking, activity_phase))
+                    (
+                        c,
+                        Self::activity_color(ActivityMode::Thinking, activity_phase),
+                    )
                 }
             };
 
@@ -1233,7 +1256,15 @@ impl InstrumentPanel {
                 _ => Color::Rgb(48, 68, 84),
             };
             let display_label: String = child.label.chars().take(label_w).collect();
-            x = render_str_colored(&display_label, x, y, inner.right(), panel_bg(t), buf, |_| label_color);
+            x = render_str_colored(
+                &display_label,
+                x,
+                y,
+                inner.right(),
+                panel_bg(t),
+                buf,
+                |_| label_color,
+            );
             // Pad to label_w
             while x < inner.x + 2 + label_w as u16 {
                 if x >= inner.right() {
@@ -1258,7 +1289,9 @@ impl InstrumentPanel {
             };
             let act_color = Color::Rgb(36, 80, 96);
             let act_display: String = activity.chars().take(activity_w).collect();
-            x = render_str_colored(&act_display, x, y, inner.right(), panel_bg(t), buf, |_| act_color);
+            x = render_str_colored(&act_display, x, y, inner.right(), panel_bg(t), buf, |_| {
+                act_color
+            });
             // Pad to activity_w
             let act_end_x = inner.x + 2 + label_w as u16 + activity_w as u16;
             while x < act_end_x {
@@ -1280,7 +1313,9 @@ impl InstrumentPanel {
             };
             let elapsed_str = Self::format_elapsed(elapsed_secs);
             let elapsed_color = Color::Rgb(36, 60, 76);
-            let _ = render_str_colored(&elapsed_str, x, y, inner.right(), panel_bg(t), buf, |_| elapsed_color);
+            let _ = render_str_colored(&elapsed_str, x, y, inner.right(), panel_bg(t), buf, |_| {
+                elapsed_color
+            });
         }
 
         // ── Summary row ──────────────────────────────────────────────────
@@ -1297,7 +1332,15 @@ impl InstrumentPanel {
                 format!("{}/{} done", done, cp.total_children)
             };
             let summary_color = Color::Rgb(36, 60, 76);
-            let _ = render_str_colored(&summary, inner.x, summary_y, inner.right(), panel_bg(t), buf, |_| summary_color);
+            let _ = render_str_colored(
+                &summary,
+                inner.x,
+                summary_y,
+                inner.right(),
+                panel_bg(t),
+                buf,
+                |_| summary_color,
+            );
         }
     }
 
@@ -1431,10 +1474,14 @@ impl InstrumentPanel {
             };
 
             let mut x = inner.x;
-            x = render_str_colored(indicator, x, y, inner.right(), panel_bg(t), buf, |_| ind_color);
+            x = render_str_colored(indicator, x, y, inner.right(), panel_bg(t), buf, |_| {
+                ind_color
+            });
             let short = tool_short_name(&tool.name);
             let display_name = truncate_str(&short, name_w, "…");
-            x = render_str_colored(&display_name, x, y, inner.right(), panel_bg(t), buf, |_| name_color);
+            x = render_str_colored(&display_name, x, y, inner.right(), panel_bg(t), buf, |_| {
+                name_color
+            });
             while x < inner.x + 2 + visible_width(&display_name) as u16 {
                 if x >= inner.right() {
                     break;
@@ -1455,7 +1502,9 @@ impl InstrumentPanel {
                 }
                 x += 1;
             }
-            x = render_str_colored(&time_str, x, y, inner.right(), panel_bg(t), buf, |_| time_color);
+            x = render_str_colored(&time_str, x, y, inner.right(), panel_bg(t), buf, |_| {
+                time_color
+            });
             while x < inner.x + 2 + name_w as u16 + duration_w as u16 {
                 if x >= inner.right() {
                     break;
@@ -2022,8 +2071,14 @@ mod tests {
         assert_eq!(low, InstrumentPanel::band_color(ContextBand::Thinking));
         match high {
             Color::Rgb(r, g, b) => {
-                assert!(b >= g && g >= r, "thinking highlight should remain blue-dominant: {r},{g},{b}");
-                assert!(b >= 214, "thinking highlight should brighten the blue channel: {r},{g},{b}");
+                assert!(
+                    b >= g && g >= r,
+                    "thinking highlight should remain blue-dominant: {r},{g},{b}"
+                );
+                assert!(
+                    b >= 214,
+                    "thinking highlight should brighten the blue channel: {r},{g},{b}"
+                );
             }
             other => panic!("unexpected thinking highlight color: {other:?}"),
         }
@@ -2144,7 +2199,16 @@ mod tests {
     fn inference_context_bar_separates_composition_from_activity_rows() {
         let mut panel = InstrumentPanel::default();
         panel.update_mind_facts(180, 12, 6, 0.08);
-        panel.update_telemetry(68.0, 200_000, Some("read"), false, "high", None, true, 0.016);
+        panel.update_telemetry(
+            68.0,
+            200_000,
+            Some("read"),
+            false,
+            "high",
+            None,
+            true,
+            0.016,
+        );
 
         let area = Rect::new(0, 0, 64, 10);
         let backend = ratatui::backend::TestBackend::new(64, 10);
@@ -2163,16 +2227,66 @@ mod tests {
             .collect();
 
         assert!(
-            composition_row.chars().any(|ch| matches!(ch, '⡀' | '⡄' | '⡆' | '⡇' | '⣇' | '⣏' | '⣟' | '⣿' | '⠂')),
+            composition_row
+                .chars()
+                .any(|ch| matches!(ch, '⡀' | '⡄' | '⡆' | '⡇' | '⣇' | '⣏' | '⣟' | '⣿' | '⠂')),
             "composition row should use density/band glyphs: {composition_row}"
         );
         assert!(
-            activity_row.chars().any(|ch| matches!(ch, '·' | '…' | '✦' | '∿' | '◌' | '◉')),
+            activity_row
+                .chars()
+                .any(|ch| matches!(ch, '·' | '…' | '✦' | '∿' | '◌' | '◉')),
             "activity row should use runtime-state glyphs: {activity_row}"
         );
         assert_ne!(
             composition_row, activity_row,
             "composition and activity rows should not be duplicated overlays"
+        );
+    }
+
+    #[test]
+    fn inference_legend_avoids_partial_entries_in_narrow_widths() {
+        let mut panel = InstrumentPanel::default();
+        panel.update_mind_facts(180, 12, 6, 0.08);
+        panel.update_telemetry(
+            68.0,
+            200_000,
+            Some("read"),
+            false,
+            "high",
+            None,
+            true,
+            0.016,
+        );
+
+        let area = Rect::new(0, 0, 28, 10);
+        let backend = ratatui::backend::TestBackend::new(28, 10);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let t = crate::tui::theme::Alpharius;
+        terminal
+            .draw(|f| panel.render_inference_panel(area, f, &t))
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let legend_row: String = (1..area.width - 1)
+            .map(|x| buf[(x, 3)].symbol().to_string())
+            .collect();
+        let trimmed = legend_row.trim_end();
+
+        assert!(
+            trimmed.contains("conv") && trimmed.contains("sys"),
+            "narrow legend should still show complete leading entries: {trimmed:?}"
+        );
+        assert!(
+            !trimmed.contains("thi") && !trimmed.contains("tool") && !trimmed.ends_with('…'),
+            "narrow legend should omit entries it cannot fit instead of clipping them: {trimmed:?}"
+        );
+        assert!(
+            !trimmed.contains("conv  ")
+                && !trimmed.contains("sys  ")
+                && !trimmed.contains("mem  ")
+                && !trimmed.contains("think  "),
+            "narrow legend should not insert multi-space gaps between entries: {trimmed:?}"
         );
     }
 }
