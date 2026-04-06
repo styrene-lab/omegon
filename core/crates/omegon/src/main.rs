@@ -2619,8 +2619,14 @@ async fn execute_remote_slash_command(
                     "openai" => Err(anyhow::anyhow!(
                         "OpenAI API login in the TUI uses hidden API-key entry. Run /login and choose OpenAI API, or set OPENAI_API_KEY."
                     )),
+                    "openrouter" => Err(anyhow::anyhow!(
+                        "OpenRouter login in the TUI uses hidden API-key entry. Run /login and choose OpenRouter, or set OPENROUTER_API_KEY."
+                    )),
+                    "ollama-cloud" => Err(anyhow::anyhow!(
+                        "Ollama Cloud login in the TUI uses hidden API-key entry. Run /login and choose Ollama Cloud, or set OLLAMA_API_KEY."
+                    )),
                     _ => Err(anyhow::anyhow!(
-                        "Unknown provider: {}. Use: anthropic, openai, openai-codex",
+                        "Unknown provider: {}. Use: anthropic, openai, openai-codex, openrouter, ollama-cloud",
                         provider_clone
                     )),
                 };

@@ -2084,6 +2084,35 @@ fn slash_login_selector_opens_with_provider_catalog() {
     );
 }
 
+#[test]
+fn login_selector_ollama_cloud_opens_hidden_api_key_entry() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.open_login_selector();
+    let selector = app.selector.as_mut().expect("selector should be open");
+    let index = selector
+        .options
+        .iter()
+        .position(|o| o.value == "ollama-cloud")
+        .expect("ollama-cloud option present");
+    selector.cursor = index;
+
+    let message = app
+        .confirm_selector(&tx)
+        .expect("selector confirmation should return message");
+    let (label, masked) = app
+        .editor
+        .secret_display()
+        .expect("ollama-cloud should enter hidden secret mode");
+
+    assert_eq!(label, "OLLAMA_API_KEY");
+    assert!(masked.is_empty(), "secret buffer should start empty");
+    assert!(
+        message.contains("ollama-cloud") && message.contains("input is hidden"),
+        "unexpected message: {message}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Recovery hints
 // ═══════════════════════════════════════════════════════════════════

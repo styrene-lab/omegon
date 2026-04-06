@@ -927,11 +927,12 @@ impl App {
                             .unwrap_or(value.as_str());
                         Some(format!("Opening browser for {label} login…"))
                     }
-                    "openai" | "openrouter" | "brave" | "tavily" | "serper" | "huggingface" => {
+                    "openai" | "openrouter" | "ollama-cloud" | "brave" | "tavily" | "serper" | "huggingface" => {
                         // Map to the correct env var name for storage
                         let key_name = match value.as_str() {
                             "openai" => "OPENAI_API_KEY",
                             "openrouter" => "OPENROUTER_API_KEY",
+                            "ollama-cloud" => "OLLAMA_API_KEY",
                             "brave" => "BRAVE_API_KEY",
                             "tavily" => "TAVILY_API_KEY",
                             "serper" => "SERPER_API_KEY",
