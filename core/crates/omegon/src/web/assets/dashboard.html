@@ -417,6 +417,9 @@ function handleEvent(event) {
     case 'system_notification':
       addMessage('system', event.message);
       break;
+    case 'slash_command_result':
+      if (event.output) addMessage(event.accepted ? 'system' : 'tool', event.output);
+      break;
     case 'phase_changed':
       addMessage('system', `Phase → ${event.phase}`);
       break;

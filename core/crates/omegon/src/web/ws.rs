@@ -168,13 +168,41 @@ async fn handle_client_command(
         "slash_command" => {
             let name = cmd["name"].as_str().unwrap_or("").to_string();
             let args = cmd["args"].as_str().unwrap_or("").to_string();
-            let _ = command_tx
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
                 .send(WebCommand::SlashCommand {
-                    name,
-                    args,
-                    respond_to: None,
+                    name: name.clone(),
+                    args: args.clone(),
+                    respond_to: Some(reply_tx),
                 })
-                .await;
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => slash_command_result_message(&name, &args, response),
+                    Err(_) => slash_command_result_message(
+                        &name,
+                        &args,
+                        omegon_traits::SlashCommandResponse {
+                            accepted: false,
+                            output: Some(
+                                "slash command executor dropped response before completion"
+                                    .to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                slash_command_result_message(
+                    &name,
+                    &args,
+                    omegon_traits::SlashCommandResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue slash command".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
         }
         "cancel" => {
             let _ = command_tx.send(WebCommand::Cancel).await;
@@ -203,6 +231,22 @@ fn snapshot_message(snapshot: impl serde::Serialize) -> Value {
         "event_name": "state.snapshot",
         "name": "state.snapshot",
         "data": snapshot,
+    })
+}
+
+fn slash_command_result_message(
+    name: &str,
+    args: &str,
+    response: omegon_traits::SlashCommandResponse,
+) -> Value {
+    let output = response.output.unwrap_or_default();
+    json!({
+        "type": "slash_command_result",
+        "event_name": "slash.command.result",
+        "name": name,
+        "args": args,
+        "accepted": response.accepted,
+        "output": escape_html(&output),
     })
 }
 
@@ -380,6 +424,24 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slash_command_result_message_escapes_html_and_preserves_acceptance() {
+        let json = slash_command_result_message(
+            "context",
+            "status",
+            omegon_traits::SlashCommandResponse {
+                accepted: true,
+                output: Some("Context: <b>42</b>".into()),
+            },
+        );
+        assert_eq!(json["type"], "slash_command_result");
+        assert_eq!(json["event_name"], "slash.command.result");
+        assert_eq!(json["name"], "context");
+        assert_eq!(json["args"], "status");
+        assert_eq!(json["accepted"], true);
+        assert_eq!(json["output"], "Context: &lt;b&gt;42&lt;/b&gt;");
+    }
 
     #[test]
     fn serialize_turn_start() {
