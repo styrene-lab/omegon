@@ -375,11 +375,12 @@ impl InstrumentPanel {
         inference_height.max(tools_height).clamp(10, 16)
     }
 
-    fn context_legend_entries() -> [(&'static str, &'static str, Color); 4] {
+    fn context_legend_entries() -> [(&'static str, &'static str, Color); 5] {
         [
             ("≡", "conv", Self::band_color(ContextBand::Conversation)),
             ("⊟", "sys", Self::band_color(ContextBand::System)),
             ("◈", "mem", Self::band_color(ContextBand::Memory)),
+            ("✦", "tool", Self::band_color(ContextBand::Tools)),
             ("◔", "think", Self::band_color(ContextBand::Thinking)),
         ]
     }
@@ -488,7 +489,7 @@ impl InstrumentPanel {
         self.render_tools_panel(panels[1], frame, t);
     }
 
-    fn context_breakdown(&self) -> [(ContextBand, f64); 5] {
+    fn context_breakdown(&self) -> [(ContextBand, f64); 6] {
         let total_used = self.context_fill.clamp(0.0, 1.0);
         let ctx_window_f = self.context_window.max(1) as f64;
 
@@ -519,11 +520,22 @@ impl InstrumentPanel {
             0.0
         };
 
+        // ── TOOLS ──
+        // Tool schemas and recent tool call/result content occupy prompt surface too.
+        // We do not have exact token provenance yet, so use a bounded heuristic from
+        // active/recent tool load rather than pretending tools are free.
+        let tool_load = self.active_tool_load();
+        let tools = if tool_load > 0.0 {
+            let estimate = 0.02 + tool_load * 0.06;
+            estimate.min((total_used - system - memory - thinking).max(0.0))
+        } else {
+            0.0
+        };
+
         // ── CONVERSATION ──
-        // Everything else: user input, conversation history, message text.
-        // Tool calls are part of conversation tokens; tool activity is visualized as an
-        // animation overlay on conversation, not as a separate token bucket.
-        let conversation = (total_used - system - memory - thinking).max(0.0);
+        // User input, conversation history, and assistant text excluding the reserved
+        // shares attributed above.
+        let conversation = (total_used - system - memory - thinking - tools).max(0.0);
 
         // ── FREE SPACE ──
         let free = (1.0 - total_used).max(0.0);
@@ -532,6 +544,7 @@ impl InstrumentPanel {
             (ContextBand::Conversation, conversation),
             (ContextBand::System, system),
             (ContextBand::Memory, memory),
+            (ContextBand::Tools, tools),
             (ContextBand::Thinking, thinking),
             (ContextBand::Free, free),
         ]
@@ -2049,8 +2062,9 @@ mod tests {
         assert_eq!(breakdown[0].0, ContextBand::Conversation);
         assert_eq!(breakdown[1].0, ContextBand::System);
         assert_eq!(breakdown[2].0, ContextBand::Memory);
-        assert_eq!(breakdown[3].0, ContextBand::Thinking);
-        assert_eq!(breakdown[4].0, ContextBand::Free);
+        assert_eq!(breakdown[3].0, ContextBand::Tools);
+        assert_eq!(breakdown[4].0, ContextBand::Thinking);
+        assert_eq!(breakdown[5].0, ContextBand::Free);
     }
 
     #[test]
@@ -2171,14 +2185,16 @@ mod tests {
             "memory bucket legend should be visible: {legend_row}"
         );
         assert!(
+            legend_row.contains('✦') && legend_row.contains("tool"),
+            "tool surface legend should be visible as prompt composition: {legend_row}"
+        );
+        assert!(
             legend_row.contains('◔') && legend_row.contains("think"),
             "thinking bucket legend should be visible: {legend_row}"
         );
         assert!(
-            !legend_row.contains("tools")
-                && !legend_row.contains("wait")
-                && !legend_row.contains("idle"),
-            "composition legend should not include activity-state labels: {legend_row}"
+            !legend_row.contains("wait") && !legend_row.contains("idle"),
+            "composition legend should not include non-context activity-state labels: {legend_row}"
         );
     }
 
@@ -2304,6 +2320,27 @@ mod tests {
             !legend_row.contains("free") && !legend_row.contains('~'),
             "free capacity should remain implicit in the grey braille tail, not the legend: {legend_row}"
         );
+    }
+
+    #[test]
+    fn tool_surface_claims_a_composition_band_when_tools_are_active() {
+        let mut panel = InstrumentPanel::default();
+        panel.update_mind_facts(180, 12, 6, 0.08);
+        panel.tool_started("read");
+        panel.update_telemetry(68.0, 200_000, Some("read"), false, "high", None, true, 0.016);
+
+        let breakdown = panel.context_breakdown();
+        let tools = breakdown
+            .iter()
+            .find_map(|(band, frac)| (*band == ContextBand::Tools).then_some(*frac))
+            .unwrap_or(0.0);
+        let conversation = breakdown
+            .iter()
+            .find_map(|(band, frac)| (*band == ContextBand::Conversation).then_some(*frac))
+            .unwrap_or(0.0);
+
+        assert!(tools > 0.0, "active tools should reserve some context surface");
+        assert!(conversation > 0.0, "conversation should still retain its own band");
     }
 }
 

@@ -4,9 +4,9 @@ assertion_line: 449
 expression: render_to_string(&terminal)
 ---
   engine                              ╭ inference ───────────────────────────────╮╭ tools ─────────────────────────────╮
-  provider ⤵ Ollama (Local) · ● local │⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⣿⣇⣿⣿⣿⣿⣧⣿⣿⡇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂││▸ ▫ recall       220ms≋≋≋≋≋≋≋≋≋≋≋≋≋≋│
+  provider ⤵ Ollama (Local) · ● local │⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣿⣧⣿⣿⣿⣷⣿⣿⣿⣧⣿⣿⡇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂││▸ ▫ recall       220ms≋≋≋≋≋≋≋≋≋≋≋≋≋≋│
   model   qwen3                       │··········································││✗ ⊕  search      8.1s ≋≋≋≋≋≋≋≋≋≋≋≋≋·│
-  tier    Victory · High              │≡  conv ⊟ sys ◈  mem ◔ think              ││  ⌘ sh           1.2s ≋≋≋≋≋≋≋≋≋≋≋≋≋·│
+  tier    Victory · High              │≡  conv ⊟ sys ◈  mem ✦ tool ◔ think       ││  ⌘ sh           1.2s ≋≋≋≋≋≋≋≋≋≋≋≋≋·│
   state   Maniple 68% / ¤262k         │↑  —   ↓  —   ⊙  —    ✦ 0  ◎  0 recalled  ││                                    │
   session T8 ~$0                      ├─ project ⌗2440  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠒⠒⠤⢄││                                    │
   version v<current>              ├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤││                                    │
