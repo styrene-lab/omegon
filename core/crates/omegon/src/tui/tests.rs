@@ -2063,9 +2063,13 @@ fn slash_login_selector_opens_with_provider_catalog() {
     assert!(app.selector.is_some(), "selector should be open");
     let selector = app.selector.as_ref().unwrap();
     assert!(
-        selector.options.len() >= 9,
-        "should have at least 9 providers, got {}",
+        selector.options.len() >= 10,
+        "should have at least 10 providers, got {}",
         selector.options.len()
+    );
+    assert!(
+        selector.options.iter().any(|o| o.value == "ollama-cloud"),
+        "selector should include ollama-cloud"
     );
     // Verify structure: each option has a value and label
     for opt in &selector.options {

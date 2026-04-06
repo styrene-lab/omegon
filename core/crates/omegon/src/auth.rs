@@ -125,6 +125,14 @@ pub static PROVIDERS: &[ProviderCredential] = &[
         auth_method: AuthMethod::ApiKey,
         description: "Local inference — your hardware, your models",
     },
+    ProviderCredential {
+        id: "ollama-cloud",
+        auth_key: "ollama-cloud",
+        display_name: "Ollama Cloud",
+        env_vars: &["OLLAMA_API_KEY"],
+        auth_method: AuthMethod::ApiKey,
+        description: "API key — hosted Ollama via ollama.com/api",
+    },
     // ── Non-inference services ──────────────────────────────────────
     ProviderCredential {
         id: "brave",
@@ -327,14 +335,16 @@ pub fn write_credentials(provider: &str, creds: &OAuthCredentials) -> anyhow::Re
 pub async fn probe_all_providers() -> AuthStatus {
     let mut providers = Vec::new();
 
-    for provider in ["anthropic", "openai", "openai-codex"] {
+    for provider in ["anthropic", "openai", "openai-codex", "ollama-cloud"] {
         providers.push(probe_provider(provider).await);
     }
 
-    // Probe OpenRouter (only show if configured — it's optional)
-    let openrouter_info = probe_provider("openrouter").await;
-    if openrouter_info.status == ProviderAuthStatus::Authenticated {
-        providers.push(openrouter_info);
+    // Probe optional providers only show if configured.
+    for provider in ["openrouter"] {
+        let info = probe_provider(provider).await;
+        if info.status == ProviderAuthStatus::Authenticated {
+            providers.push(info);
+        }
     }
 
     // TODO: Probe Vault
@@ -1202,6 +1212,10 @@ mod tests {
         assert!(
             status.providers.iter().any(|p| p.name == "openai-codex"),
             "should probe chatgpt/codex"
+        );
+        assert!(
+            status.providers.iter().any(|p| p.name == "ollama-cloud"),
+            "should probe ollama cloud"
         );
     }
 

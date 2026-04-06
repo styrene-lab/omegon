@@ -1017,6 +1017,7 @@ impl App {
         ("ANTHROPIC_API_KEY", "", "Anthropic Claude API"),
         ("OPENAI_API_KEY", "", "OpenAI API"),
         ("OPENROUTER_API_KEY", "", "OpenRouter (free tier available)"),
+        ("OLLAMA_API_KEY", "", "Ollama Cloud API"),
         // Search providers
         ("BRAVE_API_KEY", "", "Brave Search API"),
         ("TAVILY_API_KEY", "", "Tavily Search API"),

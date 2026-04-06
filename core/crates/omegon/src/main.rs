@@ -2690,9 +2690,17 @@ async fn run_auth_login(provider: &str) -> anyhow::Result<()> {
             )
             .await
         }
+        "ollama-cloud" => {
+            login_api_key(
+                "ollama-cloud",
+                "OLLAMA_API_KEY",
+                "https://ollama.com/settings/keys",
+            )
+            .await
+        }
         _ => {
             eprintln!(
-                "Unknown provider: {provider}. Use: anthropic, openai, openai-codex, openrouter"
+                "Unknown provider: {provider}. Use: anthropic, openai, openai-codex, openrouter, ollama-cloud"
             );
             std::process::exit(1);
         }
