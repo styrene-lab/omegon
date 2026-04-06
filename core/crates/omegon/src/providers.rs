@@ -356,9 +356,10 @@ pub async fn resolve_provider(provider_id: &str) -> Option<Box<dyn LlmBridge>> {
         "openai" => OpenAIClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
         "openrouter" => OpenRouterClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
         // OpenAI-compatible providers — all use the Chat Completions protocol
-        "groq" | "xai" | "mistral" | "cerebras" | "huggingface" | "ollama" | "ollama-cloud" => {
+        "groq" | "xai" | "mistral" | "cerebras" | "huggingface" | "ollama" => {
             OpenAICompatClient::from_env(provider_id).map(|c| Box::new(c) as Box<dyn LlmBridge>)
         }
+        "ollama-cloud" => OllamaCloudClient::from_env().map(|c| Box::new(c) as Box<dyn LlmBridge>),
         // Codex uses the Responses API (not Chat Completions) with OAuth JWT tokens
         "openai-codex" => {
             if let Some(client) = CodexClient::from_env() {
@@ -2077,6 +2078,17 @@ pub struct OpenAICompatClient {
     default_model: Option<String>,
 }
 
+/// Native Ollama Cloud client.
+///
+/// Hosted Ollama is not exposed at the OpenAI-compatible `/v1/chat/completions`
+/// path we use for local Ollama. Its documented hosted API lives under
+/// `https://ollama.com/api/*` with bearer auth, so it needs its own transport.
+pub struct OllamaCloudClient {
+    client: reqwest::Client,
+    api_key: String,
+    base_url: String,
+}
+
 /// Base URLs for known OpenAI-compatible providers.
 fn compat_base_url(provider_id: &str) -> Option<&'static str> {
     match provider_id {
@@ -2086,9 +2098,12 @@ fn compat_base_url(provider_id: &str) -> Option<&'static str> {
         "cerebras" => Some("https://api.cerebras.ai"),
         "huggingface" => Some("https://router.huggingface.co"),
         "ollama" => Some("http://localhost:11434"),
-        "ollama-cloud" => Some("https://ollama.com/api"),
         _ => None,
     }
+}
+
+fn ollama_cloud_base_url() -> &'static str {
+    "https://ollama.com/api"
 }
 
 /// Default model for each compat provider (used when no model is specified).
@@ -2124,7 +2139,6 @@ impl OpenAICompatClient {
         let base_url = compat_base_url(provider_id)?;
 
         // Local Ollama doesn't need an API key — just check reachability.
-        // Hosted Ollama is a distinct provider and requires OLLAMA_API_KEY.
         if provider_id == "ollama" {
             return Self::from_env_ollama(base_url);
         }
@@ -2156,6 +2170,45 @@ impl OpenAICompatClient {
                 None
             }
         }
+    }
+}
+
+impl OllamaCloudClient {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            api_key,
+            base_url: ollama_cloud_base_url().to_string(),
+        }
+    }
+
+    pub fn from_env() -> Option<Self> {
+        resolve_api_key("ollama-cloud").map(Self::new)
+    }
+
+    fn endpoint_url(&self) -> String {
+        format!("{}/chat", self.base_url.trim_end_matches('/'))
+    }
+
+    fn build_wire_messages(system_prompt: &str, messages: &[LlmMessage]) -> Vec<Value> {
+        let mut wire_msgs = vec![json!({"role": "system", "content": system_prompt})];
+        for m in messages {
+            match m {
+                LlmMessage::User { content, .. } => {
+                    wire_msgs.push(json!({"role": "user", "content": content}));
+                }
+                LlmMessage::Assistant { text, .. } => {
+                    let joined = text.join("");
+                    if !joined.is_empty() {
+                        wire_msgs.push(json!({"role": "assistant", "content": joined}));
+                    }
+                }
+                LlmMessage::ToolResult { content, .. } => {
+                    wire_msgs.push(json!({"role": "tool", "content": content}));
+                }
+            }
+        }
+        wire_msgs
     }
 }
 
@@ -2207,6 +2260,78 @@ impl LlmBridge for OpenAICompatClient {
         self.inner
             .stream(system_prompt, messages, tools, &opts)
             .await
+    }
+}
+
+#[async_trait]
+impl LlmBridge for OllamaCloudClient {
+    async fn stream(
+        &self,
+        system_prompt: &str,
+        messages: &[LlmMessage],
+        _tools: &[ToolDefinition],
+        options: &StreamOptions,
+    ) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
+        let (tx, rx) = mpsc::channel(256);
+        let model = options
+            .model
+            .as_deref()
+            .map(|m| model_id_from_spec(m).to_string())
+            .filter(|m| !m.is_empty())
+            .unwrap_or_else(|| compat_default_model("ollama-cloud").unwrap_or("gpt-oss:120b-cloud").to_string());
+
+        let body = json!({
+            "model": model,
+            "messages": Self::build_wire_messages(system_prompt, messages),
+            "stream": false,
+        });
+
+        let response = self
+            .client
+            .post(self.endpoint_url())
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let err = response.text().await.unwrap_or_default();
+            let _ = tx
+                .send(LlmEvent::Error {
+                    message: format!("Ollama Cloud {status}: {err}"),
+                })
+                .await;
+            return Ok(rx);
+        }
+
+        let provider_telemetry = parse_rate_limit_snapshot("ollama-cloud", response.headers());
+        let payload: Value = response.json().await?;
+        let content = payload
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+
+        let _ = tx.send(LlmEvent::Start).await;
+        let _ = tx.send(LlmEvent::TextStart).await;
+        if !content.is_empty() {
+            let _ = tx.send(LlmEvent::TextDelta { delta: content.clone() }).await;
+        }
+        let _ = tx.send(LlmEvent::TextEnd).await;
+        let _ = tx
+            .send(LlmEvent::Done {
+                message: json!({"role": "assistant", "content": content}),
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                provider_telemetry,
+            })
+            .await;
+
+        Ok(rx)
     }
 }
 
@@ -2780,20 +2905,14 @@ mod tests {
 
     #[test]
     fn compat_base_url_covers_all_providers() {
-        for id in [
-            "groq",
-            "xai",
-            "mistral",
-            "cerebras",
-            "huggingface",
-            "ollama",
-            "ollama-cloud",
-        ] {
+        for id in ["groq", "xai", "mistral", "cerebras", "huggingface", "ollama"] {
             assert!(
                 super::compat_base_url(id).is_some(),
                 "missing base URL for {id}"
             );
         }
+        assert_eq!(super::ollama_cloud_base_url(), "https://ollama.com/api");
+        assert!(super::compat_base_url("ollama-cloud").is_none());
         assert!(super::compat_base_url("unknown").is_none());
     }
 
@@ -2813,6 +2932,27 @@ mod tests {
                 "missing default model for {id}"
             );
         }
+    }
+
+    #[test]
+    fn ollama_cloud_uses_native_chat_endpoint() {
+        let client = OllamaCloudClient::new("test-key".into());
+        assert_eq!(client.endpoint_url(), "https://ollama.com/api/chat");
+    }
+
+    #[test]
+    fn ollama_cloud_wire_messages_include_system_and_user_content() {
+        let wire = OllamaCloudClient::build_wire_messages(
+            "system",
+            &[LlmMessage::User {
+                content: "hello".into(),
+                images: vec![],
+            }],
+        );
+        assert_eq!(wire[0]["role"], "system");
+        assert_eq!(wire[0]["content"], "system");
+        assert_eq!(wire[1]["role"], "user");
+        assert_eq!(wire[1]["content"], "hello");
     }
 
     #[test]
