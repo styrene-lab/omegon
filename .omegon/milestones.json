@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 23,
+    "rc_count": 24,
     "notes": [
       "feat(code-survey): Inspect the codebase for telemetry, metrics, tracing, event logging, and dashboard/session instrumentation surfaces. Summarize what telemetry the harness currently captures, where it lives, and notable gaps or inconsistencies.",
       "feat(compliance): enforce Anthropic subscription ToS interactive-only boundary",
@@ -431,6 +431,7 @@
       "feat(ipc): add canonical omegon instance descriptor",
       "feat(omegon): route remote slash commands through canonical runtime executor",
       "feat(otel-research): Research whether OpenTelemetry is an appropriate fit for the harness. Compare current telemetry needs against OpenTelemetry capabilities, integration cost, likely benefits, and adoption risks for this project.",
+      "feat(providers): wire ollama-cloud through runtime routing",
       "feat(session-log): record provider telemetry per turn",
       "feat(telemetry): parse ChatGPT Codex x-codex-* quota headers into provider telemetry",
       "feat(telemetry): scaffold provider usage snapshot events",
@@ -443,6 +444,7 @@
       "feat(web): mirror omegon instance descriptor into startup and state",
       "feat(ws-contract): Audit and implement WebSocket event contract changes needed for Auspex compatibility. Focus on core/crates/omegon/src/web/ws.rs plus any upstream event types it serializes so streamed events expose the fields Auspex expects or can safely ignore, especially turn-end/session/harness updates and state snapshot refresh semantics. Add tests for event serialization.",
       "fix(agent): hide attachment redisplay hints from user messages",
+      "fix(auth): expose ollama-cloud in login surfaces",
       "fix(cleave): clean scratch workspace after successful runs",
       "fix(compliance): warn instead of blocking Anthropic subscription automation",
       "fix(context): execute auto-compaction from real usage",
@@ -483,7 +485,7 @@
       "refactor(tui): make /auspex open the primary browser launch path",
       "refactor(tui): simplify slash command auth and context paths"
     ],
-    "rc_version": "0.15.10-rc.24",
-    "last_rc": "2026-04-06T18:20:40Z"
+    "rc_version": "0.15.10-rc.25",
+    "last_rc": "2026-04-06T18:55:57Z"
   }
 }
