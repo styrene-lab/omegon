@@ -27,7 +27,7 @@ codegen-units = 4
 strip = false
 
 [workspace.package]
-version = "0.15.10-rc.36"
+version = "0.15.10-rc.37"
 edition = "2024"
 license = "BUSL-1.1"
 repository = "https://github.com/styrene-lab/omegon"

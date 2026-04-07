@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 36,
+    "rc_count": 37,
     "notes": [
       "feat(auspex): add mode-aware local handoff probe",
       "feat(auspex): launch desktop handoff from cached startup payload",
@@ -462,6 +462,7 @@
       "fix(auth): expose ollama-cloud in login surfaces",
       "fix(auth): route ollama-cloud login through hidden key entry",
       "fix(cleave): clean scratch workspace after successful runs",
+      "fix(cli): align auth provider help with daemon support",
       "fix(compliance): warn instead of blocking Anthropic subscription automation",
       "fix(context): execute auto-compaction from real usage",
       "fix(context): sync compact status with authoritative snapshot",
@@ -483,6 +484,7 @@
       "fix(runtime): fill new daemon metadata in snapshots",
       "fix(session): give interactive omegon runs stable live session ids",
       "fix(telemetry): format provider usage by active backend",
+      "fix(tui): align activity row with context band semantics",
       "fix(tui): align footer context state with inference composition",
       "fix(tui): calm inference activity row glyphs",
       "fix(tui): clear footer surfaces before repaint",
@@ -501,6 +503,7 @@
       "fix(tui): render markdown tool output and split context activity",
       "fix(tui): render operator attachments as inline placeholders",
       "fix(tui): render tool result markdown tables",
+      "fix(tui): separate defs and history context colors",
       "fix(tui): show provider telemetry in split footer",
       "fix(tui): show session stats and broaden codex telemetry parsing",
       "fix(tui): show tool surface in context composition",
@@ -522,7 +525,7 @@
       "refactor(tui): remove activity-row phase labels",
       "refactor(tui): simplify slash command auth and context paths"
     ],
-    "rc_version": "0.15.10-rc.36",
-    "last_rc": "2026-04-07T19:17:08Z"
+    "rc_version": "0.15.10-rc.37",
+    "last_rc": "2026-04-07T19:55:49Z"
   }
 }
