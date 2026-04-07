@@ -20,7 +20,7 @@ use crate::features::cleave::CleaveProgress;
 use omegon_traits::ContextComposition;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 fn panel_bg(t: &dyn Theme) -> Color {
     t.footer_bg()
@@ -89,6 +89,59 @@ fn clear_row(y: u16, x0: u16, x1: u16, buf: &mut Buffer, bg: Color) {
             cell.set_bg(bg);
         }
     }
+}
+
+fn strip_terminal_control(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            match chars.peek().copied() {
+                Some('[') => {
+                    chars.next();
+                    for next in chars.by_ref() {
+                        if ('@'..='~').contains(&next) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    chars.next();
+                    let mut prev = '\0';
+                    for next in chars.by_ref() {
+                        if next == '\u{7}' || (prev == '\u{1b}' && next == '\\') {
+                            break;
+                        }
+                        prev = next;
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if ch.is_control() {
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn truncate_display_width(input: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in input.chars() {
+        let w = UnicodeWidthChar::width_cjk(ch).unwrap_or(1);
+        if used + w > max_width {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    out
 }
 
 /// Scale an RGB color's brightness.
@@ -1269,7 +1322,12 @@ impl InstrumentPanel {
                 String::new()
             };
             let act_color = Color::Rgb(36, 80, 96);
-            let act_display: String = activity.chars().take(activity_w).collect();
+            let sanitized_activity = strip_terminal_control(&activity);
+            let act_display = if UnicodeWidthStr::width(sanitized_activity.as_str()) > activity_w {
+                truncate_display_width(&sanitized_activity, activity_w)
+            } else {
+                sanitized_activity
+            };
             x = render_str_colored(&act_display, x, y, inner.right(), panel_bg(t), buf, |_| {
                 act_color
             });
@@ -1951,7 +2009,6 @@ mod tests {
                 panel.render(area, f, &t);
                 {
                     let buf = f.buffer_mut();
-                    // Re-mark the interior zones so any subsequent bleed is easy to spot.
                     for y in inference_inner.y..inference_inner.bottom() {
                         for x in inference_inner.x..inference_inner.right() {
                             if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
@@ -2001,6 +2058,58 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn cleave_activity_strips_ansi_and_stays_inside_tools_panel() {
+        let mut panel = InstrumentPanel::default();
+        panel.set_cleave_progress(Some(CleaveProgress {
+            active: true,
+            run_id: "ansi-run".into(),
+            total_children: 1,
+            completed: 0,
+            failed: 0,
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+            children: vec![crate::features::cleave::ChildProgress {
+                label: "32".into(),
+                status: "running".into(),
+                duration_secs: Some(3.4),
+                last_tool: Some("\u{1b}[32;7;14mcall\u{1b}[0m".into()),
+                last_turn: None,
+                started_at: None,
+                tokens_in: 0,
+                tokens_out: 0,
+            }],
+        }));
+
+        let area = Rect::new(0, 0, 96, 10);
+        let backend = ratatui::backend::TestBackend::new(96, 10);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let t = crate::tui::theme::Alpharius;
+
+        terminal.draw(|f| panel.render(area, f, &t)).unwrap();
+
+        let panels = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
+            .split(area);
+        let tools_inner = Block::default().borders(Borders::ALL).inner(panels[1]);
+        let buf = terminal.backend().buffer();
+        let rendered = (tools_inner.y..tools_inner.bottom())
+            .map(|y| {
+                (tools_inner.x..tools_inner.right())
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            !rendered.contains("32;7;14m")
+                && !rendered.contains("[0m")
+                && !rendered.contains('\u{1b}')
+                && rendered.contains("→ call"),
+            "cleave activity should strip ANSI/control-sequence debris before rendering: {rendered:?}"
+        );
     }
 
     #[test]
