@@ -1,15 +1,14 @@
 ---
 source: crates/omegon/src/tui/snapshot_tests.rs
-assertion_line: 464
 expression: render_to_string(&terminal)
 ---
   engine                              ╭ inference ───────────────────────────────╮╭ tools ─────────────────────────────╮
   provider ⤵ Ollama (Local) · ● local │⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣇⣿⣿⣧⣿⣿⣿⣿⣿⣿⡇⡇⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂││▸ ▫ recall       220ms≋≋≋≋≋≋≋≋≋≋≋≋≋≋│
   model   qwen3                       │··········································││✗ ⊕  search      8.1s ≋≋≋≋≋≋≋≋≋≋≋≋≋·│
-  tier    Victory · High              │≡  conv ⊟ sys ◈  mem ✦ tool ◔ think       ││  ⌘ sh           1.2s ≋≋≋≋≋≋≋≋≋≋≋≋≋·│
-  state   Maniple 68% / ¤262k         │↑  800  ↓  120  ⊙  0%   ✦ 0  ◎  0 recalled││                                    │
-  session T8 ~$0                      ├─ project ⌗2440  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠒⠒⠤⢄ ││                                    │
-                                      ├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ ││                                    │
+  version v<current>              │≡  conv ⊟ sys ◈  mem ✦ tool ◔ think       ││  ⌘ sh           1.2s ≋≋≋≋≋≋≋≋≋≋≋≋≋·│
+  tier    Victory · High              │↑  800  ↓  120  ⊙  0%   ✦ 0  ◎  0 recalled││                                    │
+  state   Maniple 68% / ¤262k         ├─ project ⌗2440  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠒⠒⠤⢄ ││                                    │
+  session T8 ~$0                      ├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ ││                                    │
                                       └─ episodes ⌗45  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ ││                                    │
                                       │                                          ││                                    │
                                       │                                          ││                                    │

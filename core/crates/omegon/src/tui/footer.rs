@@ -202,6 +202,14 @@ impl FooterData {
                 t.muted(),
                 false,
             );
+            push_row(
+                &mut lines,
+                "version",
+                format_version_text(self.update_available.as_deref()),
+                t.border_dim(),
+                t.dim(),
+                false,
+            );
         } else {
             let model_short = short_model(&self.model_id);
             let provider_label = crate::auth::provider_by_id(&self.model_provider)
@@ -288,6 +296,14 @@ impl FooterData {
                 t.border_dim(),
                 t.muted(),
                 true,
+            );
+            push_row(
+                &mut lines,
+                "version",
+                format_version_text(self.update_available.as_deref()),
+                t.border_dim(),
+                t.dim(),
+                false,
             );
             if !self.model_tier.is_empty() {
                 push_row(
@@ -1242,7 +1258,7 @@ mod tests {
     }
 
     #[test]
-    fn left_panel_prioritizes_operator_rows_over_version_and_path() {
+    fn left_panel_keeps_version_visible_without_showing_path_noise() {
         let data = FooterData {
             model_id: "openai:gpt-5.4".into(),
             model_provider: "openai".into(),
@@ -1259,7 +1275,7 @@ mod tests {
             update_available: Some("9.9.9".into()),
             ..Default::default()
         };
-        let text = render_left_panel_text(&data, 38, 8);
+        let text = render_left_panel_text(&data, 52, 10);
 
         assert!(text.contains("gpt-5.4"), "got {text}");
         assert!(
@@ -1268,9 +1284,10 @@ mod tests {
         );
         assert!(text.contains("High") || text.contains("high"), "got {text}");
         assert!(text.contains("T7"), "got {text}");
-        assert!(!text.contains("version"), "got {text}");
+        assert!(text.contains("version"), "got {text}");
+        assert!(text.contains("v"), "got {text}");
+        assert!(text.contains("9.9.9"), "got {text}");
         assert!(!text.contains("/Users/test/workspace"), "got {text}");
-        assert!(!text.contains("v9.9.9"), "got {text}");
     }
 
     #[test]
@@ -1290,7 +1307,7 @@ mod tests {
             is_oauth: true,
             ..Default::default()
         };
-        let text = render_left_panel_text(&data, 64, 8);
+        let text = render_left_panel_text(&data, 64, 10);
 
         assert!(
             text.contains("⤴ OpenAI") || text.contains("⤴ openai"),
@@ -1299,6 +1316,7 @@ mod tests {
         assert!(text.contains("↻ sub"), "got {text}");
         // model name is on its own row; tier + thinking on the next
         assert!(text.contains("gpt-5.4"), "got {text}");
+        assert!(text.contains("version"), "got {text}");
         assert!(
             text.contains("Victory · High") || text.contains("victory · high"),
             "got {text}"
@@ -1381,8 +1399,9 @@ mod tests {
             session_output_tokens: 3_000,
             ..Default::default()
         };
-        let text = render_left_panel_text(&data, 72, 9);
+        let text = render_left_panel_text(&data, 72, 10);
 
+        assert!(text.contains("version"), "got {text}");
         assert!(text.contains("session"), "got {text}");
         assert!(text.contains("T9"), "got {text}");
         assert!(text.contains("¤12k/¤3k"), "got {text}");
