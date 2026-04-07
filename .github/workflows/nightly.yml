@@ -10,6 +10,11 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  OMEGON_RUN_LIVE_UPSTREAM_TESTS: "1"
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+  OLLAMA_HOST: ${{ secrets.OLLAMA_HOST }}
 
 jobs:
   cut-nightly:
@@ -27,6 +32,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Run live upstream smoke suite
+        run: |
+          cd core
+          cargo test -p omegon --test live_upstream_smoke -- --nocapture
 
       - name: Compute nightly version
         id: nightly
