@@ -270,6 +270,19 @@ pub struct CleaveProgress {
     pub total_tokens_out: u64,
 }
 
+#[derive(Default, Clone)]
+pub struct ChildRuntimeSummary {
+    pub model: Option<String>,
+    pub thinking_level: Option<String>,
+    pub context_class: Option<String>,
+    pub enabled_tools: Vec<String>,
+    pub disabled_tools: Vec<String>,
+    pub skills: Vec<String>,
+    pub enabled_extensions: Vec<String>,
+    pub disabled_extensions: Vec<String>,
+    pub preloaded_files: Vec<String>,
+}
+
 #[derive(Clone)]
 pub struct ChildProgress {
     pub label: String,
@@ -285,6 +298,21 @@ pub struct ChildProgress {
     pub tokens_in: u64,
     /// Cumulative output tokens consumed by this child.
     pub tokens_out: u64,
+    pub runtime: Option<ChildRuntimeSummary>,
+}
+
+fn child_runtime_summary(runtime: &crate::cleave::CleaveChildRuntimeProfile) -> ChildRuntimeSummary {
+    ChildRuntimeSummary {
+        model: runtime.model.clone(),
+        thinking_level: runtime.thinking_level.clone(),
+        context_class: runtime.context_class.clone(),
+        enabled_tools: runtime.enabled_tools.clone(),
+        disabled_tools: runtime.disabled_tools.clone(),
+        skills: runtime.skills.clone(),
+        enabled_extensions: runtime.enabled_extensions.clone(),
+        disabled_extensions: runtime.disabled_extensions.clone(),
+        preloaded_files: runtime.preloaded_files.clone(),
+    }
 }
 
 fn recompute_progress_counts(progress: &mut CleaveProgress) {
@@ -320,6 +348,7 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
                     started_at: Some(std::time::Instant::now()),
                     tokens_in: 0,
                     tokens_out: 0,
+                    runtime: None,
                 });
                 progress.total_children = progress.children.len();
             }
@@ -372,6 +401,7 @@ fn apply_progress_event(shared: &Arc<Mutex<CleaveProgress>>, event: &ProgressEve
                     started_at: None,
                     tokens_in: 0,
                     tokens_out: 0,
+                    runtime: None,
                 });
                 progress.total_children = progress.children.len();
             }
@@ -484,6 +514,7 @@ impl CleaveFeature {
                     started_at: None,
                     tokens_in: 0,
                     tokens_out: 0,
+                    runtime: c.runtime.as_ref().map(child_runtime_summary),
                 })
                 .collect();
             prog.total_tokens_in = 0;
@@ -912,6 +943,7 @@ mod tests {
                 started_at: None,
                 tokens_in: 0,
                 tokens_out: 0,
+                runtime: None,
             }],
             total_tokens_in: 0,
             total_tokens_out: 0,
@@ -963,6 +995,7 @@ mod tests {
                 started_at: None,
                 tokens_in: 0,
                 tokens_out: 0,
+                runtime: None,
             }],
             total_tokens_in: 0,
             total_tokens_out: 0,

@@ -1732,6 +1732,7 @@ mod tests {
                     started_at: None,
                     tokens_in: 0,
                     tokens_out: 0,
+                    runtime: None,
                 },
                 crate::features::cleave::ChildProgress {
                     label: "beta".into(),
@@ -1742,6 +1743,7 @@ mod tests {
                     started_at: None,
                     tokens_in: 0,
                     tokens_out: 0,
+                    runtime: None,
                 },
             ],
         }));
@@ -2080,6 +2082,7 @@ mod tests {
                 started_at: None,
                 tokens_in: 0,
                 tokens_out: 0,
+                runtime: None,
             }],
         }));
 

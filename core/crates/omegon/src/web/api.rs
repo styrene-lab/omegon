@@ -97,10 +97,24 @@ pub struct CleaveSnapshot {
 }
 
 #[derive(Serialize)]
+pub struct ChildRuntimeSnapshot {
+    pub model: Option<String>,
+    pub thinking_level: Option<String>,
+    pub context_class: Option<String>,
+    pub enabled_tools: Vec<String>,
+    pub disabled_tools: Vec<String>,
+    pub skills: Vec<String>,
+    pub enabled_extensions: Vec<String>,
+    pub disabled_extensions: Vec<String>,
+    pub preloaded_files: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct ChildSnapshot {
     pub label: String,
     pub status: String,
     pub duration_secs: Option<f64>,
+    pub runtime: Option<ChildRuntimeSnapshot>,
 }
 
 #[derive(Serialize)]
@@ -430,6 +444,17 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                         label: c.label.clone(),
                         status: c.status.clone(),
                         duration_secs: c.duration_secs,
+                        runtime: c.runtime.as_ref().map(|runtime| ChildRuntimeSnapshot {
+                            model: runtime.model.clone(),
+                            thinking_level: runtime.thinking_level.clone(),
+                            context_class: runtime.context_class.clone(),
+                            enabled_tools: runtime.enabled_tools.clone(),
+                            disabled_tools: runtime.disabled_tools.clone(),
+                            skills: runtime.skills.clone(),
+                            enabled_extensions: runtime.enabled_extensions.clone(),
+                            disabled_extensions: runtime.disabled_extensions.clone(),
+                            preloaded_files: runtime.preloaded_files.clone(),
+                        }),
                     })
                     .collect(),
             }
@@ -734,6 +759,56 @@ mod tests {
         assert_eq!(payload.queued_events, 1);
         assert_eq!(state.daemon_events.lock().unwrap().len(), 1);
         assert_eq!(state.daemon_status.lock().unwrap().queued_events, 1);
+    }
+
+    #[test]
+    fn build_snapshot_includes_child_runtime_profile() {
+        let runtime = crate::features::cleave::ChildRuntimeSummary {
+            model: Some("anthropic:claude-sonnet-4-6".into()),
+            thinking_level: Some("high".into()),
+            context_class: Some("legion".into()),
+            enabled_tools: vec!["read".into()],
+            disabled_tools: vec!["bash".into()],
+            skills: vec!["security".into()],
+            enabled_extensions: vec!["alpha".into()],
+            disabled_extensions: vec!["beta".into()],
+            preloaded_files: vec!["docs/runtime-preload.md".into()],
+        };
+        let mut state = test_state();
+        state.handles = DashboardHandles {
+            cleave: Some(std::sync::Arc::new(std::sync::Mutex::new(
+                crate::features::cleave::CleaveProgress {
+                    active: true,
+                    run_id: "run-1".into(),
+                    total_children: 1,
+                    completed: 0,
+                    failed: 0,
+                    children: vec![crate::features::cleave::ChildProgress {
+                        label: "child-1".into(),
+                        status: "running".into(),
+                        duration_secs: None,
+                        last_tool: None,
+                        last_turn: None,
+                        started_at: None,
+                        tokens_in: 0,
+                        tokens_out: 0,
+                        runtime: Some(runtime),
+                    }],
+                    total_tokens_in: 0,
+                    total_tokens_out: 0,
+                },
+            ))),
+            ..DashboardHandles::default()
+        };
+
+        let snap = build_snapshot(&state);
+        let child = &snap.cleave.children[0];
+        let runtime = child.runtime.as_ref().expect("runtime should be present");
+        assert_eq!(runtime.model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
+        assert_eq!(runtime.context_class.as_deref(), Some("legion"));
+        assert_eq!(runtime.disabled_tools, vec!["bash"]);
+        assert_eq!(runtime.enabled_extensions, vec!["alpha"]);
+        assert_eq!(runtime.preloaded_files, vec!["docs/runtime-preload.md"]);
     }
 
     #[test]
