@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::conversation::ConversationState;
+use crate::shadow_context::{ContextKind, EntryBody, ShadowContext, ShadowEntry};
 
 /// Manages dynamic system prompt assembly.
 pub struct ContextManager {
@@ -25,6 +26,7 @@ pub struct ContextManager {
     session_start: Instant,
     /// Context window size in tokens for budget calculations.
     context_window: usize,
+    shadow: ShadowContext,
 }
 
 struct ActiveInjection {
@@ -43,12 +45,27 @@ impl ContextManager {
             phase: LifecyclePhase::default(),
             session_start: Instant::now(),
             context_window: 200_000, // Default for Anthropic models
+            shadow: ShadowContext::new(crate::settings::SelectorPolicy {
+                model_window: 200_000,
+                requested_class: crate::settings::ContextClass::Maniple,
+                reply_reserve: 8_192,
+                tool_schema_reserve: 4_096,
+            }),
         }
     }
 
     /// Set the context window size (in tokens) for budget calculations.
     pub fn set_context_window(&mut self, tokens: usize) {
         self.context_window = tokens;
+        let mut policy = self.shadow.selector_policy();
+        policy.model_window = tokens;
+        self.shadow.set_selector_policy(policy);
+    }
+
+    /// Update the full selector policy for turn assembly.
+    pub fn set_selector_policy(&mut self, policy: crate::settings::SelectorPolicy) {
+        self.context_window = policy.model_window;
+        self.shadow.set_selector_policy(policy);
     }
 
     /// Context budget in tokens available for injections this turn.
@@ -110,7 +127,7 @@ impl ContextManager {
             },
         });
 
-        self.assemble()
+        self.assemble(user_prompt)
     }
 
     /// Build the session HUD line.
@@ -361,19 +378,39 @@ impl ContextManager {
         }
     }
 
-    fn assemble(&self) -> String {
-        let mut prompt = self.base_prompt.clone();
+    fn assemble(&mut self, user_prompt: &str) -> String {
+        self.shadow.remove_by_source_prefix("base-prompt");
+        let mut base = ShadowEntry::new(
+            "base-prompt",
+            ContextKind::BaseSystemPrompt,
+            EntryBody::Inline(self.base_prompt.clone()),
+        );
+        base.mandatory = true;
+        self.shadow.upsert(base);
 
-        // Sort injections by priority (highest first)
-        let mut sorted: Vec<_> = self.active_injections.iter().collect();
-        sorted.sort_by(|a, b| b.injection.priority.cmp(&a.injection.priority));
-
-        for active in sorted {
-            prompt.push_str("\n\n");
-            prompt.push_str(&active.injection.content);
+        for active in &self.active_injections {
+            let kind = match active.injection.source.as_str() {
+                "session-hud" => ContextKind::SessionHud,
+                "intent-document" => ContextKind::IntentDocument,
+                source if source.starts_with("tool-group:") || source.starts_with("file-type:") => {
+                    ContextKind::TaskArtifact
+                }
+                _ => ContextKind::TaskArtifact,
+            };
+            let mut entry = ShadowEntry::new(
+                format!("inj:{}", active.injection.source),
+                kind,
+                EntryBody::Inline(active.injection.content.clone()),
+            );
+            entry.ttl_turns = Some(active.remaining_turns);
+            entry.mandatory = active.injection.priority >= 190;
+            self.shadow.upsert(entry);
         }
 
-        prompt
+        let selected = self
+            .shadow
+            .select_for_turn(self.active_injections.len() as u32 + 1, user_prompt);
+        self.shadow.render_selection(&selected)
     }
 }
 

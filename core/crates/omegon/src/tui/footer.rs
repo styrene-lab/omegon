@@ -29,6 +29,7 @@ pub struct FooterData {
     pub context_percent: f32,
     pub context_window: usize,
     pub context_class: ContextClass,
+    pub actual_context_class: ContextClass,
     pub context_mode: ContextMode,
     pub total_facts: usize,
     pub injected_facts: usize,
@@ -573,10 +574,15 @@ impl FooterData {
             t.muted()
         };
 
-        let ctx_class_color = match self.context_class {
+        let ctx_class_color = match self.actual_context_class {
             ContextClass::Legion => t.accent(),
             ContextClass::Clan => t.fg(),
             _ => t.dim(),
+        };
+        let context_badge = if self.context_class != self.actual_context_class {
+            format!("{}→{}", self.context_class.short(), self.actual_context_class.short())
+        } else {
+            self.actual_context_class.short().to_string()
         };
 
         lines.push(Line::from(vec![
@@ -587,7 +593,7 @@ impl FooterData {
             ),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
             Span::styled(
-                self.context_class.short(),
+                context_badge,
                 Style::default().fg(ctx_class_color),
             ),
             Span::styled(

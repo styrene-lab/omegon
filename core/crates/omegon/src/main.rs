@@ -1225,7 +1225,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                     metrics.update(
                                         est,
                                         ctx_window,
-                                        &s.context_class.label(),
+                                        &s.effective_requested_class().label(),
                                         s.thinking.as_str(),
                                     );
                                 }
@@ -1282,10 +1282,11 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 };
                 let _ = events_tx.send(AgentEvent::SystemNotification {
                     message: format!(
-                        "Context: {}/{} tokens ({}%)\nClass: {}\nThinking: {}",
+                        "Context: {}/{} tokens ({}%)\nPolicy: {}\nModel: {}\nThinking: {}",
                         est,
                         ctx_window,
                         pct,
+                        settings.effective_requested_class().label(),
                         settings.context_class.label(),
                         settings.thinking.as_str()
                     ),
@@ -1320,7 +1321,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 metrics.update(
                                     est,
                                     settings.context_window,
-                                    &settings.context_class.label(),
+                                    &settings.effective_requested_class().label(),
                                     settings.thinking.as_str(),
                                 );
                             }
@@ -1329,7 +1330,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                             let _ = events_tx.send(AgentEvent::ContextUpdated {
                                 tokens: est as u64,
                                 context_window: settings.context_window as u64,
-                                context_class: settings.context_class.label().to_string(),
+                                context_class: settings.effective_requested_class().label().to_string(),
                                 thinking_level: settings.thinking.as_str().to_string(),
                             });
 
@@ -1875,14 +1876,14 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         metrics.update(
                             est,
                             settings.context_window,
-                            &settings.context_class.label(),
+                            &settings.effective_requested_class().label(),
                             settings.thinking.as_str(),
                         );
                     }
                     let _ = events_tx.send(AgentEvent::ContextUpdated {
                         tokens: est as u64,
                         context_window: settings.context_window as u64,
-                        context_class: settings.context_class.label().to_string(),
+                        context_class: settings.effective_requested_class().label().to_string(),
                         thinking_level: settings.thinking.as_str().to_string(),
                     });
                 }
@@ -2515,10 +2516,11 @@ async fn execute_remote_slash_command(
             SlashCommandResponse {
                 accepted: true,
                 output: Some(format!(
-                    "Context: {}/{} tokens ({}%)\nClass: {}\nThinking: {}",
+                    "Context: {}/{} tokens ({}%)\nPolicy: {}\nModel: {}\nThinking: {}",
                     est,
                     ctx_window,
                     pct,
+                    settings.effective_requested_class().label(),
                     settings.context_class.label(),
                     settings.thinking.as_str()
                 )),
@@ -2550,14 +2552,14 @@ async fn execute_remote_slash_command(
                             metrics.update(
                                 est,
                                 settings.context_window,
-                                &settings.context_class.label(),
+                                &settings.effective_requested_class().label(),
                                 settings.thinking.as_str(),
                             );
                         }
                         let _ = events_tx.send(AgentEvent::ContextUpdated {
                             tokens: est as u64,
                             context_window: settings.context_window as u64,
-                            context_class: settings.context_class.label().to_string(),
+                            context_class: settings.effective_requested_class().label().to_string(),
                             thinking_level: settings.thinking.as_str().to_string(),
                         });
                         SlashCommandResponse {

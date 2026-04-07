@@ -202,6 +202,11 @@ pub async fn run(
             .as_ref()
             .and_then(|s| s.lock().ok().map(|g| g.context_window))
             .unwrap_or(200_000);
+        if let Some(settings) = config.settings.as_ref().and_then(|s| s.lock().ok().map(|g| g.clone())) {
+            context.set_selector_policy(settings.selector_policy());
+        } else {
+            context.set_context_window(context_window);
+        }
 
         // ─── Turn limit enforcement ─────────────────────────────────
         if config.max_turns > 0 && turn > config.max_turns {

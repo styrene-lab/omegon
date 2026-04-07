@@ -2013,6 +2013,7 @@ impl App {
             self.footer_data.model_id = s.model.clone();
             self.footer_data.model_provider = s.provider().to_string();
             self.footer_data.context_class = s.effective_requested_class();
+            self.footer_data.actual_context_class = s.context_class;
             self.footer_data.context_mode = s.context_mode;
             self.footer_data.context_window = s.context_window;
             self.footer_data.thinking_level = s.thinking.as_str().to_string();
@@ -4411,6 +4412,8 @@ impl App {
                     crate::settings::ContextClass::parse(&context_class).unwrap_or_else(|| {
                         crate::settings::ContextClass::from_tokens(context_window as usize)
                     });
+                self.footer_data.actual_context_class =
+                    crate::settings::ContextClass::from_tokens(context_window as usize);
                 self.footer_data.thinking_level = thinking_level;
                 let ctx_window = self.footer_data.context_window;
                 self.footer_data.context_percent = if ctx_window > 0 {
