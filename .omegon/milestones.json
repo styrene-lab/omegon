@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 31,
+    "rc_count": 32,
     "notes": [
       "feat(code-survey): Inspect the codebase for telemetry, metrics, tracing, event logging, and dashboard/session instrumentation surfaces. Summarize what telemetry the harness currently captures, where it lives, and notable gaps or inconsistencies.",
       "feat(compliance): enforce Anthropic subscription ToS interactive-only boundary",
@@ -428,6 +428,7 @@
       "feat(doc-survey): Inspect project docs, memory-relevant files, and design/spec artifacts for telemetry-related decisions, standards, and constraints. Summarize the intended telemetry model and any explicit design constraints.",
       "feat(docs): Write user-facing documentation about Anthropic subscription ToS compliance. Two deliverables: (1) A new markdown doc at docs/anthropic-subscription-tos.md covering: what the restriction is (exact ToS quote), which Omegon entry points are allowed vs blocked, the interactive-vs-automated distinction, what to do if you need automation (get an API key), and how this compares to other providers (GitHub Copilot has no such restriction). Include a clear table: TUI mode=allowed, --initial-prompt=allowed, --prompt/--prompt-file=blocked, --smoke=blocked, /cleave=blocked. Include the exact Anthropic ToS URL. Make it factual and non-alarmist — this is a clear boundary that Omegon enforces for the operator's protection. (2) A new Astro page at site/src/pages/docs/providers.astro covering all provider auth modes: Anthropic API key (unrestricted), Anthropic OAuth/subscription (interactive TUI only), OpenAI API key, Codex OAuth, Ollama (local, unrestricted), GitHub Models (official PAT, coming soon), Copilot seat (coming soon). For each: how to configure, what's allowed, any restrictions. Follow the structure and style of existing pages like site/src/pages/docs/quickstart.astro or site/src/pages/docs/security.astro. Files: docs/anthropic-subscription-tos.md, site/src/pages/docs/providers.astro",
       "feat(docs-copy): Update long-lived docs that currently frame the browser experience around `/dash` or the embedded web dashboard. Rewrite them to present Auspex as the primary browser surface, while keeping any necessary historical/local compatibility notes. Focus on docs/embedded-web-dashboard.md, docs/display-tool-artifacts.md, docs/native-plan-mode.md, docs/conversation-rendering-engine.md, and other directly relevant docs that mention `/dash` as the primary browser path.",
+      "feat(glyph-ui): Rework the inference panel glyph language in core/crates/omegon/src/tui/instruments.rs to use sane, legible symbols for context/activity, update or add focused tests/snapshots that prove the new behavior, and validate the Rust test targets affected by the change. Do not cut the RC inside the child; leave the tree ready for parent verification and release.",
       "feat(ipc): add canonical omegon instance descriptor",
       "feat(omegon): route remote slash commands through canonical runtime executor",
       "feat(otel-research): Research whether OpenTelemetry is an appropriate fit for the harness. Compare current telemetry needs against OpenTelemetry capabilities, integration cost, likely benefits, and adoption risks for this project.",
@@ -473,6 +474,7 @@
       "fix(tui): harden cleave panel against border glyph leakage",
       "fix(tui): keep thinking telemetry in blue family",
       "fix(tui): keep version visible in persistent footer",
+      "fix(tui): make inference activity glyphs explicit",
       "fix(tui): make inference legend composition-only",
       "fix(tui): make tool rows width-aware and clear border-adjacent cells",
       "fix(tui): remove /clear and deduplicate slash palette commands",
@@ -498,7 +500,7 @@
       "refactor(tui): make /auspex open the primary browser launch path",
       "refactor(tui): simplify slash command auth and context paths"
     ],
-    "rc_version": "0.15.10-rc.31",
-    "last_rc": "2026-04-07T02:44:37Z"
+    "rc_version": "0.15.10-rc.32",
+    "last_rc": "2026-04-07T03:19:55Z"
   }
 }
