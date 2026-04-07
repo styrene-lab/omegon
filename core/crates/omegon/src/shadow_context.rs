@@ -229,6 +229,15 @@ impl ShadowContext {
                 .then_with(|| a.id.cmp(&b.id))
         });
 
+        tracing::debug!(
+            turn,
+            budget,
+            candidate_count = ordered.len(),
+            requested_class = %self.selector_policy.requested_class.short(),
+            actual_class = %self.selector_policy.actual_class().short(),
+            "shadow_context: selection starting"
+        );
+
         let mut total_tokens = 0usize;
         let mut selected_ids = Vec::new();
 
@@ -246,6 +255,15 @@ impl ShadowContext {
                 selected_ids.push(entry.id.clone());
             }
         }
+
+        tracing::debug!(
+            turn,
+            budget,
+            selected = selected_ids.len(),
+            total_tokens,
+            selected_ids = ?selected_ids,
+            "shadow_context: selection complete"
+        );
 
         SelectedContext {
             selected_ids,

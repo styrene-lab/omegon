@@ -164,17 +164,36 @@ impl ContextProvider {
         mut entries: Vec<ShadowEntry>,
     ) -> Option<String> {
         if entries.is_empty() {
+            tracing::debug!(kind = kind_heading, query, "request_context: no candidate entries");
             return None;
         }
+        let candidate_ids = entries.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
         let mut shadow = Self::pack_shadow();
         for entry in entries.drain(..) {
             shadow.upsert(entry);
         }
+        tracing::debug!(
+            kind = kind_heading,
+            query,
+            reason,
+            candidate_count = candidate_ids.len(),
+            candidate_ids = ?candidate_ids,
+            "request_context: selecting pack candidates"
+        );
         let selected = shadow.select_for_turn_with_budget(1, query, 900);
         let body = shadow.render_selection(&selected);
         if body.trim().is_empty() {
+            tracing::debug!(kind = kind_heading, query, "request_context: empty pack after selection");
             None
         } else {
+            tracing::debug!(
+                kind = kind_heading,
+                query,
+                selected = selected.selected_ids.len(),
+                total_tokens = selected.total_tokens,
+                selected_ids = ?selected.selected_ids,
+                "request_context: pack selected"
+            );
             Some(format!("### {kind_heading}\n- Reason: {reason}\n- Query: {query}\n{body}"))
         }
     }
@@ -469,6 +488,8 @@ impl Feature for ContextProvider {
                 if requests.len() > 3 {
                     anyhow::bail!("request_context accepts at most 3 requests per call");
                 }
+
+                tracing::debug!(request_count = requests.len(), raw = ?_args, "request_context: received requests");
 
                 let metrics = {
                     let metrics = self.metrics.lock().unwrap();
