@@ -230,7 +230,6 @@ impl FooterData {
                 self.context_percent.min(100.0),
                 self.context_window,
             );
-            let version_text = format_version_text(self.update_available.as_deref());
             // Tier + thinking level on a separate row so the model name never overflows.
             let tier_line = if self.thinking_level.is_empty() || self.thinking_level == "off" {
                 capitalize(&self.model_tier)
@@ -325,29 +324,6 @@ impl FooterData {
                     quota_line,
                     t.border_dim(),
                     t.accent_muted(),
-                    false,
-                );
-            }
-            push_row(
-                &mut lines,
-                "version",
-                version_text,
-                t.border_dim(),
-                t.accent(),
-                false,
-            );
-
-            if !self.cwd.is_empty() {
-                let cwd_display = shorten_cwd(
-                    &self.cwd,
-                    inner.width.saturating_sub(label_width as u16 + 3) as usize,
-                );
-                push_row(
-                    &mut lines,
-                    "path",
-                    cwd_display,
-                    t.border_dim(),
-                    t.dim(),
                     false,
                 );
             }
@@ -959,9 +935,6 @@ fn format_provider_telemetry_line(
             }
         }
         "openai-codex" => {
-            if let Some(ref name) = t.codex_limit_name {
-                parts.push(format!("bucket {name}"));
-            }
             if let Some(active) = &t.codex_active_limit {
                 parts.push(active.clone());
             }
@@ -1201,7 +1174,7 @@ mod tests {
                 ..Default::default()
             }))
             .expect("telemetry line");
-        assert!(text.contains("GPT-5.3-Codex-Spark"), "got {text}");
+        assert!(!text.contains("GPT-5.3-Codex-Spark"), "got {text}");
         assert!(text.contains("codex"), "got {text}");
         assert!(text.contains("primary 0%"), "got {text}");
         assert!(text.contains("primary↻ 3h47m"), "got {text}");
@@ -1269,7 +1242,7 @@ mod tests {
     }
 
     #[test]
-    fn left_panel_keeps_version_visible_in_compact_layout() {
+    fn left_panel_prioritizes_operator_rows_over_version_and_path() {
         let data = FooterData {
             model_id: "openai:gpt-5.4".into(),
             model_provider: "openai".into(),
@@ -1288,16 +1261,16 @@ mod tests {
         };
         let text = render_left_panel_text(&data, 38, 8);
 
-        assert!(
-            text.contains("v<version> → v9.9.9") || text.contains("v0.15."),
-            "got {text}"
-        );
         assert!(text.contains("gpt-5.4"), "got {text}");
         assert!(
             text.contains("Victory") || text.contains("victory"),
             "got {text}"
         );
         assert!(text.contains("High") || text.contains("high"), "got {text}");
+        assert!(text.contains("T7"), "got {text}");
+        assert!(!text.contains("version"), "got {text}");
+        assert!(!text.contains("/Users/test/workspace"), "got {text}");
+        assert!(!text.contains("v9.9.9"), "got {text}");
     }
 
     #[test]
@@ -1388,7 +1361,8 @@ mod tests {
         let text = render_left_panel_text(&data, 96, 10);
 
         assert!(text.contains("limit"), "got {text}");
-        assert!(text.contains("bucket GPT-5.3-Codex-Spark"), "got {text}");
+        assert!(!text.contains("bucket GPT-5.3-Codex-Spark"), "got {text}");
+        assert!(!text.contains("GPT-5.3-Codex-Spark"), "got {text}");
         assert!(text.contains("primary 0%"), "got {text}");
     }
 

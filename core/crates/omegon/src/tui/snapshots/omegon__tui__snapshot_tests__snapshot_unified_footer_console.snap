@@ -9,8 +9,8 @@ expression: render_to_string(&terminal)
   tier    Victory · High              │≡  conv ⊟ sys ◈  mem ✦ tool ◔ think       ││  ⌘ sh           1.2s ≋≋≋≋≋≋≋≋≋≋≋≋≋·│
   state   Maniple 68% / ¤262k         │↑  800  ↓  120  ⊙  0%   ✦ 0  ◎  0 recalled││                                    │
   session T8 ~$0                      ├─ project ⌗2440  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠒⠒⠤⢄ ││                                    │
-  version v<current>              ├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ ││                                    │
-  path    /home/user/workspa…/omegon  └─ episodes ⌗45  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ ││                                    │
+                                      ├─ working ⌗8  ⠊⠉⠉⠑⠒⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ ││                                    │
+                                      └─ episodes ⌗45  ⠊⠉⠉⠑⠒⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ ││                                    │
                                       │                                          ││                                    │
                                       │                                          ││                                    │
                                       │                                          ││  3/3 active                        │
