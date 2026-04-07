@@ -44,8 +44,10 @@ impl ContextKind {
             | Self::FileSnippet
             | Self::DesignNode
             | Self::SpecScenario
-            | Self::TaskArtifact => 2,
-            Self::MemoryFact | Self::EpisodeSummary | Self::CodebaseChunk => 3,
+            | Self::TaskArtifact
+            | Self::MemoryFact
+            | Self::CodebaseChunk => 2,
+            Self::EpisodeSummary => 3,
         }
     }
 
@@ -130,10 +132,10 @@ impl ShadowEntry {
 
     pub fn tier_weight(&self) -> f32 {
         match self.kind.tier() {
-            0 => 10_000.0,
-            1 => 1_000.0,
-            2 => 100.0,
-            _ => 10.0,
+            0 => 1_000.0,
+            1 => 200.0,
+            2 => 80.0,
+            _ => 40.0,
         }
     }
 
@@ -142,11 +144,11 @@ impl ShadowEntry {
     }
 
     pub fn relevance_weight(&self) -> f32 {
-        self.relevance * 10.0
+        self.relevance * 40.0
     }
 
     pub fn recency_weight(&self) -> f32 {
-        self.recency
+        self.recency * 8.0
     }
 
     pub fn combined_score(&self) -> f32 {
@@ -544,5 +546,32 @@ mod tests {
         let selected = shadow.select_for_turn(1, "selector policy");
         assert_eq!(selected.selected_ids.len(), 1);
         assert_eq!(selected.selected_ids[0], "code:a");
+    }
+
+    #[test]
+    fn selector_lets_high_relevance_code_beat_weak_background() {
+        let mut shadow = ShadowContext::new(policy());
+
+        let mut weak_task = ShadowEntry::new(
+            "task",
+            ContextKind::TaskArtifact,
+            EntryBody::Inline("barely related words".into()),
+        );
+        weak_task.priority = 20;
+
+        let mut strong_code = ShadowEntry::new(
+            "code",
+            ContextKind::CodebaseChunk,
+            EntryBody::Inline("selector policy selector policy selector policy".into()),
+        );
+        strong_code.priority = 10;
+
+        shadow.upsert(weak_task);
+        shadow.upsert(strong_code);
+
+        let selected = shadow.select_for_turn(1, "selector policy");
+        let pos_code = selected.selected_ids.iter().position(|id| id == "code").unwrap();
+        let pos_task = selected.selected_ids.iter().position(|id| id == "task").unwrap();
+        assert!(pos_code < pos_task, "expected highly relevant code to outrank weak task artifact: {selected:?}");
     }
 }
