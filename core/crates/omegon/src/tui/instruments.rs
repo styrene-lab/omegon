@@ -381,12 +381,23 @@ impl InstrumentPanel {
 
     fn context_legend_entries() -> [(&'static str, &'static str, Color); 5] {
         [
-            ("≡", "conv", Self::band_color(ContextBand::Conversation)),
-            ("⊟", "sys", Self::band_color(ContextBand::System)),
-            ("◈", "mem", Self::band_color(ContextBand::Memory)),
-            ("✦", "tool", Self::band_color(ContextBand::Tools)),
-            ("◔", "think", Self::band_color(ContextBand::Thinking)),
+            ("=", "conv", Self::band_color(ContextBand::Conversation)),
+            ("+", "sys", Self::band_color(ContextBand::System)),
+            ("*", "mem", Self::band_color(ContextBand::Memory)),
+            ("#", "tool", Self::band_color(ContextBand::Tools)),
+            ("^", "think", Self::band_color(ContextBand::Thinking)),
         ]
+    }
+
+    fn band_glyph(band: ContextBand) -> char {
+        match band {
+            ContextBand::Conversation => '=',
+            ContextBand::System => '+',
+            ContextBand::Memory => '*',
+            ContextBand::Tools => '#',
+            ContextBand::Thinking => '^',
+            ContextBand::Free => '·',
+        }
     }
 
     fn render_context_legend_row(&self, y: u16, inner: Rect, buf: &mut Buffer, t: &dyn Theme) {
@@ -954,11 +965,10 @@ impl InstrumentPanel {
                 }
             }
 
-            let composition_ch = if dominant == ContextBand::Free {
-                '\u{2802}'
+            let composition_ch = if dominant == ContextBand::Free || fill_frac <= 0.0 {
+                Self::band_glyph(ContextBand::Free)
             } else {
-                let level = (fill_frac * 8.0).round() as usize;
-                FILL[level.min(8)]
+                Self::band_glyph(dominant)
             };
             if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, composition_y)) {
                 cell.set_char(composition_ch);
@@ -2180,29 +2190,24 @@ mod tests {
             .map(|x| buf[(x, 3)].symbol().to_string())
             .collect();
 
-        // Spacing is intentionally not checked exactly: these icons have ambiguous East-Asian
-        // width (width_cjk = 2). In a real terminal they occupy 2 cells, so we advance by 2
-        // and the format's single space lands at the correct column. TestBackend treats every
-        // character as width-1, so it sees an extra blank cell between the icon and the label.
-        // We check icon and label independently to be robust to that 1-cell difference.
         assert!(
-            legend_row.contains('≡') && legend_row.contains("conv"),
+            legend_row.contains("= conv"),
             "conversation bucket legend should be visible: {legend_row}"
         );
         assert!(
-            legend_row.contains('⊟') && legend_row.contains("sys"),
+            legend_row.contains("+ sys"),
             "system bucket legend should be visible: {legend_row}"
         );
         assert!(
-            legend_row.contains('◈') && legend_row.contains("mem"),
+            legend_row.contains("* mem"),
             "memory bucket legend should be visible: {legend_row}"
         );
         assert!(
-            legend_row.contains('✦') && legend_row.contains("tool"),
+            legend_row.contains("# tool"),
             "tool surface legend should be visible as prompt composition: {legend_row}"
         );
         assert!(
-            legend_row.contains('◔') && legend_row.contains("think"),
+            legend_row.contains("^ think"),
             "thinking bucket legend should be visible: {legend_row}"
         );
         assert!(
@@ -2259,8 +2264,8 @@ mod tests {
         assert!(
             composition_row
                 .chars()
-                .any(|ch| matches!(ch, '⡀' | '⡄' | '⡆' | '⡇' | '⣇' | '⣏' | '⣟' | '⣿' | '⠂')),
-            "composition row should use density/band glyphs: {composition_row}"
+                .any(|ch| matches!(ch, '=' | '+' | '*' | '#' | '^' | '·')),
+            "composition row should use simple band glyphs: {composition_row}"
         );
         assert!(
             activity_row
@@ -2323,7 +2328,7 @@ mod tests {
         );
         assert!(
             !trimmed.contains("thi")
-                && !trimmed.contains("tool")
+                && !trimmed.contains("^ t")
                 && !trimmed.contains("wait")
                 && !trimmed.contains("idle")
                 && !trimmed.ends_with('…'),
@@ -2373,7 +2378,7 @@ mod tests {
 
         assert!(
             !legend_row.contains("free") && !legend_row.contains('~'),
-            "free capacity should remain implicit in the grey braille tail, not the legend: {legend_row}"
+            "free capacity should remain implicit in the grey simple-glyph tail, not the legend: {legend_row}"
         );
     }
 
