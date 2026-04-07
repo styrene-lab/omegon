@@ -4,6 +4,7 @@
 //! It owns a scored corpus of context entries and selects the subset that fits
 //! the current model budget each turn.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::settings::{ContextClass, SelectorPolicy};
@@ -102,6 +103,8 @@ pub struct ShadowEntry {
     pub ttl_turns: Option<u32>,
     pub last_included_turn: Option<u32>,
     pub last_scored_turn: u32,
+    pub diversity_key: Option<String>,
+    pub diversity_cap: Option<usize>,
 }
 
 impl ShadowEntry {
@@ -120,6 +123,8 @@ impl ShadowEntry {
             ttl_turns: None,
             last_included_turn: None,
             last_scored_turn: 0,
+            diversity_key: None,
+            diversity_cap: None,
         }
     }
 
@@ -281,11 +286,15 @@ impl ShadowContext {
         let mut total_tokens = 0usize;
         let mut selected_ids = Vec::new();
         let mut dropped_ids = Vec::new();
+        let mut diversity_counts: HashMap<String, usize> = HashMap::new();
 
         for entry in ordered {
             if entry.kind.tier() == 0 || entry.mandatory || entry.pinned {
                 total_tokens += entry.token_estimate;
                 entry.last_included_turn = Some(turn);
+                if let Some(key) = &entry.diversity_key {
+                    *diversity_counts.entry(key.clone()).or_default() += 1;
+                }
                 selected_ids.push(entry.id.clone());
                 tracing::debug!(
                     id = %entry.id,
@@ -298,6 +307,8 @@ impl ShadowContext {
                     relevance_weight = entry.relevance_weight(),
                     recency = entry.recency,
                     recency_weight = entry.recency_weight(),
+                    diversity_key = ?entry.diversity_key,
+                    diversity_cap = ?entry.diversity_cap,
                     tokens = entry.token_estimate,
                     score = entry.combined_score(),
                     selected = true,
@@ -308,9 +319,40 @@ impl ShadowContext {
                 continue;
             }
 
+            if let (Some(key), Some(cap)) = (&entry.diversity_key, entry.diversity_cap) {
+                let seen = diversity_counts.get(key).copied().unwrap_or(0);
+                if seen >= cap {
+                    dropped_ids.push(entry.id.clone());
+                    tracing::debug!(
+                        id = %entry.id,
+                        kind = ?entry.kind,
+                        priority = entry.priority,
+                        tier = entry.kind.tier(),
+                        tier_weight = entry.tier_weight(),
+                        priority_weight = entry.priority_weight(),
+                        relevance = entry.relevance,
+                        relevance_weight = entry.relevance_weight(),
+                        recency = entry.recency,
+                        recency_weight = entry.recency_weight(),
+                        diversity_key = ?entry.diversity_key,
+                        diversity_cap = ?entry.diversity_cap,
+                        tokens = entry.token_estimate,
+                        score = entry.combined_score(),
+                        selected = false,
+                        reason = "diversity_cap",
+                        running_total = total_tokens,
+                        "shadow_context: entry decision"
+                    );
+                    continue;
+                }
+            }
+
             if total_tokens + entry.token_estimate <= budget {
                 total_tokens += entry.token_estimate;
                 entry.last_included_turn = Some(turn);
+                if let Some(key) = &entry.diversity_key {
+                    *diversity_counts.entry(key.clone()).or_default() += 1;
+                }
                 selected_ids.push(entry.id.clone());
                 tracing::debug!(
                     id = %entry.id,
@@ -323,6 +365,8 @@ impl ShadowContext {
                     relevance_weight = entry.relevance_weight(),
                     recency = entry.recency,
                     recency_weight = entry.recency_weight(),
+                    diversity_key = ?entry.diversity_key,
+                    diversity_cap = ?entry.diversity_cap,
                     tokens = entry.token_estimate,
                     score = entry.combined_score(),
                     selected = true,
@@ -343,6 +387,8 @@ impl ShadowContext {
                     relevance_weight = entry.relevance_weight(),
                     recency = entry.recency,
                     recency_weight = entry.recency_weight(),
+                    diversity_key = ?entry.diversity_key,
+                    diversity_cap = ?entry.diversity_cap,
                     tokens = entry.token_estimate,
                     score = entry.combined_score(),
                     selected = false,
@@ -463,5 +509,34 @@ mod tests {
         let pos_high = selected.selected_ids.iter().position(|id| id == "higher").unwrap();
         let pos_low = selected.selected_ids.iter().position(|id| id == "lower").unwrap();
         assert!(pos_high < pos_low);
+    }
+
+    #[test]
+    fn selector_enforces_diversity_cap() {
+        let mut shadow = ShadowContext::new(policy());
+        let mut a = ShadowEntry::new(
+            "code:a",
+            ContextKind::CodebaseChunk,
+            EntryBody::Inline("selector policy alpha".into()),
+        );
+        a.priority = 90;
+        a.diversity_key = Some("file:src/main.rs".into());
+        a.diversity_cap = Some(1);
+
+        let mut b = ShadowEntry::new(
+            "code:b",
+            ContextKind::CodebaseChunk,
+            EntryBody::Inline("selector policy beta".into()),
+        );
+        b.priority = 80;
+        b.diversity_key = Some("file:src/main.rs".into());
+        b.diversity_cap = Some(1);
+
+        shadow.upsert(a);
+        shadow.upsert(b);
+
+        let selected = shadow.select_for_turn(1, "selector policy");
+        assert_eq!(selected.selected_ids.len(), 1);
+        assert_eq!(selected.selected_ids[0], "code:a");
     }
 }

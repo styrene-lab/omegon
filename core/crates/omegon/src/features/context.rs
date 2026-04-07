@@ -225,6 +225,8 @@ impl ContextProvider {
                         )),
                     );
                     entry.priority = if decision.status == "decided" { 140 } else { 100 };
+                    entry.diversity_key = Some(format!("design-node:{}", node.id));
+                    entry.diversity_cap = Some(2);
                     entries.push(entry);
                 }
                 if entries.len() >= max_items {
@@ -261,6 +263,8 @@ impl ContextProvider {
                             )),
                         );
                         entry.priority = 120;
+                        entry.diversity_key = Some(format!("spec:req:{}", req.title));
+                        entry.diversity_cap = Some(1);
                         entries.push(entry);
                     }
                     for scenario in &req.scenarios {
@@ -284,6 +288,8 @@ impl ContextProvider {
                                 )),
                             );
                             entry.priority = 130;
+                            entry.diversity_key = Some(format!("spec:req:{}", req.title));
+                            entry.diversity_cap = Some(1);
                             entries.push(entry);
                         }
                         if entries.len() >= max_items {
@@ -338,6 +344,8 @@ impl ContextProvider {
                     )),
                 );
                 entry.priority = 80;
+                entry.diversity_key = Some(format!("memory-section:{:?}", scored.fact.section));
+                entry.diversity_cap = Some(2);
                 entry
             })
             .collect::<Vec<_>>();
@@ -371,6 +379,8 @@ impl ContextProvider {
                     )),
                 );
                 entry.priority = 90;
+                entry.diversity_key = Some(format!("code-file:{}", r.file));
+                entry.diversity_cap = Some(2);
                 entry
             })
             .collect::<Vec<_>>();
@@ -1055,6 +1065,47 @@ mod tests {
         assert!(text.contains("### Code"), "unexpected text: {text}");
         assert!(text.contains("src/main.rs"), "unexpected text: {text}");
         assert!(text.contains("selector_policy") || text.contains("selector policy"), "unexpected text: {text}");
+    }
+
+    #[tokio::test]
+    async fn request_context_code_pack_caps_same_file_duplicates() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(
+            tmp.path().join("src").join("main.rs"),
+            "fn selector_policy() { println!(\"selector policy\"); }\nfn selector_policy_helper() { println!(\"selector policy helper\"); }\nfn selector_policy_debug() { println!(\"selector policy debug\"); }\n",
+        )
+        .unwrap();
+
+        let provider = ContextProvider::new_with_sources(
+            SharedContextMetrics::new(),
+            new_shared_command_tx(),
+            None,
+            None,
+            None,
+            Some(tmp.path().to_path_buf()),
+        );
+        let result = provider
+            .execute(
+                crate::tool_registry::context::REQUEST_CONTEXT,
+                "call-ctx-code-diversity",
+                json!({
+                    "requests": [
+                        {
+                            "kind": "code",
+                            "query": "selector policy",
+                            "reason": "Need code orientation",
+                            "max_items": 4
+                        }
+                    ]
+                }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("tool result");
+        let text = result.content.iter().filter_map(|c| match c { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join("\n");
+        let occurrences = text.matches("src/main.rs:").count();
+        assert!(occurrences <= 2, "expected at most 2 snippets from same file, got {occurrences}: {text}");
     }
 
     #[tokio::test]
