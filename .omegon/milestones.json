@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 33,
+    "rc_count": 34,
     "notes": [
       "feat(code-survey): Inspect the codebase for telemetry, metrics, tracing, event logging, and dashboard/session instrumentation surfaces. Summarize what telemetry the harness currently captures, where it lives, and notable gaps or inconsistencies.",
       "feat(compliance): enforce Anthropic subscription ToS interactive-only boundary",
@@ -490,6 +490,7 @@
       "fix(tui): source context composition from turn accounting",
       "fix(tui): stop inference memory rows bleeding into tools panel",
       "fix(tui): stop instrument panel boundary leakage",
+      "fix(tui): strip ansi debris from cleave activity rows",
       "fix(tui): support queued prompts with attachment lists",
       "fix(tui): unify tool result block backgrounds",
       "fix(tui,web): isolate focus mode and expose auspex startup version handoff",
@@ -501,7 +502,7 @@
       "refactor(tui): make /auspex open the primary browser launch path",
       "refactor(tui): simplify slash command auth and context paths"
     ],
-    "rc_version": "0.15.10-rc.33",
-    "last_rc": "2026-04-07T03:31:59Z"
+    "rc_version": "0.15.10-rc.34",
+    "last_rc": "2026-04-07T11:01:01Z"
   }
 }
