@@ -414,12 +414,12 @@
     ]
   },
   "0.15.10": {
-    "status": "rc",
+    "status": "released",
     "channel": "stable",
     "nodes": [],
-    "frozen": false,
+    "frozen": true,
     "opened": "2026-04-04T04:08:34Z",
-    "released": null,
+    "released": "2026-04-07T01:40:23Z",
     "rc_count": 28,
     "notes": [
       "feat(code-survey): Inspect the codebase for telemetry, metrics, tracing, event logging, and dashboard/session instrumentation surfaces. Summarize what telemetry the harness currently captures, where it lives, and notable gaps or inconsistencies.",
