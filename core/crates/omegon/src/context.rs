@@ -127,7 +127,7 @@ impl ContextManager {
             },
         });
 
-        self.assemble(user_prompt)
+        self.assemble(user_prompt, conversation)
     }
 
     /// Build the session HUD line.
@@ -378,7 +378,7 @@ impl ContextManager {
         }
     }
 
-    fn assemble(&mut self, user_prompt: &str) -> String {
+    fn assemble(&mut self, user_prompt: &str, conversation: &ConversationState) -> String {
         self.shadow.remove_by_source_prefix("base-prompt");
         let mut base = ShadowEntry::new(
             "base-prompt",
@@ -402,6 +402,7 @@ impl ContextManager {
                 kind,
                 EntryBody::Inline(active.injection.content.clone()),
             );
+            entry.priority = active.injection.priority as i32;
             entry.ttl_turns = Some(active.remaining_turns);
             entry.mandatory = active.injection.priority >= 190;
             self.shadow.upsert(entry);
@@ -409,7 +410,7 @@ impl ContextManager {
 
         let selected = self
             .shadow
-            .select_for_turn(self.active_injections.len() as u32 + 1, user_prompt);
+            .select_for_turn(conversation.turn_count(), user_prompt);
         self.shadow.render_selection(&selected)
     }
 }

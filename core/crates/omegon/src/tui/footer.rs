@@ -242,6 +242,7 @@ impl FooterData {
             let provider_text = format!("{provider_icon} {provider_label} · {auth_text}");
             let context_text = format_context_text(
                 self.context_class,
+                self.actual_context_class,
                 self.context_percent.min(100.0),
                 self.context_window,
             );
@@ -873,19 +874,25 @@ fn shorten_cwd(cwd: &str, max_chars: usize) -> String {
 }
 
 fn format_context_text(
-    context_class: ContextClass,
+    requested_class: ContextClass,
+    actual_class: ContextClass,
     context_percent: f32,
     context_window: usize,
 ) -> String {
+    let badge = if requested_class != actual_class {
+        format!("{}→{}", requested_class.short(), actual_class.short())
+    } else {
+        actual_class.short().to_string()
+    };
     if context_window > 0 {
         format!(
             "{} {:.0}% / ¤{}",
-            context_class.short(),
+            badge,
             context_percent,
             widgets::format_tokens(context_window)
         )
     } else {
-        format!("{} {:.0}%", context_class.short(), context_percent)
+        format!("{} {:.0}%", badge, context_percent)
     }
 }
 
@@ -1344,10 +1351,17 @@ mod tests {
     #[test]
     fn context_text_compacts_class_percent_and_window() {
         assert_eq!(
-            format_context_text(ContextClass::Maniple, 68.0, 272_000),
+            format_context_text(ContextClass::Maniple, ContextClass::Maniple, 68.0, 272_000),
             "Maniple 68% / ¤272k"
         );
-        assert_eq!(format_context_text(ContextClass::Clan, 42.0, 0), "Clan 42%");
+        assert_eq!(
+            format_context_text(ContextClass::Clan, ContextClass::Clan, 42.0, 0),
+            "Clan 42%"
+        );
+        assert_eq!(
+            format_context_text(ContextClass::Legion, ContextClass::Squad, 68.0, 131_072),
+            "Legion→Squad 68% / ¤131k"
+        );
     }
 
     fn render_left_panel_text(data: &FooterData, width: u16, height: u16) -> String {
@@ -1401,6 +1415,28 @@ mod tests {
         assert!(text.contains("v"), "got {text}");
         assert!(text.contains("9.9.9"), "got {text}");
         assert!(!text.contains("/Users/test/workspace"), "got {text}");
+    }
+
+    #[test]
+    fn model_card_shows_policy_to_actual_context_mismatch() {
+        let data = FooterData {
+            model_id: "openai:gpt-5.4".into(),
+            model_provider: "openai".into(),
+            context_percent: 68.0,
+            context_window: 131_072,
+            context_class: ContextClass::Legion,
+            actual_context_class: ContextClass::Squad,
+            session_input_tokens: 12_000,
+            session_output_tokens: 3_000,
+            turn: 7,
+            thinking_level: "high".into(),
+            model_tier: "victory".into(),
+            provider_connected: true,
+            is_oauth: true,
+            ..Default::default()
+        };
+        let text = render_left_panel_text(&data, 64, 10);
+        assert!(text.contains("Legion→Squad"), "got {text}");
     }
 
     #[test]

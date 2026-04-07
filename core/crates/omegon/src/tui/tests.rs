@@ -94,6 +94,22 @@ fn action_prompt_clears_stale_rows_when_reused_with_fewer_actions() {
 }
 
 #[test]
+fn context_updated_tracks_requested_policy_separately_from_actual_model_class() {
+    let mut app = test_app();
+
+    app.handle_agent_event(AgentEvent::ContextUpdated {
+        tokens: 144_000,
+        context_window: 131_072,
+        context_class: "Legion".into(),
+        thinking_level: "high".into(),
+    });
+
+    assert_eq!(app.footer_data.context_class, ContextClass::Legion);
+    assert_eq!(app.footer_data.actual_context_class, ContextClass::Squad);
+    assert!(app.footer_data.context_percent > 99.0);
+}
+
+#[test]
 fn turn_end_does_not_overwrite_footer_context_with_last_request_input_tokens() {
     let mut app = test_app();
 

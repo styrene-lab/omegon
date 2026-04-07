@@ -94,6 +94,7 @@ pub struct ShadowEntry {
     pub kind: ContextKind,
     pub body: EntryBody,
     pub token_estimate: usize,
+    pub priority: i32,
     pub relevance: f32,
     pub recency: f32,
     pub mandatory: bool,
@@ -111,6 +112,7 @@ impl ShadowEntry {
             kind,
             body,
             token_estimate,
+            priority: 0,
             relevance: 0.0,
             recency: 1.0,
             mandatory: false,
@@ -128,7 +130,7 @@ impl ShadowEntry {
             2 => 100.0,
             _ => 10.0,
         };
-        tier_weight + (self.relevance * 10.0) + self.recency
+        tier_weight + self.priority as f32 + (self.relevance * 10.0) + self.recency
     }
 
     pub fn is_expired(&self, turn: u32) -> bool {
@@ -204,12 +206,18 @@ impl ShadowContext {
             };
             entry.recency = match entry.last_included_turn {
                 Some(last) => 1.0 / (turn.saturating_sub(last).max(1) as f32),
-                None => 1.0,
+                None => 0.5,
             };
         }
 
         let mut ordered: Vec<_> = self.entries.iter_mut().collect();
-        ordered.sort_by(|a, b| b.combined_score().total_cmp(&a.combined_score()));
+        ordered.sort_by(|a, b| {
+            b.combined_score()
+                .total_cmp(&a.combined_score())
+                .then_with(|| b.priority.cmp(&a.priority))
+                .then_with(|| a.token_estimate.cmp(&b.token_estimate))
+                .then_with(|| a.id.cmp(&b.id))
+        });
 
         let mut total_tokens = 0usize;
         let mut selected_ids = Vec::new();
@@ -305,5 +313,29 @@ mod tests {
         assert!(pos_tier1.is_some());
         assert!(pos_tier3.is_some());
         assert!(pos_tier1 < pos_tier3);
+    }
+
+    #[test]
+    fn selector_prefers_higher_priority_within_tier() {
+        let mut shadow = ShadowContext::new(policy());
+        let mut lower = ShadowEntry::new(
+            "lower",
+            ContextKind::TaskArtifact,
+            EntryBody::Inline("shared prompt words".into()),
+        );
+        lower.priority = 10;
+        let mut higher = ShadowEntry::new(
+            "higher",
+            ContextKind::TaskArtifact,
+            EntryBody::Inline("shared prompt words".into()),
+        );
+        higher.priority = 100;
+        shadow.upsert(lower);
+        shadow.upsert(higher);
+
+        let selected = shadow.select_for_turn(7, "shared prompt");
+        let pos_high = selected.selected_ids.iter().position(|id| id == "higher").unwrap();
+        let pos_low = selected.selected_ids.iter().position(|id| id == "lower").unwrap();
+        assert!(pos_high < pos_low);
     }
 }
