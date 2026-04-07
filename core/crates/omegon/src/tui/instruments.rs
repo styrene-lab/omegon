@@ -916,22 +916,20 @@ impl InstrumentPanel {
             return;
         }
 
-        // ── Braille left-fill levels (left column top→bottom, then right column) ──
-        const FILL: [char; 9] = [
-            '\u{2800}', // ⠀ 0/8 empty
-            '\u{2840}', // ⡀ 1/8
-            '\u{2844}', // ⡄ 2/8
-            '\u{2846}', // ⡆ 3/8
-            '\u{2847}', // ⡇ 4/8 — left col full
-            '\u{28C7}', // ⣇ 5/8
-            '\u{28E7}', // ⣏ 6/8
-            '\u{28F7}', // ⣟ 7/8
-            '\u{28FF}', // ⣿ 8/8 full
-        ];
-
         let breakdown = self.context_breakdown();
         let activity = self.activity_mode();
         let time = self.time;
+        let activity_label = match activity {
+            ActivityMode::Idle => None,
+            ActivityMode::ToolChurn => Some("tool"),
+            ActivityMode::Waiting => Some("wait"),
+            ActivityMode::Thinking => Some("think"),
+        };
+        let label_range = activity_label.map(|label| {
+            let label_width = label.chars().count().min(w);
+            let start = w.saturating_sub(label_width) / 2;
+            (start, start + label_width, label)
+        });
 
         let mut boundaries: Vec<(ContextBand, f64, f64)> = Vec::new();
         let mut cursor = 0.0_f64;
@@ -992,40 +990,33 @@ impl InstrumentPanel {
             }
             .clamp(0.0, 1.0);
 
-            let (activity_ch, activity_fg) = match activity {
-                ActivityMode::Idle => {
-                    let c = if activity_phase > 0.55 { '·' } else { ' ' };
-                    (c, Self::activity_color(ActivityMode::Idle, activity_phase))
+            let (activity_ch, activity_fg) = if let Some((start, end, label)) = label_range {
+                if x >= start && x < end {
+                    let ch = label.chars().nth(x - start).unwrap_or(' ');
+                    (ch, Self::activity_color(activity, activity_phase))
+                } else {
+                    match activity {
+                        ActivityMode::Idle => {
+                            let c = if activity_phase > 0.55 { '·' } else { ' ' };
+                            (c, Self::activity_color(ActivityMode::Idle, activity_phase))
+                        }
+                        ActivityMode::ToolChurn => {
+                            let c = if activity_phase > 0.72 { '+' } else { '=' };
+                            (c, Self::activity_color(ActivityMode::ToolChurn, activity_phase))
+                        }
+                        ActivityMode::Waiting => {
+                            let c = if activity_phase > 0.66 { '~' } else { '-' };
+                            (c, Self::activity_color(ActivityMode::Waiting, activity_phase))
+                        }
+                        ActivityMode::Thinking => {
+                            let c = if activity_phase > 0.72 { '^' } else { ':' };
+                            (c, Self::activity_color(ActivityMode::Thinking, activity_phase))
+                        }
+                    }
                 }
-                ActivityMode::ToolChurn => {
-                    let c = if activity_phase > 0.72 {
-                        '•'
-                    } else {
-                        '·'
-                    };
-                    (
-                        c,
-                        Self::activity_color(ActivityMode::ToolChurn, activity_phase),
-                    )
-                }
-                ActivityMode::Waiting => {
-                    let c = if activity_phase > 0.66 { '•' } else { '·' };
-                    (
-                        c,
-                        Self::activity_color(ActivityMode::Waiting, activity_phase),
-                    )
-                }
-                ActivityMode::Thinking => {
-                    let c = if activity_phase > 0.72 {
-                        '•'
-                    } else {
-                        '·'
-                    };
-                    (
-                        c,
-                        Self::activity_color(ActivityMode::Thinking, activity_phase),
-                    )
-                }
+            } else {
+                let c = if activity_phase > 0.55 { '·' } else { ' ' };
+                (c, Self::activity_color(ActivityMode::Idle, activity_phase))
             };
 
             if let Some(cell) = buf.cell_mut(Position::new(area.x + x as u16, activity_y)) {
@@ -2268,10 +2259,14 @@ mod tests {
             "composition row should use simple band glyphs: {composition_row}"
         );
         assert!(
+            activity_row.contains("think"),
+            "activity row should name the active runtime state instead of showing anonymous dots: {activity_row}"
+        );
+        assert!(
             activity_row
                 .chars()
-                .any(|ch| matches!(ch, ' ' | '·' | '•')),
-            "activity row should use restrained runtime-state dot glyphs: {activity_row}"
+                .any(|ch| matches!(ch, ':' | '^')),
+            "thinking activity row should use sane ASCII support glyphs around the label: {activity_row}"
         );
         assert_ne!(
             composition_row, activity_row,
