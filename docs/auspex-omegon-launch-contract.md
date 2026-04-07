@@ -315,6 +315,15 @@ attach using IPC/native client or compatibility websocket as appropriate
 supervise process lifetime externally
 ```
 
+## Reference implementation
+
+A minimal reference launcher implementing this contract lives at:
+
+- `scripts/launch_omegon_daemon.py`
+
+It is intentionally simple and suitable for integration tests, fixture wiring,
+or as a starting point for Auspex-side process orchestration.
+
 ## Source of truth
 
 This launch contract is grounded in:
