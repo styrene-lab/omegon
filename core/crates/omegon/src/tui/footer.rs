@@ -985,6 +985,7 @@ fn format_cost_usd(cost_usd: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::usage::format_duration_compact;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 

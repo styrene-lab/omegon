@@ -866,7 +866,7 @@ fn render_assistant_text(
             } else {
                 table_state = TableState::Header;
             }
-            lines.push(render_table_line(trimmed, is_header, t));
+            lines.push(render_table_line(trimmed, is_header, area.width, t));
         } else {
             table_state = TableState::None;
             let line = super::widgets::highlight_line(line, t);
@@ -1183,7 +1183,7 @@ fn render_tool_card(
                             table_state = TableState::Header;
                         }
                         let row_bg = bg;
-                        lines.push(render_table_line(trimmed, is_header, t));
+                        lines.push(render_table_line(trimmed, is_header, card_inner.width, t));
                         result_row_fills.push((lines.len().saturating_sub(1) as u16, row_bg));
                     } else {
                         table_state = TableState::None;
@@ -1437,28 +1437,52 @@ fn is_table_separator(line: &str) -> bool {
 }
 
 /// Render a markdown table line with cell highlighting.
-fn render_table_line<'a>(line: &str, is_header: bool, t: &dyn Theme) -> Line<'a> {
+fn render_table_line<'a>(line: &str, is_header: bool, max_width: u16, t: &dyn Theme) -> Line<'a> {
     let trimmed = line.trim();
     let row_bg = if is_header {
         t.card_bg()
     } else {
         t.surface_bg()
     };
+    let cells: Vec<&str> = trimmed.split('|').filter(|s| !s.is_empty()).collect();
+    let cell_count = cells.len();
 
-    // Separator row: |---|---| → render as a thin rule
+    let available_width = max_width.saturating_sub(2) as usize;
+    let separator_count = cell_count.saturating_sub(1);
+    let separator_width = separator_count;
+    let padding_width = cell_count.saturating_mul(2);
+    let mut content_budget = available_width.saturating_sub(separator_width + padding_width);
+    if content_budget < cell_count {
+        content_budget = cell_count;
+    }
+
+    let base_widths: Vec<usize> = cells
+        .iter()
+        .map(|cell| cell.trim().chars().count().max(1))
+        .collect();
+    let mut target_widths = base_widths.clone();
+
+    let total_content_width: usize = base_widths.iter().sum();
+    if total_content_width > content_budget && cell_count > 0 {
+        let preview_idx = cell_count - 1;
+        let fixed_other: usize = base_widths.iter().take(preview_idx).sum();
+        let min_preview = if is_header { "Preview".len() } else { 12 };
+        let preview_budget = content_budget.saturating_sub(fixed_other).max(min_preview);
+        target_widths[preview_idx] = preview_budget;
+    }
+
+    // Separator row: |---|---| → render as a thin rule sized to the content budget.
     if is_table_separator(trimmed) {
         let sep_bg = t.surface_bg();
         let sep_fg = t.border();
-        let cells: Vec<&str> = trimmed.split('|').filter(|s| !s.is_empty()).collect();
         let mut spans: Vec<Span<'a>> = Vec::new();
         spans.push(Span::styled("├", Style::default().fg(sep_fg).bg(sep_bg)));
-        for (i, cell) in cells.iter().enumerate() {
-            let w = cell.len().max(1);
+        for (i, width) in target_widths.iter().enumerate() {
             spans.push(Span::styled(
-                "─".repeat(w),
+                "─".repeat(width.saturating_add(2)),
                 Style::default().fg(sep_fg).bg(sep_bg),
             ));
-            if i < cells.len() - 1 {
+            if i < target_widths.len() - 1 {
                 spans.push(Span::styled("┼", Style::default().fg(sep_fg).bg(sep_bg)));
             }
         }
@@ -1466,28 +1490,30 @@ fn render_table_line<'a>(line: &str, is_header: bool, t: &dyn Theme) -> Line<'a>
         return Line::from(spans);
     }
 
-    // Content row: | cell | cell |
-    let mut spans: Vec<Span<'a>> = Vec::new();
-    let cells: Vec<&str> = trimmed.split('|').filter(|s| !s.is_empty()).collect();
-
     let pipe = Style::default().fg(t.border()).bg(row_bg);
-
+    let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::styled("│", pipe));
     for (i, cell) in cells.iter().enumerate() {
-        let cell_text = cell.trim();
+        let width = target_widths.get(i).copied().unwrap_or(1);
+        let cell_text = truncate_table_cell(cell.trim(), width);
         if is_header {
-            // Header cells: bright accent, bold, slightly different background
             spans.push(Span::styled(
-                format!(" {cell_text} "),
+                format!(" {:width$} ", cell_text, width = width),
                 Style::default()
                     .fg(t.accent_bright())
                     .bg(row_bg)
                     .add_modifier(Modifier::BOLD),
             ));
         } else {
-            // Content cells: inline highlighting (bold, code, etc.)
-            let cell_spans = super::widgets::highlight_inline(cell_text, t);
             spans.push(Span::styled(" ", Style::default().bg(row_bg)));
+            let mut cell_spans = super::widgets::highlight_inline(&cell_text, t);
+            let visible = cell_text.chars().count();
+            if visible < width {
+                cell_spans.push(Span::styled(
+                    " ".repeat(width - visible),
+                    Style::default().bg(row_bg),
+                ));
+            }
             for mut s in cell_spans {
                 s.style = s.style.bg(row_bg);
                 spans.push(s);
@@ -1501,6 +1527,19 @@ fn render_table_line<'a>(line: &str, is_header: bool, t: &dyn Theme) -> Line<'a>
     spans.push(Span::styled("│", pipe));
 
     Line::from(spans)
+}
+
+fn truncate_table_cell(text: &str, width: usize) -> String {
+    let count = text.chars().count();
+    if count <= width {
+        return text.to_string();
+    }
+    if width <= 1 {
+        return "…".to_string();
+    }
+    let mut out: String = text.chars().take(width - 1).collect();
+    out.push('…');
+    out
 }
 
 fn render_system(text: &str, area: Rect, buf: &mut Buffer, t: &dyn Theme) {
@@ -2061,6 +2100,34 @@ mod tests {
     }
 
     #[test]
+    fn tool_result_markdown_tables_truncate_wide_preview_cells_in_narrow_cards() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "codebase_search".into(),
+                args_summary: None,
+                detail_args: Some("{\"query\":\"foo\"}".into()),
+                result_summary: None,
+                detail_result: Some(
+                    "## codebase_search: `foo`\n\n**1 result(s)** (scope: `code`)\n\n| File | Lines | Type | Score | Preview |\n|------|-------|------|-------|---------|\n| `core/crates/omegon/src/tui/tests.rs` | 1163-1177 | code | 16.22 | fn slash_context_request_dispatches_direct_context_pack() { · let mut app = test_app(); · let tx = test_tx(); |\n"
+                        .into(),
+                ),
+                is_error: false,
+                complete: true,
+                expanded: false,
+            },
+        };
+        let (area, mut buf) = make_buf(90, 18);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+        assert!(text.contains("│ File"), "table header should still render: {text}");
+        assert!(text.contains("Preview"), "preview column should remain visible: {text}");
+        assert!(text.contains("… │") || text.contains("…│"), "wide preview cell should be truncated instead of wrapping the whole row: {text}");
+        assert!(!text.contains("let mut app = test_app();"), "overflow preview content should not spill into wrapped continuation lines: {text}");
+    }
+
+    #[test]
     fn assistant_markdown_tables_accept_aligned_separator_rows() {
         let seg = Segment {
             meta: SegmentMeta::default(),
@@ -2477,7 +2544,7 @@ mod tests {
 
     #[test]
     fn table_line_renders() {
-        let line = render_table_line("| Name | Value |", true, &Alpharius);
+        let line = render_table_line("| Name | Value |", true, 80, &Alpharius);
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(
             text.contains("Name"),
@@ -2488,14 +2555,14 @@ mod tests {
             "should contain box drawing separator: {text}"
         );
 
-        let body = render_table_line("| foo | bar |", false, &Alpharius);
+        let body = render_table_line("| foo | bar |", false, 80, &Alpharius);
         let body_text: String = body.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(
             body_text.contains("foo"),
             "body should contain cell text: {body_text}"
         );
 
-        let sep = render_table_line("|---|---|", false, &Alpharius);
+        let sep = render_table_line("|---|---|", false, 80, &Alpharius);
         let sep_text: String = sep.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(
             sep_text.contains("─"),
