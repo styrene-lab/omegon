@@ -553,7 +553,7 @@
       "refactor(tui): remove activity-row phase labels",
       "refactor(tui): simplify slash command auth and context paths"
     ],
-    "rc_version": "0.15.10-rc.46",
+    "rc_version": "0.15.10-rc.47",
     "last_rc": "2026-04-08T11:40:08Z"
   }
 }
