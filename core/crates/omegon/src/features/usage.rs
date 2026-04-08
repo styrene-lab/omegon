@@ -62,6 +62,11 @@ impl UsageFeature {
         lines.push("Derived advisory".to_string());
         lines.push(format!("- headroom: {}", headroom.as_str()));
         lines.push(format!("- rationale: {rationale}"));
+        if provider == "anthropic"
+            && (model.contains("claude-sonnet-4-6") || model.contains("claude-opus-4-6"))
+        {
+            lines.push("- note: Claude 4.6 uses adaptive thinking by default in Omegon. This is the recommended upstream path and helps avoid forcing high fixed thinking budgets into Anthropic's expensive output-token pricing.".to_string());
+        }
 
         if !authority.is_empty() {
             lines.push(String::new());
@@ -144,6 +149,7 @@ mod tests {
         assert!(text.contains("5h utilization: 42%"), "got: {text}");
         assert!(text.contains("7d utilization: 64%"), "got: {text}");
         assert!(text.contains("headroom: healthy"), "got: {text}");
+        assert!(text.contains("adaptive thinking by default"), "got: {text}");
         assert!(
             text.contains("https://platform.claude.com/docs/en/api/rate-limits"),
             "got: {text}"

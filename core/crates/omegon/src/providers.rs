@@ -851,17 +851,17 @@ impl LlmBridge for AnthropicClient {
         if !wire_tools.is_empty() {
             body["tools"] = Value::Array(wire_tools);
         }
-        if let Some(ref level) = options.reasoning {
-            let budget = match level.as_str() {
-                "low" => 5_000,
-                "medium" => 10_000,
-                "high" => 50_000,
-                _ => 10_000,
-            };
-            body["thinking"] = json!({
-                "type": "enabled",
-                "budget_tokens": budget,
-            });
+        if let Some(effort) = anthropic_effort(options.reasoning.as_deref()) {
+            if anthropic_supports_adaptive_thinking(model) {
+                body["thinking"] = json!({ "type": "adaptive" });
+                body["effort"] = json!(effort);
+            } else if let Some(budget) = anthropic_manual_budget_tokens(options.reasoning.as_deref()) {
+                body["thinking"] = json!({
+                    "type": "enabled",
+                    "budget_tokens": budget,
+                });
+                body["effort"] = json!(effort);
+            }
         }
 
         let msg_count = body["messages"].as_array().map(|a| a.len()).unwrap_or(0);
@@ -2150,6 +2150,35 @@ fn openai_reasoning_effort(reasoning: Option<&str>) -> Option<&'static str> {
     }
 }
 
+fn anthropic_effort(reasoning: Option<&str>) -> Option<&'static str> {
+    match reasoning? {
+        "off" => None,
+        "minimal" => Some("minimal"),
+        "low" => Some("low"),
+        "medium" => Some("medium"),
+        "high" => Some("high"),
+        "xhigh" => Some("max"),
+        _ => Some("medium"),
+    }
+}
+
+fn anthropic_manual_budget_tokens(reasoning: Option<&str>) -> Option<u32> {
+    match reasoning? {
+        "off" => None,
+        "minimal" => Some(1_024),
+        "low" => Some(5_000),
+        "medium" => Some(10_000),
+        "high" => Some(50_000),
+        "xhigh" => Some(50_000),
+        _ => Some(10_000),
+    }
+}
+
+fn anthropic_supports_adaptive_thinking(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    model.contains("claude-sonnet-4-6") || model.contains("claude-opus-4-6")
+}
+
 /// Default model for each compat provider (used when no model is specified).
 fn compat_default_model(provider_id: &str) -> Option<&'static str> {
     match provider_id {
@@ -3246,6 +3275,18 @@ mod tests {
         assert_eq!(openai_reasoning_effort(Some("xhigh")), Some("xhigh"));
         assert_eq!(openai_reasoning_effort(Some("off")), None);
         assert_eq!(openai_reasoning_effort(Some("unknown")), Some("medium"));
+    }
+
+    #[test]
+    fn anthropic_reasoning_helpers_support_adaptive_and_manual_modes() {
+        assert_eq!(anthropic_effort(Some("minimal")), Some("minimal"));
+        assert_eq!(anthropic_effort(Some("xhigh")), Some("max"));
+        assert_eq!(anthropic_manual_budget_tokens(Some("minimal")), Some(1_024));
+        assert_eq!(anthropic_manual_budget_tokens(Some("high")), Some(50_000));
+        assert_eq!(anthropic_manual_budget_tokens(Some("off")), None);
+        assert!(anthropic_supports_adaptive_thinking("claude-sonnet-4-6"));
+        assert!(anthropic_supports_adaptive_thinking("anthropic:claude-opus-4-6"));
+        assert!(!anthropic_supports_adaptive_thinking("claude-sonnet-4-5"));
     }
 
     #[test]
