@@ -36,6 +36,10 @@ Phase 1 (local supervisor): same-host, same-user trust boundary; durable child r
 
 Implement a local-only supervisor model that makes post-restart child management explicit rather than degraded: define the durable child-registry schema, define safe child adoption validation (PID plus command/worktree fingerprint), define what supervision continuity is possible after restart, and add end-to-end proof for restart + child survival + cancel/completion. Do not require cross-host identity in this phase, but do not design APIs that assume local trust forever.
 
+### Bootstrap-token foundation
+
+Phase-1 supervisor authority should introduce a minimal local token/lease model: a per-daemon or per-run opaque token persisted in child registry metadata and checked during restart-path adoption alongside PID liveness and local execution fingerprint. The token is not a remote trust primitive; it is a same-host continuity marker that raises the bar above raw PID/path/model checks while preserving a migration path to identity-backed leases later.
+
 ## Decisions
 
 ### Supervisor v1 is local-only and same-host trusted, not identity-first
@@ -49,6 +53,12 @@ Implement a local-only supervisor model that makes post-restart child management
 **Status:** decided
 
 **Rationale:** Once child ownership can be adopted, cancelled, or reaped by a distinct control-plane peer beyond same-host local trust, PID/process ownership is not an adequate authority model. Mutual-authenticated workload identity is the correct boundary for distributed supervisor authority, but it should layer on top of a proven local supervisor contract rather than replacing it prematurely.
+
+### Supervisor v1 uses a simple local bootstrap token/lease, not Styrene Identity
+
+**Status:** decided
+
+**Rationale:** The local supervisor phase needs stronger authority continuity than PID/path/model heuristics, but pulling in Styrene Identity now would prematurely couple restart-path child supervision to an unfinished distributed identity system. A simple local bootstrap token/lease persisted with child metadata provides a minimal lineage/ownership signal for same-host recovery, leaves transport/security semantics explicitly degraded, and creates a clean seam for later replacement by Styrene Identity-backed authority.
 
 ## Open Questions
 

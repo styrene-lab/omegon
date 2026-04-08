@@ -13,6 +13,7 @@ pub struct CleaveState {
     pub directive: String,
     pub repo_path: String,
     pub workspace_path: String,
+    pub supervisor_token: String,
     pub children: Vec<ChildState>,
     pub plan: serde_json::Value,
     #[serde(skip)]
@@ -56,6 +57,8 @@ pub struct ChildState {
     pub adoption_worktree_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adoption_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supervisor_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -103,6 +106,14 @@ fn canonical_display(path: &str) -> Option<String> {
         .map(|p| p.to_string_lossy().to_string())
 }
 
+fn local_supervisor_token() -> String {
+    format!(
+        "supv-{}-{}",
+        crate::cleave::orchestrator::nanoid(8),
+        crate::cleave::orchestrator::nanoid(6)
+    )
+}
+
 impl CleaveState {
     /// Save state to disk.
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
@@ -143,10 +154,17 @@ impl CleaveState {
                 .zip(child.adoption_model.as_ref())
                 .map(|(current, expected)| current == expected)
                 .unwrap_or(false);
+            let supervisor_matches = child
+                .supervisor_token
+                .as_ref()
+                .zip(Some(&self.supervisor_token))
+                .map(|(child_token, state_token)| child_token == state_token)
+                .unwrap_or(false);
             if let Some(pid) = child.pid
                 && process_is_alive(pid)
                 && worktree_matches
                 && model_matches
+                && supervisor_matches
             {
                 reconciliation.still_running += 1;
                 continue;
@@ -161,6 +179,7 @@ impl CleaveState {
             child.last_activity_unix_ms = None;
             child.adoption_worktree_path = None;
             child.adoption_model = None;
+            child.supervisor_token = None;
             reconciliation.requeued += 1;
         }
         reconciliation
@@ -175,6 +194,7 @@ impl CleaveState {
             child.last_activity_unix_ms = Some(now);
             child.adoption_worktree_path = child.worktree_path.as_deref().and_then(canonical_display);
             child.adoption_model = child.execute_model.clone();
+            child.supervisor_token = Some(self.supervisor_token.clone());
         }
     }
 
@@ -228,6 +248,7 @@ impl CleaveState {
                     last_activity_unix_ms: None,
                     adoption_worktree_path: None,
                     adoption_model: None,
+                    supervisor_token: None,
                 }
             })
             .collect();
@@ -237,6 +258,7 @@ impl CleaveState {
             directive: directive.to_string(),
             repo_path: repo_path.to_string_lossy().to_string(),
             workspace_path: workspace_path.to_string_lossy().to_string(),
+            supervisor_token: local_supervisor_token(),
             children,
             plan: serde_json::to_value(plan).unwrap_or_default(),
             started_at: Some(Instant::now()),
@@ -299,6 +321,7 @@ mod tests {
 
         let loaded = CleaveState::load(&tmp).unwrap();
         assert_eq!(loaded.run_id, "run-1");
+        assert!(!loaded.supervisor_token.is_empty());
         assert_eq!(loaded.children[0].status, ChildStatus::Completed);
         assert_eq!(loaded.children[0].duration_secs, Some(42.5));
         assert_eq!(loaded.children[1].status, ChildStatus::Pending);
@@ -366,6 +389,7 @@ mod tests {
         );
         state.children[0].execute_model = Some("model".into());
         state.children[0].adoption_model = Some("model".into());
+        state.children[0].supervisor_token = Some(state.supervisor_token.clone());
         state.children[0].started_at_unix_ms = Some(1);
         state.children[0].last_activity_unix_ms = Some(2);
 
@@ -399,6 +423,42 @@ mod tests {
         assert!(child.last_activity_unix_ms.is_some());
         assert!(child.adoption_worktree_path.is_none());
         assert_eq!(child.adoption_model.as_deref(), Some("model"));
+        assert_eq!(child.supervisor_token.as_deref(), Some(state.supervisor_token.as_str()));
+    }
+
+    #[test]
+    fn reconcile_running_children_requeues_mismatched_supervisor_token() {
+        let plan = sample_plan();
+        let mut state = CleaveState::from_plan(
+            "run-1",
+            "fix bugs",
+            Path::new("/repo"),
+            Path::new("/ws"),
+            &plan,
+            "model",
+        );
+        let pid = std::process::id();
+        let worktree = tempfile::tempdir().unwrap();
+        state.children[0].status = ChildStatus::Running;
+        state.children[0].pid = Some(pid);
+        state.children[0].worktree_path = Some(worktree.path().to_string_lossy().to_string());
+        state.children[0].adoption_worktree_path = Some(
+            std::fs::canonicalize(worktree.path())
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+        );
+        state.children[0].execute_model = Some("model".into());
+        state.children[0].adoption_model = Some("model".into());
+        state.children[0].supervisor_token = Some("different-supervisor".into());
+
+        let reconciliation = state.reconcile_running_children();
+
+        assert_eq!(reconciliation.seen, 1);
+        assert_eq!(reconciliation.still_running, 0);
+        assert_eq!(reconciliation.requeued, 1);
+        assert_eq!(state.children[0].status, ChildStatus::Pending);
+        assert!(state.children[0].pid.is_none());
     }
 
     #[test]
