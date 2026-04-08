@@ -31,6 +31,7 @@ mod smoke;
 mod switch;
 mod update;
 mod upstream_errors;
+mod usage;
 
 mod conversation;
 mod lifecycle;

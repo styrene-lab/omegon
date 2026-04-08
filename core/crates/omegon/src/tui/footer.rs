@@ -13,6 +13,7 @@ use super::widgets::{self, GaugeConfig};
 
 use crate::settings::{ContextClass, ContextMode};
 use crate::status::HarnessStatus;
+use crate::usage::format_provider_telemetry_compact;
 
 #[derive(Clone, Debug)]
 pub struct OperatorEventLine {
@@ -341,7 +342,9 @@ impl FooterData {
                     false,
                 );
             }
-            if let Some(quota_line) = format_provider_telemetry_line(&self.provider_telemetry) {
+            if let Some(quota_line) =
+                format_provider_telemetry_compact(self.provider_telemetry.as_ref())
+            {
                 push_row(
                     &mut lines,
                     "limit",
@@ -648,7 +651,7 @@ impl FooterData {
 
         lines.push(Line::from(auth_parts));
 
-        if let Some(line) = format_provider_telemetry_line(&self.provider_telemetry) {
+        if let Some(line) = format_provider_telemetry_compact(self.provider_telemetry.as_ref()) {
             lines.push(Line::from(vec![
                 Span::styled("quota ", Style::default().fg(t.dim())),
                 Span::styled(line, Style::default().fg(t.accent_muted())),
@@ -936,94 +939,6 @@ fn format_session_text(
     parts.join(" ")
 }
 
-/// Format a human-readable duration from seconds (e.g. 13648 → "3h47m").
-fn format_duration_compact(secs: u64) -> String {
-    if secs < 60 {
-        return format!("{secs}s");
-    }
-    let mins = secs / 60;
-    if mins < 60 {
-        return format!("{mins}m");
-    }
-    let hours = mins / 60;
-    let rem_mins = mins % 60;
-    if hours < 24 {
-        if rem_mins > 0 {
-            return format!("{hours}h{rem_mins:02}m");
-        }
-        return format!("{hours}h");
-    }
-    let days = hours / 24;
-    let rem_hours = hours % 24;
-    if rem_hours > 0 {
-        format!("{days}d{rem_hours}h")
-    } else {
-        format!("{days}d")
-    }
-}
-
-fn format_provider_telemetry_line(
-    telemetry: &Option<omegon_traits::ProviderTelemetrySnapshot>,
-) -> Option<String> {
-    let t = telemetry.as_ref()?;
-    let mut parts = Vec::new();
-
-    match t.provider.as_str() {
-        "anthropic" => {
-            if let Some(pct) = t.unified_5h_utilization_pct {
-                parts.push(format!("5h {:.0}%", pct));
-            }
-            if let Some(pct) = t.unified_7d_utilization_pct {
-                parts.push(format!("7d {:.0}%", pct));
-            }
-            if let Some(secs) = t.retry_after_secs {
-                parts.push(format!("retry {}", format_duration_compact(secs)));
-            }
-        }
-        "openai-codex" => {
-            let family = t.codex_active_limit.as_deref().unwrap_or("codex");
-            if let Some(pct) = t.codex_primary_pct {
-                parts.push(format!("{family} {pct}%"));
-            } else {
-                parts.push(family.to_string());
-            }
-            if let Some(secs) = t.codex_primary_reset_secs {
-                parts.push(format!("resets {}", format_duration_compact(secs)));
-            }
-            if let Some(secs) = t.codex_secondary_reset_secs {
-                parts.push(format!("weekly {}", format_duration_compact(secs)));
-            }
-            if let Some(unlimited) = t.codex_credits_unlimited {
-                parts.push(if unlimited {
-                    "credits ∞".into()
-                } else {
-                    "credits metered".into()
-                });
-            }
-        }
-        _ => {
-            if let Some(rem) = t.requests_remaining {
-                parts.push(format!("req {}", rem));
-            }
-            if let Some(rem) = t.tokens_remaining {
-                parts.push(format!(
-                    "tok {}",
-                    widgets::format_tokens_compact(rem as usize)
-                ));
-            }
-            if let Some(secs) = t.retry_after_secs {
-                parts.push(format!("retry {}", format_duration_compact(secs)));
-            }
-        }
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" · "))
-    }
-}
-
 fn format_failure_age(timestamp: &str) -> Option<String> {
     let parsed = DateTime::parse_from_rfc3339(timestamp).ok()?;
     let age = Utc::now().signed_duration_since(parsed.with_timezone(&Utc));
@@ -1276,25 +1191,27 @@ mod tests {
 
     #[test]
     fn provider_telemetry_line_formats_unified_usage() {
-        let text =
-            format_provider_telemetry_line(&Some(omegon_traits::ProviderTelemetrySnapshot {
+        let text = format_provider_telemetry_compact(Some(
+            &omegon_traits::ProviderTelemetrySnapshot {
                 provider: "anthropic".into(),
                 source: "response_headers".into(),
                 unified_5h_utilization_pct: Some(42.0),
                 unified_7d_utilization_pct: Some(64.0),
                 retry_after_secs: Some(17),
                 ..Default::default()
-            }))
-            .expect("telemetry line");
+            },
+        ))
+        .expect("telemetry line");
         assert!(text.contains("5h 42%"), "got {text}");
         assert!(text.contains("7d 64%"), "got {text}");
         assert!(text.contains("retry 17s"), "got {text}");
+        assert!(text.ends_with("ok"), "got {text}");
     }
 
     #[test]
     fn provider_telemetry_line_formats_codex_headers() {
-        let text =
-            format_provider_telemetry_line(&Some(omegon_traits::ProviderTelemetrySnapshot {
+        let text = format_provider_telemetry_compact(Some(
+            &omegon_traits::ProviderTelemetrySnapshot {
                 provider: "openai-codex".into(),
                 source: "response_headers".into(),
                 codex_active_limit: Some("codex".into()),
@@ -1304,8 +1221,9 @@ mod tests {
                 codex_credits_unlimited: Some(false),
                 codex_limit_name: Some("GPT-5.3-Codex-Spark".into()),
                 ..Default::default()
-            }))
-            .expect("telemetry line");
+            },
+        ))
+        .expect("telemetry line");
         assert!(!text.contains("GPT-5.3-Codex-Spark"), "got {text}");
         assert!(text.contains("codex 0%"), "got {text}");
         assert!(text.contains("resets 3h47m"), "got {text}");
@@ -1313,6 +1231,7 @@ mod tests {
         assert!(text.contains("credits metered"), "got {text}");
         assert!(!text.contains("primary"), "got {text}");
         assert!(!text.contains('↻'), "got {text}");
+        assert!(text.ends_with("ok"), "got {text}");
     }
 
     #[test]
