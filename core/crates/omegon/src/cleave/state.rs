@@ -74,6 +74,26 @@ impl CleaveState {
         Ok(serde_json::from_str(&json)?)
     }
 
+    /// Requeue children that were marked running by an interrupted parent process.
+    ///
+    /// Persisted `running` means only that the previous orchestrator had dispatched
+    /// the child before it died or was interrupted. It does not prove the child is
+    /// still alive or manageable, so resumed cleave runs must treat that state as
+    /// stale and requeue the child.
+    pub fn requeue_interrupted_children(&mut self) -> usize {
+        let mut requeued = 0;
+        for child in &mut self.children {
+            if child.status == ChildStatus::Running {
+                child.status = ChildStatus::Pending;
+                child.error = None;
+                child.duration_secs = None;
+                child.stdout = None;
+                requeued += 1;
+            }
+        }
+        requeued
+    }
+
     /// Build initial state from a plan.
     pub fn from_plan(
         run_id: &str,
@@ -190,6 +210,35 @@ mod tests {
         assert!(loaded.children[0].runtime.is_none());
 
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn requeue_interrupted_children_demotes_running_to_pending() {
+        let plan = sample_plan();
+        let mut state = CleaveState::from_plan(
+            "run-1",
+            "fix bugs",
+            Path::new("/repo"),
+            Path::new("/ws"),
+            &plan,
+            "model",
+        );
+        state.children[0].status = ChildStatus::Running;
+        state.children[0].error = Some("stale failure".into());
+        state.children[0].duration_secs = Some(12.0);
+        state.children[0].stdout = Some("stale stdout".into());
+        state.children[1].status = ChildStatus::Completed;
+        state.children[1].duration_secs = Some(42.5);
+
+        let requeued = state.requeue_interrupted_children();
+
+        assert_eq!(requeued, 1);
+        assert_eq!(state.children[0].status, ChildStatus::Pending);
+        assert!(state.children[0].error.is_none());
+        assert!(state.children[0].duration_secs.is_none());
+        assert!(state.children[0].stdout.is_none());
+        assert_eq!(state.children[1].status, ChildStatus::Completed);
+        assert_eq!(state.children[1].duration_secs, Some(42.5));
     }
 
     #[test]

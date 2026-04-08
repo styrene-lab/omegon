@@ -110,8 +110,13 @@ pub async fn run_cleave(
     // with worktree paths, enriched task files, etc.)
     let mut state = if state_path.exists() {
         let mut s = CleaveState::load(&state_path)?;
+        let requeued = s.requeue_interrupted_children();
         s.started_at = Some(Instant::now());
-        tracing::info!("resuming from existing state.json");
+        if requeued > 0 {
+            tracing::warn!(requeued, "resuming from existing state.json after interrupted cleave; re-queued stale running children");
+        } else {
+            tracing::info!("resuming from existing state.json");
+        }
         s
     } else {
         let run_id = format!("clv-{}-{}", nanoid(8), nanoid(4));
@@ -1406,6 +1411,39 @@ mod tests {
             prompt_file.file_name().and_then(|s| s.to_str()),
             Some(".cleave-prompt.md")
         );
+    }
+
+    #[test]
+    fn resumed_cleave_requeues_stale_running_children() {
+        let plan: crate::cleave::plan::CleavePlan = serde_json::from_str(
+            r#"{
+                "children": [
+                    {"label": "alpha", "description": "do alpha", "scope": ["src/"]},
+                    {"label": "beta", "description": "do beta", "scope": ["tests/"]}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let mut state = CleaveState::from_plan(
+            "run-1",
+            "fix bugs",
+            Path::new("/repo"),
+            Path::new("/ws"),
+            &plan,
+            "anthropic:claude-sonnet-4-6",
+        );
+        state.children[0].status = ChildStatus::Running;
+        state.children[0].error = Some("cancelled mid-flight".into());
+        state.children[0].duration_secs = Some(9.0);
+        state.children[1].status = ChildStatus::Completed;
+
+        let requeued = state.requeue_interrupted_children();
+
+        assert_eq!(requeued, 1);
+        assert_eq!(state.children[0].status, ChildStatus::Pending);
+        assert!(state.children[0].error.is_none());
+        assert!(state.children[0].duration_secs.is_none());
+        assert_eq!(state.children[1].status, ChildStatus::Completed);
     }
 }
 
