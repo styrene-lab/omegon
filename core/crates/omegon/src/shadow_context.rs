@@ -96,6 +96,7 @@ pub struct ShadowEntry {
     pub id: EntryId,
     pub kind: ContextKind,
     pub body: EntryBody,
+    pub search_text: Option<String>,
     pub token_estimate: usize,
     pub priority: i32,
     pub relevance: f32,
@@ -116,6 +117,7 @@ impl ShadowEntry {
             id: id.into(),
             kind,
             body,
+            search_text: None,
             token_estimate,
             priority: 0,
             relevance: 0.0,
@@ -128,6 +130,12 @@ impl ShadowEntry {
             diversity_key: None,
             diversity_cap: None,
         }
+    }
+
+    pub fn search_text(&self) -> String {
+        self.search_text
+            .clone()
+            .unwrap_or_else(|| self.body.materialize())
     }
 
     pub fn tier_weight(&self) -> f32 {
@@ -226,19 +234,30 @@ impl ShadowContext {
 
         for entry in &mut self.entries {
             entry.last_scored_turn = turn;
-            let content = entry.body.materialize();
             let prompt_lower = user_prompt.to_lowercase();
-            let content_lower = content.to_lowercase();
+            let content_lower = entry.search_text().to_lowercase();
+            let query_tokens = prompt_lower
+                .split_whitespace()
+                .filter(|word| !word.is_empty())
+                .collect::<Vec<_>>();
+            let normalized_phrase = prompt_lower.replace(' ', "_");
             entry.relevance = if prompt_lower.is_empty() {
                 0.0
-            } else if content_lower.contains(&prompt_lower) {
-                1.0
             } else {
-                let overlap = prompt_lower
-                    .split_whitespace()
-                    .filter(|word| content_lower.contains(word))
+                let exact_phrase = if content_lower.contains(&prompt_lower) { 0.65 } else { 0.0 };
+                let normalized_phrase_hit = if !normalized_phrase.is_empty()
+                    && content_lower.contains(&normalized_phrase)
+                {
+                    0.45
+                } else {
+                    0.0
+                };
+                let overlap = query_tokens
+                    .iter()
+                    .filter(|word| content_lower.contains(**word))
                     .count();
-                overlap as f32 / prompt_lower.split_whitespace().count().max(1) as f32
+                let overlap_score = overlap as f32 / query_tokens.len().max(1) as f32;
+                (exact_phrase + normalized_phrase_hit + overlap_score).min(1.5)
             };
             entry.recency = match entry.last_included_turn {
                 Some(last) => 1.0 / (turn.saturating_sub(last).max(1) as f32),
@@ -573,5 +592,42 @@ mod tests {
         let pos_code = selected.selected_ids.iter().position(|id| id == "code").unwrap();
         let pos_task = selected.selected_ids.iter().position(|id| id == "task").unwrap();
         assert!(pos_code < pos_task, "expected highly relevant code to outrank weak task artifact: {selected:?}");
+    }
+
+    #[test]
+    fn selector_prefers_identifier_search_text_over_comment_only_phrase_match() {
+        let mut shadow = ShadowContext::new(policy());
+
+        let mut comment_hit = ShadowEntry::new(
+            "comment-hit",
+            ContextKind::CodebaseChunk,
+            EntryBody::Inline("- src/settings.rs:250-258 [fn::default_mouse]\n  score: 16.52\n  fn default_mouse() -> bool { · true · } · · // ─── Selector Policy".into()),
+        );
+        comment_hit.search_text = Some("src/settings.rs fn::default_mouse fn default_mouse bool true".into());
+        comment_hit.priority = 90;
+
+        let mut identifier_hit = ShadowEntry::new(
+            "identifier-hit",
+            ContextKind::CodebaseChunk,
+            EntryBody::Inline("- src/shadow_context.rs:181-280 [impl::ShadowContext]\n  score: 17.09\n  impl ShadowContext { pub fn selector_policy(&self) -> SelectorPolicy { self.selector_policy } }".into()),
+        );
+        identifier_hit.search_text = Some("src/shadow_context.rs impl::ShadowContext impl ShadowContext pub fn selector_policy self selector_policy SelectorPolicy".into());
+        identifier_hit.priority = 90;
+
+        shadow.upsert(comment_hit);
+        shadow.upsert(identifier_hit);
+
+        let selected = shadow.select_for_turn(1, "selector policy");
+        let pos_identifier = selected
+            .selected_ids
+            .iter()
+            .position(|id| id == "identifier-hit")
+            .unwrap();
+        let pos_comment = selected
+            .selected_ids
+            .iter()
+            .position(|id| id == "comment-hit")
+            .unwrap();
+        assert!(pos_identifier < pos_comment, "expected identifier-bearing chunk to outrank comment-only phrase match: {selected:?}");
     }
 }

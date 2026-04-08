@@ -427,7 +427,8 @@ impl ContextProvider {
         let code_chunks = cache.all_code_chunks().ok()?;
         let knowledge_chunks = cache.all_knowledge_chunks().ok()?;
         let idx = BM25Index::build(&code_chunks, &knowledge_chunks);
-        let results = idx.search(query, SearchScope::Code, max_items);
+        let candidate_count = max_items.saturating_mul(4).clamp(max_items, 12);
+        let results = idx.search(query, SearchScope::Code, candidate_count);
         let entries = results
             .into_iter()
             .enumerate()
@@ -445,6 +446,7 @@ impl ContextProvider {
                         r.preview.chars().take(240).collect::<String>().replace('\n', " · ")
                     )),
                 );
+                entry.search_text = Some(Self::code_search_text(&r.file, &r.label, &r.preview));
                 entry.priority = 90;
                 entry.diversity_key = Some(format!("code-file:{}", r.file));
                 entry.diversity_cap = Some(2);
@@ -452,6 +454,26 @@ impl ContextProvider {
             })
             .collect::<Vec<_>>();
         Self::select_pack("Code", query, reason, entries)
+    }
+
+    fn code_search_text(file: &str, label: &str, preview: &str) -> String {
+        let mut parts = vec![file.to_string(), label.to_string()];
+        let code_lines = preview
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .filter(|line| {
+                !line.starts_with("//")
+                    && !line.starts_with("///")
+                    && !line.starts_with("//!")
+                    && !line.starts_with('*')
+                    && !line.starts_with("/*")
+            })
+            .collect::<Vec<_>>();
+        if !code_lines.is_empty() {
+            parts.push(code_lines.join(" "));
+        }
+        parts.join(" ")
     }
 }
 
@@ -1212,6 +1234,65 @@ mod tests {
         let text = result.content.iter().filter_map(|c| match c { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join("\n");
         let occurrences = text.matches("src/main.rs:").count();
         assert!(occurrences <= 2, "expected at most 2 snippets from same file, got {occurrences}: {text}");
+    }
+
+    #[tokio::test]
+    async fn request_context_code_pack_prefers_identifier_hits_over_adjacent_comment_headers() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(
+            tmp.path().join("src").join("main.rs"),
+            "fn default_mouse() -> bool {\n    true\n}\n\n// ─── Selector Policy ─────────────────────────────────────────────────────────\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("src").join("shadow_context.rs"),
+            "pub struct ShadowContext {\n    selector_policy: SelectorPolicy,\n}\n\nimpl ShadowContext {\n    pub fn selector_policy(&self) -> SelectorPolicy {\n        self.selector_policy\n    }\n}\n",
+        )
+        .unwrap();
+
+        let provider = ContextProvider::new_with_sources(
+            SharedContextMetrics::new(),
+            new_shared_command_tx(),
+            None,
+            None,
+            None,
+            Some(tmp.path().to_path_buf()),
+        );
+        let result = provider
+            .execute(
+                crate::tool_registry::context::REQUEST_CONTEXT,
+                "call-ctx-code-comment-noise",
+                json!({
+                    "requests": [
+                        {
+                            "kind": "code",
+                            "query": "selector policy",
+                            "reason": "Need exact implementation orientation",
+                            "max_items": 3
+                        }
+                    ]
+                }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("tool result");
+        let details = result.details;
+        let selected = details["packs"][0]["selected_entries"]
+            .as_array()
+            .expect("selected entries array");
+        let selected_text = selected
+            .iter()
+            .filter_map(|entry| entry.get("content").and_then(|v| v.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(selected_text.contains("shadow_context.rs"), "expected identifier-bearing chunk to survive reranking: {selected_text}");
+        let first_content = selected
+            .first()
+            .and_then(|entry| entry.get("content"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert!(first_content.contains("shadow_context.rs"), "expected first result to target actual selector implementation, got: {first_content}");
     }
 
     #[tokio::test]
