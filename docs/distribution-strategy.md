@@ -57,6 +57,28 @@ Formula at `homebrew/Formula/omegon.rb`. Auto-updated by `.github/workflows/home
 
 Install: `brew tap styrene-lab/tap && brew install omegon`
 
+## Linux ABI compatibility
+
+Homebrew on Linux is a package delivery channel, not a guarantee that Omegon's release binary will run against the host glibc.
+
+If a release artifact is built on too new a Linux baseline, users may install successfully and then fail at runtime with missing symbol versions such as `GLIBC_2.38` or `GLIBC_2.39`.
+
+### Current packaging reality
+
+- Homebrew does **not** patch the host's system glibc to satisfy Omegon
+- a Linux release built against a newer glibc will fail on older distros even when install succeeds
+- install docs must describe this honestly until release artifacts target a lower common baseline or a musl/static path exists
+
+### Release requirement
+
+The release process should eventually guarantee at least one Linux distribution path that avoids this footgun:
+
+- build on an older glibc baseline, or
+- ship a musl/static Linux artifact where practical, or
+- publish explicitly versioned distro/ABI-targeted Linux artifacts
+
+Until then, Linux Homebrew documentation must be treated as conditional on host glibc compatibility.
+
 ## Open Questions
 
 - Should we export the Developer ID private key for CI notarization, or keep it YubiKey-only (local signing)?

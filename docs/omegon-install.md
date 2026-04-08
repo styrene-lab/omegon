@@ -12,6 +12,41 @@ open_questions: []
 
 Engineers should be able to install omegon with a single command — no git clone, no submodule init, no manual npm link. The challenge: omegon depends on a vendored pi-mono fork (git submodule) and loads extensions/themes/skills from the repo root. Need a distribution strategy that bundles everything into an installable artifact.
 
+## Linux runtime requirements
+
+**Important:** Homebrew on Linux does **not** solve host glibc ABI compatibility for Omegon release binaries.
+
+If a Linux release artifact was built against a newer glibc than your distro provides, install may succeed but the binary will fail immediately at runtime with errors like:
+
+```text
+omegon: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found
+omegon: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
+```
+
+That means the host system glibc is older than the binary expects.
+
+### Current expectation
+
+Before relying on a Linux Homebrew install, verify that your host glibc is new enough for the shipped release artifact:
+
+```bash
+ldd --version
+```
+
+If your system glibc is older than the required version for the current release artifact, `brew install` alone is not sufficient.
+
+### What to do if this happens
+
+Use one of these paths:
+
+- run Omegon on a newer Linux distribution with a compatible glibc
+- use a container/VM image that provides the required glibc baseline
+- use another distribution channel once an older-glibc or musl/static Linux artifact is published
+
+### Documentation contract
+
+Linux install surfaces must state runtime ABI requirements explicitly. `brew install` should never imply that Homebrew will supply a compatible glibc for Omegon binaries on Linux.
+
 ## Research
 
 ### Runtime dependency analysis
