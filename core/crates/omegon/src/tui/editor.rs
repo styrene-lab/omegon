@@ -254,12 +254,48 @@ impl Editor {
             .find(|span| projected_idx > span.start && projected_idx <= span.end)
     }
 
+    fn token_span_containing_cursor(&self, projected_idx: usize) -> Option<TokenSpan> {
+        self.projection()
+            .token_spans
+            .into_iter()
+            .find(|span| projected_idx >= span.start && projected_idx < span.end)
+    }
+
     fn token_ord_before_model_idx(&self, model_idx: usize) -> usize {
         self.model_text
             .chars()
             .take(model_idx)
             .filter(|ch| *ch == Self::ATTACHMENT_SENTINEL)
             .count()
+    }
+
+    fn projected_char_positions(&self) -> Vec<usize> {
+        let mut positions = Vec::new();
+        let mut projected = 0usize;
+        let mut attachment_ord = 0usize;
+        for ch in self.model_text.chars() {
+            positions.push(projected);
+            if ch == Self::ATTACHMENT_SENTINEL {
+                let width = self
+                    .attachments
+                    .get(attachment_ord)
+                    .map(|path| Self::attachment_placeholder(path, attachment_ord).chars().count())
+                    .unwrap_or(1);
+                projected += width;
+                attachment_ord += 1;
+            } else {
+                projected += 1;
+            }
+        }
+        positions
+    }
+
+    fn normalize_cursor_outside_token(&mut self, prefer_end: bool) {
+        let projected_idx = self.projected_cursor();
+        if let Some(span) = self.token_span_containing_cursor(projected_idx) {
+            let target = if prefer_end { span.end } else { span.start };
+            self.set_projected_cursor(target);
+        }
     }
 
     fn remove_token(&mut self, span: TokenSpan) {
@@ -281,6 +317,48 @@ impl Editor {
         self.model_text.replace_range(start..end, "");
         let new_cursor = self.projected_cursor().saturating_sub(1);
         self.sync_textarea_from_model(new_cursor);
+    }
+
+    fn delete_projected_range(&mut self, start: usize, end: usize) {
+        if start >= end {
+            return;
+        }
+
+        let positions = self.projected_char_positions();
+        let model_chars: Vec<char> = self.model_text.chars().collect();
+        let mut new_model = String::new();
+        let mut new_attachments = Vec::new();
+        let mut attachment_ord = 0usize;
+
+        for (idx, ch) in model_chars.iter().copied().enumerate() {
+            let projected_pos = positions.get(idx).copied().unwrap_or(0);
+            let remove = if ch == Self::ATTACHMENT_SENTINEL {
+                let width = self
+                    .attachments
+                    .get(attachment_ord)
+                    .map(|path| Self::attachment_placeholder(path, attachment_ord).chars().count())
+                    .unwrap_or(1);
+                projected_pos < end && projected_pos + width > start
+            } else {
+                projected_pos >= start && projected_pos < end
+            };
+
+            if ch == Self::ATTACHMENT_SENTINEL {
+                if !remove {
+                    new_model.push(ch);
+                    if let Some(path) = self.attachments.get(attachment_ord).cloned() {
+                        new_attachments.push(path);
+                    }
+                }
+                attachment_ord += 1;
+            } else if !remove {
+                new_model.push(ch);
+            }
+        }
+
+        self.model_text = new_model;
+        self.attachments = new_attachments;
+        self.sync_textarea_from_model(start);
     }
 
 
@@ -754,19 +832,41 @@ impl Editor {
     pub fn move_word_backward(&mut self) {
         self.textarea
             .move_cursor(ratatui_textarea::CursorMove::WordBack);
+        self.normalize_cursor_outside_token(false);
     }
 
     pub fn move_word_forward(&mut self) {
         self.textarea
             .move_cursor(ratatui_textarea::CursorMove::WordForward);
+        self.normalize_cursor_outside_token(true);
     }
 
     pub fn delete_word_backward(&mut self) {
-        self.textarea.delete_word();
+        let end = self.projected_cursor();
+        let start = self
+            .token_span_for_backspace(end)
+            .map(|span| span.start)
+            .unwrap_or_else(|| {
+                self.textarea.delete_word();
+                let new_end = self.projected_cursor();
+                new_end
+            });
+        if start < end {
+            self.delete_projected_range(start, end);
+        }
     }
 
     pub fn delete_word_forward(&mut self) {
+        let start = self.projected_cursor();
+        if let Some(span) = self.token_span_containing_cursor(start) {
+            self.delete_projected_range(span.start, span.end);
+            return;
+        }
         self.textarea.delete_next_word();
+        let end = self.projected_cursor();
+        if end > start {
+            self.delete_projected_range(start, end);
+        }
     }
 }
 
@@ -1104,6 +1204,56 @@ mod tests {
 
         let cursor = e.cursor_screen_position(area);
         assert_eq!(cursor, (9, 1));
+    }
+
+    #[test]
+    fn word_motion_skips_inside_attachment_placeholder() {
+        let mut e = Editor::new();
+        e.insert('a');
+        e.insert(' ');
+        e.insert_attachment(PathBuf::from("/tmp/paste.png"));
+        e.insert(' ');
+        e.insert('b');
+        e.move_home();
+        e.move_right();
+        e.move_word_forward();
+        e.insert('X');
+        assert_eq!(e.render_text(), "a [image0]X b");
+    }
+
+    #[test]
+    fn delete_word_backward_removes_attachment_token_atomically() {
+        let mut e = Editor::new();
+        e.insert('a');
+        e.insert(' ');
+        e.insert_attachment(PathBuf::from("/tmp/paste.png"));
+        e.insert(' ');
+        e.insert('b');
+        e.move_end();
+        e.move_word_backward();
+        e.delete_word_backward();
+        assert_eq!(e.render_text(), "a b");
+        let (text, attachments) = e.take_submission();
+        assert_eq!(text, "a b");
+        assert!(attachments.is_empty());
+    }
+
+    #[test]
+    fn delete_word_forward_removes_attachment_token_atomically() {
+        let mut e = Editor::new();
+        e.insert('a');
+        e.insert(' ');
+        e.insert_attachment(PathBuf::from("/tmp/paste.png"));
+        e.insert(' ');
+        e.insert('b');
+        e.move_home();
+        e.move_right();
+        e.move_right();
+        e.delete_word_forward();
+        assert_eq!(e.render_text(), "a  b");
+        let (text, attachments) = e.take_submission();
+        assert_eq!(text, "a  b");
+        assert!(attachments.is_empty());
     }
 
     #[test]

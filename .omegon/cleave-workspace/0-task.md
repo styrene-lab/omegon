@@ -1,32 +1,29 @@
 ---
 task_id: 0
-label: runtime-matrix
-siblings: [1:workflow-issueing]
+label: prompt-shape
+siblings: [1:runtime-telemetry]
 ---
 
-# Task 0: runtime-matrix
+# Task 0: prompt-shape
 
 ## Root Directive
 
-> Design and implement a dedicated daily provider drift workflow for live upstream endpoint verification against an expected response matrix, using limited-budget provider secrets, with deduplicated GitHub issue creation on true drift. Reuse/repair existing live_upstream_smoke and stale provider-drift workflow where sensible, add tests/docs, and keep release/nightly non-blocking.
+> Add system prompt composition breakdown instrumentation to Omegon: section-by-section prompt metrics surfaced in runtime/session telemetry with tests
 
 ## Mission
 
-Inspect and extend the Rust live upstream smoke/drift test surface. Define or add a checked-in expectation matrix and determine the minimal viable assertions for provider-specific endpoint drift (not just round-trip OK), plus tests or validation around the matrix parsing/execution path.
+Add prompt section breakdown structures and make prompt assembly return/track section sizes with tests in prompt.rs and shared traits as needed.
 
 ## Scope
 
-- `core/crates/omegon/tests/live_upstream_smoke.rs`
-- `core/crates/omegon/src/providers.rs`
-- `core/crates/omegon/src/settings.rs`
-- `.pi/provider-contracts.json`
-- `docs/provider-thinking-capability-matrix.md`
+- `core/crates/omegon/src/prompt.rs`
+- `core/crates/omegon-traits/src/lib.rs`
 
 **Depends on:** none (independent)
 
 ## Siblings
 
-- **workflow-issueing**: Inspect and repair/replace the stale provider-drift GitHub Actions workflow. Design the daily control-plane workflow, issue dedupe/update behavior, artifact/log strategy, and docs. Implement the workflow and any helper scripts/files needed for issue creation/reporting without making release/nightly blocking.
+- **runtime-telemetry**: Wire prompt breakdown through setup/loop/session-log context telemetry and add regression tests for reporting/output.
 
 ## Dependency Versions
 
@@ -96,6 +93,21 @@ rpassword = "7"
 
 [dev-dependencies]
 insta = "1.46"
+tempfile = "3.27.0"
+
+```
+
+```toml
+# core/crates/omegon-traits/Cargo.toml
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+tokio-util = { workspace = true }
+rmp-serde = "1.3"
+
+[dev-dependencies]
 tempfile = "3.27.0"
 
 ```

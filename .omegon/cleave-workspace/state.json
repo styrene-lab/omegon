@@ -1,42 +1,41 @@
 {
-  "runId": "clv-5qa6qt21-5q1c",
-  "directive": "Design and implement a dedicated daily provider drift workflow for live upstream endpoint verification against an expected response matrix, using limited-budget provider secrets, with deduplicated GitHub issue creation on true drift. Reuse/repair existing live_upstream_smoke and stale provider-drift workflow where sensible, add tests/docs, and keep release/nightly non-blocking.",
+  "runId": "clv-pl9gc3pn-ag53",
+  "directive": "Add system prompt composition breakdown instrumentation to Omegon: section-by-section prompt metrics surfaced in runtime/session telemetry with tests",
   "repoPath": "/Users/cwilson/workspace/black-meridian/omegon",
   "workspacePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace",
   "children": [
     {
       "childId": 0,
-      "label": "runtime-matrix",
-      "description": "Inspect and extend the Rust live upstream smoke/drift test surface. Define or add a checked-in expectation matrix and determine the minimal viable assertions for provider-specific endpoint drift (not just round-trip OK), plus tests or validation around the matrix parsing/execution path.",
+      "label": "prompt-shape",
+      "description": "Add prompt section breakdown structures and make prompt assembly return/track section sizes with tests in prompt.rs and shared traits as needed.",
       "scope": [
-        "core/crates/omegon/tests/live_upstream_smoke.rs",
-        "core/crates/omegon/src/providers.rs",
-        "core/crates/omegon/src/settings.rs",
-        ".pi/provider-contracts.json",
-        "docs/provider-thinking-capability-matrix.md"
+        "core/crates/omegon/src/prompt.rs",
+        "core/crates/omegon-traits/src/lib.rs"
       ],
       "dependsOn": [],
-      "status": "running",
-      "branch": "cleave/0-runtime-matrix",
-      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/0-wt-runtime-matrix",
+      "status": "completed",
+      "branch": "cleave/0-prompt-shape",
+      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/0-wt-prompt-shape",
       "backend": "native",
-      "executeModel": "openai-codex:gpt-5.4"
+      "executeModel": "openai-codex:gpt-5.4",
+      "durationSecs": 580.321905625,
+      "stdout": "Done.\n\nSummary:\n- Added shared prompt breakdown types in `core/crates/omegon-traits/src/lib.rs`.\n- Refactored prompt assembly in `core/crates/omegon/src/prompt.rs` so the existing `build_base_prompt(...)` preserves its string API, while new `build_base_prompt_with_breakdown(...)` returns:\n  - `PromptAssembly { prompt, composition }`\n  - `PromptComposition { sections, total_chars, total_estimated_tokens }`\n  - section entries as `PromptSectionMetric { key, label, chars, estimated_tokens }`\n- Instrumented prompt construction as explicit sections:\n  - identity\n  - tools\n  - behavior\n  - core_directives\n  - project_lifecycle\n  - operator_directives\n  - project_directives\n  - project_conventions\n  - runtime_context\n- Added tests in `prompt.rs` to verify:\n  - breakdown totals match the assembled prompt length\n  - section metrics exist and are populated\n  - the breakdown path preserves exact prompt output from the legacy API\n\nEvidence:\n- `core/crates/omegon-traits/src/lib.rs` now defines `PromptSectionMetric` and `PromptComposition`.\n- `core/crates/omegon/src/prompt.rs` now defines `PromptAssembly` and `build_base_prompt_with_breakdown(...)`, with `build_base_prompt(...)` delegating to it.\n\nValidation run:\n- `cd core && cargo test -p omegon-traits --lib -- --nocapture`\n- `cd core && cargo test -p omegon prompt::tests -- --nocapture`\n- `cd core && cargo check -p omegon -p omegon-traits`\n\nGit:\n- Commit: `e204c5fee7ea9a7d69646cb5fcb754e68b7f015e`\n- Commit message: `feat(prompt-shape): add prompt section breakdown metrics`\n\nState:\n- Working tree is clean.\n"
     },
     {
       "childId": 1,
-      "label": "workflow-issueing",
-      "description": "Inspect and repair/replace the stale provider-drift GitHub Actions workflow. Design the daily control-plane workflow, issue dedupe/update behavior, artifact/log strategy, and docs. Implement the workflow and any helper scripts/files needed for issue creation/reporting without making release/nightly blocking.",
+      "label": "runtime-telemetry",
+      "description": "Wire prompt breakdown through setup/loop/session-log context telemetry and add regression tests for reporting/output.",
       "scope": [
-        ".github/workflows/provider-drift.yml",
-        ".github/workflows/nightly.yml",
-        ".github/workflows/release.yml",
-        "docs/provider-api-drift.md",
-        "scripts/"
+        "core/crates/omegon/src/setup.rs",
+        "core/crates/omegon/src/loop.rs",
+        "core/crates/omegon/src/features/session_log.rs"
       ],
-      "dependsOn": [],
+      "dependsOn": [
+        "prompt-shape"
+      ],
       "status": "running",
-      "branch": "cleave/1-workflow-issueing",
-      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/1-wt-workflow-issueing",
+      "branch": "cleave/1-runtime-telemetry",
+      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/1-wt-runtime-telemetry",
       "backend": "native",
       "executeModel": "openai-codex:gpt-5.4"
     }
@@ -45,30 +44,27 @@
     "children": [
       {
         "depends_on": [],
-        "description": "Inspect and extend the Rust live upstream smoke/drift test surface. Define or add a checked-in expectation matrix and determine the minimal viable assertions for provider-specific endpoint drift (not just round-trip OK), plus tests or validation around the matrix parsing/execution path.",
-        "label": "runtime-matrix",
+        "description": "Add prompt section breakdown structures and make prompt assembly return/track section sizes with tests in prompt.rs and shared traits as needed.",
+        "label": "prompt-shape",
         "scope": [
-          "core/crates/omegon/tests/live_upstream_smoke.rs",
-          "core/crates/omegon/src/providers.rs",
-          "core/crates/omegon/src/settings.rs",
-          ".pi/provider-contracts.json",
-          "docs/provider-thinking-capability-matrix.md"
+          "core/crates/omegon/src/prompt.rs",
+          "core/crates/omegon-traits/src/lib.rs"
         ]
       },
       {
-        "depends_on": [],
-        "description": "Inspect and repair/replace the stale provider-drift GitHub Actions workflow. Design the daily control-plane workflow, issue dedupe/update behavior, artifact/log strategy, and docs. Implement the workflow and any helper scripts/files needed for issue creation/reporting without making release/nightly blocking.",
-        "label": "workflow-issueing",
+        "depends_on": [
+          "prompt-shape"
+        ],
+        "description": "Wire prompt breakdown through setup/loop/session-log context telemetry and add regression tests for reporting/output.",
+        "label": "runtime-telemetry",
         "scope": [
-          ".github/workflows/provider-drift.yml",
-          ".github/workflows/nightly.yml",
-          ".github/workflows/release.yml",
-          "docs/provider-api-drift.md",
-          "scripts/"
+          "core/crates/omegon/src/setup.rs",
+          "core/crates/omegon/src/loop.rs",
+          "core/crates/omegon/src/features/session_log.rs"
         ]
       }
     ],
     "default_model": "openai-codex:gpt-5.4",
-    "rationale": "Separate the live endpoint verification mechanics from the GitHub Actions orchestration and issue lifecycle so drift semantics are defined once and the workflow becomes a thin runner."
+    "rationale": "Prompt composition metrics originate in prompt assembly but must be surfaced through shared event types and session reporting."
   }
 }
