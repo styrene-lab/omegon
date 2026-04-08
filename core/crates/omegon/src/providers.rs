@@ -2106,6 +2106,35 @@ fn ollama_cloud_base_url() -> &'static str {
     "https://ollama.com/api"
 }
 
+/// Map Omegon thinking levels onto Ollama's native `think` request field.
+///
+/// Upstream docs:
+/// - https://docs.ollama.com/capabilities/thinking
+/// - https://docs.ollama.com/api/chat
+///
+/// Most Ollama thinking models accept booleans, but GPT-OSS expects one of
+/// "low" | "medium" | "high" and ignores booleans. We therefore send string
+/// levels for GPT-OSS and a simple boolean for other models.
+fn ollama_think_value(model: &str, reasoning: Option<&str>) -> Option<Value> {
+    let level = reasoning?;
+    if level.eq_ignore_ascii_case("off") {
+        return None;
+    }
+
+    let is_gpt_oss = model.to_ascii_lowercase().contains("gpt-oss");
+    if is_gpt_oss {
+        let mapped = match level {
+            "minimal" | "low" => "low",
+            "medium" => "medium",
+            "high" => "high",
+            other => other,
+        };
+        return Some(Value::String(mapped.to_string()));
+    }
+
+    Some(Value::Bool(true))
+}
+
 /// Default model for each compat provider (used when no model is specified).
 fn compat_default_model(provider_id: &str) -> Option<&'static str> {
     match provider_id {
@@ -2329,6 +2358,11 @@ impl LlmBridge for OpenAICompatClient {
                 .unwrap_or(32_768);
             let keep_alive =
                 std::env::var("OMEGON_OLLAMA_KEEP_ALIVE").unwrap_or_else(|_| "30m".to_string());
+            let model_id = opts
+                .model
+                .as_deref()
+                .map(model_id_from_spec)
+                .unwrap_or_else(|| self.default_model.as_deref().unwrap_or("qwen3:32b"));
             opts.extra_body.insert(
                 "options".to_string(),
                 serde_json::json!({"num_ctx": num_ctx}),
@@ -2337,6 +2371,9 @@ impl LlmBridge for OpenAICompatClient {
                 "keep_alive".to_string(),
                 serde_json::Value::String(keep_alive),
             );
+            if let Some(think) = ollama_think_value(model_id, opts.reasoning.as_deref()) {
+                opts.extra_body.insert("think".to_string(), think);
+            }
         }
 
         self.inner
@@ -2362,11 +2399,14 @@ impl LlmBridge for OllamaCloudClient {
             .filter(|m| !m.is_empty())
             .unwrap_or_else(|| compat_default_model("ollama-cloud").unwrap_or("gpt-oss:120b-cloud").to_string());
 
-        let body = json!({
+        let mut body = json!({
             "model": model,
             "messages": Self::build_wire_messages(system_prompt, messages),
             "stream": false,
         });
+        if let Some(think) = ollama_think_value(&model, options.reasoning.as_deref()) {
+            body["think"] = think;
+        }
 
         let response = self
             .client
@@ -3137,6 +3177,35 @@ mod tests {
             wire[1]["tool_calls"][0]["function"]["arguments"],
             json!({"command": "git status --short"})
         );
+    }
+
+    #[test]
+    fn ollama_think_value_uses_string_levels_for_gpt_oss() {
+        assert_eq!(
+            ollama_think_value("gpt-oss:20b", Some("minimal")),
+            Some(Value::String("low".into()))
+        );
+        assert_eq!(
+            ollama_think_value("gpt-oss:120b-cloud", Some("medium")),
+            Some(Value::String("medium".into()))
+        );
+        assert_eq!(
+            ollama_think_value("gpt-oss:120b-cloud", Some("high")),
+            Some(Value::String("high".into()))
+        );
+    }
+
+    #[test]
+    fn ollama_think_value_uses_boolean_for_non_gpt_oss_models() {
+        assert_eq!(
+            ollama_think_value("qwen3:32b", Some("minimal")),
+            Some(Value::Bool(true))
+        );
+        assert_eq!(
+            ollama_think_value("deepseek-r1:14b", Some("high")),
+            Some(Value::Bool(true))
+        );
+        assert_eq!(ollama_think_value("qwen3:32b", None), None);
     }
 
     #[test]
