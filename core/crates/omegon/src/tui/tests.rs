@@ -1162,7 +1162,8 @@ fn focus_mode_render_shows_plaintext_fullscreen_conversation() {
     assert!(!rendered.contains("focus — segment"), "{rendered}");
     assert!(!rendered.contains("╭"), "{rendered}");
     assert!(!rendered.contains("╰"), "{rendered}");
-    assert!(!rendered.contains("│"), "{rendered}");
+    assert!(rendered.contains("│"), "{rendered}");
+    assert!(rendered.contains("▶"), "{rendered}");
 }
 
 #[test]

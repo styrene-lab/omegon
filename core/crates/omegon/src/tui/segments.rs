@@ -649,7 +649,7 @@ fn render_user_prompt(
 
 /// Build a compact meta tag string from SegmentMeta for display in the response header.
 /// Example: "claude-sonnet-4-6 · anthropic · victory · think:medium"
-fn build_meta_tag(meta: &SegmentMeta) -> String {
+pub fn build_meta_tag(meta: &SegmentMeta) -> String {
     let mut parts = Vec::new();
     if let Some(ref m) = meta.model_id {
         // Trim provider prefix if present (e.g. "anthropic:claude-..." → "claude-...")

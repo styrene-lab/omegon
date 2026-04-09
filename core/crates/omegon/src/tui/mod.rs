@@ -58,7 +58,7 @@ use self::dashboard::DashboardState;
 use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
-use self::segments::{SegmentContent, SegmentExportMode};
+use self::segments::{build_meta_tag, SegmentContent, SegmentExportMode};
 
 #[derive(Debug, Clone)]
 pub struct PromptSubmission {
@@ -2535,22 +2535,57 @@ impl App {
         self.editor_area = None;
         self.dashboard_area = None;
 
+        let viewport_height = area.height.saturating_sub(1);
+        let selected = self.conversation.selected_or_focused_segment();
+
         let mut lines: Vec<Line<'static>> = Vec::new();
-        for segment in self.conversation.segments() {
+        let segments = self.conversation.segments();
+        for (idx, segment) in segments.iter().enumerate() {
             if matches!(segment.content, SegmentContent::TurnSeparator) {
-                if !lines.is_empty() {
-                    lines.push(Line::default());
-                }
                 continue;
             }
 
-            for line in segment
-                .export_text(SegmentExportMode::Raw)
-                .lines()
-                .map(|line| line.to_string())
-            {
-                lines.push(Line::from(line));
+            let is_selected = selected == Some(idx);
+            let (role, sigil, color) = match segment.role() {
+                crate::tui::segments::SegmentRole::Operator => ("operator", "OP", self.theme.accent()),
+                crate::tui::segments::SegmentRole::Assistant => ("assistant", "Ω", self.theme.success()),
+                crate::tui::segments::SegmentRole::Tool => ("tool", "⚙", self.theme.warning()),
+                crate::tui::segments::SegmentRole::System => ("system", "ℹ", self.theme.dim()),
+                crate::tui::segments::SegmentRole::Lifecycle => ("event", "⚡", self.theme.dim()),
+                crate::tui::segments::SegmentRole::Media => ("media", "◈", self.theme.accent_muted()),
+                crate::tui::segments::SegmentRole::Separator => ("separator", "", self.theme.dim()),
+            };
+            let timestamp = segment
+                .meta
+                .timestamp
+                .and_then(|ts| chrono::DateTime::<chrono::Local>::from(ts).format("%H:%M").to_string().into());
+            let meta = build_meta_tag(&segment.meta);
+            let mut content = segment.export_text(SegmentExportMode::Plaintext);
+            let expanded = matches!(segment.content, SegmentContent::ToolCard { expanded: true, .. });
+            let max_chars = if is_selected || expanded { usize::MAX } else { 2000 };
+            if content.chars().count() > max_chars {
+                content = crate::util::truncate(&content, 2000);
+                content.push_str("\n… truncated (press Enter to expand)");
             }
+
+            let gutter = if is_selected { "▶" } else { "│" };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{gutter} {sigil}"), Style::default().fg(color).add_modifier(if is_selected { Modifier::BOLD } else { Modifier::empty() })),
+                Span::raw(" "),
+                Span::styled(role.to_string(), Style::default().fg(color)),
+                Span::raw(" · "),
+                Span::styled(meta, Style::default().fg(self.theme.dim())),
+                Span::raw(" "),
+                Span::styled(timestamp.unwrap_or_default(), Style::default().fg(self.theme.dim())),
+            ]));
+            lines.push(Line::from(Span::styled(
+                format!("  {}", content.lines().next().unwrap_or_default()),
+                Style::default().fg(self.theme.fg()),
+            )));
+            for line in content.lines().skip(1).take(40) {
+                lines.push(Line::from(Span::styled(format!("  {line}"), Style::default().fg(self.theme.fg()))));
+            }
+            lines.push(Line::from(Span::styled(if is_selected { "  └─ selected" } else { "  └─" }, Style::default().fg(self.theme.dim()))));
             lines.push(Line::default());
         }
         if lines.last().is_some_and(|line| line.spans.is_empty()) {
@@ -2558,7 +2593,6 @@ impl App {
         }
 
         let total_lines = lines.len() as u16;
-        let viewport_height = area.height.saturating_sub(1);
         let max_scroll = total_lines.saturating_sub(viewport_height);
         if self.conversation.conv_state.scroll_offset > max_scroll {
             self.conversation.conv_state.scroll_offset = max_scroll;
@@ -2567,34 +2601,16 @@ impl App {
         let top_line = max_scroll.saturating_sub(self.conversation.conv_state.scroll_offset);
 
         let paragraph = Paragraph::new(lines)
-            .style(
-                Style::default()
-                    .fg(self.theme.fg())
-                    .bg(self.theme.surface_bg()),
-            )
+            .style(Style::default().fg(self.theme.fg()).bg(self.theme.surface_bg()))
             .wrap(Wrap { trim: false })
             .scroll((top_line, 0));
-        let text_area = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: viewport_height,
-        };
+        let text_area = Rect { x: area.x, y: area.y, width: area.width, height: viewport_height };
         frame.render_widget(paragraph, text_area);
 
-        let overlay = Paragraph::new("↑/↓ scroll · PgUp/PgDn jump · Home/End top/bottom · drag to select · Ctrl+Y copy segment · Esc or /focus to return")
-            .style(
-                Style::default()
-                    .fg(self.theme.dim())
-                    .bg(self.theme.surface_bg()),
-            )
+        let overlay = Paragraph::new("↑/↓ scroll · PgUp/PgDn jump · Home/End top/bottom · Enter expand/collapse selected · Ctrl+Y copy segment · Esc or /focus to return")
+            .style(Style::default().fg(self.theme.dim()).bg(self.theme.surface_bg()))
             .alignment(Alignment::Center);
-        let overlay_area = Rect {
-            x: area.x,
-            y: area.bottom().saturating_sub(1),
-            width: area.width,
-            height: 1,
-        };
+        let overlay_area = Rect { x: area.x, y: area.bottom().saturating_sub(1), width: area.width, height: 1 };
         frame.render_widget(overlay, overlay_area);
     }
 
