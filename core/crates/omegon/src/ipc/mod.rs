@@ -76,12 +76,10 @@ pub fn start_ipc_server(
     shared_cancel: SharedCancel,
     cancel: CancellationToken,
 ) {
-    tokio::spawn(async move {
-        if let Err(e) = run_server(cfg, handles, events_tx, command_tx, shared_cancel, cancel).await
-        {
-            warn!("IPC server exited with error: {e}");
-        }
-    });
+    crate::task_spawn::spawn_infra(
+        "ipc-server",
+        async move { run_server(cfg, handles, events_tx, command_tx, shared_cancel, cancel).await },
+    );
 }
 
 async fn run_server(

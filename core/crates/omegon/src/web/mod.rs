@@ -363,10 +363,10 @@ pub async fn start_server_with_options(
         startup.token
     );
 
-    tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, app).await {
-            tracing::error!("web server error: {e}");
-        }
+    crate::task_spawn::spawn_infra("web-server", async move {
+        axum::serve(listener, app)
+            .await
+            .map_err(anyhow::Error::from)
     });
 
     start_daemon_event_worker(&state);
@@ -433,7 +433,7 @@ fn start_daemon_event_worker(state: &WebState) {
     refresh_startup_daemon_status(state);
 
     let state = state.clone();
-    tokio::spawn(async move {
+    crate::task_spawn::spawn_best_effort_result("web-daemon-event-worker", async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_millis(100));
         loop {
             ticker.tick().await;
@@ -441,6 +441,8 @@ fn start_daemon_event_worker(state: &WebState) {
                 tracing::warn!(?err, "daemon event worker failed to dispatch event");
             }
         }
+        #[allow(unreachable_code)]
+        Ok(())
     });
 }
 

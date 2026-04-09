@@ -79,8 +79,7 @@ fn find_asset_url(assets: &[GitHubAsset], suffix: &str) -> String {
 /// Spawn the background update check.
 pub fn spawn_check(tx: UpdateSender, channel: UpdateChannel) {
     let current = env!("CARGO_PKG_VERSION").to_string();
-    tokio::spawn(async move {
-        // Delay slightly so startup isn't blocked
+    crate::task_spawn::spawn_best_effort_result("update-check", async move {
         tokio::time::sleep(Duration::from_secs(5)).await;
 
         match check_latest_for_channel(&current, channel).await {
@@ -104,6 +103,7 @@ pub fn spawn_check(tx: UpdateSender, channel: UpdateChannel) {
                 );
             }
         }
+        Ok(())
     });
 }
 

@@ -7,7 +7,6 @@
 //! Phase 3: Native LLM provider clients.
 
 use clap::{Parser, Subcommand};
-use futures_util::FutureExt;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,6 +30,7 @@ mod migrate;
 mod skills;
 mod smoke;
 mod switch;
+mod task_spawn;
 mod update;
 mod upstream_errors;
 mod usage;
@@ -1771,9 +1771,13 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 .map(|s| s.model.clone())
                                 .unwrap_or_else(|| cli.model.clone());
                             let settings_for_login = shared_settings.clone();
-                            let panic_events_tx = events_tx_clone.clone();
-                            tokio::spawn(async move {
-                                let task = std::panic::AssertUnwindSafe(async move {
+                            crate::task_spawn::spawn_operator_task(
+                                "interactive-auth-login",
+                                events_tx_clone.clone(),
+                                crate::task_spawn::OperatorTaskOptions {
+                                    panic_notification_prefix: "⚠ Background login task crashed — authentication did not complete safely".to_string(),
+                                },
+                                async move {
                                     let progress: auth::LoginProgress = Box::new(move |msg| {
                                         let _ = progress_tx.send(AgentEvent::SystemNotification {
                                             message: msg.to_string(),
@@ -1822,7 +1826,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                     let _ = events_tx_clone
                                         .send(AgentEvent::SystemNotification { message });
 
-                                    // Hot-swap the bridge after login succeeds using the current model intent.
                                     if result.is_ok() {
                                         let effective_model = providers::resolve_execution_model_spec(
                                             &model_for_redetect,
@@ -1848,26 +1851,10 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                                 });
                                         }
                                     }
-                                })
-                                .catch_unwind()
-                                .await;
 
-                                if let Err(panic_payload) = task {
-                                    let panic_text = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                                        (*s).to_string()
-                                    } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                                        s.clone()
-                                    } else {
-                                        "unknown panic payload".to_string()
-                                    };
-                                    tracing::error!(%panic_text, "interactive auth_login task panicked");
-                                    let _ = panic_events_tx.send(AgentEvent::SystemNotification {
-                                        message: format!(
-                                            "⚠ Background login task crashed — authentication did not complete safely: {panic_text}"
-                                        ),
-                                    });
-                                }
-                            });
+                                    Ok(())
+                                },
+                            );
                         }
                         "auth_logout" => {
                             let provider = args.trim();
