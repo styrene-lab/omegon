@@ -177,6 +177,13 @@ notes: |
 - `budget`
 - `notes`
 
+### Model and credential integrity
+
+- Task/model selection must be deterministic: CLI `--model` overrides `task.model`, which overrides adapter defaults.
+- Benchmark runs must use the same credential surfaces the harness uses in normal local execution.
+- For local Omegon Anthropic benchmark runs, an authenticated OAuth session in `~/.config/omegon/auth.json` is a valid credential source when that is the operator's available access path.
+- The harness must never silently swap to a different model/provider just because a preferred API-key path is unavailable.
+
 ## Result artifact
 
 Each run should emit one JSON file.

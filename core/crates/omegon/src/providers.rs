@@ -22,25 +22,24 @@ use omegon_traits::ToolDefinition;
 
 // ─── API Key Resolution ─────────────────────────────────────────────────────
 
-/// Anthropic credential mode — determines what operations are permitted.
+/// Anthropic credential mode — records what credential source is active.
 ///
-/// Anthropic's Consumer ToS (https://www.anthropic.com/legal/consumer-terms) prohibits
-/// automated/non-human use of subscription credentials. Only `ApiKey` may be used in
-/// headless or background modes. `OAuthOnly` is restricted to interactive TUI sessions.
+/// Omegon may still warn when subscription/OAuth credentials are used in
+/// automated contexts, but OAuth credentials remain executable for local
+/// headless and benchmark runs when they are the available Anthropic auth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnthropicCredentialMode {
-    /// A direct API key is present — no automation restrictions.
+    /// A direct API key is present.
     ApiKey,
-    /// Only a subscription/OAuth token is present — interactive use only.
+    /// An OAuth/subscription token is present.
     OAuthOnly,
     /// No Anthropic credentials configured.
     None,
 }
 
-/// Determine what Anthropic credential is available and which restrictions apply.
+/// Determine what Anthropic credential is available.
 ///
 /// Priority: ANTHROPIC_API_KEY (or auth.json api-key entry) wins over ANTHROPIC_OAUTH_TOKEN.
-/// This ensures headless/automated paths always use the unrestricted API key path when both exist.
 pub fn anthropic_credential_mode() -> AnthropicCredentialMode {
     match resolve_api_key_sync("anthropic") {
         Some((_, false)) => AnthropicCredentialMode::ApiKey,
