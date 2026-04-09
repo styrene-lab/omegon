@@ -2377,7 +2377,16 @@ impl App {
                 self.editor
                     .visible_visual_lines(content_width, visible_rows)
                     .into_iter()
-                    .map(|vl| Line::from(Span::styled(vl, Style::default().fg(t.fg()))))
+                    .map(|vl| {
+                        if vl.contains("[Pasted text #") {
+                            Line::from(vec![
+                                Span::styled("› ", Style::default().fg(t.accent())),
+                                Span::styled(vl, Style::default().fg(t.accent_bright())),
+                            ])
+                        } else {
+                            Line::from(Span::styled(vl, Style::default().fg(t.fg())))
+                        }
+                    })
                     .collect()
             };
             let editor_widget = Paragraph::new(visual_lines)
