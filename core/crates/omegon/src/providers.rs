@@ -8,6 +8,7 @@
 //! no Node.js, no supply chain risk from package registries.
 
 use async_trait::async_trait;
+use futures_util::FutureExt;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
@@ -670,6 +671,38 @@ where
     Ok(())
 }
 
+fn spawn_provider_stream_task<Fut>(
+    provider: &'static str,
+    tx: mpsc::Sender<LlmEvent>,
+    fut: Fut,
+) -> tokio::task::JoinHandle<()>
+where
+    Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
+{
+    tokio::spawn(async move {
+        let task = std::panic::AssertUnwindSafe(fut).catch_unwind().await;
+        let message = match task {
+            Ok(Ok(())) => None,
+            Ok(Err(err)) => Some(err.to_string()),
+            Err(panic_payload) => {
+                let panic_text = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                    (*s).to_string()
+                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic payload".to_string()
+                };
+                Some(format!("{provider} stream parser panicked: {panic_text}"))
+            }
+        };
+
+        if let Some(message) = message {
+            tracing::warn!(provider, %message, "provider stream task terminated with error");
+            let _ = tx.send(LlmEvent::Error { message }).await;
+        }
+    })
+}
+
 // ─── Anthropic ──────────────────────────────────────────────────────────────
 
 pub struct AnthropicClient {
@@ -955,14 +988,8 @@ impl LlmBridge for AnthropicClient {
         log_rate_limit_headers("anthropic", response.headers());
         tracing::debug!(status = %response.status(), "Anthropic response OK — starting SSE stream");
 
-        tokio::spawn(async move {
-            if let Err(e) = parse_anthropic_stream(response, provider_telemetry, &tx).await {
-                let _ = tx
-                    .send(LlmEvent::Error {
-                        message: format!("{e}"),
-                    })
-                    .await;
-            }
+        spawn_provider_stream_task("anthropic", tx.clone(), async move {
+            parse_anthropic_stream(response, provider_telemetry, &tx).await
         });
 
         Ok(rx)
@@ -1309,14 +1336,8 @@ impl LlmBridge for OpenAIClient {
         let provider_telemetry = parse_rate_limit_snapshot("openai", response.headers());
         log_rate_limit_headers("openai", response.headers());
 
-        tokio::spawn(async move {
-            if let Err(e) = parse_openai_stream(response, provider_telemetry, &tx).await {
-                let _ = tx
-                    .send(LlmEvent::Error {
-                        message: format!("{e}"),
-                    })
-                    .await;
-            }
+        spawn_provider_stream_task("openai", tx.clone(), async move {
+            parse_openai_stream(response, provider_telemetry, &tx).await
         });
 
         Ok(rx)
@@ -1736,16 +1757,8 @@ impl LlmBridge for CodexClient {
                         parse_rate_limit_snapshot("openai-codex", resp.headers());
                     log_rate_limit_headers("openai-codex", resp.headers());
                     let tx_clone = tx.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) =
-                            parse_codex_stream(resp, provider_telemetry, &tx_clone).await
-                        {
-                            let _ = tx_clone
-                                .send(LlmEvent::Error {
-                                    message: format!("{e}"),
-                                })
-                                .await;
-                        }
+                    spawn_provider_stream_task("openai-codex", tx_clone.clone(), async move {
+                        parse_codex_stream(resp, provider_telemetry, &tx_clone).await
                     });
                     return Ok(rx);
                 }
@@ -3435,6 +3448,43 @@ mod tests {
         assert_eq!(input[0]["call_id"], "call_abc");
         assert_eq!(input[0]["id"], "fc_0");
         assert_eq!(input[0]["name"], "bash");
+    }
+
+    #[tokio::test]
+    async fn provider_stream_task_converts_errors_to_llm_error_events() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let handle = spawn_provider_stream_task("test-provider", tx, async {
+            anyhow::bail!("stream parse failed")
+        });
+        handle.await.expect("join");
+
+        match rx.recv().await.expect("llm event") {
+            LlmEvent::Error { message } => assert!(message.contains("stream parse failed")),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_stream_task_converts_panics_to_llm_error_events() {
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+
+        let (tx, mut rx) = mpsc::channel(1);
+        let handle = spawn_provider_stream_task("test-provider", tx, async {
+            panic!("provider boom");
+            #[allow(unreachable_code)]
+            Ok(())
+        });
+        handle.await.expect("join");
+        std::panic::set_hook(previous_hook);
+
+        match rx.recv().await.expect("llm event") {
+            LlmEvent::Error { message } => {
+                assert!(message.contains("test-provider stream parser panicked"));
+                assert!(message.contains("provider boom"));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 
     #[test]
