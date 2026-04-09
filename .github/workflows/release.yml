@@ -191,9 +191,54 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  linux-abi-validation:
+    name: Linux ABI validation (${{ matrix.name }})
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-22.04
+            image: ubuntu:22.04
+            install_cmd: apt-get update && apt-get install -y libc6 libgcc-s1 ca-certificates file
+          - name: rockylinux-9
+            image: rockylinux:9
+            install_cmd: dnf install -y glibc libgcc file ca-certificates
+          - name: amazonlinux-2023
+            image: amazonlinux:2023
+            install_cmd: dnf install -y glibc libgcc file ca-certificates
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-x86_64-unknown-linux-gnu
+          path: abi-artifacts
+
+      - name: Unpack Linux x86_64 artifact
+        run: |
+          set -euo pipefail
+          mkdir -p abi-artifacts/unpacked
+          tar xzf abi-artifacts/omegon-*.tar.gz -C abi-artifacts/unpacked
+          ls -lh abi-artifacts/unpacked/omegon
+          file abi-artifacts/unpacked/omegon
+
+      - name: Validate binary in ${{ matrix.name }} container
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/abi-artifacts/unpacked:/work:ro" \
+            "${{ matrix.image }}" \
+            /bin/sh -lc '
+              set -e
+              ${{ matrix.install_cmd }}
+              ldd --version || true
+              /work/omegon --version
+            '
+
   release:
     name: Create release
-    needs: build
+    needs: [build, linux-abi-validation]
     runs-on: ubuntu-latest
     permissions:
       contents: write
