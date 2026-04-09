@@ -77,7 +77,7 @@ acceptance: [echo ok]
             env = dict(os.environ)
             env["PATH"] = f"{repo / 'scripts'}:/usr/bin:/bin"
             result = subprocess.run(
-                ["python3", str(SCRIPT), str(task), "--root", str(repo), "--harness", "claude-code"],
+                [sys.executable, str(SCRIPT), str(task), "--root", str(repo), "--harness", "claude-code"],
                 cwd=ROOT,
                 check=False,
                 capture_output=True,
@@ -135,6 +135,8 @@ acceptance:
             result_path = Path(result.stdout.strip())
             payload = json.loads(result_path.read_text())
             self.assertEqual(payload["status"], "pass")
+            self.assertEqual(payload["benchmark_mode"]["adapter_profile"], "omegon-native")
+            self.assertTrue(payload["benchmark_mode"]["clean_room"])
             self.assertEqual(payload["tokens"]["total"], 1500)
             self.assertEqual(payload["harness"], "omegon")
             self.assertEqual(payload["extra"]["context"]["sys"], 100)
@@ -147,7 +149,8 @@ acceptance:
             fake_pi.write_text(
                 "#!/bin/sh\n"
                 "cat <<'JSON'\n"
-                '{"model":"openai/gpt-4o","usage":{"inputTokens":111,"outputTokens":22,"cacheTokens":3}}\n'
+                '{"type":"session"}\n'
+                '{"type":"message_end","message":{"role":"assistant","model":"openai/gpt-4o","usage":{"input":111,"output":22,"cacheRead":3,"cacheWrite":9}}}\n'
                 "JSON\n"
             )
             fake_pi.chmod(0o755)
@@ -176,8 +179,10 @@ acceptance:
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(Path(result.stdout.strip()).read_text())
             self.assertEqual(payload["harness"], "pi")
+            self.assertEqual(payload["benchmark_mode"]["adapter_profile"], "minimal")
             self.assertEqual(payload["model"], "openai/gpt-4o")
             self.assertEqual(payload["tokens"]["total"], 136)
+            self.assertEqual(payload["tokens"]["cache_write"], 9)
 
     def test_claude_adapter_normalizes_json_usage(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -216,6 +221,7 @@ acceptance:
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(Path(result.stdout.strip()).read_text())
             self.assertEqual(payload["harness"], "claude-code")
+            self.assertEqual(payload["benchmark_mode"]["adapter_profile"], "default")
             self.assertEqual(payload["model"], "claude-sonnet-4-6")
             self.assertEqual(payload["tokens"]["total"], 249)
             self.assertEqual(payload["tokens"]["cache"], 5)

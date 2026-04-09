@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from shutil import which
+from shutil import copytree, which
 from typing import Any
 
 import yaml
@@ -58,6 +58,7 @@ class AdapterResult:
     model: str | None
     usage: dict[str, Any]
     extra: dict[str, Any]
+    profile: str
     log_path: Path | None = None
     patch_path: Path | None = None
 
@@ -69,10 +70,11 @@ class AdapterError(RuntimeError):
 class HarnessAdapter:
     harness_name: str
 
-    def __init__(self, repo_path: Path, spec: TaskSpec, model: str | None) -> None:
+    def __init__(self, repo_path: Path, spec: TaskSpec, model: str | None, clean_repo_path: Path) -> None:
         self.repo_path = repo_path
         self.spec = spec
         self.model = model
+        self.clean_repo_path = clean_repo_path
 
     def validate_environment(self) -> None:
         raise NotImplementedError
@@ -148,11 +150,21 @@ def select_harness(spec: TaskSpec, explicit: str | None) -> str:
     return harness
 
 
+def prepare_clean_repo(repo_path: Path, base_ref: str) -> Path:
+    clean_root = Path(tempfile.mkdtemp(prefix="benchmark-repo-"))
+    if (repo_path / ".git").exists():
+        subprocess.run(["git", "clone", "--quiet", "--no-checkout", str(repo_path), str(clean_root)], check=True)
+        subprocess.run(["git", "checkout", "--quiet", base_ref], cwd=clean_root, check=True)
+    else:
+        copytree(repo_path, clean_root, dirs_exist_ok=True)
+    return clean_root
+
+
 class OmegonAdapter(HarnessAdapter):
     harness_name = "omegon"
 
     def validate_environment(self) -> None:
-        cargo_toml = self.repo_path / "core" / "Cargo.toml"
+        cargo_toml = self.clean_repo_path / "core" / "Cargo.toml"
         if not cargo_toml.exists():
             raise AdapterError(f"omegon adapter requires {cargo_toml}")
         if which("cargo") is None:
@@ -165,7 +177,7 @@ class OmegonAdapter(HarnessAdapter):
             "cargo",
             "run",
             "--manifest-path",
-            str((self.repo_path / "core" / "Cargo.toml").resolve()),
+            str((self.clean_repo_path / "core" / "Cargo.toml").resolve()),
             "-p",
             "omegon",
             "--",
@@ -180,7 +192,7 @@ class OmegonAdapter(HarnessAdapter):
             cmd.extend(["--model", self.model])
 
         with log_file.open("w") as handle:
-            proc = subprocess.run(cmd, cwd=self.repo_path, check=False, stdout=handle, stderr=subprocess.STDOUT, text=True)
+            proc = subprocess.run(cmd, cwd=self.clean_repo_path, check=False, stdout=handle, stderr=subprocess.STDOUT, text=True)
 
         usage: dict[str, Any] = {}
         if usage_file.exists():
@@ -197,6 +209,7 @@ class OmegonAdapter(HarnessAdapter):
             model=self.model or usage.get("model") or "omegon-default",
             usage=usage,
             extra=usage.get("extra", {}),
+            profile="omegon-native",
             log_path=log_file,
             patch_path=None,
         )
@@ -211,19 +224,34 @@ class PiAdapter(HarnessAdapter):
 
     def run(self) -> AdapterResult:
         log_file = Path(tempfile.NamedTemporaryFile(prefix="benchmark-pi-", suffix=".log", delete=False).name)
-        cmd = ["pi", "--print", "--mode", "json", "--no-session"]
+        cmd = [
+            "pi",
+            "--print",
+            "--mode",
+            "json",
+            "--no-session",
+            "--no-extensions",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-themes",
+            "--no-tools",
+        ]
         if self.model:
             cmd.extend(["--model", self.model])
         cmd.append(self.spec.prompt)
-        proc = subprocess.run(cmd, cwd=self.repo_path, check=False, capture_output=True, text=True)
+        env = dict(os.environ)
+        env.setdefault("PI_CODING_AGENT_DIR", str(Path.home() / ".pi" / "agent"))
+        proc = subprocess.run(
+            cmd,
+            cwd=self.clean_repo_path,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
         log_file.write_text(proc.stdout + ("\n" if proc.stdout and proc.stderr else "") + proc.stderr)
 
-        payload: dict[str, Any] | None = None
-        try:
-            payload = json.loads(proc.stdout) if proc.stdout.strip() else None
-        except json.JSONDecodeError:
-            payload = None
-
+        payload = extract_pi_result(proc.stdout)
         usage = extract_usage(payload)
         usage["exit_code"] = proc.returncode
         usage.setdefault("input_tokens", None)
@@ -231,7 +259,7 @@ class PiAdapter(HarnessAdapter):
         usage.setdefault("cache_tokens", None)
         extra = {"raw_json": payload} if payload is not None else {"raw_stdout": proc.stdout}
         model = self.model or extract_model(payload) or "pi-default"
-        return AdapterResult(model=model, usage=usage, extra=extra, log_path=log_file)
+        return AdapterResult(model=model, usage=usage, extra=extra, profile="minimal", log_path=log_file)
 
 
 class ClaudeCodeAdapter(HarnessAdapter):
@@ -247,7 +275,7 @@ class ClaudeCodeAdapter(HarnessAdapter):
         if self.model:
             cmd.extend(["--model", self.model])
         cmd.append(self.spec.prompt)
-        proc = subprocess.run(cmd, cwd=self.repo_path, check=False, capture_output=True, text=True)
+        proc = subprocess.run(cmd, cwd=self.clean_repo_path, check=False, capture_output=True, text=True)
         log_file.write_text(proc.stdout + ("\n" if proc.stdout and proc.stderr else "") + proc.stderr)
 
         payload: dict[str, Any] | None = None
@@ -263,7 +291,26 @@ class ClaudeCodeAdapter(HarnessAdapter):
         usage.setdefault("cache_tokens", None)
         extra = {"raw_json": payload} if payload is not None else {"raw_stdout": proc.stdout}
         model = self.model or extract_model(payload) or "claude-code-default"
-        return AdapterResult(model=model, usage=usage, extra=extra, log_path=log_file)
+        return AdapterResult(model=model, usage=usage, extra=extra, profile="default", log_path=log_file)
+
+
+def extract_pi_result(stdout: str) -> dict[str, Any] | None:
+    last_message: dict[str, Any] | None = None
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "turn_end" and isinstance(event.get("message"), dict):
+            last_message = event["message"]
+        elif event.get("type") == "message_end" and isinstance(event.get("message"), dict):
+            message = event["message"]
+            if message.get("role") == "assistant":
+                last_message = message
+    return last_message
 
 
 def extract_nested(payload: dict[str, Any] | None, *paths: tuple[str, ...]) -> Any:
@@ -301,6 +348,7 @@ def extract_usage(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("input_tokens",),
             ("usage", "input_tokens"),
             ("usage", "inputTokens"),
+            ("usage", "input"),
             ("usage", "prompt_tokens"),
             ("usage", "promptTokens"),
             ("result", "usage", "input_tokens"),
@@ -312,6 +360,7 @@ def extract_usage(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("output_tokens",),
             ("usage", "output_tokens"),
             ("usage", "outputTokens"),
+            ("usage", "output"),
             ("usage", "completion_tokens"),
             ("usage", "completionTokens"),
             ("result", "usage", "output_tokens"),
@@ -325,6 +374,7 @@ def extract_usage(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("usage", "cacheTokens"),
             ("usage", "cache_read_input_tokens"),
             ("usage", "cacheReadInputTokens"),
+            ("usage", "cacheRead"),
             ("result", "usage", "cache_tokens"),
         )
     )
@@ -333,6 +383,7 @@ def extract_usage(payload: dict[str, Any] | None) -> dict[str, Any]:
             payload,
             ("usage", "cache_creation_input_tokens"),
             ("usage", "cacheCreationInputTokens"),
+            ("usage", "cacheWrite"),
             ("result", "usage", "cache_creation_input_tokens"),
         )
     )
@@ -349,13 +400,19 @@ def extract_model(payload: dict[str, Any] | None) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def adapter_for(harness: str, repo_path: Path, spec: TaskSpec, model: str | None) -> HarnessAdapter:
+def adapter_for(
+    harness: str,
+    repo_path: Path,
+    spec: TaskSpec,
+    model: str | None,
+    clean_repo_path: Path,
+) -> HarnessAdapter:
     if harness == "omegon":
-        return OmegonAdapter(repo_path, spec, model)
+        return OmegonAdapter(repo_path, spec, model, clean_repo_path)
     if harness == "pi":
-        return PiAdapter(repo_path, spec, model)
+        return PiAdapter(repo_path, spec, model, clean_repo_path)
     if harness == "claude-code":
-        return ClaudeCodeAdapter(repo_path, spec, model)
+        return ClaudeCodeAdapter(repo_path, spec, model, clean_repo_path)
     raise TaskSpecError(f"unsupported harness: {harness}")
 
 
@@ -404,6 +461,10 @@ def build_result(
         "score": 1.0 if acceptance_status == "pass" else 0.0,
         "wall_clock_sec": round(wall_clock_sec, 3),
         "attempts": 1,
+        "benchmark_mode": {
+            "clean_room": True,
+            "adapter_profile": adapter.profile,
+        },
         "tokens": {
             "input": adapter.usage.get("input_tokens"),
             "output": adapter.usage.get("output_tokens"),
@@ -443,9 +504,10 @@ def main() -> int:
 
     repo_path = resolve_repo_path(root, spec)
     out_dir = ensure_clean_out_dir(root, args.out_dir)
+    clean_repo_path = prepare_clean_repo(repo_path, spec.base_ref)
 
     try:
-        adapter_impl = adapter_for(harness, repo_path, spec, args.model)
+        adapter_impl = adapter_for(harness, repo_path, spec, args.model, clean_repo_path)
         adapter_impl.validate_environment()
     except (TaskSpecError, AdapterError) as err:
         print(str(err), file=sys.stderr)
