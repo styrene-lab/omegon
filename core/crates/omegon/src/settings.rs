@@ -21,6 +21,10 @@ pub struct Settings {
     /// Active model (provider:model-id format).
     pub model: String,
 
+    /// Slim runtime mode — reduce prompt and tool surface for quick interactive work.
+    #[serde(default)]
+    pub slim_mode: bool,
+
     /// Thinking level: off, minimal, low, medium, high.
     pub thinking: ThinkingLevel,
 
@@ -291,6 +295,7 @@ impl Default for Settings {
         let context_window = 200_000;
         Self {
             model: "anthropic:claude-sonnet-4-6".into(),
+            slim_mode: false,
             thinking: ThinkingLevel::Medium,
             max_turns: 50,
             compaction_threshold: 0.75,
@@ -345,6 +350,16 @@ impl Settings {
     /// Does NOT change `context_window` or `context_class` — those are model-derived.
     pub fn set_requested_context_class(&mut self, class: ContextClass) {
         self.requested_context_class = Some(class);
+    }
+
+    pub fn set_slim_mode(&mut self, slim: bool) {
+        self.slim_mode = slim;
+        if slim {
+            self.thinking = ThinkingLevel::Low;
+            if self.requested_context_class.is_none() {
+                self.requested_context_class = Some(ContextClass::Squad);
+            }
+        }
     }
 
     /// Derive a SelectorPolicy for this turn's context assembly.
@@ -780,6 +795,15 @@ fn global_profile_path() -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slim_mode_reduces_defaults() {
+        let mut s = Settings::new("anthropic:claude-sonnet-4-6");
+        s.set_slim_mode(true);
+        assert!(s.slim_mode);
+        assert_eq!(s.thinking, ThinkingLevel::Low);
+        assert_eq!(s.requested_context_class, Some(ContextClass::Squad));
+    }
 
     #[test]
     fn settings_default() {

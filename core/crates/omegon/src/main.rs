@@ -1150,10 +1150,15 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 
     // ─── Interactive agent loop ─────────────────────────────────────────
     let mut runtime = InteractiveRuntimeSupervisor::default();
-    loop {
-        let cmd = match command_rx.recv().await {
-            Some(cmd) => cmd,
-            None => break,
+    let mut deferred_commands = VecDeque::new();
+    'interactive: loop {
+        let cmd = if let Some(cmd) = deferred_commands.pop_front() {
+            cmd
+        } else {
+            match command_rx.recv().await {
+                Some(cmd) => cmd,
+                None => break,
+            }
         };
 
         match cmd {
@@ -1933,28 +1938,71 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     continue;
                 }
 
-                let Some(active) = runtime.maybe_start_next_turn() else {
-                    continue;
-                };
+                while let Some(active) = runtime.maybe_start_next_turn() {
+                    if let Ok(mut ss) = agent.dashboard_handles.session.lock() {
+                        ss.busy = true;
+                    }
 
-                if let Ok(mut ss) = agent.dashboard_handles.session.lock() {
-                    ss.busy = true;
-                }
+                    let mut quit_after_turn = false;
+                    {
+                        let mut turn_fut = std::pin::pin!(run_interactive_active_turn(
+                            &mut agent,
+                            &bridge,
+                            &shared_settings,
+                            &shared_cancel,
+                            &pending_compact,
+                            &events_tx,
+                            active,
+                        ));
 
-                run_interactive_active_turn(
-                    &mut agent,
-                    &bridge,
-                    &shared_settings,
-                    &shared_cancel,
-                    &pending_compact,
-                    &events_tx,
-                    active,
-                )
-                .await;
+                        loop {
+                            tokio::select! {
+                                _ = &mut turn_fut => {
+                                    break;
+                                }
+                                maybe_cmd = command_rx.recv() => {
+                                    let Some(cmd) = maybe_cmd else {
+                                        quit_after_turn = true;
+                                        if let Ok(guard) = shared_cancel.lock()
+                                            && let Some(ref cancel) = *guard
+                                        {
+                                            cancel.cancel();
+                                        }
+                                        continue;
+                                    };
 
-                runtime.complete_active_turn();
-                if let Ok(mut ss) = agent.dashboard_handles.session.lock() {
-                    ss.busy = runtime.is_busy();
+                                    match cmd {
+                                        tui::TuiCommand::SubmitPrompt(prompt) => {
+                                            let actor = RuntimeActor {
+                                                kind: runtime_actor_kind_from_via(&prompt.via),
+                                                label: prompt.submitted_by.clone(),
+                                            };
+                                            let via = control_surface_from_via(&prompt.via);
+                                            runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via);
+                                        }
+                                        tui::TuiCommand::Quit => {
+                                            quit_after_turn = true;
+                                            if let Ok(guard) = shared_cancel.lock()
+                                                && let Some(ref cancel) = *guard
+                                            {
+                                                cancel.cancel();
+                                            }
+                                        }
+                                        other => deferred_commands.push_back(other),
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    runtime.complete_active_turn();
+                    if let Ok(mut ss) = agent.dashboard_handles.session.lock() {
+                        ss.busy = runtime.is_busy();
+                    }
+
+                    if quit_after_turn {
+                        break 'interactive;
+                    }
                 }
             }
         }
