@@ -1499,6 +1499,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                         tui::TuiCommand::SubmitPrompt(crate::tui::PromptSubmission {
                                             text,
                                             image_paths: Vec::new(),
+                                            submitted_by: "web-dashboard".to_string(),
+                                            via: "websocket",
                                         })
                                     }
                                     web::WebCommand::SlashCommand {

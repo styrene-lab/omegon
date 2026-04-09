@@ -64,6 +64,8 @@ use self::segments::{SegmentContent, SegmentExportMode};
 pub struct PromptSubmission {
     pub text: String,
     pub image_paths: Vec<std::path::PathBuf>,
+    pub submitted_by: String,
+    pub via: &'static str,
 }
 
 /// Messages from TUI to the agent coordinator.
@@ -1829,6 +1831,8 @@ impl App {
                                 .send(TuiCommand::SubmitPrompt(PromptSubmission {
                                     text,
                                     image_paths: Vec::new(),
+                                    submitted_by: "local-tui".to_string(),
+                                    via: "tui",
                                 }))
                                 .await;
                         } else {
@@ -1836,6 +1840,8 @@ impl App {
                                 .send(TuiCommand::SubmitPrompt(PromptSubmission {
                                     text,
                                     image_paths: attachments,
+                                    submitted_by: "local-tui".to_string(),
+                                    via: "tui",
                                 }))
                                 .await;
                         }
@@ -1869,6 +1875,8 @@ impl App {
             .send(TuiCommand::SubmitPrompt(PromptSubmission {
                 text,
                 image_paths: attachments,
+                submitted_by: "local-tui".to_string(),
+                via: "tui",
             }))
             .await;
         if let Some(ref mut overlay) = self.tutorial_overlay {
@@ -5763,6 +5771,8 @@ pub async fn run_tui(
                                                         .send(TuiCommand::SubmitPrompt(PromptSubmission {
                                                             text: prompt,
                                                             image_paths: Vec::new(),
+                                                            submitted_by: "local-tui".to_string(),
+                                                            via: "tui",
                                                         }))
                                                         .await;
                                                 } else {
@@ -5791,6 +5801,8 @@ pub async fn run_tui(
                                                         .send(TuiCommand::SubmitPrompt(PromptSubmission {
                                                             text: prompt,
                                                             image_paths: Vec::new(),
+                                                            submitted_by: "local-tui".to_string(),
+                                                            via: "tui",
                                                         }))
                                                         .await;
                                                 } else {
@@ -6183,6 +6195,8 @@ pub async fn run_tui(
                     .send(TuiCommand::SubmitPrompt(PromptSubmission {
                         text,
                         image_paths: Vec::new(),
+                        submitted_by: "local-tui".to_string(),
+                        via: "tui",
                     }))
                     .await;
             } else {
@@ -6190,6 +6204,8 @@ pub async fn run_tui(
                     .send(TuiCommand::SubmitPrompt(PromptSubmission {
                         text,
                         image_paths: attachments,
+                        submitted_by: "local-tui".to_string(),
+                        via: "tui",
                     }))
                     .await;
             }

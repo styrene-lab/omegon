@@ -241,6 +241,8 @@ impl IpcConnection {
                         .send(TuiCommand::SubmitPrompt(crate::tui::PromptSubmission {
                             text: req.prompt,
                             image_paths: Vec::new(),
+                            submitted_by: "ipc-controller".to_string(),
+                            via: "ipc",
                         }))
                         .await
                         .is_ok();
