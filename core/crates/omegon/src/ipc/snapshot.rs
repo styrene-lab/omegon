@@ -4,9 +4,9 @@ use omegon_traits::{
     IpcChangeSnapshot, IpcChildSnapshot, IpcCleaveSnapshot, IpcDesignCounts, IpcDesignTreeSnapshot,
     IpcFocusedNode, IpcHarnessSnapshot, IpcHealthSnapshot, IpcHealthState, IpcMemorySnapshot,
     IpcNodeBrief, IpcOpenSpecSnapshot, IpcProviderSnapshot, IpcSessionSnapshot, IpcStateSnapshot,
-    OmegonControlPlane, OmegonDeploymentKind, OmegonIdentity, OmegonInstanceDescriptor,
-    OmegonOwnerKind, OmegonOwnership, OmegonPlacement, OmegonPlacementKind, OmegonRole,
-    OmegonRuntime, OmegonRuntimeHealth,
+    OmegonAutonomyMode, OmegonControlPlane, OmegonDeploymentKind, OmegonIdentity,
+    OmegonInstanceDescriptor, OmegonOwnerKind, OmegonOwnership, OmegonPlacement,
+    OmegonPlacementKind, OmegonRole, OmegonRuntime, OmegonRuntimeHealth, OmegonRuntimeProfile,
 };
 
 use crate::tui::dashboard::{DashboardHandles, SharedSessionStats};
@@ -279,7 +279,7 @@ pub fn project_instance_descriptor(
                 .clone()
                 .unwrap_or_else(|| "detached".into()),
             role: OmegonRole::PrimaryDriver,
-            profile: "primary-interactive".into(),
+            profile: harness.runtime_profile.clone(),
         },
         ownership: OmegonOwnership {
             owner_kind: OmegonOwnerKind::Operator,
@@ -323,6 +323,8 @@ pub fn project_instance_descriptor(
         runtime: OmegonRuntime {
             deployment_kind: OmegonDeploymentKind::InteractiveTui,
             runtime_mode: omegon_traits::OmegonRuntimeMode::Standalone,
+            runtime_profile: OmegonRuntimeProfile::PrimaryInteractive,
+            autonomy_mode: OmegonAutonomyMode::OperatorDriven,
             health: match health.state {
                 IpcHealthState::Ready => OmegonRuntimeHealth::Ready,
                 IpcHealthState::Degraded => OmegonRuntimeHealth::Degraded,
@@ -376,6 +378,8 @@ fn project_harness(handles: &DashboardHandles) -> IpcHarnessSnapshot {
             context_class: "Squad".into(),
             thinking_level: "Medium".into(),
             capability_tier: "victory".into(),
+            runtime_profile: "primary-interactive".into(),
+            autonomy_mode: "operator-driven".into(),
             memory_available: false,
             cleave_available: false,
             memory_warning: None,
@@ -398,6 +402,8 @@ fn project_harness(handles: &DashboardHandles) -> IpcHarnessSnapshot {
             context_class: "Squad".into(),
             thinking_level: "Medium".into(),
             capability_tier: "victory".into(),
+            runtime_profile: "primary-interactive".into(),
+            autonomy_mode: "operator-driven".into(),
             memory_available: false,
             cleave_available: false,
             memory_warning: None,
@@ -420,6 +426,12 @@ fn project_harness(handles: &DashboardHandles) -> IpcHarnessSnapshot {
         context_class: h.context_class.clone(),
         thinking_level: h.thinking_level.clone(),
         capability_tier: h.capability_tier.clone(),
+        runtime_profile: h.runtime_profile.as_str().to_string(),
+        autonomy_mode: match h.autonomy_mode {
+            omegon_traits::OmegonAutonomyMode::OperatorDriven => "operator-driven".into(),
+            omegon_traits::OmegonAutonomyMode::GuardedAutonomous => "guarded-autonomous".into(),
+            omegon_traits::OmegonAutonomyMode::Autonomous => "autonomous".into(),
+        },
         memory_available: h.memory_available,
         cleave_available: h.cleave_available,
         memory_warning: h.memory_warning.clone(),
@@ -487,6 +499,8 @@ mod tests {
                 context_class: "Squad".into(),
                 thinking_level: "high".into(),
                 capability_tier: "victory".into(),
+                runtime_profile: omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
+                autonomy_mode: omegon_traits::OmegonAutonomyMode::OperatorDriven,
                 memory_available: true,
                 cleave_available: true,
                 web_auth_mode: Some("ephemeral-bearer".into()),
@@ -508,6 +522,9 @@ mod tests {
         assert_eq!(snap.instance.identity.instance_id, "instance-123");
         assert_eq!(snap.instance.identity.session_id, "session-abc");
         assert_eq!(snap.instance.identity.workspace_id, "tmp::example-project");
+        assert_eq!(snap.instance.identity.profile, "primary-interactive");
+        assert_eq!(snap.harness.runtime_profile, "primary-interactive");
+        assert_eq!(snap.harness.autonomy_mode, "operator-driven");
         assert_eq!(
             snap.instance.control_plane.server_instance_id,
             "instance-123"

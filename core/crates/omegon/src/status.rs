@@ -44,6 +44,8 @@ pub struct HarnessStatus {
     pub context_class: String,   // "Squad" / "Maniple" / "Clan" / "Legion"
     pub thinking_level: String,  // "Off" / "Minimal" / "Low" / "Medium" / "High"
     pub capability_tier: String, // "retribution" / "victory" / "gloriana"
+    pub runtime_profile: omegon_traits::OmegonRuntimeProfile,
+    pub autonomy_mode: omegon_traits::OmegonAutonomyMode,
 
     // ── Memory ───────────────────────────────────────────────
     pub memory: MemoryStatus,
@@ -662,6 +664,8 @@ impl Default for HarnessStatus {
             context_class: "Squad".into(),
             thinking_level: "Medium".into(),
             capability_tier: "victory".into(),
+            runtime_profile: omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
+            autonomy_mode: omegon_traits::OmegonAutonomyMode::OperatorDriven,
             memory: MemoryStatus {
                 total_facts: 0,
                 active_facts: 0,

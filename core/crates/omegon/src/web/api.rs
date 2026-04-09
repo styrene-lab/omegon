@@ -542,6 +542,18 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                     .as_ref()
                     .map(|h| h.capability_tier.clone())
                     .unwrap_or_else(|| "victory".into()),
+                runtime_profile: harness
+                    .as_ref()
+                    .map(|h| h.runtime_profile.as_str().to_string())
+                    .unwrap_or_else(|| "primary-interactive".into()),
+                autonomy_mode: harness
+                    .as_ref()
+                    .map(|h| match h.autonomy_mode {
+                        omegon_traits::OmegonAutonomyMode::OperatorDriven => "operator-driven".to_string(),
+                        omegon_traits::OmegonAutonomyMode::GuardedAutonomous => "guarded-autonomous".to_string(),
+                        omegon_traits::OmegonAutonomyMode::Autonomous => "autonomous".to_string(),
+                    })
+                    .unwrap_or_else(|| "operator-driven".into()),
                 memory_available: harness.as_ref().is_some_and(|h| h.memory_available),
                 cleave_available: harness.as_ref().is_some_and(|h| h.cleave_available),
                 memory_warning: harness.as_ref().and_then(|h| h.memory_warning.clone()),

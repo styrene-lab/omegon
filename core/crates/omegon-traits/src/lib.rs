@@ -311,6 +311,32 @@ pub struct OmegonIdentity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OmegonRuntimeProfile {
+    PrimaryInteractive,
+    LongRunningDaemon,
+    RemoteAgent,
+}
+
+impl OmegonRuntimeProfile {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::PrimaryInteractive => "primary-interactive",
+            Self::LongRunningDaemon => "long-running-daemon",
+            Self::RemoteAgent => "remote-agent",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OmegonAutonomyMode {
+    OperatorDriven,
+    GuardedAutonomous,
+    Autonomous,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OmegonOwnership {
     pub owner_kind: OmegonOwnerKind,
     pub owner_id: String,
@@ -374,6 +400,8 @@ pub struct OmegonControlPlane {
 pub struct OmegonRuntime {
     pub deployment_kind: OmegonDeploymentKind,
     pub runtime_mode: OmegonRuntimeMode,
+    pub runtime_profile: OmegonRuntimeProfile,
+    pub autonomy_mode: OmegonAutonomyMode,
     pub health: OmegonRuntimeHealth,
     pub provider_ok: bool,
     pub memory_ok: bool,
@@ -555,6 +583,8 @@ pub struct IpcHarnessSnapshot {
     pub context_class: String,
     pub thinking_level: String,
     pub capability_tier: String,
+    pub runtime_profile: String,
+    pub autonomy_mode: String,
     pub memory_available: bool,
     pub cleave_available: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1311,6 +1341,8 @@ mod tests {
                 runtime: OmegonRuntime {
                     deployment_kind: OmegonDeploymentKind::InteractiveTui,
                     runtime_mode: OmegonRuntimeMode::Standalone,
+                    runtime_profile: OmegonRuntimeProfile::PrimaryInteractive,
+                    autonomy_mode: OmegonAutonomyMode::OperatorDriven,
                     health: OmegonRuntimeHealth::Ready,
                     provider_ok: true,
                     memory_ok: true,
@@ -1369,6 +1401,8 @@ mod tests {
                 context_class: "Squad".into(),
                 thinking_level: "Medium".into(),
                 capability_tier: "victory".into(),
+                runtime_profile: "primary-interactive".into(),
+                autonomy_mode: "operator-driven".into(),
                 memory_available: true,
                 cleave_available: false,
                 memory_warning: None,

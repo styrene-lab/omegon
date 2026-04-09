@@ -2258,6 +2258,8 @@ fn auspex_attach_payload_carries_startup_and_instance_metadata() {
             runtime: omegon_traits::OmegonRuntime {
                 deployment_kind: omegon_traits::OmegonDeploymentKind::InteractiveTui,
                 runtime_mode: omegon_traits::OmegonRuntimeMode::Standalone,
+                runtime_profile: omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
+                autonomy_mode: omegon_traits::OmegonAutonomyMode::OperatorDriven,
                 health: omegon_traits::OmegonRuntimeHealth::Ready,
                 provider_ok: true,
                 memory_ok: true,

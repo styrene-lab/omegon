@@ -782,6 +782,21 @@
       "bound_change": null,
       "created_at": "2026-04-09T12:18:39Z",
       "updated_at": "2026-04-09T12:18:39Z"
+    },
+    {
+      "id": "runtime-profile-status-contract",
+      "title": "Runtime profile and autonomy status contract",
+      "state": "seed",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-04-09T21:57:40Z",
+      "updated_at": "2026-04-09T21:57:40Z"
     }
   ],
   "changes": [],
@@ -1774,6 +1789,15 @@
       "entity_id": "benchmark-model-selection-integrity",
       "from_state": "seed",
       "to_state": "exploring",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-04-09T21:57:40Z",
+      "entity_type": "node",
+      "entity_id": "runtime-profile-status-contract",
+      "from_state": "(new)",
+      "to_state": "seed",
       "reason": null,
       "forced": false
     }
