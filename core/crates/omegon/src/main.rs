@@ -2511,6 +2511,7 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     let profile = settings::Profile::load(&cli.cwd);
     if let Ok(mut s) = shared_settings.lock() {
         profile.apply_to(&mut s);
+        s.set_model(&cli.model);
         if cli.max_turns != 50 {
             s.max_turns = cli.max_turns;
         }
@@ -4000,6 +4001,55 @@ mod tests {
             }
             _ => panic!("wrong command parsed"),
         }
+    }
+
+    #[test]
+    fn headless_benchmark_settings_preserve_explicit_cli_model_over_profile() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".omegon")).unwrap();
+        std::fs::write(
+            dir.path().join(".omegon/profile.json"),
+            r#"{
+  "lastUsedModel": {
+    "provider": "openai",
+    "modelId": "gpt-4.1"
+  },
+  "thinkingLevel": "high",
+  "maxTurns": 17
+}"#,
+        )
+        .unwrap();
+
+        let cli = Cli::try_parse_from([
+            "omegon",
+            "bench",
+            "run-task",
+            "--cwd",
+            dir.path().to_str().unwrap(),
+            "--model",
+            "anthropic:claude-sonnet-4-6",
+            "--prompt",
+            "benchmark prompt",
+            "--usage-json",
+            "usage.json",
+        ])
+        .expect("bench run-task should parse");
+
+        let shared_settings = settings::shared(&cli.model);
+        let profile = settings::Profile::load(&cli.cwd);
+        {
+            let mut s = shared_settings.lock().unwrap();
+            profile.apply_to(&mut s);
+            s.set_model(&cli.model);
+            if cli.max_turns != 50 {
+                s.max_turns = cli.max_turns;
+            }
+        }
+
+        let s = shared_settings.lock().unwrap();
+        assert_eq!(s.model, "anthropic:claude-sonnet-4-6");
+        assert_eq!(s.thinking, crate::settings::ThinkingLevel::High);
+        assert_eq!(s.max_turns, 17);
     }
 
     #[test]
