@@ -2344,6 +2344,31 @@ struct BenchmarkUsageSummary {
     provider_telemetry: Option<omegon_traits::ProviderTelemetrySnapshot>,
 }
 
+impl BenchmarkUsageSummary {
+    fn observe_turn(
+        &mut self,
+        model: Option<String>,
+        provider: Option<String>,
+        estimated_tokens: usize,
+        context_window: usize,
+        context_composition: omegon_traits::ContextComposition,
+        actual_input_tokens: u64,
+        actual_output_tokens: u64,
+        cache_read_tokens: u64,
+        provider_telemetry: Option<omegon_traits::ProviderTelemetrySnapshot>,
+    ) {
+        self.model = model;
+        self.provider = provider;
+        self.input_tokens = self.input_tokens.saturating_add(actual_input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(actual_output_tokens);
+        self.cache_tokens = self.cache_tokens.saturating_add(cache_read_tokens);
+        self.estimated_tokens = self.estimated_tokens.saturating_add(estimated_tokens);
+        self.context_window = context_window;
+        self.context_composition = context_composition;
+        self.provider_telemetry = provider_telemetry;
+    }
+}
+
 fn write_benchmark_usage_json(path: &Path, summary: &BenchmarkUsageSummary) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -2486,17 +2511,17 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
                     provider_telemetry,
                 } => {
                     if let Ok(mut summary) = benchmark_summary_task.lock() {
-                        *summary = BenchmarkUsageSummary {
+                        summary.observe_turn(
                             model,
                             provider,
-                            input_tokens: actual_input_tokens,
-                            output_tokens: actual_output_tokens,
-                            cache_tokens: cache_read_tokens,
                             estimated_tokens,
                             context_window,
                             context_composition,
+                            actual_input_tokens,
+                            actual_output_tokens,
+                            cache_read_tokens,
                             provider_telemetry,
-                        };
+                        );
                     }
                     if actual_input_tokens > 0 || actual_output_tokens > 0 {
                         tracing::info!(
@@ -3878,6 +3903,67 @@ mod tests {
             }
             _ => panic!("wrong command parsed"),
         }
+    }
+
+    #[test]
+    fn benchmark_usage_summary_accumulates_run_totals() {
+        let mut summary = BenchmarkUsageSummary::default();
+        summary.observe_turn(
+            Some("anthropic:claude-sonnet-4-6".into()),
+            Some("anthropic".into()),
+            321,
+            200_000,
+            omegon_traits::ContextComposition {
+                system_tokens: 100,
+                tool_schema_tokens: 50,
+                conversation_tokens: 75,
+                memory_tokens: 10,
+                tool_history_tokens: 20,
+                thinking_tokens: 30,
+                free_tokens: 199_715,
+            },
+            123,
+            45,
+            6,
+            None,
+        );
+        summary.observe_turn(
+            Some("anthropic:claude-sonnet-4-6".into()),
+            Some("anthropic".into()),
+            111,
+            200_000,
+            omegon_traits::ContextComposition {
+                system_tokens: 120,
+                tool_schema_tokens: 55,
+                conversation_tokens: 90,
+                memory_tokens: 12,
+                tool_history_tokens: 24,
+                thinking_tokens: 36,
+                free_tokens: 199_663,
+            },
+            77,
+            9,
+            4,
+            None,
+        );
+
+        assert_eq!(summary.input_tokens, 200);
+        assert_eq!(summary.output_tokens, 54);
+        assert_eq!(summary.cache_tokens, 10);
+        assert_eq!(summary.estimated_tokens, 432);
+        assert_eq!(summary.context_window, 200_000);
+        assert_eq!(
+            summary.context_composition,
+            omegon_traits::ContextComposition {
+                system_tokens: 120,
+                tool_schema_tokens: 55,
+                conversation_tokens: 90,
+                memory_tokens: 12,
+                tool_history_tokens: 24,
+                thinking_tokens: 36,
+                free_tokens: 199_663,
+            }
+        );
     }
 
     #[test]
