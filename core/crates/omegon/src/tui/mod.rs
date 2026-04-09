@@ -2378,10 +2378,13 @@ impl App {
                     .visible_visual_lines(content_width, visible_rows)
                     .into_iter()
                     .map(|vl| {
-                        if vl.contains("[Pasted text #") {
+                        if let Some(summary) = vl.strip_prefix("[Pasted text #") {
+                            let summary = summary.strip_suffix(']').unwrap_or(summary);
                             Line::from(vec![
-                                Span::styled("› ", Style::default().fg(t.accent())),
-                                Span::styled(vl, Style::default().fg(t.accent_bright())),
+                                Span::styled("▌", Style::default().fg(t.accent())),
+                                Span::styled(" paste ", Style::default().fg(t.bg()).bg(t.accent())),
+                                Span::raw(" "),
+                                Span::styled(summary, Style::default().fg(t.accent_bright())),
                             ])
                         } else {
                             Line::from(Span::styled(vl, Style::default().fg(t.fg())))

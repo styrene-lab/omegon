@@ -152,6 +152,18 @@ async fn submit_editor_buffer_sends_prompt_with_images_when_attachment_token_pre
 }
 
 #[test]
+fn collapsed_paste_token_renders_as_editor_chip() {
+    let mut app = test_app();
+    app.editor.insert_paste("alpha\n\nbeta\n");
+
+    let rendered = render_app_to_string(&mut app, 100, 20);
+
+    assert!(rendered.contains(" paste "), "got {rendered}");
+    assert!(rendered.contains("1 +2 lines"), "got {rendered}");
+    assert!(!rendered.contains("[Pasted text #1 +2 lines]"), "got {rendered}");
+}
+
+#[test]
 fn queued_prompt_preview_mentions_attachment_count() {
     let mut app = test_app();
     app.queue_prompt(
