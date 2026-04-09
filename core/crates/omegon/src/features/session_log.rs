@@ -683,8 +683,9 @@ fn format_turn_summary(summary: &TurnSummary) -> String {
                 if let Some(active) = &telemetry.codex_active_limit {
                     parts.push(active.clone());
                 }
-                if let Some(pct) = telemetry.codex_primary_pct {
-                    parts.push(format!("primary {}%", pct));
+                if let Some(pct) = telemetry.codex_primary_used_pct {
+                    parts.push(format!("primary used {:.0}%", pct));
+                    parts.push(format!("primary left {:.0}%", (100.0 - pct).clamp(0.0, 100.0)));
                 }
                 if let Some(secs) = telemetry.codex_primary_reset_secs {
                     parts.push(format!("primary↻ {}s", secs));
@@ -1129,7 +1130,7 @@ mod tests {
                 provider: "openai-codex".into(),
                 source: "response_headers".into(),
                 codex_active_limit: Some("codex".into()),
-                codex_primary_pct: Some(0),
+                codex_primary_used_pct: Some(0.0),
                 codex_primary_reset_secs: Some(13648),
                 codex_limit_name: Some("GPT-5.3-Codex-Spark".into()),
                 ..Default::default()
@@ -1139,7 +1140,8 @@ mod tests {
         let text = format_turn_summary(&summary);
         assert!(text.contains("GPT-5.3-Codex-Spark"), "got: {text}");
         assert!(text.contains("codex"), "got: {text}");
-        assert!(text.contains("primary 0%"), "got: {text}");
+        assert!(text.contains("primary used 0%"), "got: {text}");
+        assert!(text.contains("primary left 100%"), "got: {text}");
         assert!(text.contains("primary↻ 13648s"), "got: {text}");
         assert!(!text.contains("5h 0%"), "got: {text}");
     }

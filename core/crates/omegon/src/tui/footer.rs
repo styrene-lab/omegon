@@ -1274,7 +1274,8 @@ mod tests {
                 provider: "openai-codex".into(),
                 source: "response_headers".into(),
                 codex_active_limit: Some("codex".into()),
-                codex_primary_pct: Some(0),
+                codex_primary_used_pct: Some(0.0),
+                codex_secondary_used_pct: Some(60.0),
                 codex_primary_reset_secs: Some(13648),
                 codex_secondary_reset_secs: Some(348644),
                 codex_credits_unlimited: Some(false),
@@ -1284,9 +1285,9 @@ mod tests {
         ))
         .expect("telemetry line");
         assert!(!text.contains("GPT-5.3-Codex-Spark"), "got {text}");
-        assert!(text.contains("codex 0%"), "got {text}");
-        assert!(text.contains("resets 3h47m"), "got {text}");
-        assert!(text.contains("weekly 4d"), "got {text}");
+        assert!(text.contains("codex 100% left"), "got {text}");
+        assert!(!text.contains("resets 3h47m"), "got {text}");
+        assert!(text.contains("7d 40% left"), "got {text}");
         assert!(text.contains("credits metered"), "got {text}");
         assert!(!text.contains("primary"), "got {text}");
         assert!(!text.contains('↻'), "got {text}");
@@ -1547,7 +1548,8 @@ mod tests {
                 source: "response_headers".into(),
                 codex_limit_name: Some("GPT-5.3-Codex-Spark".into()),
                 codex_active_limit: Some("codex".into()),
-                codex_primary_pct: Some(0),
+                codex_primary_used_pct: Some(0.0),
+                codex_secondary_used_pct: Some(60.0),
                 codex_primary_reset_secs: Some(13_648),
                 codex_secondary_reset_secs: Some(348_644),
                 codex_credits_unlimited: Some(false),
@@ -1560,8 +1562,8 @@ mod tests {
         assert!(text.contains("limit"), "got {text}");
         assert!(!text.contains("bucket GPT-5.3-Codex-Spark"), "got {text}");
         assert!(!text.contains("GPT-5.3-Codex-Spark"), "got {text}");
-        assert!(text.contains("codex 0%"), "got {text}");
-        assert!(text.contains("resets 3h47m"), "got {text}");
+        assert!(text.contains("codex 100% left"), "got {text}");
+        assert!(!text.contains("resets 3h47m"), "got {text}");
     }
 
     #[test]
@@ -1600,7 +1602,8 @@ mod tests {
                 source: "response_headers".into(),
                 codex_limit_name: Some("GPT-5.3-Codex-Spark".into()),
                 codex_active_limit: Some("codex".into()),
-                codex_primary_pct: Some(0),
+                codex_primary_used_pct: Some(0.0),
+                codex_secondary_used_pct: Some(60.0),
                 codex_primary_reset_secs: Some(13_648),
                 codex_secondary_reset_secs: Some(348_644),
                 codex_credits_unlimited: Some(false),
@@ -1660,7 +1663,7 @@ mod tests {
                 provider: "openai".into(),
                 source: "response_headers".into(),
                 codex_active_limit: Some("codex".into()),
-                codex_primary_pct: Some(0),
+                codex_primary_used_pct: Some(0.0),
                 codex_primary_reset_secs: Some(13_648),
                 ..Default::default()
             }),
@@ -1718,7 +1721,7 @@ mod tests {
                 provider: "anthropic".into(),
                 source: "headers".into(),
                 codex_active_limit: Some("burst".into()),
-                codex_primary_pct: Some(12),
+                codex_primary_used_pct: Some(12.0),
                 codex_primary_reset_secs: Some(60),
                 ..Default::default()
             }),
@@ -1765,7 +1768,7 @@ mod tests {
         let text = render_to_string(&terminal);
         assert!(!text.contains("Concise"), "got {text}");
         assert!(!text.contains("Systems Engineer"), "got {text}");
-        assert!(!text.contains("burst 12%"), "got {text}");
+        assert!(!text.contains("burst 88% left"), "got {text}");
     }
 
     #[test]

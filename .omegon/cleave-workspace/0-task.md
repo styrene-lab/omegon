@@ -1,138 +1,32 @@
 ---
 task_id: 0
-label: prompt-shape
-siblings: [1:runtime-telemetry]
+label: real-run
+siblings: [1:aggregate-mode]
 ---
 
-# Task 0: prompt-shape
+# Task 0: real-run
 
 ## Root Directive
 
-> Add system prompt composition breakdown instrumentation to Omegon: section-by-section prompt metrics surfaced in runtime/session telemetry with tests
+> Run a real example benchmark task end-to-end, inspect the generated artifacts and report output, then add a minimal directory-level aggregation/report mode for benchmark result files with tests and docs updates as needed.
 
 ## Mission
 
-Add prompt section breakdown structures and make prompt assembly return/track section sizes with tests in prompt.rs and shared traits as needed.
+Execute a real benchmark run from the example task, inspect the generated artifacts and report output, and capture concrete findings about output shape and any runtime gaps. Do not edit code except if required to unblock the run and only within scoped benchmark harness files.
 
 ## Scope
 
-- `core/crates/omegon/src/prompt.rs`
-- `core/crates/omegon-traits/src/lib.rs`
+- `ai/benchmarks/tasks/example-shadow-context.yaml`
+- `ai/benchmarks/runs`
+- `ai/benchmarks/examples/example-shadow-context-omegon.result.json`
+- `scripts/benchmark_harness.py`
+- `docs/token-efficiency-comparison-harness-v1.md`
 
 **Depends on:** none (independent)
 
 ## Siblings
 
-- **runtime-telemetry**: Wire prompt breakdown through setup/loop/session-log context telemetry and add regression tests for reporting/output.
-
-## Dependency Versions
-
-Use these exact versions — do not rely on training data for API shapes:
-
-```toml
-# core/crates/omegon/Cargo.toml
-[dependencies]
-omegon-extension = { path = "../omegon-extension" }
-omegon-traits = { path = "../omegon-traits" }
-omegon-git = { path = "../omegon-git" }
-omegon-memory = { path = "../omegon-memory" }
-omegon-codescan = { path = "../omegon-codescan" }
-omegon-secrets = { path = "../omegon-secrets" }
-opsx-core = { path = "../opsx-core" }
-tokio = { workspace = true }
-serde = { workspace = true }
-toml = "0.8"
-serde_json = { workspace = true }
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-async-trait = { workspace = true }
-clap = { workspace = true }
-rusqlite = { workspace = true }
-tokio-util = { workspace = true }
-indexmap = { workspace = true }
-dirs = "6.0.0"
-unicode-truncate = "2.0"
-chrono = "0.4"
-libc = "0.2"
-regex-lite = "0.1"
-ratatui = "0.30.0"
-syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-onig"] }
-tui-syntax-highlight = "0.2"
-tachyonfx = { version = "0.25.0", features = ["sendable"] }
-crossterm = "0.29.0"
-reqwest = { version = "0.13.2", features = ["json", "stream"] }
-tokio-stream = "0.1.18"
-sha2 = "0.10.9"
-secrecy = "0.10"
-sysinfo = "0.33"
-getrandom = "0.4.2"
-open = "5.3.3"
-tracing-appender = "0.2.4"
-unicode-width = "0.2.2"
-ratatui-image = { version = "10.0.6", default-features = false, features = ["crossterm", "image-defaults"] }
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-axum = { version = "0.8.8", features = ["ws", "macros"] }
-tower-http = { version = "0.6.8", features = ["cors"] }
-futures-util = "0.3.32"
-base64 = "0.22"
-hmac = "0.12"
-ansi-to-tui = "8.0"
-tui-tree-widget = "0.24"
-ratatui-toaster = "0.1"
-ratatui-textarea = { version = "0.8", features = ["crossterm"] }
-tui-popup = "0.7"
-hyperrat = "0.1"
-rmcp = { version = "1.2", features = ["transport-child-process", "client", "transport-streamable-http-client-reqwest", "auth"], default-features = false }
-tar = "0.4"
-flate2 = "1.0"
-sigstore = { version = "0.13.0", default-features = false, features = ["cosign", "rustls-tls"] }
-x509-parser = "0.17"
-rpassword = "7"
-
-[dev-dependencies]
-insta = "1.46"
-tempfile = "3.27.0"
-
-```
-
-```toml
-# core/crates/omegon-traits/Cargo.toml
-[dependencies]
-serde = { workspace = true }
-serde_json = { workspace = true }
-async-trait = { workspace = true }
-anyhow = { workspace = true }
-tokio-util = { workspace = true }
-rmp-serde = "1.3"
-
-[dev-dependencies]
-tempfile = "3.27.0"
-
-```
-
-## Test Convention
-
-Follow this pattern from an existing test in the same crate:
-
-```rust
-// From bridge.rs
-    #[test]
-    fn llm_message_user_round_trip() {
-        let msg = LlmMessage::User {
-            content: "hello".into(),
-            images: vec![],
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""role":"user"#));
-        let parsed: LlmMessage = serde_json::from_str(&json).unwrap();
-        match parsed {
-            LlmMessage::User { content, .. } => assert_eq!(content, "hello"),
-            _ => panic!("wrong variant"),
-        }
-    }
-```
+- **aggregate-mode**: Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.
 
 
 
@@ -140,27 +34,7 @@ Follow this pattern from an existing test in the same crate:
 
 ### Test Convention
 
-Write tests as #[test] functions in the same file or a tests submodule
-
-Example from codebase:
-
-```rust
-// From bridge.rs
-    #[test]
-    fn llm_message_user_round_trip() {
-        let msg = LlmMessage::User {
-            content: "hello".into(),
-            images: vec![],
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""role":"user"#));
-        let parsed: LlmMessage = serde_json::from_str(&json).unwrap();
-        match parsed {
-            LlmMessage::User { content, .. } => assert_eq!(content, "hello"),
-            _ => panic!("wrong variant"),
-        }
-    }
-```
+Write tests using pytest in co-located test_*.py files
 
 
 ## Contract

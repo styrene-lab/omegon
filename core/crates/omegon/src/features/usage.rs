@@ -176,7 +176,7 @@ mod tests {
                 provider: "openai-codex".into(),
                 source: "response_headers".into(),
                 codex_active_limit: Some("codex".into()),
-                codex_primary_pct: Some(99),
+                codex_primary_used_pct: Some(99.0),
                 codex_primary_reset_secs: Some(13648),
                 codex_limit_name: Some("GPT-5.3-Codex-Spark".into()),
                 ..Default::default()
@@ -186,7 +186,8 @@ mod tests {
         let CommandResult::Display(text) = feature.handle_command("usage", "") else {
             panic!("expected display result");
         };
-        assert!(text.contains("primary utilization: 99%"), "got: {text}");
+        assert!(text.contains("primary used: 99%"), "got: {text}");
+        assert!(text.contains("primary remaining: 1%"), "got: {text}");
         assert!(text.contains("headroom: exhausted"), "got: {text}");
         assert!(text.contains("OpenAI help"), "got: {text}");
         assert!(text.contains("developers.openai.com/api/docs/guides/rate-limits"), "got: {text}");

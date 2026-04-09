@@ -1,69 +1,87 @@
 {
-  "runId": "clv-pl9gc3pn-ag53",
-  "directive": "Add system prompt composition breakdown instrumentation to Omegon: section-by-section prompt metrics surfaced in runtime/session telemetry with tests",
+  "runId": "clv-ub8cn8lj-ub8c",
+  "directive": "Run a real example benchmark task end-to-end, inspect the generated artifacts and report output, then add a minimal directory-level aggregation/report mode for benchmark result files with tests and docs updates as needed.",
   "repoPath": "/Users/cwilson/workspace/black-meridian/omegon",
   "workspacePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace",
+  "supervisorToken": "supv-18a4b4cb8ce78938",
   "children": [
     {
       "childId": 0,
-      "label": "prompt-shape",
-      "description": "Add prompt section breakdown structures and make prompt assembly return/track section sizes with tests in prompt.rs and shared traits as needed.",
+      "label": "real-run",
+      "description": "Execute a real benchmark run from the example task, inspect the generated artifacts and report output, and capture concrete findings about output shape and any runtime gaps. Do not edit code except if required to unblock the run and only within scoped benchmark harness files.",
       "scope": [
-        "core/crates/omegon/src/prompt.rs",
-        "core/crates/omegon-traits/src/lib.rs"
+        "ai/benchmarks/tasks/example-shadow-context.yaml",
+        "ai/benchmarks/runs",
+        "ai/benchmarks/examples/example-shadow-context-omegon.result.json",
+        "scripts/benchmark_harness.py",
+        "docs/token-efficiency-comparison-harness-v1.md"
       ],
       "dependsOn": [],
       "status": "completed",
-      "branch": "cleave/0-prompt-shape",
+      "branch": "cleave/0-real-run",
+      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/0-wt-real-run",
       "backend": "native",
-      "executeModel": "openai-codex:gpt-5.4",
-      "durationSecs": 580.321905625,
-      "stdout": "Done.\n\nSummary:\n- Added shared prompt breakdown types in `core/crates/omegon-traits/src/lib.rs`.\n- Refactored prompt assembly in `core/crates/omegon/src/prompt.rs` so the existing `build_base_prompt(...)` preserves its string API, while new `build_base_prompt_with_breakdown(...)` returns:\n  - `PromptAssembly { prompt, composition }`\n  - `PromptComposition { sections, total_chars, total_estimated_tokens }`\n  - section entries as `PromptSectionMetric { key, label, chars, estimated_tokens }`\n- Instrumented prompt construction as explicit sections:\n  - identity\n  - tools\n  - behavior\n  - core_directives\n  - project_lifecycle\n  - operator_directives\n  - project_directives\n  - project_conventions\n  - runtime_context\n- Added tests in `prompt.rs` to verify:\n  - breakdown totals match the assembled prompt length\n  - section metrics exist and are populated\n  - the breakdown path preserves exact prompt output from the legacy API\n\nEvidence:\n- `core/crates/omegon-traits/src/lib.rs` now defines `PromptSectionMetric` and `PromptComposition`.\n- `core/crates/omegon/src/prompt.rs` now defines `PromptAssembly` and `build_base_prompt_with_breakdown(...)`, with `build_base_prompt(...)` delegating to it.\n\nValidation run:\n- `cd core && cargo test -p omegon-traits --lib -- --nocapture`\n- `cd core && cargo test -p omegon prompt::tests -- --nocapture`\n- `cd core && cargo check -p omegon -p omegon-traits`\n\nGit:\n- Commit: `e204c5fee7ea9a7d69646cb5fcb754e68b7f015e`\n- Commit message: `feat(prompt-shape): add prompt section breakdown metrics`\n\nState:\n- Working tree is clean.\n"
+      "executeModel": "anthropic:claude-sonnet-4-6",
+      "durationSecs": 271.485909292,
+      "stdout": "I ran the real benchmark end-to-end and inspected the generated artifacts. I did not change code, because the run was not blocked.\n\nWhat I ran:\n- `python3 scripts/benchmark_harness.py ai/benchmarks/tasks/example-shadow-context.yaml --root .`\n\nResult:\n- Generated artifact: `ai/benchmarks/runs/2026-04-09T13-58-52Z-example-shadow-context-omegon.json`\n- Exit status was success because acceptance passed.\n\nConcrete findings\n\n1. Real run passed acceptance\n- The task spec at `ai/benchmarks/tasks/example-shadow-context.yaml:1` targets `omegon` first and runs:\n  - `cargo test -p omegon shadow_context --manifest-path core/Cargo.toml`\n- The generated result artifact shows:\n  - `status: \"pass\"`\n  - `score: 1.0`\n  - `wall_clock_sec: 159.997`\n  - `timing.acceptance_wall_clock_sec: 33.1`\n\n2. Output shape from the real artifact\n- The result schema produced by `build_result()` in `scripts/benchmark_harness.py:481-528` matched the documented broad shape:\n  - top-level keys: `task_id`, `harness`, `model`, `status`, `score`, `wall_clock_sec`, `attempts`, `benchmark_mode`, `tokens`, `acceptance`, `artifact_paths`, `extra`, `timing`\n- The real artifact specifically contained:\n  - `tokens.input/output/cache/cache_write/total = null`\n  - no `omegon_context`\n  - no `telemetry`\n- That behavior is consistent with the code paths:\n  - token totals depend on adapter usage fields at `scripts/benchmark_harness.py:489-507`\n  - `omegon_context` is only added when `context_composition` exists at `scripts/benchmark_harness.py:520-521`\n  - telemetry fields are only added when present at `scripts/benchmark_harness.py:522-527`\n\n3. Runtime gap: real Omegon usage JSON was effectively empty/missing\n- The harness run succeeded, but the artifact had all token fields null.\n- That means the Omegon adapter did not receive usable usage data from `bench run-task --usage-json`.\n- Evidence:\n  - result artifact had null token fields\n  - `build_result()` only emits non-null tokens from `adapter.usage`\n  - `OmegonAdapter.run()` initializes missing usage fields to `None` if the usage file is absent or empty-ish (`scripts/benchmark_harness.py:167-196`)\n- I know this is a real runtime gap, not a report bug, because the same report mode works correctly on the tracked example artifact:\n  - `python3 scripts/benchmark_harness.py --report ai/benchmarks/examples/example-shadow-context-omegon.result.json`\n  - produced the expected tokened summary\n\n4. Runtime gap: log path is outside benchmark runs directory\n- The real artifact pointed `artifact_paths.log` to a temp file:\n  - `/var/folders/.../benchmark-omegon-....log`\n- That comes directly from the adapter creating temp logs in `OmegonAdapter.run()` and `write_result()` only writing the JSON artifact, not relocating logs:\n  - temp log creation in `scripts/benchmark_harness.py:160-180`\n  - JSON write only in `scripts/benchmark_harness.py:531-535`\n- That diverges from the documentation example in `docs/token-efficiency-comparison-harness-v1.md:220-223`, which shows logs under `ai/benchmarks/runs/...`.\n\n5. Acceptance output is preserved usefully\n- The real artifact embedded full stdout/stderr for acceptance commands under `acceptance.commands`.\n- That is useful for auditing and matches the acceptance runner implementation at `scripts/benchmark_harness.py:430-445`.\n\n6. Report mode currently works for file lists, not directory aggregation\n- Current CLI only accepts `--report <one-or-more-json-files>` from `parse_args()` and `run_report_mode()`:\n  - `scripts/benchmark_harness.py:87-100`\n  - `scripts/benchmark_harness.py:631-638`\n- It does not accept a directory and expand contained result files. So the “minimal directory-level aggregation/report mode” is not implemented yet in this branch.\n\nCommands I used to inspect behavior\n- Real run:\n  - `python3 scripts/benchmark_harness.py ai/benchmarks/tasks/example-shadow-context.yaml --root .`\n- Real artifact report:\n  - `python3 scripts/benchmark_harness.py --report ai/benchmarks/runs/2026-04-09T13-58-52Z-example-shadow-context-omegon.json`\n- Example artifact report:\n  - `python3 scripts/benchmark_harness.py --report ai/benchmarks/examples/example-shadow-context-omegon.result.json`\n\nTesting status\n- Targeted benchmark harness tests pass:\n  - `python3 -m pytest -q tests/test_benchmark_harness.py`\n  - 12 passed\n- Repo-wide `pytest -q tests` is not green, but the failures are unrelated pre-existing import issues in `tests/test_release_status.py`:\n  - `ModuleNotFoundError: No module named 'scripts'`\n\nGit state / finalization\n- No code changes were made.\n- I did not commit, because there was nothing to commit.\n- Working tree for tracked files is clean; `ai/benchmarks/runs/` is ignored.\n\nBottom line\n- The real benchmark runner works end-to-end for this example task.\n- The important runtime gaps are:\n  1. real Omegon runs are not currently yielding usage/token telemetry into the result artifact\n  2. run logs are written to temp paths instead of the benchmark runs directory\n  3. directory-level aggregation/report mode is still missing\n\nIf you want, I can take the sibling task next and implement the minimal directory report mode in `scripts/benchmark_harness.py` with tests in `tests/test_benchmark_harness.py` and doc updates in `docs/token-efficiency-comparison-harness-v1.md`.\n",
+      "startedAtUnixMs": 1775743211244,
+      "lastActivityUnixMs": 1775743211244,
+      "adoptionWorktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/0-wt-real-run",
+      "adoptionModel": "anthropic:claude-sonnet-4-6",
+      "supervisorToken": "supv-18a4b4cb8ce78938"
     },
     {
       "childId": 1,
-      "label": "runtime-telemetry",
-      "description": "Wire prompt breakdown through setup/loop/session-log context telemetry and add regression tests for reporting/output.",
+      "label": "aggregate-mode",
+      "description": "Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
       "scope": [
-        "core/crates/omegon/src/setup.rs",
-        "core/crates/omegon/src/loop.rs",
-        "core/crates/omegon/src/features/session_log.rs"
+        "scripts/benchmark_harness.py",
+        "tests/test_benchmark_harness.py",
+        "docs/token-efficiency-comparison-harness-v1.md"
       ],
       "dependsOn": [
-        "prompt-shape"
+        "real-run"
       ],
-      "status": "failed",
-      "error": "Cancelled\n--- last 30 stderr lines ---\n\u001b[2m2026-04-08T15:15:42.731417Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon\u001b[0m\u001b[2m:\u001b[0m ── Turn 10 complete — in:58684 out:325 ──\n\u001b[2m2026-04-08T15:15:42.731428Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon\u001b[0m\u001b[2m:\u001b[0m ── Turn 11 ──\n\u001b[2m2026-04-08T15:15:43.576038Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon::providers\u001b[0m\u001b[2m:\u001b[0m provider telemetry-related headers \u001b[3mprovider\u001b[0m\u001b[2m=\u001b[0m\"openai-codex\" \u001b[3mheader_count\u001b[0m\u001b[2m=\u001b[0m14 \u001b[3mheaders\u001b[0m\u001b[2m=\u001b[0mx-codex-active-limit=codex, x-codex-primary-over-secondary-limit-percent=0, x-codex-primary-reset-after-seconds=12045, x-codex-secondary-reset-after-seconds=547505, x-codex-primary-reset-at=1775673387, x-codex-secondary-reset-at=1776208847, x-codex-credits-unlimited=False, x-codex-bengalfox-primary-over-secondary-limit-percent=0, x-codex-bengalfox-primary-reset-after-seconds=18000, x-codex-bengalfox-secondary-reset-after-seconds=604800, x-codex-bengalfox-primary-reset-at=1775679343, x-codex-bengalfox-secondary-reset-at=1776266143, x-codex-bengalfox-limit-name=GPT-5.3-Codex-Spark, x-oai-request-id=9cb55513-eb29-4ef1-9138-f7de5df0a2bb\n\u001b[2m2026-04-08T15:15:54.373238Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon::providers\u001b[0m\u001b[2m:\u001b[0m Codex usage \u001b[3minput_tokens\u001b[0m\u001b[2m=\u001b[0m58949 \u001b[3moutput_tokens\u001b[0m\u001b[2m=\u001b[0m419 \u001b[3mtotal_tokens\u001b[0m\u001b[2m=\u001b[0m59368\n\u001b[2m2026-04-08T15:15:54.374543Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon\u001b[0m\u001b[2m:\u001b[0m → bash\n\u001b[2m2026-04-08T15:15:54.401738Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon\u001b[0m\u001b[2m:\u001b[0m   ✓ core/crates/omegon/src/setup.rs:316:            if let Ok(stats) = backend.stats(&mind).await {\ncore/crates/omegon/src/setup.rs:318:                    total_facts: stats.total_facts,\ncore/crates/omeg…\n\u001b[2m2026-04-08T15:15:54.401748Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon\u001b[0m\u001b[2m:\u001b[0m → read\n\u001b[2m2026-04-08T15:15:54.401951Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon\u001b[0m\u001b[2m:\u001b[0m   ✓ //! ContextManager — dynamic per-turn system prompt injection.\n//!\n//! Starts with a minimal base prompt (~500 tokens) and injects\n//! context based on deterministic signals: recent tools, file types,…\n\u001b[2m2026-04-08T15:15:54.401971Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon\u001b[0m\u001b[2m:\u001b[0m → bash\n\u001b[2m2026-04-08T15:15:54.413038Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon\u001b[0m\u001b[2m:\u001b[0m   ✓     TurnStart {\n        turn: u32,\n    },\n    MessageStart {\n        role: String,\n    },\n    MessageChunk {\n        text: String,\n    },\n    ThinkingChunk {\n        text: String,\n    },\n    MessageEn…\n\u001b[2m2026-04-08T15:15:54.431568Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon\u001b[0m\u001b[2m:\u001b[0m ── Turn 11 complete — in:58949 out:419 ──\n\u001b[2m2026-04-08T15:15:54.432231Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon\u001b[0m\u001b[2m:\u001b[0m ── Turn 12 ──\n\u001b[2m2026-04-08T15:15:55.520164Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2momegon::providers\u001b[0m\u001b[2m:\u001b[0m provider telemetry-related headers \u001b[3mprovider\u001b[0m\u001b[2m=\u001b[0m\"openai-codex\" \u001b[3mheader_count\u001b[0m\u001b[2m=\u001b[0m14 \u001b[3mheaders\u001b[0m\u001b[2m=\u001b[0mx-codex-active-limit=codex, x-codex-primary-over-secondary-limit-percent=0, x-codex-primary-reset-after-seconds=12033, x-codex-secondary-reset-after-seconds=547493, x-codex-primary-reset-at=1775673387, x-codex-secondary-reset-at=1776208847, x-codex-credits-unlimited=False, x-codex-bengalfox-primary-over-secondary-limit-percent=0, x-codex-bengalfox-primary-reset-after-seconds=18000, x-codex-bengalfox-secondary-reset-after-seconds=604800, x-codex-bengalfox-primary-reset-at=1775679355, x-codex-bengalfox-secondary-reset-at=1776266155, x-codex-bengalfox-limit-name=GPT-5.3-Codex-Spark, x-oai-request-id=df7833b2-2205-49ec-a078-76c2d17dddc4\n---",
-      "branch": "cleave/1-runtime-telemetry",
+      "status": "running",
+      "branch": "cleave/1-aggregate-mode",
+      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/1-wt-aggregate-mode",
       "backend": "native",
-      "executeModel": "openai-codex:gpt-5.4"
+      "executeModel": "anthropic:claude-sonnet-4-6",
+      "pid": 2469,
+      "startedAtUnixMs": 1775743211668,
+      "lastActivityUnixMs": 1775743211668,
+      "adoptionWorktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/1-wt-aggregate-mode",
+      "adoptionModel": "anthropic:claude-sonnet-4-6",
+      "supervisorToken": "supv-18a4b4cb8ce78938"
     }
   ],
   "plan": {
     "children": [
       {
         "depends_on": [],
-        "description": "Add prompt section breakdown structures and make prompt assembly return/track section sizes with tests in prompt.rs and shared traits as needed.",
-        "label": "prompt-shape",
+        "description": "Execute a real benchmark run from the example task, inspect the generated artifacts and report output, and capture concrete findings about output shape and any runtime gaps. Do not edit code except if required to unblock the run and only within scoped benchmark harness files.",
+        "label": "real-run",
         "scope": [
-          "core/crates/omegon/src/prompt.rs",
-          "core/crates/omegon-traits/src/lib.rs"
+          "ai/benchmarks/tasks/example-shadow-context.yaml",
+          "ai/benchmarks/runs",
+          "ai/benchmarks/examples/example-shadow-context-omegon.result.json",
+          "scripts/benchmark_harness.py",
+          "docs/token-efficiency-comparison-harness-v1.md"
         ]
       },
       {
         "depends_on": [
-          "prompt-shape"
+          "real-run"
         ],
-        "description": "Wire prompt breakdown through setup/loop/session-log context telemetry and add regression tests for reporting/output.",
-        "label": "runtime-telemetry",
+        "description": "Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
+        "label": "aggregate-mode",
         "scope": [
-          "core/crates/omegon/src/setup.rs",
-          "core/crates/omegon/src/loop.rs",
-          "core/crates/omegon/src/features/session_log.rs"
+          "scripts/benchmark_harness.py",
+          "tests/test_benchmark_harness.py",
+          "docs/token-efficiency-comparison-harness-v1.md"
         ]
       }
     ],
-    "default_model": "openai-codex:gpt-5.4",
-    "rationale": "Prompt composition metrics originate in prompt assembly but must be surfaced through shared event types and session reporting."
+    "rationale": "First validate the real output shape and runtime behavior, then add the smallest aggregation feature based on observed artifacts rather than assumptions."
   }
 }

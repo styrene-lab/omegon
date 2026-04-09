@@ -423,8 +423,15 @@ fn parse_rate_limit_snapshot(
 
     // ── ChatGPT Codex x-codex-* headers ─────────────────────────────────
     let codex_active_limit = get("x-codex-active-limit").map(ToOwned::to_owned);
-    let codex_primary_pct = parse_u64("x-codex-primary-over-secondary-limit-percent")
-        .or_else(|| parse_u64("x-codex-bengalfox-primary-over-secondary-limit-percent"));
+    let codex_primary_used_pct = parse_pct("x-codex-primary-used-percent")
+        .or_else(|| parse_pct("x-codex-bengalfox-primary-used-percent"))
+        // Legacy fallback from older proxy headers; semantically weaker than used-percent.
+        .or_else(|| parse_u64("x-codex-primary-over-secondary-limit-percent").map(|v| v as f32))
+        .or_else(|| {
+            parse_u64("x-codex-bengalfox-primary-over-secondary-limit-percent").map(|v| v as f32)
+        });
+    let codex_secondary_used_pct = parse_pct("x-codex-secondary-used-percent")
+        .or_else(|| parse_pct("x-codex-bengalfox-secondary-used-percent"));
     let codex_primary_reset_secs = parse_u64("x-codex-primary-reset-after-seconds")
         .or_else(|| parse_u64("x-codex-bengalfox-primary-reset-after-seconds"));
     let codex_secondary_reset_secs = parse_u64("x-codex-secondary-reset-after-seconds")
@@ -457,7 +464,8 @@ fn parse_rate_limit_snapshot(
             .or_else(|| get("x-oai-request-id"))
             .map(ToOwned::to_owned),
         codex_active_limit,
-        codex_primary_pct,
+        codex_primary_used_pct,
+        codex_secondary_used_pct,
         codex_primary_reset_secs,
         codex_secondary_reset_secs,
         codex_credits_unlimited,
@@ -2623,7 +2631,7 @@ mod tests {
         let snapshot = parse_rate_limit_snapshot("openai-codex", &headers).expect("snapshot");
         assert_eq!(snapshot.provider, "openai-codex");
         assert_eq!(snapshot.codex_active_limit.as_deref(), Some("codex"));
-        assert_eq!(snapshot.codex_primary_pct, Some(0));
+        assert_eq!(snapshot.codex_primary_used_pct, Some(0.0));
         assert_eq!(snapshot.codex_primary_reset_secs, Some(13648));
         assert_eq!(snapshot.codex_secondary_reset_secs, Some(348644));
         assert_eq!(snapshot.codex_credits_unlimited, Some(false));

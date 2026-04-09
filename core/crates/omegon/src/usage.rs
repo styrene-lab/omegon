@@ -66,8 +66,8 @@ pub fn derive_headroom_state(telemetry: Option<&ProviderTelemetrySnapshot>) -> U
             .or_else(|| t.unified_7d_utilization_pct.map(classify_pct))
             .unwrap_or(UsageHeadroomState::Unknown),
         "openai-codex" => t
-            .codex_primary_pct
-            .map(|pct| classify_pct(pct as f32))
+            .codex_primary_used_pct
+            .map(classify_pct)
             .unwrap_or(UsageHeadroomState::Unknown),
         _ => {
             if let Some(secs) = t.retry_after_secs
@@ -121,15 +121,16 @@ pub fn derive_rationale(
             ),
             _ => "Anthropic provider selected, but no utilization headers were captured".to_string(),
         },
-        "openai-codex" => match t.codex_primary_pct {
+        "openai-codex" => match t.codex_primary_used_pct {
             Some(pct) => format!(
-                "derived from Codex primary limit pressure header: {}%{}",
+                "derived from Codex primary window used-percent header: {:.0}% used ({:.0}% remaining){}",
                 pct,
+                (100.0 - pct).clamp(0.0, 100.0),
                 t.codex_primary_reset_secs
                     .map(|secs| format!(", reset in {}", format_duration_compact(secs)))
                     .unwrap_or_default()
             ),
-            None => "Codex provider selected, but no primary limit header was captured".to_string(),
+            None => "Codex provider selected, but no primary used-percent header was captured".to_string(),
         },
         _ => {
             let mut parts = Vec::new();
@@ -175,8 +176,13 @@ pub fn format_raw_telemetry_lines(t: &ProviderTelemetrySnapshot) -> Vec<String> 
             if let Some(active) = &t.codex_active_limit {
                 lines.push(format!("active limit: {active}"));
             }
-            if let Some(pct) = t.codex_primary_pct {
-                lines.push(format!("primary utilization: {pct}%"));
+            if let Some(pct) = t.codex_primary_used_pct {
+                lines.push(format!("primary used: {:.0}%", pct));
+                lines.push(format!("primary remaining: {:.0}%", (100.0 - pct).clamp(0.0, 100.0)));
+            }
+            if let Some(pct) = t.codex_secondary_used_pct {
+                lines.push(format!("secondary used: {:.0}%", pct));
+                lines.push(format!("secondary remaining: {:.0}%", (100.0 - pct).clamp(0.0, 100.0)));
             }
             if let Some(secs) = t.codex_primary_reset_secs {
                 lines.push(format!("primary reset: {}", format_duration_compact(secs)));
@@ -249,16 +255,20 @@ pub fn format_provider_telemetry_compact(
         }
         "openai-codex" => {
             let family = t.codex_active_limit.as_deref().unwrap_or("codex");
-            if let Some(pct) = t.codex_primary_pct {
-                parts.push(format!("{family} {pct}%"));
+            if let Some(used) = t.codex_primary_used_pct {
+                parts.push(format!("{family} {:.0}% left", (100.0 - used).clamp(0.0, 100.0)));
             } else {
                 parts.push(family.to_string());
             }
-            if let Some(secs) = t.codex_primary_reset_secs {
-                parts.push(format!("resets {}", format_duration_compact(secs)));
-            }
-            if let Some(secs) = t.codex_secondary_reset_secs {
+            if let Some(used) = t.codex_secondary_used_pct {
+                parts.push(format!("7d {:.0}% left", (100.0 - used).clamp(0.0, 100.0)));
+            } else if let Some(secs) = t.codex_secondary_reset_secs {
                 parts.push(format!("weekly {}", format_duration_compact(secs)));
+            }
+            if let Some(secs) = t.codex_primary_reset_secs
+                && matches!(derive_headroom_state(Some(t)), UsageHeadroomState::Constrained | UsageHeadroomState::Exhausted)
+            {
+                parts.push(format!("resets {}", format_duration_compact(secs)));
             }
             if let Some(unlimited) = t.codex_credits_unlimited {
                 parts.push(if unlimited {
@@ -349,12 +359,12 @@ mod tests {
             provider: "openai-codex".into(),
             source: "response_headers".into(),
             codex_active_limit: Some("codex".into()),
-            codex_primary_pct: Some(99),
+            codex_primary_used_pct: Some(99.0),
             codex_primary_reset_secs: Some(13648),
             ..Default::default()
         }))
         .expect("compact line");
-        assert!(text.contains("codex 99%"), "got {text}");
+        assert!(text.contains("codex 1% left"), "got {text}");
         assert!(text.contains("resets 3h47m"), "got {text}");
         assert!(text.ends_with("full"), "got {text}");
     }

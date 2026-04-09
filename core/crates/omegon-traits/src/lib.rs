@@ -643,13 +643,16 @@ pub struct ProviderTelemetrySnapshot {
     /// Which limit family is active (e.g. "codex").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub codex_active_limit: Option<String>,
-    /// Primary (5h) window usage as percent over the secondary (7d) limit.
+    /// Primary window used percent from Codex rate-limit headers.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub codex_primary_pct: Option<u64>,
-    /// Seconds until the primary (5h) window resets.
+    pub codex_primary_used_pct: Option<f32>,
+    /// Secondary window used percent from Codex rate-limit headers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex_secondary_used_pct: Option<f32>,
+    /// Seconds until the primary (active) window resets.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub codex_primary_reset_secs: Option<u64>,
-    /// Seconds until the secondary (7d) window resets.
+    /// Seconds until the secondary (longer) window resets.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub codex_secondary_reset_secs: Option<u64>,
     /// Whether the account has unlimited credits.
