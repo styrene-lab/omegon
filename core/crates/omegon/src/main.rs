@@ -1147,29 +1147,21 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         );
     }
 
+    let (mut agent, mut runtime_state) = split_interactive_agent(agent);
+
     let runtime_resources = InteractiveRuntimeResources {
         cwd: agent.cwd.clone(),
         secrets: agent.secrets.clone(),
         context_metrics: agent.context_metrics.clone(),
     };
-    let mut runtime_state = Some(take_interactive_agent_state(&mut agent));
 
     // ─── Emit session start to bus features ────────────────────────────
-    runtime_state
-        .as_mut()
-        .expect("interactive runtime state initialized")
-        .bus
-        .emit(&omegon_traits::BusEvent::SessionStart {
+    runtime_state.bus.emit(&omegon_traits::BusEvent::SessionStart {
         cwd: agent.cwd.clone(),
         session_id: agent.session_id.clone(),
     });
     // Drain any requests from session_start handlers
-    for request in runtime_state
-        .as_mut()
-        .expect("interactive runtime state initialized")
-        .bus
-        .drain_requests()
-    {
+    for request in runtime_state.bus.drain_requests() {
         match request {
             omegon_traits::BusRequest::Notify { message, .. } => {
                 let _ = events_tx.send(AgentEvent::SystemNotification { message });
@@ -1288,9 +1280,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::Compact => {
-                let runtime_state = runtime_state
-                    .as_mut()
-                    .expect("interactive runtime state available for compaction");
                 tracing::info!("manual compaction requested");
 
                 let bridge_guard = bridge.read().await;
@@ -1368,9 +1357,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::ContextStatus => {
-                let runtime_state = runtime_state
-                    .as_ref()
-                    .expect("interactive runtime state available for context status");
                 let est = runtime_state.conversation.estimate_tokens();
                 let settings = shared_settings.lock().unwrap();
                 let ctx_window = settings.context_window;
@@ -1393,9 +1379,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::ContextCompact => {
-                let runtime_state = runtime_state
-                    .as_mut()
-                    .expect("interactive runtime state available for context compact");
                 tracing::info!("context compaction requested via /context compact");
 
                 let bridge_guard = bridge.read().await;
@@ -1454,9 +1437,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::ContextClear => {
-                let runtime_state = runtime_state
-                    .as_mut()
-                    .expect("interactive runtime state available for context clear");
                 tracing::info!("context clear requested via /context clear");
                 // Same as /new: save session, reset conversation
                 if !cli.no_session {
@@ -1503,9 +1483,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::NewSession => {
-                let runtime_state = runtime_state
-                    .as_mut()
-                    .expect("interactive runtime state available for new session");
                 // Save the current session before resetting
                 if !cli.no_session {
                     let _ = session::save_session(
@@ -1601,11 +1578,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 args,
                 respond_to,
             } => {
-                let runtime_state = runtime_state
-                    .as_mut()
-                    .expect("interactive runtime state available for remote slash command");
                 let response = execute_remote_slash_command(
-                    runtime_state,
+                    &mut runtime_state,
                     &mut agent,
                     &events_tx,
                     &shared_settings,
@@ -1622,9 +1596,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             }
 
             tui::TuiCommand::BusCommand { name, args } => {
-                let runtime_state = runtime_state
-                    .as_mut()
-                    .expect("interactive runtime state available for bus command");
                 // Handle special auth commands directly
                 if name == "secrets" {
                     let parts: Vec<&str> = args.splitn(3, ' ').collect();
@@ -1747,7 +1718,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         })
                     };
 
-                    let message = match agent
+                    let message = match runtime_state
                         .bus
                         .execute_tool(
                             crate::tool_registry::context::REQUEST_CONTEXT,
@@ -1961,7 +1932,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         } => {
                             let args =
                                 serde_json::json!({ "content": content, "section": section });
-                            if let Err(e) = agent
+                            if let Err(e) = runtime_state
                                 .bus
                                 .execute_tool(
                                     "memory_store",
@@ -1997,9 +1968,14 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     }
 
                     let mut quit_after_turn = false;
-                    let state_for_turn = runtime_state
-                        .take()
-                        .expect("interactive runtime state available before turn spawn");
+                    let state_for_turn = std::mem::replace(
+                        &mut runtime_state,
+                        InteractiveAgentState {
+                            bus: crate::bus::EventBus::default(),
+                            context_manager: crate::context::ContextManager::new(),
+                            conversation: crate::conversation::ConversationState::new(),
+                        },
+                    );
                     let mut turn_task = tokio::task::spawn_local(run_interactive_active_turn(
                         state_for_turn,
                         runtime_resources.clone(),
@@ -2014,13 +1990,15 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     loop {
                         tokio::select! {
                             turn_result = &mut turn_task => {
-                                runtime_state = Some(match turn_result {
+                                runtime_state = match turn_result {
                                     Ok(runtime_state) => runtime_state,
                                     Err(join_err) => {
                                         tracing::error!("interactive turn task failed: {join_err}");
-                                        break 'interactive;
+                                        return Err(anyhow::anyhow!(
+                                            "interactive turn task failed: {join_err}"
+                                        ));
                                     }
-                                });
+                                };
                                 break;
                             }
                             maybe_cmd = command_rx.recv() => {
@@ -2071,18 +2049,14 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     }
 
     // Save session + profile
-    if let Some(runtime_state) = runtime_state.as_ref() {
-        if !cli.no_session
-            && let Err(e) = session::save_session(
-                &runtime_state.conversation,
-                &agent.cwd,
-                Some(agent.session_id.as_str()),
-            )
-        {
-            tracing::debug!("Session save failed: {e}");
-        }
-    } else {
-        tracing::error!("interactive runtime state unavailable at shutdown; skipping session save");
+    if !cli.no_session
+        && let Err(e) = session::save_session(
+            &runtime_state.conversation,
+            &agent.cwd,
+            Some(agent.session_id.as_str()),
+        )
+    {
+        tracing::debug!("Session save failed: {e}");
     }
     // Always persist profile on exit (captures thinking level changes, etc.)
     if let Ok(s) = shared_settings.lock() {
@@ -2275,21 +2249,33 @@ struct InteractiveAgentState {
     conversation: crate::conversation::ConversationState,
 }
 
-fn take_interactive_agent_state(agent: &mut setup::AgentSetup) -> InteractiveAgentState {
-    InteractiveAgentState {
-        bus: std::mem::take(&mut agent.bus),
-        context_manager: std::mem::replace(
-            &mut agent.context_manager,
-            crate::context::ContextManager::new(
-                "interactive-runtime-state-moved".to_string(),
-                vec![],
-            ),
-        ),
-        conversation: std::mem::replace(
-            &mut agent.conversation,
-            crate::conversation::ConversationState::new(),
-        ),
-    }
+struct InteractiveAgentHost {
+    session_id: String,
+    context_metrics:
+        std::sync::Arc<std::sync::Mutex<crate::features::context::SharedContextMetrics>>,
+    cwd: PathBuf,
+    secrets: std::sync::Arc<omegon_secrets::SecretsManager>,
+    web_auth_state: crate::web::WebAuthState,
+    dashboard_handles: crate::tui::dashboard::DashboardHandles,
+    resume_info: Option<setup::ResumeInfo>,
+}
+
+fn split_interactive_agent(agent: setup::AgentSetup) -> (InteractiveAgentHost, InteractiveAgentState) {
+    let host = InteractiveAgentHost {
+        session_id: agent.session_id,
+        context_metrics: agent.context_metrics,
+        cwd: agent.cwd,
+        secrets: agent.secrets,
+        web_auth_state: agent.web_auth_state,
+        dashboard_handles: agent.dashboard_handles,
+        resume_info: agent.resume_info,
+    };
+    let state = InteractiveAgentState {
+        bus: agent.bus,
+        context_manager: agent.context_manager,
+        conversation: agent.conversation,
+    };
+    (host, state)
 }
 
 #[derive(Clone)]
@@ -2976,7 +2962,7 @@ fn list_sessions_message(cwd: &Path) -> String {
 
 async fn execute_remote_slash_command(
     runtime_state: &mut InteractiveAgentState,
-    agent: &mut setup::AgentSetup,
+    agent: &mut InteractiveAgentHost,
     events_tx: &broadcast::Sender<AgentEvent>,
     shared_settings: &settings::SharedSettings,
     bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
@@ -3766,7 +3752,7 @@ mod tests {
         let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
         let cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
 
-        let mut runtime_state = take_interactive_agent_state(&mut agent);
+        let (mut agent, mut runtime_state) = split_interactive_agent(agent);
 
         let response = rt.block_on(execute_remote_slash_command(
             &mut runtime_state,
@@ -3798,7 +3784,7 @@ mod tests {
         let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
         let cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
 
-        let mut runtime_state = take_interactive_agent_state(&mut agent);
+        let (mut agent, mut runtime_state) = split_interactive_agent(agent);
 
         let response = rt.block_on(execute_remote_slash_command(
             &mut runtime_state,
