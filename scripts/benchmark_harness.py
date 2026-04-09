@@ -61,6 +61,8 @@ class AdapterResult:
     usage: dict[str, Any]
     extra: dict[str, Any]
     profile: str
+    execution_status: str = "ok"
+    error_message: str | None = None
     log_path: Path | None = None
     patch_path: Path | None = None
 
@@ -222,6 +224,8 @@ class OmegonAdapter(HarnessAdapter):
             usage=usage,
             extra=usage.get("extra", {}),
             profile="omegon-native",
+            execution_status="ok" if proc.returncode == 0 else "error",
+            error_message=None if proc.returncode == 0 else f"omegon exited with code {proc.returncode}",
             log_path=log_file,
             patch_path=None,
         )
@@ -271,7 +275,20 @@ class PiAdapter(HarnessAdapter):
         usage.setdefault("cache_tokens", None)
         extra = {"raw_json": payload} if payload is not None else {"raw_stdout": proc.stdout}
         model = self.model or extract_model(payload) or "pi-default"
-        return AdapterResult(model=model, usage=usage, extra=extra, profile="minimal", log_path=log_file)
+        execution_status = "ok"
+        error_message = None
+        if proc.returncode != 0:
+            execution_status = "error"
+            error_message = f"pi exited with code {proc.returncode}"
+        return AdapterResult(
+            model=model,
+            usage=usage,
+            extra=extra,
+            profile="minimal",
+            execution_status=execution_status,
+            error_message=error_message,
+            log_path=log_file,
+        )
 
 
 class ClaudeCodeAdapter(HarnessAdapter):
@@ -303,7 +320,24 @@ class ClaudeCodeAdapter(HarnessAdapter):
         usage.setdefault("cache_tokens", None)
         extra = {"raw_json": payload} if payload is not None else {"raw_stdout": proc.stdout}
         model = self.model or extract_model(payload) or "claude-code-default"
-        return AdapterResult(model=model, usage=usage, extra=extra, profile="default", log_path=log_file)
+        execution_status = "ok"
+        error_message = None
+        if proc.returncode != 0:
+            execution_status = "error"
+            error_message = f"claude-code exited with code {proc.returncode}"
+        elif isinstance(payload, dict) and payload.get("is_error") is True:
+            execution_status = "error"
+            result_text = payload.get("result")
+            error_message = result_text if isinstance(result_text, str) else "claude-code reported an error result"
+        return AdapterResult(
+            model=model,
+            usage=usage,
+            extra=extra,
+            profile="default",
+            execution_status=execution_status,
+            error_message=error_message,
+            log_path=log_file,
+        )
 
 
 def extract_pi_result(stdout: str) -> dict[str, Any] | None:
@@ -479,6 +513,16 @@ def normalize_omegon_context(usage: dict[str, Any]) -> dict[str, int] | None:
     return {key: int(value or 0) for key, value in mapping.items()}
 
 
+def derive_final_status(adapter: AdapterResult, acceptance_status: str) -> tuple[str, float]:
+    if adapter.execution_status != "ok":
+        return "error", 0.0
+    if acceptance_status == "pass":
+        return "pass", 1.0
+    if acceptance_status == "fail":
+        return "fail", 0.0
+    return acceptance_status, 0.0
+
+
 def build_result(
     *,
     spec: TaskSpec,
@@ -489,17 +533,22 @@ def build_result(
     wall_clock_sec: float,
 ) -> dict[str, Any]:
     total_tokens = compute_total_tokens(adapter.usage)
+    final_status, final_score = derive_final_status(adapter, acceptance_status)
     payload = {
         "task_id": spec.id,
         "harness": harness,
         "model": adapter.model,
-        "status": acceptance_status,
-        "score": 1.0 if acceptance_status == "pass" else 0.0,
+        "status": final_status,
+        "score": final_score,
         "wall_clock_sec": round(wall_clock_sec, 3),
         "attempts": 1,
         "benchmark_mode": {
             "clean_room": True,
             "adapter_profile": adapter.profile,
+        },
+        "adapter": {
+            "execution_status": adapter.execution_status,
+            "error_message": adapter.error_message,
         },
         "tokens": {
             "input": adapter.usage.get("input_tokens"),
@@ -731,7 +780,7 @@ def main() -> int:
     payload["timing"] = {"acceptance_wall_clock_sec": round(acceptance_elapsed, 3)}
     result_path = write_result(out_dir, spec, harness, payload)
     print(result_path)
-    return 0 if acceptance_status == "pass" else 3
+    return 0 if payload.get("status") == "pass" else 3
 
 
 if __name__ == "__main__":

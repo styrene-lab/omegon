@@ -256,6 +256,48 @@ acceptance:
             self.assertEqual(payload["tokens"]["total"], 145)
             self.assertEqual(payload["tokens"]["cache_write"], 9)
 
+    def test_claude_adapter_error_result_becomes_benchmark_error_even_if_acceptance_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            fake_claude = repo / "scripts" / "claude"
+            fake_claude.write_text(
+                "#!/bin/sh\n"
+                "cat <<'JSON'\n"
+                '{"type":"result","subtype":"success","is_error":true,"result":"model access denied","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}\n'
+                "JSON\n"
+            )
+            fake_claude.chmod(0o755)
+            task = self.write_task(
+                repo,
+                """
+id: claude-error
+repo: .
+base_ref: main
+prompt: hi
+harnesses: [claude-code]
+acceptance:
+  - python3 -c \"print('ok')\"
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo), "--harness", "claude-code"],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 3, result.stderr)
+            payload = json.loads(Path(result.stdout.strip()).read_text())
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["score"], 0.0)
+            self.assertEqual(payload["adapter"]["execution_status"], "error")
+            self.assertEqual(payload["adapter"]["error_message"], "model access denied")
+            self.assertEqual(payload["acceptance"]["commands"][0]["exit"], 0)
+
     def test_task_spec_model_is_used_when_cli_override_is_absent(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)
