@@ -420,11 +420,13 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 48,
+    "rc_count": 49,
     "notes": [
       "feat(anthropic): prefer adaptive thinking for claude 4.6",
       "feat(auspex): add mode-aware local handoff probe",
       "feat(auspex): launch desktop handoff from cached startup payload",
+      "feat(benchmark): add omegon bench run-task adapter",
+      "feat(benchmark): scaffold token efficiency harness v1",
       "feat(cleave): add per-child cancel registry and command",
       "feat(cleave): add structured child runtime controls",
       "feat(cleave): expose active child runtime ownership in progress state",
@@ -474,6 +476,7 @@
       "feat(tui): add auspex status handoff probe",
       "feat(tui): add direct context request slash command",
       "feat(tui): add transitional auspex open bridge",
+      "feat(tui): fullscreen focus mode and inline image attachments",
       "feat(tui): make image attachments inline editor tokens",
       "feat(tui-copy): Update in-product copy in the TUI/tutorial/help surfaces so operator-facing text points to Auspex as the primary browser UI, while leaving current `/dash` command behavior intact as compatibility wording. Focus on core/crates/omegon/src/tui/mod.rs, core/crates/omegon/src/tui/tutorial.rs, and nearby help/command descriptions only.",
       "feat(tutorial): add tutorial gate and orientation mode",
@@ -483,6 +486,7 @@
       "feat(workflow-issueing): Inspect and repair/replace the stale provider-drift GitHub Actions workflow. Design the daily control-plane workflow, issue dedupe/update behavior, artifact/log strategy, and docs. Implement the workflow and any helper scripts/files needed for issue creation/reporting without making release/nightly blocking.",
       "feat(ws-contract): Audit and implement WebSocket event contract changes needed for Auspex compatibility. Focus on core/crates/omegon/src/web/ws.rs plus any upstream event types it serializes so streamed events expose the fields Auspex expects or can safely ignore, especially turn-end/session/harness updates and state snapshot refresh semantics. Add tests for event serialization.",
       "fix(agent): hide attachment redisplay hints from user messages",
+      "fix(anthropic): bound Claude 4.6 light thinking",
       "fix(auspex): report chosen local handoff mode",
       "fix(auth): expose ollama-cloud in login surfaces",
       "fix(auth): route ollama-cloud login through hidden key entry",
@@ -532,6 +536,7 @@
       "fix(settings): prefer specific route matrix matches",
       "fix(telemetry): format provider usage by active backend",
       "fix(tui): accept json context request slash payloads",
+      "fix(tui): add a dedicated seam gutter between instrument panels",
       "fix(tui): align activity row with context band semantics",
       "fix(tui): align cursor with inline attachment tokens",
       "fix(tui): align footer context state with inference composition",
@@ -548,6 +553,7 @@
       "fix(tui): keep thinking telemetry in blue family",
       "fix(tui): keep version visible in persistent footer",
       "fix(tui): make arrow keys terminal-first and add focus hotkey",
+      "fix(tui): make focus mode render a borderless transcript",
       "fix(tui): make focus mode track and navigate selected segments",
       "fix(tui): make inference activity glyphs explicit",
       "fix(tui): make inference legend composition-only",
@@ -558,6 +564,7 @@
       "fix(tui): reflect runtime activity in inference bar",
       "fix(tui): remove /clear and deduplicate slash palette commands",
       "fix(tui): remove fake tools context bucket",
+      "fix(tui): remove rounded seam artifacts from dashboard and instruments",
       "fix(tui): remove side gutters from focus copy view",
       "fix(tui): remove unused widget renderer test import",
       "fix(tui): render markdown tool output and split context activity",
@@ -576,6 +583,7 @@
       "fix(tui): stop instrument panel boundary leakage",
       "fix(tui): strip ansi debris from cleave activity rows",
       "fix(tui): support queued prompts with attachment lists",
+      "fix(tui): take instrument seam width from the tools panel",
       "fix(tui): unify tool result block backgrounds",
       "fix(tui,web): isolate focus mode and expose auspex startup version handoff",
       "fix(tutorial): restore Tutorial::with_context() as gate-free constructor",
@@ -590,7 +598,7 @@
       "refactor(tui): remove activity-row phase labels",
       "refactor(tui): simplify slash command auth and context paths"
     ],
-    "rc_version": "0.15.10-rc.53",
-    "last_rc": "2026-04-09T00:33:03Z"
+    "rc_version": "0.15.10-rc.54",
+    "last_rc": "2026-04-09T01:25:50Z"
   }
 }
