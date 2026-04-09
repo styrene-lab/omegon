@@ -4448,6 +4448,9 @@ impl App {
                 self.conversation = ConversationView::new();
                 self.turn = 0;
                 self.tool_calls = 0;
+                self.last_tool_name = None;
+                self.completed_tool_name = None;
+                self.instrument_panel.reset();
                 self.footer_data.turn = 0;
                 self.footer_data.tool_calls = 0;
                 self.footer_data.compactions = 0;

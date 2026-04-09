@@ -70,6 +70,25 @@ fn editor_inline_attachment_tokens_submit_as_multimodal_prompt() {
 }
 
 #[test]
+fn session_reset_clears_instrument_panel_tool_activity() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "tool-1".into(),
+        name: "context_clear".into(),
+        args: serde_json::json!({}),
+    });
+
+    let before = render_app_to_string(&mut app, 140, 36);
+    assert!(before.contains("context_clear") || before.contains("context_clear 0"), "got {before}");
+
+    app.handle_agent_event(AgentEvent::SessionReset);
+
+    let after = render_app_to_string(&mut app, 140, 36);
+    assert!(!after.contains("context_clear"), "got {after}");
+    assert!(after.contains("New session started. Previous session saved."), "got {after}");
+}
+
+#[test]
 fn queued_prompt_preview_mentions_attachment_count() {
     let mut app = test_app();
     app.queue_prompt(

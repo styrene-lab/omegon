@@ -432,6 +432,12 @@ enum ContextBand {
 }
 
 impl InstrumentPanel {
+    pub fn reset(&mut self) {
+        let focus_mode = self.focus_mode;
+        *self = Self::default();
+        self.focus_mode = focus_mode;
+    }
+
     pub fn preferred_height(&self) -> u16 {
         let active_minds = self.minds.iter().filter(|m| m.active).count().max(1) as u16;
         let tool_rows = self.tools.len().clamp(1, 6) as u16;
