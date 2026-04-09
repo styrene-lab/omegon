@@ -1386,15 +1386,23 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 } else {
                     0
                 };
+                let bar_width = 24usize;
+                let filled = ((pct as usize * bar_width) / 100).min(bar_width);
+                let bar = format!("{}{}", "█".repeat(filled), "░".repeat(bar_width - filled));
+                let requested_class = settings.effective_requested_class().label().to_string();
+                let actual_class = settings.context_class.label().to_string();
+                let model = settings.model.clone();
+                let thinking = {
+                    let raw = settings.thinking.as_str();
+                    let mut chars = raw.chars();
+                    match chars.next() {
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                        None => String::new(),
+                    }
+                };
                 let _ = events_tx.send(AgentEvent::SystemNotification {
                     message: format!(
-                        "Context: {}/{} tokens ({}%)\nPolicy: {}\nModel: {}\nThinking: {}",
-                        est,
-                        ctx_window,
-                        pct,
-                        settings.effective_requested_class().label(),
-                        settings.context_class.label(),
-                        settings.thinking.as_str()
+                        "Context\n  Usage:           {est}/{ctx_window} tokens ({pct}%)\n  Meter:           {bar}\n  Requested Class: {requested_class}\n  Actual Class:    {actual_class}\n  Model:           {model}\n  Thinking Level:  {thinking}\n\nActions\n  /context compact   Compact older turns\n  /context clear     Start a fresh conversation\n  /context request   Pull a mediated context pack"
                     ),
                 });
             }

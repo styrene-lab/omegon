@@ -3347,8 +3347,7 @@ impl App {
 
             "context" => {
                 if args.is_empty() {
-                    // No args → open interactive context class selector
-                    self.open_context_selector();
+                    let _ = tx.try_send(TuiCommand::ContextStatus);
                     SlashResult::Handled
                 } else {
                     match canonical_slash_command("context", args) {
@@ -3386,7 +3385,7 @@ impl App {
                             self.update_settings(|s| {
                                 s.set_requested_context_class(class);
                             });
-                            SlashResult::Display(format!("Context policy → {}", class.label()))
+                            SlashResult::Display(format!("Context Policy → {}", class.label()))
                         }
                         _ => {
                             let (sub, _) = args.split_once(' ').unwrap_or((args, ""));

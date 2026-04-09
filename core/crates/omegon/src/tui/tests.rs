@@ -1328,6 +1328,15 @@ fn slash_exit_returns_quit() {
 }
 
 #[test]
+fn slash_context_no_args_shows_context_status() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/context", &tx);
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(app.selector.is_none(), "bare /context should no longer open the selector");
+}
+
+#[test]
 fn slash_context_request_dispatches_direct_context_pack() {
     let mut app = test_app();
     let tx = test_tx();

@@ -557,13 +557,21 @@ impl Feature for ContextProvider {
                 let dispatched = dispatch_command(&self.command_tx, TuiCommand::ContextStatus);
                 let metrics = self.metrics.lock().unwrap();
                 let pct = metrics.usage_percent();
+                let thinking = {
+                    let raw = metrics.thinking_level.as_str();
+                    let mut chars = raw.chars();
+                    match chars.next() {
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                        None => String::new(),
+                    }
+                };
                 let result_text = format!(
-                    "Context: {}/{} tokens ({}%)\nClass: {}\nThinking: {}",
+                    "Context: {}/{} tokens ({}%)\nClass: {}\nThinking Level: {}",
                     metrics.tokens_used,
                     metrics.context_window,
                     pct,
                     metrics.context_class,
-                    metrics.thinking_level
+                    thinking
                 );
 
                 Ok(ToolResult {
@@ -819,7 +827,10 @@ mod tests {
                     text.contains("Class: Maniple (272k)"),
                     "unexpected text: {text}"
                 );
-                assert!(text.contains("Thinking: medium"), "unexpected text: {text}");
+                assert!(
+                    text.contains("Thinking Level: Medium"),
+                    "unexpected text: {text}"
+                );
             }
             other => panic!("unexpected content block: {other:?}"),
         }
