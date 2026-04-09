@@ -1968,14 +1968,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     }
 
                     let mut quit_after_turn = false;
-                    let state_for_turn = std::mem::replace(
-                        &mut runtime_state,
-                        InteractiveAgentState {
-                            bus: crate::bus::EventBus::default(),
-                            context_manager: crate::context::ContextManager::new(),
-                            conversation: crate::conversation::ConversationState::new(),
-                        },
-                    );
+                    let state_for_turn = runtime_state;
                     let mut turn_task = tokio::task::spawn_local(run_interactive_active_turn(
                         state_for_turn,
                         runtime_resources.clone(),
@@ -3741,7 +3734,7 @@ mod tests {
     #[test]
     fn remote_slash_login_is_classified_as_interactive_only_for_openai_api() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let mut agent = rt.block_on(setup::AgentSetup::new(Path::new("."), None, None)).unwrap();
+        let agent = rt.block_on(setup::AgentSetup::new(Path::new("."), None, None)).unwrap();
         let (events_tx, _) = broadcast::channel(16);
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
             "anthropic:claude-sonnet-4-6",
@@ -3773,7 +3766,7 @@ mod tests {
     #[test]
     fn remote_slash_logout_defaults_to_anthropic() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let mut agent = rt.block_on(setup::AgentSetup::new(Path::new("."), None, None)).unwrap();
+        let agent = rt.block_on(setup::AgentSetup::new(Path::new("."), None, None)).unwrap();
         let (events_tx, _) = broadcast::channel(16);
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
             "anthropic:claude-sonnet-4-6",
