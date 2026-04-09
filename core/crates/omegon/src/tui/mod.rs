@@ -181,8 +181,8 @@ pub struct App {
     web_startup: Option<crate::web::WebStartupInfo>,
     /// Parsed web dashboard socket address (legacy/debug convenience).
     web_server_addr: Option<std::net::SocketAddr>,
-    /// Prompt queued while agent was busy — sent on next AgentEnd.
-    queued_prompt: Option<(String, Vec<std::path::PathBuf>)>,
+    /// Prompts queued while the agent is busy — drained only after authoritative AgentEnd.
+    queued_prompts: std::collections::VecDeque<(String, Vec<std::path::PathBuf>)>,
     /// Inline operator-facing transient events (replaces floating toasts).
     operator_events: std::collections::VecDeque<OperatorEvent>,
     /// Previous harness status for diffing on HarnessStatusChanged.
@@ -694,7 +694,7 @@ impl App {
             dashboard_refresh_turn: u32::MAX, // force refresh on first frame
             web_startup: None,
             web_server_addr: None,
-            queued_prompt: None,
+            queued_prompts: std::collections::VecDeque::new(),
             operator_events: std::collections::VecDeque::new(),
             previous_harness_status: None,
             capability_tier: None,
@@ -1762,12 +1762,6 @@ impl App {
     }
 
     fn queue_prompt(&mut self, text: String, attachments: Vec<std::path::PathBuf>) {
-        if let Some((ref prev, _)) = self.queued_prompt {
-            self.conversation.push_system(&format!(
-                "⏳ Replaced queued: {}",
-                &prev[..prev.len().min(40)]
-            ));
-        }
         let preview = if attachments.is_empty() {
             text.clone()
         } else {
@@ -1778,9 +1772,10 @@ impl App {
                 if attachments.len() == 1 { "" } else { "s" }
             )
         };
+        self.queued_prompts.push_back((text, attachments));
+        let queued = self.queued_prompts.len();
         self.conversation
-            .push_system(&format!("⏳ Queued: {preview}"));
-        self.queued_prompt = Some((text, attachments));
+            .push_system(&format!("⏳ Queued [{queued}]: {preview}"));
     }
 
     fn interrupt(&self) -> bool {
@@ -5826,24 +5821,23 @@ pub async fn run_tui(
                             } else if app.focus_mode {
                                 app.set_focus_mode(false);
                             } else if app.agent_active {
-                                app.interrupt();
-                                app.agent_active = false; // Unblock editor immediately
-                                if let Ok(mut ss) = app.dashboard_handles.session.lock() {
-                                    ss.busy = false;
+                                if app.interrupt() {
+                                    app.conversation
+                                        .push_system("⎋ Interrupt requested — waiting for turn to stop");
+                                } else {
+                                    app.conversation.push_system("⎋ Interrupt requested");
                                 }
-                                app.conversation.finalize_message();
-                                app.conversation.push_system("⎋ Interrupted");
                             }
                         }
                         (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                             if app.agent_active {
-                                app.interrupt();
-                                app.agent_active = false; // Unblock editor immediately
-                                if let Ok(mut ss) = app.dashboard_handles.session.lock() {
-                                    ss.busy = false;
+                                if app.interrupt() {
+                                    app.conversation.push_system(
+                                        "⎋ Interrupt requested (Ctrl+C) — waiting for turn to stop",
+                                    );
+                                } else {
+                                    app.conversation.push_system("⎋ Interrupt requested (Ctrl+C)");
                                 }
-                                app.conversation.finalize_message();
-                                app.conversation.push_system("⎋ Interrupted (Ctrl+C)");
                             } else if !app.editor.is_empty() {
                                 // Clear the line first (like a real terminal)
                                 app.editor.clear_line();
@@ -6151,9 +6145,9 @@ pub async fn run_tui(
 
         // Agent events already drained before draw (above).
 
-        // Drain queued prompt after agent finishes (but not if quitting)
-        if !app.agent_active && !app.should_quit && app.queued_prompt.is_some() {
-            let (text, attachments) = app.queued_prompt.take().unwrap();
+        // Drain queued prompts only after authoritative AgentEnd (but not if quitting)
+        if !app.agent_active && !app.should_quit && !app.queued_prompts.is_empty() {
+            let (text, attachments) = app.queued_prompts.pop_front().unwrap();
             if attachments.is_empty() {
                 app.conversation.push_user(&text);
             } else {

@@ -220,6 +220,22 @@ impl IpcConnection {
                 "submit_prompt" => {
                     let req = serde_json::from_value::<SubmitPromptRequest>(payload)
                         .context("parse submit_prompt")?;
+                    let turn_busy = cfg
+                        .handles
+                        .session
+                        .lock()
+                        .map(|session| session.busy)
+                        .unwrap_or(true);
+                    if turn_busy {
+                        send_error(
+                            &out_tx,
+                            req_id,
+                            IpcErrorCode::TurnInProgress,
+                            "the agent is still processing or unwinding the current turn",
+                        )
+                        .await;
+                        continue;
+                    }
                     let accepted = cfg
                         .command_tx
                         .send(TuiCommand::UserPrompt(req.prompt))

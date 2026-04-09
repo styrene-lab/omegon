@@ -77,8 +77,21 @@ fn queued_prompt_preview_mentions_attachment_count() {
         vec![std::path::PathBuf::from("/tmp/paste.png")],
     );
     let rendered = render_app_to_string(&mut app, 100, 20);
-    assert!(rendered.contains("Queued"), "{rendered}");
+    assert!(rendered.contains("Queued [1]"), "{rendered}");
     assert!(rendered.contains("+1 attachment"), "{rendered}");
+}
+
+#[test]
+fn queue_prompt_preserves_fifo_order() {
+    let mut app = test_app();
+    app.queue_prompt("first".to_string(), Vec::new());
+    app.queue_prompt("second".to_string(), Vec::new());
+
+    let first = app.queued_prompts.pop_front().expect("first queued prompt");
+    let second = app.queued_prompts.pop_front().expect("second queued prompt");
+
+    assert_eq!(first.0, "first");
+    assert_eq!(second.0, "second");
 }
 
 #[test]

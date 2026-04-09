@@ -187,7 +187,7 @@ acceptance:
             fake_claude.write_text(
                 "#!/bin/sh\n"
                 "cat <<'JSON'\n"
-                '{"model":"claude-sonnet-4-6","usage":{"input_tokens":210,"output_tokens":34,"cache_tokens":5}}\n'
+                '{"model":"claude-sonnet-4-6","usage":{"input_tokens":210,"output_tokens":34,"cache_read_input_tokens":5,"cache_creation_input_tokens":144}}\n'
                 "JSON\n"
             )
             fake_claude.chmod(0o755)
@@ -218,6 +218,8 @@ acceptance:
             self.assertEqual(payload["harness"], "claude-code")
             self.assertEqual(payload["model"], "claude-sonnet-4-6")
             self.assertEqual(payload["tokens"]["total"], 249)
+            self.assertEqual(payload["tokens"]["cache"], 5)
+            self.assertEqual(payload["tokens"]["cache_write"], 144)
 
 
 if __name__ == "__main__":

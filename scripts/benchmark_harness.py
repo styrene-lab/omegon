@@ -323,13 +323,24 @@ def extract_usage(payload: dict[str, Any] | None) -> dict[str, Any]:
             ("cache_tokens",),
             ("usage", "cache_tokens"),
             ("usage", "cacheTokens"),
+            ("usage", "cache_read_input_tokens"),
+            ("usage", "cacheReadInputTokens"),
             ("result", "usage", "cache_tokens"),
+        )
+    )
+    cache_write_tokens = coerce_int(
+        extract_nested(
+            payload,
+            ("usage", "cache_creation_input_tokens"),
+            ("usage", "cacheCreationInputTokens"),
+            ("result", "usage", "cache_creation_input_tokens"),
         )
     )
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "cache_tokens": cache_tokens,
+        "cache_write_tokens": cache_write_tokens,
     }
 
 
@@ -397,6 +408,7 @@ def build_result(
             "input": adapter.usage.get("input_tokens"),
             "output": adapter.usage.get("output_tokens"),
             "cache": adapter.usage.get("cache_tokens"),
+            "cache_write": adapter.usage.get("cache_write_tokens"),
             "total": total_tokens,
         },
         "acceptance": {
