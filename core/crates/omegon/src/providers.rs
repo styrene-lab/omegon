@@ -2146,7 +2146,7 @@ fn apply_anthropic_thinking(body: &mut Value, model: &str, reasoning: Option<&st
     if reasoning == "off" {
         return;
     }
-    if anthropic_supports_adaptive_thinking(model) {
+    if anthropic_should_use_adaptive_thinking(model, reasoning) {
         body["thinking"] = json!({ "type": "adaptive" });
     } else if let Some(budget) = anthropic_manual_budget_tokens(Some(reasoning)) {
         body["thinking"] = json!({
@@ -2171,6 +2171,10 @@ fn anthropic_manual_budget_tokens(reasoning: Option<&str>) -> Option<u32> {
 fn anthropic_supports_adaptive_thinking(model: &str) -> bool {
     let model = model.to_ascii_lowercase();
     model.contains("claude-sonnet-4-6") || model.contains("claude-opus-4-6")
+}
+
+fn anthropic_should_use_adaptive_thinking(model: &str, reasoning: &str) -> bool {
+    anthropic_supports_adaptive_thinking(model) && matches!(reasoning, "medium" | "high")
 }
 
 /// Default model for each compat provider (used when no model is specified).
@@ -3279,6 +3283,22 @@ mod tests {
         assert!(anthropic_supports_adaptive_thinking("claude-sonnet-4-6"));
         assert!(anthropic_supports_adaptive_thinking("anthropic:claude-opus-4-6"));
         assert!(!anthropic_supports_adaptive_thinking("claude-sonnet-4-5"));
+        assert!(!anthropic_should_use_adaptive_thinking(
+            "anthropic:claude-sonnet-4-6",
+            "minimal"
+        ));
+        assert!(!anthropic_should_use_adaptive_thinking(
+            "anthropic:claude-sonnet-4-6",
+            "low"
+        ));
+        assert!(anthropic_should_use_adaptive_thinking(
+            "anthropic:claude-sonnet-4-6",
+            "medium"
+        ));
+        assert!(anthropic_should_use_adaptive_thinking(
+            "anthropic:claude-sonnet-4-6",
+            "high"
+        ));
     }
 
     #[test]
@@ -3287,6 +3307,14 @@ mod tests {
         apply_anthropic_thinking(&mut adaptive, "anthropic:claude-sonnet-4-6", Some("high"));
         assert_eq!(adaptive["thinking"], json!({ "type": "adaptive" }));
         assert!(adaptive.get("effort").is_none());
+
+        let mut bounded_46 = json!({});
+        apply_anthropic_thinking(&mut bounded_46, "anthropic:claude-sonnet-4-6", Some("minimal"));
+        assert_eq!(
+            bounded_46["thinking"],
+            json!({ "type": "enabled", "budget_tokens": 1_024 })
+        );
+        assert!(bounded_46.get("effort").is_none());
 
         let mut manual = json!({});
         apply_anthropic_thinking(&mut manual, "anthropic:claude-sonnet-4-5", Some("high"));

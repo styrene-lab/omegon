@@ -65,7 +65,7 @@ impl UsageFeature {
         if provider == "anthropic"
             && (model.contains("claude-sonnet-4-6") || model.contains("claude-opus-4-6"))
         {
-            lines.push("- note: Claude 4.6 uses adaptive thinking by default in Omegon. This is the recommended upstream path and helps avoid forcing high fixed thinking budgets into Anthropic's expensive output-token pricing.".to_string());
+            lines.push("- note: Claude 4.6 uses bounded manual thinking for minimal/low and adaptive thinking for medium/high in Omegon. This preserves a cheaper path for light turns while keeping adaptive available for deeper reasoning.".to_string());
         }
 
         if !authority.is_empty() {
@@ -149,7 +149,10 @@ mod tests {
         assert!(text.contains("5h utilization: 42%"), "got: {text}");
         assert!(text.contains("7d utilization: 64%"), "got: {text}");
         assert!(text.contains("headroom: healthy"), "got: {text}");
-        assert!(text.contains("adaptive thinking by default"), "got: {text}");
+        assert!(
+            text.contains("bounded manual thinking for minimal/low and adaptive thinking for medium/high"),
+            "got: {text}"
+        );
         assert!(
             text.contains("https://platform.claude.com/docs/en/api/rate-limits"),
             "got: {text}"
