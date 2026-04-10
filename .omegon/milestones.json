@@ -629,5 +629,12 @@
     ],
     "rc_version": "0.15.10-rc.60",
     "last_rc": "2026-04-09T15:38:31Z"
+  },
+  "nightly": {
+    "status": "nightly",
+    "channel": "nightly",
+    "version": "0.15.10-nightly.20260410",
+    "last_build": "2026-04-10T08:49:37Z",
+    "build_count": 1
   }
 }
