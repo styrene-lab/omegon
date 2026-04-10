@@ -129,6 +129,20 @@ pub enum TuiCommand {
     AuthStatus {
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
     },
+    /// Start provider login flow.
+    AuthLogin {
+        provider: String,
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
+    /// Log out a provider.
+    AuthLogout {
+        provider: String,
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
+    /// Unlock secrets/auth backend.
+    AuthUnlock {
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
 }
 
 /// Shared cancel token — the TUI writes it on Escape/Ctrl+C,
@@ -3475,10 +3489,7 @@ impl App {
                         SlashResult::Handled
                     }
                     Some(CanonicalSlashCommand::AuthUnlock) => {
-                        let _ = tx.try_send(TuiCommand::BusCommand {
-                            name: "auth_unlock".to_string(),
-                            args: String::new(),
-                        });
+                        let _ = tx.try_send(TuiCommand::AuthUnlock { respond_to: None });
                         SlashResult::Handled
                     }
                     _ => SlashResult::Display(format!(
@@ -3827,9 +3838,9 @@ impl App {
                 } else if let Some(CanonicalSlashCommand::AuthLogin(provider)) =
                     canonical_slash_command("login", args)
                 {
-                    let _ = tx.try_send(TuiCommand::BusCommand {
-                        name: "auth_login".to_string(),
-                        args: provider,
+                    let _ = tx.try_send(TuiCommand::AuthLogin {
+                        provider,
+                        respond_to: None,
                     });
                     SlashResult::Handled
                 } else {
@@ -3842,9 +3853,9 @@ impl App {
                 if let Some(CanonicalSlashCommand::AuthLogout(provider)) =
                     canonical_slash_command("logout", args)
                 {
-                    let _ = tx.try_send(TuiCommand::BusCommand {
-                        name: "auth_logout".to_string(),
-                        args: provider,
+                    let _ = tx.try_send(TuiCommand::AuthLogout {
+                        provider,
+                        respond_to: None,
                     });
                     SlashResult::Handled
                 } else {

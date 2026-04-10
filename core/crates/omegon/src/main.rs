@@ -1676,6 +1676,50 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 }
             }
 
+            tui::TuiCommand::AuthLogin { provider, respond_to } => {
+                let response = remote_auth_login_response(
+                    &shared_settings,
+                    &bridge,
+                    &login_prompt_tx,
+                    &events_tx,
+                    &cli,
+                    &provider,
+                )
+                .await;
+                if let Some(respond_to) = respond_to {
+                    let _ = respond_to.send(omegon_traits::ControlOutputResponse {
+                        accepted: response.accepted,
+                        output: response.output,
+                    });
+                }
+            }
+
+            tui::TuiCommand::AuthLogout { provider, respond_to } => {
+                let response = remote_auth_logout_response(&provider).await;
+                if let Some(output) = response.output.clone() {
+                    let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
+                }
+                if let Some(respond_to) = respond_to {
+                    let _ = respond_to.send(omegon_traits::ControlOutputResponse {
+                        accepted: response.accepted,
+                        output: response.output,
+                    });
+                }
+            }
+
+            tui::TuiCommand::AuthUnlock { respond_to } => {
+                let response = remote_auth_unlock_response().await;
+                if let Some(output) = response.output.clone() {
+                    let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
+                }
+                if let Some(respond_to) = respond_to {
+                    let _ = respond_to.send(omegon_traits::ControlOutputResponse {
+                        accepted: response.accepted,
+                        output: response.output,
+                    });
+                }
+            }
+
             tui::TuiCommand::StartWebDashboard => {
                 let web_state = web::WebState::with_auth_state(
                     agent.dashboard_handles.clone(),
@@ -3429,6 +3473,144 @@ async fn remote_auth_status_response() -> omegon_traits::SlashCommandResponse {
     }
 }
 
+async fn remote_auth_unlock_response() -> omegon_traits::SlashCommandResponse {
+    omegon_traits::SlashCommandResponse {
+        accepted: true,
+        output: Some("🔒 Secrets store unlock not yet implemented".to_string()),
+    }
+}
+
+async fn remote_auth_login_response(
+    shared_settings: &settings::SharedSettings,
+    bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
+    login_prompt_tx: &std::sync::Arc<tokio::sync::Mutex<Option<oneshot::Sender<String>>>>,
+    events_tx: &broadcast::Sender<AgentEvent>,
+    cli: &Cli,
+    provider: &str,
+) -> omegon_traits::SlashCommandResponse {
+    let provider = provider.trim();
+    let provider = if provider.is_empty() { "anthropic" } else { provider };
+    if provider == "openai" {
+        return omegon_traits::SlashCommandResponse {
+            accepted: false,
+            output: Some(
+                "OpenAI API login is interactive-only in the TUI. Use /login in the terminal session or set OPENAI_API_KEY."
+                    .to_string(),
+            ),
+        };
+    }
+    if login_prompt_tx.lock().await.is_some() {
+        return omegon_traits::SlashCommandResponse {
+            accepted: false,
+            output: Some("Login is already waiting for interactive input in the TUI.".to_string()),
+        };
+    }
+    let events_tx_clone = events_tx.clone();
+    let progress_tx = events_tx.clone();
+    let prompt_tx_for_login = events_tx.clone();
+    let login_prompt_slot = login_prompt_tx.clone();
+    let provider_clone = provider.to_string();
+    let bridge_clone = bridge.clone();
+    let model_for_redetect = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.model.clone())
+        .unwrap_or_else(|| cli.model.clone());
+    let settings_for_login = shared_settings.clone();
+    tokio::spawn(async move {
+        let progress: auth::LoginProgress = Box::new(move |msg| {
+            let _ = progress_tx.send(AgentEvent::SystemNotification {
+                message: msg.to_string(),
+            });
+        });
+        let prompt: auth::LoginPrompt = Box::new(move |msg| {
+            let slot = login_prompt_slot.clone();
+            let tx = prompt_tx_for_login.clone();
+            Box::pin(async move {
+                let (otx, orx) = tokio::sync::oneshot::channel();
+                {
+                    let mut guard = slot.lock().await;
+                    *guard = Some(otx);
+                }
+                let _ = tx.send(AgentEvent::SystemNotification { message: msg });
+                orx.await
+                    .map_err(|_| anyhow::anyhow!("Login prompt cancelled"))
+            })
+        });
+        let result = match provider_clone.as_str() {
+            "anthropic" | "claude" => {
+                auth::login_anthropic_with_callbacks(progress, prompt).await
+            }
+            "openai-codex" | "chatgpt" | "codex" => {
+                auth::login_openai_with_callbacks(progress, prompt).await
+            }
+            "openai" => Err(anyhow::anyhow!(
+                "OpenAI API login in the TUI uses hidden API-key entry. Run /login and choose OpenAI API, or set OPENAI_API_KEY."
+            )),
+            "openrouter" => Err(anyhow::anyhow!(
+                "OpenRouter login in the TUI uses hidden API-key entry. Run /login and choose OpenRouter, or set OPENROUTER_API_KEY."
+            )),
+            "ollama-cloud" => Err(anyhow::anyhow!(
+                "Ollama Cloud login in the TUI uses hidden API-key entry. Run /login and choose Ollama Cloud, or set OLLAMA_API_KEY."
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unknown provider: {}. Use: anthropic, openai, openai-codex, openrouter, ollama-cloud",
+                provider_clone
+            )),
+        };
+        let provider_label = crate::auth::provider_by_id(&provider_clone)
+            .map(|p| p.display_name)
+            .unwrap_or(provider_clone.as_str())
+            .to_string();
+        let message = match &result {
+            Ok(_) => format!("✓ Successfully logged in to {provider_label}"),
+            Err(e) => format!("❌ Login failed: {}", e),
+        };
+        let _ = events_tx_clone.send(AgentEvent::SystemNotification { message });
+        if result.is_ok() {
+            let effective_model = providers::resolve_execution_model_spec(&model_for_redetect)
+                .await
+                .unwrap_or(model_for_redetect.clone());
+            if let Some(new_bridge) = providers::auto_detect_bridge(&effective_model).await {
+                let mut guard = bridge_clone.write().await;
+                *guard = new_bridge;
+                if let Ok(mut s) = settings_for_login.lock() {
+                    s.set_model(&effective_model);
+                    s.provider_connected = true;
+                }
+                let _ = events_tx_clone.send(AgentEvent::SystemNotification {
+                    message: format!("Provider connected — active route {}.", effective_model),
+                });
+            }
+        }
+    });
+    omegon_traits::SlashCommandResponse {
+        accepted: true,
+        output: Some(format!(
+            "Login started for {provider}. Complete any interactive prompts in the TUI."
+        )),
+    }
+}
+
+async fn remote_auth_logout_response(provider: &str) -> omegon_traits::SlashCommandResponse {
+    if provider.trim().is_empty() {
+        return omegon_traits::SlashCommandResponse {
+            accepted: false,
+            output: Some(
+                "Provider required for logout. Use: anthropic, openai, openai-codex, openrouter, ollama-cloud".to_string(),
+            ),
+        };
+    }
+    let message = match auth::logout_provider(provider) {
+        Ok(()) => format!("✓ Logged out from {}", provider),
+        Err(e) => format!("❌ Logout failed: {}", e),
+    };
+    omegon_traits::SlashCommandResponse {
+        accepted: true,
+        output: Some(message),
+    }
+}
+
 async fn execute_remote_slash_command(
     runtime_state: &mut InteractiveAgentState,
     agent: &mut InteractiveAgentHost,
@@ -3647,132 +3829,19 @@ async fn execute_remote_slash_command(
         }
         CanonicalSlashCommand::ListSessions => remote_list_sessions_response(agent).await,
         CanonicalSlashCommand::AuthStatus => remote_auth_status_response().await,
-        CanonicalSlashCommand::AuthUnlock => SlashCommandResponse {
-            accepted: true,
-            output: Some("🔒 Secrets store unlock not yet implemented".to_string()),
-        },
+        CanonicalSlashCommand::AuthUnlock => remote_auth_unlock_response().await,
         CanonicalSlashCommand::AuthLogin(provider) => {
-            let provider = provider.trim();
-            let provider = if provider.is_empty() { "anthropic" } else { provider };
-            if provider == "openai" {
-                return SlashCommandResponse {
-                    accepted: false,
-                    output: Some(
-                        "OpenAI API login is interactive-only in the TUI. Use /login in the terminal session or set OPENAI_API_KEY."
-                            .to_string(),
-                    ),
-                };
-            }
-            if login_prompt_tx.lock().await.is_some() {
-                return SlashCommandResponse {
-                    accepted: false,
-                    output: Some("Login is already waiting for interactive input in the TUI.".to_string()),
-                };
-            }
-            let events_tx_clone = events_tx.clone();
-            let progress_tx = events_tx.clone();
-            let prompt_tx_for_login = events_tx.clone();
-            let login_prompt_slot = login_prompt_tx.clone();
-            let provider_clone = provider.to_string();
-            let bridge_clone = bridge.clone();
-            let model_for_redetect = shared_settings
-                .lock()
-                .ok()
-                .map(|s| s.model.clone())
-                .unwrap_or_else(|| cli.model.clone());
-            let settings_for_login = shared_settings.clone();
-            tokio::spawn(async move {
-                let progress: auth::LoginProgress = Box::new(move |msg| {
-                    let _ = progress_tx.send(AgentEvent::SystemNotification {
-                        message: msg.to_string(),
-                    });
-                });
-                let prompt: auth::LoginPrompt = Box::new(move |msg| {
-                    let slot = login_prompt_slot.clone();
-                    let tx = prompt_tx_for_login.clone();
-                    Box::pin(async move {
-                        let (otx, orx) = tokio::sync::oneshot::channel();
-                        {
-                            let mut guard = slot.lock().await;
-                            *guard = Some(otx);
-                        }
-                        let _ = tx.send(AgentEvent::SystemNotification { message: msg });
-                        orx.await
-                            .map_err(|_| anyhow::anyhow!("Login prompt cancelled"))
-                    })
-                });
-                let result = match provider_clone.as_str() {
-                    "anthropic" | "claude" => {
-                        auth::login_anthropic_with_callbacks(progress, prompt).await
-                    }
-                    "openai-codex" | "chatgpt" | "codex" => {
-                        auth::login_openai_with_callbacks(progress, prompt).await
-                    }
-                    "openai" => Err(anyhow::anyhow!(
-                        "OpenAI API login in the TUI uses hidden API-key entry. Run /login and choose OpenAI API, or set OPENAI_API_KEY."
-                    )),
-                    "openrouter" => Err(anyhow::anyhow!(
-                        "OpenRouter login in the TUI uses hidden API-key entry. Run /login and choose OpenRouter, or set OPENROUTER_API_KEY."
-                    )),
-                    "ollama-cloud" => Err(anyhow::anyhow!(
-                        "Ollama Cloud login in the TUI uses hidden API-key entry. Run /login and choose Ollama Cloud, or set OLLAMA_API_KEY."
-                    )),
-                    _ => Err(anyhow::anyhow!(
-                        "Unknown provider: {}. Use: anthropic, openai, openai-codex, openrouter, ollama-cloud",
-                        provider_clone
-                    )),
-                };
-                let provider_label = crate::auth::provider_by_id(&provider_clone)
-                    .map(|p| p.display_name)
-                    .unwrap_or(provider_clone.as_str())
-                    .to_string();
-                let message = match &result {
-                    Ok(_) => format!("✓ Successfully logged in to {provider_label}"),
-                    Err(e) => format!("❌ Login failed: {}", e),
-                };
-                let _ = events_tx_clone.send(AgentEvent::SystemNotification { message });
-                if result.is_ok() {
-                    let effective_model = providers::resolve_execution_model_spec(&model_for_redetect)
-                        .await
-                        .unwrap_or(model_for_redetect.clone());
-                    if let Some(new_bridge) = providers::auto_detect_bridge(&effective_model).await {
-                        let mut guard = bridge_clone.write().await;
-                        *guard = new_bridge;
-                        if let Ok(mut s) = settings_for_login.lock() {
-                            s.set_model(&effective_model);
-                            s.provider_connected = true;
-                        }
-                        let _ = events_tx_clone.send(AgentEvent::SystemNotification {
-                            message: format!("Provider connected — active route {}.", effective_model),
-                        });
-                    }
-                }
-            });
-            SlashCommandResponse {
-                accepted: true,
-                output: Some(format!(
-                    "Login started for {provider}. Complete any interactive prompts in the TUI."
-                )),
-            }
+            remote_auth_login_response(
+                shared_settings,
+                bridge,
+                login_prompt_tx,
+                events_tx,
+                cli,
+                &provider,
+            )
+            .await
         }
-        CanonicalSlashCommand::AuthLogout(provider) => {
-            if provider.trim().is_empty() {
-                return SlashCommandResponse {
-                    accepted: false,
-                    output: Some(
-                        "Provider required for logout. Use: anthropic, openai, openai-codex, openrouter, ollama-cloud".to_string(),
-                    ),
-                };
-            }
-            let message = match auth::logout_provider(&provider) {
-                Ok(()) => format!("✓ Logged out from {}", provider),
-                Err(e) => format!("❌ Logout failed: {}", e),
-            };
-            SlashCommandResponse {
-                accepted: true,
-                output: Some(message),
-            }
-        }
+        CanonicalSlashCommand::AuthLogout(provider) => remote_auth_logout_response(&provider).await,
     }
 }
 
