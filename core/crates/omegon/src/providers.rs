@@ -808,9 +808,11 @@ impl AnthropicClient {
     }
 
     fn build_tools(tools: &[ToolDefinition], is_oauth: bool) -> Vec<Value> {
+        let tool_count = tools.len();
         tools
             .iter()
-            .map(|t| {
+            .enumerate()
+            .map(|(idx, t)| {
                 let name = if is_oauth {
                     to_claude_code_name(&t.name)
                 } else {
@@ -821,7 +823,7 @@ impl AnthropicClient {
                 // description. Full descriptions cost ~50 tokens/tool × 31 tools.
                 let properties = t.parameters.get("properties").cloned().unwrap_or(json!({}));
                 let compact_props = strip_parameter_descriptions(&properties);
-                json!({
+                let mut tool_json = json!({
                     "name": name,
                     "description": t.description,
                     "input_schema": {
@@ -829,7 +831,13 @@ impl AnthropicClient {
                         "properties": compact_props,
                         "required": t.parameters.get("required").cloned().unwrap_or(json!([])),
                     },
-                })
+                });
+                // Mark the last tool with cache_control so the entire tools
+                // array is included in the Anthropic prompt cache prefix.
+                if idx == tool_count - 1 {
+                    tool_json["cache_control"] = json!({"type": "ephemeral"});
+                }
+                tool_json
             })
             .collect()
     }
@@ -867,15 +875,50 @@ impl LlmBridge for AnthropicClient {
             .map(|m| model_id_from_spec(m))
             .unwrap_or("claude-sonnet-4-6");
 
-        // System prompt format: OAuth requires array format with CC identity prefix
-        // to satisfy the claude-code beta header contract.
-        let system_value = if is_oauth {
-            json!([
-                {"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
-                {"type": "text", "text": system_prompt},
-            ])
-        } else {
-            json!(system_prompt)
+        // System prompt: always array-of-blocks format (required for cache_control).
+        // Split on CACHE_BOUNDARY sentinel to separate the stable prefix
+        // (base prompt, directives) from dynamic per-turn content (HUD, intent,
+        // memory). The stable prefix gets cache_control for Anthropic prompt caching.
+        let system_value = {
+            let sentinel = crate::bridge::CACHE_BOUNDARY;
+            let mut blocks = Vec::new();
+
+            if is_oauth {
+                blocks.push(json!({
+                    "type": "text",
+                    "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+                    "cache_control": {"type": "ephemeral"}
+                }));
+            }
+
+            if let Some(pos) = system_prompt.find(sentinel) {
+                let stable = system_prompt[..pos].trim();
+                let dynamic = system_prompt[pos + sentinel.len()..].trim();
+
+                // Stable prefix — cached across turns
+                if !stable.is_empty() {
+                    blocks.push(json!({
+                        "type": "text",
+                        "text": stable,
+                        "cache_control": {"type": "ephemeral"}
+                    }));
+                }
+                // Dynamic segment — NOT cached
+                if !dynamic.is_empty() {
+                    blocks.push(json!({
+                        "type": "text",
+                        "text": dynamic
+                    }));
+                }
+            } else {
+                // No sentinel — send entire prompt as single block
+                blocks.push(json!({
+                    "type": "text",
+                    "text": system_prompt
+                }));
+            }
+
+            Value::Array(blocks)
         };
 
         let mut body = json!({
@@ -1013,6 +1056,7 @@ async fn parse_anthropic_stream(
     let mut acc_input_tokens: u64 = 0;
     let mut acc_output_tokens: u64 = 0;
     let mut acc_cache_read_tokens: u64 = 0;
+    let mut acc_cache_creation_tokens: u64 = 0;
 
     tracing::debug!("parsing Anthropic SSE stream");
     let provider_telemetry_done = provider_telemetry.clone();
@@ -1145,6 +1189,7 @@ async fn parse_anthropic_stream(
                     if out > 0 { acc_output_tokens = out; }
                     if inp > 0 { acc_input_tokens  = inp; }
                     if cr  > 0 { acc_cache_read_tokens = cr; }
+                    if cc  > 0 { acc_cache_creation_tokens = cc; }
                     tracing::info!(
                         output_tokens = out, input_tokens = inp,
                         cache_read = cr, cache_creation = cc,
@@ -1198,6 +1243,7 @@ async fn parse_anthropic_stream(
                     input_tokens: acc_input_tokens,
                     output_tokens: acc_output_tokens,
                     cache_read_tokens: acc_cache_read_tokens,
+                    cache_creation_tokens: acc_cache_creation_tokens,
                     provider_telemetry: provider_telemetry_done.clone(),
                 });
                 return false; // stop
@@ -1442,6 +1488,7 @@ async fn parse_openai_stream(
                 input_tokens: acc_input_tokens,
                 output_tokens: acc_output_tokens,
                 cache_read_tokens: 0,
+                cache_creation_tokens: 0,
                 provider_telemetry: provider_telemetry_done.clone(),
             });
             return false;
@@ -2031,6 +2078,7 @@ async fn parse_codex_stream(
                     input_tokens,
                     output_tokens,
                     cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
                     provider_telemetry: provider_telemetry_done.clone(),
                 })
                 .await;
@@ -2545,6 +2593,7 @@ impl LlmBridge for OllamaCloudClient {
                     .and_then(Value::as_u64)
                     .unwrap_or(0),
                 cache_read_tokens: 0,
+                cache_creation_tokens: 0,
                 provider_telemetry,
             })
             .await;

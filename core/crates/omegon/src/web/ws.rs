@@ -1958,6 +1958,7 @@ mod tests {
             actual_input_tokens: 45,
             actual_output_tokens: 67,
             cache_read_tokens: 8,
+            cache_creation_tokens: 3,
             provider_telemetry: Some(omegon_traits::ProviderTelemetrySnapshot {
                 provider: "anthropic".into(),
                 source: "headers".into(),
@@ -2028,6 +2029,7 @@ mod tests {
                 actual_input_tokens: 0,
                 actual_output_tokens: 0,
                 cache_read_tokens: 0,
+                cache_creation_tokens: 0,
                 provider_telemetry: None,
             },
             AgentEvent::MessageStart {

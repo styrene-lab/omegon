@@ -284,6 +284,7 @@ fn turn_end_does_not_overwrite_footer_context_with_last_request_input_tokens() {
         actual_input_tokens: 12_345,
         actual_output_tokens: 413,
         cache_read_tokens: 0,
+        cache_creation_tokens: 0,
         provider_telemetry: None,
     });
 
@@ -309,6 +310,7 @@ fn turn_end_tracks_session_usage_by_model_attribution() {
         actual_input_tokens: 100_000,
         actual_output_tokens: 20_000,
         cache_read_tokens: 0,
+        cache_creation_tokens: 0,
         provider_telemetry: None,
     });
     app.handle_agent_event(AgentEvent::TurnEnd {
@@ -321,6 +323,7 @@ fn turn_end_tracks_session_usage_by_model_attribution() {
         actual_input_tokens: 12_000,
         actual_output_tokens: 3_000,
         cache_read_tokens: 0,
+        cache_creation_tokens: 0,
         provider_telemetry: None,
     });
 

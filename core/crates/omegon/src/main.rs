@@ -1355,6 +1355,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                         actual_input_tokens: 0,
                                         actual_output_tokens: 0,
                                         cache_read_tokens: 0,
+                                        cache_creation_tokens: 0,
                                         provider_telemetry: None,
                                     });
                                 }
@@ -2534,6 +2535,7 @@ struct BenchmarkUsageSummary {
     input_tokens: u64,
     output_tokens: u64,
     cache_tokens: u64,
+    cache_write_tokens: u64,
     estimated_tokens: usize,
     context_window: usize,
     context_composition: omegon_traits::ContextComposition,
@@ -2551,6 +2553,7 @@ impl BenchmarkUsageSummary {
         actual_input_tokens: u64,
         actual_output_tokens: u64,
         cache_read_tokens: u64,
+        cache_write_tokens: u64,
         provider_telemetry: Option<omegon_traits::ProviderTelemetrySnapshot>,
     ) {
         self.model = model;
@@ -2558,6 +2561,7 @@ impl BenchmarkUsageSummary {
         self.input_tokens = self.input_tokens.saturating_add(actual_input_tokens);
         self.output_tokens = self.output_tokens.saturating_add(actual_output_tokens);
         self.cache_tokens = self.cache_tokens.saturating_add(cache_read_tokens);
+        self.cache_write_tokens = self.cache_write_tokens.saturating_add(cache_write_tokens);
         self.estimated_tokens = self.estimated_tokens.saturating_add(estimated_tokens);
         self.context_window = context_window;
         if has_nonempty_context_snapshot(&context_composition) {
@@ -2731,6 +2735,7 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
                     actual_input_tokens,
                     actual_output_tokens,
                     cache_read_tokens,
+                    cache_creation_tokens,
                     provider_telemetry,
                 } => {
                     if let Ok(mut summary) = benchmark_summary_task.lock() {
@@ -2743,6 +2748,7 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
                             actual_input_tokens,
                             actual_output_tokens,
                             cache_read_tokens,
+                            cache_creation_tokens,
                             provider_telemetry,
                         );
                     }
@@ -3920,6 +3926,7 @@ mod tests {
             123,
             45,
             6,
+            2,
             None,
         );
         summary.observe_turn(
@@ -3939,12 +3946,14 @@ mod tests {
             77,
             9,
             4,
+            3,
             None,
         );
 
         assert_eq!(summary.input_tokens, 200);
         assert_eq!(summary.output_tokens, 54);
         assert_eq!(summary.cache_tokens, 10);
+        assert_eq!(summary.cache_write_tokens, 5);
         assert_eq!(summary.estimated_tokens, 432);
         assert_eq!(summary.context_window, 200_000);
         assert_eq!(
@@ -3981,6 +3990,7 @@ mod tests {
             1,
             2,
             3,
+            4,
             None,
         );
         summary.observe_turn(
@@ -3995,6 +4005,7 @@ mod tests {
             4,
             5,
             6,
+            7,
             None,
         );
 
@@ -4032,6 +4043,7 @@ mod tests {
             1,
             2,
             3,
+            4,
             None,
         );
         summary.observe_turn(
@@ -4051,6 +4063,7 @@ mod tests {
             4,
             5,
             6,
+            7,
             None,
         );
 
@@ -4078,6 +4091,7 @@ mod tests {
             input_tokens: 123,
             output_tokens: 45,
             cache_tokens: 6,
+            cache_write_tokens: 2,
             estimated_tokens: 321,
             context_window: 200_000,
             context_composition: omegon_traits::ContextComposition {

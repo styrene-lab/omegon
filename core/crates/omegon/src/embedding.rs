@@ -14,7 +14,9 @@ const DEFAULT_EMBED_MODEL: &str = "nomic-embed-text";
 
 /// Embedding service backed by Ollama's `/api/embed` endpoint.
 pub struct OllamaEmbeddingService {
-    client: reqwest::Client,
+    /// Lazy-initialized HTTP client. Deferred to avoid triggering macOS
+    /// keychain prompts during TLS root store initialization at setup time.
+    client: tokio::sync::OnceCell<reqwest::Client>,
     base_url: String,
     model: String,
 }
@@ -41,17 +43,25 @@ impl OllamaEmbeddingService {
             .or_else(|| std::env::var("OMEGON_EMBED_MODEL").ok())
             .unwrap_or_else(|| DEFAULT_EMBED_MODEL.to_string());
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .pool_max_idle_per_host(4)
-            .build()
-            .unwrap_or_default();
-
         Self {
-            client,
+            client: tokio::sync::OnceCell::new(),
             base_url,
             model,
         }
+    }
+
+    /// Get or initialize the HTTP client. Deferred so TLS root store loading
+    /// only happens when we actually need to make an HTTP request.
+    async fn client(&self) -> &reqwest::Client {
+        self.client
+            .get_or_init(|| async {
+                reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .pool_max_idle_per_host(4)
+                    .build()
+                    .unwrap_or_default()
+            })
+            .await
     }
 
     /// The configured base URL (for logging).
@@ -61,15 +71,14 @@ impl OllamaEmbeddingService {
 
     /// Probe whether the embedding endpoint is reachable.
     ///
-    /// Uses a short timeout (200ms) HTTP GET to `/api/tags` — this validates
-    /// Ollama is actually responding, not just that the port is open.
+    /// Uses the lazy-initialized HTTP client to GET `/api/tags`. The client
+    /// is only constructed on the first call, deferring TLS root store loading
+    /// past the setup phase (avoids macOS keychain prompts during tests).
     pub async fn probe(&self) -> bool {
-        let probe_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_millis(200))
-            .build()
-            .unwrap_or_default();
-        probe_client
+        let client = self.client().await;
+        client
             .get(format!("{}/api/tags", self.base_url))
+            .timeout(std::time::Duration::from_millis(200))
             .send()
             .await
             .map(|r| r.status().is_success())
@@ -86,7 +95,8 @@ impl EmbeddingService for OllamaEmbeddingService {
         });
 
         let resp = self
-            .client
+            .client()
+            .await
             .post(format!("{}/api/embed", self.base_url))
             .json(&body)
             .send()

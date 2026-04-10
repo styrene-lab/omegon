@@ -39,7 +39,7 @@ pub struct AssistantMessage {
     /// The complete provider response — opaque, preserved for multi-turn continuity
     pub raw: Value,
     /// Actual billing tokens reported by the provider. (0,0,0) = not reported.
-    pub provider_tokens: (u64, u64, u64), // (input, output, cache_read)
+    pub provider_tokens: (u64, u64, u64, u64), // (input, output, cache_read, cache_write)
     /// Parsed provider quota/headroom telemetry for this turn, when available.
     pub provider_telemetry: Option<omegon_traits::ProviderTelemetrySnapshot>,
 }
@@ -51,7 +51,7 @@ impl Default for AssistantMessage {
             thinking: None,
             tool_calls: Vec::new(),
             raw: Value::Null,
-            provider_tokens: (0, 0, 0),
+            provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         }
     }
@@ -856,7 +856,7 @@ impl ConversationState {
                                 })
                                 .collect(),
                             raw: raw.unwrap_or(Value::Null),
-                            provider_tokens: (0, 0, 0),
+                            provider_tokens: (0, 0, 0, 0),
                             provider_telemetry: None,
                         },
                         turn,
@@ -1160,7 +1160,7 @@ mod tests {
                 arguments: serde_json::json!({}),
             }],
             raw: serde_json::Value::Null,
-            provider_tokens: (0, 0, 0),
+            provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         });
     }
@@ -1176,7 +1176,7 @@ mod tests {
             thinking: Some("very long internal thinking...".repeat(100)),
             tool_calls: vec![],
             raw: serde_json::Value::Null,
-            provider_tokens: (0, 0, 0),
+            provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         });
         conv.intent.stats.turns = 1; // Advance turn so the message is old
@@ -1200,7 +1200,7 @@ mod tests {
             thinking: None,
             tool_calls: vec![],
             raw: serde_json::Value::Null,
-            provider_tokens: (0, 0, 0),
+            provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         });
         conv.intent.stats.turns = 1;
@@ -1268,7 +1268,7 @@ mod tests {
             thinking: Some("detailed thinking here...".repeat(50)),
             tool_calls: vec![],
             raw: serde_json::Value::Null,
-            provider_tokens: (0, 0, 0),
+            provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         });
         conv.push_tool_result(ToolResultEntry {
@@ -1314,7 +1314,7 @@ mod tests {
                 arguments: serde_json::json!({"path": "src/foo.rs"}),
             }],
             raw: serde_json::Value::Null,
-            provider_tokens: (0, 0, 0),
+            provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         });
         conv.push_tool_result(ToolResultEntry {
@@ -1437,7 +1437,7 @@ mod tests {
             thinking: None,
             tool_calls: vec![],
             raw: Value::Null,
-            provider_tokens: (0, 0, 0),
+            provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         });
 
@@ -1466,7 +1466,7 @@ mod tests {
             thinking: None,
             tool_calls: vec![],
             raw: Value::Null,
-            provider_tokens: (0, 0, 0),
+            provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         });
 
@@ -1784,7 +1784,7 @@ mod tests {
             thinking: None,
             tool_calls: vec![],
             raw: Value::Null,
-            provider_tokens: (0, 0, 0),
+            provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         });
 
@@ -1940,7 +1940,7 @@ mod tests {
             thinking: Some("deep reasoning here".into()),
             tool_calls: vec![],
             raw: serde_json::Value::Null,
-            provider_tokens: (0, 0, 0),
+            provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         });
 
@@ -1972,7 +1972,7 @@ mod tests {
                 thinking: None,
                 tool_calls: vec![],
                 raw: serde_json::Value::Null,
-                provider_tokens: (0, 0, 0),
+                provider_tokens: (0, 0, 0, 0),
                 provider_telemetry: None,
             });
         }

@@ -11,6 +11,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+// ─── Cache control ──────────────────────────────────────────────────────────
+
+/// Sentinel inserted between stable and dynamic system prompt segments.
+///
+/// Providers that support prompt caching (e.g. Anthropic) split on this to
+/// place cache_control breakpoints on the stable prefix. Providers without
+/// caching ignore it — it's an HTML comment, invisible to the model.
+pub const CACHE_BOUNDARY: &str = "\n<!-- cache-boundary -->\n";
+
 // ─── Omegon wire types ──────────────────────────────────────────────────────
 // These types define what Omegon sends and receives.
 // The bridge JS translates to/from provider-specific formats.
@@ -140,6 +149,9 @@ pub enum LlmEvent {
         /// Cache-read tokens (Anthropic prompt caching; 0 if not applicable)
         #[serde(default)]
         cache_read_tokens: u64,
+        /// Cache-creation tokens (Anthropic prompt caching; 0 if not applicable)
+        #[serde(default)]
+        cache_creation_tokens: u64,
         /// Parsed provider quota/headroom telemetry from response headers or status endpoints.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider_telemetry: Option<omegon_traits::ProviderTelemetrySnapshot>,

@@ -4328,6 +4328,7 @@ impl App {
                 actual_output_tokens,
                 cache_read_tokens,
                 provider_telemetry,
+                ..
             } => {
                 self.turn = turn;
                 // Accumulate session-long token counts

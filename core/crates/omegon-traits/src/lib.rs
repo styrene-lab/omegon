@@ -1264,6 +1264,8 @@ pub enum AgentEvent {
         actual_output_tokens: u64,
         /// Cache-read tokens (Anthropic). 0 if not applicable.
         cache_read_tokens: u64,
+        /// Cache-write / cache-creation tokens (Anthropic). 0 if not applicable.
+        cache_creation_tokens: u64,
         /// Parsed provider quota/headroom telemetry from response headers or status endpoints.
         provider_telemetry: Option<ProviderTelemetrySnapshot>,
     },
