@@ -312,6 +312,80 @@ Includes all `edit` and `read` capabilities.
 
 ---
 
+### Contractual matrix snapshot (v0 live)
+
+This table is the first-pass **contractual C2 matrix**. It records the live
+canonical action ids already reflected in `core/crates/omegon/src/control_actions.rs`,
+plus their current transport bindings.
+
+Status legend:
+
+- `canonical` — first-class transport binding to a named canonical intent
+- `tunneled` — currently exposed through generic slash transport rather than a
+  dedicated transport method
+- `missing` — no implemented binding on that surface
+- `divergent` — transport has a near-peer binding, but vocabulary/shape differs
+
+| Canonical action | Slash | IPC | WebSocket | CLI | Role | Remote-safe | Status | Notes |
+|---|---|---|---|---|---|---|---|---|
+| `status.view` | `/status`, `/stats`, `/auspex status`, `/dash status` | `get_state`, `get_graph`, `subscribe`, `unsubscribe` | `request_snapshot` | — | read | yes | divergent | IPC and WebSocket expose similar observation intents with different method names and shapes |
+| `prompt.submit` | normal prompt entry | `submit_prompt` | `user_prompt` | `--prompt`, `--prompt-file` | edit | yes | divergent | Same intent; remote method names differ |
+| `turn.cancel` | local cancel flows | `cancel` | `cancel` | — | edit | yes | canonical | Best-aligned C2 action today |
+| `runtime.shutdown` | local quit path | `shutdown` | missing | process exit / local shutdown path | admin | yes (IPC) | missing | WebSocket lacks first-class shutdown peer |
+| `session.new` | `/new` | missing | missing | — | edit | yes in daemon trigger classifier | missing | Web daemon trigger exists conceptually, but not as a documented WebSocket/IPC method |
+| `session.view.list` | `/sessions` | missing | missing | — | read | no | tunneled | Slash-only today; not remote-safe |
+| `context.view` | `/context`, `/context status` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | read | yes | tunneled | Canonical action exists in classifier but lacks first-class remote method |
+| `context.compact` | `/context compact` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | edit | yes | tunneled | Remote-safe but still stringly |
+| `context.clear` | `/context clear` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | edit | yes | tunneled | Remote-safe but still stringly |
+| `context.request` | `/context request ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | edit | yes | tunneled | Good candidate for first-class C2 method later |
+| `context.set_class` | `/context <class>` | tunneled via `run_slash_command` | tunneled via `slash_command` | `--context-class` (startup) | edit | yes | tunneled | Same intent spans slash/runtime config but no shared method binding |
+| `model.view` | `/model` | tunneled via `run_slash_command` | tunneled via `slash_command` | startup logs only | read | yes | tunneled | Read-only but still slash-tunneled remotely |
+| `model.list` | `/model list` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | read | yes | tunneled | Candidate for dedicated query surface |
+| `model.set.same_provider` | `/model <model>` | tunneled via `run_slash_command` | tunneled via `slash_command` | partial via `--model` | edit | yes | tunneled | Current classifier distinguishes same-provider model changes |
+| `provider.switch` | `/model <provider:model>` | tunneled via `run_slash_command` | tunneled via `slash_command` | `--model` | admin | no | tunneled | Same syntax as model.set, different canonical intent and policy |
+| `thinking.set` | `/think <level>` | tunneled via `run_slash_command` | tunneled via `slash_command` | profile/startup settings | edit | yes | tunneled | Canonical action exists but no first-class transport binding |
+| `skills.view` | `/skills`, `/skills list` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon skills list` | read | yes | tunneled | Read intent is classified and remote-safe but still tunneled |
+| `skills.install` | `/skills install` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon skills install` | edit | no | tunneled | Classified local-only on remote surfaces |
+| `auth.status` | `/auth`, `/auth status` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon auth status` | read | yes | tunneled | Read-only, but remote still depends on generic slash tunnel |
+| `auth.login` | `/login <provider>` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon auth login <provider>` | admin | no | tunneled | Local-only by policy |
+| `auth.logout` | `/logout <provider>` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon auth logout <provider>` | admin | no | tunneled | Local-only by policy; explicit provider now required |
+| `auth.unlock` | `/auth unlock` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon auth unlock` | admin | no | tunneled | Sensitive backend action |
+| `secrets.view` | `/secrets`, `/secrets list` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | edit | no | tunneled | Explicitly not remote-safe today |
+| `secrets.set` | `/secrets set ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | edit | no | tunneled | Local-only by policy |
+| `secrets.get` | `/secrets get ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | edit | no | tunneled | Local-only by policy |
+| `secrets.delete` | `/secrets delete ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | edit | no | tunneled | Local-only by policy |
+| `plugin.view` | `/plugin`, `/plugin list` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon plugin list` | read | yes | tunneled | Read path exists but not first-class remotely |
+| `plugin.install` | `/plugin install ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon plugin install ...` | edit | no | tunneled | Local-only by policy |
+| `plugin.remove` | `/plugin remove ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon plugin remove ...` | edit | no | tunneled | Local-only by policy |
+| `plugin.update` | `/plugin update ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon plugin update ...` | edit | no | tunneled | Local-only by policy |
+
+### Immediate implications
+
+1. **`control_actions.rs` is already the embryo of the canonical registry**
+   - it defines canonical actions
+   - it defines starter roles
+   - it defines remote-safety
+   - it classifies both slash commands and IPC methods
+
+2. **The main gap is no longer 'invent a matrix'**
+   - the main gap is to make transports bind directly to canonical actions
+     instead of tunneling broad classes of intent through generic slash
+     execution
+
+3. **Best current first-class C2 actions**
+   - `turn.cancel`
+   - `prompt.submit`
+   - `status.view` (partially; still vocabulary-divergent)
+   - `runtime.shutdown` (IPC only)
+
+4. **Highest-value unification targets**
+   - `context.*`
+   - `model.*`
+   - `auth.status`
+   - `session.new`
+
+---
+
 ## Current canonical matrix (v0 draft)
 
 The following tables capture the **currently implemented** surfaces and the
