@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,10 @@ from typing import Any
 import yaml
 
 SUPPORTED_HARNESSES = {"omegon", "claude-code", "pi"}
+
+
+def audit(message: str) -> None:
+    print(f"[benchmark] {message}", file=sys.stderr, flush=True)
 
 
 class TaskSpecError(ValueError):
@@ -191,11 +196,13 @@ def ensure_model_supported_for_harness(harness: str, model: str | None) -> None:
 
 def prepare_clean_repo(repo_path: Path, base_ref: str) -> Path:
     clean_root = Path(tempfile.mkdtemp(prefix="benchmark-repo-"))
+    audit(f"prepare clean repo: source={repo_path} base_ref={base_ref} target={clean_root}")
     if (repo_path / ".git").exists():
         subprocess.run(["git", "clone", "--quiet", "--no-checkout", str(repo_path), str(clean_root)], check=True)
         subprocess.run(["git", "checkout", "--quiet", base_ref], cwd=clean_root, check=True)
     else:
         copytree(repo_path, clean_root, dirs_exist_ok=True)
+    audit(f"clean repo ready: {clean_root}")
     return clean_root
 
 
@@ -244,7 +251,17 @@ class OmegonAdapter(HarnessAdapter):
         if self.slim:
             cmd.append("--slim")
 
+        audit(
+            "adapter start: "
+            f"harness={self.harness_name} model={self.model or 'default'} slim={self.slim} "
+            f"cwd={self.clean_repo_path} usage_json={usage_file} log={log_file}"
+        )
+        audit(f"adapter command: {shlex.join(cmd)}")
         with log_file.open("w") as handle:
+            handle.write(f"[benchmark] adapter={self.harness_name} model={self.model or 'default'} slim={self.slim}\n")
+            handle.write(f"[benchmark] cwd={self.clean_repo_path}\n")
+            handle.write(f"[benchmark] command={shlex.join(cmd)}\n\n")
+            handle.flush()
             proc = subprocess.run(
                 cmd,
                 cwd=self.clean_repo_path,
@@ -254,6 +271,7 @@ class OmegonAdapter(HarnessAdapter):
                 text=True,
                 env=benchmark_process_env(self.repo_path, self.clean_repo_path, self.harness_name, self.spec.id),
             )
+        audit(f"adapter done: harness={self.harness_name} exit={proc.returncode} usage_json_exists={usage_file.exists()} log={log_file}")
 
         usage: dict[str, Any] = {}
         if usage_file.exists():
@@ -304,6 +322,12 @@ class PiAdapter(HarnessAdapter):
         cmd.append(self.spec.prompt)
         env = dict(os.environ)
         env.setdefault("PI_CODING_AGENT_DIR", str(Path.home() / ".pi" / "agent"))
+        audit(
+            "adapter start: "
+            f"harness={self.harness_name} model={self.model or 'default'} slim={self.slim} "
+            f"cwd={self.clean_repo_path} log={log_file}"
+        )
+        audit(f"adapter command: {shlex.join(cmd)}")
         proc = subprocess.run(
             cmd,
             cwd=self.clean_repo_path,
@@ -312,7 +336,15 @@ class PiAdapter(HarnessAdapter):
             text=True,
             env=env,
         )
-        log_file.write_text(proc.stdout + ("\n" if proc.stdout and proc.stderr else "") + proc.stderr)
+        log_file.write_text(
+            f"[benchmark] adapter={self.harness_name} model={self.model or 'default'} slim={self.slim}\n"
+            f"[benchmark] cwd={self.clean_repo_path}\n"
+            f"[benchmark] command={shlex.join(cmd)}\n\n"
+            + proc.stdout
+            + ("\n" if proc.stdout and proc.stderr else "")
+            + proc.stderr
+        )
+        audit(f"adapter done: harness={self.harness_name} exit={proc.returncode} log={log_file}")
 
         payload = extract_pi_result(proc.stdout)
         usage = extract_usage(payload)
@@ -351,6 +383,12 @@ class ClaudeCodeAdapter(HarnessAdapter):
         if self.model:
             cmd.extend(["--model", self.model])
         cmd.append(self.spec.prompt)
+        audit(
+            "adapter start: "
+            f"harness={self.harness_name} model={self.model or 'default'} slim={self.slim} "
+            f"cwd={self.clean_repo_path} log={log_file}"
+        )
+        audit(f"adapter command: {shlex.join(cmd)}")
         proc = subprocess.run(
             cmd,
             cwd=self.clean_repo_path,
@@ -359,7 +397,15 @@ class ClaudeCodeAdapter(HarnessAdapter):
             text=True,
             env=benchmark_process_env(self.repo_path, self.clean_repo_path, self.harness_name, self.spec.id),
         )
-        log_file.write_text(proc.stdout + ("\n" if proc.stdout and proc.stderr else "") + proc.stderr)
+        log_file.write_text(
+            f"[benchmark] adapter={self.harness_name} model={self.model or 'default'} slim={self.slim}\n"
+            f"[benchmark] cwd={self.clean_repo_path}\n"
+            f"[benchmark] command={shlex.join(cmd)}\n\n"
+            + proc.stdout
+            + ("\n" if proc.stdout and proc.stderr else "")
+            + proc.stderr
+        )
+        audit(f"adapter done: harness={self.harness_name} exit={proc.returncode} log={log_file}")
 
         payload: dict[str, Any] | None = None
         try:
@@ -522,7 +568,9 @@ def run_acceptance(commands: list[str], repo_path: Path, env: dict[str, str] | N
     started = time.monotonic()
     results: list[dict[str, Any]] = []
     status = "pass"
-    for cmd in commands:
+    audit(f"acceptance start: cwd={repo_path} commands={len(commands)}")
+    for index, cmd in enumerate(commands, start=1):
+        audit(f"acceptance command {index}/{len(commands)}: {cmd}")
         proc = subprocess.run(
             cmd,
             cwd=repo_path,
@@ -540,10 +588,13 @@ def run_acceptance(commands: list[str], repo_path: Path, env: dict[str, str] | N
                 "stderr": proc.stderr,
             }
         )
+        audit(f"acceptance command {index} exit={proc.returncode}")
         if proc.returncode != 0:
             status = "fail"
             break
-    return status, time.monotonic() - started, results
+    elapsed = time.monotonic() - started
+    audit(f"acceptance done: status={status} elapsed={elapsed:.3f}s")
+    return status, elapsed, results
 
 
 def compute_total_tokens(usage: dict[str, Any]) -> int | None:
@@ -797,6 +848,10 @@ def run_report_mode(paths: list[str]) -> int:
 
 
 def main() -> int:
+    try:
+        sys.stderr.reconfigure(line_buffering=True)
+    except AttributeError:
+        pass
     args = parse_args()
     if args.report:
         return run_report_mode(args.report)
@@ -818,6 +873,11 @@ def main() -> int:
 
     repo_path = resolve_repo_path(root, spec)
     out_dir = ensure_clean_out_dir(root, args.out_dir)
+    audit(
+        "benchmark start: "
+        f"task={spec.id} harness={harness} model={model or 'default'} slim={slim} "
+        f"repo={repo_path} out_dir={out_dir}"
+    )
     clean_repo_path = prepare_clean_repo(repo_path, spec.base_ref)
 
     try:
@@ -847,6 +907,11 @@ def main() -> int:
     payload.setdefault("timing", {})
     payload["timing"] = {"acceptance_wall_clock_sec": round(acceptance_elapsed, 3)}
     result_path = write_result(out_dir, spec, harness, payload)
+    audit(
+        "benchmark done: "
+        f"task={spec.id} harness={harness} status={payload.get('status')} "
+        f"wall={payload.get('wall_clock_sec')}s result={result_path}"
+    )
     print(result_path)
     return 0 if payload.get("status") == "pass" else 3
 

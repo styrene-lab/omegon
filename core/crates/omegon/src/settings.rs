@@ -658,6 +658,16 @@ pub struct Profile {
     /// Format: "Legion→Squad" (from_class→to_class).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub downgrade_overrides: Vec<String>,
+
+    // ── Embedding service (hybrid search) ──
+    /// Embedding service base URL (Ollama `/api/embed` endpoint).
+    /// Overrides `OMEGON_EMBED_URL` env var. Default: `http://localhost:11434`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embed_url: Option<String>,
+    /// Embedding model name (e.g. `nomic-embed-text`).
+    /// Overrides `OMEGON_EMBED_MODEL` env var.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embed_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -696,6 +706,8 @@ impl Profile {
             avoid_providers: Vec::new(),
             context_floor_pin: None,
             downgrade_overrides: Vec::new(),
+            embed_url: None,
+            embed_model: None,
         }
     }
 
@@ -987,6 +999,8 @@ mod tests {
             avoid_providers: Vec::new(),
             context_floor_pin: None,
             downgrade_overrides: Vec::new(),
+            embed_url: None,
+            embed_model: None,
         };
         assert!(!p.is_downgrade_accepted(ContextClass::Legion, ContextClass::Squad));
         p.accept_downgrade(ContextClass::Legion, ContextClass::Squad);
@@ -1006,6 +1020,8 @@ mod tests {
             avoid_providers: Vec::new(),
             context_floor_pin: None,
             downgrade_overrides: Vec::new(),
+            embed_url: None,
+            embed_model: None,
         };
         assert_eq!(p.pinned_floor(), None);
         p.pin_floor(ContextClass::Clan);
@@ -1032,6 +1048,8 @@ mod tests {
             avoid_providers: vec![],
             context_floor_pin: Some("Clan".into()),
             downgrade_overrides: vec!["Legion→Squad".into()],
+            embed_url: None,
+            embed_model: None,
         };
         let json = serde_json::to_string_pretty(&p).unwrap();
         let parsed: Profile = serde_json::from_str(&json).unwrap();
@@ -1082,6 +1100,8 @@ mod tests {
             avoid_providers: Vec::new(),
             context_floor_pin: None,
             downgrade_overrides: Vec::new(),
+            embed_url: None,
+            embed_model: None,
         };
 
         profile.save(&nested).unwrap();

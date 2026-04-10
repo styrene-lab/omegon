@@ -23,6 +23,7 @@ mod cleave;
 mod cleave_smoke;
 mod context;
 mod control_actions;
+mod embedding;
 mod control_runtime;
 mod shadow_context;
 pub mod extensions;

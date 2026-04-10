@@ -25,8 +25,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use omegon_memory::{
-    ContextRenderer, CreateEdge, DecayProfileName, FactFilter, MarkdownRenderer, MemoryBackend,
-    Section, StoreAction, StoreEpisode, StoreFact,
+    ContextRenderer, CreateEdge, DecayProfileName, EmbeddingService, FactFilter, MarkdownRenderer,
+    MemoryBackend, ScoredFact, Section, StoreAction, StoreEpisode, StoreFact,
 };
 
 /// Memory feature that provides all memory_* tools and context injection.
@@ -42,6 +42,8 @@ pub struct MemoryFeature {
     /// Set by execute() when a successful memory mutation/focus change should
     /// trigger a refreshed HarnessStatus snapshot after ToolEnd delivery.
     pending_status_refresh: AtomicBool,
+    /// Optional embedding service for hybrid search + auto-embed on store.
+    embed_service: Option<Arc<dyn EmbeddingService>>,
 }
 
 impl MemoryFeature {
@@ -53,7 +55,14 @@ impl MemoryFeature {
             mind,
             working_memory: Mutex::new(Vec::new()),
             pending_status_refresh: AtomicBool::new(false),
+            embed_service: None,
         }
+    }
+
+    /// Attach an embedding service for hybrid search and auto-embed on store.
+    pub fn with_embed_service(mut self, svc: Arc<dyn EmbeddingService>) -> Self {
+        self.embed_service = Some(svc);
+        self
     }
 
     /// Get the backend for direct access (used by other features).
@@ -65,6 +74,76 @@ impl MemoryFeature {
     pub fn mind(&self) -> &str {
         &self.mind
     }
+
+    /// 1-hop edge expansion: for each seed fact, fetch edges, load neighbor
+    /// facts, score as `parent_score × edge.confidence × 0.5`, merge and
+    /// re-sort. Facts already in the seed set are skipped.
+    async fn expand_edges(&self, results: Vec<ScoredFact>, limit: usize) -> Vec<ScoredFact> {
+        use std::collections::HashSet;
+        let mut seen: HashSet<String> = results.iter().map(|sf| sf.fact.id.clone()).collect();
+        let mut expanded = results.clone();
+
+        for sf in &results {
+            let edges = match self.backend.get_edges(&self.mind, &sf.fact.id).await {
+                Ok(edges) => edges,
+                Err(e) => {
+                    tracing::debug!(fact_id = %sf.fact.id, error = %e, "edge lookup failed");
+                    continue;
+                }
+            };
+
+            for edge in edges {
+                let neighbor_id = if edge.source_id == sf.fact.id {
+                    &edge.target_id
+                } else {
+                    &edge.source_id
+                };
+
+                if !seen.insert(neighbor_id.clone()) {
+                    continue;
+                }
+
+                if let Ok(Some(neighbor)) = self.backend.get_fact(neighbor_id).await {
+                    let derived_score = sf.score * edge.confidence * 0.5;
+                    expanded.push(ScoredFact {
+                        similarity: derived_score,
+                        score: derived_score,
+                        fact: neighbor,
+                    });
+                }
+            }
+        }
+
+        expanded.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        expanded.truncate(limit);
+        expanded
+    }
+}
+
+/// Spawn a non-blocking embedding generation task for a newly stored fact.
+fn spawn_auto_embed(
+    embed_svc: &Arc<dyn EmbeddingService>,
+    backend: &Arc<dyn MemoryBackend>,
+    fact_id: String,
+    content: String,
+) {
+    let embed_svc = embed_svc.clone();
+    let backend = backend.clone();
+    tokio::spawn(async move {
+        match embed_svc.embed(&content).await {
+            Ok(embedding) => {
+                if let Err(e) = backend
+                    .store_embedding(&fact_id, embed_svc.model_name(), &embedding)
+                    .await
+                {
+                    tracing::warn!(fact_id = %fact_id, error = %e, "auto-embed store failed");
+                }
+            }
+            Err(e) => {
+                tracing::debug!(fact_id = %fact_id, error = %e, "auto-embed generation failed");
+            }
+        }
+    });
 }
 
 #[async_trait]
@@ -298,6 +377,18 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
+                // Auto-embed newly stored facts (fire-and-forget)
+                if matches!(result.action, StoreAction::Stored) {
+                    if let Some(ref embed_svc) = self.embed_service {
+                        spawn_auto_embed(
+                            embed_svc,
+                            &self.backend,
+                            result.fact.id.clone(),
+                            content.clone(),
+                        );
+                    }
+                }
+
                 let msg = match result.action {
                     StoreAction::Stored => format!("Stored in {}: {}", section_str, content),
                     StoreAction::Reinforced => format!("Reinforced existing fact: {}", content),
@@ -312,13 +403,53 @@ Also use it when you notice a gap — if you're unsure whether something was alr
             crate::tool_registry::memory::MEMORY_RECALL => {
                 let query = args["query"].as_str().unwrap_or("").to_string();
                 let k = args["k"].as_u64().unwrap_or(10) as usize;
+                let fetch_k = k * 2; // over-fetch for RRF merge headroom
 
-                // Use FTS search (vector search requires embeddings which may not be available)
-                let results = self
+                // FTS search — always available
+                let fts_results = self
                     .backend
-                    .fts_search(&self.mind, &query, k)
+                    .fts_search(&self.mind, &query, fetch_k)
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+                // Vector search — best-effort when embedding service is available
+                let vec_results = if let Some(ref embed_svc) = self.embed_service {
+                    match embed_svc.embed(&query).await {
+                        Ok(query_embedding) => {
+                            match self
+                                .backend
+                                .vector_search(&self.mind, &query_embedding, fetch_k, 0.1)
+                                .await
+                            {
+                                Ok(results) => results,
+                                Err(omegon_memory::MemoryError::NoEmbeddings) => vec![],
+                                Err(e) => {
+                                    tracing::debug!(error = %e, "vector search unavailable, FTS-only");
+                                    vec![]
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!(error = %e, "embedding generation failed, FTS-only");
+                            vec![]
+                        }
+                    }
+                } else {
+                    vec![]
+                };
+
+                // Merge: RRF if both sources contributed, else FTS-only
+                let mut results = if vec_results.is_empty() {
+                    fts_results
+                } else {
+                    omegon_memory::rrf_merge(&fts_results, &vec_results, 60.0, fetch_k)
+                };
+
+                // 1-hop edge expansion
+                results = self.expand_edges(results, fetch_k).await;
+
+                // Final truncation
+                results.truncate(k);
 
                 if results.is_empty() {
                     return Ok(ToolResult {
@@ -333,7 +464,6 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 for (i, sf) in results.iter().enumerate() {
                     let section = serde_json::to_string(&sf.fact.section).unwrap_or_default();
                     let section = section.trim_matches('"');
-                    // Truncate very long facts in recall results
                     let content = if sf.fact.content.len() > 200 {
                         crate::util::truncate(&sf.fact.content, 197)
                     } else {
@@ -451,7 +581,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         &fact_id,
                         StoreFact {
                             mind: self.mind.clone(),
-                            content,
+                            content: content.clone(),
                             section,
                             decay_profile: DecayProfileName::Standard,
                             source: Some("manual".into()),
@@ -459,6 +589,17 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+                // Auto-embed the replacement fact
+                if let Some(ref embed_svc) = self.embed_service {
+                    spawn_auto_embed(
+                        embed_svc,
+                        &self.backend,
+                        new_fact.id.clone(),
+                        content,
+                    );
+                }
+
                 self.pending_status_refresh.store(true, Ordering::Relaxed);
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
@@ -606,6 +747,18 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     })
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+                // Auto-embed newly ingested lifecycle facts
+                if matches!(result.action, StoreAction::Stored) {
+                    if let Some(ref embed_svc) = self.embed_service {
+                        spawn_auto_embed(
+                            embed_svc,
+                            &self.backend,
+                            result.fact.id.clone(),
+                            content.clone(),
+                        );
+                    }
+                }
 
                 let msg = match result.action {
                     StoreAction::Stored => format!(

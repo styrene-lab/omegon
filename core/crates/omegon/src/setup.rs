@@ -6,7 +6,8 @@
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
-use omegon_memory::MemoryBackend as _; // bring trait methods into scope
+use omegon_memory::EmbeddingService as _; // bring trait methods into scope
+use omegon_memory::MemoryBackend as _;
 
 use crate::bus::EventBus;
 use crate::context::ContextManager;
@@ -360,10 +361,35 @@ impl AgentSetup {
                 std::sync::Arc::new(backend);
             context_memory_backend = Some(memory_backend.clone());
             context_memory_mind = Some(mind.clone());
-            bus.register(Box::new(features::memory::MemoryFeature::new(
-                memory_backend,
-                mind,
-            )));
+
+            // ── Embedding service (optional, for hybrid search) ──
+            let embed_service: Option<
+                std::sync::Arc<dyn omegon_memory::EmbeddingService>,
+            > = {
+                let profile = crate::settings::Profile::load(&cwd);
+                let svc = crate::embedding::OllamaEmbeddingService::from_config(
+                    profile.embed_url.as_deref(),
+                    profile.embed_model.as_deref(),
+                );
+                if svc.probe().await {
+                    tracing::info!(
+                        url = svc.base_url(),
+                        model = svc.model_name(),
+                        "embedding service available — hybrid search enabled"
+                    );
+                    Some(std::sync::Arc::new(svc))
+                } else {
+                    tracing::info!("embedding service not reachable — FTS-only recall");
+                    None
+                }
+            };
+
+            let mut memory_feature =
+                features::memory::MemoryFeature::new(memory_backend, mind);
+            if let Some(svc) = embed_service {
+                memory_feature = memory_feature.with_embed_service(svc);
+            }
+            bus.register(Box::new(memory_feature));
         } else {
             let warning = format!(
                 "Memory backend unavailable — memory_* tools disabled ({})",

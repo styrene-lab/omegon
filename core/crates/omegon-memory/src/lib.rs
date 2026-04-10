@@ -20,6 +20,7 @@
 
 pub mod backend;
 pub mod decay;
+pub mod embedding;
 pub mod hash;
 pub mod inmemory;
 pub mod provider;
@@ -35,10 +36,11 @@ mod tests;
 // Re-exports for convenience
 pub use backend::{ContextRenderer, MemoryBackend, MemoryError};
 pub use decay::{DecayProfile, compute_confidence};
+pub use embedding::{EmbedError, EmbeddingService};
 pub use hash::{content_hash, normalize_for_hash};
 pub use inmemory::InMemoryBackend;
 pub use provider::MemoryProvider;
 pub use renderer::MarkdownRenderer;
 pub use sqlite::SqliteBackend;
 pub use types::*;
-pub use vectors::{blob_to_vector, cosine_similarity, vector_to_blob};
+pub use vectors::{blob_to_vector, cosine_similarity, rrf_merge, vector_to_blob};
