@@ -418,6 +418,101 @@ Decision rule for residual families:
 
 Project stance at current maturity:
 
+## WebSocket command assessment after typed control expansion
+
+The WebSocket surface in `core/crates/omegon/src/web/ws.rs` should now be read
+as a **JSON web command protocol normalized by Omegon into canonical control
+requests**, not as a legacy one-off layer.
+
+### Commands that already route through `ExecuteControl`
+
+These WebSocket commands currently dispatch via `WebCommand::ExecuteControl`
+and are therefore already on the canonical control rail:
+
+- `model_view`
+- `model_list`
+- `skills_view`
+- `skills_install`
+- `plugin_view`
+- `set_model`
+- `switch_dispatcher`
+- `set_thinking`
+- `plugin_install`
+- `plugin_remove`
+- `plugin_update`
+- `secrets_view`
+- `secrets_set`
+- `secrets_get`
+- `secrets_delete`
+- `vault_status`
+- `vault_unseal`
+- `vault_login`
+- `vault_configure`
+- `vault_init_policy`
+- `cleave_status`
+- `delegate_status`
+- `auth_status`
+- `context_status`
+- `context_compact`
+- `context_clear`
+
+These should be treated as **canonicalized** unless and until the
+transport-neutral action set changes.
+
+### Commands that still bypass `ExecuteControl`
+
+The following branches in `web/ws.rs` still use bespoke WebSocket-native
+handling:
+
+- `user_prompt`
+- `slash_command`
+- `cancel`
+- `cancel_cleave_child`
+- `request_snapshot`
+
+### Classification: should stay transport-native
+
+These commands are inherently session/transport mechanics rather than canonical
+mutation/control actions:
+
+- `user_prompt`
+  - reason: operator/runtime input ingress into the active turn pipeline
+- `cancel`
+  - reason: interruption of the currently active turn, naturally coupled to the
+    live session execution surface
+- `request_snapshot`
+  - reason: transport refresh / state pull, not domain control intent
+
+These should **remain transport-native** unless Omegon explicitly chooses an
+"everything is a command object" architecture.
+
+### Classification: should migrate to `ControlRequest`
+
+These commands represent real control intent and are not merely transport
+mechanics:
+
+- `cancel_cleave_child`
+  - preferred target: `ControlRequest::CleaveCancelChild`
+  - rationale: this is a canonical control mutation in the cleave/delegate
+    family, not a transport concern
+- `slash_command`
+  - rationale: compatibility tunnel only
+  - expected lifecycle: shrink over time as remaining slash families are
+    promoted into typed control requests
+
+### Current architectural conclusion
+
+The WebSocket surface is now largely canonicalized. Remaining bespoke commands
+are either:
+
+1. **correctly transport-native** (`user_prompt`, `cancel`, `request_snapshot`)
+2. **explicit migration debt** (`slash_command`, and `cancel_cleave_child` if it
+   has not yet been fully normalized)
+
+That means Auspex attach/manage readiness is no longer blocked on WebSocket
+control-surface shape. Remaining work is cleanup and convergence, not missing
+operator capability.
+
 - Omegon is still early enough that command-surface churn is acceptable.
 - We should prefer promotion over preserving legacy slash tunnels.
 - Generic slash execution should be treated as transitional scaffolding, not a first-class long-term control surface.
