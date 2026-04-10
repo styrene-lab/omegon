@@ -121,14 +121,10 @@ pub fn classify_slash_command(name: &str, args: &str) -> ClassifiedAction {
                 (CanonicalAction::ModelView, ControlRole::Read, true)
             } else if trimmed == "list" {
                 (CanonicalAction::ModelList, ControlRole::Read, true)
+            } else if trimmed.contains(':') {
+                (CanonicalAction::ProviderSwitch, ControlRole::Admin, false)
             } else {
-                let requested_provider = trimmed.split(':').next().unwrap_or("");
-                let current_provider = infer_provider_from_args_or_default(trimmed);
-                if requested_provider == current_provider {
-                    (CanonicalAction::ModelSetSameProvider, ControlRole::Edit, true)
-                } else {
-                    (CanonicalAction::ProviderSwitch, ControlRole::Admin, false)
-                }
+                (CanonicalAction::ModelSetSameProvider, ControlRole::Edit, true)
             }
         }
         "think" => (CanonicalAction::ThinkingSet, ControlRole::Edit, true),
@@ -201,10 +197,6 @@ pub fn classify_remote_slash_command(name: &str, args: &str) -> ClassifiedAction
     classified
 }
 
-fn infer_provider_from_args_or_default(raw: &str) -> &str {
-    raw.split(':').next().unwrap_or("")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +244,46 @@ mod tests {
         assert_eq!(action.action, CanonicalAction::SkillsInstall);
         assert_eq!(action.role, ControlRole::Edit);
         assert!(!action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_remote_login_as_local_only_admin() {
+        let action = classify_remote_slash_command("login", "anthropic");
+        assert_eq!(action.action, CanonicalAction::AuthLogin);
+        assert_eq!(action.role, ControlRole::Admin);
+        assert!(!action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_remote_secrets_set_as_local_only() {
+        let action = classify_remote_slash_command("secrets", "set api-key test");
+        assert_eq!(action.action, CanonicalAction::SecretsSet);
+        assert_eq!(action.role, ControlRole::Edit);
+        assert!(!action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_remote_plugin_install_as_local_only() {
+        let action = classify_remote_slash_command("plugin", "install alpha");
+        assert_eq!(action.action, CanonicalAction::PluginInstall);
+        assert_eq!(action.role, ControlRole::Edit);
+        assert!(!action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_model_with_explicit_provider_as_provider_switch() {
+        let action = classify_remote_slash_command("model", "anthropic:claude-sonnet-4-6");
+        assert_eq!(action.action, CanonicalAction::ProviderSwitch);
+        assert_eq!(action.role, ControlRole::Admin);
+        assert!(!action.remote_safe);
+    }
+
+    #[test]
+    fn classifies_bare_model_id_as_same_provider_tuning() {
+        let action = classify_remote_slash_command("model", "gpt-5.4");
+        assert_eq!(action.action, CanonicalAction::ModelSetSameProvider);
+        assert_eq!(action.role, ControlRole::Edit);
+        assert!(action.remote_safe);
     }
 
     #[test]
