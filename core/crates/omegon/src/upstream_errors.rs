@@ -101,7 +101,29 @@ const PROVIDER_ERROR_RULES: &[ErrorRule] = &[
     ErrorRule {
         providers: &["openai-codex"],
         class: UpstreamErrorClass::SessionExpired,
-        substrings: &["session expired", "out of session", "please log in again"],
+        substrings: &[
+            "session expired",
+            "session has expired",
+            "out of session",
+            "please log in again",
+            "login required",
+            "token expired",
+            "expired token",
+        ],
+        word_tokens: &[],
+    },
+    ErrorRule {
+        providers: &["openai-codex"],
+        class: UpstreamErrorClass::AuthInvalid,
+        substrings: &[
+            "api.responses.write",
+            "insufficient permissions",
+            "missing scopes",
+            "missing scope",
+            "incorrect role in your organization",
+            "correct role in your organization",
+            "restricted api key",
+        ],
         word_tokens: &[],
     },
     ErrorRule {
@@ -753,6 +775,28 @@ mod tests {
         assert_eq!(
             classify_upstream_error("upstream connect error or disconnect/reset before headers"),
             UpstreamErrorClass::Upstream5xx,
+        );
+    }
+
+    #[test]
+    fn classify_codex_401_scope_message_as_auth_state_not_scope_failure() {
+        assert_eq!(
+            classify_upstream_error_for_provider(
+                "openai-codex",
+                "Codex 401: You have insufficient permissions for this operation. Missing scopes: api.responses.write",
+            ),
+            UpstreamErrorClass::AuthInvalid,
+        );
+    }
+
+    #[test]
+    fn classify_codex_401_expired_token_as_session_expired() {
+        assert_eq!(
+            classify_upstream_error_for_provider(
+                "openai-codex",
+                "Codex 401 Unauthorized: token expired, please log in again",
+            ),
+            UpstreamErrorClass::SessionExpired,
         );
     }
 

@@ -2111,30 +2111,41 @@ fn format_interactive_turn_task_failure(join_err: &tokio::task::JoinError) -> St
 fn format_agent_error(e: &anyhow::Error) -> String {
     let raw = format!("{e}");
     let provider = provider_label_from_error(&raw);
-    let upstream_class = crate::upstream_errors::classify_upstream_error_for_provider(
-        provider.as_deref().unwrap_or("upstream"),
-        &raw,
-    );
-    if matches!(
-        upstream_class,
+    let provider_id = provider.as_deref().unwrap_or("upstream");
+    let upstream_class =
+        crate::upstream_errors::classify_upstream_error_for_provider(provider_id, &raw);
+    let who = provider_display_name(provider_id);
+
+    match upstream_class {
         crate::upstream_errors::UpstreamErrorClass::ProviderOverloaded
-            | crate::upstream_errors::UpstreamErrorClass::Upstream5xx
-            | crate::upstream_errors::UpstreamErrorClass::Timeout
-            | crate::upstream_errors::UpstreamErrorClass::StalledStream
-            | crate::upstream_errors::UpstreamErrorClass::NetworkConnect
-            | crate::upstream_errors::UpstreamErrorClass::NetworkReset
-            | crate::upstream_errors::UpstreamErrorClass::Dns
-            | crate::upstream_errors::UpstreamErrorClass::DecodeBody
-            | crate::upstream_errors::UpstreamErrorClass::BridgeDropped
-            | crate::upstream_errors::UpstreamErrorClass::ResponseIncomplete
-            | crate::upstream_errors::UpstreamErrorClass::ResponseCancelled
-    ) {
-        let who = provider_display_name(provider.as_deref().unwrap_or("upstream"));
-        let status_hint = provider_status_hint(provider.as_deref().unwrap_or("upstream"));
-        return format!(
-            "⚠ Upstream error ({who}) — provider-side failure. Retry later or check {status_hint}."
-        );
+        | crate::upstream_errors::UpstreamErrorClass::Upstream5xx
+        | crate::upstream_errors::UpstreamErrorClass::Timeout
+        | crate::upstream_errors::UpstreamErrorClass::StalledStream
+        | crate::upstream_errors::UpstreamErrorClass::NetworkConnect
+        | crate::upstream_errors::UpstreamErrorClass::NetworkReset
+        | crate::upstream_errors::UpstreamErrorClass::Dns
+        | crate::upstream_errors::UpstreamErrorClass::DecodeBody
+        | crate::upstream_errors::UpstreamErrorClass::BridgeDropped
+        | crate::upstream_errors::UpstreamErrorClass::ResponseIncomplete
+        | crate::upstream_errors::UpstreamErrorClass::ResponseCancelled => {
+            let status_hint = provider_status_hint(provider_id);
+            return format!(
+                "⚠ Upstream error ({who}) — provider-side failure. Retry later or check {status_hint}."
+            );
+        }
+        crate::upstream_errors::UpstreamErrorClass::SessionExpired => {
+            return format!(
+                "⚠ Authentication error ({who}) — your session appears expired or no longer valid. Re-authenticate and retry."
+            );
+        }
+        crate::upstream_errors::UpstreamErrorClass::AuthInvalid => {
+            return format!(
+                "⚠ Authentication error ({who}) — credentials were rejected. This may be an expired/invalid session, wrong account identity, or a provider-side auth mismatch. Re-authenticate and verify the active account before retrying."
+            );
+        }
+        _ => {}
     }
+
     // Try to extract the "message" field from Anthropic/OpenAI error JSON
     if let Some(start) = raw.find("\"message\":\"") {
         let rest = &raw[start + 11..];
@@ -3192,6 +3203,29 @@ mod tests {
         assert!(result.contains("Upstream error (OpenAI/Codex)"), "got: {result}");
         assert!(result.contains("status.openai.com"), "got: {result}");
         assert!(!result.contains("error code: 520"), "got: {result}");
+    }
+
+    #[test]
+    fn format_agent_error_codex_401_does_not_parrot_scope_message() {
+        let e = anyhow::anyhow!(
+            "LLM error: Codex 401: You have insufficient permissions for this operation. Missing scopes: api.responses.write"
+        );
+        let result = format_agent_error(&e);
+        assert!(result.contains("Authentication error (OpenAI/Codex)"), "got: {result}");
+        assert!(result.contains("expired/invalid session"), "got: {result}");
+        assert!(!result.contains("api.responses.write"), "got: {result}");
+        assert!(!result.contains("insufficient permissions"), "got: {result}");
+    }
+
+    #[test]
+    fn format_agent_error_codex_expired_session_prefers_reauth() {
+        let e = anyhow::anyhow!(
+            "LLM error: Codex 401 Unauthorized: session expired, please log in again"
+        );
+        let result = format_agent_error(&e);
+        assert!(result.contains("Authentication error (OpenAI/Codex)"), "got: {result}");
+        assert!(result.contains("session appears expired"), "got: {result}");
+        assert!(!result.contains("please log in again"), "got: {result}");
     }
 
     #[test]
