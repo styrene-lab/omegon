@@ -206,6 +206,30 @@ impl Editor {
         Projection { text, token_spans }
     }
 
+    fn viewport_text(&self) -> String {
+        let mut text = String::new();
+        let mut token_ord = 0usize;
+
+        for ch in self.model_text.chars() {
+            if ch == Self::INLINE_TOKEN_SENTINEL {
+                match self.inline_tokens.get(token_ord) {
+                    Some(InlineToken::Attachment(path)) => {
+                        text.push_str(&Self::attachment_placeholder(path, token_ord));
+                    }
+                    Some(InlineToken::CollapsedPaste { text: pasted }) => {
+                        text.push_str(pasted);
+                    }
+                    None => text.push_str(&format!("[token{}]", token_ord)),
+                }
+                token_ord += 1;
+            } else {
+                text.push(ch);
+            }
+        }
+
+        text
+    }
+
     fn projected_cursor(&self) -> usize {
         let (cursor_row, cursor_col) = self.textarea.cursor();
         let mut idx = 0usize;
@@ -908,7 +932,7 @@ impl Editor {
         if self.is_empty() {
             return lines;
         }
-        let visual_text = self.projection().text;
+        let visual_text = self.viewport_text();
         for logical in visual_text.split('\n') {
             lines.extend(wrap_chars_at(logical, width));
         }

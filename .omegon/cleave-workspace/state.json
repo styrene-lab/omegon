@@ -1,0 +1,86 @@
+{
+  "runId": "clv-ubilp2vq-01aj",
+  "directive": "Migrate skills/plugin slash commands to canonical control requests across TUI dispatcher, IPC/web transport bindings, and tests.",
+  "repoPath": "/Users/cwilson/workspace/black-meridian/omegon",
+  "workspacePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace",
+  "supervisorToken": "supv-18a4df410e7142b0",
+  "children": [
+    {
+      "childId": 0,
+      "label": "control-core",
+      "description": "Implement canonical control requests and dispatcher support for skills/plugin command families in the TUI/runtime layer. Update slash parsing to route skills/plugin commands through execute_control instead of legacy slash-only execution where feasible.",
+      "scope": [
+        "core/crates/omegon/src/tui/mod.rs",
+        "core/crates/omegon/src/main.rs",
+        "core/crates/omegon/src/control_actions.rs",
+        "core/crates/omegon/src/ipc/connection.rs",
+        "core/crates/omegon-traits/src/lib.rs"
+      ],
+      "dependsOn": [],
+      "status": "running",
+      "branch": "cleave/0-control-core",
+      "worktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/0-wt-control-core",
+      "backend": "native",
+      "executeModel": "openai-codex:gpt-5.4",
+      "pid": 39613,
+      "startedAtUnixMs": 1775789623977,
+      "lastActivityUnixMs": 1775789623977,
+      "adoptionWorktreePath": "/Users/cwilson/workspace/black-meridian/omegon/.omegon/cleave-workspace/0-wt-control-core",
+      "adoptionModel": "openai-codex:gpt-5.4",
+      "supervisorToken": "supv-18a4df410e7142b0"
+    },
+    {
+      "childId": 1,
+      "label": "web-tests",
+      "description": "Update transport bindings and tests for canonical skills/plugin control requests, including any websocket/dashboard acceptance needed and regression coverage for promoted commands.",
+      "scope": [
+        "core/crates/omegon/src/web/ws.rs",
+        "core/crates/omegon/src/web/assets/dashboard.html",
+        "core/crates/omegon/src/**/*.test.ts",
+        "core/crates/omegon/src/**/*.rs",
+        "core/tests/**/*"
+      ],
+      "dependsOn": [
+        "control-core"
+      ],
+      "status": "pending",
+      "branch": "cleave/1-web-tests",
+      "backend": "native",
+      "executeModel": "openai-codex:gpt-5.4"
+    }
+  ],
+  "plan": {
+    "children": [
+      {
+        "depends_on": [],
+        "description": "Implement canonical control requests and dispatcher support for skills/plugin command families in the TUI/runtime layer. Update slash parsing to route skills/plugin commands through execute_control instead of legacy slash-only execution where feasible.",
+        "label": "control-core",
+        "model": "openai-codex:gpt-5.4",
+        "scope": [
+          "core/crates/omegon/src/tui/mod.rs",
+          "core/crates/omegon/src/main.rs",
+          "core/crates/omegon/src/control_actions.rs",
+          "core/crates/omegon/src/ipc/connection.rs",
+          "core/crates/omegon-traits/src/lib.rs"
+        ]
+      },
+      {
+        "depends_on": [
+          "control-core"
+        ],
+        "description": "Update transport bindings and tests for canonical skills/plugin control requests, including any websocket/dashboard acceptance needed and regression coverage for promoted commands.",
+        "label": "web-tests",
+        "model": "openai-codex:gpt-5.4",
+        "scope": [
+          "core/crates/omegon/src/web/ws.rs",
+          "core/crates/omegon/src/web/assets/dashboard.html",
+          "core/crates/omegon/src/**/*.test.ts",
+          "core/crates/omegon/src/**/*.rs",
+          "core/tests/**/*"
+        ]
+      }
+    ],
+    "default_model": "openai-codex:gpt-5.4",
+    "rationale": "Separate control-layer canonicalization from transport/test follow-through so the risky dispatcher changes land first and transport coverage can adapt to the resulting API."
+  }
+}

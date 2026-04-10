@@ -3115,7 +3115,6 @@ async fn execute_remote_slash_command(
 
     match command {
         CanonicalSlashCommand::ContextRequest { kind, query } => {
-        CanonicalSlashCommand::ContextRequest { kind, query } => {
             let mut ctx = control_runtime::ControlContext {
                 runtime_state,
                 agent,
