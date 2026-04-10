@@ -48,6 +48,9 @@ pub enum CanonicalAction {
     PluginInstall,
     PluginRemove,
     PluginUpdate,
+    CleaveView,
+    CleaveCancelChild,
+    DelegateStatus,
     Unknown,
 }
 
@@ -99,6 +102,9 @@ pub fn classify_ipc_method(method: &str) -> ClassifiedAction {
         "vault_login" => (CanonicalAction::Unknown, ControlRole::Admin, false),
         "vault_configure" => (CanonicalAction::Unknown, ControlRole::Admin, false),
         "vault_init_policy" => (CanonicalAction::Unknown, ControlRole::Admin, false),
+        "cleave_status" => (CanonicalAction::CleaveView, ControlRole::Read, true),
+        "cleave_cancel_child" => (CanonicalAction::CleaveCancelChild, ControlRole::Edit, true),
+        "delegate_status" => (CanonicalAction::DelegateStatus, ControlRole::Read, true),
         "set_model" => (CanonicalAction::ProviderSwitch, ControlRole::Admin, false),
         "set_thinking" => (CanonicalAction::ThinkingSet, ControlRole::Edit, true),
         "submit_prompt" => (CanonicalAction::PromptSubmit, ControlRole::Edit, true),
@@ -171,6 +177,9 @@ pub fn classify_web_method(method: &str) -> ClassifiedAction {
         "vault_login" => (CanonicalAction::Unknown, ControlRole::Admin, false),
         "vault_configure" => (CanonicalAction::Unknown, ControlRole::Admin, false),
         "vault_init_policy" => (CanonicalAction::Unknown, ControlRole::Admin, false),
+        "cleave_status" => (CanonicalAction::CleaveView, ControlRole::Read, true),
+        "cleave_cancel_child" => (CanonicalAction::CleaveCancelChild, ControlRole::Edit, true),
+        "delegate_status" => (CanonicalAction::DelegateStatus, ControlRole::Read, true),
         "set_model" => (CanonicalAction::ProviderSwitch, ControlRole::Admin, false),
         "set_thinking" => (CanonicalAction::ThinkingSet, ControlRole::Edit, true),
         "shutdown" => (CanonicalAction::RuntimeShutdown, ControlRole::Admin, true),
@@ -278,6 +287,20 @@ pub fn classify_slash_command(name: &str, args: &str) -> ClassifiedAction {
             "install" => (CanonicalAction::PluginInstall, ControlRole::Edit, false),
             "remove" => (CanonicalAction::PluginRemove, ControlRole::Edit, false),
             "update" => (CanonicalAction::PluginUpdate, ControlRole::Edit, false),
+            _ => (CanonicalAction::Unknown, ControlRole::Admin, false),
+        },
+        "cleave" => {
+            let trimmed = args.trim();
+            if trimmed.is_empty() || trimmed == "status" {
+                (CanonicalAction::CleaveView, ControlRole::Read, true)
+            } else if trimmed.starts_with("cancel ") {
+                (CanonicalAction::CleaveCancelChild, ControlRole::Edit, true)
+            } else {
+                (CanonicalAction::Unknown, ControlRole::Admin, false)
+            }
+        }
+        "delegate" => match args.trim() {
+            "" | "status" => (CanonicalAction::DelegateStatus, ControlRole::Read, true),
             _ => (CanonicalAction::Unknown, ControlRole::Admin, false),
         },
         _ => (CanonicalAction::Unknown, ControlRole::Admin, false),

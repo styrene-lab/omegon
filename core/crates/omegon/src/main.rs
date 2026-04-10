@@ -1631,11 +1631,34 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                         continue;
                                     }
                                     web::WebCommand::CancelCleaveChild { label, respond_to } => {
-                                        tui::TuiCommand::RunSlashCommand {
-                                            name: "cleave".to_string(),
-                                            args: format!("cancel {label}"),
-                                            respond_to,
+                                        let (control_tx, control_rx) = tokio::sync::oneshot::channel();
+                                        if cmd_tx_clone.send(tui::TuiCommand::ExecuteControl {
+                                            request: crate::control_runtime::ControlRequest::CleaveCancelChild {
+                                                label,
+                                            },
+                                            respond_to: Some(control_tx),
+                                        }).await.is_err() {
+                                            break;
                                         }
+                                        if let Some(respond_to) = respond_to {
+                                            tokio::spawn(async move {
+                                                let response = match control_rx.await {
+                                                    Ok(output) => omegon_traits::SlashCommandResponse {
+                                                        accepted: output.accepted,
+                                                        output: output.output,
+                                                    },
+                                                    Err(_) => omegon_traits::SlashCommandResponse {
+                                                        accepted: false,
+                                                        output: Some(
+                                                            "cleave child cancel executor dropped response before completion"
+                                                                .to_string(),
+                                                        ),
+                                                    },
+                                                };
+                                                let _ = respond_to.send(response);
+                                            });
+                                        }
+                                        continue;
                                     }
                                 };
                                 if cmd_tx_clone.send(tui_cmd).await.is_err() {

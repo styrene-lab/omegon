@@ -332,6 +332,9 @@ pub(crate) enum CanonicalSlashCommand {
     VaultLogin,
     VaultConfigure,
     VaultInitPolicy,
+    CleaveStatus,
+    CleaveCancelChild(String),
+    DelegateStatus,
 }
 
 pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<CanonicalSlashCommand> {
@@ -428,6 +431,20 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             "login" => Some(CanonicalSlashCommand::VaultLogin),
             "configure" => Some(CanonicalSlashCommand::VaultConfigure),
             "init-policy" => Some(CanonicalSlashCommand::VaultInitPolicy),
+            _ => None,
+        },
+        "cleave" => {
+            if args.is_empty() || args == "status" {
+                Some(CanonicalSlashCommand::CleaveStatus)
+            } else if let Some(label) = args.strip_prefix("cancel ") {
+                let label = label.trim();
+                (!label.is_empty()).then(|| CanonicalSlashCommand::CleaveCancelChild(label.to_string()))
+            } else {
+                None
+            }
+        }
+        "delegate" => match args {
+            "" | "status" => Some(CanonicalSlashCommand::DelegateStatus),
             _ => None,
         },
         _ => None,
@@ -3744,14 +3761,25 @@ impl App {
             }
 
             "delegate" => {
-                match args {
-                    "" | "status" => {
-                        // Show active/completed delegate tasks
-                        SlashResult::Display("Delegate status: use the delegate_status agent tool for full details.\n\nActive delegates shown in dashboard when running.".into())
+                if let Some(command) = canonical_slash_command("delegate", args) {
+                    if let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    {
+                        let _ = tx.try_send(TuiCommand::ExecuteControl {
+                            request,
+                            respond_to: None,
+                        });
+                        SlashResult::Handled
+                    } else {
+                        SlashResult::Display(
+                            "Usage: /delegate status\n\nTo invoke a delegate, use the delegate agent tool."
+                                .into(),
+                        )
                     }
-                    _ => {
-                        SlashResult::Display("Usage: /delegate status\n\nTo invoke a delegate, use the delegate agent tool.".into())
-                    }
+                } else {
+                    SlashResult::Display(
+                        "Usage: /delegate status\n\nTo invoke a delegate, use the delegate agent tool."
+                            .into(),
+                    )
                 }
             }
 
@@ -4030,8 +4058,27 @@ impl App {
                         ratatui_toaster::ToastType::Warning,
                     );
                 }
-                // Forward to bus (cleave extension handles it)
-                if self.bus_commands.iter().any(|c| c.name == "cleave") {
+                if let Some(command) = canonical_slash_command("cleave", args) {
+                    if let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    {
+                        let _ = tx.try_send(TuiCommand::ExecuteControl {
+                            request,
+                            respond_to: None,
+                        });
+                        SlashResult::Handled
+                    } else if self.bus_commands.iter().any(|c| c.name == "cleave") {
+                        let _ = tx.try_send(TuiCommand::BusCommand {
+                            name: "cleave".to_string(),
+                            args: args.to_string(),
+                        });
+                        SlashResult::Handled
+                    } else {
+                        SlashResult::Display(
+                            "Cleave extension not loaded. Run omegon from a project directory."
+                                .into(),
+                        )
+                    }
+                } else if self.bus_commands.iter().any(|c| c.name == "cleave") {
                     let _ = tx.try_send(TuiCommand::BusCommand {
                         name: "cleave".to_string(),
                         args: args.to_string(),

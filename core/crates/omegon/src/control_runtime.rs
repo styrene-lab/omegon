@@ -55,6 +55,9 @@ pub enum ControlRequest {
     VaultLogin,
     VaultConfigure,
     VaultInitPolicy,
+    CleaveStatus,
+    CleaveCancelChild { label: String },
+    DelegateStatus,
 }
 
 pub fn control_request_from_slash(
@@ -125,6 +128,13 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::VaultLogin => ControlRequest::VaultLogin,
         crate::tui::CanonicalSlashCommand::VaultConfigure => ControlRequest::VaultConfigure,
         crate::tui::CanonicalSlashCommand::VaultInitPolicy => ControlRequest::VaultInitPolicy,
+        crate::tui::CanonicalSlashCommand::CleaveStatus => ControlRequest::CleaveStatus,
+        crate::tui::CanonicalSlashCommand::CleaveCancelChild(label) => {
+            ControlRequest::CleaveCancelChild {
+                label: label.clone(),
+            }
+        }
+        crate::tui::CanonicalSlashCommand::DelegateStatus => ControlRequest::DelegateStatus,
     })
 }
 
@@ -199,6 +209,11 @@ pub async fn execute_control(
         ControlRequest::VaultLogin => vault_login_response().await,
         ControlRequest::VaultConfigure => vault_configure_response().await,
         ControlRequest::VaultInitPolicy => vault_init_policy_response().await,
+        ControlRequest::CleaveStatus => cleave_status_response(ctx.runtime_state).await,
+        ControlRequest::CleaveCancelChild { label } => {
+            cleave_cancel_child_response(ctx.runtime_state, &label).await
+        }
+        ControlRequest::DelegateStatus => delegate_status_response(ctx.runtime_state).await,
     }
 }
 
@@ -1037,6 +1052,67 @@ pub async fn vault_init_policy_response() -> SlashCommandResponse {
              Save to a file and apply: `vault policy write omegon-agent <file>`"
                 .to_string(),
         ),
+    }
+}
+
+pub async fn cleave_status_response(
+    runtime_state: &mut InteractiveAgentState,
+) -> SlashCommandResponse {
+    match runtime_state.bus.dispatch_command("cleave", "status") {
+        omegon_traits::CommandResult::Display(text) => SlashCommandResponse {
+            accepted: true,
+            output: Some(text),
+        },
+        omegon_traits::CommandResult::Handled => SlashCommandResponse {
+            accepted: true,
+            output: None,
+        },
+        omegon_traits::CommandResult::NotHandled => SlashCommandResponse {
+            accepted: false,
+            output: Some("Cleave feature is unavailable.".to_string()),
+        },
+    }
+}
+
+pub async fn cleave_cancel_child_response(
+    runtime_state: &mut InteractiveAgentState,
+    label: &str,
+) -> SlashCommandResponse {
+    match runtime_state
+        .bus
+        .dispatch_command("cleave", &format!("cancel {label}"))
+    {
+        omegon_traits::CommandResult::Display(text) => SlashCommandResponse {
+            accepted: true,
+            output: Some(text),
+        },
+        omegon_traits::CommandResult::Handled => SlashCommandResponse {
+            accepted: true,
+            output: None,
+        },
+        omegon_traits::CommandResult::NotHandled => SlashCommandResponse {
+            accepted: false,
+            output: Some("Cleave feature is unavailable.".to_string()),
+        },
+    }
+}
+
+pub async fn delegate_status_response(
+    runtime_state: &mut InteractiveAgentState,
+) -> SlashCommandResponse {
+    match runtime_state.bus.dispatch_command("delegate", "status") {
+        omegon_traits::CommandResult::Display(text) => SlashCommandResponse {
+            accepted: true,
+            output: Some(text),
+        },
+        omegon_traits::CommandResult::Handled => SlashCommandResponse {
+            accepted: true,
+            output: None,
+        },
+        omegon_traits::CommandResult::NotHandled => SlashCommandResponse {
+            accepted: false,
+            output: Some("Delegate feature is unavailable.".to_string()),
+        },
     }
 }
 

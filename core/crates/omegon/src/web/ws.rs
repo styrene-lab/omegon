@@ -1061,6 +1061,96 @@ async fn handle_client_command(
             };
             let _ = snapshot_tx.send(message).await;
         }
+        "cleave_status" => {
+            let classified = crate::control_actions::classify_web_method("cleave_status");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for cleave_status",
+                    }))
+                    .await;
+                return;
+            }
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::ExecuteControl {
+                    request: crate::control_runtime::ControlRequest::CleaveStatus,
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("cleave_status", response),
+                    Err(_) => control_result_message(
+                        "cleave_status",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "cleave_status executor dropped response before completion"
+                                    .to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "cleave_status",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue cleave_status".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
+        }
+        "delegate_status" => {
+            let classified = crate::control_actions::classify_web_method("delegate_status");
+            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                let _ = snapshot_tx
+                    .send(serde_json::json!({
+                        "type": "system_message",
+                        "role": "system",
+                        "message": "caller role is insufficient for delegate_status",
+                    }))
+                    .await;
+                return;
+            }
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let accepted = command_tx
+                .send(WebCommand::ExecuteControl {
+                    request: crate::control_runtime::ControlRequest::DelegateStatus,
+                    respond_to: Some(reply_tx),
+                })
+                .await
+                .is_ok();
+            let message = if accepted {
+                match reply_rx.await {
+                    Ok(response) => control_result_message("delegate_status", response),
+                    Err(_) => control_result_message(
+                        "delegate_status",
+                        omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "delegate_status executor dropped response before completion"
+                                    .to_string(),
+                            ),
+                        },
+                    ),
+                }
+            } else {
+                control_result_message(
+                    "delegate_status",
+                    omegon_traits::ControlOutputResponse {
+                        accepted: false,
+                        output: Some("failed to enqueue delegate_status".to_string()),
+                    },
+                )
+            };
+            let _ = snapshot_tx.send(message).await;
+        }
         "auth_status" => {
             let classified = crate::control_actions::classify_web_method("auth_status");
             if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {

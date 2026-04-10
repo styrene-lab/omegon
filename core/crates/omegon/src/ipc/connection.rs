@@ -363,8 +363,9 @@ impl IpcConnection {
                 | "skills_install" | "plugin_view" | "plugin_install" | "plugin_remove"
                 | "plugin_update" | "secrets_view" | "secrets_set" | "secrets_get"
                 | "secrets_delete" | "vault_status" | "vault_unseal" | "vault_login"
-                | "vault_configure" | "vault_init_policy" | "set_model" | "set_thinking"
-                | "list_sessions" => {
+                | "vault_configure" | "vault_init_policy" | "cleave_status"
+                | "cleave_cancel_child" | "delegate_status" | "set_model"
+                | "set_thinking" | "list_sessions" => {
                     let req = serde_json::from_value::<ControlRequest>(payload.clone())
                         .unwrap_or_default();
                     let caller_role = parse_caller_role(req.caller_role.as_deref());
@@ -450,6 +451,15 @@ impl IpcConnection {
                         "vault_init_policy" => {
                             Some(crate::control_runtime::ControlRequest::VaultInitPolicy)
                         }
+                        "cleave_status" => Some(crate::control_runtime::ControlRequest::CleaveStatus),
+                        "cleave_cancel_child" => payload
+                            .get("label")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|label| crate::control_runtime::ControlRequest::CleaveCancelChild {
+                                label: label.to_string(),
+                            }),
+                        "delegate_status" => Some(crate::control_runtime::ControlRequest::DelegateStatus),
                         "list_sessions" => Some(crate::control_runtime::ControlRequest::ListSessions),
                         "set_model" => {
                             let model = payload
