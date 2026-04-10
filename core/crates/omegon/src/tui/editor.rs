@@ -137,7 +137,8 @@ impl Editor {
 
     fn should_collapse_paste(text: &str) -> bool {
         let line_count = text.split('\n').count();
-        line_count >= Self::COLLAPSIBLE_PASTE_MIN_LINES
+        let has_blank_line = text.contains("\n\n");
+        (line_count >= Self::COLLAPSIBLE_PASTE_MIN_LINES && has_blank_line)
             || text.chars().count() >= Self::COLLAPSIBLE_PASTE_MIN_CHARS
     }
 
@@ -220,8 +221,11 @@ impl Editor {
     }
 
     fn set_projected_cursor(&mut self, projected_idx: usize) {
-        let text = self.textarea.lines().join("\n");
-        self.raw_set_textarea_text(&text);
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::Head);
+        while self.textarea.cursor().0 > 0 {
+            self.textarea.move_cursor(ratatui_textarea::CursorMove::Up);
+            self.textarea.move_cursor(ratatui_textarea::CursorMove::Head);
+        }
         for _ in 0..projected_idx {
             self.textarea
                 .move_cursor(ratatui_textarea::CursorMove::Forward);
@@ -914,12 +918,27 @@ impl Editor {
     }
 
     pub fn move_word_backward(&mut self) {
+        let projected_idx = self.projected_cursor();
+        if let Some(span) = self.token_span_for_backspace(projected_idx) {
+            self.set_projected_cursor(span.start);
+            return;
+        }
         self.textarea
             .move_cursor(ratatui_textarea::CursorMove::WordBack);
         self.normalize_cursor_outside_token(false);
     }
 
     pub fn move_word_forward(&mut self) {
+        let projected_idx = self.projected_cursor();
+        if let Some(span) = self
+            .projection()
+            .token_spans
+            .into_iter()
+            .find(|span| projected_idx <= span.start)
+        {
+            self.set_projected_cursor(span.end);
+            return;
+        }
         self.textarea
             .move_cursor(ratatui_textarea::CursorMove::WordForward);
         self.normalize_cursor_outside_token(true);

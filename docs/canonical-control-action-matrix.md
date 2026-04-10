@@ -39,6 +39,207 @@ surface can be normalized without encoding security policy into ad hoc strings.
 
 ---
 
+## Live ingress inventory (evidence-backed)
+
+This section records the **currently implemented** command-and-control ingress
+surfaces, using the live code as evidence rather than intended architecture.
+It exists to make drift visible.
+
+### 1. Local TUI slash surface
+
+Primary parse/normalization entrypoint:
+
+- `core/crates/omegon/src/tui/mod.rs`
+  - `canonical_slash_command(...)`
+
+Current characteristics:
+
+- acts as the de facto parser for several canonical command families
+- supplies some user-facing command metadata/help text
+- is still partly transport-coupled because remote slash execution reuses this
+  parser directly
+
+Examples of command families currently normalized here:
+
+- context (`/context ...`)
+- model (`/model ...`)
+- thinking (`/think ...`)
+- session (`/new`, `/sessions`)
+- auth (`/login`, `/logout`, `/auth status`, `/auth unlock`)
+
+### 2. TUI command bus surface
+
+Primary dispatch path:
+
+- `TuiCommand::BusCommand`
+- `runtime_state.bus.dispatch_command(...)`
+- special-case auth handling in `core/crates/omegon/src/main.rs`
+
+Current characteristics:
+
+- bus dispatch is not identical to slash parsing
+- some auth actions bypass generic bus dispatch and are handled as special cases
+- this is a drift vector because transport bindings can hit bus commands without
+  going through the same validation path as slash
+
+Examples:
+
+- `auth_login`
+- `auth_logout`
+- feature-defined bus commands via `dispatch_command(...)`
+
+### 3. Native IPC control plane
+
+Primary transport contract:
+
+- `core/crates/omegon-traits/src/lib.rs`
+- `core/crates/omegon/src/ipc/connection.rs`
+
+Current request methods implemented in IPC:
+
+- `hello`
+- `ping`
+- `get_state`
+- `submit_prompt`
+- `cancel`
+- `subscribe`
+- `unsubscribe`
+- `get_graph`
+- `run_slash_command`
+- `shutdown`
+
+Current characteristics:
+
+- IPC already has several **first-class canonical methods** (`submit_prompt`,
+  `cancel`, `get_state`, `get_graph`, `shutdown`)
+- IPC still tunnels a broad mutation surface through generic
+  `run_slash_command`
+- role checks already exist at this layer, but many are attached to the method
+  or remote-slash classifier rather than a single transport-neutral command
+  contract
+
+### 4. WebSocket / daemon remote control surface
+
+Primary transport handler:
+
+- `core/crates/omegon/src/web/ws.rs`
+
+Current inbound command types:
+
+- `user_prompt`
+- `slash_command`
+- `cancel`
+- `request_snapshot`
+
+Current characteristics:
+
+- WebSocket mirrors IPC in spirit but not in vocabulary
+- prompt submission is first-class (`user_prompt`)
+- slash execution is still a generic tunnel (`slash_command`)
+- snapshot/state refresh exists as a transport command rather than a canonical
+  action binding
+
+### 5. CLI operator surface
+
+Primary entrypoint:
+
+- `core/crates/omegon/src/main.rs`
+
+Current characteristics:
+
+- CLI exposes some first-class commands (`auth`, `serve`, `embedded`, startup
+  flags, prompt submission)
+- some CLI operations correspond cleanly to canonical actions
+- others remain bootstrap/runtime wiring rather than reusable control intents
+
+Examples already in scope for this matrix:
+
+- `omegon auth status`
+- `omegon auth login <provider>`
+- `omegon auth logout <provider>`
+- `--model`
+- `--prompt` / `--prompt-file`
+
+### 6. Event/read surfaces that participate in C2
+
+These are not mutating command surfaces, but they are part of the control
+contract because operators and controllers rely on them for observation:
+
+- IPC `get_state`
+- IPC `get_graph`
+- IPC event `subscribe`
+- WebSocket `request_snapshot`
+- Web/dashboard state/graph APIs
+- local slash read surfaces like `/status`, `/stats`, `/model`, `/context`
+
+---
+
+## Observed drift points
+
+These are the concrete reasons the command surfaces are not yet unified.
+
+### Generic slash tunneling still carries too much control traffic
+
+Both IPC and WebSocket expose broad generic slash execution surfaces:
+
+- IPC: `run_slash_command`
+- WebSocket: `slash_command`
+
+That is useful as a compatibility bridge, but it means:
+
+- transport policy is attached to slash strings
+- help/docs can drift from runtime behavior
+- role classification depends on classifiers instead of canonical action ids
+- parity testing becomes stringly-typed and fragile
+
+### Parsing, help, policy, and execution are still split
+
+Today, different layers own different pieces of the contract:
+
+- TUI slash parser owns syntax for many commands
+- command list/help text owns discoverability metadata
+- remote slash executor owns remote acceptance behavior
+- IPC/WebSocket handlers own transport gating and role checks
+- bus/auth special cases own some execution semantics
+
+That split is exactly how stale behavior like implicit `/logout anthropic`
+slipped through.
+
+### IPC and WebSocket do not yet share a transport-neutral method vocabulary
+
+The two remote surfaces expose similar intents with different transport method
+names:
+
+| Intent | IPC | WebSocket |
+|---|---|---|
+| prompt submit | `submit_prompt` | `user_prompt` |
+| slash tunnel | `run_slash_command` | `slash_command` |
+| cancel | `cancel` | `cancel` |
+| state refresh | `get_state` | `request_snapshot` |
+| graph read | `get_graph` | no direct peer |
+| shutdown | `shutdown` | no direct peer |
+
+That is survivable, but it is not a unified C2 contract.
+
+---
+
+## Convergence target
+
+The intended end state is:
+
+1. **Canonical action ids own intent**
+   - e.g. `auth.logout`, `prompt.submit`, `runtime.shutdown`
+2. **Transport bindings map onto those ids**
+   - slash, IPC, WebSocket, CLI
+3. **Role requirements attach to canonical actions**
+   - not to raw slash strings or transport-specific method names
+4. **Help/discoverability derive from the same registry**
+   - provider lists, aliases, usage, remote-safety
+5. **Parity tests validate bindings across surfaces**
+   - same operator intent, different transport wrappers
+
+---
+
 ## Design rule
 
 Canonical actions own intent. Ingresses are bindings.
