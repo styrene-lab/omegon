@@ -75,3 +75,77 @@ Search for the fallback dispatch block (around line 430). It builds a `fb_dispat
 - `cargo test -p omegon cleave_` passes (9 tests)
 - `--smoke-cleave` is wired but has never been run
 - FYDS changes have NOT been written — that is the primary outstanding task
+
+---
+
+## 4. Canonical dispatcher-switch control request for Auspex/Omegon parity
+
+**Context:**
+Auspex is now typed-first internally and no longer uses raw legacy JSON as its production command model. Prompt submit, cancel, and slash/control actions have canonical typed paths, but **dispatcher switch still lacks a canonical Omegon control request over IPC/web control surfaces**.
+
+**Observed gap in Omegon rc.63:**
+- `core/crates/omegon/src/control_runtime.rs` defines typed `ControlRequest` variants for model/thinking/context/auth/plugin/secrets/cleave/delegate actions, but nothing for dispatcher switching.
+- `core/crates/omegon/src/ipc/connection.rs` routes canonical typed requests like `set_model`, `set_thinking`, `delegate_status`, etc., but no dispatcher-switch request.
+- Auspex currently has to serialize dispatcher switch to websocket compatibility JSON at the edge.
+- On IPC, Auspex now explicitly rejects dispatcher switch as unsupported and surfaces a visible operator-facing failure instead of silently dropping it.
+
+**What needs to be implemented in Omegon:**
+
+### A. Add a canonical typed control request
+Add a new control-runtime request for dispatcher switching, something structurally equivalent to:
+- `ControlRequest::SwitchDispatcher { request_id: String, profile: String, model: Option<String> }`
+
+This request must be treated as a first-class control surface, not a legacy/raw JSON special case.
+
+### B. Route it through canonical ingress surfaces
+Wire the new request through:
+- `core/crates/omegon/src/control_runtime.rs`
+- `core/crates/omegon/src/ipc/connection.rs`
+- any web/daemon control bridge that already forwards typed `ExecuteControl` requests
+- control action classification (`core/crates/omegon/src/control_actions.rs`)
+
+The request must receive:
+- a clear canonical action classification
+- an explicit control role
+- an explicit `remote_safe` decision
+
+### C. Update runtime/session state publication
+When a dispatcher switch is requested and processed, the runtime must continue publishing authoritative dispatcher state via the existing snapshot surfaces so Auspex can reconcile:
+- `available_options`
+- `switch_state`
+- `expected_profile`
+- `expected_model`
+
+If there is already an internal runtime path that performs dispatcher switching, expose it through the new typed control request instead of duplicating logic.
+
+### D. Keep request-aware reconciliation semantics
+Auspex already expects monotonic request-aware reconciliation:
+- pending local request gets a `request_id`
+- snapshot-confirmed matching request becomes active/confirmed
+- conflicting request IDs become “active elsewhere”
+- backend rejection becomes failed with `failure_code` / `note`
+
+Do **not** regress that. The new canonical request must preserve those semantics in published state.
+
+**Acceptance criteria:**
+- A canonical typed dispatcher-switch request exists in Omegon control runtime.
+- IPC can execute dispatcher switch without using `run_slash_command` or raw JSON envelopes.
+- Web/daemon typed control can execute the same request through the same runtime path.
+- `control_actions` classifies the new request explicitly.
+- Snapshot/state publication continues to expose authoritative dispatcher `switch_state` and target profile/model.
+- Tests cover:
+  - accepted dispatcher-switch request
+  - rejected dispatcher-switch request
+  - state publication after issue/confirm/fail
+  - IPC routing for the new request
+  - control classification for the new request
+
+**Why this matters:**
+This is the last meaningful non-canonical control seam for Auspex integration. Until Omegon exposes this request, Auspex must keep a compatibility-only websocket edge path and report IPC dispatcher-switch attempts as unsupported.
+
+**Validation once implemented:**
+From Auspex side, the expected follow-up is:
+- remove the special unsupported IPC branch for dispatcher switch
+- dispatch typed dispatcher-switch requests over IPC normally
+- keep websocket compatibility only if still needed for remote degraded mode
+- verify `cargo test`, `cargo clippy --all-targets -- -D warnings`, and an actual Auspex live attach/switch flow

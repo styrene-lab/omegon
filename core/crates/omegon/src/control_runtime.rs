@@ -27,6 +27,11 @@ pub enum ControlRequest {
     ModelView,
     ModelList,
     SetModel { requested_model: String },
+    SwitchDispatcher {
+        request_id: String,
+        profile: String,
+        model: Option<String>,
+    },
     SetThinking { level: crate::settings::ThinkingLevel },
     ContextStatus,
     ContextCompact,
@@ -147,6 +152,22 @@ pub async fn execute_control(
         ControlRequest::ModelList => model_list_response().await,
         ControlRequest::SetModel { requested_model } => {
             set_model_response(ctx.agent, ctx.shared_settings, ctx.bridge, &requested_model).await
+        }
+        ControlRequest::SwitchDispatcher {
+            request_id,
+            profile,
+            model,
+        } => {
+            switch_dispatcher_response(
+                ctx.agent,
+                ctx.shared_settings,
+                ctx.bridge,
+                &request_id,
+                &profile,
+                model.as_deref(),
+                ctx.events_tx,
+            )
+            .await
         }
         ControlRequest::SetThinking { level } => {
             set_thinking_response(ctx.shared_settings, level).await
@@ -353,6 +374,106 @@ pub async fn set_model_response(
             format!("Model unchanged: {effective_model}")
         } else {
             messages.join("\n")
+        }),
+    }
+}
+
+pub async fn switch_dispatcher_response(
+    agent: &mut InteractiveAgentHost,
+    shared_settings: &settings::SharedSettings,
+    bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
+    request_id: &str,
+    profile: &str,
+    model: Option<&str>,
+    events_tx: &broadcast::Sender<AgentEvent>,
+) -> SlashCommandResponse {
+    let normalized_profile = profile.trim().to_ascii_lowercase();
+    let allowed = ["retribution", "victory", "gloriana"];
+    if !allowed.contains(&normalized_profile.as_str()) {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!(
+                "Unknown dispatcher profile '{profile}'. Expected one of: {}",
+                allowed.join(", ")
+            )),
+        };
+    }
+
+    let requested_model = model.map(str::trim).filter(|m| !m.is_empty());
+    let effective_model = if let Some(requested_model) = requested_model {
+        providers::resolve_execution_model_spec(requested_model)
+            .await
+            .unwrap_or_else(|| requested_model.to_string())
+    } else {
+        shared_settings
+            .lock()
+            .ok()
+            .map(|s| s.model.clone())
+            .unwrap_or_default()
+    };
+
+    if let Ok(mut s) = shared_settings.lock() {
+        s.capability_tier = match normalized_profile.as_str() {
+            "retribution" => settings::CapabilityTier::Retribution,
+            "victory" => settings::CapabilityTier::Victory,
+            "gloriana" => settings::CapabilityTier::Gloriana,
+            _ => settings::CapabilityTier::Victory,
+        };
+        if !effective_model.is_empty() {
+            s.set_model(&effective_model);
+        }
+        let mut profile_doc = settings::Profile::load(&agent.cwd);
+        profile_doc.capture_from(&s);
+        let _ = profile_doc.save(&agent.cwd);
+    }
+
+    if !effective_model.is_empty() {
+        if let Some(new_bridge) = providers::auto_detect_bridge(&effective_model).await {
+            let mut guard = bridge.write().await;
+            *guard = new_bridge;
+            if let Ok(mut s) = shared_settings.lock() {
+                s.provider_connected = true;
+            }
+        }
+    }
+
+    let mut status = crate::status::HarnessStatus::assemble();
+    status.update_runtime_posture(
+        omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
+        omegon_traits::OmegonAutonomyMode::OperatorDriven,
+    );
+    status.update_dispatcher_state(
+        Some(request_id.to_string()),
+        Some(normalized_profile.clone()),
+        if effective_model.is_empty() {
+            None
+        } else {
+            Some(effective_model.clone())
+        },
+        "accepted",
+        None,
+        Some("dispatcher switch applied locally".into()),
+    );
+    status.dispatcher.active_profile = Some(normalized_profile.clone());
+    status.dispatcher.active_model = if effective_model.is_empty() {
+        None
+    } else {
+        Some(effective_model.clone())
+    };
+    let auth_status = auth::probe_all_providers().await;
+    status.providers = crate::auth::auth_status_to_provider_statuses(&auth_status);
+    status.annotate_provider_runtime_health();
+    if let Ok(json) = serde_json::to_value(&status) {
+        let _ = events_tx.send(AgentEvent::HarnessStatusChanged { status_json: json });
+    }
+
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(match requested_model {
+            Some(_) => format!(
+                "Dispatcher switched to {normalized_profile} (request {request_id}) using {effective_model}."
+            ),
+            None => format!("Dispatcher switched to {normalized_profile} (request {request_id})."),
         }),
     }
 }

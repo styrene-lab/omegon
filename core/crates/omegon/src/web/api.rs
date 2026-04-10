@@ -570,6 +570,26 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                         omegon_traits::OmegonAutonomyMode::Autonomous => "autonomous".to_string(),
                     })
                     .unwrap_or_else(|| "operator-driven".into()),
+                dispatcher: omegon_traits::IpcDispatcherSnapshot {
+                    available_options: harness
+                        .as_ref()
+                        .map(|h| h.dispatcher.available_options.clone())
+                        .unwrap_or_else(|| vec!["retribution".into(), "victory".into(), "gloriana".into()]),
+                    switch_state: harness
+                        .as_ref()
+                        .map(|h| h.dispatcher.switch_state.clone())
+                        .unwrap_or_else(|| "idle".into()),
+                    request_id: harness.as_ref().and_then(|h| h.dispatcher.request_id.clone()),
+                    expected_profile: harness.as_ref().and_then(|h| h.dispatcher.expected_profile.clone()),
+                    expected_model: harness.as_ref().and_then(|h| h.dispatcher.expected_model.clone()),
+                    active_profile: harness
+                        .as_ref()
+                        .and_then(|h| h.dispatcher.active_profile.clone())
+                        .or_else(|| Some("victory".into())),
+                    active_model: harness.as_ref().and_then(|h| h.dispatcher.active_model.clone()),
+                    failure_code: harness.as_ref().and_then(|h| h.dispatcher.failure_code.clone()),
+                    note: harness.as_ref().and_then(|h| h.dispatcher.note.clone()),
+                },
                 memory_available: harness.as_ref().is_some_and(|h| h.memory_available),
                 cleave_available: harness.as_ref().is_some_and(|h| h.cleave_available),
                 memory_warning: harness.as_ref().and_then(|h| h.memory_warning.clone()),

@@ -14,10 +14,11 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, warn};
 
 use omegon_traits::{
-    AcceptedResponse, AgentEvent, ControlOutputResponse, ControlRequest, HelloRequest,
-    HelloResponse, IPC_PROTOCOL_VERSION, IpcCapability, IpcEnvelope, IpcEnvelopeKind,
-    IpcErrorCode, IpcEventPayload, PingRequest, PingResponse, SlashCommandRequest,
-    SlashCommandResponse, SubmitPromptRequest, SubscriptionRequest, SubscriptionResponse,
+    AcceptedResponse, AgentEvent, ControlOutputResponse, ControlRequest,
+    DispatcherSwitchRequest, HelloRequest, HelloResponse, IPC_PROTOCOL_VERSION, IpcCapability,
+    IpcEnvelope, IpcEnvelopeKind, IpcErrorCode, IpcEventPayload, PingRequest, PingResponse,
+    SlashCommandRequest, SlashCommandResponse, SubmitPromptRequest, SubscriptionRequest,
+    SubscriptionResponse,
 };
 
 use super::snapshot::build_state_snapshot;
@@ -365,7 +366,7 @@ impl IpcConnection {
                 | "secrets_delete" | "vault_status" | "vault_unseal" | "vault_login"
                 | "vault_configure" | "vault_init_policy" | "cleave_status"
                 | "cleave_cancel_child" | "delegate_status" | "set_model"
-                | "set_thinking" | "list_sessions" => {
+                | "switch_dispatcher" | "set_thinking" | "list_sessions" => {
                     let req = serde_json::from_value::<ControlRequest>(payload.clone())
                         .unwrap_or_default();
                     let caller_role = parse_caller_role(req.caller_role.as_deref());
@@ -492,6 +493,31 @@ impl IpcConnection {
                                 }
                                 Some(crate::control_runtime::ControlRequest::SetModel {
                                     requested_model: model,
+                                })
+                            }
+                        }
+                        "switch_dispatcher" => {
+                            let req = serde_json::from_value::<DispatcherSwitchRequest>(payload.clone())
+                                .context("parse switch_dispatcher")?;
+                            let classified = crate::control_actions::classify_ipc_method("switch_dispatcher");
+                            let caller_role = parse_caller_role(req.caller_role.as_deref());
+                            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                                send_error(
+                                    &out_tx,
+                                    req_id,
+                                    IpcErrorCode::InvalidPayload,
+                                    "caller role is insufficient for switch_dispatcher",
+                                )
+                                .await;
+                                continue;
+                            }
+                            if req.request_id.trim().is_empty() || req.profile.trim().is_empty() {
+                                None
+                            } else {
+                                Some(crate::control_runtime::ControlRequest::SwitchDispatcher {
+                                    request_id: req.request_id,
+                                    profile: req.profile,
+                                    model: req.model,
                                 })
                             }
                         }

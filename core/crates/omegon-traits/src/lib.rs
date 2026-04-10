@@ -173,6 +173,8 @@ pub enum IpcCapability {
     ModelSet,
     /// `set_thinking` is available.
     ThinkingSet,
+    /// `switch_dispatcher` is available.
+    DispatcherSwitch,
     /// `run_slash_command` is available.
     SlashCommands,
     /// `shutdown` is available.
@@ -197,6 +199,7 @@ impl IpcCapability {
             Self::ModelList => "model.list",
             Self::ModelSet => "model.set",
             Self::ThinkingSet => "thinking.set",
+            Self::DispatcherSwitch => "dispatcher.switch",
             Self::SlashCommands => "slash_commands",
             Self::Shutdown => "shutdown",
         }
@@ -220,6 +223,7 @@ impl IpcCapability {
             Self::ModelList.as_str(),
             Self::ModelSet.as_str(),
             Self::ThinkingSet.as_str(),
+            Self::DispatcherSwitch.as_str(),
             Self::SlashCommands.as_str(),
             Self::Shutdown.as_str(),
         ]
@@ -290,6 +294,18 @@ pub struct AcceptedResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ControlRequest {
+    /// Optional caller role for transport-side authorization. Defaults to admin
+    /// when omitted for backward compatibility with existing clients.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller_role: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DispatcherSwitchRequest {
+    pub request_id: String,
+    pub profile: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Optional caller role for transport-side authorization. Defaults to admin
     /// when omitted for backward compatibility with existing clients.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -652,6 +668,7 @@ pub struct IpcHarnessSnapshot {
     pub capability_tier: String,
     pub runtime_profile: String,
     pub autonomy_mode: String,
+    pub dispatcher: IpcDispatcherSnapshot,
     pub memory_available: bool,
     pub cleave_available: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -665,6 +682,26 @@ pub struct IpcHarnessSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_tone: Option<String>,
     pub active_delegate_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IpcDispatcherSnapshot {
+    pub available_options: Vec<String>,
+    pub switch_state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

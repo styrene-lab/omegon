@@ -46,6 +46,7 @@ pub struct HarnessStatus {
     pub capability_tier: String, // "retribution" / "victory" / "gloriana"
     pub runtime_profile: omegon_traits::OmegonRuntimeProfile,
     pub autonomy_mode: omegon_traits::OmegonAutonomyMode,
+    pub dispatcher: DispatcherStatus,
 
     // ── Memory ───────────────────────────────────────────────
     pub memory: MemoryStatus,
@@ -64,6 +65,19 @@ pub struct HarnessStatus {
 }
 
 /// Summary of an active delegate process.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DispatcherStatus {
+    pub available_options: Vec<String>,
+    pub switch_state: String,
+    pub request_id: Option<String>,
+    pub expected_profile: Option<String>,
+    pub expected_model: Option<String>,
+    pub active_profile: Option<String>,
+    pub active_model: Option<String>,
+    pub failure_code: Option<String>,
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegateSummary {
     pub task_id: String,
@@ -488,6 +502,23 @@ impl HarnessStatus {
         self.autonomy_mode = autonomy_mode;
     }
 
+    pub fn update_dispatcher_state(
+        &mut self,
+        request_id: Option<String>,
+        profile: Option<String>,
+        model: Option<String>,
+        switch_state: &str,
+        failure_code: Option<String>,
+        note: Option<String>,
+    ) {
+        self.dispatcher.request_id = request_id;
+        self.dispatcher.expected_profile = profile;
+        self.dispatcher.expected_model = model;
+        self.dispatcher.switch_state = switch_state.to_string();
+        self.dispatcher.failure_code = failure_code;
+        self.dispatcher.note = note;
+    }
+
     /// Update memory stats.
     pub fn update_memory(&mut self, stats: MemoryStatus) {
         self.memory = stats;
@@ -676,6 +707,17 @@ impl Default for HarnessStatus {
             capability_tier: "victory".into(),
             runtime_profile: omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
             autonomy_mode: omegon_traits::OmegonAutonomyMode::OperatorDriven,
+            dispatcher: DispatcherStatus {
+                available_options: vec!["retribution".into(), "victory".into(), "gloriana".into()],
+                switch_state: "idle".into(),
+                request_id: None,
+                expected_profile: None,
+                expected_model: None,
+                active_profile: Some("victory".into()),
+                active_model: None,
+                failure_code: None,
+                note: None,
+            },
             memory: MemoryStatus {
                 total_facts: 0,
                 active_facts: 0,
