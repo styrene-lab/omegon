@@ -314,18 +314,122 @@ These need an explicit decision per family:
 2. keep slash-only by design
 3. expose only via CLI or local TUI, not remote transports
 
-### Compatibility tunnel scope is now much smaller
+### Auspex exposure policy
 
-The remaining generic slash adapters exist primarily for the families above,
-not for the promoted control set.
+Auspex should expose a **full operator slash vocabulary** for attached Omegon
+instances, including the local Auspex-managed instance. Terminal-only control
+surfaces create operator friction and effectively hide capability.
 
-- IPC `run_slash_command` is now mostly a compatibility path for non-promoted
-  slash families.
-- WebSocket `slash_command` is now mostly the dashboard fallback for the same
-  residual slash-only families.
+That does **not** mean slash should remain the semantic owner.
 
-This means removal planning can now be scoped against a concrete residual set
-instead of the entire slash surface.
+Preferred execution stack:
+
+1. slash UX in Auspex
+2. parse to canonical `ControlRequest` where available
+3. dispatch through shared control runtime
+4. fall back to a narrow slash adapter only for non-promoted families
+
+Decision rule for residual families:
+
+- **Preferred** — promote to canonical `ControlRequest`
+- **Allowed temporarily** — keep Auspex slash UX via compatibility adapter
+- **Avoid** — require terminal-only execution for common operator workflows
+
+### Residual family prioritization for Auspex
+
+These families matter because operators are likely to need them from Auspex,
+not just from a local terminal.
+
+#### 1. `skills` / `plugin`
+
+Why it matters:
+- extension lifecycle and capability installation are operator-facing workflows
+- forcing terminal use here would make Auspex feel incomplete
+
+Recommended direction:
+- expose full slash UX in Auspex immediately
+- promote listing/status flows first
+- promote install/remove/update flows next with explicit role gating
+
+Target canonical actions (illustrative):
+- `skills.view`
+- `skills.install`
+- `plugin.view`
+- `plugin.install`
+- `plugin.remove`
+- `plugin.update`
+
+#### 2. `secrets` / `vault`
+
+Why it matters:
+- operators need credential and backend visibility from the orchestration plane
+- local-only terminal workflows here create high friction during setup and recovery
+
+Recommended direction:
+- expose read/status surfaces in Auspex first
+- promote mutating actions carefully with explicit admin gating and auditability
+- keep sensitive value entry ergonomics in mind; some flows may need guided UI
+
+Target canonical actions (illustrative):
+- `secrets.view`
+- `secrets.set`
+- `secrets.get`
+- `secrets.delete`
+- `vault.status`
+- `vault.unseal`
+- `vault.login`
+- `vault.configure`
+- `vault.init_policy`
+
+#### 3. `cleave` / `delegate`
+
+Why it matters:
+- these are orchestration-native capabilities and are especially relevant in
+  Auspex, where multiple agents/instances are visible together
+- requiring terminal fallback here would undermine the point of the control plane
+
+Recommended direction:
+- expose slash UX in Auspex immediately
+- promote status/list/cancel/read flows before broad mutating orchestration
+- preserve explicit role boundaries for spawning or dispatching work
+
+Target canonical actions (illustrative):
+- `cleave.view`
+- `cleave.run`
+- `cleave.cancel_child`
+- `delegate.status`
+- `delegate.run`
+
+#### 4. `auspex` / `dash`
+
+Why it matters:
+- these are self-management / browser-surface workflows
+- they are awkward because Auspex is both the controller and, for the local
+  instance, the attached environment
+
+Recommended direction:
+- distinguish self-management from attached-instance control explicitly
+- prefer canonical actions for status/open flows that make sense remotely
+- avoid transport loops where Auspex-in-Ausepx style commands become ambiguous
+
+Target canonical actions (illustrative):
+- `dashboard.status`
+- `dashboard.open`
+- `auspex.status`
+
+### Suggested promotion order
+
+If we continue the dispatcher expansion, the recommended order is:
+
+1. `skills` / `plugin`
+2. `secrets` / `vault`
+3. `cleave` / `delegate`
+4. `auspex` / `dash`
+
+Rationale:
+- `skills` / `plugin` and `secrets` / `vault` are common operator workflows
+- `cleave` / `delegate` are high-value orchestration capabilities
+- `auspex` / `dash` need extra care because they blend controller and target roles
 
 ---
 
