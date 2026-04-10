@@ -244,37 +244,35 @@ rc:
         exit 1
     fi
 
-    # Read current version
+    # Read current version and compute target RC version, but do not mutate yet.
     CURRENT=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
     echo "Current version: $CURRENT"
 
-    # Bump RC number
     if echo "$CURRENT" | grep -q '\-rc\.'; then
-        # Already an RC — increment the number
         BASE=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//')
         RC_NUM=$(echo "$CURRENT" | sed 's/.*-rc\.//')
         NEW_RC=$((RC_NUM + 1))
         NEW_VERSION="${BASE}-rc.${NEW_RC}"
     else
-        # Stable version — start rc.1 on next patch
         IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-        NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))-rc.1"
+        BASE="${MAJOR}.${MINOR}.$((PATCH + 1))"
+        NEW_VERSION="${BASE}-rc.1"
     fi
 
     echo "New version: $NEW_VERSION"
 
-    # Update Cargo.toml
-    sed -i '' "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" core/Cargo.toml
+    # Preflight before any mutation.
+    echo "Release preflight..."
+    python3 scripts/release_preflight.py
 
-    # Update milestone tracking
-    ./scripts/milestone-update.sh rc "$NEW_VERSION"
-
-    # Audit lifecycle drift before cutting the RC.
-    # Scope blocking to the active milestone only; unrelated historical design
-    # backlog should not jam release mechanics. Repo-wide drift is still shown
-    # as a warning for operator visibility.
+    # Audit lifecycle drift before cutting the RC, but without mutating milestone state.
+    # Scope blocking to the active milestone only when present.
     echo "Lifecycle audit..."
-    MILESTONE_NODES=$(jq -r --arg base "$BASE" '.[$base].nodes[]? // empty' .omegon/milestones.json)
+    if [ -f .omegon/milestones.json ]; then
+        MILESTONE_NODES=$(jq -r --arg base "$BASE" '.[$base].nodes[]? // empty' .omegon/milestones.json)
+    else
+        MILESTONE_NODES=""
+    fi
     if [ -z "$MILESTONE_NODES" ]; then
         echo "  ! No milestone-scoped design nodes for $BASE — treating lifecycle audit as warning-only"
         cd core && cargo run --quiet -p omegon -- doctor || true
@@ -303,15 +301,31 @@ rc:
         rm -f "$REPORT"
     fi
 
-    # Test first (faster than build, catches errors early)
+    # Test before any mutation so aborts don't dirty the tree.
     echo "Testing..."
     cd core && cargo test -p omegon 2>&1 | tail -3
     cd ..
+
+    # From here on, rollback mutated files if anything fails before commit.
+    MUTATED=0
+    rollback() {
+        if [ "$MUTATED" = "1" ]; then
+            git checkout -- core/Cargo.toml core/Cargo.lock .omegon/milestones.json 2>/dev/null || true
+        fi
+    }
+    trap rollback ERR INT TERM
+
+    # Mutate version and milestone state only after validation passes.
+    sed -i '' "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" core/Cargo.toml
+    ./scripts/milestone-update.sh rc "$NEW_VERSION"
+    MUTATED=1
 
     # Commit and tag BEFORE final build so the binary has the right sha
     git add core/Cargo.toml core/Cargo.lock .omegon/milestones.json
     git commit -m "chore(release): ${NEW_VERSION}"
     git tag "v${NEW_VERSION}"
+    MUTATED=0
+    trap - ERR INT TERM
 
     # Build release (now the tag and commit are baked into the binary)
     echo "Building..."
@@ -339,13 +353,9 @@ rc:
         echo "Ad-hoc signed (run 'just sign' to sign with Developer ID)"
     fi
 
-    # Re-link the freshly cut RC so the operator's local `omegon` matches the
-    # version that was just committed/tagged/built.
     echo "Linking freshly built RC into PATH..."
     just link
 
-    # Push immediately — don't accumulate local tags. Pushing many tags at once
-    # causes GitHub Actions to silently drop workflow triggers.
     echo "Pushing rc tag..."
     git push origin main "v${NEW_VERSION}"
 
