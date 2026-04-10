@@ -51,6 +51,9 @@ pub struct LoopConfig {
     /// Whether the loop may spend an extra turn nudging the agent to commit.
     /// Interactive mode wants this; headless/benchmark mode generally does not.
     pub allow_commit_nudge: bool,
+    /// Whether the loop should push back on first-turn orientation churn in
+    /// execution-biased headless runs (benchmarks, smoke tasks).
+    pub enforce_first_turn_execution_bias: bool,
 }
 
 impl Default for LoopConfig {
@@ -67,6 +70,7 @@ impl Default for LoopConfig {
             secrets: None,
             force_compact: None,
             allow_commit_nudge: true,
+            enforce_first_turn_execution_bias: false,
         }
     }
 }
@@ -90,6 +94,24 @@ fn estimate_tool_schema_tokens(tools: &[omegon_traits::ToolDefinition]) -> usize
             estimate_chars_to_tokens(tool.name.len() + tool.description.len() + schema_json.len())
         })
         .sum()
+}
+
+fn is_orientation_tool(name: &str) -> bool {
+    matches!(name, "memory_recall" | "context_status" | "request_context")
+}
+
+fn is_first_turn_orientation_churn(
+    turn: u32,
+    config: &LoopConfig,
+    conversation: &ConversationState,
+    tool_calls: &[ToolCall],
+) -> bool {
+    config.enforce_first_turn_execution_bias
+        && turn == 1
+        && !tool_calls.is_empty()
+        && tool_calls.iter().all(|call| is_orientation_tool(&call.name))
+        && conversation.intent.files_read.is_empty()
+        && conversation.intent.files_modified.is_empty()
 }
 
 pub(crate) fn compute_context_composition(
@@ -608,6 +630,14 @@ pub async fn run(
             conversation.push_tool_result(result.clone());
         }
         conversation.intent.update_from_tools(tool_calls, &results);
+
+        if is_first_turn_orientation_churn(turn, config, conversation, tool_calls) {
+            tracing::info!("First-turn orientation churn detected — injecting execution-bias nudge");
+            conversation.push_user(
+                "[System: This is an execution-biased headless run. Stop spending turns on orientation tools unless they are strictly required to unblock execution. On the next turn, take a concrete repo-inspection or implementation step: read the most relevant file, search the codebase for the target symbol/path, or make the smallest justified change.]"
+                    .to_string(),
+            );
+        }
 
         // ─── Emit tool events to bus features ───────────────────────
         for (call, result) in tool_calls.iter().zip(results.iter()) {
@@ -2107,6 +2137,7 @@ mod tests {
             secrets: None,
             force_compact: None,
             allow_commit_nudge: true,
+            enforce_first_turn_execution_bias: false,
         };
         // soft_limit_turns=0 → loop should compute 2/3 of max_turns (40)
         assert_eq!(config.soft_limit_turns, 0, "0 = auto-calculate in run()");
@@ -2238,6 +2269,69 @@ mod tests {
     #[test]
     fn default_loop_config_allows_commit_nudge() {
         assert!(LoopConfig::default().allow_commit_nudge);
+    }
+
+    #[test]
+    fn default_loop_config_does_not_enforce_first_turn_execution_bias() {
+        assert!(!LoopConfig::default().enforce_first_turn_execution_bias);
+    }
+
+    #[test]
+    fn first_turn_orientation_churn_detected_for_headless_execution_bias_mode() {
+        let config = LoopConfig {
+            enforce_first_turn_execution_bias: true,
+            ..LoopConfig::default()
+        };
+        let conversation = ConversationState::new();
+        let tool_calls = vec![
+            ToolCall {
+                id: "1".into(),
+                name: "memory_recall".into(),
+                arguments: Value::Null,
+            },
+            ToolCall {
+                id: "2".into(),
+                name: "context_status".into(),
+                arguments: Value::Null,
+            },
+            ToolCall {
+                id: "3".into(),
+                name: "request_context".into(),
+                arguments: Value::Null,
+            },
+        ];
+        assert!(is_first_turn_orientation_churn(1, &config, &conversation, &tool_calls));
+    }
+
+    #[test]
+    fn first_turn_orientation_churn_not_detected_after_real_repo_inspection() {
+        let config = LoopConfig {
+            enforce_first_turn_execution_bias: true,
+            ..LoopConfig::default()
+        };
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("src/main.rs"));
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "memory_recall".into(),
+            arguments: Value::Null,
+        }];
+        assert!(!is_first_turn_orientation_churn(1, &config, &conversation, &tool_calls));
+    }
+
+    #[test]
+    fn first_turn_orientation_churn_not_detected_for_normal_mode() {
+        let config = LoopConfig::default();
+        let conversation = ConversationState::new();
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "memory_recall".into(),
+            arguments: Value::Null,
+        }];
+        assert!(!is_first_turn_orientation_churn(1, &config, &conversation, &tool_calls));
     }
 
     // ── Stuck detector edge cases ──────────────────────────────────────
