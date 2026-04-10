@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 57,
+    "rc_count": 58,
     "notes": [
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
       "feat(anthropic): prefer adaptive thinking for claude 4.6",
@@ -500,13 +500,16 @@
       "fix(auth): expose ollama-cloud in login surfaces",
       "fix(auth): route ollama-cloud login through hidden key entry",
       "fix(benchmark): accumulate usage across bench turns",
+      "fix(benchmark): add phase audit logs to harness runs",
       "fix(benchmark): count cache writes in total tokens",
       "fix(benchmark): fail runs when adapter execution errors",
       "fix(benchmark): isolate cargo targets for clean-room runs",
+      "fix(benchmark): label slim omegon runs as om",
       "fix(benchmark): normalize claude model specs and fail fast",
       "fix(benchmark): parse real Claude Code usage fields",
       "fix(benchmark): preserve explicit model over profile defaults",
       "fix(benchmark): preserve non-empty context snapshots",
+      "fix(benchmark): propagate cache creation tokens through usage summaries",
       "fix(benchmark): run acceptance against clean-room repo",
       "fix(brew): fail early on unsupported Linux glibc",
       "fix(cleave): add bootstrap supervisor token to restart adoption",
@@ -648,7 +651,7 @@
       "refactor(web): migrate dashboard prompt bar to typed control messages",
       "refactor(web): route typed control commands through dispatcher"
     ],
-    "rc_version": "0.15.10-rc.63",
-    "last_rc": "2026-04-10T13:31:07Z"
+    "rc_version": "0.15.10-rc.64",
+    "last_rc": "2026-04-10T16:36:32Z"
   }
 }
