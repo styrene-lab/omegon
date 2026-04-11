@@ -301,7 +301,8 @@ pub fn read_credential_extra(provider: &str, field: &str) -> Option<String> {
     let path = auth_json_path()?;
     let content = std::fs::read_to_string(&path).ok()?;
     let auth: Value = serde_json::from_str(&content).ok()?;
-    auth.get(provider)?.get(field)?.as_str().map(String::from)
+    let auth_key = auth_json_key(provider);
+    auth.get(auth_key)?.get(field)?.as_str().map(String::from)
 }
 
 /// Write credentials for a provider to auth.json.
