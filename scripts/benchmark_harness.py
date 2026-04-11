@@ -672,6 +672,98 @@ def run_acceptance(commands: list[str], repo_path: Path, env: dict[str, str] | N
     return status, elapsed, results
 
 
+def run_optional_acceptance(
+    commands: list[str],
+    repo_path: Path,
+    env: dict[str, str] | None = None,
+) -> tuple[float, list[dict[str, Any]]]:
+    """Run optional acceptance commands for diagnostic visibility.
+
+    Optional commands are informational. Their pass/fail state is recorded but
+    never gates the run's final status. All commands are executed regardless of
+    earlier failures.
+    """
+    started = time.monotonic()
+    results: list[dict[str, Any]] = []
+    if commands:
+        audit(f"acceptance optional start: cwd={repo_path} commands={len(commands)}")
+    for index, cmd in enumerate(commands, start=1):
+        audit(f"acceptance optional command {index}/{len(commands)}: {cmd}")
+        proc = subprocess.run(
+            cmd,
+            cwd=repo_path,
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        results.append(
+            {
+                "cmd": cmd,
+                "exit": proc.returncode,
+                "stdout": proc.stdout,
+                "stderr": proc.stderr,
+                "status": "pass" if proc.returncode == 0 else "fail",
+            }
+        )
+        audit(f"acceptance optional command {index} exit={proc.returncode}")
+    elapsed = time.monotonic() - started
+    if commands:
+        audit(f"acceptance optional done: elapsed={elapsed:.3f}s")
+    return elapsed, results
+
+
+def run_failure_if(
+    commands: list[str],
+    repo_path: Path,
+    env: dict[str, str] | None = None,
+) -> tuple[bool, float, list[dict[str, Any]]]:
+    """Run failure_if predicate commands.
+
+    Each command is treated as a forbidden-condition predicate:
+      - exit 0   → the forbidden condition matched → status "triggered"
+      - non-zero → the forbidden condition is clear → status "clear"
+
+    Any triggered command causes the run to be marked as failed (failure_if
+    overrides a passing required-acceptance result). All commands are executed
+    regardless of earlier matches so the artifact captures every violation.
+    """
+    started = time.monotonic()
+    results: list[dict[str, Any]] = []
+    triggered = False
+    if commands:
+        audit(f"acceptance failure_if start: cwd={repo_path} commands={len(commands)}")
+    for index, cmd in enumerate(commands, start=1):
+        audit(f"acceptance failure_if command {index}/{len(commands)}: {cmd}")
+        proc = subprocess.run(
+            cmd,
+            cwd=repo_path,
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        cmd_status = "triggered" if proc.returncode == 0 else "clear"
+        if cmd_status == "triggered":
+            triggered = True
+        results.append(
+            {
+                "cmd": cmd,
+                "exit": proc.returncode,
+                "stdout": proc.stdout,
+                "stderr": proc.stderr,
+                "status": cmd_status,
+            }
+        )
+        audit(f"acceptance failure_if command {index} exit={proc.returncode} status={cmd_status}")
+    elapsed = time.monotonic() - started
+    if commands:
+        audit(f"acceptance failure_if done: triggered={triggered} elapsed={elapsed:.3f}s")
+    return triggered, elapsed, results
+
+
 def compute_total_tokens(usage: dict[str, Any]) -> int | None:
     values = [
         usage.get("input_tokens"),
@@ -739,12 +831,133 @@ def derive_process_metrics(spec: TaskSpec, usage: dict[str, Any]) -> dict[str, A
                 derived[key] = value
     if derived:
         process["derived"] = derived
+
+    process["availability"] = "full" if turn_count is not None else "none"
+    process["grading"] = grade_process_expectations(spec.process_expectations, turn_count, derived)
     return process
 
 
-def derive_final_status(adapter: AdapterResult, acceptance_status: str) -> tuple[str, float]:
+# Process expectation keys that we know how to grade today and the
+# `(actual_source, getter)` we use to resolve their actual value. Each getter
+# takes (turn_count, derived) and returns an int or None.
+SUPPORTED_PROCESS_EXPECTATIONS: dict[str, tuple[str, Any]] = {
+    "max_turns": (
+        "turn_count",
+        lambda turn_count, derived: turn_count,
+    ),
+    "max_orientation_only_turns": (
+        "derived.orientation_only_turns",
+        lambda turn_count, derived: derived.get("orientation_only_turns"),
+    ),
+    "max_progress_nudges": (
+        "derived.progress_nudge_count",
+        lambda turn_count, derived: derived.get("progress_nudge_count"),
+    ),
+    "max_tool_continuation_turns": (
+        "derived.tool_continuation_turns",
+        lambda turn_count, derived: derived.get("tool_continuation_turns"),
+    ),
+    "max_avg_input_tokens": (
+        "derived.avg_input_tokens",
+        lambda turn_count, derived: derived.get("avg_input_tokens"),
+    ),
+}
+
+
+def grade_process_expectations(
+    expectations: dict[str, Any],
+    turn_count: int | None,
+    derived: dict[str, Any],
+) -> dict[str, Any]:
+    """Grade declared process expectations against the omegon adapter telemetry.
+
+    Returns a dict of shape:
+        {
+          "status": "pass" | "fail" | "not_evaluated",
+          "checks": [
+            {
+              "expectation": str,
+              "threshold": Any,
+              "actual": int | None,
+              "actual_source": str | None,
+              "status": "pass" | "fail" | "not_evaluated",
+              "reason": str (only when not_evaluated)
+            },
+            ...
+          ],
+          "violations": [...subset of checks where status == "fail"...]
+        }
+
+    Numeric "max_*" expectations supported by ``SUPPORTED_PROCESS_EXPECTATIONS``
+    are graded as ``actual <= threshold``. Unknown keys and keys whose required
+    counter is missing emit ``not_evaluated`` with an explicit reason. Process
+    grading does not gate the run's correctness status; it is a separate axis.
+    """
+    expectations = expectations or {}
+    checks: list[dict[str, Any]] = []
+    if not expectations:
+        return {"status": "not_evaluated", "checks": [], "violations": []}
+
+    derived = derived or {}
+    telemetry_available = turn_count is not None
+    overall_status = "pass"
+    any_evaluated = False
+
+    for key, threshold in expectations.items():
+        check: dict[str, Any] = {
+            "expectation": key,
+            "threshold": threshold,
+            "actual": None,
+            "actual_source": None,
+            "status": "not_evaluated",
+        }
+        spec_entry = SUPPORTED_PROCESS_EXPECTATIONS.get(key)
+        if spec_entry is None:
+            check["reason"] = "unsupported_expectation"
+            checks.append(check)
+            continue
+        if not telemetry_available:
+            check["reason"] = "process_telemetry_unavailable"
+            checks.append(check)
+            continue
+        if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
+            check["reason"] = "non_numeric_threshold"
+            checks.append(check)
+            continue
+
+        source, getter = spec_entry
+        actual = getter(turn_count, derived)
+        check["actual_source"] = source
+        if actual is None:
+            check["reason"] = "actual_value_missing"
+            checks.append(check)
+            continue
+
+        check["actual"] = int(actual)
+        if int(actual) <= threshold:
+            check["status"] = "pass"
+        else:
+            check["status"] = "fail"
+            overall_status = "fail"
+        any_evaluated = True
+        checks.append(check)
+
+    if not any_evaluated:
+        overall_status = "not_evaluated"
+
+    violations = [c for c in checks if c["status"] == "fail"]
+    return {"status": overall_status, "checks": checks, "violations": violations}
+
+
+def derive_final_status(
+    adapter: AdapterResult,
+    acceptance_status: str,
+    failure_if_triggered: bool = False,
+) -> tuple[str, float]:
     if adapter.execution_status != "ok":
         return "error", 0.0
+    if failure_if_triggered:
+        return "fail", 0.0
     if acceptance_status == "pass":
         return "pass", 1.0
     if acceptance_status == "fail":
@@ -766,10 +979,20 @@ def build_result(
     adapter: AdapterResult,
     acceptance_status: str,
     acceptance_results: list[dict[str, Any]],
+    optional_results: list[dict[str, Any]] | None = None,
+    failure_if_results: list[dict[str, Any]] | None = None,
+    failure_if_triggered: bool = False,
     wall_clock_sec: float,
 ) -> dict[str, Any]:
     total_tokens = compute_total_tokens(adapter.usage)
-    final_status, final_score = derive_final_status(adapter, acceptance_status)
+    optional_results = optional_results if optional_results is not None else []
+    failure_if_results = failure_if_results if failure_if_results is not None else []
+    effective_acceptance_status = acceptance_status
+    if failure_if_triggered and effective_acceptance_status == "pass":
+        effective_acceptance_status = "fail"
+    final_status, final_score = derive_final_status(
+        adapter, acceptance_status, failure_if_triggered=failure_if_triggered
+    )
     payload = {
         "task_id": spec.id,
         "task_kind": spec.kind,
@@ -810,10 +1033,12 @@ def build_result(
         },
         "process": derive_process_metrics(spec, adapter.usage),
         "acceptance": {
-            "status": acceptance_status,
+            "status": effective_acceptance_status,
+            "required_status": acceptance_status,
+            "failure_if_triggered": failure_if_triggered,
             "required": acceptance_results,
-            "optional": [{"cmd": cmd, "status": "not_run"} for cmd in spec.acceptance_optional],
-            "failure_if": [{"cmd": cmd, "status": "not_run"} for cmd in spec.acceptance_failure_if],
+            "optional": optional_results,
+            "failure_if": failure_if_results,
         },
         "artifact_paths": {
             "patch": str(adapter.patch_path) if adapter.patch_path else None,
@@ -1055,6 +1280,16 @@ def main() -> int:
         clean_repo_path,
         env=process_env,
     )
+    optional_elapsed, optional_results = run_optional_acceptance(
+        spec.acceptance_optional,
+        clean_repo_path,
+        env=process_env,
+    )
+    failure_if_triggered, failure_if_elapsed, failure_if_results = run_failure_if(
+        spec.acceptance_failure_if,
+        clean_repo_path,
+        env=process_env,
+    )
     payload = build_result(
         spec=spec,
         harness=harness,
@@ -1062,10 +1297,17 @@ def main() -> int:
         adapter=adapter,
         acceptance_status=acceptance_status,
         acceptance_results=acceptance_results,
+        optional_results=optional_results,
+        failure_if_results=failure_if_results,
+        failure_if_triggered=failure_if_triggered,
         wall_clock_sec=time.monotonic() - run_started,
     )
     payload.setdefault("timing", {})
-    payload["timing"] = {"acceptance_wall_clock_sec": round(acceptance_elapsed, 3)}
+    payload["timing"] = {
+        "acceptance_wall_clock_sec": round(acceptance_elapsed, 3),
+        "acceptance_optional_wall_clock_sec": round(optional_elapsed, 3),
+        "acceptance_failure_if_wall_clock_sec": round(failure_if_elapsed, 3),
+    }
     result_path = write_result(out_dir, spec, harness, slim, payload)
     audit(
         "benchmark done: "
