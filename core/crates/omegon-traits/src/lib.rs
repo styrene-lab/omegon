@@ -1314,6 +1314,72 @@ pub enum BusRequest {
         content: String,
         source: String,
     },
+    /// Emit an `AgentEvent` on the runtime's broadcast channel.
+    ///
+    /// Features that need to fire events from inside long-running tool
+    /// executions (e.g. cleave's decomposition lifecycle, family vital
+    /// signs) push these through a [`BusRequestSink`] handed in by the
+    /// runtime — they never touch the broadcast channel directly. Keeps
+    /// features decoupled from the transport layer while still letting
+    /// them communicate state changes mid-execution.
+    EmitAgentEvent { event: AgentEvent },
+}
+
+/// A sink for features to push [`BusRequest`]s mid-execution.
+///
+/// Analogous to [`ToolProgressSink`]: callback-shaped (no tokio dep in
+/// this crate), constructed by the runtime, handed to features through
+/// shared slots so they can communicate state changes during long-running
+/// operations without holding direct broadcast access.
+///
+/// The runtime's closure inside the sink is responsible for routing each
+/// request to the appropriate handler — for example, translating
+/// [`BusRequest::EmitAgentEvent`] into a `broadcast::Sender::send` call.
+/// Features only see the typed `BusRequest` contract.
+#[derive(Clone)]
+pub struct BusRequestSink {
+    inner: Option<Arc<dyn Fn(BusRequest) + Send + Sync>>,
+}
+
+impl BusRequestSink {
+    /// A no-op sink. Requests pushed into this are silently dropped —
+    /// correct for tests, headless paths, and any context without a
+    /// live runtime.
+    pub fn noop() -> Self {
+        Self { inner: None }
+    }
+
+    /// Wrap a callback as a sink. The runtime constructs one of these
+    /// at startup with a closure that routes each `BusRequest` variant
+    /// to its appropriate handler.
+    pub fn from_fn<F>(f: F) -> Self
+    where
+        F: Fn(BusRequest) + Send + Sync + 'static,
+    {
+        Self {
+            inner: Some(Arc::new(f)),
+        }
+    }
+
+    /// Push a request. No-op if the sink is inactive.
+    pub fn send(&self, request: BusRequest) {
+        if let Some(cb) = &self.inner {
+            cb(request);
+        }
+    }
+
+    /// Whether anyone is actually listening.
+    pub fn is_active(&self) -> bool {
+        self.inner.is_some()
+    }
+}
+
+impl std::fmt::Debug for BusRequestSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BusRequestSink")
+            .field("active", &self.is_active())
+            .finish()
+    }
 }
 
 /// Notification severity level.

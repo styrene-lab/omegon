@@ -405,6 +405,28 @@ enum PluginAction {
     },
 }
 
+/// Build a typed `BusRequestSink` that the runtime hands to features
+/// (currently just cleave) so they can communicate with the broadcast
+/// channel via the `BusRequest` contract instead of holding a
+/// `broadcast::Sender<AgentEvent>` directly.
+///
+/// Today the only variant the sink translates is
+/// `BusRequest::EmitAgentEvent`, which forwards onto the broadcast
+/// channel. Other `BusRequest` variants pushed through here are dropped
+/// silently — features can still surface them through the conventional
+/// `Vec<BusRequest>` return path from `on_event`. As more long-running
+/// features need mid-execution communication, additional variants get
+/// handled here.
+fn build_runtime_bus_request_sink(
+    events_tx: tokio::sync::broadcast::Sender<AgentEvent>,
+) -> omegon_traits::BusRequestSink {
+    omegon_traits::BusRequestSink::from_fn(move |request| {
+        if let omegon_traits::BusRequest::EmitAgentEvent { event } = request {
+            let _ = events_tx.send(event);
+        }
+    })
+}
+
 fn parse_csv_env(name: &str) -> Vec<String> {
     std::env::var(name)
         .ok()
@@ -709,10 +731,12 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
     // ─── Event channel (shared with web dashboard) ──────────────────────
     let (events_tx, _) = broadcast::channel::<AgentEvent>(256);
 
-    // Hand the broadcast sender to the cleave feature so it can emit
-    // AgentEvent::Decomposition* events from inside its tool execution path.
+    // Install a typed BusRequestSink into the cleave feature's slot so
+    // it can emit AgentEvents from inside its tool execution path. The
+    // sink routes BusRequest::EmitAgentEvent to the broadcast channel —
+    // the cleave feature itself never touches the broadcast directly.
     if let Ok(mut slot) = agent.cleave_event_slot.lock() {
-        *slot = Some(events_tx.clone());
+        *slot = Some(build_runtime_bus_request_sink(events_tx.clone()));
     }
 
     // ─── Web control plane ──────────────────────────────────────────────
@@ -1311,10 +1335,12 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         *shared_tx = Some(command_tx.clone());
     }
 
-    // Hand the broadcast sender to the cleave feature so it can emit
-    // AgentEvent::Decomposition* events from inside its tool execution path.
+    // Install a typed BusRequestSink into the cleave feature's slot so
+    // it can emit AgentEvents from inside its tool execution path. The
+    // sink routes BusRequest::EmitAgentEvent to the broadcast channel —
+    // the cleave feature itself never touches the broadcast directly.
     if let Ok(mut slot) = agent.cleave_event_slot.lock() {
-        *slot = Some(events_tx.clone());
+        *slot = Some(build_runtime_bus_request_sink(events_tx.clone()));
     }
 
     let pending_compact = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -2301,6 +2327,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 tracing::debug!(source, "auto-store fact skipped: {e}");
                             }
                         }
+                        omegon_traits::BusRequest::EmitAgentEvent { event } => {
+                            let _ = events_tx.send(event);
+                        }
                     }
                 }
             }
@@ -3130,10 +3159,12 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     // ─── Event channel ──────────────────────────────────────────────────
     let (events_tx, mut events_rx) = broadcast::channel::<AgentEvent>(256);
 
-    // Hand the broadcast sender to the cleave feature so it can emit
-    // AgentEvent::Decomposition* events from inside its tool execution path.
+    // Install a typed BusRequestSink into the cleave feature's slot so
+    // it can emit AgentEvents from inside its tool execution path. The
+    // sink routes BusRequest::EmitAgentEvent to the broadcast channel —
+    // the cleave feature itself never touches the broadcast directly.
     if let Ok(mut slot) = agent.cleave_event_slot.lock() {
-        *slot = Some(events_tx.clone());
+        *slot = Some(build_runtime_bus_request_sink(events_tx.clone()));
     }
 
     let benchmark_summary = std::sync::Arc::new(std::sync::Mutex::new(BenchmarkUsageSummary {

@@ -17,24 +17,31 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use omegon_traits::{
-    AgentEvent, BusEvent, BusRequest, CommandDefinition, CommandResult, ContentBlock, Feature,
-    ToolDefinition, ToolResult,
+    AgentEvent, BusEvent, BusRequest, BusRequestSink, CommandDefinition, CommandResult,
+    ContentBlock, Feature, ToolDefinition, ToolResult,
 };
-use tokio::sync::broadcast;
 
-/// Shared slot for the AgentEvent broadcast sender.
+/// Shared slot for the runtime-supplied [`BusRequestSink`].
 ///
-/// CleaveFeature needs to emit `AgentEvent::Decomposition*` events to
-/// surface tree state changes to consumers (web dashboard, IPC / Auspex,
-/// TUI). The features layer is constructed in `setup.rs` *before* the
+/// CleaveFeature needs to emit `AgentEvent::Decomposition*` and
+/// `AgentEvent::FamilyVitalSignsUpdated` events to surface tree state
+/// changes to consumers (web dashboard, IPC / Auspex, eventual TUI).
+/// The features layer is constructed in `setup.rs` *before* the runtime's
 /// broadcast channel exists in `main.rs`, so we hand out a shared slot
-/// at feature-construction time and let main.rs write the sender into
-/// it once the channel is up.
+/// at feature-construction time and let main.rs install a typed
+/// `BusRequestSink` into it once the channel is up.
 ///
-/// Until the slot is populated, decomposition emissions are silently
-/// dropped — this is correct for tests and for any code path that
-/// constructs the feature without a live event bus.
-pub type CleaveEventSlot = Arc<Mutex<Option<broadcast::Sender<AgentEvent>>>>;
+/// Going through `BusRequestSink` (rather than holding a
+/// `broadcast::Sender<AgentEvent>` directly) keeps the cleave feature
+/// decoupled from the transport layer — the runtime is the only thing
+/// that touches the broadcast channel, and it routes incoming
+/// `BusRequest::EmitAgentEvent` requests there. Features only see the
+/// typed `BusRequest` contract.
+///
+/// Until the slot is populated, emissions are silently dropped — correct
+/// for tests and for any code path that constructs the feature without
+/// a live runtime.
+pub type CleaveEventSlot = Arc<Mutex<Option<BusRequestSink>>>;
 
 use crate::cleave::{
     self, CleavePlan,
@@ -478,9 +485,10 @@ pub struct CleaveFeature {
     pub inventory: Option<std::sync::Arc<tokio::sync::RwLock<crate::routing::ProviderInventory>>>,
     /// Startup-approved secret env inherited by child runs.
     session_secret_env: Vec<(String, String)>,
-    /// Slot holding the AgentEvent broadcast sender once the runtime has
-    /// constructed it. See [`CleaveEventSlot`] for the rationale.
-    event_sender: CleaveEventSlot,
+    /// Slot holding the runtime-supplied `BusRequestSink` once the
+    /// runtime has constructed it. See [`CleaveEventSlot`] for the
+    /// rationale.
+    bus_request_sink: CleaveEventSlot,
 }
 
 impl CleaveFeature {
@@ -492,27 +500,27 @@ impl CleaveFeature {
             child_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
             inventory: None,
             session_secret_env,
-            event_sender: Arc::new(Mutex::new(None)),
+            bus_request_sink: Arc::new(Mutex::new(None)),
         };
         feature.refresh_progress_from_workspace_state();
         feature
     }
 
-    /// Hand out a clone of the event-sender slot so the runtime can write
-    /// the broadcast `Sender<AgentEvent>` into it once the channel exists.
+    /// Hand out a clone of the bus-request slot so the runtime can install
+    /// a typed [`BusRequestSink`] once the broadcast channel exists.
     /// Must be called *before* `bus.register(Box::new(feature))` consumes
     /// the typed `CleaveFeature`.
     pub fn event_sender_slot(&self) -> CleaveEventSlot {
-        Arc::clone(&self.event_sender)
+        Arc::clone(&self.bus_request_sink)
     }
 
-    /// Send a decomposition event on the broadcast channel if a sender is
-    /// installed. Silently dropped otherwise — tests and headless runs
-    /// don't have an event bus and shouldn't fail because of it.
+    /// Push an `AgentEvent` through the runtime's `BusRequestSink` if one
+    /// is installed. Silently dropped otherwise — tests and headless runs
+    /// don't have a runtime sink and shouldn't fail because of it.
     fn emit_decomposition_event(&self, event: AgentEvent) {
-        if let Ok(slot) = self.event_sender.lock() {
-            if let Some(tx) = slot.as_ref() {
-                let _ = tx.send(event);
+        if let Ok(slot) = self.bus_request_sink.lock() {
+            if let Some(sink) = slot.as_ref() {
+                sink.send(BusRequest::EmitAgentEvent { event });
             }
         }
     }
@@ -794,6 +802,17 @@ impl CleaveFeature {
                 // Update internal cleave progress state first.
                 apply_progress_event(&shared, event);
 
+                // Snapshot the bus sink once per callback so we don't
+                // hold the slot lock across emissions. The sink itself
+                // is `Clone` (Arc-backed) so cloning is cheap.
+                let sink_snapshot = event_slot
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.as_ref().cloned());
+                let Some(sink) = sink_snapshot else {
+                    return;
+                };
+
                 // ── Decomposition lifecycle event 2 of 3 ──────────────
                 // Per-child terminal transitions get surfaced as
                 // DecompositionChildCompleted. The four terminal statuses
@@ -806,14 +825,12 @@ impl CleaveFeature {
                         ChildProgressStatus::Completed
                             | ChildProgressStatus::MergedAfterFailure
                     );
-                    if let Ok(slot) = event_slot.lock() {
-                        if let Some(tx) = slot.as_ref() {
-                            let _ = tx.send(AgentEvent::DecompositionChildCompleted {
-                                label: child.clone(),
-                                success,
-                            });
-                        }
-                    }
+                    sink.send(BusRequest::EmitAgentEvent {
+                        event: AgentEvent::DecompositionChildCompleted {
+                            label: child.clone(),
+                            success,
+                        },
+                    });
                 }
 
                 // ── Family vital signs (L3 rollup) ─────────────────────
@@ -823,13 +840,11 @@ impl CleaveFeature {
                 // orchestrator doesn't fire ProgressEvents at high
                 // frequency (a handful per child per minute) so no
                 // rate-limiting is needed here.
-                if let Ok(slot) = event_slot.lock() {
-                    if let Some(tx) = slot.as_ref() {
-                        if let Ok(progress_guard) = shared.lock() {
-                            let signs = build_family_vital_signs(&progress_guard);
-                            let _ = tx.send(AgentEvent::FamilyVitalSignsUpdated { signs });
-                        }
-                    }
+                if let Ok(progress_guard) = shared.lock() {
+                    let signs = build_family_vital_signs(&progress_guard);
+                    sink.send(BusRequest::EmitAgentEvent {
+                        event: AgentEvent::FamilyVitalSignsUpdated { signs },
+                    });
                 }
             })
         };
@@ -1444,14 +1459,29 @@ mod tests {
         assert_eq!(signs.children[2].last_activity_unix_ms, None);
     }
 
+    /// Test helper: build a `BusRequestSink` that forwards
+    /// `BusRequest::EmitAgentEvent` requests onto a broadcast channel,
+    /// returning the receiver so the test can assert what arrived.
+    fn test_sink_with_receiver() -> (BusRequestSink, tokio::sync::broadcast::Receiver<AgentEvent>)
+    {
+        let (tx, rx) = tokio::sync::broadcast::channel::<AgentEvent>(8);
+        let sink = BusRequestSink::from_fn(move |request| {
+            if let BusRequest::EmitAgentEvent { event } = request {
+                let _ = tx.send(event);
+            }
+        });
+        (sink, rx)
+    }
+
     #[tokio::test]
     async fn event_slot_routes_family_vital_signs() {
-        // Wire a real broadcast channel into the slot and assert that
-        // FamilyVitalSignsUpdated reaches a subscribed receiver.
+        // Install a BusRequestSink wrapping a broadcast channel into the
+        // slot and assert that FamilyVitalSignsUpdated reaches a subscribed
+        // receiver via the BusRequest::EmitAgentEvent pathway.
         let dir = tempfile::tempdir().unwrap();
         let feature = CleaveFeature::new(dir.path(), vec![]);
-        let (tx, mut rx) = broadcast::channel::<AgentEvent>(8);
-        *feature.event_sender_slot().lock().unwrap() = Some(tx);
+        let (sink, mut rx) = test_sink_with_receiver();
+        *feature.event_sender_slot().lock().unwrap() = Some(sink);
 
         let signs = omegon_traits::FamilyVitalSigns {
             run_id: "test".into(),
@@ -1491,15 +1521,16 @@ mod tests {
 
     #[tokio::test]
     async fn event_slot_routes_emissions_when_populated() {
-        // Install a broadcast sender into the slot and verify all three
-        // decomposition variants reach a subscribed receiver. This is the
-        // mechanism the cleave run path uses; the call sites in execute_run
-        // are reviewed manually since they require a real subprocess
-        // dispatch to exercise end-to-end.
+        // Install a BusRequestSink into the slot and verify all three
+        // decomposition variants reach a subscribed receiver via the
+        // BusRequest::EmitAgentEvent pathway. The mechanism the cleave
+        // run path uses; the call sites in execute_run are reviewed
+        // manually since they require a real subprocess dispatch to
+        // exercise end-to-end.
         let dir = tempfile::tempdir().unwrap();
         let feature = CleaveFeature::new(dir.path(), vec![]);
-        let (tx, mut rx) = broadcast::channel::<AgentEvent>(8);
-        *feature.event_sender_slot().lock().unwrap() = Some(tx);
+        let (sink, mut rx) = test_sink_with_receiver();
+        *feature.event_sender_slot().lock().unwrap() = Some(sink);
 
         feature.emit_decomposition_event(AgentEvent::DecompositionStarted {
             children: vec!["alpha".into(), "beta".into()],

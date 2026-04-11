@@ -1355,6 +1355,9 @@ pub async fn run(
                         tracing::debug!(source, "auto-store fact skipped: {e}");
                     }
                 }
+                omegon_traits::BusRequest::EmitAgentEvent { event } => {
+                    let _ = events.send(event);
+                }
             }
         }
 
@@ -1456,6 +1459,9 @@ pub async fn run(
                 {
                     tracing::debug!(source, "post-loop auto-store fact skipped: {e}");
                 }
+            }
+            omegon_traits::BusRequest::EmitAgentEvent { event } => {
+                let _ = events.send(event);
             }
         }
     }
