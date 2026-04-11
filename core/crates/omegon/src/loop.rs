@@ -2021,8 +2021,27 @@ async fn dispatch_tools(
             args: call.arguments.clone(),
         });
 
+        // Build a progress sink that turns each partial ToolResult into a
+        // ToolUpdate event on the broadcast channel. Runners that don't
+        // override execute_with_sink (the default) simply discard the sink
+        // and behave exactly as before.
+        let sink_events = events.clone();
+        let sink_call_id = call.id.clone();
+        let sink = omegon_traits::ToolProgressSink::from_fn(move |partial| {
+            let _ = sink_events.send(AgentEvent::ToolUpdate {
+                id: sink_call_id.clone(),
+                partial,
+            });
+        });
+
         let (result, is_error) = match bus
-            .execute_tool(&call.name, &call.id, call.arguments.clone(), cancel.clone())
+            .execute_tool_with_sink(
+                &call.name,
+                &call.id,
+                call.arguments.clone(),
+                cancel.clone(),
+                sink,
+            )
             .await
         {
             Ok(result) => (result, false),

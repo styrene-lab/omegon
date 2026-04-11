@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Native IPC contract — transport-facing Auspex/Omegon boundary (v1)
@@ -931,6 +932,62 @@ pub struct ToolResult {
     pub details: Value,
 }
 
+/// A sink for streaming partial tool output during execution.
+///
+/// Runners that don't stream simply ignore the sink. Runners that do
+/// (currently `bash`) push partial `ToolResult`s as work happens; the
+/// dispatch layer in `bus`/`loop.rs` converts each partial into an
+/// `AgentEvent::ToolUpdate` emission for downstream consumers.
+///
+/// The sink is intentionally callback-shaped (rather than holding a
+/// channel directly) so this crate stays free of a tokio dependency.
+/// Construct one with [`ToolProgressSink::from_fn`] in the dispatch
+/// layer; runners only see [`ToolProgressSink::send`] and
+/// [`ToolProgressSink::is_active`].
+#[derive(Clone)]
+pub struct ToolProgressSink {
+    inner: Option<Arc<dyn Fn(ToolResult) + Send + Sync>>,
+}
+
+impl ToolProgressSink {
+    /// A no-op sink. Runners that call `send` on this sink discard the partial.
+    pub fn noop() -> Self {
+        Self { inner: None }
+    }
+
+    /// Wrap a callback as a sink. Typically the dispatch layer passes
+    /// a closure that forwards into a tokio mpsc channel.
+    pub fn from_fn<F>(f: F) -> Self
+    where
+        F: Fn(ToolResult) + Send + Sync + 'static,
+    {
+        Self {
+            inner: Some(Arc::new(f)),
+        }
+    }
+
+    /// Push a partial result. No-op if the sink is inactive.
+    pub fn send(&self, partial: ToolResult) {
+        if let Some(cb) = &self.inner {
+            cb(partial);
+        }
+    }
+
+    /// Whether anyone is actually listening. Runners can use this to
+    /// skip building partials when no consumer is attached.
+    pub fn is_active(&self) -> bool {
+        self.inner.is_some()
+    }
+}
+
+impl std::fmt::Debug for ToolProgressSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolProgressSink")
+            .field("active", &self.is_active())
+            .finish()
+    }
+}
+
 /// JSON Schema definition for a tool's parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
@@ -1220,6 +1277,28 @@ pub trait Feature: Send + Sync {
         anyhow::bail!("not implemented")
     }
 
+    /// Execute a tool call with a progress sink for streaming partial output.
+    ///
+    /// The default implementation forwards to [`Feature::execute`] and ignores
+    /// the sink — features that want to stream (e.g. long-running shell
+    /// commands, test runners, multi-phase work) should override this method
+    /// directly and push partial `ToolResult`s into the sink as work happens.
+    /// The dispatch layer will convert each partial into an
+    /// `AgentEvent::ToolUpdate` for downstream consumers.
+    ///
+    /// Runners that don't override this method retain the existing
+    /// fire-and-await semantics with zero behavior change.
+    async fn execute_with_sink(
+        &self,
+        tool_name: &str,
+        call_id: &str,
+        args: Value,
+        cancel: tokio_util::sync::CancellationToken,
+        _sink: ToolProgressSink,
+    ) -> anyhow::Result<ToolResult> {
+        self.execute(tool_name, call_id, args, cancel).await
+    }
+
     /// Slash commands this feature registers. Called once at startup.
     fn commands(&self) -> Vec<CommandDefinition> {
         vec![]
@@ -1430,6 +1509,20 @@ pub trait ToolProvider: Send + Sync {
         args: Value,
         cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<ToolResult>;
+
+    /// Sink-aware execution. Default forwards to `execute` and discards
+    /// the sink — providers that want to stream partial output (e.g. bash)
+    /// override this method directly. Mirrors `Feature::execute_with_sink`.
+    async fn execute_with_sink(
+        &self,
+        tool_name: &str,
+        call_id: &str,
+        args: Value,
+        cancel: tokio_util::sync::CancellationToken,
+        _sink: ToolProgressSink,
+    ) -> anyhow::Result<ToolResult> {
+        self.execute(tool_name, call_id, args, cancel).await
+    }
 }
 
 /// Legacy: ContextProvider for omegon-memory.
