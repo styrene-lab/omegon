@@ -1049,6 +1049,43 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     if let Ok(status_json) = serde_json::to_value(&agent.initial_harness_status) {
         let _ = events_tx.send(AgentEvent::HarnessStatusChanged { status_json });
     }
+    match &agent.workspace_state.admission {
+        crate::workspace::types::AdmissionOutcome::GrantedMutable
+        | crate::workspace::types::AdmissionOutcome::GrantedReadOnly => {}
+        crate::workspace::types::AdmissionOutcome::ConflictReadOnlySuggested {
+            owner_session_id,
+        } => {
+            let owner = owner_session_id.as_deref().unwrap_or("(unknown)");
+            let message = format!(
+                "Workspace is already owned by mutable session {owner}. Current startup remained local-only for now; use /workspace to inspect details. Recommended next step: open a sibling workspace or attach read-only until stale-lease adoption is implemented."
+            );
+            let _ = events_tx.send(AgentEvent::SystemNotification { message });
+        }
+        crate::workspace::types::AdmissionOutcome::ConflictCreateWorkspaceSuggested {
+            owner_session_id,
+        } => {
+            let owner = owner_session_id.as_deref().unwrap_or("(unknown)");
+            let message = format!(
+                "Workspace is already occupied by session {owner}. This workflow should use a separate mutable workspace. Use /workspace to inspect current ownership before starting parallel mutable work."
+            );
+            let _ = events_tx.send(AgentEvent::SystemNotification { message });
+        }
+        crate::workspace::types::AdmissionOutcome::ConflictStaleLeaseAdoptable {
+            owner_session_id,
+        } => {
+            let owner = owner_session_id.as_deref().unwrap_or("(unknown)");
+            let message = format!(
+                "Workspace lease from session {owner} appears stale. Use /workspace to inspect the current lease before adopting it or creating a sibling workspace."
+            );
+            let _ = events_tx.send(AgentEvent::SystemNotification { message });
+        }
+        crate::workspace::types::AdmissionOutcome::DeniedByAuthorityPolicy { reason } => {
+            let message = format!(
+                "Workspace authority warning: {reason}. Use /workspace to inspect the current role and occupancy state."
+            );
+            let _ = events_tx.send(AgentEvent::SystemNotification { message });
+        }
+    }
 
     // ─── Shared state ─────────────────────────────────────────────────
     let shared_cancel: tui::SharedCancel = std::sync::Arc::new(std::sync::Mutex::new(None));
