@@ -1,0 +1,91 @@
+# TEMPLATE — Repair-after-diagnosis task (taxonomy D)
+#
+# This is a TEMPLATE, not a working benchmark. Copy it to a new file with a
+# real id and replace every placeholder marked with TODO before running.
+#
+# What this taxonomy measures (from docs/benchmark-redesign-task-and-eval-spec.md):
+#   "Agent must first identify the bug, then apply the smallest correct fix."
+#
+# Primary risks measured:
+#   - too much orientation before acting
+#   - too much action before diagnosis
+#   - incomplete fix scope
+#
+# How to use this template:
+#   1. Pick a real, *small*, *localized* bug. The smaller the correct fix,
+#      the more useful the "scope creep" signal becomes.
+#   2. Acceptance is the bug's regression test passing.
+#   3. failure_if scopes the diff: any edit outside the expected source
+#      file(s) is a forbidden over-edit.
+#   4. process_expectations should be tighter than implementation tasks
+#      because the change is supposed to be small.
+
+id: TODO-repair-after-diagnosis-template
+kind: repair_after_diagnosis
+repo: .
+base_ref: main
+
+prompt: |
+  TODO: describe the symptom and ask the agent to find and fix the bug
+  with the smallest correct change. Example shape:
+  "Test X is failing with error Y. Find the bug and apply the smallest
+   correct fix. Do not refactor or change unrelated code."
+
+matrix:
+  harnesses:
+    - omegon
+    - om
+    - pi
+    - claude-code
+  models:
+    - anthropic:claude-sonnet-4-6
+
+expected_solution:
+  summary: |
+    The smallest correct fix to TODO file/function. The diff should be
+    confined to the named source file(s).
+  primary_files:
+    - TODO/path/to/source_file.rs
+  forbidden_patterns:
+    - broad refactors
+    - disabling tests
+    - acceptance-check bypasses
+    - touching files outside the expected scope
+
+acceptance:
+  required:
+    # TODO: the regression test that proves the bug is fixed.
+    - cargo test -p TODO_crate TODO_test_name --manifest-path core/Cargo.toml
+  optional:
+    # TODO: any nearby tests that should remain green.
+    - cargo test -p TODO_crate TODO_neighbor_test --manifest-path core/Cargo.toml
+  failure_if:
+    # Scope creep: the diff must be confined to the expected file(s).
+    # `git diff --name-only` lists changed files; `grep -v` keeps only
+    # files OUTSIDE the allowed prefix; if any survive, exit 0 → fail.
+    - 'sh -c "git diff --name-only | grep -v ^TODO/path/to/source_file.rs$ | grep ."'
+
+process_expectations:
+  # The fix is small. The harness should converge fast and not over-search.
+  max_orientation_only_turns: 2
+  max_progress_nudges: 1
+  max_turns: 10
+
+budget:
+  soft:
+    max_turns: 10
+    max_total_tokens: 600000
+    max_wall_clock_sec: 600
+  hard:
+    max_turns: 20
+    max_total_tokens: 1200000
+    max_wall_clock_sec: 1200
+
+success_files:
+  - TODO/path/to/source_file.rs
+
+notes: |
+  TEMPLATE — copy and adapt before running. The signal this task
+  measures is "did the agent stop after the smallest correct change."
+  If your replacement task allows broad edits to pass acceptance,
+  the failure_if scope predicate is misconfigured.
