@@ -432,22 +432,29 @@ async fn probe_provider(provider: &str) -> ProviderInfo {
 }
 
 /// Remove stored credentials for a provider.
+///
+/// Logout is intentionally idempotent for known providers: if no auth.json exists
+/// or the provider has no stored entry, treat the provider as already logged out.
 pub fn logout_provider(provider: &str) -> anyhow::Result<()> {
+    let canonical = canonical_provider_id(provider);
+    provider_by_id(canonical)
+        .ok_or_else(|| anyhow::anyhow!("Unknown provider: {provider}"))?;
+
     let path =
         auth_json_path().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
 
     if !path.exists() {
-        return Err(anyhow::anyhow!("No credentials found for {provider}"));
+        return Ok(());
     }
 
     with_auth_json_lock(&path, || {
         let content = std::fs::read_to_string(&path)?;
         let mut auth: Value = serde_json::from_str(&content)?;
 
-        let auth_key = auth_json_key(provider);
+        let auth_key = auth_json_key(canonical);
 
         if auth.get(auth_key).is_none() {
-            return Err(anyhow::anyhow!("No credentials found for {provider}"));
+            return Ok(());
         }
 
         // Remove the provider's entry
