@@ -949,6 +949,236 @@ def grade_process_expectations(
     return {"status": overall_status, "checks": checks, "violations": violations}
 
 
+# Budget keys we know how to grade today, paired with a getter that maps the
+# benchmark run state to the actual value being compared. Each getter takes
+# (total_tokens, input_tokens, wall_clock_sec, turn_count) and returns int|float|None.
+SUPPORTED_BUDGET_KEYS: dict[str, Any] = {
+    "max_turns": lambda total, inp, wall, turns: turns,
+    "max_total_tokens": lambda total, inp, wall, turns: total,
+    "max_input_tokens": lambda total, inp, wall, turns: inp,
+    "max_wall_clock_sec": lambda total, inp, wall, turns: wall,
+    "max_minutes": lambda total, inp, wall, turns: (wall / 60.0) if wall is not None else None,
+}
+
+
+def extract_budget_tiers(budget: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return (soft, hard) budget dicts.
+
+    Supports both the legacy flat schema (`budget: {max_turns: 20, ...}`) and
+    the redesigned tiered schema (`budget: {soft: {...}, hard: {...}}`). The
+    flat form is treated as soft-only (no hard ceiling).
+    """
+    if not isinstance(budget, dict):
+        return {}, {}
+    soft_raw = budget.get("soft")
+    hard_raw = budget.get("hard")
+    if isinstance(soft_raw, dict) or isinstance(hard_raw, dict):
+        soft = soft_raw if isinstance(soft_raw, dict) else {}
+        hard = hard_raw if isinstance(hard_raw, dict) else {}
+        return soft, hard
+    # Flat / legacy form: every key that isn't a known wrapper goes into soft.
+    flat = {k: v for k, v in budget.items() if k not in {"soft", "hard"}}
+    return flat, {}
+
+
+def grade_efficiency_budgets(
+    budget: dict[str, Any],
+    total_tokens: int | None,
+    input_tokens: int | None,
+    wall_clock_sec: float | None,
+    turn_count: int | None,
+) -> dict[str, Any]:
+    """Grade efficiency against the declared budget tiers.
+
+    Per-key semantics:
+        actual <= soft       → score 1.0  status "pass"
+        soft  < actual ≤ hard → score 0.5 status "warn"
+        actual >  hard       → score 0.0  status "fail"
+
+    If only soft is present, "over soft" is "fail" (0.0). If only hard is
+    present, the run is graded against the hard tier alone. Composite score
+    is the mean of evaluated per-key scores.
+    """
+    soft, hard = extract_budget_tiers(budget or {})
+    keys = sorted(set(soft.keys()) | set(hard.keys()))
+    if not keys:
+        return {"status": "not_evaluated", "score": None, "checks": []}
+
+    checks: list[dict[str, Any]] = []
+    evaluated_scores: list[float] = []
+    overall_status = "pass"
+
+    for key in keys:
+        check: dict[str, Any] = {
+            "key": key,
+            "soft": soft.get(key),
+            "hard": hard.get(key),
+            "actual": None,
+            "score": None,
+            "status": "not_evaluated",
+        }
+        getter = SUPPORTED_BUDGET_KEYS.get(key)
+        if getter is None:
+            check["reason"] = "unsupported_budget_key"
+            checks.append(check)
+            continue
+        soft_val = soft.get(key)
+        hard_val = hard.get(key)
+        if soft_val is not None and (not isinstance(soft_val, (int, float)) or isinstance(soft_val, bool)):
+            check["reason"] = "non_numeric_soft"
+            checks.append(check)
+            continue
+        if hard_val is not None and (not isinstance(hard_val, (int, float)) or isinstance(hard_val, bool)):
+            check["reason"] = "non_numeric_hard"
+            checks.append(check)
+            continue
+        actual = getter(total_tokens, input_tokens, wall_clock_sec, turn_count)
+        if actual is None:
+            check["reason"] = "actual_value_missing"
+            checks.append(check)
+            continue
+
+        check["actual"] = actual
+        if soft_val is not None and actual <= soft_val:
+            check["status"] = "pass"
+            check["score"] = 1.0
+        elif hard_val is not None and actual <= hard_val:
+            # Within hard but over (or no) soft. If no soft was declared this
+            # is just "pass" rather than "warn".
+            if soft_val is None:
+                check["status"] = "pass"
+                check["score"] = 1.0
+            else:
+                check["status"] = "warn"
+                check["score"] = 0.5
+                if overall_status == "pass":
+                    overall_status = "warn"
+        else:
+            check["status"] = "fail"
+            check["score"] = 0.0
+            overall_status = "fail"
+
+        evaluated_scores.append(check["score"])
+        checks.append(check)
+
+    if not evaluated_scores:
+        return {"status": "not_evaluated", "score": None, "checks": checks}
+
+    composite = sum(evaluated_scores) / len(evaluated_scores)
+    return {"status": overall_status, "score": round(composite, 3), "checks": checks}
+
+
+# Discipline scoring is intentionally a small, documented heuristic so it can
+# be iterated without breaking artifact consumers. The formula version is
+# emitted in the score body so any future change is visible to readers.
+DISCIPLINE_FORMULA_VERSION = "v1"
+
+
+def grade_discipline(turn_count: int | None, derived: dict[str, Any]) -> dict[str, Any]:
+    """Heuristic discipline score derived from existing process telemetry.
+
+    Formula v1:
+        score = max(0, 1.0
+                       - 0.2 * progress_nudge_count
+                       - 0.2 * orientation_only_turns)
+
+    Status thresholds (independent of the score so they degrade gracefully):
+        score >= 0.8 → "pass"
+        score >= 0.4 → "warn"
+        score <  0.4 → "fail"
+
+    Returns "not_evaluated" with no score when telemetry is unavailable.
+    """
+    if turn_count is None:
+        return {
+            "status": "not_evaluated",
+            "score": None,
+            "formula_version": DISCIPLINE_FORMULA_VERSION,
+            "signals": {},
+        }
+    derived = derived or {}
+    nudges = int(derived.get("progress_nudge_count", 0) or 0)
+    churn = int(derived.get("orientation_only_turns", 0) or 0)
+    raw = 1.0 - 0.2 * nudges - 0.2 * churn
+    # Round before threshold comparison so the emitted score and the status
+    # cannot disagree across floating-point boundaries (e.g. 1.0 - 0.4 - 0.2
+    # producing 0.3999... and silently dropping to "fail" instead of "warn").
+    score = round(max(0.0, raw), 3)
+    if score >= 0.8:
+        status = "pass"
+    elif score >= 0.4:
+        status = "warn"
+    else:
+        status = "fail"
+    return {
+        "status": status,
+        "score": score,
+        "formula_version": DISCIPLINE_FORMULA_VERSION,
+        "signals": {
+            "progress_nudge_count": nudges,
+            "orientation_only_turns": churn,
+        },
+    }
+
+
+def compose_scores(
+    *,
+    final_status: str,
+    final_score: float,
+    process_metrics: dict[str, Any],
+    budget: dict[str, Any],
+    total_tokens: int | None,
+    input_tokens: int | None,
+    wall_clock_sec: float | None,
+    turn_count: int | None,
+) -> dict[str, Any]:
+    """Compose the four-axis structured score the redesign doc calls for.
+
+    The four axes (outcome / process / efficiency / discipline) are emitted
+    side-by-side. The pre-existing top-level `score` field is preserved as
+    the binary outcome score; this surface adds the other three axes without
+    changing existing readers.
+    """
+    grading = process_metrics.get("grading") if isinstance(process_metrics, dict) else None
+    derived = process_metrics.get("derived") if isinstance(process_metrics, dict) else {}
+
+    process_score: float | None
+    if isinstance(grading, dict) and grading.get("status") == "pass":
+        process_score = 1.0
+        process_status = "pass"
+    elif isinstance(grading, dict) and grading.get("status") == "fail":
+        process_score = 0.0
+        process_status = "fail"
+    else:
+        process_score = None
+        process_status = "not_evaluated"
+
+    process_axis: dict[str, Any] = {"status": process_status, "score": process_score}
+    if isinstance(grading, dict):
+        checks = grading.get("checks") or []
+        evaluated = [c for c in checks if c.get("status") in {"pass", "fail"}]
+        process_axis["supported_checks"] = len(evaluated)
+        process_axis["passing_checks"] = sum(1 for c in evaluated if c.get("status") == "pass")
+        process_axis["failing_checks"] = sum(1 for c in evaluated if c.get("status") == "fail")
+
+    efficiency_axis = grade_efficiency_budgets(
+        budget or {},
+        total_tokens=total_tokens,
+        input_tokens=input_tokens,
+        wall_clock_sec=wall_clock_sec,
+        turn_count=turn_count,
+    )
+
+    discipline_axis = grade_discipline(turn_count, derived if isinstance(derived, dict) else {})
+
+    return {
+        "outcome": {"status": final_status, "score": final_score},
+        "process": process_axis,
+        "efficiency": efficiency_axis,
+        "discipline": discipline_axis,
+    }
+
+
 def derive_final_status(
     adapter: AdapterResult,
     acceptance_status: str,
@@ -1040,12 +1270,23 @@ def build_result(
             "optional": optional_results,
             "failure_if": failure_if_results,
         },
+        "scores": {},  # populated below once process metrics exist
         "artifact_paths": {
             "patch": str(adapter.patch_path) if adapter.patch_path else None,
             "log": str(adapter.log_path) if adapter.log_path else None,
         },
         "extra": adapter.extra,
     }
+    payload["scores"] = compose_scores(
+        final_status=final_status,
+        final_score=final_score,
+        process_metrics=payload["process"],
+        budget=spec.budget,
+        total_tokens=total_tokens,
+        input_tokens=adapter.usage.get("input_tokens"),
+        wall_clock_sec=wall_clock_sec,
+        turn_count=coerce_int(adapter.usage.get("turn_count")),
+    )
     for key in ("requested_model", "requested_provider", "resolved_provider", "provider"):
         value = adapter.usage.get(key)
         if value is not None:

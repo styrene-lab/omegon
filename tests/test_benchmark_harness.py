@@ -412,6 +412,271 @@ acceptance:
         self.assertEqual(result["checks"], [])
         self.assertEqual(result["violations"], [])
 
+    def test_extract_budget_tiers_supports_flat_and_layered_schemas(self) -> None:
+        flat_soft, flat_hard = BENCHMARK_HARNESS.extract_budget_tiers(
+            {"max_turns": 20, "max_minutes": 30}
+        )
+        self.assertEqual(flat_soft, {"max_turns": 20, "max_minutes": 30})
+        self.assertEqual(flat_hard, {})
+
+        soft, hard = BENCHMARK_HARNESS.extract_budget_tiers(
+            {"soft": {"max_turns": 12}, "hard": {"max_turns": 25}}
+        )
+        self.assertEqual(soft, {"max_turns": 12})
+        self.assertEqual(hard, {"max_turns": 25})
+
+        soft_only, hard_only = BENCHMARK_HARNESS.extract_budget_tiers({"soft": {"max_turns": 12}})
+        self.assertEqual(soft_only, {"max_turns": 12})
+        self.assertEqual(hard_only, {})
+
+        empty_soft, empty_hard = BENCHMARK_HARNESS.extract_budget_tiers({})
+        self.assertEqual(empty_soft, {})
+        self.assertEqual(empty_hard, {})
+
+    def test_grade_efficiency_budgets_pass_warn_fail_per_tier(self) -> None:
+        budget = {
+            "soft": {"max_turns": 12, "max_total_tokens": 1_000_000},
+            "hard": {"max_turns": 25, "max_total_tokens": 2_000_000},
+        }
+        # Pass — both within soft.
+        passing = BENCHMARK_HARNESS.grade_efficiency_budgets(
+            budget, total_tokens=500_000, input_tokens=None, wall_clock_sec=None, turn_count=8
+        )
+        self.assertEqual(passing["status"], "pass")
+        self.assertEqual(passing["score"], 1.0)
+        statuses = {c["key"]: c["status"] for c in passing["checks"]}
+        self.assertEqual(statuses, {"max_turns": "pass", "max_total_tokens": "pass"})
+
+        # Warn — turns over soft but within hard, tokens still pass.
+        warn = BENCHMARK_HARNESS.grade_efficiency_budgets(
+            budget, total_tokens=500_000, input_tokens=None, wall_clock_sec=None, turn_count=18
+        )
+        self.assertEqual(warn["status"], "warn")
+        # mean of 0.5 (turns warn) + 1.0 (tokens pass) = 0.75
+        self.assertEqual(warn["score"], 0.75)
+        warn_check = next(c for c in warn["checks"] if c["key"] == "max_turns")
+        self.assertEqual(warn_check["status"], "warn")
+        self.assertEqual(warn_check["score"], 0.5)
+
+        # Fail — turns over hard.
+        failing = BENCHMARK_HARNESS.grade_efficiency_budgets(
+            budget, total_tokens=500_000, input_tokens=None, wall_clock_sec=None, turn_count=40
+        )
+        self.assertEqual(failing["status"], "fail")
+        fail_check = next(c for c in failing["checks"] if c["key"] == "max_turns")
+        self.assertEqual(fail_check["status"], "fail")
+        self.assertEqual(fail_check["score"], 0.0)
+
+    def test_grade_efficiency_budgets_legacy_flat_budget_treated_as_soft(self) -> None:
+        budget = {"max_turns": 20, "max_minutes": 30}
+        # Within both → pass.
+        within = BENCHMARK_HARNESS.grade_efficiency_budgets(
+            budget, total_tokens=None, input_tokens=None, wall_clock_sec=600.0, turn_count=10
+        )
+        self.assertEqual(within["status"], "pass")
+        # Over the soft turn limit, no hard ceiling → fail (not warn).
+        over = BENCHMARK_HARNESS.grade_efficiency_budgets(
+            budget, total_tokens=None, input_tokens=None, wall_clock_sec=600.0, turn_count=25
+        )
+        self.assertEqual(over["status"], "fail")
+        over_check = next(c for c in over["checks"] if c["key"] == "max_turns")
+        self.assertEqual(over_check["status"], "fail")
+
+    def test_grade_efficiency_budgets_missing_actuals_become_not_evaluated_per_key(self) -> None:
+        budget = {"soft": {"max_turns": 12, "max_total_tokens": 1_000_000}}
+        # Only turn_count is supplied; tokens are None → that key is not_evaluated.
+        result = BENCHMARK_HARNESS.grade_efficiency_budgets(
+            budget, total_tokens=None, input_tokens=None, wall_clock_sec=None, turn_count=4
+        )
+        per_key = {c["key"]: c for c in result["checks"]}
+        self.assertEqual(per_key["max_turns"]["status"], "pass")
+        self.assertEqual(per_key["max_total_tokens"]["status"], "not_evaluated")
+        self.assertEqual(per_key["max_total_tokens"]["reason"], "actual_value_missing")
+        # Composite is computed only over evaluated checks → still 1.0 here.
+        self.assertEqual(result["score"], 1.0)
+        self.assertEqual(result["status"], "pass")
+
+    def test_grade_efficiency_budgets_empty_returns_not_evaluated(self) -> None:
+        result = BENCHMARK_HARNESS.grade_efficiency_budgets(
+            {}, total_tokens=10, input_tokens=5, wall_clock_sec=1.0, turn_count=1
+        )
+        self.assertEqual(result["status"], "not_evaluated")
+        self.assertIsNone(result["score"])
+        self.assertEqual(result["checks"], [])
+
+    def test_grade_efficiency_budgets_unsupported_key_marked_not_evaluated(self) -> None:
+        result = BENCHMARK_HARNESS.grade_efficiency_budgets(
+            {"soft": {"max_turns": 10, "max_unicorns": 3}},
+            total_tokens=None,
+            input_tokens=None,
+            wall_clock_sec=None,
+            turn_count=5,
+        )
+        per_key = {c["key"]: c for c in result["checks"]}
+        self.assertEqual(per_key["max_unicorns"]["status"], "not_evaluated")
+        self.assertEqual(per_key["max_unicorns"]["reason"], "unsupported_budget_key")
+
+    def test_grade_discipline_clean_run_is_full_score(self) -> None:
+        result = BENCHMARK_HARNESS.grade_discipline(
+            turn_count=4, derived={"progress_nudge_count": 0, "orientation_only_turns": 0}
+        )
+        self.assertEqual(result["score"], 1.0)
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["formula_version"], BENCHMARK_HARNESS.DISCIPLINE_FORMULA_VERSION)
+        self.assertEqual(
+            result["signals"],
+            {"progress_nudge_count": 0, "orientation_only_turns": 0},
+        )
+
+    def test_grade_discipline_degrades_with_nudges_and_churn(self) -> None:
+        # 1 nudge + 0 churn → 0.8 → still "pass"
+        light = BENCHMARK_HARNESS.grade_discipline(
+            turn_count=4, derived={"progress_nudge_count": 1, "orientation_only_turns": 0}
+        )
+        self.assertEqual(light["score"], 0.8)
+        self.assertEqual(light["status"], "pass")
+        # 2 nudges + 1 churn → 1.0 - 0.4 - 0.2 = 0.4 → "warn"
+        warn = BENCHMARK_HARNESS.grade_discipline(
+            turn_count=4, derived={"progress_nudge_count": 2, "orientation_only_turns": 1}
+        )
+        self.assertEqual(warn["score"], 0.4)
+        self.assertEqual(warn["status"], "warn")
+        # 5 nudges → score floored at 0 → "fail"
+        bad = BENCHMARK_HARNESS.grade_discipline(
+            turn_count=4, derived={"progress_nudge_count": 5, "orientation_only_turns": 0}
+        )
+        self.assertEqual(bad["score"], 0.0)
+        self.assertEqual(bad["status"], "fail")
+
+    def test_grade_discipline_returns_not_evaluated_without_telemetry(self) -> None:
+        result = BENCHMARK_HARNESS.grade_discipline(turn_count=None, derived={})
+        self.assertEqual(result["status"], "not_evaluated")
+        self.assertIsNone(result["score"])
+        self.assertEqual(result["signals"], {})
+
+    def test_compose_scores_emits_four_axes_with_omegon_telemetry(self) -> None:
+        process_metrics = {
+            "turn_count": 4,
+            "derived": {"progress_nudge_count": 0, "orientation_only_turns": 0},
+            "grading": {"status": "pass", "checks": [{"status": "pass"}], "violations": []},
+            "availability": "full",
+        }
+        scores = BENCHMARK_HARNESS.compose_scores(
+            final_status="pass",
+            final_score=1.0,
+            process_metrics=process_metrics,
+            budget={"soft": {"max_turns": 12}},
+            total_tokens=10,
+            input_tokens=5,
+            wall_clock_sec=1.5,
+            turn_count=4,
+        )
+        self.assertEqual(set(scores.keys()), {"outcome", "process", "efficiency", "discipline"})
+        self.assertEqual(scores["outcome"], {"status": "pass", "score": 1.0})
+        self.assertEqual(scores["process"]["status"], "pass")
+        self.assertEqual(scores["process"]["score"], 1.0)
+        self.assertEqual(scores["process"]["supported_checks"], 1)
+        self.assertEqual(scores["process"]["passing_checks"], 1)
+        self.assertEqual(scores["efficiency"]["status"], "pass")
+        self.assertEqual(scores["efficiency"]["score"], 1.0)
+        self.assertEqual(scores["discipline"]["status"], "pass")
+        self.assertEqual(scores["discipline"]["score"], 1.0)
+
+    def test_compose_scores_marks_process_and_discipline_not_evaluated_without_telemetry(self) -> None:
+        process_metrics = {
+            "turn_count": None,
+            "derived": {},
+            "grading": {"status": "not_evaluated", "checks": [], "violations": []},
+            "availability": "none",
+        }
+        scores = BENCHMARK_HARNESS.compose_scores(
+            final_status="pass",
+            final_score=1.0,
+            process_metrics=process_metrics,
+            budget={"max_turns": 20},  # legacy flat
+            total_tokens=10,
+            input_tokens=5,
+            wall_clock_sec=1.5,
+            turn_count=None,
+        )
+        self.assertEqual(scores["process"]["status"], "not_evaluated")
+        self.assertIsNone(scores["process"]["score"])
+        self.assertEqual(scores["discipline"]["status"], "not_evaluated")
+        self.assertIsNone(scores["discipline"]["score"])
+        # Efficiency: max_turns is the only budget key but turn_count is None → not_evaluated.
+        self.assertEqual(scores["efficiency"]["status"], "not_evaluated")
+        # Outcome is still pass because the run passed regardless of telemetry.
+        self.assertEqual(scores["outcome"]["status"], "pass")
+
+    def test_scores_axes_appear_in_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            # Fake cargo emits clean telemetry: 4 turns, no nudges, no churn.
+            fake_cargo = repo / "scripts" / "cargo"
+            fake_cargo.write_text(
+                "#!/bin/sh\n"
+                "usage_json=''\n"
+                "prev=''\n"
+                "for arg in \"$@\"; do\n"
+                "  if [ \"$prev\" = \"--usage-json\" ]; then usage_json=\"$arg\"; fi\n"
+                "  prev=\"$arg\"\n"
+                "done\n"
+                "if [ -n \"$usage_json\" ]; then\n"
+                "  cat > \"$usage_json\" <<'JSON'\n"
+                '{"input_tokens": 100, "output_tokens": 50, "cache_tokens": 0, "turn_count": 4, "drift_kinds": {}, "progress_nudge_reasons": {}}\n'
+                "JSON\n"
+                "fi\n"
+                "exit 0\n"
+            )
+            fake_cargo.chmod(0o755)
+            task = self.write_task(
+                repo,
+                """
+id: t-scores
+repo: .
+base_ref: main
+prompt: hi
+harnesses: [omegon]
+acceptance:
+  required:
+    - python3 -c \"print('ok')\"
+process_expectations:
+  max_orientation_only_turns: 1
+  max_turns: 20
+budget:
+  soft:
+    max_turns: 12
+    max_total_tokens: 1000000
+  hard:
+    max_turns: 25
+    max_total_tokens: 2000000
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(Path(result.stdout.strip()).read_text())
+            scores = payload["scores"]
+            self.assertEqual(set(scores.keys()), {"outcome", "process", "efficiency", "discipline"})
+            self.assertEqual(scores["outcome"]["status"], "pass")
+            self.assertEqual(scores["outcome"]["score"], 1.0)
+            self.assertEqual(scores["process"]["status"], "pass")
+            self.assertEqual(scores["efficiency"]["status"], "pass")
+            self.assertEqual(scores["discipline"]["status"], "pass")
+            self.assertEqual(scores["discipline"]["formula_version"], "v1")
+            # Existing top-level binary score is unchanged (outcome only).
+            self.assertEqual(payload["score"], 1.0)
+            self.assertEqual(payload["status"], "pass")
+
     def test_process_grading_violation_is_recorded_in_artifact_without_failing_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)
