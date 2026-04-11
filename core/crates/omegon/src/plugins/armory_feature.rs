@@ -183,11 +183,14 @@ impl ArmoryFeature {
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn {cmd} {script_str}: {e}"))?;
 
-        // Write args to stdin then close
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(input.as_bytes()).await?;
-            stdin.shutdown().await?;
-        }
+        // Write args to stdin then close. We tolerate broken-pipe errors:
+        // a fast script that doesn't actually read its stdin (e.g.
+        // `echo 'hello'`) will close the read end of the pipe before
+        // we finish writing, which is harmless — the child has already
+        // moved on to producing its output. Propagating that error here
+        // would manifest as a flaky test on busy CI runners (the race
+        // is wall-clock dependent).
+        write_stdin_best_effort(child.stdin.take(), input.as_bytes()).await;
 
         // Wait with timeout + cancellation
         let wait_fut = child.wait_with_output();
@@ -258,10 +261,9 @@ impl ArmoryFeature {
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn {runtime} run: {e}"))?;
 
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(input.as_bytes()).await?;
-            stdin.shutdown().await?;
-        }
+        // Same broken-pipe tolerance as execute_script — see the comment
+        // there for the rationale.
+        write_stdin_best_effort(child.stdin.take(), input.as_bytes()).await;
 
         let wait_fut = child.wait_with_output();
         tokio::pin!(wait_fut);
@@ -279,6 +281,23 @@ impl ArmoryFeature {
 
         parse_tool_output(&tool.name, &output)
     }
+}
+
+/// Write `input` to a child process's stdin and close it, tolerating
+/// broken-pipe errors (which are benign and racy: a fast child that
+/// doesn't actually read its stdin will have closed the read end before
+/// we finish writing). All other I/O errors are silently dropped — if
+/// the child can't receive its arguments, that will surface as a tool
+/// error from the script's own behavior, not from this function.
+async fn write_stdin_best_effort(
+    stdin: Option<tokio::process::ChildStdin>,
+    input: &[u8],
+) {
+    let Some(mut stdin) = stdin else {
+        return;
+    };
+    let _ = stdin.write_all(input).await;
+    let _ = stdin.shutdown().await;
 }
 
 #[async_trait]
