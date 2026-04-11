@@ -71,6 +71,11 @@ pub struct AgentSetup {
     pub extension_widgets: Vec<crate::extensions::ExtensionTabWidget>,
     /// Widget event receivers — one per discovered extension.
     pub widget_receivers: Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
+    /// Slot the AgentEvent broadcast sender gets written into once main.rs
+    /// has constructed the channel. The cleave feature reads this slot when
+    /// emitting `AgentEvent::Decomposition*` events from inside its tool
+    /// execution path. See `features::cleave::CleaveEventSlot`.
+    pub cleave_event_slot: features::cleave::CleaveEventSlot,
 }
 
 /// Pre-computed state gathered during setup for TUI initial display.
@@ -419,6 +424,11 @@ impl AgentSetup {
         // ─── Cleave (decomposition + dispatch) ─────────────────────────
         let cleave_feature = features::cleave::CleaveFeature::new(&cwd, session_secret_env.clone());
         let cleave_handle = cleave_feature.shared_progress();
+        // Capture the event-sender slot before bus.register consumes the
+        // typed feature. main.rs writes the AgentEvent broadcast sender
+        // into this slot once the channel exists, after which the cleave
+        // feature can emit DecompositionStarted/ChildCompleted/Completed.
+        let cleave_event_slot = cleave_feature.event_sender_slot();
         bus.register(Box::new(cleave_feature));
 
         // ─── Codescan (codebase_search / codebase_index) ──────────────
@@ -925,6 +935,7 @@ impl AgentSetup {
                     initial_harness_status.clone(),
                 ))),
             },
+            cleave_event_slot,
         })
     }
 

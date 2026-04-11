@@ -17,9 +17,24 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use omegon_traits::{
-    BusEvent, BusRequest, CommandDefinition, CommandResult, ContentBlock, Feature, ToolDefinition,
-    ToolResult,
+    AgentEvent, BusEvent, BusRequest, CommandDefinition, CommandResult, ContentBlock, Feature,
+    ToolDefinition, ToolResult,
 };
+use tokio::sync::broadcast;
+
+/// Shared slot for the AgentEvent broadcast sender.
+///
+/// CleaveFeature needs to emit `AgentEvent::Decomposition*` events to
+/// surface tree state changes to consumers (web dashboard, IPC / Auspex,
+/// TUI). The features layer is constructed in `setup.rs` *before* the
+/// broadcast channel exists in `main.rs`, so we hand out a shared slot
+/// at feature-construction time and let main.rs write the sender into
+/// it once the channel is up.
+///
+/// Until the slot is populated, decomposition emissions are silently
+/// dropped — this is correct for tests and for any code path that
+/// constructs the feature without a live event bus.
+pub type CleaveEventSlot = Arc<Mutex<Option<broadcast::Sender<AgentEvent>>>>;
 
 use crate::cleave::{
     self, CleavePlan,
@@ -463,6 +478,9 @@ pub struct CleaveFeature {
     pub inventory: Option<std::sync::Arc<tokio::sync::RwLock<crate::routing::ProviderInventory>>>,
     /// Startup-approved secret env inherited by child runs.
     session_secret_env: Vec<(String, String)>,
+    /// Slot holding the AgentEvent broadcast sender once the runtime has
+    /// constructed it. See [`CleaveEventSlot`] for the rationale.
+    event_sender: CleaveEventSlot,
 }
 
 impl CleaveFeature {
@@ -474,9 +492,29 @@ impl CleaveFeature {
             child_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
             inventory: None,
             session_secret_env,
+            event_sender: Arc::new(Mutex::new(None)),
         };
         feature.refresh_progress_from_workspace_state();
         feature
+    }
+
+    /// Hand out a clone of the event-sender slot so the runtime can write
+    /// the broadcast `Sender<AgentEvent>` into it once the channel exists.
+    /// Must be called *before* `bus.register(Box::new(feature))` consumes
+    /// the typed `CleaveFeature`.
+    pub fn event_sender_slot(&self) -> CleaveEventSlot {
+        Arc::clone(&self.event_sender)
+    }
+
+    /// Send a decomposition event on the broadcast channel if a sender is
+    /// installed. Silently dropped otherwise — tests and headless runs
+    /// don't have an event bus and shouldn't fail because of it.
+    fn emit_decomposition_event(&self, event: AgentEvent) {
+        if let Ok(slot) = self.event_sender.lock() {
+            if let Some(tx) = slot.as_ref() {
+                let _ = tx.send(event);
+            }
+        }
     }
 
     fn workspace_state_path(&self) -> PathBuf {
@@ -741,9 +779,43 @@ impl CleaveFeature {
             prog.total_tokens_out = 0;
         }
 
+        // ── Decomposition lifecycle event 1 of 3 ──────────────────────────
+        // Tree exists and is about to start spawning children. Consumers
+        // (web dashboard, IPC, TUI) get the list of child labels so they
+        // can render placeholder rows immediately.
+        self.emit_decomposition_event(AgentEvent::DecompositionStarted {
+            children: plan.children.iter().map(|c| c.label.clone()).collect(),
+        });
+
         let progress_sink = {
             let shared = self.shared_progress();
-            progress::callback_progress_sink(move |event| apply_progress_event(&shared, event))
+            let event_slot = self.event_sender_slot();
+            progress::callback_progress_sink(move |event| {
+                // Update internal cleave progress state first.
+                apply_progress_event(&shared, event);
+
+                // ── Decomposition lifecycle event 2 of 3 ──────────────
+                // Per-child terminal transitions get surfaced as
+                // DecompositionChildCompleted. The four terminal statuses
+                // (Completed, Failed, MergedAfterFailure, UpstreamExhausted)
+                // map to a single boolean: did the child do something
+                // useful that contributed to the merged result?
+                if let ProgressEvent::ChildStatus { child, status, .. } = event {
+                    let success = matches!(
+                        status,
+                        ChildProgressStatus::Completed
+                            | ChildProgressStatus::MergedAfterFailure
+                    );
+                    if let Ok(slot) = event_slot.lock() {
+                        if let Some(tx) = slot.as_ref() {
+                            let _ = tx.send(AgentEvent::DecompositionChildCompleted {
+                                label: child.clone(),
+                                success,
+                            });
+                        }
+                    }
+                }
+            })
         };
         let child_cancel_tokens = Arc::clone(&self.child_cancel_tokens);
 
@@ -785,6 +857,18 @@ impl CleaveFeature {
             let mut tokens = self.child_cancel_tokens.lock().unwrap();
             tokens.clear();
         }
+
+        // ── Decomposition lifecycle event 3 of 3 ──────────────────────────
+        // Run completed. `merged` is true iff at least one child's work
+        // was successfully merged into the parent branch — this matches
+        // the dashboard semantics ("did the family produce anything?")
+        // rather than the per-child success tally, which is already
+        // covered by the stream of DecompositionChildCompleted events.
+        let merged = result
+            .merge_results
+            .iter()
+            .any(|(_, outcome)| matches!(outcome, cleave::orchestrator::MergeOutcome::Success));
+        self.emit_decomposition_event(AgentEvent::DecompositionCompleted { merged });
 
         if should_cleanup_workspace(&result) {
             cleanup_workspace_dir(&workspace)?;
@@ -1181,6 +1265,64 @@ mod tests {
         let mut feature = CleaveFeature::new(dir.path(), vec![]);
         let result = feature.handle_command("cleave", "status");
         assert!(matches!(result, CommandResult::Display(ref s) if s.contains("No active")));
+    }
+
+    #[test]
+    fn event_slot_starts_empty_and_drops_emissions() {
+        // Without a sender installed, emit_decomposition_event must be a
+        // silent no-op (used in tests, headless runs, anywhere without an
+        // event bus). Reaching this assertion at all proves we don't panic.
+        let dir = tempfile::tempdir().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![]);
+        feature.emit_decomposition_event(AgentEvent::DecompositionStarted {
+            children: vec!["a".into(), "b".into()],
+        });
+        assert!(
+            feature.event_sender_slot().lock().unwrap().is_none(),
+            "slot should still be empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn event_slot_routes_emissions_when_populated() {
+        // Install a broadcast sender into the slot and verify all three
+        // decomposition variants reach a subscribed receiver. This is the
+        // mechanism the cleave run path uses; the call sites in execute_run
+        // are reviewed manually since they require a real subprocess
+        // dispatch to exercise end-to-end.
+        let dir = tempfile::tempdir().unwrap();
+        let feature = CleaveFeature::new(dir.path(), vec![]);
+        let (tx, mut rx) = broadcast::channel::<AgentEvent>(8);
+        *feature.event_sender_slot().lock().unwrap() = Some(tx);
+
+        feature.emit_decomposition_event(AgentEvent::DecompositionStarted {
+            children: vec!["alpha".into(), "beta".into()],
+        });
+        feature.emit_decomposition_event(AgentEvent::DecompositionChildCompleted {
+            label: "alpha".into(),
+            success: true,
+        });
+        feature.emit_decomposition_event(AgentEvent::DecompositionCompleted { merged: true });
+
+        match rx.recv().await.unwrap() {
+            AgentEvent::DecompositionStarted { children } => {
+                assert_eq!(children, vec!["alpha".to_string(), "beta".to_string()]);
+            }
+            other => panic!("expected DecompositionStarted, got {other:?}"),
+        }
+        match rx.recv().await.unwrap() {
+            AgentEvent::DecompositionChildCompleted { label, success } => {
+                assert_eq!(label, "alpha");
+                assert!(success);
+            }
+            other => panic!("expected DecompositionChildCompleted, got {other:?}"),
+        }
+        match rx.recv().await.unwrap() {
+            AgentEvent::DecompositionCompleted { merged } => {
+                assert!(merged);
+            }
+            other => panic!("expected DecompositionCompleted, got {other:?}"),
+        }
     }
 
     #[test]

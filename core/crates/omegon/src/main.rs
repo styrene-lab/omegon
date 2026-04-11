@@ -709,6 +709,12 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
     // ─── Event channel (shared with web dashboard) ──────────────────────
     let (events_tx, _) = broadcast::channel::<AgentEvent>(256);
 
+    // Hand the broadcast sender to the cleave feature so it can emit
+    // AgentEvent::Decomposition* events from inside its tool execution path.
+    if let Ok(mut slot) = agent.cleave_event_slot.lock() {
+        *slot = Some(events_tx.clone());
+    }
+
     // ─── Web control plane ──────────────────────────────────────────────
     let state = web::WebState::new(
         agent.dashboard_handles.clone(),
@@ -1303,6 +1309,12 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     // Wire command_tx to ContextProvider for tool dispatch
     if let Ok(mut shared_tx) = agent.command_tx.lock() {
         *shared_tx = Some(command_tx.clone());
+    }
+
+    // Hand the broadcast sender to the cleave feature so it can emit
+    // AgentEvent::Decomposition* events from inside its tool execution path.
+    if let Ok(mut slot) = agent.cleave_event_slot.lock() {
+        *slot = Some(events_tx.clone());
     }
 
     let pending_compact = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -3112,6 +3124,13 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
 
     // ─── Event channel ──────────────────────────────────────────────────
     let (events_tx, mut events_rx) = broadcast::channel::<AgentEvent>(256);
+
+    // Hand the broadcast sender to the cleave feature so it can emit
+    // AgentEvent::Decomposition* events from inside its tool execution path.
+    if let Ok(mut slot) = agent.cleave_event_slot.lock() {
+        *slot = Some(events_tx.clone());
+    }
+
     let benchmark_summary = std::sync::Arc::new(std::sync::Mutex::new(BenchmarkUsageSummary {
         requested_model: Some(requested_model.clone()),
         requested_provider: Some(requested_provider.clone()),
