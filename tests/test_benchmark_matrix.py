@@ -191,6 +191,20 @@ class SummarizeAndRenderTests(unittest.TestCase):
 
 
 class MatrixRunnerIntegrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Hermetic cargo target cache per test — see the matching note in
+        # tests/test_benchmark_harness.py.
+        self._cache_tmpdir = tempfile.TemporaryDirectory(prefix="omegon-bench-cache-matrix-test-")
+        self._saved_cache_env = os.environ.get("OMEGON_BENCHMARK_CACHE_DIR")
+        os.environ["OMEGON_BENCHMARK_CACHE_DIR"] = self._cache_tmpdir.name
+
+    def tearDown(self) -> None:
+        if self._saved_cache_env is None:
+            os.environ.pop("OMEGON_BENCHMARK_CACHE_DIR", None)
+        else:
+            os.environ["OMEGON_BENCHMARK_CACHE_DIR"] = self._saved_cache_env
+        self._cache_tmpdir.cleanup()
+
     def init_repo(self, repo: Path) -> None:
         (repo / "ai" / "benchmarks" / "tasks").mkdir(parents=True, exist_ok=True)
         (repo / "scripts").mkdir(parents=True, exist_ok=True)

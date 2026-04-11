@@ -325,13 +325,41 @@ def prepare_clean_repo(repo_path: Path, base_ref: str) -> Path:
     return clean_root
 
 
+def benchmark_cache_root() -> Path:
+    """Resolve the root directory for the shared benchmark cargo cache.
+
+    Resolution order:
+      1. ``OMEGON_BENCHMARK_CACHE_DIR`` (explicit override, used by tests
+         and CI to keep runs hermetic).
+      2. ``$XDG_CACHE_HOME/omegon-benchmark`` if XDG_CACHE_HOME is set.
+      3. ``~/.cache/omegon-benchmark``.
+
+    Anchoring the cache outside the source tree decouples per-run cargo
+    state from the working tree (which historically lived at
+    ``<source>/core/target/benchmark-harness/...`` and made "clean
+    checkout" not really clean) without losing the per-(task, harness)
+    sharding that makes incremental builds fast.
+    """
+    explicit = os.environ.get("OMEGON_BENCHMARK_CACHE_DIR")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        return (Path(xdg) / "omegon-benchmark").expanduser().resolve()
+    return (Path.home() / ".cache" / "omegon-benchmark").resolve()
+
+
 def benchmark_process_env(repo_path: Path, clean_repo_path: Path, harness: str, task_id: str) -> dict[str, str]:
     env = dict(os.environ)
     source_core = repo_path / "core"
     clean_core = clean_repo_path / "core"
     if source_core.exists() and clean_core.exists():
         safe_task = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in task_id)
-        shared_target = source_core / "target" / "benchmark-harness" / safe_task / harness
+        # Anchor the shared cargo target dir outside the source tree so
+        # per-run state cannot leak back into the working copy. Per-(task,
+        # harness) sharding is preserved so incremental builds across
+        # consecutive matrix cells still hit a warm cache.
+        shared_target = benchmark_cache_root() / "cargo-target" / safe_task / harness
         shared_target.mkdir(parents=True, exist_ok=True)
         env["CARGO_TARGET_DIR"] = str(shared_target.resolve())
     return env

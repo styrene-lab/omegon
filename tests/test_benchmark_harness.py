@@ -17,6 +17,22 @@ SPEC.loader.exec_module(BENCHMARK_HARNESS)
 
 
 class BenchmarkHarnessTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Redirect the shared benchmark cargo cache to a per-test tmpdir so
+        # tests do not pollute (or share state through) the real
+        # ~/.cache/omegon-benchmark/. Tests that need to manipulate the
+        # resolution order save/restore this env var themselves.
+        self._cache_tmpdir = tempfile.TemporaryDirectory(prefix="omegon-bench-cache-test-")
+        self._saved_cache_env = os.environ.get("OMEGON_BENCHMARK_CACHE_DIR")
+        os.environ["OMEGON_BENCHMARK_CACHE_DIR"] = self._cache_tmpdir.name
+
+    def tearDown(self) -> None:
+        if self._saved_cache_env is None:
+            os.environ.pop("OMEGON_BENCHMARK_CACHE_DIR", None)
+        else:
+            os.environ["OMEGON_BENCHMARK_CACHE_DIR"] = self._saved_cache_env
+        self._cache_tmpdir.cleanup()
+
     def write_task(self, repo: Path, content: str) -> Path:
         task = repo / "task.yaml"
         task.write_text(content)
@@ -868,12 +884,61 @@ acceptance: [echo ok]
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir) / "repo"
             clean = Path(tmpdir) / "clean"
+            cache = Path(tmpdir) / "bench-cache"
             (repo / "core").mkdir(parents=True)
             (clean / "core").mkdir(parents=True)
 
-            env = BENCHMARK_HARNESS.benchmark_process_env(repo, clean, "omegon", "task:alpha")
-            expected = (repo / "core" / "target" / "benchmark-harness" / "task-alpha" / "omegon").resolve()
+            old = os.environ.get("OMEGON_BENCHMARK_CACHE_DIR")
+            os.environ["OMEGON_BENCHMARK_CACHE_DIR"] = str(cache)
+            try:
+                env = BENCHMARK_HARNESS.benchmark_process_env(repo, clean, "omegon", "task:alpha")
+            finally:
+                if old is None:
+                    os.environ.pop("OMEGON_BENCHMARK_CACHE_DIR", None)
+                else:
+                    os.environ["OMEGON_BENCHMARK_CACHE_DIR"] = old
+            expected = (cache / "cargo-target" / "task-alpha" / "omegon").resolve()
             self.assertEqual(env["CARGO_TARGET_DIR"], str(expected))
+            self.assertTrue(expected.exists(), "shared target dir should be created")
+            # Critically: the shared target dir must NOT be a path inside
+            # the source tree any more.
+            self.assertNotIn(str(repo), env["CARGO_TARGET_DIR"])
+
+    def test_benchmark_cache_root_resolution_order(self) -> None:
+        # Save and restore environment so other tests are not perturbed.
+        saved = {k: os.environ.get(k) for k in ("OMEGON_BENCHMARK_CACHE_DIR", "XDG_CACHE_HOME")}
+
+        def restore() -> None:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        try:
+            # Explicit override wins over everything.
+            os.environ["OMEGON_BENCHMARK_CACHE_DIR"] = "/tmp/explicit-cache"
+            os.environ["XDG_CACHE_HOME"] = "/tmp/xdg-cache"
+            self.assertEqual(
+                BENCHMARK_HARNESS.benchmark_cache_root(),
+                Path("/tmp/explicit-cache").resolve(),
+            )
+
+            # No explicit, XDG present → XDG_CACHE_HOME/omegon-benchmark.
+            os.environ.pop("OMEGON_BENCHMARK_CACHE_DIR", None)
+            self.assertEqual(
+                BENCHMARK_HARNESS.benchmark_cache_root(),
+                Path("/tmp/xdg-cache/omegon-benchmark").resolve(),
+            )
+
+            # Neither set → ~/.cache/omegon-benchmark.
+            os.environ.pop("XDG_CACHE_HOME", None)
+            self.assertEqual(
+                BENCHMARK_HARNESS.benchmark_cache_root(),
+                (Path.home() / ".cache" / "omegon-benchmark").resolve(),
+            )
+        finally:
+            restore()
 
     def test_writes_result_for_mocked_omegon_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
