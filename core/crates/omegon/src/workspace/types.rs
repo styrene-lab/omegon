@@ -142,6 +142,13 @@ pub enum AdmissionOutcome {
     DeniedByAuthorityPolicy { reason: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct WorkspaceBindings {
+    pub milestone_id: Option<String>,
+    pub design_node_id: Option<String>,
+    pub openspec_change: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceLease {
     pub project_id: String,
@@ -150,6 +157,7 @@ pub struct WorkspaceLease {
     pub path: String,
     pub backend_kind: WorkspaceBackendKind,
     pub vcs_ref: Option<WorkspaceVcsRef>,
+    pub bindings: WorkspaceBindings,
     pub branch: String,
     pub role: WorkspaceRole,
     pub workspace_kind: WorkspaceKind,
@@ -169,6 +177,7 @@ pub struct WorkspaceSummary {
     pub path: String,
     pub backend_kind: WorkspaceBackendKind,
     pub vcs_ref: Option<WorkspaceVcsRef>,
+    pub bindings: WorkspaceBindings,
     pub branch: String,
     pub role: WorkspaceRole,
     pub workspace_kind: WorkspaceKind,
@@ -218,6 +227,11 @@ mod tests {
                 revision: None,
                 remote: Some("origin".into()),
             }),
+            bindings: WorkspaceBindings {
+                milestone_id: Some("0.15.10".into()),
+                design_node_id: Some("workspace-ownership-model".into()),
+                openspec_change: None,
+            },
             branch: "feature/demo".into(),
             role: WorkspaceRole::Feature,
             workspace_kind: WorkspaceKind::Mixed,
@@ -250,6 +264,11 @@ mod tests {
                     revision: None,
                     remote: Some("origin".into()),
                 }),
+                bindings: WorkspaceBindings {
+                    milestone_id: Some("0.15.10".into()),
+                    design_node_id: Some("release-candidate-system".into()),
+                    openspec_change: None,
+                },
                 branch: "main".into(),
                 role: WorkspaceRole::Primary,
                 workspace_kind: WorkspaceKind::Code,

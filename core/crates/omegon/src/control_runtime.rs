@@ -632,8 +632,11 @@ pub async fn workspace_status_view_response(agent: &InteractiveAgentHost) -> Sla
         .map(|registry| registry.workspaces.len())
         .unwrap_or(1);
     let owner = lease.owner_session_id.as_deref().unwrap_or("(none)");
+    let milestone = lease.bindings.milestone_id.as_deref().unwrap_or("(none)");
+    let node = lease.bindings.design_node_id.as_deref().unwrap_or("(none)");
+    let change = lease.bindings.openspec_change.as_deref().unwrap_or("(none)");
     let text = format!(
-        "Workspace\n  ID:           {}\n  Label:        {}\n  Project:      {}\n  Path:         {}\n  Backend:      {}\n  Branch:       {}\n  Role:         {:?}\n  Kind:         {:?}\n  Mutability:   {:?}\n  Owner:        {}\n  Source:       {}\n  Local Views:  {}",
+        "Workspace\n  ID:           {}\n  Label:        {}\n  Project:      {}\n  Path:         {}\n  Backend:      {}\n  Branch:       {}\n  Role:         {:?}\n  Kind:         {:?}\n  Mutability:   {:?}\n  Owner:        {}\n  Source:       {}\n  Milestone:    {}\n  Design Node:  {}\n  OpenSpec:     {}\n  Local Views:  {}",
         lease.workspace_id,
         lease.label,
         lease.project_id,
@@ -645,6 +648,9 @@ pub async fn workspace_status_view_response(agent: &InteractiveAgentHost) -> Sla
         lease.mutability,
         owner,
         lease.source,
+        milestone,
+        node,
+        change,
         occupancy,
     );
     SlashCommandResponse {
@@ -908,6 +914,7 @@ pub async fn workspace_new_response(
             revision: None,
             remote: Some("origin".into()),
         }),
+        bindings: parent.bindings.clone(),
         branch: info.branch.clone(),
         role: crate::workspace::types::WorkspaceRole::Feature,
         workspace_kind: parent.workspace_kind,
@@ -940,6 +947,7 @@ pub async fn workspace_new_response(
         path: new_lease.path.clone(),
         backend_kind: new_lease.backend_kind,
         vcs_ref: new_lease.vcs_ref.clone(),
+        bindings: new_lease.bindings.clone(),
         branch: new_lease.branch.clone(),
         role: new_lease.role,
         workspace_kind: new_lease.workspace_kind,
@@ -985,8 +993,10 @@ pub async fn workspace_list_view_response(agent: &InteractiveAgentHost) -> Slash
     )];
     for workspace in registry.workspaces {
         let owner = workspace.owner_session_id.as_deref().unwrap_or("(none)");
+        let milestone = workspace.bindings.milestone_id.as_deref().unwrap_or("(none)");
+        let node = workspace.bindings.design_node_id.as_deref().unwrap_or("(none)");
         lines.push(format!(
-            "- {} ({})\n    path: {}\n    backend: {}\n    branch: {}\n    role/kind: {:?} / {:?}\n    mutability: {:?}\n    owner: {}\n    stale: {}",
+            "- {} ({})\n    path: {}\n    backend: {}\n    branch: {}\n    role/kind: {:?} / {:?}\n    milestone/node: {} / {}\n    mutability: {:?}\n    owner: {}\n    stale: {}",
             workspace.workspace_id,
             workspace.label,
             workspace.path,
@@ -994,6 +1004,8 @@ pub async fn workspace_list_view_response(agent: &InteractiveAgentHost) -> Slash
             workspace.branch,
             workspace.role,
             workspace.workspace_kind,
+            milestone,
+            node,
             workspace.mutability,
             owner,
             workspace.stale,

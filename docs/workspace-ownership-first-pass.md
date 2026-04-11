@@ -103,6 +103,11 @@ Proposed schema:
     "revision": "string|null",
     "remote": "string|null"
   },
+  "bindings": {
+    "milestone_id": "string|null",
+    "design_node_id": "string|null",
+    "openspec_change": "string|null"
+  },
   "branch": "string",
   "role": "primary|feature|cleave-child|benchmark|release|exploratory|read-only",
   "workspace_kind": "code|vault|knowledge|spec|mixed|generic",
@@ -145,6 +150,11 @@ Proposed shape:
         "revision": "string|null",
         "remote": "string|null"
       },
+      "bindings": {
+        "milestone_id": "string|null",
+        "design_node_id": "string|null",
+        "openspec_change": "string|null"
+      },
       "branch": "string",
       "role": "feature",
       "workspace_kind": "mixed",
@@ -166,6 +176,7 @@ Required distinction:
 - `label` = human-facing operator name
 - `backend_kind` = how the surface is realized
 - `vcs_ref` = optional descriptive VCS linkage, not identity
+- `bindings.milestone_id` / `bindings.design_node_id` / `bindings.openspec_change` = optional lifecycle bindings describing what the workspace is for
 
 This keeps workspace from collapsing into a shadow branch/worktree system.
 

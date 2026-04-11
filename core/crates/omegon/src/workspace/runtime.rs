@@ -145,6 +145,7 @@ mod tests {
                     revision: None,
                     remote: Some("origin".into()),
                 }),
+                bindings: crate::workspace::types::WorkspaceBindings::default(),
                 branch: "main".into(),
                 role: WorkspaceRole::Primary,
                 workspace_kind: WorkspaceKind::Mixed,

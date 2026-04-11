@@ -756,6 +756,10 @@ impl AgentSetup {
                 revision: None,
                 remote: Some("origin".into()),
             }),
+            bindings: existing_workspace_lease
+                .as_ref()
+                .map(|lease| lease.bindings.clone())
+                .unwrap_or_default(),
             branch: existing_workspace_lease
                 .as_ref()
                 .map(|lease| lease.branch.clone())
@@ -782,6 +786,7 @@ impl AgentSetup {
             path: workspace_lease.path.clone(),
             backend_kind: workspace_lease.backend_kind,
             vcs_ref: workspace_lease.vcs_ref.clone(),
+            bindings: workspace_lease.bindings.clone(),
             branch: workspace_lease.branch.clone(),
             role: workspace_lease.role,
             workspace_kind: workspace_lease.workspace_kind,

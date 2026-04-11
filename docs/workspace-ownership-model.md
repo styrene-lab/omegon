@@ -89,9 +89,32 @@ This separation is required so a workspace remains valid even if:
 - the same upstream project is mounted at different local paths
 - the workspace has no VCS backing at all (for example a vault)
 
-### Workspace must remain valid without VCS semantics
+### Workspace binding should point into lifecycle, not collapse into it
 
-If removing git/jj semantics would make the workspace model collapse, then the model is incorrectly defined.
+Authority-sensitive workspaces should carry optional lifecycle bindings such as:
+- `milestone_id`
+- `design_node_id`
+- `openspec_change`
 
-A workspace may reference VCS state, but VCS state must remain descriptive rather than identity-defining.
+These are **bindings**, not identities.
 
+That means:
+- a release workspace may be bound to milestone `0.15.10`
+- a benchmark workspace may be bound to a benchmark-analysis node
+- a feature workspace may be bound to a design node or spec change
+
+But the workspace itself remains a runtime coordination object.
+
+Lifecycle bindings answer **what this workspace is for**.
+Workspace identity answers **which mutable surface this runtime owns**.
+
+### VCS anchors should be descriptive reference, not primary identity
+
+Git/jj commit or revision pointers are useful as:
+- audit anchors
+- reproducibility markers
+- drift detectors
+
+They should not become workspace identity.
+
+A workspace may record a `vcs_ref` or future `vcs_anchor`, but authority should key primarily off role + lifecycle binding, with VCS state used secondarily for drift and provenance checks.

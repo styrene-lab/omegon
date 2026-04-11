@@ -92,6 +92,7 @@ mod tests {
                 revision: None,
                 remote: Some("origin".into()),
             }),
+            bindings: super::types::WorkspaceBindings::default(),
             branch: "feature/demo".into(),
             role: WorkspaceRole::Feature,
             workspace_kind: WorkspaceKind::Mixed,
