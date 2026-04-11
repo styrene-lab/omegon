@@ -1711,18 +1711,38 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "args": args,
         }),
         AgentEvent::ToolUpdate { id, partial } => {
-            let text = partial
-                .content
-                .iter()
-                .filter_map(|c| c.as_text())
-                .collect::<Vec<_>>()
-                .join("\n");
-            json!({
+            // Surface the typed shape so the dashboard can render live
+            // tail + progress instead of guessing from raw text. Heartbeats
+            // arrive with `tail` empty and `heartbeat: true` — consumers can
+            // use them to refresh a "last seen alive" timestamp without
+            // re-rendering content.
+            let mut payload = json!({
                 "type": "tool_update",
                 "event_name": "tool.updated",
                 "id": id,
-                "partial": escape_html(&text),
-            })
+                "partial": escape_html(&partial.tail),
+                "heartbeat": partial.progress.heartbeat,
+                "elapsed_ms": partial.progress.elapsed_ms,
+            });
+            if let Some(phase) = &partial.progress.phase {
+                payload["phase"] = json!(phase);
+            }
+            if let Some(units) = &partial.progress.units {
+                payload["units"] = json!({
+                    "current": units.current,
+                    "total": units.total,
+                    "unit": units.unit,
+                });
+            }
+            if let Some(tally) = &partial.progress.tally {
+                payload["tally"] = json!({
+                    "ok": tally.ok,
+                    "fail": tally.fail,
+                    "skip": tally.skip,
+                    "other": tally.other,
+                });
+            }
+            payload
         }
         AgentEvent::ToolEnd {
             id,
@@ -2264,12 +2284,7 @@ mod tests {
             },
             AgentEvent::ToolUpdate {
                 id: "1".into(),
-                partial: omegon_traits::ToolResult {
-                    content: vec![omegon_traits::ContentBlock::Text {
-                        text: "partial".into(),
-                    }],
-                    details: serde_json::json!(null),
-                },
+                partial: omegon_traits::PartialToolResult::content("partial", 100),
             },
             AgentEvent::ToolEnd {
                 id: "1".into(),
