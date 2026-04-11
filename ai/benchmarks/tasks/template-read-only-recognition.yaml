@@ -1,0 +1,92 @@
+# TEMPLATE — Read-only recognition task (taxonomy B)
+#
+# This is a TEMPLATE, not a working benchmark. Copy it to a new file with a
+# real id and replace every placeholder marked with TODO before running.
+#
+# What this taxonomy measures (from docs/benchmark-redesign-task-and-eval-spec.md):
+#   "Agent should discover that the target condition is already satisfied or
+#    that no change is justified."
+#
+# Primary risks measured:
+#   - pointless edits
+#   - endless searching after decisive evidence
+#   - failure to conclude no-op cleanly
+#
+# How to use this template:
+#   1. Pick a feature in the codebase that is *already* correctly wired or
+#      a property that is *already* satisfied.
+#   2. Word the prompt so a naive agent might think work is needed.
+#   3. The required acceptance command should pass on a clean checkout
+#      WITHOUT any agent modification (this is the whole point — recognition
+#      means no edits).
+#   4. The failure_if predicate should detect any unnecessary edits, e.g.
+#      `git diff --quiet` returning non-zero (meaning the diff is non-empty).
+#      Note the inverted exit semantics: failure_if treats exit 0 as
+#      "matched → fail" so we want a command that exits 0 when something
+#      forbidden happened.
+
+id: TODO-read-only-recognition-template
+kind: read_only_recognition
+repo: .
+base_ref: main
+
+prompt: |
+  TODO: word a prompt that suggests work might be needed for a feature
+  that is in fact already correctly wired in the codebase.
+
+matrix:
+  harnesses:
+    - omegon
+    - om
+    - pi
+    - claude-code
+  models:
+    - anthropic:claude-sonnet-4-6
+
+expected_solution:
+  summary: |
+    No code change should be made. The agent should report that the
+    target condition is already satisfied and exit cleanly.
+  primary_files: []
+  forbidden_patterns:
+    - any code modification
+    - disabling tests
+    - introducing new tests when none were asked for
+
+acceptance:
+  required:
+    # TODO: a deterministic check that already passes on a clean checkout.
+    - cargo test -p omegon TODO_target_test --manifest-path core/Cargo.toml
+  optional: []
+  failure_if:
+    # The diff is empty on a clean checkout. If the agent edited anything,
+    # `git diff --quiet` returns non-zero (clear); if the diff IS empty,
+    # `git diff --quiet` exits 0 — which under failure_if semantics means
+    # "matched → fail." That is the OPPOSITE of what we want here, so we
+    # invert with `!`. The shell wrapper makes it exit 0 (matched → fail)
+    # only when the diff is NON-empty.
+    - 'sh -c "! git diff --quiet"'
+
+process_expectations:
+  # Recognition tasks should converge fast — there is nothing to fix.
+  max_orientation_only_turns: 1
+  max_progress_nudges: 0
+  max_turns: 6
+
+budget:
+  soft:
+    max_turns: 6
+    max_total_tokens: 400000
+    max_wall_clock_sec: 300
+  hard:
+    max_turns: 12
+    max_total_tokens: 800000
+    max_wall_clock_sec: 600
+
+success_files: []
+
+notes: |
+  TEMPLATE — copy and adapt before running. The whole point of a
+  recognition task is to detect harnesses that cannot stop searching
+  once evidence is decisive. If your replacement task makes any edit
+  pass acceptance, you have built an implementation task by accident.

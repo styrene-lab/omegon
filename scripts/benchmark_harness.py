@@ -37,6 +37,16 @@ import yaml
 
 SUPPORTED_HARNESSES = {"omegon", "claude-code", "pi"}
 
+# Matrix-schema aliases. The redesign doc lists `om` in the matrix example
+# alongside `omegon`/`pi`/`claude-code`, but the per-cell harness only
+# understands `omegon` + `--slim`. Aliases are accepted in `spec.harnesses`
+# at parse time and translated at selection time so direct CLI invocation
+# (`--harness om`) and matrix-orchestrated invocation both work without
+# the per-cell adapter layer needing to grow a new harness identity.
+HARNESS_ALIASES: dict[str, tuple[str, bool]] = {
+    "om": ("omegon", True),
+}
+
 
 def audit(message: str) -> None:
     print(f"[benchmark] {message}", file=sys.stderr, flush=True)
@@ -169,7 +179,7 @@ def load_task_spec(path: Path) -> TaskSpec:
     default_model = str(raw["model"]) if raw.get("model") is not None else None
     harnesses, models = _parse_matrix(raw, list(default_harnesses), default_model)
     for harness in harnesses:
-        if harness not in SUPPORTED_HARNESSES:
+        if harness not in SUPPORTED_HARNESSES and harness not in HARNESS_ALIASES:
             raise TaskSpecError(f"unsupported harness: {harness}")
 
     acceptance_required, acceptance_optional, acceptance_failure_if = _parse_acceptance(raw["acceptance"])
@@ -237,19 +247,44 @@ def ensure_clean_out_dir(root: Path, out_dir: str | None) -> Path:
     return path
 
 
+def resolve_harness_alias(name: str) -> tuple[str, bool]:
+    """Translate a possibly-aliased harness name into (canonical, slim_override).
+
+    `om` → `("omegon", True)`. Unknown / non-aliased names pass through with
+    `slim_override=False`. Callers must combine `slim_override` with their
+    own slim source via OR — an alias never *unsets* slim that was already
+    requested by the user.
+    """
+    if name in HARNESS_ALIASES:
+        return HARNESS_ALIASES[name]
+    return name, False
+
+
 def select_harness(spec: TaskSpec, explicit: str | None) -> str:
     harness = explicit or spec.harnesses[0]
     if harness not in spec.harnesses:
         raise TaskSpecError(f"harness '{harness}' not declared in task harnesses")
-    return harness
+    canonical, _slim_override = resolve_harness_alias(harness)
+    return canonical
 
 
 def select_model(spec: TaskSpec, explicit: str | None) -> str | None:
     return explicit or spec.model
 
 
-def select_slim(spec: TaskSpec, explicit: bool) -> bool:
-    return explicit or spec.slim
+def select_slim(spec: TaskSpec, explicit: bool, *, harness_request: str | None = None) -> bool:
+    """Resolve the slim flag honoring user intent and matrix-schema aliases.
+
+    If the requested harness is an alias that implies slim (e.g. `om`), the
+    slim flag is forced on regardless of the spec/CLI state. Otherwise the
+    flag is the OR of the explicit CLI flag and the spec default.
+    """
+    base = explicit or spec.slim
+    if harness_request is not None:
+        _canonical, slim_override = resolve_harness_alias(harness_request)
+        if slim_override:
+            return True
+    return base
 
 
 def normalize_model_for_harness(harness: str, model: str | None) -> str | None:
@@ -1499,9 +1534,12 @@ def main() -> int:
 
     try:
         spec = load_task_spec(task_path)
+        # Capture the user's pre-alias-resolution harness request so the slim
+        # selector can detect alias-implied slim (e.g. `--harness om`).
+        harness_request = args.harness or (spec.harnesses[0] if spec.harnesses else None)
         harness = select_harness(spec, args.harness)
         model = select_model(spec, args.model)
-        slim = select_slim(spec, args.slim)
+        slim = select_slim(spec, args.slim, harness_request=harness_request)
         ensure_model_supported_for_harness(harness, model)
     except TaskSpecError as err:
         print(str(err), file=sys.stderr)

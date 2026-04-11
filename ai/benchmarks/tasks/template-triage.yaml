@@ -1,0 +1,100 @@
+# TEMPLATE — Triage / diagnosis task (taxonomy C)
+#
+# This is a TEMPLATE, not a working benchmark. Copy it to a new file with a
+# real id and replace every placeholder marked with TODO before running.
+#
+# What this taxonomy measures (from docs/benchmark-redesign-task-and-eval-spec.md):
+#   "Agent must isolate cause correctly before editing."
+#
+# Primary risks measured:
+#   - false certainty
+#   - over-editing before diagnosis
+#   - failure to gather decisive evidence
+#
+# How to use this template:
+#   1. Pick a real bug or anomaly in the codebase that has an identifiable
+#      root cause file/function.
+#   2. The agent's job is to *identify* the cause, not fix it. Acceptance
+#      should test that the agent named the right code location, e.g. by
+#      writing it to a designated artifact path or by passing a separate
+#      grader script that reads the agent's last assistant message.
+#   3. Forbid edits to source files via failure_if so the harness catches
+#      agents that "fix" instead of diagnosing.
+#
+# Caveat: deterministic acceptance for triage tasks is hard. If you cannot
+# express the diagnosis check as a shell exit code, prefer pairing this
+# with a downstream Repair-after-diagnosis task (template-repair-after-diagnosis.yaml)
+# rather than introducing an LLM-as-judge step. The redesign doc explicitly
+# wants outcome to remain deterministic whenever possible.
+
+id: TODO-triage-template
+kind: triage
+repo: .
+base_ref: main
+
+prompt: |
+  TODO: describe an observable symptom and ask the agent to identify the
+  root cause without applying a fix. Example shape:
+  "Test X is failing with error Y. Identify which file and function
+   contains the root cause. Do not apply a fix — only report the location."
+
+matrix:
+  harnesses:
+    - omegon
+    - om
+    - pi
+    - claude-code
+  models:
+    - anthropic:claude-sonnet-4-6
+
+expected_solution:
+  summary: |
+    The agent should identify the root-cause file and function and
+    report it without modifying any source.
+  # TODO: list the files the agent must reference correctly.
+  primary_files:
+    - TODO/path/to/root_cause_file.rs
+  forbidden_patterns:
+    - any source code edit
+    - guessing without grep evidence
+    - applying a fix instead of reporting the cause
+
+acceptance:
+  required:
+    # TODO: a deterministic check that the agent identified the right
+    # location. Two viable patterns:
+    #   (a) The task prompt asks the agent to write the answer to a
+    #       known path; acceptance greps for the expected file/function:
+    #         grep -q 'TODO/path/to/root_cause_file.rs' /tmp/triage-answer.txt
+    #   (b) A small grader script bundled with the task spec that reads
+    #       the agent's chat output and exits 0 on a correct identification.
+    - 'grep -q "TODO/path/to/root_cause_file.rs" TODO/path/to/agent-answer.txt'
+  optional: []
+  failure_if:
+    # No source modifications allowed.
+    - 'sh -c "! git diff --quiet -- TODO/path/to/source/"'
+
+process_expectations:
+  # Triage should require some search but not endless grep churn.
+  max_orientation_only_turns: 3
+  max_progress_nudges: 1
+  max_turns: 12
+
+budget:
+  soft:
+    max_turns: 12
+    max_total_tokens: 800000
+    max_wall_clock_sec: 600
+  hard:
+    max_turns: 25
+    max_total_tokens: 1600000
+    max_wall_clock_sec: 1200
+
+success_files: []
+
+notes: |
+  TEMPLATE — copy and adapt before running. Triage tasks are the
+  hardest to grade deterministically. If you cannot express the
+  diagnosis check as a shell predicate, consider pairing this with a
+  Repair-after-diagnosis task instead, which does have a deterministic
+  acceptance signal (the test passes).

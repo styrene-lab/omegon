@@ -971,6 +971,115 @@ acceptance:
             self.assertEqual(payload["telemetry"]["per_turn"]["avg_input_tokens"], 300)
             self.assertEqual(payload["telemetry"]["per_turn"]["avg_cache_write_tokens"], 6)
 
+    def test_load_task_spec_accepts_om_alias_in_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            task = self.write_task(
+                repo,
+                """
+id: t-om-alias
+repo: .
+base_ref: main
+prompt: hi
+matrix:
+  harnesses: [omegon, om, pi]
+  models: [anthropic:claude-sonnet-4-6]
+acceptance:
+  required:
+    - echo ok
+""",
+            )
+            # Parse-time: `om` should not raise.
+            spec = BENCHMARK_HARNESS.load_task_spec(task)
+            self.assertEqual(spec.harnesses, ["omegon", "om", "pi"])
+
+    def test_resolve_harness_alias_translates_om_and_passes_through_others(self) -> None:
+        self.assertEqual(BENCHMARK_HARNESS.resolve_harness_alias("om"), ("omegon", True))
+        self.assertEqual(BENCHMARK_HARNESS.resolve_harness_alias("omegon"), ("omegon", False))
+        self.assertEqual(BENCHMARK_HARNESS.resolve_harness_alias("pi"), ("pi", False))
+        self.assertEqual(BENCHMARK_HARNESS.resolve_harness_alias("claude-code"), ("claude-code", False))
+
+    def test_select_harness_returns_canonical_name_for_alias(self) -> None:
+        from types import SimpleNamespace
+        spec = SimpleNamespace(harnesses=["omegon", "om"])
+        # Direct alias selection returns the canonical harness identity so
+        # adapter_for can dispatch to OmegonAdapter without growing a new branch.
+        self.assertEqual(BENCHMARK_HARNESS.select_harness(spec, "om"), "omegon")
+        self.assertEqual(BENCHMARK_HARNESS.select_harness(spec, "omegon"), "omegon")
+
+    def test_select_slim_forces_slim_when_alias_implies_it(self) -> None:
+        from types import SimpleNamespace
+        spec = SimpleNamespace(slim=False, harnesses=["omegon", "om"])
+        # Even though both spec.slim and the explicit CLI flag are False,
+        # an `om` request must turn slim on.
+        self.assertTrue(
+            BENCHMARK_HARNESS.select_slim(spec, False, harness_request="om")
+        )
+        # Plain omegon request honors the spec/CLI false.
+        self.assertFalse(
+            BENCHMARK_HARNESS.select_slim(spec, False, harness_request="omegon")
+        )
+        # Explicit CLI slim still wins for non-alias harnesses.
+        self.assertTrue(
+            BENCHMARK_HARNESS.select_slim(spec, True, harness_request="omegon")
+        )
+
+    def test_om_alias_runs_end_to_end_through_per_cell_harness(self) -> None:
+        # Direct CLI invocation with `--harness om` should execute the
+        # omegon adapter with slim forced on, and the result should be
+        # labelled `om` in the artifact.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            fake_cargo = repo / "scripts" / "cargo"
+            fake_cargo.write_text(
+                "#!/bin/sh\n"
+                "slim_seen='false'\n"
+                "usage_json=''\n"
+                "prev=''\n"
+                "for arg in \"$@\"; do\n"
+                "  if [ \"$prev\" = \"--usage-json\" ]; then usage_json=\"$arg\"; fi\n"
+                "  if [ \"$arg\" = \"--slim\" ]; then slim_seen='true'; fi\n"
+                "  prev=\"$arg\"\n"
+                "done\n"
+                "if [ -n \"$usage_json\" ]; then\n"
+                "  printf '{\"input_tokens\": 10, \"output_tokens\": 5, \"extra\": {\"slim_observed\": \"%s\"}}' \"$slim_seen\" > \"$usage_json\"\n"
+                "fi\n"
+                "exit 0\n"
+            )
+            fake_cargo.chmod(0o755)
+            task = self.write_task(
+                repo,
+                """
+id: t-om-direct
+repo: .
+base_ref: main
+prompt: hi
+matrix:
+  harnesses: [omegon, om]
+  models: []
+acceptance:
+  required:
+    - python3 -c \"print('ok')\"
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo), "--harness", "om"],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(Path(result.stdout.strip()).read_text())
+            self.assertEqual(payload["harness"], "om")
+            # The fake cargo recorded that --slim was actually passed through.
+            self.assertEqual(payload.get("extra", {}).get("slim_observed"), "true")
+
     def test_write_result_includes_model_in_filename_to_avoid_matrix_collisions(self) -> None:
         # Two cells with the same (harness, slim) but different models must
         # produce different filenames even when written within the same

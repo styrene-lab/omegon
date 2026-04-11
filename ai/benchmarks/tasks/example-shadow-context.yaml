@@ -1,20 +1,72 @@
 id: example-shadow-context
+kind: implementation
 repo: .
 base_ref: main
-model: anthropic:claude-sonnet-4-6
-slim: false
+
 prompt: |
   Finish the shadow-context assembly wiring.
-harnesses:
-  - omegon
-  - claude-code
-  - pi
+
+# The matrix the orchestrator (scripts/benchmark_matrix.py) walks. The
+# `om` entry is shorthand for omegon + --slim and renders as a distinct
+# row in the matrix summary alongside plain `omegon`.
+matrix:
+  harnesses:
+    - omegon
+    - om
+    - pi
+    - claude-code
+  models:
+    - anthropic:claude-sonnet-4-6
+
+expected_solution:
+  summary: |
+    Wire shadow-context assembly into the relevant runtime path so the
+    task acceptance test passes without unrelated churn.
+  primary_files:
+    - core/crates/omegon/src/context.rs
+  forbidden_patterns:
+    - broad unrelated refactors
+    - disabling tests
+    - acceptance-check bypasses
+
 acceptance:
-  - cargo test -p omegon shadow_context --manifest-path core/Cargo.toml
+  required:
+    - cargo test -p omegon shadow_context --manifest-path core/Cargo.toml
+  optional: []
+  failure_if: []
+
+# Process discipline expectations graded by the harness against omegon
+# adapter telemetry. Numeric `max_*` keys are graded as
+# `actual <= threshold`. See SUPPORTED_PROCESS_EXPECTATIONS in
+# scripts/benchmark_harness.py for the current set of supported keys;
+# unknown keys are recorded as `not_evaluated` rather than silently
+# ignored. Process violations do not gate the run's status — they appear
+# under `process.grading.violations[]` and feed `scores.process`.
+process_expectations:
+  max_orientation_only_turns: 2
+  max_progress_nudges: 1
+
+# Tiered budget — within soft is `pass` (1.0), between soft and hard is
+# `warn` (0.5), over hard is `fail` (0.0). Composite efficiency score is
+# the mean of evaluated per-key scores. The legacy flat form
+# (`budget: {max_turns: 20, ...}`) is still accepted and is treated as
+# soft-only.
+budget:
+  soft:
+    max_turns: 20
+    max_total_tokens: 1500000
+    max_wall_clock_sec: 1200
+  hard:
+    max_turns: 40
+    max_total_tokens: 3000000
+    max_wall_clock_sec: 1800
+
 success_files:
   - core/crates/omegon/src/context.rs
-budget:
-  max_turns: 20
-  max_minutes: 30
+
 notes: |
-  Example benchmark task spec for the token-efficiency comparison harness.
+  Canonical token-efficiency comparison task. The task id is referenced
+  from docs/benchmark-finding-rc63-shadow-context.md,
+  docs/benchmark-finding-rc64-shadow-context.md, and
+  docs/benchmark-optimization-plan-turn-count-first.md — preserve the id
+  when the schema evolves so historical comparisons remain meaningful.
