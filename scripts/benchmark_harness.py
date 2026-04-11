@@ -1316,10 +1316,22 @@ def build_result(
     return payload
 
 
+def _sanitize_filename_component(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in value)
+
+
 def write_result(out_dir: Path, spec: TaskSpec, harness: str, slim: bool, payload: dict[str, Any]) -> Path:
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     label = result_harness_label(harness, slim)
-    out_path = out_dir / f"{timestamp}-{spec.id}-{label}.json"
+    # Include the resolved model in the filename when present so concurrent
+    # matrix cells with the same (harness, slim) but different models do not
+    # collide on the same second-resolution timestamp. Sanitize because model
+    # ids contain ':' and other path-unsafe characters.
+    model = payload.get("model")
+    parts = [timestamp, spec.id, label]
+    if isinstance(model, str) and model:
+        parts.append(_sanitize_filename_component(model))
+    out_path = out_dir / ("-".join(parts) + ".json")
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return out_path
 

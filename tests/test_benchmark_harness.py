@@ -971,6 +971,33 @@ acceptance:
             self.assertEqual(payload["telemetry"]["per_turn"]["avg_input_tokens"], 300)
             self.assertEqual(payload["telemetry"]["per_turn"]["avg_cache_write_tokens"], 6)
 
+    def test_write_result_includes_model_in_filename_to_avoid_matrix_collisions(self) -> None:
+        # Two cells with the same (harness, slim) but different models must
+        # produce different filenames even when written within the same
+        # second. This is the per-cell harness side of the matrix-runner
+        # filename-collision fix.
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            spec = SimpleNamespace(id="t-collide")
+            payload_a = {"model": "anthropic:claude-sonnet-4-6", "harness": "omegon"}
+            payload_b = {"model": "openai-codex:gpt-5.4", "harness": "omegon"}
+
+            path_a = BENCHMARK_HARNESS.write_result(out_dir, spec, "omegon", False, payload_a)
+            path_b = BENCHMARK_HARNESS.write_result(out_dir, spec, "omegon", False, payload_b)
+
+            self.assertNotEqual(path_a.name, path_b.name)
+            # Sanitization: ':' and '.' both become '-' so the filename is
+            # safe across filesystems and does not produce a misleading
+            # extension partway through.
+            self.assertIn("anthropic-claude-sonnet-4-6", path_a.name)
+            self.assertIn("openai-codex-gpt-5-4", path_b.name)
+            # No model → no extra suffix beyond the existing label.
+            payload_c: dict = {"harness": "omegon"}
+            path_c = BENCHMARK_HARNESS.write_result(out_dir, spec, "omegon", False, payload_c)
+            self.assertTrue(path_c.name.endswith("-omegon.json"))
+
     def test_slim_omegon_results_are_labeled_om(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)
@@ -1018,7 +1045,13 @@ acceptance:
             result_path = Path(result.stdout.strip())
             payload = json.loads(result_path.read_text())
             self.assertEqual(payload["harness"], "om")
-            self.assertTrue(result_path.name.endswith("-om.json"))
+            # The label segment "-om-" appears between the task id and the
+            # (optional) model component. With no model set the filename ends
+            # in "-om.json"; with a model set it ends in "-om-<model>.json".
+            self.assertTrue(
+                result_path.name.endswith("-om.json") or "-om-" in result_path.name,
+                f"expected om label in filename, got {result_path.name}",
+            )
 
     def test_acceptance_runs_in_clean_repo_not_source_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
