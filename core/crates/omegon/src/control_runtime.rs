@@ -37,6 +37,7 @@ pub enum ControlRequest {
     WorkspaceStatusView,
     WorkspaceListView,
     WorkspaceNew { label: String },
+    WorkspaceDestroy { target: String },
     WorkspaceAdopt,
     WorkspaceRelease,
     WorkspaceArchive,
@@ -107,6 +108,11 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::WorkspaceListView => ControlRequest::WorkspaceListView,
         crate::tui::CanonicalSlashCommand::WorkspaceNew(label) => {
             ControlRequest::WorkspaceNew { label: label.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::WorkspaceDestroy(target) => {
+            ControlRequest::WorkspaceDestroy {
+                target: target.clone(),
+            }
         }
         crate::tui::CanonicalSlashCommand::WorkspaceAdopt => ControlRequest::WorkspaceAdopt,
         crate::tui::CanonicalSlashCommand::WorkspaceRelease => ControlRequest::WorkspaceRelease,
@@ -244,6 +250,9 @@ pub async fn execute_control(
         ControlRequest::WorkspaceStatusView => workspace_status_view_response(ctx.agent).await,
         ControlRequest::WorkspaceListView => workspace_list_view_response(ctx.agent).await,
         ControlRequest::WorkspaceNew { label } => workspace_new_response(ctx.agent, &label).await,
+        ControlRequest::WorkspaceDestroy { target } => {
+            workspace_destroy_response(ctx.agent, &target).await
+        }
         ControlRequest::WorkspaceAdopt => workspace_adopt_response(ctx.agent).await,
         ControlRequest::WorkspaceRelease => workspace_release_response(ctx.agent).await,
         ControlRequest::WorkspaceArchive => workspace_archive_response(ctx.agent).await,
@@ -805,6 +814,145 @@ pub async fn workspace_kind_view_response(agent: &InteractiveAgentHost) -> Slash
             declared.as_str(),
             inferred.as_str(),
             source,
+        )),
+    }
+}
+
+fn find_workspace_target(
+    registry: &crate::workspace::types::WorkspaceRegistry,
+    target: &str,
+) -> Result<crate::workspace::types::WorkspaceSummary, String> {
+    if let Some(workspace) = registry
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.workspace_id == target)
+    {
+        return Ok(workspace.clone());
+    }
+
+    let matches = registry
+        .workspaces
+        .iter()
+        .filter(|workspace| workspace.label == target)
+        .cloned()
+        .collect::<Vec<_>>();
+    match matches.len() {
+        0 => Err(format!("Workspace '{target}' not found in local registry.")),
+        1 => Ok(matches.into_iter().next().unwrap()),
+        _ => Err(format!(
+            "Workspace label '{target}' is ambiguous; use workspace_id instead."
+        )),
+    }
+}
+
+fn safe_remove_workspace_dir(
+    current_cwd: &Path,
+    repo_root: &Path,
+    workspace_path: &Path,
+) -> Result<(), String> {
+    if workspace_path == current_cwd {
+        return Err("Refusing to destroy the current active workspace path.".into());
+    }
+    if workspace_path == repo_root {
+        return Err("Refusing to destroy the project root workspace.".into());
+    }
+    if workspace_path.exists() {
+        std::fs::remove_dir_all(workspace_path)
+            .map_err(|err| format!("Failed to remove workspace directory: {err}"))?;
+    }
+    Ok(())
+}
+
+pub async fn workspace_destroy_response(
+    agent: &InteractiveAgentHost,
+    target: &str,
+) -> SlashCommandResponse {
+    let registry = match crate::workspace::runtime::read_workspace_registry(&agent.cwd)
+        .ok()
+        .flatten()
+    {
+        Some(registry) => registry,
+        None => {
+            return SlashCommandResponse {
+                accepted: false,
+                output: Some("Workspace destroy requires existing local registry metadata.".into()),
+            }
+        }
+    };
+    let workspace = match find_workspace_target(&registry, target) {
+        Ok(workspace) => workspace,
+        Err(message) => {
+            return SlashCommandResponse {
+                accepted: false,
+                output: Some(message),
+            }
+        }
+    };
+    if workspace.path == agent.cwd.display().to_string() {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some("Refusing to destroy the current active workspace.".into()),
+        };
+    }
+    if workspace.role == crate::workspace::types::WorkspaceRole::Primary {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some("Refusing to destroy the primary workspace.".into()),
+        };
+    }
+    if workspace.owner_session_id.is_some() {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some("Workspace must be released before it can be destroyed.".into()),
+        };
+    }
+    if !workspace.archived {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some("Workspace must be archived before it can be destroyed.".into()),
+        };
+    }
+
+    let repo_root = Path::new(&registry.repo_root);
+    let workspace_path = Path::new(&workspace.path);
+    let removal = match workspace.backend_kind {
+        crate::workspace::types::WorkspaceBackendKind::GitWorktree
+        | crate::workspace::types::WorkspaceBackendKind::JjCheckout => {
+            omegon_git::worktree::remove_smart(repo_root, &workspace.label, workspace_path)
+                .map_err(|err| format!("Failed to remove workspace backend: {err}"))
+        }
+        crate::workspace::types::WorkspaceBackendKind::LocalDir
+        | crate::workspace::types::WorkspaceBackendKind::GitClone => {
+            safe_remove_workspace_dir(&agent.cwd, repo_root, workspace_path)
+        }
+        crate::workspace::types::WorkspaceBackendKind::RemoteDir
+        | crate::workspace::types::WorkspaceBackendKind::PodVolume => Err(
+            "Workspace destroy is not yet implemented for remote-dir/pod-volume backends.".into(),
+        ),
+    };
+    if let Err(message) = removal {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some(message),
+        };
+    }
+
+    let mut updated = registry.clone();
+    updated
+        .workspaces
+        .retain(|entry| entry.workspace_id != workspace.workspace_id);
+    if let Err(err) = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &updated) {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Destroyed workspace but failed to update registry: {err}")),
+        };
+    }
+
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(format!(
+            "Destroyed archived workspace {} ({}).",
+            workspace.workspace_id, workspace.label
         )),
     }
 }

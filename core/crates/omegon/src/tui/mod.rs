@@ -309,6 +309,7 @@ pub(crate) enum CanonicalSlashCommand {
     WorkspaceStatusView,
     WorkspaceListView,
     WorkspaceNew(String),
+    WorkspaceDestroy(String),
     WorkspaceAdopt,
     WorkspaceRelease,
     WorkspaceArchive,
@@ -381,6 +382,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "workspace" => {
             if let Some(label) = args.strip_prefix("new ").map(str::trim).filter(|label| !label.is_empty()) {
                 Some(CanonicalSlashCommand::WorkspaceNew(label.to_string()))
+            } else if let Some(target) = args.strip_prefix("destroy ").map(str::trim).filter(|value| !value.is_empty()) {
+                Some(CanonicalSlashCommand::WorkspaceDestroy(target.to_string()))
             } else if let Some(milestone) = args.strip_prefix("bind milestone ").map(str::trim).filter(|value| !value.is_empty()) {
                 Some(CanonicalSlashCommand::WorkspaceBindMilestone(milestone.to_string()))
             } else if let Some(node) = args.strip_prefix("bind node ").map(str::trim).filter(|value| !value.is_empty()) {
@@ -3382,6 +3385,11 @@ impl App {
                         CanonicalSlashCommand::WorkspaceNew(label) => {
                             crate::control_runtime::ControlRequest::WorkspaceNew {
                                 label: label.clone(),
+                            }
+                        }
+                        CanonicalSlashCommand::WorkspaceDestroy(target) => {
+                            crate::control_runtime::ControlRequest::WorkspaceDestroy {
+                                target: target.clone(),
                             }
                         }
                         CanonicalSlashCommand::WorkspaceAdopt => {
