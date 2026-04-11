@@ -1738,6 +1738,46 @@ mod tests {
     }
 
     #[test]
+    fn cleave_panel_renders_salvaged_merge_without_red_failure_badge() {
+        let mut panel = InstrumentPanel::default();
+        panel.set_cleave_progress(Some(CleaveProgress {
+            active: true,
+            run_id: "run-1".into(),
+            total_children: 1,
+            completed: 1,
+            failed: 0,
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+            children: vec![crate::features::cleave::ChildProgress {
+                label: "alpha".into(),
+                status: "merged_after_failure".into(),
+                duration_secs: Some(12.4),
+                supervision_mode: None,
+                pid: None,
+                last_tool: Some("commit".into()),
+                last_turn: Some(8),
+                started_at: None,
+                last_activity_at: None,
+                tokens_in: 0,
+                tokens_out: 0,
+                runtime: None,
+            }],
+        }));
+
+        let area = Rect::new(0, 0, 48, 8);
+        let backend = ratatui::backend::TestBackend::new(48, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let t = crate::tui::theme::Alpharius;
+
+        terminal.draw(|f| panel.render_tools_panel(area, f, &t)).unwrap();
+
+        let buf = terminal.backend().buffer().clone();
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(text.contains("↺") || text.contains("⚡"), "expected non-red reconciled indicator: {text}");
+        assert!(!text.contains("✗ alpha"), "salvaged merge should not render as hard failure: {text}");
+    }
+
+    #[test]
     fn render_cleave_panel_clears_dirty_border_adjacent_cells() {
         let mut panel = InstrumentPanel::default();
         panel.set_cleave_progress(Some(CleaveProgress {

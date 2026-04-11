@@ -4009,6 +4009,47 @@ mod tests {
     }
 
     #[test]
+    fn cleave_merge_result_reports_salvaged_merge_honestly() {
+        let child = cleave::state::ChildState {
+            child_id: 0,
+            label: "noop-docs".to_string(),
+            description: String::new(),
+            scope: vec![],
+            depends_on: vec![],
+            status: cleave::state::ChildStatus::Completed,
+            error: Some("merged after salvaging work from a failed child".to_string()),
+            branch: None,
+            worktree_path: None,
+            backend: "native".to_string(),
+            execute_model: None,
+            provider_id: None,
+            duration_secs: None,
+            stdout: None,
+            runtime: None,
+            pid: None,
+            started_at_unix_ms: None,
+            last_activity_unix_ms: None,
+            adoption_worktree_path: None,
+            adoption_model: None,
+            supervisor_token: None,
+        };
+
+        let line = format_cleave_merge_result(
+            Some(&child),
+            "noop-docs",
+            &cleave::orchestrator::MergeOutcome::Success,
+        );
+        assert!(
+            line.contains("salvaged and merged after failure"),
+            "unexpected line: {line}"
+        );
+        assert!(
+            !line.contains("✓ noop-docs merged"),
+            "line should not flatten salvaged merge into plain success: {line}"
+        );
+    }
+
+    #[test]
     fn hidden_bench_run_task_cli_parses() {
         let cli = Cli::try_parse_from([
             "omegon",

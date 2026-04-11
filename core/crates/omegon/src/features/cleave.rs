@@ -1449,6 +1449,49 @@ mod tests {
     }
 
     #[test]
+    fn apply_progress_event_merged_after_failure_counts_as_completed_not_failed() {
+        let shared = Arc::new(Mutex::new(CleaveProgress {
+            active: true,
+            run_id: "run-1".into(),
+            total_children: 1,
+            completed: 0,
+            failed: 1,
+            children: vec![ChildProgress {
+                label: "alpha".into(),
+                status: "failed".into(),
+                duration_secs: None,
+                supervision_mode: None,
+                pid: None,
+                last_tool: None,
+                last_turn: None,
+                started_at: None,
+                last_activity_at: None,
+                tokens_in: 0,
+                tokens_out: 0,
+                runtime: None,
+            }],
+            total_tokens_in: 0,
+            total_tokens_out: 0,
+        }));
+
+        apply_progress_event(
+            &shared,
+            &ProgressEvent::ChildStatus {
+                child: "alpha".into(),
+                status: ChildProgressStatus::MergedAfterFailure,
+                duration_secs: Some(1.5),
+                error: None,
+            },
+        );
+
+        let progress = shared.lock().unwrap();
+        assert_eq!(progress.children[0].status, "merged_after_failure");
+        assert_eq!(progress.children[0].duration_secs, Some(1.5));
+        assert_eq!(progress.completed, 1);
+        assert_eq!(progress.failed, 0);
+    }
+
+    #[test]
     fn apply_progress_event_activity_refreshes_last_seen() {
         let shared = Arc::new(Mutex::new(CleaveProgress {
             active: true,
