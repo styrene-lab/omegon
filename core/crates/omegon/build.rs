@@ -23,8 +23,15 @@ fn main() {
     // Short SHA (7 chars)
     let sha = git(&["rev-parse", "--short=7", "HEAD"]).unwrap_or_else(|| "unknown".into());
 
-    // Dirty flag — any tracked modifications or staged changes
-    let dirty = git(&["status", "--porcelain"])
+    // Dirty flag — tracked modifications or staged changes only.
+    // Ignored local runtime state (for example `.omegon/runtime/`) must not taint
+    // version reporting, because workspace leases are intentionally machine-local.
+    let dirty = git(&[
+        "status",
+        "--porcelain",
+        "--untracked-files=no",
+        "--ignored=no",
+    ])
         .map(|s| if s.is_empty() { "" } else { "-dirty" })
         .unwrap_or("");
 
