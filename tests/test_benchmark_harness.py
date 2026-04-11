@@ -130,6 +130,76 @@ acceptance:
             self.assertEqual(spec.acceptance_optional, [])
             self.assertEqual(spec.acceptance_failure_if, [])
 
+    def test_structured_acceptance_and_task_metadata_emitted_in_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            fake_cargo = repo / "scripts" / "cargo"
+            fake_cargo.write_text(
+                "#!/bin/sh\n"
+                "usage_json=''\n"
+                "prev=''\n"
+                "for arg in \"$@\"; do\n"
+                "  if [ \"$prev\" = \"--usage-json\" ]; then usage_json=\"$arg\"; fi\n"
+                "  prev=\"$arg\"\n"
+                "done\n"
+                "if [ -n \"$usage_json\" ]; then\n"
+                "  cat > \"$usage_json\" <<'JSON'\n"
+                '{"input_tokens": 10, "output_tokens": 5, "cache_tokens": 0}\n'
+                "JSON\n"
+                "fi\n"
+                "exit 0\n"
+            )
+            fake_cargo.chmod(0o755)
+            task = self.write_task(
+                repo,
+                """
+id: t-structured
+kind: diagnosis
+repo: .
+base_ref: main
+prompt: inspect and fix
+matrix:
+  harnesses: [omegon]
+  models: [anthropic:claude-sonnet-4-6, openai-codex:gpt-5.4]
+acceptance:
+  required:
+    - python3 -c \"print('ok')\"
+  optional:
+    - python3 -c \"print('optional')\"
+  failure_if:
+    - python3 -c \"print('guard')\"
+process_expectations:
+  max_orientation_only_turns: 1
+expected_solution:
+  primary_files: [core/crates/omegon/src/context.rs]
+budget:
+  max_turns: 12
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(Path(result.stdout.strip()).read_text())
+            self.assertEqual(payload["task_kind"], "diagnosis")
+            self.assertEqual(payload["task"]["kind"], "diagnosis")
+            self.assertEqual(payload["task"]["matrix"]["models"], ["anthropic:claude-sonnet-4-6", "openai-codex:gpt-5.4"])
+            self.assertEqual(payload["task"]["process_expectations"], {"max_orientation_only_turns": 1})
+            self.assertEqual(payload["task"]["expected_solution"], {"primary_files": ["core/crates/omegon/src/context.rs"]})
+            self.assertEqual(payload["task"]["budgets"], {"max_turns": 12})
+            self.assertEqual(payload["acceptance"]["status"], "pass")
+            self.assertEqual(len(payload["acceptance"]["required"]), 1)
+            self.assertEqual(payload["acceptance"]["optional"], [{"cmd": "python3 -c \"print('optional')\"", "status": "not_run"}])
+            self.assertEqual(payload["acceptance"]["failure_if"], [{"cmd": "python3 -c \"print('guard')\"", "status": "not_run"}])
+
     def test_declared_harness_without_binary_fails_usefully(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)
@@ -217,6 +287,14 @@ acceptance:
             result_path = Path(result.stdout.strip())
             payload = json.loads(result_path.read_text())
             self.assertEqual(payload["status"], "pass")
+            self.assertEqual(payload["task_kind"], "implementation")
+            self.assertEqual(payload["task"]["kind"], "implementation")
+            self.assertEqual(payload["task"]["matrix"]["harnesses"], ["omegon"])
+            self.assertEqual(payload["task"]["matrix"]["models"], [])
+            self.assertEqual(payload["acceptance"]["status"], "pass")
+            self.assertEqual(len(payload["acceptance"]["required"]), 1)
+            self.assertEqual(payload["acceptance"]["optional"], [])
+            self.assertEqual(payload["acceptance"]["failure_if"], [])
             self.assertEqual(payload["benchmark_mode"]["adapter_profile"], "omegon-native")
             self.assertTrue(payload["benchmark_mode"]["clean_room"])
             self.assertEqual(payload["tokens"]["total"], 1525)

@@ -254,6 +254,17 @@ fn should_inject_execution_pressure(
         && tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProgressSignal {
+    None,
+    Mutation,
+    TargetedValidation,
+    BroadValidation,
+    ConstraintDiscovery,
+    Commit,
+    Completion,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ControllerState {
     consecutive_tool_continuations: u32,
@@ -261,6 +272,7 @@ struct ControllerState {
     repeated_action_failure_streak: u32,
     validation_thrash_streak: u32,
     closure_stall_streak: u32,
+    constraint_discovery_streak: u32,
 }
 
 impl ControllerState {
@@ -272,11 +284,21 @@ impl ControllerState {
         &mut self,
         turn_end_reason: TurnEndReason,
         drift_kind: Option<DriftKind>,
-        had_progress_boundary: bool,
+        progress_signal: ProgressSignal,
     ) {
-        if had_progress_boundary {
-            self.reset();
-            return;
+        match progress_signal {
+            ProgressSignal::Mutation | ProgressSignal::Commit | ProgressSignal::Completion => {
+                self.reset();
+                return;
+            }
+            ProgressSignal::TargetedValidation | ProgressSignal::ConstraintDiscovery => {
+                self.consecutive_tool_continuations /= 2;
+                self.orientation_churn_streak /= 2;
+                self.repeated_action_failure_streak = 0;
+                self.validation_thrash_streak = 0;
+                self.closure_stall_streak /= 2;
+            }
+            ProgressSignal::BroadValidation | ProgressSignal::None => {}
         }
 
         if matches!(turn_end_reason, TurnEndReason::ToolContinuation) {
@@ -309,6 +331,12 @@ impl ControllerState {
         } else {
             0
         };
+        self.constraint_discovery_streak =
+            if matches!(progress_signal, ProgressSignal::ConstraintDiscovery) {
+                self.constraint_discovery_streak.saturating_add(1)
+            } else {
+                0
+            };
     }
 }
 
@@ -333,6 +361,89 @@ fn has_progress_boundary(tool_calls: &[ToolCall], results: &[ToolResultEntry]) -
     has_successful_tool_call(tool_calls, results, |call| is_mutation_tool_name(&call.name))
         || has_successful_tool_call(tool_calls, results, is_validation_tool)
         || has_successful_tool_call(tool_calls, results, |call| call.name == "commit")
+}
+
+fn classify_validation_scope(tool_calls: &[ToolCall], results: &[ToolResultEntry]) -> ProgressSignal {
+    let successful_validation_calls: Vec<&ToolCall> = tool_calls
+        .iter()
+        .filter(|call| {
+            is_validation_tool(call)
+                && results
+                    .iter()
+                    .find(|result| result.call_id == call.id)
+                    .is_some_and(|result| !result.is_error)
+        })
+        .collect();
+
+    if successful_validation_calls.is_empty() {
+        return ProgressSignal::None;
+    }
+
+    let is_targeted = successful_validation_calls.iter().any(|call| {
+        call.arguments
+            .get("command")
+            .and_then(|v| v.as_str())
+            .is_some_and(|command| {
+                let lower = command.to_ascii_lowercase();
+                lower.contains(" -k ")
+                    || lower.contains(" --test ")
+                    || lower.contains("::")
+                    || lower.contains(" shadow_context")
+                    || lower.contains(" tests/")
+            })
+    });
+
+    if is_targeted {
+        ProgressSignal::TargetedValidation
+    } else {
+        ProgressSignal::BroadValidation
+    }
+}
+
+fn detect_constraint_discovery(
+    constraints_before: usize,
+    constraints_after: usize,
+    tool_calls: &[ToolCall],
+    results: &[ToolResultEntry],
+) -> bool {
+    if constraints_after <= constraints_before {
+        return false;
+    }
+
+    tool_calls.iter().any(|call| {
+        is_repo_inspection_tool(&call.name)
+            || is_validation_tool(call)
+            || (is_mutation_tool_name(&call.name)
+                && results
+                    .iter()
+                    .find(|result| result.call_id == call.id)
+                    .is_some_and(|result| result.is_error))
+    })
+}
+
+fn classify_progress_signal(
+    constraints_before: usize,
+    constraints_after: usize,
+    tool_calls: &[ToolCall],
+    results: &[ToolResultEntry],
+) -> ProgressSignal {
+    if has_successful_tool_call(tool_calls, results, |call| call.name == "commit") {
+        return ProgressSignal::Commit;
+    }
+    if has_successful_tool_call(tool_calls, results, |call| is_mutation_tool_name(&call.name)) {
+        return ProgressSignal::Mutation;
+    }
+
+    let validation_signal = classify_validation_scope(tool_calls, results);
+    if !matches!(validation_signal, ProgressSignal::None) {
+        return validation_signal;
+    }
+
+    if detect_constraint_discovery(constraints_before, constraints_after, tool_calls, results) {
+        return ProgressSignal::ConstraintDiscovery;
+    }
+
+    ProgressSignal::None
 }
 
 fn is_slim_execution_bias(config: &LoopConfig) -> bool {
@@ -369,6 +480,11 @@ fn continuation_pressure_tier(
     let closure = controller.closure_stall_streak;
     let validation = controller.validation_thrash_streak;
     let failures = controller.repeated_action_failure_streak;
+    let discoveries = controller.constraint_discovery_streak;
+
+    if discoveries >= 2 {
+        return Some(2);
+    }
 
     if continuation >= tier3 || orient >= tier2 || closure >= tier2 || validation >= tier2 {
         Some(3)
@@ -921,12 +1037,20 @@ pub async fn run(
 
         let dominant_phase = classify_turn_phase(tool_calls, &results);
         let drift_kind = classify_drift_kind(turn, conversation, tool_calls, &results);
-        let had_progress_boundary = has_progress_boundary(tool_calls, &results);
-        controller.observe_turn(
-            TurnEndReason::ToolContinuation,
-            drift_kind,
-            had_progress_boundary,
+        let constraints_before = captured
+            .iter()
+            .filter(|capture| {
+                matches!(capture, crate::lifecycle::capture::AmbientCapture::Constraint(_))
+            })
+            .count();
+        let constraints_after = conversation.intent.constraints_discovered.len();
+        let progress_signal = classify_progress_signal(
+            constraints_after.saturating_sub(constraints_before),
+            constraints_after,
+            tool_calls,
+            &results,
         );
+        controller.observe_turn(TurnEndReason::ToolContinuation, drift_kind, progress_signal);
         let continuation_tier = continuation_pressure_tier(
             config,
             &controller,
@@ -2889,7 +3013,66 @@ mod tests {
         assert!(!should_inject_execution_pressure(4, &config, &conversation, &tool_calls));
     }
 
-    // ── Stuck detector edge cases ──────────────────────────────────────
+    fn controller_partial_reset_for_constraint_discovery() {
+        let mut controller = ControllerState {
+            consecutive_tool_continuations: 8,
+            orientation_churn_streak: 4,
+            repeated_action_failure_streak: 2,
+            validation_thrash_streak: 3,
+            closure_stall_streak: 2,
+            constraint_discovery_streak: 0,
+        };
+        controller.observe_turn(
+            TurnEndReason::ToolContinuation,
+            Some(DriftKind::OrientationChurn),
+            ProgressSignal::ConstraintDiscovery,
+        );
+        assert!(controller.consecutive_tool_continuations < 8);
+        assert!(controller.orientation_churn_streak < 4);
+        assert_eq!(controller.repeated_action_failure_streak, 0);
+        assert_eq!(controller.validation_thrash_streak, 0);
+        assert_eq!(controller.constraint_discovery_streak, 1);
+    }
+
+    #[test]
+    fn classify_progress_signal_recognizes_constraint_discovery_from_new_constraints() {
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: Value::Null,
+        }];
+        let results = vec![ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "read".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        }];
+        assert_eq!(
+            classify_progress_signal(0, 1, &tool_calls, &results),
+            ProgressSignal::ConstraintDiscovery
+        );
+    }
+
+    #[test]
+    fn classify_progress_signal_ignores_unevidenced_constraint_growth() {
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "memory_recall".into(),
+            arguments: Value::Null,
+        }];
+        let results = vec![ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "memory_recall".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: None,
+        }];
+        assert_eq!(
+            classify_progress_signal(0, 1, &tool_calls, &results),
+            ProgressSignal::None
+        );
+    }
 
     #[test]
     fn stuck_detector_resets_on_different_tool() {

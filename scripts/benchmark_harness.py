@@ -712,6 +712,7 @@ def build_result(
     final_status, final_score = derive_final_status(adapter, acceptance_status)
     payload = {
         "task_id": spec.id,
+        "task_kind": spec.kind,
         "harness": result_harness_label(harness, slim),
         "model": adapter.model,
         "status": final_status,
@@ -721,6 +722,20 @@ def build_result(
         "benchmark_mode": {
             "clean_room": True,
             "adapter_profile": adapter.profile,
+        },
+        "task": {
+            "kind": spec.kind,
+            "prompt": spec.prompt,
+            "base_ref": spec.base_ref,
+            "repo": spec.repo,
+            "success_files": list(spec.success_files),
+            "process_expectations": spec.process_expectations,
+            "expected_solution": spec.expected_solution,
+            "budgets": spec.budget,
+            "matrix": {
+                "harnesses": list(spec.harnesses),
+                "models": list(spec.models),
+            },
         },
         "adapter": {
             "execution_status": adapter.execution_status,
@@ -734,7 +749,10 @@ def build_result(
             "total": total_tokens,
         },
         "acceptance": {
-            "commands": acceptance_results,
+            "status": acceptance_status,
+            "required": acceptance_results,
+            "optional": [{"cmd": cmd, "status": "not_run"} for cmd in spec.acceptance_optional],
+            "failure_if": [{"cmd": cmd, "status": "not_run"} for cmd in spec.acceptance_failure_if],
         },
         "artifact_paths": {
             "patch": str(adapter.patch_path) if adapter.patch_path else None,
