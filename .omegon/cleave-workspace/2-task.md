@@ -1,10 +1,10 @@
 ---
-task_id: 0
-label: auth-core-audit
-siblings: [1:startup-and-status-audit, 2:consumer-surface-audit]
+task_id: 2
+label: consumer-surface-audit
+siblings: [0:auth-core-audit, 1:startup-and-status-audit]
 ---
 
-# Task 0: auth-core-audit
+# Task 2: consumer-surface-audit
 
 ## Root Directive
 
@@ -12,19 +12,20 @@ siblings: [1:startup-and-status-audit, 2:consumer-surface-audit]
 
 ## Mission
 
-Audit and fix auth core consistency in core/crates/omegon/src/auth.rs and closely related provider resolution code: provider map usage, auth.json read/write/refresh/logout semantics, persistence verification, and tests for canonical credential behavior.
+Audit and fix consumer/UI surfaces that infer auth availability so they use canonical auth resolution instead of ad hoc env checks, while preserving explicit product-policy distinctions. Cover tutorial/model catalog/TUI-related surfaces and add tests.
 
 ## Scope
 
-- `core/crates/omegon/src/auth.rs`
-- `core/crates/omegon/src/providers.rs`
+- `core/crates/omegon/src/tui/tutorial.rs`
+- `core/crates/omegon/src/tui/model_catalog.rs`
+- `core/crates/omegon/src/tui/mod.rs`
 
 **Depends on:** none (independent)
 
 ## Siblings
 
+- **auth-core-audit**: Audit and fix auth core consistency in core/crates/omegon/src/auth.rs and closely related provider resolution code: provider map usage, auth.json read/write/refresh/logout semantics, persistence verification, and tests for canonical credential behavior.
 - **startup-and-status-audit**: Audit and fix startup hydration and status/reporting surfaces so persisted credentials, environment export, and auth status outputs are consistent across runs. Cover setup, main/control auth commands, and add tests where practical.
-- **consumer-surface-audit**: Audit and fix consumer/UI surfaces that infer auth availability so they use canonical auth resolution instead of ad hoc env checks, while preserving explicit product-policy distinctions. Cover tutorial/model catalog/TUI-related surfaces and add tests.
 
 ## Dependency Versions
 

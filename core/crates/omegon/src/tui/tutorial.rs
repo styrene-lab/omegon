@@ -1350,13 +1350,19 @@ mod tests {
 
     #[test]
     fn tutorial_gate_classifies_routes_conservatively() {
+        let temp_home = tempfile::tempdir().expect("temp home");
+        let original_home = std::env::var_os("HOME");
+
         unsafe {
+            std::env::set_var("HOME", temp_home.path());
             std::env::remove_var("ANTHROPIC_API_KEY");
             std::env::remove_var("OPENAI_API_KEY");
             std::env::remove_var("OPENROUTER_API_KEY");
             std::env::remove_var("ANTHROPIC_OAUTH_TOKEN");
             std::env::remove_var("CHATGPT_OAUTH_TOKEN");
         }
+
+        assert_eq!(tutorial_gate(), TutorialMode::OrientationOnly);
 
         unsafe {
             std::env::set_var("CHATGPT_OAUTH_TOKEN", "test-codex");
@@ -1377,6 +1383,11 @@ mod tests {
 
         unsafe {
             std::env::remove_var("OPENAI_API_KEY");
+            if let Some(home) = original_home {
+                std::env::set_var("HOME", home);
+            } else {
+                std::env::remove_var("HOME");
+            }
         }
     }
 }

@@ -397,6 +397,18 @@ mod tests {
         unsafe { std::env::remove_var(key) };
     }
 
+    #[tokio::test]
+    async fn auth_status_tool_execution() {
+        let feature = AuthFeature::new();
+        let result = feature
+            .execute(
+                "auth_status",
+                "test-call",
+                json!({"action": "status"}),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result.content.len(), 1);
         if let ContentBlock::Text { text } = &result.content[0] {
