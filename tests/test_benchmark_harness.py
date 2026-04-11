@@ -237,7 +237,7 @@ acceptance:
   optional:
     - python3 -c \"print('optional')\"
   failure_if:
-    - python3 -c \"print('guard')\"
+    - python3 -c \"import sys; sys.exit(1)\"
 process_expectations:
   max_orientation_only_turns: 1
 expected_solution:
@@ -271,9 +271,305 @@ budget:
             self.assertEqual(payload["process"]["drift_kinds"], {})
             self.assertEqual(payload["process"]["progress_nudge_reasons"], {})
             self.assertEqual(payload["acceptance"]["status"], "pass")
+            self.assertEqual(payload["acceptance"]["required_status"], "pass")
+            self.assertFalse(payload["acceptance"]["failure_if_triggered"])
             self.assertEqual(len(payload["acceptance"]["required"]), 1)
-            self.assertEqual(payload["acceptance"]["optional"], [{"cmd": "python3 -c \"print('optional')\"", "status": "not_run"}])
-            self.assertEqual(payload["acceptance"]["failure_if"], [{"cmd": "python3 -c \"print('guard')\"", "status": "not_run"}])
+            self.assertEqual(len(payload["acceptance"]["optional"]), 1)
+            optional_entry = payload["acceptance"]["optional"][0]
+            self.assertEqual(optional_entry["cmd"], "python3 -c \"print('optional')\"")
+            self.assertEqual(optional_entry["status"], "pass")
+            self.assertEqual(optional_entry["exit"], 0)
+            self.assertEqual(len(payload["acceptance"]["failure_if"]), 1)
+            guard_entry = payload["acceptance"]["failure_if"][0]
+            self.assertEqual(guard_entry["cmd"], "python3 -c \"import sys; sys.exit(1)\"")
+            self.assertEqual(guard_entry["status"], "clear")
+            self.assertEqual(guard_entry["exit"], 1)
+
+    def _write_passing_fake_cargo(self, repo: Path) -> None:
+        fake_cargo = repo / "scripts" / "cargo"
+        fake_cargo.write_text(
+            "#!/bin/sh\n"
+            "usage_json=''\n"
+            "prev=''\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$prev\" = \"--usage-json\" ]; then usage_json=\"$arg\"; fi\n"
+            "  prev=\"$arg\"\n"
+            "done\n"
+            "if [ -n \"$usage_json\" ]; then\n"
+            "  cat > \"$usage_json\" <<'JSON'\n"
+            '{"input_tokens": 10, "output_tokens": 5, "cache_tokens": 0}\n'
+            "JSON\n"
+            "fi\n"
+            "exit 0\n"
+        )
+        fake_cargo.chmod(0o755)
+
+    def test_failure_if_triggered_overrides_passing_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            self._write_passing_fake_cargo(repo)
+            task = self.write_task(
+                repo,
+                """
+id: t-failure-if-triggered
+repo: .
+base_ref: main
+prompt: hi
+harnesses: [omegon]
+acceptance:
+  required:
+    - python3 -c \"print('ok')\"
+  failure_if:
+    - python3 -c \"print('boom')\"
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            # main() returns 3 when the run fails
+            self.assertEqual(result.returncode, 3)
+            payload = json.loads(Path(result.stdout.strip()).read_text())
+            self.assertEqual(payload["status"], "fail")
+            self.assertEqual(payload["score"], 0.0)
+            self.assertEqual(payload["acceptance"]["status"], "fail")
+            self.assertEqual(payload["acceptance"]["required_status"], "pass")
+            self.assertTrue(payload["acceptance"]["failure_if_triggered"])
+            self.assertEqual(len(payload["acceptance"]["failure_if"]), 1)
+            entry = payload["acceptance"]["failure_if"][0]
+            self.assertEqual(entry["status"], "triggered")
+            self.assertEqual(entry["exit"], 0)
+
+    def test_grade_process_expectations_returns_pass_when_within_threshold(self) -> None:
+        result = BENCHMARK_HARNESS.grade_process_expectations(
+            {"max_orientation_only_turns": 2, "max_turns": 12},
+            turn_count=4,
+            derived={"orientation_only_turns": 1},
+        )
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["violations"], [])
+        statuses = {c["expectation"]: c["status"] for c in result["checks"]}
+        self.assertEqual(statuses["max_orientation_only_turns"], "pass")
+        self.assertEqual(statuses["max_turns"], "pass")
+        # actual_source should be populated for evaluated checks
+        sources = {c["expectation"]: c["actual_source"] for c in result["checks"]}
+        self.assertEqual(sources["max_orientation_only_turns"], "derived.orientation_only_turns")
+        self.assertEqual(sources["max_turns"], "turn_count")
+
+    def test_grade_process_expectations_flags_violations_without_gating(self) -> None:
+        result = BENCHMARK_HARNESS.grade_process_expectations(
+            {"max_orientation_only_turns": 0, "max_turns": 12},
+            turn_count=4,
+            derived={"orientation_only_turns": 3},
+        )
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(len(result["violations"]), 1)
+        violation = result["violations"][0]
+        self.assertEqual(violation["expectation"], "max_orientation_only_turns")
+        self.assertEqual(violation["threshold"], 0)
+        self.assertEqual(violation["actual"], 3)
+        # max_turns is still recorded as a passing check alongside the violation
+        check_names = {c["expectation"] for c in result["checks"]}
+        self.assertEqual(check_names, {"max_orientation_only_turns", "max_turns"})
+
+    def test_grade_process_expectations_marks_unsupported_keys_not_evaluated(self) -> None:
+        result = BENCHMARK_HARNESS.grade_process_expectations(
+            {
+                "must_touch_repo_before_edit": True,
+                "max_orientation_only_turns": 2,
+            },
+            turn_count=4,
+            derived={"orientation_only_turns": 1},
+        )
+        # Overall is pass because at least one supported expectation evaluated to pass.
+        self.assertEqual(result["status"], "pass")
+        unsupported = next(c for c in result["checks"] if c["expectation"] == "must_touch_repo_before_edit")
+        self.assertEqual(unsupported["status"], "not_evaluated")
+        self.assertEqual(unsupported["reason"], "unsupported_expectation")
+
+    def test_grade_process_expectations_returns_not_evaluated_without_telemetry(self) -> None:
+        result = BENCHMARK_HARNESS.grade_process_expectations(
+            {"max_orientation_only_turns": 1, "max_turns": 10},
+            turn_count=None,
+            derived={},
+        )
+        self.assertEqual(result["status"], "not_evaluated")
+        self.assertEqual(result["violations"], [])
+        for check in result["checks"]:
+            self.assertEqual(check["status"], "not_evaluated")
+            self.assertEqual(check["reason"], "process_telemetry_unavailable")
+
+    def test_grade_process_expectations_empty_returns_not_evaluated(self) -> None:
+        result = BENCHMARK_HARNESS.grade_process_expectations({}, turn_count=4, derived={"orientation_only_turns": 0})
+        self.assertEqual(result["status"], "not_evaluated")
+        self.assertEqual(result["checks"], [])
+        self.assertEqual(result["violations"], [])
+
+    def test_process_grading_violation_is_recorded_in_artifact_without_failing_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            # Fake cargo emits telemetry showing 1 orientation_churn turn.
+            fake_cargo = repo / "scripts" / "cargo"
+            fake_cargo.write_text(
+                "#!/bin/sh\n"
+                "usage_json=''\n"
+                "prev=''\n"
+                "for arg in \"$@\"; do\n"
+                "  if [ \"$prev\" = \"--usage-json\" ]; then usage_json=\"$arg\"; fi\n"
+                "  prev=\"$arg\"\n"
+                "done\n"
+                "if [ -n \"$usage_json\" ]; then\n"
+                "  cat > \"$usage_json\" <<'JSON'\n"
+                '{"input_tokens": 10, "output_tokens": 5, "cache_tokens": 0, "turn_count": 4, "drift_kinds": {"orientation_churn": 1}}\n'
+                "JSON\n"
+                "fi\n"
+                "exit 0\n"
+            )
+            fake_cargo.chmod(0o755)
+            task = self.write_task(
+                repo,
+                """
+id: t-process-violation
+repo: .
+base_ref: main
+prompt: hi
+harnesses: [omegon]
+acceptance:
+  required:
+    - python3 -c \"print('ok')\"
+process_expectations:
+  max_orientation_only_turns: 0
+  max_turns: 100
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            # Process violations are diagnostic only; the run still passes.
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(Path(result.stdout.strip()).read_text())
+            self.assertEqual(payload["status"], "pass")
+            grading = payload["process"]["grading"]
+            self.assertEqual(grading["status"], "fail")
+            self.assertEqual(len(grading["violations"]), 1)
+            self.assertEqual(grading["violations"][0]["expectation"], "max_orientation_only_turns")
+            self.assertEqual(grading["violations"][0]["actual"], 1)
+            self.assertEqual(grading["violations"][0]["threshold"], 0)
+            self.assertEqual(payload["process"]["availability"], "full")
+
+    def test_process_grading_marks_availability_none_for_missing_telemetry(self) -> None:
+        # When the omegon adapter emits no turn_count, availability should be "none"
+        # and any declared expectations should grade as not_evaluated.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            fake_cargo = repo / "scripts" / "cargo"
+            fake_cargo.write_text(
+                "#!/bin/sh\n"
+                "usage_json=''\n"
+                "prev=''\n"
+                "for arg in \"$@\"; do\n"
+                "  if [ \"$prev\" = \"--usage-json\" ]; then usage_json=\"$arg\"; fi\n"
+                "  prev=\"$arg\"\n"
+                "done\n"
+                "if [ -n \"$usage_json\" ]; then\n"
+                "  cat > \"$usage_json\" <<'JSON'\n"
+                '{"input_tokens": 10, "output_tokens": 5, "cache_tokens": 0}\n'
+                "JSON\n"
+                "fi\n"
+                "exit 0\n"
+            )
+            fake_cargo.chmod(0o755)
+            task = self.write_task(
+                repo,
+                """
+id: t-process-availability
+repo: .
+base_ref: main
+prompt: hi
+harnesses: [omegon]
+acceptance:
+  required:
+    - python3 -c \"print('ok')\"
+process_expectations:
+  max_orientation_only_turns: 1
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(Path(result.stdout.strip()).read_text())
+            self.assertEqual(payload["process"]["availability"], "none")
+            grading = payload["process"]["grading"]
+            self.assertEqual(grading["status"], "not_evaluated")
+            self.assertEqual(len(grading["checks"]), 1)
+            self.assertEqual(grading["checks"][0]["status"], "not_evaluated")
+            self.assertEqual(grading["checks"][0]["reason"], "process_telemetry_unavailable")
+
+    def test_optional_acceptance_failure_does_not_gate_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo)
+            self._write_passing_fake_cargo(repo)
+            task = self.write_task(
+                repo,
+                """
+id: t-optional-fail
+repo: .
+base_ref: main
+prompt: hi
+harnesses: [omegon]
+acceptance:
+  required:
+    - python3 -c \"print('ok')\"
+  optional:
+    - python3 -c \"import sys; sys.exit(2)\"
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            # main() returns 0 when the run passes; optional failures must not gate
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(Path(result.stdout.strip()).read_text())
+            self.assertEqual(payload["status"], "pass")
+            self.assertEqual(payload["score"], 1.0)
+            self.assertEqual(payload["acceptance"]["status"], "pass")
+            self.assertFalse(payload["acceptance"]["failure_if_triggered"])
+            self.assertEqual(len(payload["acceptance"]["optional"]), 1)
+            entry = payload["acceptance"]["optional"][0]
+            self.assertEqual(entry["status"], "fail")
+            self.assertEqual(entry["exit"], 2)
 
     def test_declared_harness_without_binary_fails_usefully(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
