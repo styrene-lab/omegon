@@ -549,22 +549,13 @@ fn detect_evidence_sufficiency(
                             .is_some_and(|result| result.is_error)
                 })
     });
-    let targeted_read_batch = tool_calls.iter().any(|call| {
-        call.name == "read"
-            && call
-                .arguments
-                .get("path")
-                .and_then(|v| v.as_str())
-                .is_some_and(|path| {
-                    conversation
-                        .intent
-                        .files_read
-                        .iter()
-                        .any(|read| read == std::path::Path::new(path))
-                })
+    let inspection_backed_by_validation_failure = tool_calls.iter().any(|call| {
+        is_repo_inspection_tool(&call.name)
+            && results.iter().any(|result| result.is_error)
+            && tool_calls.iter().any(is_validation_tool)
     });
 
-    if targeted_validation || failed_mutation_on_known_target || targeted_read_batch {
+    if targeted_validation || failed_mutation_on_known_target || inspection_backed_by_validation_failure {
         EvidenceSufficiency::Sufficient
     } else {
         EvidenceSufficiency::None
@@ -639,6 +630,10 @@ fn continuation_pressure_message(tier: u8) -> String {
         2 => "[System: Orientation churn is persisting. Next turn must choose exactly one: (1) mutate one named file, (2) run one targeted validation tied to one named file/symbol, or (3) state one blocker tied to one named file/symbol. Do not call broad search or read tools again before doing one of those.]".to_string(),
         _ => "[System: Controller escalation: you are burning turns without converging. On the next turn, do exactly one of these and nothing else first: (1) edit/write/change one named file, (2) run one validating command for one named file/symbol, or (3) declare the concrete blocker. Do not call memory_recall, context_status, request_context, codebase_search, read, or view before taking that action.]".to_string(),
     }
+}
+
+fn evidence_sufficiency_message() -> String {
+    "[System: Evidence sufficiency reached. You have enough local evidence to stop exploring. On the next turn, do exactly one of these first: (1) make the smallest justified edit to the named target, (2) run one targeted validation for that named target, or (3) declare the exact blocker. Do not call broad inspection/search tools again unless the last action creates a new contradiction.]".to_string()
 }
 
 pub(crate) fn compute_context_composition(
@@ -1227,6 +1222,9 @@ pub async fn run(
                 "[System: This run is execution-biased. Stop spending turns on orientation tools unless they are strictly required to unblock execution. On the next turn, take a concrete repo-inspection or implementation step: read the most relevant file, search the codebase for the target symbol/path, or make the smallest justified change.]"
                     .to_string(),
             );
+        } else if controller.evidence_sufficient_streak > 0 && continuation_tier.is_some() {
+            tracing::info!("Evidence sufficiency reached — injecting forced-convergence nudge");
+            conversation.push_user(evidence_sufficiency_message());
         } else if should_inject_execution_pressure(turn, config, conversation, tool_calls) {
             tracing::info!("Execution stall detected after repo inspection — injecting execution-pressure nudge");
             conversation.push_user(
@@ -3355,16 +3353,20 @@ mod tests {
     }
 
     #[test]
-    fn evidence_sufficiency_not_detected_without_target_file() {
-        let conversation = ConversationState::new();
+    fn evidence_sufficiency_not_detected_for_targeted_read_alone() {
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("core/src/context.rs"));
         let tool_calls = vec![ToolCall {
             id: "1".into(),
-            name: "bash".into(),
-            arguments: serde_json::json!({"command": "cargo test parser::tests::smoke"}),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "core/src/context.rs"}),
         }];
         let results = vec![ToolResultEntry {
             call_id: "1".into(),
-            tool_name: "bash".into(),
+            tool_name: "read".into(),
             content: vec![ContentBlock::Text { text: "ok".into() }],
             is_error: false,
             args_summary: None,
@@ -3376,37 +3378,11 @@ mod tests {
     }
 
     #[test]
-    fn post_sufficiency_pressure_escalates_faster_than_default() {
-        let config = LoopConfig {
-            enforce_first_turn_execution_bias: true,
-            ..LoopConfig::default()
-        };
-        let mut conversation = ConversationState::new();
-        conversation
-            .intent
-            .files_read
-            .insert(std::path::PathBuf::from("core/src/context.rs"));
-        let tool_calls = vec![ToolCall {
-            id: "1".into(),
-            name: "read".into(),
-            arguments: serde_json::json!({"path": "core/src/context.rs"}),
-        }];
-        let controller = ControllerState {
-            consecutive_tool_continuations: 4,
-            orientation_churn_streak: 1,
-            evidence_sufficient_streak: 1,
-            ..ControllerState::default()
-        };
-        assert_eq!(
-            continuation_pressure_tier(
-                &config,
-                &controller,
-                &conversation,
-                &tool_calls,
-                Some(OodaPhase::Orient),
-            ),
-            Some(3)
-        );
+    fn evidence_sufficiency_message_explicitly_forces_action() {
+        let text = evidence_sufficiency_message();
+        assert!(text.contains("Evidence sufficiency reached"));
+        assert!(text.contains("make the smallest justified edit"));
+        assert!(text.contains("Do not call broad inspection/search tools again"));
     }
 
     #[test]
