@@ -1,7 +1,9 @@
 //! Bash tool — execute shell commands with output capture.
 
 use anyhow::Result;
-use omegon_traits::{ContentBlock, ToolProgressSink, ToolResult};
+use omegon_traits::{
+    ContentBlock, PartialToolResult, ProgressUnits, ToolProgress, ToolProgressSink, ToolResult,
+};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -11,11 +13,17 @@ use tokio_util::sync::CancellationToken;
 const MAX_OUTPUT_BYTES: usize = 50 * 1024;
 const MAX_OUTPUT_LINES: usize = 2000;
 
-/// Minimum interval between streamed partials. Cheap rate-limit so a
-/// command spewing thousands of lines a second doesn't flood the
-/// broadcast channel — the partial is still a complete tail snapshot,
-/// not an incremental delta, so consumers always see fresh state.
+/// Minimum interval between content-bearing streamed partials. Cheap
+/// rate-limit so a command spewing thousands of lines a second doesn't
+/// flood the broadcast channel — the partial is still a complete tail
+/// snapshot, not an incremental delta, so consumers always see fresh
+/// state on the next tick.
 const STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(150);
+
+/// How long the buffer must be quiet before bash emits an idle heartbeat
+/// partial. Lets operators see "still alive, just waiting" for commands
+/// like `sleep 60 && echo done` that produce no output for long stretches.
+const IDLE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 pub async fn execute(
     command: &str,
@@ -102,6 +110,7 @@ pub async fn execute_streaming(
     // gets the same semantic info; live consumers see lines in chronological
     // arrival order which is what they want.
     let mut combined = String::new();
+    let mut lines_seen: u64 = 0;
     let mut last_flush = Instant::now();
     let sink_active = sink.is_active();
 
@@ -114,6 +123,15 @@ pub async fn execute_streaming(
     };
     tokio::pin!(timeout_fut);
 
+    // Heartbeat ticker — only matters when a sink is attached. We construct
+    // it unconditionally so the select arm exists, and gate the actual send
+    // on `sink_active` inside the arm. The first tick fires after one full
+    // interval, so a fast command never sees a heartbeat.
+    let mut heartbeat = tokio::time::interval_at(
+        tokio::time::Instant::now() + IDLE_HEARTBEAT_INTERVAL,
+        IDLE_HEARTBEAT_INTERVAL,
+    );
+
     let exit_status = loop {
         tokio::select! {
             biased;
@@ -125,19 +143,29 @@ pub async fn execute_streaming(
                 let _ = child.kill().await;
                 anyhow::bail!("Command timed out after {} seconds", timeout_secs.unwrap());
             }
+            _ = heartbeat.tick() => {
+                // Only emit if quiet — if we've flushed content recently
+                // there's nothing to signal beyond what just went out.
+                if sink_active && last_flush.elapsed() >= IDLE_HEARTBEAT_INTERVAL {
+                    sink.send(PartialToolResult::heartbeat(start.elapsed().as_millis() as u64));
+                    last_flush = Instant::now();
+                }
+            }
             line = stdout_lines.next_line() => {
                 match line? {
                     Some(l) => {
                         combined.push_str(&l);
                         combined.push('\n');
-                        maybe_flush_partial(&sink, sink_active, &combined, &mut last_flush);
+                        lines_seen += 1;
+                        maybe_flush_partial(&sink, sink_active, &combined, lines_seen, start, &mut last_flush);
                     }
                     None => {
                         // stdout closed — drain remaining stderr then wait for exit
                         while let Some(l) = stderr_lines.next_line().await? {
                             combined.push_str(&l);
                             combined.push('\n');
-                            maybe_flush_partial(&sink, sink_active, &combined, &mut last_flush);
+                            lines_seen += 1;
+                            maybe_flush_partial(&sink, sink_active, &combined, lines_seen, start, &mut last_flush);
                         }
                         break child.wait().await?;
                     }
@@ -148,14 +176,16 @@ pub async fn execute_streaming(
                     Some(l) => {
                         combined.push_str(&l);
                         combined.push('\n');
-                        maybe_flush_partial(&sink, sink_active, &combined, &mut last_flush);
+                        lines_seen += 1;
+                        maybe_flush_partial(&sink, sink_active, &combined, lines_seen, start, &mut last_flush);
                     }
                     None => {
                         // stderr closed — drain remaining stdout then wait for exit
                         while let Some(l) = stdout_lines.next_line().await? {
                             combined.push_str(&l);
                             combined.push('\n');
-                            maybe_flush_partial(&sink, sink_active, &combined, &mut last_flush);
+                            lines_seen += 1;
+                            maybe_flush_partial(&sink, sink_active, &combined, lines_seen, start, &mut last_flush);
                         }
                         break child.wait().await?;
                     }
@@ -199,10 +229,20 @@ pub async fn execute_streaming(
 
 /// Push a tail-truncated snapshot of `buffer` to the sink, rate-limited
 /// by [`STREAM_FLUSH_INTERVAL`]. Cheap when no consumer is attached.
+///
+/// The partial carries:
+/// - `tail`: noise-stripped, tail-truncated buffer (consumers render directly)
+/// - `progress.elapsed_ms`: wall-clock since the command started
+/// - `progress.units`: cumulative line count, no upper bound (bash doesn't
+///   know how much output is coming)
+/// - `details`: legacy bash-specific keys preserved for any consumer that
+///   was sniffing them
 fn maybe_flush_partial(
     sink: &ToolProgressSink,
     sink_active: bool,
     buffer: &str,
+    lines_seen: u64,
+    started_at: Instant,
     last_flush: &mut Instant,
 ) {
     if !sink_active {
@@ -215,12 +255,21 @@ fn maybe_flush_partial(
 
     let cleaned = strip_terminal_noise(buffer);
     let truncated = truncate_tail(&cleaned);
-    sink.send(ToolResult {
-        content: vec![ContentBlock::Text {
-            text: truncated.content,
-        }],
+
+    sink.send(PartialToolResult {
+        tail: truncated.content,
+        progress: ToolProgress {
+            elapsed_ms: started_at.elapsed().as_millis() as u64,
+            heartbeat: false,
+            phase: None,
+            units: Some(ProgressUnits {
+                current: lines_seen,
+                total: None,
+                unit: "lines".to_string(),
+            }),
+            tally: None,
+        },
         details: serde_json::json!({
-            "partial": true,
             "totalLines": truncated.total_lines,
             "totalBytes": truncated.total_bytes,
             "truncated": truncated.was_truncated,
@@ -550,9 +599,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn streaming_sink_receives_partials() {
+    async fn streaming_sink_receives_typed_partials() {
         use std::sync::{Arc, Mutex};
-        let collected: Arc<Mutex<Vec<ToolResult>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected: Arc<Mutex<Vec<PartialToolResult>>> = Arc::new(Mutex::new(Vec::new()));
         let collected_for_sink = collected.clone();
         let sink = ToolProgressSink::from_fn(move |partial| {
             collected_for_sink.lock().unwrap().push(partial);
@@ -582,16 +631,90 @@ mod tests {
         assert_eq!(result.details["exitCode"], 0);
 
         // At least one partial should have flown through the sink. We don't
-        // assert an exact count because flush timing is wall-clock dependent;
-        // we only require that streaming actually happened.
+        // assert an exact count because flush timing is wall-clock dependent.
         let partials = collected.lock().unwrap();
         assert!(
             !partials.is_empty(),
             "expected at least one streamed partial"
         );
-        // Each partial should be marked as such in details.
-        for p in partials.iter() {
-            assert_eq!(p.details["partial"], true);
+
+        // Find content-bearing partials (heartbeats may also exist for slow
+        // tests but the body of this command is < IDLE_HEARTBEAT_INTERVAL).
+        let content_partials: Vec<&PartialToolResult> =
+            partials.iter().filter(|p| !p.progress.heartbeat).collect();
+        assert!(
+            !content_partials.is_empty(),
+            "expected at least one content partial"
+        );
+
+        // Every content partial should populate the typed shape correctly.
+        for p in &content_partials {
+            assert!(!p.tail.is_empty(), "content partial should carry tail");
+            assert!(p.progress.elapsed_ms > 0, "elapsed_ms should be set");
+            let units = p
+                .progress
+                .units
+                .as_ref()
+                .expect("content partial should carry units");
+            assert_eq!(units.unit, "lines");
+            assert!(units.current > 0, "lines counter should advance");
+            assert!(
+                units.total.is_none(),
+                "bash has no concept of total line count"
+            );
+            assert!(p.progress.phase.is_none(), "bash sets no phase label");
+            assert!(p.progress.tally.is_none(), "bash has no outcome tally");
+        }
+
+        // Counter should be monotonically non-decreasing across partials.
+        let mut last = 0u64;
+        for p in &content_partials {
+            let cur = p.progress.units.as_ref().unwrap().current;
+            assert!(
+                cur >= last,
+                "lines counter regressed: {last} -> {cur}"
+            );
+            last = cur;
+        }
+    }
+
+    #[tokio::test]
+    async fn streaming_sink_emits_idle_heartbeat() {
+        use std::sync::{Arc, Mutex};
+        let collected: Arc<Mutex<Vec<PartialToolResult>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_for_sink = collected.clone();
+        let sink = ToolProgressSink::from_fn(move |partial| {
+            collected_for_sink.lock().unwrap().push(partial);
+        });
+
+        // Sleep longer than IDLE_HEARTBEAT_INTERVAL (5s) with no output, then
+        // emit a single line. We should see at least one heartbeat partial
+        // followed by a content partial.
+        let cancel = CancellationToken::new();
+        let result = execute_streaming(
+            "sleep 6 && echo done",
+            Path::new("."),
+            Some(15),
+            cancel,
+            sink,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.details["exitCode"], 0);
+        assert!(result.content[0].as_text().unwrap().contains("done"));
+
+        let partials = collected.lock().unwrap();
+        let heartbeats: Vec<&PartialToolResult> =
+            partials.iter().filter(|p| p.progress.heartbeat).collect();
+        assert!(
+            !heartbeats.is_empty(),
+            "expected at least one idle heartbeat during 6s sleep, got {} partials total",
+            partials.len()
+        );
+        for hb in &heartbeats {
+            assert!(hb.tail.is_empty(), "heartbeat should carry no content");
+            assert!(hb.progress.elapsed_ms > 0);
         }
     }
 

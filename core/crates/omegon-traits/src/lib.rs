@@ -847,8 +847,17 @@ pub enum IpcEventPayload {
     },
 
     /// Partial result while tool is still running (optional; not all tools emit).
+    ///
+    /// Carries the same [`PartialToolResult`] payload as `AgentEvent::ToolUpdate`
+    /// — `tail` is the latest noise-stripped, tail-truncated buffer of
+    /// accumulated output, and `progress` carries elapsed time + opportunistic
+    /// phase / units / tally signal. Consumers may render `tail` directly,
+    /// route progress to dashboards, or skip the event entirely.
     #[serde(rename = "tool.updated")]
-    ToolUpdated { id: String },
+    ToolUpdated {
+        id: String,
+        partial: PartialToolResult,
+    },
 
     #[serde(rename = "tool.ended")]
     ToolEnded {
@@ -932,10 +941,149 @@ pub struct ToolResult {
     pub details: Value,
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Partial / streaming tool state
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Snapshot of a tool's working state during execution.
+///
+/// Distinct from [`ToolResult`] (the *terminal* value the tool produces) —
+/// a partial is a digest of in-progress work, suitable for live rendering
+/// by operators or for routing to higher-layer rollups (pod / family
+/// vital signs).
+///
+/// Runners populate as much of [`progress`] as they can know; the rest is
+/// left as defaults / `None`. The [`tail`] field carries the latest
+/// noise-stripped, tail-truncated buffer of accumulated output and is
+/// empty for heartbeat-only updates.
+///
+/// [`progress`]: PartialToolResult::progress
+/// [`tail`]: PartialToolResult::tail
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PartialToolResult {
+    /// Tail snapshot of accumulated output. Already noise-stripped and
+    /// tail-truncated by the runner — consumers can render directly.
+    /// Empty when [`ToolProgress::heartbeat`] is true.
+    #[serde(default)]
+    pub tail: String,
+
+    /// Structured progress signal.
+    pub progress: ToolProgress,
+
+    /// Runner-specific extras that don't fit the typed schema.
+    /// Use sparingly — prefer extending [`ToolProgress`] if a field
+    /// proves useful to more than one runner.
+    #[serde(default)]
+    pub details: Value,
+}
+
+impl PartialToolResult {
+    /// Construct a content-bearing partial: a fresh tail snapshot with
+    /// elapsed time, no other progress fields populated.
+    pub fn content(tail: impl Into<String>, elapsed_ms: u64) -> Self {
+        Self {
+            tail: tail.into(),
+            progress: ToolProgress {
+                elapsed_ms,
+                ..ToolProgress::default()
+            },
+            details: Value::Null,
+        }
+    }
+
+    /// Construct a heartbeat-only partial: no content, just liveness.
+    /// Used by runners that go quiet for long stretches (sleeping shell
+    /// commands, slow remote calls, blocked-on-IO scenarios) to signal
+    /// "still alive, just waiting."
+    pub fn heartbeat(elapsed_ms: u64) -> Self {
+        Self {
+            tail: String::new(),
+            progress: ToolProgress {
+                elapsed_ms,
+                heartbeat: true,
+                ..ToolProgress::default()
+            },
+            details: Value::Null,
+        }
+    }
+}
+
+/// Structured progress signal for an in-flight tool.
+///
+/// Two fields are universal — every runner can populate them:
+/// - [`elapsed_ms`]: wall-clock since the tool started
+/// - [`heartbeat`]: marks updates that exist purely to signal liveness
+///
+/// The remainder are opportunistic: populated when the runner has natural
+/// access to the data, left at default / `None` otherwise. Consumers must
+/// not assume any optional field will be present.
+///
+/// [`elapsed_ms`]: ToolProgress::elapsed_ms
+/// [`heartbeat`]: ToolProgress::heartbeat
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ToolProgress {
+    /// Wall-clock duration since the tool started, in milliseconds.
+    #[serde(default)]
+    pub elapsed_ms: u64,
+
+    /// True if this update carries no new content — purely a liveness
+    /// signal. Consumers can skip rendering content for these and just
+    /// update an "alive at T" timestamp.
+    #[serde(default)]
+    pub heartbeat: bool,
+
+    /// Optional human-readable phase label, e.g. `"compiling foo"`,
+    /// `"running test bar::baz"`, `"fetching schema"`. Used by runners
+    /// with structural progress (validate, MCP) to give operators a
+    /// sense of *where* the tool is in its work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+
+    /// Cardinal progress: how many units of work have been done,
+    /// optionally out of a known total. Examples by runner:
+    /// - bash: lines of output (no total)
+    /// - validate: tests run (total = total tests if known up front)
+    /// - local_inference: tokens generated (total = max_tokens)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub units: Option<ProgressUnits>,
+
+    /// Counts of discrete outcomes the tool has observed so far.
+    /// Populated by runners with discrete-result semantics (validate,
+    /// test runners, MCP servers reporting structured results). `None`
+    /// for runners with continuous output (bash).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tally: Option<ProgressTally>,
+}
+
+/// Cardinal progress count, optionally bounded by a known total.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProgressUnits {
+    /// How many units processed so far.
+    pub current: u64,
+    /// Total units, if known up front. `None` if the runner can't predict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    /// Human-readable unit label: `"lines"`, `"tests"`, `"files"`,
+    /// `"bytes"`, `"tokens"`, `"items"`, etc.
+    pub unit: String,
+}
+
+/// Tally of discrete outcomes a tool has observed during execution.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProgressTally {
+    pub ok: u64,
+    pub fail: u64,
+    pub skip: u64,
+    /// Anything that doesn't fit the ok/fail/skip taxonomy
+    /// (warnings, indeterminate results, etc.).
+    #[serde(default)]
+    pub other: u64,
+}
+
 /// A sink for streaming partial tool output during execution.
 ///
 /// Runners that don't stream simply ignore the sink. Runners that do
-/// (currently `bash`) push partial `ToolResult`s as work happens; the
+/// (currently `bash`) push [`PartialToolResult`]s as work happens; the
 /// dispatch layer in `bus`/`loop.rs` converts each partial into an
 /// `AgentEvent::ToolUpdate` emission for downstream consumers.
 ///
@@ -946,7 +1094,7 @@ pub struct ToolResult {
 /// [`ToolProgressSink::is_active`].
 #[derive(Clone)]
 pub struct ToolProgressSink {
-    inner: Option<Arc<dyn Fn(ToolResult) + Send + Sync>>,
+    inner: Option<Arc<dyn Fn(PartialToolResult) + Send + Sync>>,
 }
 
 impl ToolProgressSink {
@@ -956,10 +1104,10 @@ impl ToolProgressSink {
     }
 
     /// Wrap a callback as a sink. Typically the dispatch layer passes
-    /// a closure that forwards into a tokio mpsc channel.
+    /// a closure that forwards into a broadcast channel.
     pub fn from_fn<F>(f: F) -> Self
     where
-        F: Fn(ToolResult) + Send + Sync + 'static,
+        F: Fn(PartialToolResult) + Send + Sync + 'static,
     {
         Self {
             inner: Some(Arc::new(f)),
@@ -967,7 +1115,7 @@ impl ToolProgressSink {
     }
 
     /// Push a partial result. No-op if the sink is inactive.
-    pub fn send(&self, partial: ToolResult) {
+    pub fn send(&self, partial: PartialToolResult) {
         if let Some(cb) = &self.inner {
             cb(partial);
         }
@@ -1393,7 +1541,7 @@ pub enum AgentEvent {
     },
     ToolUpdate {
         id: String,
-        partial: ToolResult,
+        partial: PartialToolResult,
     },
     ToolEnd {
         id: String,

@@ -771,7 +771,10 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
             name: name.clone(),
             args: args.clone(),
         }),
-        AgentEvent::ToolUpdate { id, .. } => Some(IpcEventPayload::ToolUpdated { id: id.clone() }),
+        AgentEvent::ToolUpdate { id, partial } => Some(IpcEventPayload::ToolUpdated {
+            id: id.clone(),
+            partial: partial.clone(),
+        }),
         AgentEvent::ToolEnd {
             id,
             name,
