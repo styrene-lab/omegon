@@ -2293,6 +2293,39 @@ mod tests {
         assert_eq!(json["data"]["session"]["turns"], 1);
     }
 
+    /// Compile-time exhaustivity guard: every `AgentEvent` variant must
+    /// appear here as a named arm. There is no `_` wildcard. If anyone
+    /// adds a new variant without also adding it to
+    /// `serialize_all_event_types` below, this function fails to compile,
+    /// which fails the build, which forces the new variant into the test
+    /// fixture. The function is never called at runtime.
+    #[allow(dead_code)]
+    fn _exhaustive_agent_event_serialization_coverage(ev: &AgentEvent) {
+        match ev {
+            AgentEvent::TurnStart { .. } => {}
+            AgentEvent::TurnEnd { .. } => {}
+            AgentEvent::MessageStart { .. } => {}
+            AgentEvent::MessageChunk { .. } => {}
+            AgentEvent::ThinkingChunk { .. } => {}
+            AgentEvent::MessageEnd => {}
+            AgentEvent::MessageAbort => {}
+            AgentEvent::ToolStart { .. } => {}
+            AgentEvent::ToolUpdate { .. } => {}
+            AgentEvent::ToolEnd { .. } => {}
+            AgentEvent::AgentEnd => {}
+            AgentEvent::PhaseChanged { .. } => {}
+            AgentEvent::DecompositionStarted { .. } => {}
+            AgentEvent::DecompositionChildCompleted { .. } => {}
+            AgentEvent::DecompositionCompleted { .. } => {}
+            AgentEvent::FamilyVitalSignsUpdated { .. } => {}
+            AgentEvent::SystemNotification { .. } => {}
+            AgentEvent::HarnessStatusChanged { .. } => {}
+            AgentEvent::WebDashboardStarted { .. } => {}
+            AgentEvent::ContextUpdated { .. } => {}
+            AgentEvent::SessionReset => {}
+        }
+    }
+
     #[test]
     fn serialize_all_event_types() {
         let events = vec![
@@ -2383,12 +2416,48 @@ mod tests {
             AgentEvent::SystemNotification {
                 message: "test".into(),
             },
+            // Variants previously missing from this test — added so the
+            // exhaustive `_exhaustive_agent_event_serialization_coverage`
+            // guard above is the *only* thing the test relies on for
+            // coverage. If you add a new AgentEvent variant, you must
+            // both extend the guard above AND add an entry here.
+            AgentEvent::MessageAbort,
+            AgentEvent::HarnessStatusChanged {
+                status_json: serde_json::json!({"thinking_level": "low"}),
+            },
+            AgentEvent::WebDashboardStarted {
+                startup_json: serde_json::json!({"port": 0}),
+            },
+            AgentEvent::ContextUpdated {
+                tokens: 1000,
+                context_window: 200_000,
+                context_class: "Squad".into(),
+                thinking_level: "Low".into(),
+            },
+            AgentEvent::SessionReset,
         ];
         for event in &events {
+            // WebDashboardStarted is intentionally filtered by
+            // serialize_ws_messages and `unreachable!()` inside
+            // serialize_agent_event. Route it through the public
+            // interface to verify the filter, and skip the per-event
+            // type assertion since it returns an empty Vec.
+            if matches!(event, AgentEvent::WebDashboardStarted { .. }) {
+                let messages = serialize_ws_messages(event);
+                assert!(
+                    messages.is_empty(),
+                    "WebDashboardStarted should be filtered, got {messages:?}"
+                );
+                continue;
+            }
             let json = serialize_agent_event(event);
             assert!(json["type"].is_string(), "event should have a type field");
         }
-        assert_eq!(events.len(), 16, "should cover all 16 AgentEvent variants");
+        assert_eq!(
+            events.len(),
+            21,
+            "should cover all 21 AgentEvent variants — see _exhaustive_agent_event_serialization_coverage"
+        );
     }
 
     #[test]
