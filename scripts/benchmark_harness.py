@@ -210,6 +210,27 @@ def resolve_repo_path(root: Path, spec: TaskSpec) -> Path:
     return repo_path
 
 
+def read_workspace_role(repo_path: Path) -> str | None:
+    lease_path = repo_path / ".omegon" / "runtime" / "workspace.json"
+    if not lease_path.exists():
+        return None
+    try:
+        payload = json.loads(lease_path.read_text())
+    except json.JSONDecodeError as err:
+        raise TaskSpecError(f"could not parse workspace lease {lease_path}: {err}") from err
+    role = payload.get("role")
+    return role if isinstance(role, str) and role else None
+
+
+def enforce_workspace_authority(repo_path: Path, spec: TaskSpec) -> None:
+    role = read_workspace_role(repo_path)
+    release_eval = spec.base_ref.startswith("v") or "-rc." in spec.base_ref
+    if release_eval and role != "benchmark":
+        raise TaskSpecError(
+            f"release-evaluation benchmark runs require workspace role 'benchmark' (current: {role or 'unset'})"
+        )
+
+
 def ensure_clean_out_dir(root: Path, out_dir: str | None) -> Path:
     path = Path(out_dir).resolve() if out_dir else (root / "ai" / "benchmarks" / "runs").resolve()
     path.mkdir(parents=True, exist_ok=True)
@@ -1009,6 +1030,7 @@ def main() -> int:
         return 1
 
     repo_path = resolve_repo_path(root, spec)
+    enforce_workspace_authority(repo_path, spec)
     out_dir = ensure_clean_out_dir(root, args.out_dir)
     audit(
         "benchmark start: "

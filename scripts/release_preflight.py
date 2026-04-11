@@ -8,6 +8,7 @@ stable release is cut from an RC line.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -66,12 +67,30 @@ def git_stdout(repo_root: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
+def read_workspace_role(repo_root: Path) -> str | None:
+    lease_path = repo_root / ".omegon" / "runtime" / "workspace.json"
+    if not lease_path.exists():
+        return None
+    try:
+        payload = json.loads(lease_path.read_text())
+    except json.JSONDecodeError as err:
+        raise PreflightError(f"Could not parse workspace lease {lease_path}: {err}") from err
+    role = payload.get("role")
+    return role if isinstance(role, str) and role else None
+
+
 def collect_failures(repo_root: Path) -> list[str]:
     failures: list[str] = []
 
     branch = git_stdout(repo_root, "branch", "--show-current")
     if branch != "main":
         failures.append(f"must be on main (currently: {branch or 'detached'})")
+
+    role = read_workspace_role(repo_root)
+    if role != "release":
+        failures.append(
+            f"workspace role must be 'release' for RC/release cuts (currently: {role or 'unset'})"
+        )
 
     dirty = git_stdout(repo_root, "status", "--porcelain")
     if dirty:

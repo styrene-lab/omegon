@@ -31,11 +31,80 @@ class BenchmarkHarnessTests(unittest.TestCase):
             text=True,
         )
 
-    def init_repo(self, repo: Path) -> None:
+    def init_repo(self, repo: Path, *, workspace_role: str | None = None) -> None:
         (repo / "ai" / "benchmarks" / "tasks").mkdir(parents=True, exist_ok=True)
         (repo / "scripts").mkdir(parents=True, exist_ok=True)
         (repo / "core").mkdir(parents=True, exist_ok=True)
         (repo / "core" / "Cargo.toml").write_text("[workspace]\n")
+        if workspace_role is not None:
+            (repo / ".omegon" / "runtime").mkdir(parents=True, exist_ok=True)
+            (repo / ".omegon" / "runtime" / "workspace.json").write_text(
+                '{"role": "%s"}\n' % workspace_role
+            )
+
+    def test_release_eval_requires_benchmark_workspace_role(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo, workspace_role="feature")
+            task = self.write_task(
+                repo,
+                """
+id: t-release-eval
+repo: .
+base_ref: v0.15.10-rc.68
+prompt: hi
+harnesses: [omegon]
+acceptance: [echo ok]
+""",
+            )
+            result = self.run_script(str(task), "--root", str(repo))
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("workspace role 'benchmark'", result.stderr)
+
+    def test_release_eval_passes_with_benchmark_workspace_role(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            self.init_repo(repo, workspace_role="benchmark")
+            fake_cargo = repo / "scripts" / "cargo"
+            fake_cargo.write_text(
+                "#!/bin/sh\n"
+                "usage_json=''\n"
+                "prev=''\n"
+                "for arg in \"$@\"; do\n"
+                "  if [ \"$prev\" = \"--usage-json\" ]; then usage_json=\"$arg\"; fi\n"
+                "  prev=\"$arg\"\n"
+                "done\n"
+                "if [ -n \"$usage_json\" ]; then\n"
+                "  cat > \"$usage_json\" <<'JSON'\n"
+                '{"input_tokens": 10, "output_tokens": 5, "cache_tokens": 0}\n'
+                "JSON\n"
+                "fi\n"
+                "exit 0\n"
+            )
+            fake_cargo.chmod(0o755)
+            task = self.write_task(
+                repo,
+                """
+id: t-release-eval-pass
+repo: .
+base_ref: v0.15.10-rc.68
+prompt: hi
+harnesses: [omegon]
+acceptance:
+  - python3 -c \"print('ok')\"
+""",
+            )
+            env = dict(os.environ)
+            env["PATH"] = f"{repo / 'scripts'}:{env['PATH']}"
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(task), "--root", str(repo)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rejects_missing_required_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -598,7 +667,7 @@ acceptance:
             self.assertEqual(payload["score"], 0.0)
             self.assertEqual(payload["adapter"]["execution_status"], "error")
             self.assertEqual(payload["adapter"]["error_message"], "model access denied")
-            self.assertEqual(payload["acceptance"]["commands"][0]["exit"], 0)
+            self.assertEqual(payload["acceptance"]["required"][0]["exit"], 0)
 
     def test_task_spec_slim_mode_is_used_when_cli_flag_is_absent(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

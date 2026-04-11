@@ -8,10 +8,15 @@ SCRIPT = ROOT / "scripts" / "release_preflight.py"
 
 
 class ReleasePreflightTests(unittest.TestCase):
-    def write_repo_fixture(self, root: Path, *, version: str, install_placeholder: bool = True, manifest_wired: bool = True) -> None:
+    def write_repo_fixture(self, root: Path, *, version: str, install_placeholder: bool = True, manifest_wired: bool = True, workspace_role: str | None = "release") -> None:
         (root / "core").mkdir(parents=True)
         (root / "site" / "src" / "pages" / "docs").mkdir(parents=True)
         (root / ".github" / "workflows").mkdir(parents=True)
+        if workspace_role is not None:
+            (root / ".omegon" / "runtime").mkdir(parents=True, exist_ok=True)
+            (root / ".omegon" / "runtime" / "workspace.json").write_text(
+                '{"role": "%s"}\n' % workspace_role
+            )
 
         (root / "core" / "Cargo.toml").write_text(f'[workspace.package]\nversion = "{version}"\n')
         stable = version.split("-rc.", 1)[0] if "-rc." in version else version
@@ -88,6 +93,15 @@ class ReleasePreflightTests(unittest.TestCase):
             result = self.run_script(repo_root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("release-manifest.json", result.stderr)
+    def test_preflight_fails_when_workspace_role_is_not_release(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            self.write_repo_fixture(repo_root, version="0.15.9-rc.14", workspace_role="feature")
+            self.init_git_repo(repo_root)
+
+            result = self.run_script(repo_root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("workspace role must be 'release'", result.stderr)
 
 
 class ReleaseRecipeTests(unittest.TestCase):
