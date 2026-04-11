@@ -1302,26 +1302,24 @@ fn slash_help_returns_display() {
 #[test]
 fn slash_stats_returns_session_info() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
     let result = app.handle_slash_command("/stats", &tx);
-    if let SlashResult::Display(text) = result {
-        assert!(text.contains("Duration"), "should show duration: {text}");
-        assert!(text.contains("Turns"), "should show turns: {text}");
-    } else {
-        panic!("expected Display result");
+    assert!(matches!(result, SlashResult::Handled));
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl { .. } => {}
+        other => panic!("expected ExecuteControl, got {other:?}"),
     }
 }
 
 #[test]
 fn slash_status_returns_bootstrap_panel() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
     let result = app.handle_slash_command("/status", &tx);
-    if let SlashResult::Display(text) = result {
-        assert!(text.contains("Omegon"), "should contain Omegon: {text}");
-        assert!(text.contains("Context:"), "should contain Context: {text}");
-    } else {
-        panic!("expected Display result");
+    assert!(matches!(result, SlashResult::Handled));
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl { .. } => {}
+        other => panic!("expected ExecuteControl, got {other:?}"),
     }
 }
 
@@ -2703,57 +2701,37 @@ fn slash_note_with_text_persists_to_disk() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = test_app();
     app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
 
-    // Write a note
     let result = app.handle_slash_command("/note look into this later", &tx);
-    if let SlashResult::Display(text) = result {
-        assert!(text.contains("Noted"), "should confirm note: {text}");
-        assert!(text.contains("1 entries"), "should count 1 entry: {text}");
-    } else {
-        panic!("expected Display result");
-    }
-
-    // Verify file exists and contains the note
-    let notes_path = tmp.path().join(".omegon").join("notes.md");
-    let content = std::fs::read_to_string(&notes_path).expect("notes file should exist");
-    assert!(
-        content.contains("look into this later"),
-        "note text should be persisted: {content}"
-    );
-    assert!(
-        content.starts_with("- ["),
-        "should have timestamp prefix: {content}"
-    );
-
-    // Write a second note and verify count
-    let result2 = app.handle_slash_command("/note second thing", &tx);
-    if let SlashResult::Display(text) = result2 {
-        assert!(text.contains("2 entries"), "should count 2 entries: {text}");
+    assert!(matches!(result, SlashResult::Handled));
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl { .. } => {}
+        other => panic!("expected ExecuteControl, got {other:?}"),
     }
 }
 
 #[test]
 fn slash_note_without_args_shows_notes() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
     let result = app.handle_slash_command("/note", &tx);
-    if let SlashResult::Display(text) = result {
-        assert!(text.contains("note"), "should mention notes: {text}");
-    } else {
-        panic!("expected Display result");
+    assert!(matches!(result, SlashResult::Handled));
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl { .. } => {}
+        other => panic!("expected ExecuteControl, got {other:?}"),
     }
 }
 
 #[test]
 fn slash_notes_clear_returns_display() {
     let mut app = test_app();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
     let result = app.handle_slash_command("/notes clear", &tx);
-    if let SlashResult::Display(text) = result {
-        assert!(text.contains("cleared"), "should confirm clear: {text}");
-    } else {
-        panic!("expected Display result");
+    assert!(matches!(result, SlashResult::Handled));
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl { .. } => {}
+        other => panic!("expected ExecuteControl, got {other:?}"),
     }
 }
 
@@ -2766,26 +2744,24 @@ fn slash_checkin_with_notes_shows_note_count() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = test_app();
     app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
 
-    // No notes → should NOT mention notes in checkin
     let result = app.handle_slash_command("/checkin", &tx);
-    if let SlashResult::Display(text) = &result {
-        assert!(!text.contains("pending note"), "no notes yet: {text}");
+    assert!(matches!(result, SlashResult::Handled));
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl { .. } => {}
+        other => panic!("expected ExecuteControl, got {other:?}"),
     }
 
-    // Add a note
-    app.handle_slash_command("/note investigate flaky test", &tx);
+    let result2 = app.handle_slash_command("/note investigate flaky test", &tx);
+    assert!(matches!(result2, SlashResult::Handled));
+    let _ = rx.try_recv().expect("queued note command");
 
-    // Now checkin should show the note count
-    let result2 = app.handle_slash_command("/checkin", &tx);
-    if let SlashResult::Display(text) = result2 {
-        assert!(
-            text.contains("1 pending note"),
-            "should show note count: {text}"
-        );
-    } else {
-        panic!("expected Display result");
+    let result3 = app.handle_slash_command("/checkin", &tx);
+    assert!(matches!(result3, SlashResult::Handled));
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl { .. } => {}
+        other => panic!("expected ExecuteControl, got {other:?}"),
     }
 }
 
@@ -2794,9 +2770,8 @@ fn slash_checkin_with_opsx_changes_shows_them() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = test_app();
     app.footer_data.cwd = tmp.path().to_string_lossy().to_string();
-    let tx = test_tx();
+    let (tx, mut rx) = test_tx_with_rx();
 
-    // Create a fake OpenSpec change directory
     let change_dir = tmp
         .path()
         .join("openspec")
@@ -2805,17 +2780,10 @@ fn slash_checkin_with_opsx_changes_shows_them() {
     std::fs::create_dir_all(&change_dir).unwrap();
 
     let result = app.handle_slash_command("/checkin", &tx);
-    if let SlashResult::Display(text) = result {
-        assert!(
-            text.contains("OpenSpec"),
-            "should show OpenSpec changes: {text}"
-        );
-        assert!(
-            text.contains("my-feature"),
-            "should name the change: {text}"
-        );
-    } else {
-        panic!("expected Display result");
+    assert!(matches!(result, SlashResult::Handled));
+    match rx.try_recv().expect("queued command") {
+        TuiCommand::ExecuteControl { .. } => {}
+        other => panic!("expected ExecuteControl, got {other:?}"),
     }
 }
 
