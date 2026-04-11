@@ -682,6 +682,45 @@ def normalize_omegon_context(usage: dict[str, Any]) -> dict[str, int] | None:
     return {key: int(value or 0) for key, value in mapping.items()}
 
 
+def derive_process_metrics(spec: TaskSpec, usage: dict[str, Any]) -> dict[str, Any]:
+    turn_count = coerce_int(usage.get("turn_count"))
+    dominant_phases = usage.get("dominant_phases") if isinstance(usage.get("dominant_phases"), dict) else {}
+    drift_kinds = usage.get("drift_kinds") if isinstance(usage.get("drift_kinds"), dict) else {}
+    progress_nudge_reasons = usage.get("progress_nudge_reasons") if isinstance(usage.get("progress_nudge_reasons"), dict) else {}
+    turn_end_reasons = usage.get("turn_end_reasons") if isinstance(usage.get("turn_end_reasons"), dict) else {}
+    per_turn = usage.get("per_turn") if isinstance(usage.get("per_turn"), dict) else {}
+
+    process: dict[str, Any] = {
+        "expectations": spec.process_expectations,
+        "turn_count": turn_count,
+        "turn_end_reasons": turn_end_reasons,
+        "dominant_phases": dominant_phases,
+        "drift_kinds": drift_kinds,
+        "progress_nudge_reasons": progress_nudge_reasons,
+    }
+
+    derived: dict[str, Any] = {}
+    if turn_count is not None:
+        derived["orientation_only_turns"] = int(drift_kinds.get("orientation_churn", 0) or 0)
+        derived["progress_nudge_count"] = int(sum((v or 0) for v in progress_nudge_reasons.values()))
+        derived["tool_continuation_turns"] = int(turn_end_reasons.get("tool_continuation", 0) or 0)
+        derived["assistant_completed_turns"] = int(turn_end_reasons.get("assistant_completed", 0) or 0)
+    if per_turn:
+        for key in (
+            "avg_input_tokens",
+            "avg_output_tokens",
+            "avg_cache_tokens",
+            "avg_cache_write_tokens",
+            "avg_estimated_tokens",
+        ):
+            value = coerce_int(per_turn.get(key))
+            if value is not None:
+                derived[key] = value
+    if derived:
+        process["derived"] = derived
+    return process
+
+
 def derive_final_status(adapter: AdapterResult, acceptance_status: str) -> tuple[str, float]:
     if adapter.execution_status != "ok":
         return "error", 0.0
@@ -748,6 +787,7 @@ def build_result(
             "cache_write": adapter.usage.get("cache_write_tokens"),
             "total": total_tokens,
         },
+        "process": derive_process_metrics(spec, adapter.usage),
         "acceptance": {
             "status": acceptance_status,
             "required": acceptance_results,
