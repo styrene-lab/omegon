@@ -5,7 +5,9 @@
 //! (e.g., omegon-memory) participate in the bus without implementing Feature directly.
 
 use async_trait::async_trait;
-use omegon_traits::{ContextInjection, ContextSignals, Feature, ToolDefinition, ToolResult};
+use omegon_traits::{
+    ContextInjection, ContextSignals, Feature, ToolDefinition, ToolProgressSink, ToolResult,
+};
 use serde_json::Value;
 
 /// Wraps a ToolProvider as a Feature.
@@ -42,6 +44,19 @@ impl Feature for ToolAdapter {
     ) -> anyhow::Result<ToolResult> {
         self.provider
             .execute(tool_name, call_id, args, cancel)
+            .await
+    }
+
+    async fn execute_with_sink(
+        &self,
+        tool_name: &str,
+        call_id: &str,
+        args: Value,
+        cancel: tokio_util::sync::CancellationToken,
+        sink: ToolProgressSink,
+    ) -> anyhow::Result<ToolResult> {
+        self.provider
+            .execute_with_sink(tool_name, call_id, args, cancel, sink)
             .await
     }
 }
@@ -112,6 +127,19 @@ impl Feature for ToolContextAdapter {
     ) -> anyhow::Result<ToolResult> {
         self.tool_provider
             .execute(tool_name, call_id, args, cancel)
+            .await
+    }
+
+    async fn execute_with_sink(
+        &self,
+        tool_name: &str,
+        call_id: &str,
+        args: Value,
+        cancel: tokio_util::sync::CancellationToken,
+        sink: ToolProgressSink,
+    ) -> anyhow::Result<ToolResult> {
+        self.tool_provider
+            .execute_with_sink(tool_name, call_id, args, cancel, sink)
             .await
     }
 

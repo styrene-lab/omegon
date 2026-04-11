@@ -26,7 +26,7 @@ pub mod write;
 // pub mod remember;    // session scratchpad
 
 use async_trait::async_trait;
-use omegon_traits::{ToolDefinition, ToolProvider, ToolResult};
+use omegon_traits::{ToolDefinition, ToolProgressSink, ToolProvider, ToolResult};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
@@ -703,6 +703,47 @@ impl ToolProvider for CoreTools {
             // by their dedicated providers registered in setup.rs.
             _ => anyhow::bail!("Unknown core tool: {tool_name}"),
         }
+    }
+
+    /// Sink-aware dispatch. Currently only `bash` actually streams; every
+    /// other tool delegates to `execute` (which itself ignores the sink).
+    /// As more runners learn to stream they should grow branches here.
+    async fn execute_with_sink(
+        &self,
+        tool_name: &str,
+        call_id: &str,
+        args: Value,
+        cancel: CancellationToken,
+        sink: ToolProgressSink,
+    ) -> anyhow::Result<ToolResult> {
+        if tool_name == reg::BASH {
+            let command = args["command"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("missing 'command' argument"))?;
+            let timeout = args["timeout"].as_u64();
+
+            // Same git-mutation warning as the non-streaming path. Kept inline
+            // (rather than factored out) to make the divergence between the
+            // two dispatch paths obvious — if you change one, change both.
+            if self.repo_model.is_some() {
+                let cmd_lower = command.to_lowercase();
+                if cmd_lower.contains("git commit")
+                    || cmd_lower.contains("git add ")
+                    || (cmd_lower.contains("git stash")
+                        && !cmd_lower.contains("git stash list"))
+                {
+                    tracing::warn!(
+                        command = command,
+                        "git mutation via bash — prefer the structured `commit` tool \
+                         for commits (handles submodules, lifecycle batching, working set)"
+                    );
+                }
+            }
+
+            return bash::execute_streaming(command, &self.cwd, timeout, cancel, sink).await;
+        }
+
+        self.execute(tool_name, call_id, args, cancel).await
     }
 }
 

@@ -157,10 +157,32 @@ impl EventBus {
         args: Value,
         cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<omegon_traits::ToolResult> {
+        self.execute_tool_with_sink(
+            tool_name,
+            call_id,
+            args,
+            cancel,
+            omegon_traits::ToolProgressSink::noop(),
+        )
+        .await
+    }
+
+    /// Like [`Self::execute_tool`] but also passes a `ToolProgressSink` so the
+    /// runner can stream partial output. The dispatch loop in `loop.rs` uses
+    /// this path; other call sites that just want a final result keep using
+    /// [`Self::execute_tool`] (which constructs a no-op sink).
+    pub async fn execute_tool_with_sink(
+        &self,
+        tool_name: &str,
+        call_id: &str,
+        args: Value,
+        cancel: tokio_util::sync::CancellationToken,
+        sink: omegon_traits::ToolProgressSink,
+    ) -> anyhow::Result<omegon_traits::ToolResult> {
         for (idx, def) in &self.tool_defs {
             if def.name == tool_name {
                 return self.features[*idx]
-                    .execute(tool_name, call_id, args, cancel)
+                    .execute_with_sink(tool_name, call_id, args, cancel, sink)
                     .await;
             }
         }

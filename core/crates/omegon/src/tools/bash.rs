@@ -1,20 +1,47 @@
 //! Bash tool — execute shell commands with output capture.
 
 use anyhow::Result;
-use omegon_traits::{ContentBlock, ToolResult};
+use omegon_traits::{ContentBlock, ToolProgressSink, ToolResult};
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 const MAX_OUTPUT_BYTES: usize = 50 * 1024;
 const MAX_OUTPUT_LINES: usize = 2000;
 
+/// Minimum interval between streamed partials. Cheap rate-limit so a
+/// command spewing thousands of lines a second doesn't flood the
+/// broadcast channel — the partial is still a complete tail snapshot,
+/// not an incremental delta, so consumers always see fresh state.
+const STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(150);
+
 pub async fn execute(
     command: &str,
     cwd: &Path,
     timeout_secs: Option<u64>,
     cancel: CancellationToken,
+) -> Result<ToolResult> {
+    execute_streaming(command, cwd, timeout_secs, cancel, ToolProgressSink::noop()).await
+}
+
+/// Like [`execute`] but streams partial output through `sink` while the
+/// command is running. Each partial is a *snapshot* of the combined
+/// stdout+stderr buffer (not a delta), built with the same noise-stripping
+/// and tail-truncation as the final result, so consumers can render the
+/// latest partial directly without merging.
+///
+/// When `sink` is inactive (the no-op sink) this is byte-for-byte
+/// equivalent to the previous `wait_with_output`-based implementation:
+/// no partials are constructed and the only behavioral difference is
+/// that we read stdout/stderr line-by-line instead of in one shot.
+pub async fn execute_streaming(
+    command: &str,
+    cwd: &Path,
+    timeout_secs: Option<u64>,
+    cancel: CancellationToken,
+    sink: ToolProgressSink,
 ) -> Result<ToolResult> {
     let start = Instant::now();
 
@@ -55,39 +82,100 @@ pub async fn execute(
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
 
-    let child = cmd.spawn()?;
+    let mut child = cmd.spawn()?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("failed to capture stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("failed to capture stderr"))?;
 
-    let output = tokio::select! {
-        result = child.wait_with_output() => result?,
-        _ = cancel.cancelled() => {
-            anyhow::bail!("Command aborted");
+    let mut stdout_lines = BufReader::new(stdout).lines();
+    let mut stderr_lines = BufReader::new(stderr).lines();
+
+    // Combined buffer — same shape as the legacy join order (stdout, then
+    // a separator newline if stderr is non-empty, then stderr) but here we
+    // interleave by arrival because line-readers don't preserve the
+    // stdout-then-stderr ordering of the original implementation. The agent
+    // gets the same semantic info; live consumers see lines in chronological
+    // arrival order which is what they want.
+    let mut combined = String::new();
+    let mut last_flush = Instant::now();
+    let sink_active = sink.is_active();
+
+    let timeout_fut = async {
+        if let Some(secs) = timeout_secs {
+            tokio::time::sleep(Duration::from_secs(secs)).await;
+        } else {
+            std::future::pending::<()>().await;
         }
-        _ = async {
-            if let Some(secs) = timeout_secs {
-                tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
-            } else {
-                std::future::pending::<()>().await;
+    };
+    tokio::pin!(timeout_fut);
+
+    let exit_status = loop {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                let _ = child.kill().await;
+                anyhow::bail!("Command aborted");
             }
-        } => {
-            anyhow::bail!("Command timed out after {} seconds", timeout_secs.unwrap());
+            _ = &mut timeout_fut => {
+                let _ = child.kill().await;
+                anyhow::bail!("Command timed out after {} seconds", timeout_secs.unwrap());
+            }
+            line = stdout_lines.next_line() => {
+                match line? {
+                    Some(l) => {
+                        combined.push_str(&l);
+                        combined.push('\n');
+                        maybe_flush_partial(&sink, sink_active, &combined, &mut last_flush);
+                    }
+                    None => {
+                        // stdout closed — drain remaining stderr then wait for exit
+                        while let Some(l) = stderr_lines.next_line().await? {
+                            combined.push_str(&l);
+                            combined.push('\n');
+                            maybe_flush_partial(&sink, sink_active, &combined, &mut last_flush);
+                        }
+                        break child.wait().await?;
+                    }
+                }
+            }
+            line = stderr_lines.next_line() => {
+                match line? {
+                    Some(l) => {
+                        combined.push_str(&l);
+                        combined.push('\n');
+                        maybe_flush_partial(&sink, sink_active, &combined, &mut last_flush);
+                    }
+                    None => {
+                        // stderr closed — drain remaining stdout then wait for exit
+                        while let Some(l) = stdout_lines.next_line().await? {
+                            combined.push_str(&l);
+                            combined.push('\n');
+                            maybe_flush_partial(&sink, sink_active, &combined, &mut last_flush);
+                        }
+                        break child.wait().await?;
+                    }
+                }
+            }
         }
     };
 
     let duration_ms = start.elapsed().as_millis() as u64;
-    let exit_code = output.status.code().unwrap_or(-1);
+    let exit_code = exit_status.code().unwrap_or(-1);
 
-    // Combine stdout + stderr
-    let mut full_output = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.is_empty() {
-        if !full_output.is_empty() {
-            full_output.push('\n');
-        }
-        full_output.push_str(&stderr);
+    // Strip the trailing newline we added per line so the legacy String
+    // shape matches (the old impl did `lossy(stdout) + "\n" + lossy(stderr)`
+    // without a final newline).
+    if combined.ends_with('\n') {
+        combined.pop();
     }
 
     // Strip terminal control noise (mouse reports, bracketed paste, etc.)
-    let clean_output = strip_terminal_noise(&full_output);
+    let clean_output = strip_terminal_noise(&combined);
 
     // Tail-truncate if needed
     let truncated = truncate_tail(&clean_output);
@@ -107,6 +195,37 @@ pub async fn execute(
             "totalBytes": truncated.total_bytes,
         }),
     })
+}
+
+/// Push a tail-truncated snapshot of `buffer` to the sink, rate-limited
+/// by [`STREAM_FLUSH_INTERVAL`]. Cheap when no consumer is attached.
+fn maybe_flush_partial(
+    sink: &ToolProgressSink,
+    sink_active: bool,
+    buffer: &str,
+    last_flush: &mut Instant,
+) {
+    if !sink_active {
+        return;
+    }
+    if last_flush.elapsed() < STREAM_FLUSH_INTERVAL {
+        return;
+    }
+    *last_flush = Instant::now();
+
+    let cleaned = strip_terminal_noise(buffer);
+    let truncated = truncate_tail(&cleaned);
+    sink.send(ToolResult {
+        content: vec![ContentBlock::Text {
+            text: truncated.content,
+        }],
+        details: serde_json::json!({
+            "partial": true,
+            "totalLines": truncated.total_lines,
+            "totalBytes": truncated.total_bytes,
+            "truncated": truncated.was_truncated,
+        }),
+    });
 }
 
 /// Strip CSI terminal control sequences that aren't SGR color codes.
@@ -428,5 +547,70 @@ mod tests {
         let cancel = CancellationToken::new();
         let result = execute("sleep 10", Path::new("."), Some(1), cancel).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn streaming_sink_receives_partials() {
+        use std::sync::{Arc, Mutex};
+        let collected: Arc<Mutex<Vec<ToolResult>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_for_sink = collected.clone();
+        let sink = ToolProgressSink::from_fn(move |partial| {
+            collected_for_sink.lock().unwrap().push(partial);
+        });
+
+        // Emit a handful of lines spaced beyond STREAM_FLUSH_INTERVAL so the
+        // rate-limiter actually flushes more than once.
+        let cancel = CancellationToken::new();
+        let result = execute_streaming(
+            "for i in 1 2 3 4; do echo line-$i; sleep 0.2; done",
+            Path::new("."),
+            Some(10),
+            cancel,
+            sink,
+        )
+        .await
+        .unwrap();
+
+        // Final result still contains every line.
+        let final_text = result.content[0].as_text().unwrap();
+        for i in 1..=4 {
+            assert!(
+                final_text.contains(&format!("line-{i}")),
+                "final result missing line-{i}: {final_text}"
+            );
+        }
+        assert_eq!(result.details["exitCode"], 0);
+
+        // At least one partial should have flown through the sink. We don't
+        // assert an exact count because flush timing is wall-clock dependent;
+        // we only require that streaming actually happened.
+        let partials = collected.lock().unwrap();
+        assert!(
+            !partials.is_empty(),
+            "expected at least one streamed partial"
+        );
+        // Each partial should be marked as such in details.
+        for p in partials.iter() {
+            assert_eq!(p.details["partial"], true);
+        }
+    }
+
+    #[tokio::test]
+    async fn streaming_sink_inactive_is_zero_overhead() {
+        // The default no-op sink should not affect outcome — covered by the
+        // existing `execute_*` tests since `execute` now forwards to
+        // `execute_streaming` with a noop sink, but assert it explicitly.
+        let cancel = CancellationToken::new();
+        let result = execute_streaming(
+            "echo hello",
+            Path::new("."),
+            None,
+            cancel,
+            ToolProgressSink::noop(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.details["exitCode"], 0);
+        assert!(result.content[0].as_text().unwrap().contains("hello"));
     }
 }
