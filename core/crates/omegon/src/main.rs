@@ -21,6 +21,7 @@ mod bridge;
 pub mod bus;
 mod cleave;
 mod cleave_smoke;
+mod clipboard;
 mod context;
 mod control_actions;
 mod embedding;
@@ -1261,6 +1262,32 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             model = %s.model, thinking = %s.thinking.as_str(),
             max_turns = s.max_turns, "settings initialized from profile"
         );
+    }
+
+    // ─── Clipboard paste retention sweep ────────────────────────────────
+    // Walk the system temp dir for `omegon-clipboard-*` files older
+    // than `Settings.clipboard_retention_hours` (default 24h, 0 to
+    // disable) and delete them. Without this sweep clipboard image
+    // pastes accumulate indefinitely — operators were seeing
+    // multi-month backlogs in `/tmp`. The sweep runs once per
+    // interactive launch, before the rest of setup so any failures
+    // here don't block startup.
+    let clipboard_retention_hours = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.clipboard_retention_hours)
+        .unwrap_or(24);
+    let clipboard_retention =
+        std::time::Duration::from_secs(clipboard_retention_hours.saturating_mul(3600));
+    match clipboard::prune_old_pastes(clipboard_retention) {
+        Ok(stats) if stats.deleted > 0 || stats.errors > 0 => {
+            tracing::info!("{}", stats.summary());
+        }
+        Ok(_) => {
+            // Nothing to clean — stay quiet on the common path so we
+            // don't spam the log on every launch.
+        }
+        Err(e) => tracing::warn!(error = %e, "clipboard prune failed"),
     }
 
     // ─── Shared setup ───────────────────────────────────────────────────

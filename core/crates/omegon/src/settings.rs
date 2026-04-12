@@ -336,6 +336,24 @@ pub struct Settings {
     /// Defaults to true. Set to false to restore terminal-native text selection.
     #[serde(default = "default_mouse")]
     pub mouse: bool,
+
+    /// How long clipboard pastes are retained on disk before automatic
+    /// deletion at session start, in hours. Default 24h. Set to 0 to
+    /// disable automatic deletion entirely. The setting also feeds the
+    /// `/clipboard prune` slash command for on-demand sweeps.
+    ///
+    /// Clipboard pastes are written to the system temp directory by
+    /// `tui::mod::pull_clipboard_image` and named
+    /// `omegon-clipboard-{pid}-{counter}.{ext}`. The matching prune
+    /// logic in `clipboard::prune_old_pastes` walks that directory at
+    /// session start and removes anything matching that pattern whose
+    /// modification time is older than `clipboard_retention_hours`.
+    #[serde(default = "default_clipboard_retention_hours")]
+    pub clipboard_retention_hours: u64,
+}
+
+fn default_clipboard_retention_hours() -> u64 {
+    24
 }
 
 /// Tool card display mode in the conversation view.
@@ -573,6 +591,7 @@ impl Default for Settings {
             update_channel: default_update_channel(),
             provider_connected: true, // optimistic default — set false when NullBridge
             mouse: true,
+            clipboard_retention_hours: default_clipboard_retention_hours(),
         }
     }
 }

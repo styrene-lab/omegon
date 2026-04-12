@@ -451,6 +451,17 @@ impl AgentSetup {
         // ─── Usage advisory (/usage from captured provider telemetry) ───
         bus.register(Box::new(features::usage::UsageFeature::new()));
 
+        // ─── Clipboard paste retention (/clipboard prune) ────────────────
+        // Manual on-demand sweep surface for clipboard image pastes.
+        // The automatic 24h sweep at session start lives in main.rs;
+        // this feature is the operator's override for forcing a sweep
+        // mid-session. Both call paths share `clipboard::prune_old_pastes`.
+        if let Some(ref settings) = settings {
+            bus.register(Box::new(features::clipboard::ClipboardFeature::new(
+                settings.clone(),
+            )));
+        }
+
         // ─── Model budget (tier switching + thinking) ───────────────────
         if let Some(ref settings) = settings {
             bus.register(Box::new(features::model_budget::ModelBudget::new(

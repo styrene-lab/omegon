@@ -23,6 +23,7 @@ pub mod adapter;
 pub mod auth;
 pub mod auto_compact;
 pub mod cleave;
+pub mod clipboard;
 pub mod context;
 pub mod delegate;
 pub mod harness_settings;
