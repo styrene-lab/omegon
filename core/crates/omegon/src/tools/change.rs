@@ -151,7 +151,11 @@ pub async fn execute(
     for (path, mut file_edits) in edits_by_file {
         file_edits.sort_by(|a, b| b.offset.cmp(&a.offset));
 
-        let mut content = snapshots.get(&path).cloned().unwrap_or_default().replace("\r\n", "\n");
+        let mut content = snapshots
+            .get(&path)
+            .cloned()
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
 
         for edit in &file_edits {
             let end = edit.offset + edit.old_norm.len();
@@ -160,7 +164,10 @@ pub async fn execute(
             let new_content = format!("{}{}{}", before, edit.new_norm, after);
 
             if new_content == content {
-                results.push((edit.index, format!("  {}: no change (identical)", edits[edit.index].file)));
+                results.push((
+                    edit.index,
+                    format!("  {}: no change (identical)", edits[edit.index].file),
+                ));
                 continue;
             }
             content = new_content;
@@ -172,7 +179,10 @@ pub async fn execute(
             } else {
                 format!("{old_lines}→{new_lines} lines")
             };
-            results.push((edit.index, format!("  ✓ {}: {diff}", edits[edit.index].file)));
+            results.push((
+                edit.index,
+                format!("  ✓ {}: {diff}", edits[edit.index].file),
+            ));
         }
 
         tokio::fs::write(&path, &content).await.map_err(|e| {

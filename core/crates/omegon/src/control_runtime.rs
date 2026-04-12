@@ -16,8 +16,7 @@ pub struct ControlContext<'a> {
     pub agent: &'a mut InteractiveAgentHost,
     pub shared_settings: &'a settings::SharedSettings,
     pub bridge: &'a Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
-    pub login_prompt_tx:
-        &'a std::sync::Arc<tokio::sync::Mutex<Option<oneshot::Sender<String>>>>,
+    pub login_prompt_tx: &'a std::sync::Arc<tokio::sync::Mutex<Option<oneshot::Sender<String>>>>,
     pub events_tx: &'a broadcast::Sender<AgentEvent>,
     pub cli: &'a CliRuntimeView<'a>,
 }
@@ -26,66 +25,112 @@ pub struct ControlContext<'a> {
 pub enum ControlRequest {
     ModelView,
     ModelList,
-    SetModel { requested_model: String },
+    SetModel {
+        requested_model: String,
+    },
     SwitchDispatcher {
         request_id: String,
         profile: String,
         model: Option<String>,
     },
-    SetThinking { level: crate::settings::ThinkingLevel },
+    SetThinking {
+        level: crate::settings::ThinkingLevel,
+    },
     StatusView,
     WorkspaceStatusView,
     WorkspaceListView,
-    WorkspaceNew { label: String },
-    WorkspaceDestroy { target: String },
+    WorkspaceNew {
+        label: String,
+    },
+    WorkspaceDestroy {
+        target: String,
+    },
     WorkspaceAdopt,
     WorkspaceRelease,
     WorkspaceArchive,
     WorkspacePrune,
-    WorkspaceBindMilestone { milestone_id: String },
-    WorkspaceBindNode { design_node_id: String },
+    WorkspaceBindMilestone {
+        milestone_id: String,
+    },
+    WorkspaceBindNode {
+        design_node_id: String,
+    },
     WorkspaceBindClear,
     WorkspaceRoleView,
-    WorkspaceRoleSet { role: crate::workspace::types::WorkspaceRole },
+    WorkspaceRoleSet {
+        role: crate::workspace::types::WorkspaceRole,
+    },
     WorkspaceRoleClear,
     WorkspaceKindView,
-    WorkspaceKindSet { kind: crate::workspace::types::WorkspaceKind },
+    WorkspaceKindSet {
+        kind: crate::workspace::types::WorkspaceKind,
+    },
     WorkspaceKindClear,
     SessionStatsView,
-    TreeView { args: String },
-    NoteAdd { text: String },
+    TreeView {
+        args: String,
+    },
+    NoteAdd {
+        text: String,
+    },
     NotesView,
     NotesClear,
     CheckinView,
     ContextStatus,
     ContextCompact,
     ContextClear,
-    ContextRequest { kind: String, query: String },
-    ContextRequestJson { raw: String },
-    SetContextClass { class: crate::settings::ContextClass },
+    ContextRequest {
+        kind: String,
+        query: String,
+    },
+    ContextRequestJson {
+        raw: String,
+    },
+    SetContextClass {
+        class: crate::settings::ContextClass,
+    },
     NewSession,
     ListSessions,
     AuthStatus,
     AuthUnlock,
-    AuthLogin { provider: String },
-    AuthLogout { provider: String },
+    AuthLogin {
+        provider: String,
+    },
+    AuthLogout {
+        provider: String,
+    },
     SkillsView,
     SkillsInstall,
     PluginView,
-    PluginInstall { uri: String },
-    PluginRemove { name: String },
-    PluginUpdate { name: Option<String> },
+    PluginInstall {
+        uri: String,
+    },
+    PluginRemove {
+        name: String,
+    },
+    PluginUpdate {
+        name: Option<String>,
+    },
     SecretsView,
-    SecretsSet { name: String, value: String },
-    SecretsGet { name: String },
-    SecretsDelete { name: String },
+    SecretsSet {
+        name: String,
+        value: String,
+    },
+    SecretsGet {
+        name: String,
+    },
+    SecretsDelete {
+        name: String,
+    },
     VaultStatus,
     VaultUnseal,
     VaultLogin,
     VaultConfigure,
     VaultInitPolicy,
     CleaveStatus,
-    CleaveCancelChild { label: String },
+    CleaveCancelChild {
+        label: String,
+    },
     DelegateStatus,
 }
 
@@ -94,11 +139,9 @@ pub fn control_request_from_slash(
 ) -> Option<ControlRequest> {
     Some(match command {
         crate::tui::CanonicalSlashCommand::ModelList => ControlRequest::ModelList,
-        crate::tui::CanonicalSlashCommand::SetModel(requested_model) => {
-            ControlRequest::SetModel {
-                requested_model: requested_model.clone(),
-            }
-        }
+        crate::tui::CanonicalSlashCommand::SetModel(requested_model) => ControlRequest::SetModel {
+            requested_model: requested_model.clone(),
+        },
         crate::tui::CanonicalSlashCommand::SetThinking(level) => {
             ControlRequest::SetThinking { level: *level }
         }
@@ -107,9 +150,9 @@ pub fn control_request_from_slash(
             ControlRequest::WorkspaceStatusView
         }
         crate::tui::CanonicalSlashCommand::WorkspaceListView => ControlRequest::WorkspaceListView,
-        crate::tui::CanonicalSlashCommand::WorkspaceNew(label) => {
-            ControlRequest::WorkspaceNew { label: label.clone() }
-        }
+        crate::tui::CanonicalSlashCommand::WorkspaceNew(label) => ControlRequest::WorkspaceNew {
+            label: label.clone(),
+        },
         crate::tui::CanonicalSlashCommand::WorkspaceDestroy(target) => {
             ControlRequest::WorkspaceDestroy {
                 target: target.clone(),
@@ -135,15 +178,11 @@ pub fn control_request_from_slash(
             ControlRequest::WorkspaceRoleSet { role: *role }
         }
         crate::tui::CanonicalSlashCommand::WorkspaceRoleClear => ControlRequest::WorkspaceRoleClear,
-        crate::tui::CanonicalSlashCommand::WorkspaceKindView => {
-            ControlRequest::WorkspaceKindView
-        }
+        crate::tui::CanonicalSlashCommand::WorkspaceKindView => ControlRequest::WorkspaceKindView,
         crate::tui::CanonicalSlashCommand::WorkspaceKindSet(kind) => {
             ControlRequest::WorkspaceKindSet { kind: *kind }
         }
-        crate::tui::CanonicalSlashCommand::WorkspaceKindClear => {
-            ControlRequest::WorkspaceKindClear
-        }
+        crate::tui::CanonicalSlashCommand::WorkspaceKindClear => ControlRequest::WorkspaceKindClear,
         crate::tui::CanonicalSlashCommand::SessionStatsView => ControlRequest::SessionStatsView,
         crate::tui::CanonicalSlashCommand::TreeView { args } => {
             ControlRequest::TreeView { args: args.clone() }
@@ -182,15 +221,15 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::SkillsView => ControlRequest::SkillsView,
         crate::tui::CanonicalSlashCommand::SkillsInstall => ControlRequest::SkillsInstall,
         crate::tui::CanonicalSlashCommand::PluginView => ControlRequest::PluginView,
-        crate::tui::CanonicalSlashCommand::PluginInstall(uri) => ControlRequest::PluginInstall {
-            uri: uri.clone(),
-        },
-        crate::tui::CanonicalSlashCommand::PluginRemove(name) => ControlRequest::PluginRemove {
-            name: name.clone(),
-        },
-        crate::tui::CanonicalSlashCommand::PluginUpdate(name) => ControlRequest::PluginUpdate {
-            name: name.clone(),
-        },
+        crate::tui::CanonicalSlashCommand::PluginInstall(uri) => {
+            ControlRequest::PluginInstall { uri: uri.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::PluginRemove(name) => {
+            ControlRequest::PluginRemove { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::PluginUpdate(name) => {
+            ControlRequest::PluginUpdate { name: name.clone() }
+        }
         crate::tui::CanonicalSlashCommand::SecretsView => ControlRequest::SecretsView,
         crate::tui::CanonicalSlashCommand::SecretsSet { name, value } => {
             ControlRequest::SecretsSet {
@@ -198,12 +237,12 @@ pub fn control_request_from_slash(
                 value: value.clone(),
             }
         }
-        crate::tui::CanonicalSlashCommand::SecretsGet(name) => ControlRequest::SecretsGet {
-            name: name.clone(),
-        },
-        crate::tui::CanonicalSlashCommand::SecretsDelete(name) => ControlRequest::SecretsDelete {
-            name: name.clone(),
-        },
+        crate::tui::CanonicalSlashCommand::SecretsGet(name) => {
+            ControlRequest::SecretsGet { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::SecretsDelete(name) => {
+            ControlRequest::SecretsDelete { name: name.clone() }
+        }
         crate::tui::CanonicalSlashCommand::VaultStatus => ControlRequest::VaultStatus,
         crate::tui::CanonicalSlashCommand::VaultUnseal => ControlRequest::VaultUnseal,
         crate::tui::CanonicalSlashCommand::VaultLogin => ControlRequest::VaultLogin,
@@ -248,7 +287,9 @@ pub async fn execute_control(
         ControlRequest::SetThinking { level } => {
             set_thinking_response(ctx.shared_settings, level).await
         }
-        ControlRequest::StatusView => status_view_response(ctx.runtime_state, ctx.shared_settings).await,
+        ControlRequest::StatusView => {
+            status_view_response(ctx.runtime_state, ctx.shared_settings).await
+        }
         ControlRequest::WorkspaceStatusView => workspace_status_view_response(ctx.agent).await,
         ControlRequest::WorkspaceListView => workspace_list_view_response(ctx.agent).await,
         ControlRequest::WorkspaceNew { label } => workspace_new_response(ctx.agent, &label).await,
@@ -267,10 +308,14 @@ pub async fn execute_control(
         }
         ControlRequest::WorkspaceBindClear => workspace_bind_clear_response(ctx.agent).await,
         ControlRequest::WorkspaceRoleView => workspace_role_view_response(ctx.agent).await,
-        ControlRequest::WorkspaceRoleSet { role } => workspace_role_set_response(ctx.agent, role).await,
+        ControlRequest::WorkspaceRoleSet { role } => {
+            workspace_role_set_response(ctx.agent, role).await
+        }
         ControlRequest::WorkspaceRoleClear => workspace_role_clear_response(ctx.agent).await,
         ControlRequest::WorkspaceKindView => workspace_kind_view_response(ctx.agent).await,
-        ControlRequest::WorkspaceKindSet { kind } => workspace_kind_set_response(ctx.agent, kind).await,
+        ControlRequest::WorkspaceKindSet { kind } => {
+            workspace_kind_set_response(ctx.agent, kind).await
+        }
         ControlRequest::WorkspaceKindClear => workspace_kind_clear_response(ctx.agent).await,
         ControlRequest::SessionStatsView => {
             session_stats_view_response(ctx.runtime_state, ctx.shared_settings, ctx.agent).await
@@ -284,8 +329,13 @@ pub async fn execute_control(
             context_status_response(ctx.runtime_state, ctx.shared_settings).await
         }
         ControlRequest::ContextCompact => {
-            context_compact_response(ctx.runtime_state, ctx.agent, ctx.shared_settings, ctx.bridge)
-                .await
+            context_compact_response(
+                ctx.runtime_state,
+                ctx.agent,
+                ctx.shared_settings,
+                ctx.bridge,
+            )
+            .await
         }
         ControlRequest::ContextClear => {
             context_clear_response(ctx.runtime_state, ctx.agent, ctx.cli, ctx.events_tx).await
@@ -542,15 +592,13 @@ pub async fn switch_dispatcher_response(
         }
         _ => current_model.clone(),
     };
-    let requested_model_spec = requested_model
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| {
-            if current_provider.is_empty() || current_provider == "anthropic" {
-                format!("anthropic:{tier_model}")
-            } else {
-                format!("{current_provider}:{tier_model}")
-            }
-        });
+    let requested_model_spec = requested_model.map(ToOwned::to_owned).unwrap_or_else(|| {
+        if current_provider.is_empty() || current_provider == "anthropic" {
+            format!("anthropic:{tier_model}")
+        } else {
+            format!("{current_provider}:{tier_model}")
+        }
+    });
     let effective_model = providers::resolve_execution_model_spec(&requested_model_spec)
         .await
         .unwrap_or_else(|| requested_model_spec.clone());
@@ -586,33 +634,45 @@ pub async fn switch_dispatcher_response(
         session_kind,
         authorization,
     ) = if let Some(settings) = settings_snapshot {
-            let profile = settings.operating_profile();
-            let principal_id = profile.identity.principal_id.clone().unwrap_or_else(|| "anonymous".into());
-            let identity_issuer = profile.identity.issuer.clone().unwrap_or_else(|| "unknown".into());
-            let session_kind = profile.identity.session_kind.clone().unwrap_or_else(|| "unknown".into());
-            let authorization = profile.authorization.summary();
-            (
-                settings.effective_requested_class().label().to_string(),
-                settings.thinking.as_str().to_string(),
-                profile.posture.effective.display_name().to_string(),
-                profile.summary(),
-                principal_id,
-                identity_issuer,
-                session_kind,
-                authorization,
-            )
-        } else {
-            (
-                status.context_class.clone(),
-                status.thinking_level.clone(),
-                status.posture.clone(),
-                status.operating_profile.clone(),
-                status.principal_id.clone(),
-                status.identity_issuer.clone(),
-                status.session_kind.clone(),
-                status.authorization.clone(),
-            )
-        };
+        let profile = settings.operating_profile();
+        let principal_id = profile
+            .identity
+            .principal_id
+            .clone()
+            .unwrap_or_else(|| "anonymous".into());
+        let identity_issuer = profile
+            .identity
+            .issuer
+            .clone()
+            .unwrap_or_else(|| "unknown".into());
+        let session_kind = profile
+            .identity
+            .session_kind
+            .clone()
+            .unwrap_or_else(|| "unknown".into());
+        let authorization = profile.authorization.summary();
+        (
+            settings.effective_requested_class().label().to_string(),
+            settings.thinking.as_str().to_string(),
+            profile.posture.effective.display_name().to_string(),
+            profile.summary(),
+            principal_id,
+            identity_issuer,
+            session_kind,
+            authorization,
+        )
+    } else {
+        (
+            status.context_class.clone(),
+            status.thinking_level.clone(),
+            status.posture.clone(),
+            status.operating_profile.clone(),
+            status.principal_id.clone(),
+            status.identity_issuer.clone(),
+            status.session_kind.clone(),
+            status.authorization.clone(),
+        )
+    };
     status.update_routing(
         &context_class,
         &thinking_level,
@@ -741,7 +801,11 @@ pub async fn workspace_status_view_response(agent: &InteractiveAgentHost) -> Sla
     let owner = lease.owner_session_id.as_deref().unwrap_or("(none)");
     let milestone = lease.bindings.milestone_id.as_deref().unwrap_or("(none)");
     let node = lease.bindings.design_node_id.as_deref().unwrap_or("(none)");
-    let change = lease.bindings.openspec_change.as_deref().unwrap_or("(none)");
+    let change = lease
+        .bindings
+        .openspec_change
+        .as_deref()
+        .unwrap_or("(none)");
     let text = format!(
         "Workspace\n  ID:           {}\n  Label:        {}\n  Project:      {}\n  Path:         {}\n  Backend:      {}\n  Branch:       {}\n  Role:         {:?}\n  Kind:         {:?}\n  Mutability:   {:?}\n  Owner:        {}\n  Source:       {}\n  Milestone:    {}\n  Design Node:  {}\n  OpenSpec:     {}\n  Local Views:  {}",
         lease.workspace_id,
@@ -797,8 +861,10 @@ pub async fn workspace_role_set_response(
         None => {
             return SlashCommandResponse {
                 accepted: false,
-                output: Some("Workspace role cannot be set before workspace metadata exists.".into()),
-            }
+                output: Some(
+                    "Workspace role cannot be set before workspace metadata exists.".into(),
+                ),
+            };
         }
     };
     lease.role = role;
@@ -834,8 +900,10 @@ pub async fn workspace_role_clear_response(agent: &InteractiveAgentHost) -> Slas
         None => {
             return SlashCommandResponse {
                 accepted: false,
-                output: Some("Workspace role cannot be cleared before workspace metadata exists.".into()),
-            }
+                output: Some(
+                    "Workspace role cannot be cleared before workspace metadata exists.".into(),
+                ),
+            };
         }
     };
     lease.role = crate::workspace::types::WorkspaceRole::Primary;
@@ -877,7 +945,11 @@ pub async fn workspace_kind_view_response(agent: &InteractiveAgentHost) -> Slash
         };
     };
     let declared = lease.workspace_kind;
-    let source = if declared == inferred { "inferred/default" } else { "operator-declared" };
+    let source = if declared == inferred {
+        "inferred/default"
+    } else {
+        "operator-declared"
+    };
     SlashCommandResponse {
         accepted: true,
         output: Some(format!(
@@ -947,7 +1019,7 @@ pub async fn workspace_destroy_response(
             return SlashCommandResponse {
                 accepted: false,
                 output: Some("Workspace destroy requires existing local registry metadata.".into()),
-            }
+            };
         }
     };
     let workspace = match find_workspace_target(&registry, target) {
@@ -956,7 +1028,7 @@ pub async fn workspace_destroy_response(
             return SlashCommandResponse {
                 accepted: false,
                 output: Some(message),
-            }
+            };
         }
     };
     if workspace.path == agent.cwd.display().to_string() {
@@ -1015,7 +1087,9 @@ pub async fn workspace_destroy_response(
     if let Err(err) = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &updated) {
         return SlashCommandResponse {
             accepted: false,
-            output: Some(format!("Destroyed workspace but failed to update registry: {err}")),
+            output: Some(format!(
+                "Destroyed workspace but failed to update registry: {err}"
+            )),
         };
     }
 
@@ -1038,7 +1112,7 @@ pub async fn workspace_adopt_response(agent: &InteractiveAgentHost) -> SlashComm
             return SlashCommandResponse {
                 accepted: false,
                 output: Some("Workspace adopt requires existing local workspace metadata.".into()),
-            }
+            };
         }
     };
     let heartbeat = crate::workspace::runtime::heartbeat_epoch_secs(&lease.last_heartbeat);
@@ -1142,8 +1216,10 @@ pub async fn workspace_release_response(agent: &InteractiveAgentHost) -> SlashCo
         None => {
             return SlashCommandResponse {
                 accepted: false,
-                output: Some("Workspace release requires existing local workspace metadata.".into()),
-            }
+                output: Some(
+                    "Workspace release requires existing local workspace metadata.".into(),
+                ),
+            };
         }
     };
     if lease.owner_session_id.as_deref() != Some(agent.session_id.as_str()) {
@@ -1182,8 +1258,10 @@ pub async fn workspace_archive_response(agent: &InteractiveAgentHost) -> SlashCo
         None => {
             return SlashCommandResponse {
                 accepted: false,
-                output: Some("Workspace archive requires existing local workspace metadata.".into()),
-            }
+                output: Some(
+                    "Workspace archive requires existing local workspace metadata.".into(),
+                ),
+            };
         }
     };
     if lease.owner_session_id.is_some() {
@@ -1221,7 +1299,7 @@ pub async fn workspace_prune_response(agent: &InteractiveAgentHost) -> SlashComm
             return SlashCommandResponse {
                 accepted: true,
                 output: Some("Workspace registry: nothing to prune.".into()),
-            }
+            };
         }
     };
     let before = registry.workspaces.len();
@@ -1315,8 +1393,10 @@ pub async fn workspace_new_response(
         None => {
             return SlashCommandResponse {
                 accepted: false,
-                output: Some("Workspace creation requires existing local workspace metadata.".into()),
-            }
+                output: Some(
+                    "Workspace creation requires existing local workspace metadata.".into(),
+                ),
+            };
         }
     };
     let sanitized = label
@@ -1328,21 +1408,35 @@ pub async fn workspace_new_response(
     if sanitized.is_empty() {
         return SlashCommandResponse {
             accepted: false,
-            output: Some("Workspace label must contain at least one alphanumeric character.".into()),
+            output: Some(
+                "Workspace label must contain at least one alphanumeric character.".into(),
+            ),
         };
     }
     let workspace_path = project_root
         .parent()
         .unwrap_or(project_root.as_path())
-        .join(format!("{}-{}", project_root.file_name().and_then(|n| n.to_str()).unwrap_or("workspace"), sanitized));
+        .join(format!(
+            "{}-{}",
+            project_root
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("workspace"),
+            sanitized
+        ));
     let branch = format!("workspace/{}", sanitized);
-    let info = match omegon_git::worktree::create_smart(&project_root, &workspace_path, &sanitized, &branch) {
+    let info = match omegon_git::worktree::create_smart(
+        &project_root,
+        &workspace_path,
+        &sanitized,
+        &branch,
+    ) {
         Ok(info) => info,
         Err(err) => {
             return SlashCommandResponse {
                 accepted: false,
                 output: Some(format!("Failed to create sibling workspace: {err}")),
-            }
+            };
         }
     };
     let backend_kind = match info.backend {
@@ -1358,7 +1452,11 @@ pub async fn workspace_new_response(
         path: workspace_path.display().to_string(),
         backend_kind,
         vcs_ref: Some(crate::workspace::types::WorkspaceVcsRef {
-            vcs: if info.backend == "jj" { "jj".into() } else { "git".into() },
+            vcs: if info.backend == "jj" {
+                "jj".into()
+            } else {
+                "git".into()
+            },
             branch: Some(info.branch.clone()),
             revision: None,
             remote: Some("origin".into()),
@@ -1378,10 +1476,13 @@ pub async fn workspace_new_response(
         parent_workspace_id: Some(parent.workspace_id.clone()),
         source: "operator".into(),
     };
-    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&workspace_path, &new_lease) {
+    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&workspace_path, &new_lease)
+    {
         return SlashCommandResponse {
             accepted: false,
-            output: Some(format!("Created workspace but failed to write lease metadata: {err}")),
+            output: Some(format!(
+                "Created workspace but failed to write lease metadata: {err}"
+            )),
         };
     }
     let mut registry = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
@@ -1392,25 +1493,29 @@ pub async fn workspace_new_response(
             repo_root: project_root.display().to_string(),
             workspaces: vec![],
         });
-    registry.workspaces.retain(|ws| ws.workspace_id != new_workspace_id);
-    registry.workspaces.push(crate::workspace::types::WorkspaceSummary {
-        workspace_id: new_lease.workspace_id.clone(),
-        label: new_lease.label.clone(),
-        path: new_lease.path.clone(),
-        backend_kind: new_lease.backend_kind,
-        vcs_ref: new_lease.vcs_ref.clone(),
-        bindings: new_lease.bindings.clone(),
-        branch: new_lease.branch.clone(),
-        role: new_lease.role,
-        workspace_kind: new_lease.workspace_kind,
-        mutability: new_lease.mutability,
-        owner_session_id: new_lease.owner_session_id.clone(),
-        last_heartbeat: new_lease.last_heartbeat.clone(),
-        archived: new_lease.archived,
-        archived_at: new_lease.archived_at.clone(),
-        archive_reason: new_lease.archive_reason.clone(),
-        stale: false,
-    });
+    registry
+        .workspaces
+        .retain(|ws| ws.workspace_id != new_workspace_id);
+    registry
+        .workspaces
+        .push(crate::workspace::types::WorkspaceSummary {
+            workspace_id: new_lease.workspace_id.clone(),
+            label: new_lease.label.clone(),
+            path: new_lease.path.clone(),
+            backend_kind: new_lease.backend_kind,
+            vcs_ref: new_lease.vcs_ref.clone(),
+            bindings: new_lease.bindings.clone(),
+            branch: new_lease.branch.clone(),
+            role: new_lease.role,
+            workspace_kind: new_lease.workspace_kind,
+            mutability: new_lease.mutability,
+            owner_session_id: new_lease.owner_session_id.clone(),
+            last_heartbeat: new_lease.last_heartbeat.clone(),
+            archived: new_lease.archived,
+            archived_at: new_lease.archived_at.clone(),
+            archive_reason: new_lease.archive_reason.clone(),
+            stale: false,
+        });
     let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
     let _ = crate::workspace::runtime::write_workspace_registry(&workspace_path, &registry);
     SlashCommandResponse {
@@ -1448,10 +1553,22 @@ pub async fn workspace_list_view_response(agent: &InteractiveAgentHost) -> Slash
     )];
     for workspace in registry.workspaces {
         let owner = workspace.owner_session_id.as_deref().unwrap_or("(none)");
-        let milestone = workspace.bindings.milestone_id.as_deref().unwrap_or("(none)");
-        let node = workspace.bindings.design_node_id.as_deref().unwrap_or("(none)");
+        let milestone = workspace
+            .bindings
+            .milestone_id
+            .as_deref()
+            .unwrap_or("(none)");
+        let node = workspace
+            .bindings
+            .design_node_id
+            .as_deref()
+            .unwrap_or("(none)");
         let archive = if workspace.archived {
-            format!("archived at {} ({})", workspace.archived_at.as_deref().unwrap_or("unknown"), workspace.archive_reason.as_deref().unwrap_or("no reason"))
+            format!(
+                "archived at {} ({})",
+                workspace.archived_at.as_deref().unwrap_or("unknown"),
+                workspace.archive_reason.as_deref().unwrap_or("no reason")
+            )
         } else {
             "active".to_string()
         };
@@ -1490,8 +1607,10 @@ pub async fn workspace_kind_set_response(
         None => {
             return SlashCommandResponse {
                 accepted: false,
-                output: Some("Workspace kind cannot be set before workspace metadata exists.".into()),
-            }
+                output: Some(
+                    "Workspace kind cannot be set before workspace metadata exists.".into(),
+                ),
+            };
         }
     };
     lease.workspace_kind = kind;
@@ -1527,8 +1646,10 @@ pub async fn workspace_kind_clear_response(agent: &InteractiveAgentHost) -> Slas
         None => {
             return SlashCommandResponse {
                 accepted: false,
-                output: Some("Workspace kind cannot be cleared before workspace metadata exists.".into()),
-            }
+                output: Some(
+                    "Workspace kind cannot be cleared before workspace metadata exists.".into(),
+                ),
+            };
         }
     };
     let inferred = crate::workspace::infer::infer_workspace_kind(&agent.cwd);
@@ -1552,7 +1673,10 @@ pub async fn workspace_kind_clear_response(agent: &InteractiveAgentHost) -> Slas
     }
     SlashCommandResponse {
         accepted: true,
-        output: Some(format!("Workspace kind reset to inferred value {}.", inferred.as_str())),
+        output: Some(format!(
+            "Workspace kind reset to inferred value {}.",
+            inferred.as_str()
+        )),
     }
 }
 
@@ -1592,7 +1716,10 @@ pub async fn session_stats_view_response(
             .iter()
             .filter(|provider| provider.authenticated)
             .count();
-        format!("{authenticated}/{} authenticated", live_harness.providers.len())
+        format!(
+            "{authenticated}/{} authenticated",
+            live_harness.providers.len()
+        )
     };
 
     SlashCommandResponse {
@@ -1675,7 +1802,10 @@ pub async fn note_add_response(agent: &InteractiveAgentHost, text: &str) -> Slas
     {
         Ok(()) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!("📌 Noted. ({} entries)", count_notes_file(&notes_path))),
+            output: Some(format!(
+                "📌 Noted. ({} entries)",
+                count_notes_file(&notes_path)
+            )),
         },
         Err(e) => SlashCommandResponse {
             accepted: false,
@@ -1761,7 +1891,9 @@ pub async fn checkin_view_response(
     }
 
     let opsx_dir = agent.cwd.join("openspec").join("changes");
-    if opsx_dir.exists() && let Ok(entries) = std::fs::read_dir(&opsx_dir) {
+    if opsx_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(&opsx_dir)
+    {
         let active: Vec<String> = entries
             .filter_map(|e| {
                 let e = e.ok()?;
@@ -1783,7 +1915,9 @@ pub async fn checkin_view_response(
     }
 
     let facts = crate::status::HarnessStatus::assemble().memory.total_facts;
-    let working = crate::status::HarnessStatus::assemble().memory.working_facts;
+    let working = crate::status::HarnessStatus::assemble()
+        .memory
+        .working_facts;
     if facts > 0 {
         sections.push(format!("🧠 {facts} facts ({working} working)"));
     }
@@ -1844,7 +1978,8 @@ pub async fn context_compact_response(
         }
     };
     if let Some((payload, _)) = runtime_state.conversation.build_compaction_payload() {
-        match crate::r#loop::compact_via_llm(bridge_guard.as_ref(), &payload, &stream_options).await {
+        match crate::r#loop::compact_via_llm(bridge_guard.as_ref(), &payload, &stream_options).await
+        {
             Ok(summary) => {
                 runtime_state.conversation.apply_compaction(summary);
                 let est = runtime_state.conversation.estimate_tokens();
@@ -2131,9 +2266,7 @@ pub async fn auth_login_response(
             })
         });
         let result = match provider_clone.as_str() {
-            "anthropic" | "claude" => {
-                auth::login_anthropic_with_callbacks(progress, prompt).await
-            }
+            "anthropic" | "claude" => auth::login_anthropic_with_callbacks(progress, prompt).await,
             "openai-codex" | "chatgpt" | "codex" => {
                 auth::login_openai_with_callbacks(progress, prompt).await
             }
@@ -2424,7 +2557,9 @@ pub async fn vault_status_response(agent: &crate::InteractiveAgentHost) -> Slash
 
     SlashCommandResponse {
         accepted: false,
-        output: Some(format!("Vault ✗\n  Address:  {addr}\n  Status:   unreachable")),
+        output: Some(format!(
+            "Vault ✗\n  Address:  {addr}\n  Status:   unreachable"
+        )),
     }
 }
 
@@ -2575,7 +2710,10 @@ pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
     let mut lines = vec![
         "Authentication Overview".to_string(),
         String::new(),
-        format!("Providers\n  Authenticated:   {authenticated}/{}", status.providers.len()),
+        format!(
+            "Providers\n  Authenticated:   {authenticated}/{}",
+            status.providers.len()
+        ),
         format!("  Expired:         {expired}"),
     ];
 

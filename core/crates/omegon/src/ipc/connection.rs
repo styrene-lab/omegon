@@ -14,11 +14,10 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, warn};
 
 use omegon_traits::{
-    AcceptedResponse, AgentEvent, ControlOutputResponse, ControlRequest,
-    DispatcherSwitchRequest, HelloRequest, HelloResponse, IPC_PROTOCOL_VERSION, IpcCapability,
-    IpcEnvelope, IpcEnvelopeKind, IpcErrorCode, IpcEventPayload, PingRequest, PingResponse,
-    SlashCommandRequest, SlashCommandResponse, SubmitPromptRequest, SubscriptionRequest,
-    SubscriptionResponse,
+    AcceptedResponse, AgentEvent, ControlOutputResponse, ControlRequest, DispatcherSwitchRequest,
+    HelloRequest, HelloResponse, IPC_PROTOCOL_VERSION, IpcCapability, IpcEnvelope, IpcEnvelopeKind,
+    IpcErrorCode, IpcEventPayload, PingRequest, PingResponse, SlashCommandRequest,
+    SlashCommandResponse, SubmitPromptRequest, SubscriptionRequest, SubscriptionResponse,
 };
 
 use super::snapshot::build_state_snapshot;
@@ -231,7 +230,8 @@ impl IpcConnection {
                     let req = serde_json::from_value::<SubmitPromptRequest>(payload)
                         .context("parse submit_prompt")?;
                     let caller_role = parse_caller_role(req.caller_role.as_deref());
-                    let required = crate::control_actions::classify_ipc_method("submit_prompt").role;
+                    let required =
+                        crate::control_actions::classify_ipc_method("submit_prompt").role;
                     if !crate::control_actions::is_role_sufficient(caller_role, required) {
                         send_error(
                             &out_tx,
@@ -265,6 +265,7 @@ impl IpcConnection {
                             image_paths: Vec::new(),
                             submitted_by: "ipc-controller".to_string(),
                             via: "ipc",
+                            queue_mode: crate::tui::PromptQueueMode::InterruptAfterTurn,
                         }))
                         .await
                         .is_ok();
@@ -278,9 +279,8 @@ impl IpcConnection {
                 }
 
                 "cancel" => {
-                    let caller_role = parse_caller_role(
-                        payload.get("caller_role").and_then(|v| v.as_str()),
-                    );
+                    let caller_role =
+                        parse_caller_role(payload.get("caller_role").and_then(|v| v.as_str()));
                     let required = crate::control_actions::classify_ipc_method("cancel").role;
                     if !crate::control_actions::is_role_sufficient(caller_role, required) {
                         send_error(
@@ -350,23 +350,38 @@ impl IpcConnection {
 
                 "get_graph" => {
                     let graph = crate::web::api::build_graph_data(&cfg.handles);
-                    send_response(
-                        &out_tx,
-                        req_id,
-                        "get_graph",
-                        serde_json::to_value(graph)?,
-                    )
-                    .await;
+                    send_response(&out_tx, req_id, "get_graph", serde_json::to_value(graph)?).await;
                 }
 
-                "context_status" | "context_compact" | "context_clear" | "new_session"
-                | "auth_status" | "model_view" | "model_list" | "skills_view"
-                | "skills_install" | "plugin_view" | "plugin_install" | "plugin_remove"
-                | "plugin_update" | "secrets_view" | "secrets_set" | "secrets_get"
-                | "secrets_delete" | "vault_status" | "vault_unseal" | "vault_login"
-                | "vault_configure" | "vault_init_policy" | "cleave_status"
-                | "cleave_cancel_child" | "delegate_status" | "set_model"
-                | "switch_dispatcher" | "set_thinking" | "list_sessions" => {
+                "context_status"
+                | "context_compact"
+                | "context_clear"
+                | "new_session"
+                | "auth_status"
+                | "model_view"
+                | "model_list"
+                | "skills_view"
+                | "skills_install"
+                | "plugin_view"
+                | "plugin_install"
+                | "plugin_remove"
+                | "plugin_update"
+                | "secrets_view"
+                | "secrets_set"
+                | "secrets_get"
+                | "secrets_delete"
+                | "vault_status"
+                | "vault_unseal"
+                | "vault_login"
+                | "vault_configure"
+                | "vault_init_policy"
+                | "cleave_status"
+                | "cleave_cancel_child"
+                | "delegate_status"
+                | "set_model"
+                | "switch_dispatcher"
+                | "set_thinking"
+                | "list_sessions" => {
                     let req = serde_json::from_value::<ControlRequest>(payload.clone())
                         .unwrap_or_default();
                     let caller_role = parse_caller_role(req.caller_role.as_deref());
@@ -383,9 +398,15 @@ impl IpcConnection {
                     }
                     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
                     let request = match method.as_str() {
-                        "context_status" => Some(crate::control_runtime::ControlRequest::ContextStatus),
-                        "context_compact" => Some(crate::control_runtime::ControlRequest::ContextCompact),
-                        "context_clear" => Some(crate::control_runtime::ControlRequest::ContextClear),
+                        "context_status" => {
+                            Some(crate::control_runtime::ControlRequest::ContextStatus)
+                        }
+                        "context_compact" => {
+                            Some(crate::control_runtime::ControlRequest::ContextCompact)
+                        }
+                        "context_clear" => {
+                            Some(crate::control_runtime::ControlRequest::ContextClear)
+                        }
                         "new_session" => Some(crate::control_runtime::ControlRequest::NewSession),
                         "auth_status" => Some(crate::control_runtime::ControlRequest::AuthStatus),
                         "model_view" => Some(crate::control_runtime::ControlRequest::ModelView),
@@ -399,23 +420,29 @@ impl IpcConnection {
                             .get("uri")
                             .and_then(|v| v.as_str())
                             .filter(|s| !s.is_empty())
-                            .map(|uri| crate::control_runtime::ControlRequest::PluginInstall {
-                                uri: uri.to_string(),
-                            }),
+                            .map(
+                                |uri| crate::control_runtime::ControlRequest::PluginInstall {
+                                    uri: uri.to_string(),
+                                },
+                            ),
                         "plugin_remove" => payload
                             .get("name")
                             .and_then(|v| v.as_str())
                             .filter(|s| !s.is_empty())
-                            .map(|name| crate::control_runtime::ControlRequest::PluginRemove {
-                                name: name.to_string(),
-                            }),
-                        "plugin_update" => Some(crate::control_runtime::ControlRequest::PluginUpdate {
-                            name: payload
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string())
-                                .filter(|s| !s.is_empty()),
-                        }),
+                            .map(
+                                |name| crate::control_runtime::ControlRequest::PluginRemove {
+                                    name: name.to_string(),
+                                },
+                            ),
+                        "plugin_update" => {
+                            Some(crate::control_runtime::ControlRequest::PluginUpdate {
+                                name: payload
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string())
+                                    .filter(|s| !s.is_empty()),
+                            })
+                        }
                         "secrets_view" => Some(crate::control_runtime::ControlRequest::SecretsView),
                         "secrets_set" => {
                             let name = payload.get("name").and_then(|v| v.as_str()).unwrap_or("");
@@ -440,9 +467,11 @@ impl IpcConnection {
                             .get("name")
                             .and_then(|v| v.as_str())
                             .filter(|s| !s.is_empty())
-                            .map(|name| crate::control_runtime::ControlRequest::SecretsDelete {
-                                name: name.to_string(),
-                            }),
+                            .map(
+                                |name| crate::control_runtime::ControlRequest::SecretsDelete {
+                                    name: name.to_string(),
+                                },
+                            ),
                         "vault_status" => Some(crate::control_runtime::ControlRequest::VaultStatus),
                         "vault_unseal" => Some(crate::control_runtime::ControlRequest::VaultUnseal),
                         "vault_login" => Some(crate::control_runtime::ControlRequest::VaultLogin),
@@ -452,16 +481,24 @@ impl IpcConnection {
                         "vault_init_policy" => {
                             Some(crate::control_runtime::ControlRequest::VaultInitPolicy)
                         }
-                        "cleave_status" => Some(crate::control_runtime::ControlRequest::CleaveStatus),
+                        "cleave_status" => {
+                            Some(crate::control_runtime::ControlRequest::CleaveStatus)
+                        }
                         "cleave_cancel_child" => payload
                             .get("label")
                             .and_then(|v| v.as_str())
                             .filter(|s| !s.is_empty())
-                            .map(|label| crate::control_runtime::ControlRequest::CleaveCancelChild {
-                                label: label.to_string(),
+                            .map(|label| {
+                                crate::control_runtime::ControlRequest::CleaveCancelChild {
+                                    label: label.to_string(),
+                                }
                             }),
-                        "delegate_status" => Some(crate::control_runtime::ControlRequest::DelegateStatus),
-                        "list_sessions" => Some(crate::control_runtime::ControlRequest::ListSessions),
+                        "delegate_status" => {
+                            Some(crate::control_runtime::ControlRequest::DelegateStatus)
+                        }
+                        "list_sessions" => {
+                            Some(crate::control_runtime::ControlRequest::ListSessions)
+                        }
                         "set_model" => {
                             let model = payload
                                 .get("model")
@@ -477,11 +514,15 @@ impl IpcConnection {
                                     .ok()
                                     .map(|s| s.model.clone())
                                     .unwrap_or_default();
-                                let classified = crate::control_actions::classify_ipc_set_model_request(
-                                    &current_model,
-                                    &model,
-                                );
-                                if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                                let classified =
+                                    crate::control_actions::classify_ipc_set_model_request(
+                                        &current_model,
+                                        &model,
+                                    );
+                                if !crate::control_actions::is_role_sufficient(
+                                    caller_role,
+                                    classified.role,
+                                ) {
                                     send_error(
                                         &out_tx,
                                         req_id,
@@ -497,11 +538,16 @@ impl IpcConnection {
                             }
                         }
                         "switch_dispatcher" => {
-                            let req = serde_json::from_value::<DispatcherSwitchRequest>(payload.clone())
-                                .context("parse switch_dispatcher")?;
-                            let classified = crate::control_actions::classify_ipc_method("switch_dispatcher");
+                            let req =
+                                serde_json::from_value::<DispatcherSwitchRequest>(payload.clone())
+                                    .context("parse switch_dispatcher")?;
+                            let classified =
+                                crate::control_actions::classify_ipc_method("switch_dispatcher");
                             let caller_role = parse_caller_role(req.caller_role.as_deref());
-                            if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
+                            if !crate::control_actions::is_role_sufficient(
+                                caller_role,
+                                classified.role,
+                            ) {
                                 send_error(
                                     &out_tx,
                                     req_id,
@@ -522,10 +568,8 @@ impl IpcConnection {
                             }
                         }
                         "set_thinking" => {
-                            let level_raw = payload
-                                .get("level")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
+                            let level_raw =
+                                payload.get("level").and_then(|v| v.as_str()).unwrap_or("");
                             crate::settings::ThinkingLevel::parse(level_raw).map(|level| {
                                 crate::control_runtime::ControlRequest::SetThinking { level }
                             })
@@ -559,13 +603,7 @@ impl IpcConnection {
                             output: Some(format!("failed to enqueue {method}")),
                         }
                     };
-                    send_response(
-                        &out_tx,
-                        req_id,
-                        &method,
-                        serde_json::to_value(response)?,
-                    )
-                    .await;
+                    send_response(&out_tx, req_id, &method, serde_json::to_value(response)?).await;
                 }
 
                 // Legacy compatibility adapter. Promoted control families should
@@ -635,9 +673,8 @@ impl IpcConnection {
                 }
 
                 "shutdown" => {
-                    let caller_role = parse_caller_role(
-                        payload.get("caller_role").and_then(|v| v.as_str()),
-                    );
+                    let caller_role =
+                        parse_caller_role(payload.get("caller_role").and_then(|v| v.as_str()));
                     let required = crate::control_actions::classify_ipc_method("shutdown").role;
                     if !crate::control_actions::is_role_sufficient(caller_role, required) {
                         send_error(
@@ -796,7 +833,11 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
                 id: id.clone(),
                 name: name.clone(),
                 is_error: *is_error,
-                summary: if summary.is_empty() { None } else { Some(summary) },
+                summary: if summary.is_empty() {
+                    None
+                } else {
+                    Some(summary)
+                },
             })
         }
         AgentEvent::AgentEnd => Some(IpcEventPayload::AgentCompleted),

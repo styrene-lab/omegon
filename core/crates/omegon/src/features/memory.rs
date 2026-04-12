@@ -114,7 +114,11 @@ impl MemoryFeature {
             }
         }
 
-        expanded.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        expanded.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         expanded.truncate(limit);
         expanded
     }
@@ -592,12 +596,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
 
                 // Auto-embed the replacement fact
                 if let Some(ref embed_svc) = self.embed_service {
-                    spawn_auto_embed(
-                        embed_svc,
-                        &self.backend,
-                        new_fact.id.clone(),
-                        content,
-                    );
+                    spawn_auto_embed(embed_svc, &self.backend, new_fact.id.clone(), content);
                 }
 
                 self.pending_status_refresh.store(true, Ordering::Relaxed);

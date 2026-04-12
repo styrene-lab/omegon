@@ -1599,13 +1599,14 @@ impl CodexClient {
             return None;
         }
 
-        let account_id = crate::auth::read_credential_extra("openai-codex", "accountId").or_else(|| {
-            crate::auth::extract_jwt_claim(
-                &token,
-                "https://api.openai.com/auth",
-                "chatgpt_account_id",
-            )
-        })?;
+        let account_id =
+            crate::auth::read_credential_extra("openai-codex", "accountId").or_else(|| {
+                crate::auth::extract_jwt_claim(
+                    &token,
+                    "https://api.openai.com/auth",
+                    "chatgpt_account_id",
+                )
+            })?;
 
         tracing::debug!("CodexClient: resolved via canonical provider lookup");
         Some(Self::new(token, account_id))
@@ -2517,7 +2518,11 @@ impl LlmBridge for OllamaCloudClient {
             .as_deref()
             .map(|m| model_id_from_spec(m).to_string())
             .filter(|m| !m.is_empty())
-            .unwrap_or_else(|| compat_default_model("ollama-cloud").unwrap_or("gpt-oss:120b-cloud").to_string());
+            .unwrap_or_else(|| {
+                compat_default_model("ollama-cloud")
+                    .unwrap_or("gpt-oss:120b-cloud")
+                    .to_string()
+            });
 
         let mut body = json!({
             "model": model,
@@ -2575,7 +2580,11 @@ impl LlmBridge for OllamaCloudClient {
         }
         let _ = tx.send(LlmEvent::TextStart).await;
         if !content.is_empty() {
-            let _ = tx.send(LlmEvent::TextDelta { delta: content.clone() }).await;
+            let _ = tx
+                .send(LlmEvent::TextDelta {
+                    delta: content.clone(),
+                })
+                .await;
         }
         let _ = tx.send(LlmEvent::TextEnd).await;
         for tool_call in &tool_calls {
@@ -2791,7 +2800,10 @@ mod tests {
         assert_eq!(infer_provider_id("qwen3:30b"), "ollama");
         assert_eq!(infer_provider_id("local:qwen3:30b"), "ollama");
         assert_eq!(infer_provider_id("local"), "ollama");
-        assert_eq!(infer_provider_id("ollama-cloud:gpt-oss:120b-cloud"), "ollama-cloud");
+        assert_eq!(
+            infer_provider_id("ollama-cloud:gpt-oss:120b-cloud"),
+            "ollama-cloud"
+        );
         assert_eq!(infer_provider_id("claude-opus-4-6"), "anthropic");
         assert_eq!(infer_provider_id("gpt-5.4"), "openai");
         assert_eq!(infer_provider_id("gpt-5.4-mini"), "openai");
@@ -3257,7 +3269,14 @@ mod tests {
 
     #[test]
     fn compat_base_url_covers_all_providers() {
-        for id in ["groq", "xai", "mistral", "cerebras", "huggingface", "ollama"] {
+        for id in [
+            "groq",
+            "xai",
+            "mistral",
+            "cerebras",
+            "huggingface",
+            "ollama",
+        ] {
             assert!(
                 super::compat_base_url(id).is_some(),
                 "missing base URL for {id}"
@@ -3435,7 +3454,9 @@ mod tests {
         assert_eq!(anthropic_manual_budget_tokens(Some("high")), Some(50_000));
         assert_eq!(anthropic_manual_budget_tokens(Some("off")), None);
         assert!(anthropic_supports_adaptive_thinking("claude-sonnet-4-6"));
-        assert!(anthropic_supports_adaptive_thinking("anthropic:claude-opus-4-6"));
+        assert!(anthropic_supports_adaptive_thinking(
+            "anthropic:claude-opus-4-6"
+        ));
         assert!(!anthropic_supports_adaptive_thinking("claude-sonnet-4-5"));
         assert!(!anthropic_should_use_adaptive_thinking(
             "anthropic:claude-sonnet-4-6",
@@ -3463,7 +3484,11 @@ mod tests {
         assert!(adaptive.get("effort").is_none());
 
         let mut bounded_46 = json!({});
-        apply_anthropic_thinking(&mut bounded_46, "anthropic:claude-sonnet-4-6", Some("minimal"));
+        apply_anthropic_thinking(
+            &mut bounded_46,
+            "anthropic:claude-sonnet-4-6",
+            Some("minimal"),
+        );
         assert_eq!(
             bounded_46["thinking"],
             json!({ "type": "enabled", "budget_tokens": 1_024 })

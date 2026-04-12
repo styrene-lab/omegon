@@ -50,9 +50,15 @@ fn resolve_omegon_binary() -> Result<PathBuf> {
     }
 
     let current = std::env::current_exe().context("current_exe")?;
-    let deps_dir = current.parent().context("integration test executable has no parent")?;
+    let deps_dir = current
+        .parent()
+        .context("integration test executable has no parent")?;
     let debug_dir = deps_dir.parent().context("deps dir has no parent")?;
-    let candidate = debug_dir.join(if cfg!(windows) { "omegon.exe" } else { "omegon" });
+    let candidate = debug_dir.join(if cfg!(windows) {
+        "omegon.exe"
+    } else {
+        "omegon"
+    });
     if candidate.is_file() {
         return Ok(candidate);
     }
@@ -76,19 +82,14 @@ fn spawn_daemon() -> Result<(SpawnedDaemon, StartupEvent)> {
         .spawn()
         .context("spawn omegon serve")?;
 
-    let stdout = child
-        .stdout
-        .take()
-        .context("serve stdout not captured")?;
+    let stdout = child.stdout.take().context("serve stdout not captured")?;
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
     reader.read_line(&mut line).context("read startup line")?;
-    let startup: StartupEvent = serde_json::from_str(line.trim()).context("parse startup event json")?;
+    let startup: StartupEvent =
+        serde_json::from_str(line.trim()).context("parse startup event json")?;
 
-    Ok((
-        SpawnedDaemon { child, _tmp: tmp },
-        startup,
-    ))
+    Ok((SpawnedDaemon { child, _tmp: tmp }, startup))
 }
 
 async fn wait_for_startup_payload(startup_url: &str, deadline: Duration) -> Result<StartupPayload> {
@@ -99,7 +100,10 @@ async fn wait_for_startup_payload(startup_url: &str, deadline: Duration) -> Resu
     while Instant::now() < end {
         match client.get(startup_url).send().await {
             Ok(resp) if resp.status().is_success() => {
-                return resp.json::<StartupPayload>().await.context("decode startup payload");
+                return resp
+                    .json::<StartupPayload>()
+                    .await
+                    .context("decode startup payload");
             }
             Ok(resp) => {
                 last_err = Some(anyhow::anyhow!("startup status {}", resp.status()));
@@ -122,7 +126,10 @@ async fn wait_for_ready(ready_url: &str, deadline: Duration) -> Result<()> {
     while Instant::now() < end {
         match client.get(ready_url).send().await {
             Ok(resp) if resp.status().is_success() => {
-                let probe = resp.json::<ProbePayload>().await.context("decode ready payload")?;
+                let probe = resp
+                    .json::<ProbePayload>()
+                    .await
+                    .context("decode ready payload")?;
                 if probe.ok {
                     return Ok(());
                 }
@@ -144,7 +151,8 @@ async fn wait_for_ready(ready_url: &str, deadline: Duration) -> Result<()> {
 #[tokio::test]
 async fn serve_accepts_cleave_child_cancel_event_over_http() -> Result<()> {
     let (mut daemon, startup_event) = spawn_daemon()?;
-    let payload = wait_for_startup_payload(&startup_event.startup_url, Duration::from_secs(5)).await?;
+    let payload =
+        wait_for_startup_payload(&startup_event.startup_url, Duration::from_secs(5)).await?;
     wait_for_ready(&startup_event.ready_url, Duration::from_secs(5)).await?;
 
     let event = DaemonEventEnvelope {

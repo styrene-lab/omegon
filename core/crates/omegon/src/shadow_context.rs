@@ -54,10 +54,7 @@ impl ContextKind {
     pub fn compressible(&self) -> bool {
         matches!(
             self,
-            Self::RecentToolOutput
-                | Self::FileSnippet
-                | Self::EpisodeSummary
-                | Self::CodebaseChunk
+            Self::RecentToolOutput | Self::FileSnippet | Self::EpisodeSummary | Self::CodebaseChunk
         )
     }
 }
@@ -204,7 +201,11 @@ impl ShadowContext {
 
     pub fn upsert(&mut self, mut entry: ShadowEntry) {
         entry.token_estimate = entry.body.token_estimate();
-        if let Some(slot) = self.entries.iter_mut().find(|existing| existing.id == entry.id) {
+        if let Some(slot) = self
+            .entries
+            .iter_mut()
+            .find(|existing| existing.id == entry.id)
+        {
             *slot = entry;
         } else {
             self.entries.push(entry);
@@ -244,7 +245,11 @@ impl ShadowContext {
             entry.relevance = if prompt_lower.is_empty() {
                 0.0
             } else {
-                let exact_phrase = if content_lower.contains(&prompt_lower) { 0.65 } else { 0.0 };
+                let exact_phrase = if content_lower.contains(&prompt_lower) {
+                    0.65
+                } else {
+                    0.0
+                };
                 let normalized_phrase_hit = if !normalized_phrase.is_empty()
                     && content_lower.contains(&normalized_phrase)
                 {
@@ -543,8 +548,16 @@ mod tests {
         shadow.upsert(higher);
 
         let selected = shadow.select_for_turn(7, "shared prompt");
-        let pos_high = selected.selected_ids.iter().position(|id| id == "higher").unwrap();
-        let pos_low = selected.selected_ids.iter().position(|id| id == "lower").unwrap();
+        let pos_high = selected
+            .selected_ids
+            .iter()
+            .position(|id| id == "higher")
+            .unwrap();
+        let pos_low = selected
+            .selected_ids
+            .iter()
+            .position(|id| id == "lower")
+            .unwrap();
         assert!(pos_high < pos_low);
     }
 
@@ -599,9 +612,20 @@ mod tests {
         shadow.upsert(strong_code);
 
         let selected = shadow.select_for_turn(1, "selector policy");
-        let pos_code = selected.selected_ids.iter().position(|id| id == "code").unwrap();
-        let pos_task = selected.selected_ids.iter().position(|id| id == "task").unwrap();
-        assert!(pos_code < pos_task, "expected highly relevant code to outrank weak task artifact: {selected:?}");
+        let pos_code = selected
+            .selected_ids
+            .iter()
+            .position(|id| id == "code")
+            .unwrap();
+        let pos_task = selected
+            .selected_ids
+            .iter()
+            .position(|id| id == "task")
+            .unwrap();
+        assert!(
+            pos_code < pos_task,
+            "expected highly relevant code to outrank weak task artifact: {selected:?}"
+        );
     }
 
     #[test]
@@ -613,7 +637,8 @@ mod tests {
             ContextKind::CodebaseChunk,
             EntryBody::Inline("- src/settings.rs:250-258 [fn::default_mouse]\n  score: 16.52\n  fn default_mouse() -> bool { · true · } · · // ─── Selector Policy".into()),
         );
-        comment_hit.search_text = Some("src/settings.rs fn::default_mouse fn default_mouse bool true".into());
+        comment_hit.search_text =
+            Some("src/settings.rs fn::default_mouse fn default_mouse bool true".into());
         comment_hit.priority = 90;
 
         let mut identifier_hit = ShadowEntry::new(
@@ -638,6 +663,9 @@ mod tests {
             .iter()
             .position(|id| id == "comment-hit")
             .unwrap();
-        assert!(pos_identifier < pos_comment, "expected identifier-bearing chunk to outrank comment-only phrase match: {selected:?}");
+        assert!(
+            pos_identifier < pos_comment,
+            "expected identifier-bearing chunk to outrank comment-only phrase match: {selected:?}"
+        );
     }
 }

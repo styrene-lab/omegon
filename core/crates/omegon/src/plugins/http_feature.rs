@@ -205,15 +205,18 @@ impl Feature for HttpPluginFeature {
                     let url = resolve_template(endpoint, &HashMap::new());
                     let payload = serde_json::json!({ "event": "turn_end", "turn": turn });
                     // Best-effort plugin telemetry hook — delivery is not guaranteed.
-                    crate::task_spawn::spawn_best_effort_result("http-plugin-turn-end", async move {
-                        let _ = client
-                            .post(&url)
-                            .json(&payload)
-                            .timeout(Duration::from_secs(5))
-                            .send()
-                            .await;
-                        Ok(())
-                    });
+                    crate::task_spawn::spawn_best_effort_result(
+                        "http-plugin-turn-end",
+                        async move {
+                            let _ = client
+                                .post(&url)
+                                .json(&payload)
+                                .timeout(Duration::from_secs(5))
+                                .send()
+                                .await;
+                            Ok(())
+                        },
+                    );
                 }
             }
             BusEvent::SessionStart { .. } => {
@@ -222,15 +225,18 @@ impl Feature for HttpPluginFeature {
                     let url = resolve_template(endpoint, &HashMap::new());
                     let payload = serde_json::json!({ "event": "session_start" });
                     // Best-effort plugin telemetry hook — delivery is not guaranteed.
-                    crate::task_spawn::spawn_best_effort_result("http-plugin-session-start", async move {
-                        let _ = client
-                            .post(&url)
-                            .json(&payload)
-                            .timeout(Duration::from_secs(5))
-                            .send()
-                            .await;
-                        Ok(())
-                    });
+                    crate::task_spawn::spawn_best_effort_result(
+                        "http-plugin-session-start",
+                        async move {
+                            let _ = client
+                                .post(&url)
+                                .json(&payload)
+                                .timeout(Duration::from_secs(5))
+                                .send()
+                                .await;
+                            Ok(())
+                        },
+                    );
                 }
             }
             _ => {}

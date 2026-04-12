@@ -517,7 +517,8 @@ impl ConversationView {
     }
 
     pub fn selected_or_focused_segment(&self) -> Option<usize> {
-        self.selected_segment.or_else(|| self.last_selectable_segment())
+        self.selected_segment
+            .or_else(|| self.last_selectable_segment())
     }
 
     pub fn timeline_focused_segment(&self) -> Option<usize> {
@@ -678,7 +679,13 @@ mod tests {
             ..SegmentMeta::default()
         });
 
-        cv.stamp_turn_tokens(2, TokenUsage { input: 500, output: 100 });
+        cv.stamp_turn_tokens(
+            2,
+            TokenUsage {
+                input: 500,
+                output: 100,
+            },
+        );
 
         // Turn 1 segment: untouched
         assert!(
@@ -688,11 +695,17 @@ mod tests {
         // Turn 2 segments: stamped
         assert_eq!(
             cv.segments[1].meta.actual_tokens,
-            Some(TokenUsage { input: 500, output: 100 })
+            Some(TokenUsage {
+                input: 500,
+                output: 100
+            })
         );
         assert_eq!(
             cv.segments[2].meta.actual_tokens,
-            Some(TokenUsage { input: 500, output: 100 })
+            Some(TokenUsage {
+                input: 500,
+                output: 100
+            })
         );
     }
 
@@ -766,8 +779,14 @@ mod tests {
             ],
         );
         assert_eq!(cv.segments.len(), 2);
-        assert!(matches!(&cv.segments[0].content, SegmentContent::Image { .. }));
-        assert!(matches!(&cv.segments[1].content, SegmentContent::Image { .. }));
+        assert!(matches!(
+            &cv.segments[0].content,
+            SegmentContent::Image { .. }
+        ));
+        assert!(matches!(
+            &cv.segments[1].content,
+            SegmentContent::Image { .. }
+        ));
     }
 
     #[test]

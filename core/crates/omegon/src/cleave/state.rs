@@ -192,7 +192,8 @@ impl CleaveState {
             child.pid = Some(pid);
             child.started_at_unix_ms = Some(now);
             child.last_activity_unix_ms = Some(now);
-            child.adoption_worktree_path = child.worktree_path.as_deref().and_then(canonical_display);
+            child.adoption_worktree_path =
+                child.worktree_path.as_deref().and_then(canonical_display);
             child.adoption_model = child.execute_model.clone();
             child.supervisor_token = Some(self.supervisor_token.clone());
         }
@@ -423,7 +424,10 @@ mod tests {
         assert!(child.last_activity_unix_ms.is_some());
         assert!(child.adoption_worktree_path.is_none());
         assert_eq!(child.adoption_model.as_deref(), Some("model"));
-        assert_eq!(child.supervisor_token.as_deref(), Some(state.supervisor_token.as_str()));
+        assert_eq!(
+            child.supervisor_token.as_deref(),
+            Some(state.supervisor_token.as_str())
+        );
     }
 
     #[test]

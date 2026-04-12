@@ -670,10 +670,7 @@ mod tests {
         let mut last = 0u64;
         for p in &content_partials {
             let cur = p.progress.units.as_ref().unwrap().current;
-            assert!(
-                cur >= last,
-                "lines counter regressed: {last} -> {cur}"
-            );
+            assert!(cur >= last, "lines counter regressed: {last} -> {cur}");
             last = cur;
         }
     }

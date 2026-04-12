@@ -46,11 +46,9 @@ async fn run_context_slash(
         return Ok(None);
     }
 
-    Ok(Some(
-        reply_rx
-            .await
-            .map_err(|_| anyhow::anyhow!("context slash executor dropped response"))?,
-    ))
+    Ok(Some(reply_rx.await.map_err(|_| {
+        anyhow::anyhow!("context slash executor dropped response")
+    })?))
 }
 
 /// Shared context metrics — updated by main loop, read by ContextProvider
@@ -170,7 +168,11 @@ impl ContextProvider {
         mut entries: Vec<ShadowEntry>,
     ) -> Option<PackReport> {
         if entries.is_empty() {
-            tracing::debug!(kind = kind_heading, query, "request_context: no candidate entries");
+            tracing::debug!(
+                kind = kind_heading,
+                query,
+                "request_context: no candidate entries"
+            );
             return None;
         }
         let candidate_ids = entries.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
@@ -189,7 +191,11 @@ impl ContextProvider {
         let selected = shadow.select_for_turn_with_budget(1, query, 900);
         let body = shadow.render_selection(&selected);
         if body.trim().is_empty() {
-            tracing::debug!(kind = kind_heading, query, "request_context: empty pack after selection");
+            tracing::debug!(
+                kind = kind_heading,
+                query,
+                "request_context: empty pack after selection"
+            );
             None
         } else {
             let selected_entries = selected
@@ -263,7 +269,12 @@ impl ContextProvider {
         }
     }
 
-    fn summarize_decisions(&self, query: &str, reason: &str, max_items: usize) -> Option<PackReport> {
+    fn summarize_decisions(
+        &self,
+        query: &str,
+        reason: &str,
+        max_items: usize,
+    ) -> Option<PackReport> {
         let lifecycle = self.lifecycle.as_ref()?;
         let provider = lifecycle.lock().ok()?;
         let mut entries = Vec::new();
@@ -286,10 +297,18 @@ impl ContextProvider {
                         ContextKind::DesignNode,
                         EntryBody::Inline(format!(
                             "- {} / {} — {} [{}]\n  rationale: {}",
-                            node.id, node.title, decision.title, decision.status, decision.rationale
+                            node.id,
+                            node.title,
+                            decision.title,
+                            decision.status,
+                            decision.rationale
                         )),
                     );
-                    entry.priority = if decision.status == "decided" { 140 } else { 100 };
+                    entry.priority = if decision.status == "decided" {
+                        140
+                    } else {
+                        100
+                    };
                     entry.diversity_key = Some(format!("design-node:{}", node.id));
                     entry.diversity_cap = Some(2);
                     entries.push(entry);
@@ -300,8 +319,7 @@ impl ContextProvider {
             }
         }
 
-        Self::select_pack("Decisions", query, reason, entries)
-            .map(|report| report)
+        Self::select_pack("Decisions", query, reason, entries).map(|report| report)
     }
 
     fn summarize_specs(&self, query: &str, reason: &str, max_items: usize) -> Option<PackReport> {
@@ -310,15 +328,19 @@ impl ContextProvider {
         let mut entries = Vec::new();
         let query_lower = query.to_lowercase();
 
-        for change in provider
-            .changes()
-            .iter()
-            .filter(|c| matches!(c.stage, ChangeStage::Implementing | ChangeStage::Verifying | ChangeStage::Planned | ChangeStage::Specified))
-        {
+        for change in provider.changes().iter().filter(|c| {
+            matches!(
+                c.stage,
+                ChangeStage::Implementing
+                    | ChangeStage::Verifying
+                    | ChangeStage::Planned
+                    | ChangeStage::Specified
+            )
+        }) {
             for spec in &change.specs {
                 for req in &spec.requirements {
-                    let req_hay = format!("{} {} {}", spec.domain, req.title, req.description)
-                        .to_lowercase();
+                    let req_hay =
+                        format!("{} {} {}", spec.domain, req.title, req.description).to_lowercase();
                     if query.is_empty() || req_hay.contains(&query_lower) {
                         let mut entry = ShadowEntry::new(
                             format!("spec:req:{}:{}", change.name, req.title),
@@ -375,8 +397,7 @@ impl ContextProvider {
             }
         }
 
-        Self::select_pack("Specs", query, reason, entries)
-            .map(|report| report)
+        Self::select_pack("Specs", query, reason, entries).map(|report| report)
     }
 
     async fn summarize_memory(
@@ -443,7 +464,11 @@ impl ContextProvider {
                         r.end_line,
                         r.label,
                         r.score,
-                        r.preview.chars().take(240).collect::<String>().replace('\n', " · ")
+                        r.preview
+                            .chars()
+                            .take(240)
+                            .collect::<String>()
+                            .replace('\n', " · ")
                     )),
                 );
                 entry.search_text = Some(Self::code_search_text(&r.file, &r.label, &r.preview));
@@ -611,7 +636,10 @@ impl Feature for ContextProvider {
                 let mut unsupported = 0usize;
 
                 for req in requests {
-                    let kind = req.get("kind").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let kind = req
+                        .get("kind")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
                     let query = req.get("query").and_then(|v| v.as_str()).unwrap_or("");
                     let reason = req.get("reason").and_then(|v| v.as_str()).unwrap_or("");
                     match kind {
@@ -668,7 +696,11 @@ impl Feature for ContextProvider {
                             }));
                         }
                         "decisions" => {
-                            if let Some(pack) = self.summarize_decisions(query, reason, Self::request_max_items(req)) {
+                            if let Some(pack) = self.summarize_decisions(
+                                query,
+                                reason,
+                                Self::request_max_items(req),
+                            ) {
                                 supported += 1;
                                 sections.push(pack.text.clone());
                                 pack_details.push(pack.details);
@@ -680,7 +712,9 @@ impl Feature for ContextProvider {
                             }
                         }
                         "specs" => {
-                            if let Some(pack) = self.summarize_specs(query, reason, Self::request_max_items(req)) {
+                            if let Some(pack) =
+                                self.summarize_specs(query, reason, Self::request_max_items(req))
+                            {
                                 supported += 1;
                                 sections.push(pack.text.clone());
                                 pack_details.push(pack.details);
@@ -692,7 +726,10 @@ impl Feature for ContextProvider {
                             }
                         }
                         "memory" => {
-                            if let Some(pack) = self.summarize_memory(query, reason, Self::request_max_items(req)).await {
+                            if let Some(pack) = self
+                                .summarize_memory(query, reason, Self::request_max_items(req))
+                                .await
+                            {
                                 supported += 1;
                                 sections.push(pack.text.clone());
                                 pack_details.push(pack.details);
@@ -704,7 +741,9 @@ impl Feature for ContextProvider {
                             }
                         }
                         "code" => {
-                            if let Some(pack) = self.summarize_code(query, reason, Self::request_max_items(req)) {
+                            if let Some(pack) =
+                                self.summarize_code(query, reason, Self::request_max_items(req))
+                            {
                                 supported += 1;
                                 sections.push(pack.text.clone());
                                 pack_details.push(pack.details);
@@ -725,7 +764,9 @@ impl Feature for ContextProvider {
                     "Retrieved {} supported context pack(s); {} request(s) still require dedicated tools.",
                     supported, unsupported
                 );
-                let mut blocks = vec![ContentBlock::Text { text: summary.clone() }];
+                let mut blocks = vec![ContentBlock::Text {
+                    text: summary.clone(),
+                }];
                 blocks.push(ContentBlock::Text {
                     text: sections.join("\n\n"),
                 });
@@ -747,7 +788,9 @@ impl Feature for ContextProvider {
                 let response = run_context_slash(&self.command_tx, "compact").await?;
                 let (text, accepted, dispatched) = if let Some(response) = response {
                     (
-                        response.output.unwrap_or_else(|| "Context compaction completed.".into()),
+                        response
+                            .output
+                            .unwrap_or_else(|| "Context compaction completed.".into()),
                         response.accepted,
                         true,
                     )
@@ -1013,7 +1056,11 @@ mod tests {
         );
         assert!(text.contains("Session State"), "unexpected text: {text}");
         assert!(text.contains("96433/272000"), "unexpected text: {text}");
-        assert!(result.details["packs"].is_array(), "missing structured packs: {}", result.details);
+        assert!(
+            result.details["packs"].is_array(),
+            "missing structured packs: {}",
+            result.details
+        );
         assert_eq!(result.details["packs"].as_array().unwrap().len(), 1);
         assert_eq!(result.details["packs"][0]["kind"], "Session State");
     }
@@ -1057,9 +1104,20 @@ mod tests {
             )
             .await
             .expect("tool result");
-        let text = result.content.iter().filter_map(|c| match c { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join("\n");
+        let text = result
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(text.contains("### Decisions"), "unexpected text: {text}");
-        assert!(text.contains("Use selector policy"), "unexpected text: {text}");
+        assert!(
+            text.contains("Use selector policy"),
+            "unexpected text: {text}"
+        );
     }
 
     #[tokio::test]
@@ -1101,9 +1159,20 @@ mod tests {
             )
             .await
             .expect("tool result");
-        let text = result.content.iter().filter_map(|c| match c { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join("\n");
+        let text = result
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(text.contains("### Memory"), "unexpected text: {text}");
-        assert!(text.contains("bounded and mediated"), "unexpected text: {text}");
+        assert!(
+            text.contains("bounded and mediated"),
+            "unexpected text: {text}"
+        );
     }
 
     #[tokio::test]
@@ -1117,17 +1186,29 @@ mod tests {
             .join("specs");
         std::fs::create_dir_all(&spec_dir).unwrap();
         std::fs::write(
-            tmp.path().join("openspec").join("changes").join("ctx-pack").join("proposal.md"),
+            tmp.path()
+                .join("openspec")
+                .join("changes")
+                .join("ctx-pack")
+                .join("proposal.md"),
             "# proposal\n",
         )
         .unwrap();
         std::fs::write(
-            tmp.path().join("openspec").join("changes").join("ctx-pack").join("design.md"),
+            tmp.path()
+                .join("openspec")
+                .join("changes")
+                .join("ctx-pack")
+                .join("design.md"),
             "# design\n",
         )
         .unwrap();
         std::fs::write(
-            tmp.path().join("openspec").join("changes").join("ctx-pack").join("tasks.md"),
+            tmp.path()
+                .join("openspec")
+                .join("changes")
+                .join("ctx-pack")
+                .join("tasks.md"),
             "- [ ] task\n",
         )
         .unwrap();
@@ -1163,9 +1244,21 @@ mod tests {
             )
             .await
             .expect("tool result");
-        let text = result.content.iter().filter_map(|c| match c { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join("\n");
+        let text = result
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(text.contains("### Specs"), "unexpected text: {text}");
-        assert!(text.contains("Context requests are mediated") || text.contains("Session orientation request"), "unexpected text: {text}");
+        assert!(
+            text.contains("Context requests are mediated")
+                || text.contains("Session orientation request"),
+            "unexpected text: {text}"
+        );
     }
 
     #[tokio::test]
@@ -1203,10 +1296,21 @@ mod tests {
             )
             .await
             .expect("tool result");
-        let text = result.content.iter().filter_map(|c| match c { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join("\n");
+        let text = result
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(text.contains("### Code"), "unexpected text: {text}");
         assert!(text.contains("src/main.rs"), "unexpected text: {text}");
-        assert!(text.contains("selector_policy") || text.contains("selector policy"), "unexpected text: {text}");
+        assert!(
+            text.contains("selector_policy") || text.contains("selector policy"),
+            "unexpected text: {text}"
+        );
     }
 
     #[tokio::test]
@@ -1245,9 +1349,20 @@ mod tests {
             )
             .await
             .expect("tool result");
-        let text = result.content.iter().filter_map(|c| match c { ContentBlock::Text { text } => Some(text.as_str()), _ => None }).collect::<Vec<_>>().join("\n");
+        let text = result
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         let occurrences = text.matches("src/main.rs:").count();
-        assert!(occurrences <= 2, "expected at most 2 snippets from same file, got {occurrences}: {text}");
+        assert!(
+            occurrences <= 2,
+            "expected at most 2 snippets from same file, got {occurrences}: {text}"
+        );
     }
 
     #[tokio::test]
@@ -1300,13 +1415,19 @@ mod tests {
             .filter_map(|entry| entry.get("content").and_then(|v| v.as_str()))
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(selected_text.contains("shadow_context.rs"), "expected identifier-bearing chunk to survive reranking: {selected_text}");
+        assert!(
+            selected_text.contains("shadow_context.rs"),
+            "expected identifier-bearing chunk to survive reranking: {selected_text}"
+        );
         let first_content = selected
             .first()
             .and_then(|entry| entry.get("content"))
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        assert!(first_content.contains("shadow_context.rs"), "expected first result to target actual selector implementation, got: {first_content}");
+        assert!(
+            first_content.contains("shadow_context.rs"),
+            "expected first result to target actual selector implementation, got: {first_content}"
+        );
     }
 
     #[tokio::test]

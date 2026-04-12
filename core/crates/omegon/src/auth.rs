@@ -437,8 +437,7 @@ async fn probe_provider(provider: &str) -> ProviderInfo {
 /// or the provider has no stored entry, treat the provider as already logged out.
 pub fn logout_provider(provider: &str) -> anyhow::Result<()> {
     let canonical = canonical_provider_id(provider);
-    provider_by_id(canonical)
-        .ok_or_else(|| anyhow::anyhow!("Unknown provider: {provider}"))?;
+    provider_by_id(canonical).ok_or_else(|| anyhow::anyhow!("Unknown provider: {provider}"))?;
 
     let path =
         auth_json_path().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
@@ -515,7 +514,9 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
             }
             Err(e) => {
                 if oauth_refresh_failure_is_fatal(auth_key) {
-                    tracing::warn!("Token refresh failed: {e} — refusing to use expired {auth_key} credential");
+                    tracing::warn!(
+                        "Token refresh failed: {e} — refusing to use expired {auth_key} credential"
+                    );
                     return None;
                 }
                 tracing::warn!("Token refresh failed: {e} — using expired token");
@@ -769,10 +770,13 @@ pub async fn login_anthropic_with_callbacks(
 
     // Save to auth.json
     write_credentials("anthropic", &creds)?;
-    let persisted = read_credentials("anthropic")
-        .ok_or_else(|| anyhow::anyhow!("Anthropic login completed but credentials were not persisted"))?;
+    let persisted = read_credentials("anthropic").ok_or_else(|| {
+        anyhow::anyhow!("Anthropic login completed but credentials were not persisted")
+    })?;
     if persisted.access != creds.access {
-        anyhow::bail!("Anthropic login completed but persisted credentials do not match the issued token");
+        anyhow::bail!(
+            "Anthropic login completed but persisted credentials do not match the issued token"
+        );
     }
     progress("✓ Authentication successful. Credentials saved.");
 
@@ -907,19 +911,28 @@ pub async fn login_openai_with_callbacks(
 
     // Store with accountId as extra field
     write_credentials_with_extra("openai-codex", &creds, account_id.as_deref())?;
-    let persisted = read_credentials("openai-codex")
-        .ok_or_else(|| anyhow::anyhow!("OpenAI login completed but credentials were not persisted"))?;
+    let persisted = read_credentials("openai-codex").ok_or_else(|| {
+        anyhow::anyhow!("OpenAI login completed but credentials were not persisted")
+    })?;
     if persisted.access != creds.access {
-        anyhow::bail!("OpenAI login completed but persisted credentials do not match the issued token");
+        anyhow::bail!(
+            "OpenAI login completed but persisted credentials do not match the issued token"
+        );
     }
     if persisted.refresh != creds.refresh {
-        anyhow::bail!("OpenAI login completed but persisted credentials do not match the issued refresh token");
+        anyhow::bail!(
+            "OpenAI login completed but persisted credentials do not match the issued refresh token"
+        );
     }
     if let Some(expected_account_id) = account_id.as_deref() {
-        let persisted_account_id = read_credential_extra("openai-codex", "accountId")
-            .ok_or_else(|| anyhow::anyhow!("OpenAI login completed but accountId was not persisted"))?;
+        let persisted_account_id =
+            read_credential_extra("openai-codex", "accountId").ok_or_else(|| {
+                anyhow::anyhow!("OpenAI login completed but accountId was not persisted")
+            })?;
         if persisted_account_id != expected_account_id {
-            anyhow::bail!("OpenAI login completed but persisted accountId does not match the issued accountId");
+            anyhow::bail!(
+                "OpenAI login completed but persisted accountId does not match the issued accountId"
+            );
         }
     }
     progress("✓ OpenAI authentication successful. Credentials saved.");
@@ -1582,7 +1595,10 @@ mod tests {
             "huggingface",
         ] {
             assert_eq!(canonical_provider_id(provider), provider);
-            assert!(provider_by_id(provider).is_some(), "provider should resolve: {provider}");
+            assert!(
+                provider_by_id(provider).is_some(),
+                "provider should resolve: {provider}"
+            );
         }
     }
 }

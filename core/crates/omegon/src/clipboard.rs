@@ -78,10 +78,7 @@ pub fn prune_old_pastes(retention: Duration) -> std::io::Result<PruneStats> {
 /// Same as [`prune_old_pastes`] but operates on a caller-supplied
 /// directory. Exists so tests can target a tempdir instead of the
 /// real system temp directory.
-pub fn prune_old_pastes_in(
-    dir: &Path,
-    retention: Duration,
-) -> std::io::Result<PruneStats> {
+pub fn prune_old_pastes_in(dir: &Path, retention: Duration) -> std::io::Result<PruneStats> {
     let mut stats = PruneStats::default();
     if retention.is_zero() {
         // Operator-disabled sweep. Scan the directory anyway so we
@@ -173,10 +170,7 @@ mod tests {
         // recent Rust, but the simpler portable path is the `filetime`
         // crate. Since we don't want a new dep, fall back to manipulating
         // the file's mtime via the std API on platforms that support it.
-        let f = fs::OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .unwrap();
+        let f = fs::OpenOptions::new().write(true).open(&path).unwrap();
         f.set_modified(mtime).unwrap();
         path
     }
@@ -184,9 +178,21 @@ mod tests {
     #[test]
     fn prune_deletes_files_older_than_retention() {
         let tmp = tempfile::tempdir().unwrap();
-        let old = touch(tmp.path(), "omegon-clipboard-123-0.png", Duration::from_secs(48 * 3600));
-        let recent = touch(tmp.path(), "omegon-clipboard-123-1.png", Duration::from_secs(60));
-        let unrelated = touch(tmp.path(), "some-other-file.png", Duration::from_secs(48 * 3600));
+        let old = touch(
+            tmp.path(),
+            "omegon-clipboard-123-0.png",
+            Duration::from_secs(48 * 3600),
+        );
+        let recent = touch(
+            tmp.path(),
+            "omegon-clipboard-123-1.png",
+            Duration::from_secs(60),
+        );
+        let unrelated = touch(
+            tmp.path(),
+            "some-other-file.png",
+            Duration::from_secs(48 * 3600),
+        );
 
         let stats = prune_old_pastes_in(tmp.path(), Duration::from_secs(24 * 3600)).unwrap();
 
@@ -215,7 +221,10 @@ mod tests {
         let stats = prune_old_pastes_in(tmp.path(), Duration::ZERO).unwrap();
         assert_eq!(stats.deleted, 0);
         assert_eq!(stats.skipped_recent, 1);
-        assert!(old.exists(), "zero-retention sweep must not delete anything");
+        assert!(
+            old.exists(),
+            "zero-retention sweep must not delete anything"
+        );
     }
 
     #[test]

@@ -33,13 +33,19 @@ pub struct PluginSelectionFilter {
 
 impl PluginSelectionFilter {
     pub fn allows(&self, plugin_name: &str) -> bool {
-        if self.disabled_extensions.iter().any(|name| name == plugin_name) {
+        if self
+            .disabled_extensions
+            .iter()
+            .any(|name| name == plugin_name)
+        {
             return false;
         }
         if self.enabled_extensions.is_empty() {
             return true;
         }
-        self.enabled_extensions.iter().any(|name| name == plugin_name)
+        self.enabled_extensions
+            .iter()
+            .any(|name| name == plugin_name)
     }
 }
 

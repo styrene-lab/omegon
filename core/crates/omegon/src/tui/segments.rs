@@ -615,30 +615,27 @@ impl Segment {
                 // at the same collapsed/expanded budget as the result
                 // section. The actual rendering is bounded by
                 // `max_diff_lines` (8 collapsed, 200 expanded).
-                let compact_diff_rows: u16 =
-                    if matches!(name.as_str(), "edit" | "change") {
-                        detail_args
-                            .as_deref()
-                            .and_then(|args| build_edit_diff_blocks(name, args))
-                            .map(|blocks| {
-                                let multi = blocks.len() > 1;
-                                let total: usize = blocks
-                                    .iter()
-                                    .map(|b| {
-                                        let header = if multi { 1 } else { 0 };
-                                        header
-                                            + b.old_text.lines().count()
-                                            + b.new_text.lines().count()
-                                    })
-                                    .sum();
-                                // +1 summary line, +1 truncation marker (worst case)
-                                let with_chrome = total + 2;
-                                with_chrome.min(if *expanded { 200 } else { 12 }) as u16
-                            })
-                            .unwrap_or(0)
-                    } else {
-                        0
-                    };
+                let compact_diff_rows: u16 = if matches!(name.as_str(), "edit" | "change") {
+                    detail_args
+                        .as_deref()
+                        .and_then(|args| build_edit_diff_blocks(name, args))
+                        .map(|blocks| {
+                            let multi = blocks.len() > 1;
+                            let total: usize = blocks
+                                .iter()
+                                .map(|b| {
+                                    let header = if multi { 1 } else { 0 };
+                                    header + b.old_text.lines().count() + b.new_text.lines().count()
+                                })
+                                .sum();
+                            // +1 summary line, +1 truncation marker (worst case)
+                            let with_chrome = total + 2;
+                            with_chrome.min(if *expanded { 200 } else { 12 }) as u16
+                        })
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
                 // Live section rows: only relevant while the tool is
                 // still in flight. Always at least one row (the status
                 // header) when incomplete; tail rows on top when a
@@ -656,16 +653,14 @@ impl Segment {
                 } else {
                     0
                 };
-                let live_separator_rows =
-                    u16::from(compact_arg_rows > 0 && compact_live_rows > 0);
+                let live_separator_rows = u16::from(compact_arg_rows > 0 && compact_live_rows > 0);
                 // The diff section replaces the result section when
                 // present, so we use whichever is larger to over-
                 // estimate (under-estimating clips content; over-
                 // estimating just allocates a slightly larger temp
                 // buffer that the `last_used` scan will trim).
                 let body_rows = compact_diff_rows.max(compact_result_rows);
-                let result_separator_rows =
-                    u16::from(compact_arg_rows > 0 && body_rows > 0);
+                let result_separator_rows = u16::from(compact_arg_rows > 0 && body_rows > 0);
                 compact_arg_rows
                     + compact_live_rows
                     + live_separator_rows
@@ -1395,12 +1390,10 @@ fn render_tool_card(
             }
         }
         let status_text = format!("▶ {}", status_parts.join(" · "));
-        lines.push(Line::from(vec![
-            Span::styled(
-                status_text,
-                Style::default().fg(t.warning()).bg(bg),
-            ),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            status_text,
+            Style::default().fg(t.warning()).bg(bg),
+        )]));
         live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
 
         // Tail content from the latest partial. Only renders when the
@@ -1447,8 +1440,7 @@ fn render_tool_card(
                                 })
                                 .collect();
                             lines.push(Line::from(spans));
-                            live_row_fills
-                                .push((lines.len().saturating_sub(1) as u16, bg));
+                            live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
                         }
                     } else {
                         // ANSI parse failed — strip raw ESC bytes
@@ -1458,16 +1450,14 @@ fn render_tool_card(
                             let stripped: String =
                                 line.chars().filter(|c| !c.is_control()).collect();
                             lines.push(Line::from(Span::styled(stripped, tail_style)));
-                            live_row_fills
-                                .push((lines.len().saturating_sub(1) as u16, bg));
+                            live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
                         }
                     }
                 } else {
                     for line in &tail_lines[start..] {
                         // Even on the no-ANSI path, drop any stray
                         // control bytes — defense in depth.
-                        let stripped: String =
-                            line.chars().filter(|c| !c.is_control()).collect();
+                        let stripped: String = line.chars().filter(|c| !c.is_control()).collect();
                         lines.push(Line::from(Span::styled(stripped, tail_style)));
                         live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
                     }
@@ -1515,24 +1505,19 @@ fn render_tool_card(
         // (one per file in the change tool's case). The summary is
         // always the first line in the diff section so the operator
         // gets a quick read at the top.
-        let total_added: usize = blocks
-            .iter()
-            .map(|b| b.new_text.lines().count())
-            .sum();
-        let total_removed: usize = blocks
-            .iter()
-            .map(|b| b.old_text.lines().count())
-            .sum();
+        let total_added: usize = blocks.iter().map(|b| b.new_text.lines().count()).sum();
+        let total_removed: usize = blocks.iter().map(|b| b.old_text.lines().count()).sum();
         lines.push(Line::from(vec![
-            Span::styled(
-                format!("Δ {} edit(s) · ", blocks.len()),
-                summary_style,
-            ),
+            Span::styled(format!("Δ {} edit(s) · ", blocks.len()), summary_style),
             Span::styled(format!("+{total_added}"), added_style),
             Span::styled(" / ", summary_style),
             Span::styled(format!("-{total_removed}"), removed_style),
             Span::styled(
-                if expanded { "" } else { "  (expand for full diff)" },
+                if expanded {
+                    ""
+                } else {
+                    "  (expand for full diff)"
+                },
                 summary_style,
             ),
         ]));
@@ -1547,9 +1532,8 @@ fn render_tool_card(
         // shouldn't normally contain ESC bytes, but if they do, we
         // don't want them ending up in cell symbols where the
         // terminal would interpret them as escape sequences.
-        let sanitize_diff_line = |s: &str| -> String {
-            s.chars().filter(|c| !c.is_control()).collect()
-        };
+        let sanitize_diff_line =
+            |s: &str| -> String { s.chars().filter(|c| !c.is_control()).collect() };
         let multi_block = blocks.len() > 1;
         'outer: for block in &blocks {
             if multi_block {
@@ -1990,10 +1974,8 @@ fn build_edit_diff_blocks(name: &str, args: &str) -> Option<Vec<EditDiffBlock>> 
                         .or_else(|| edit.get("path"))
                         .and_then(|v| v.as_str())?
                         .to_string();
-                    let old_text =
-                        edit.get("oldText").and_then(|v| v.as_str())?.to_string();
-                    let new_text =
-                        edit.get("newText").and_then(|v| v.as_str())?.to_string();
+                    let old_text = edit.get("oldText").and_then(|v| v.as_str())?.to_string();
+                    let new_text = edit.get("newText").and_then(|v| v.as_str())?.to_string();
                     Some(EditDiffBlock {
                         file,
                         old_text,
@@ -2063,10 +2045,7 @@ fn is_table_separator(line: &str) -> bool {
 /// `Vec<usize>` (column widths) per table line; non-table lines map to
 /// `None`. Separator rows participate in column-count detection but
 /// not in width measurement (they're all dashes).
-fn compute_table_widths(
-    lines: &[&str],
-    available_width: usize,
-) -> Vec<Option<Vec<usize>>> {
+fn compute_table_widths(lines: &[&str], available_width: usize) -> Vec<Option<Vec<usize>>> {
     let mut result: Vec<Option<Vec<usize>>> = vec![None; lines.len()];
     let mut i = 0;
     while i < lines.len() {
@@ -2272,7 +2251,9 @@ fn render_system(text: &str, area: Rect, buf: &mut Buffer, t: &dyn Theme, mode: 
                 .fg(t.accent())
                 .bg(bg)
                 .add_modifier(Modifier::BOLD)
-        } else if i == 0 && (line.starts_with('⚠') || line.starts_with('⟳') || line.starts_with('✓')) {
+        } else if i == 0
+            && (line.starts_with('⚠') || line.starts_with('⟳') || line.starts_with('✓'))
+        {
             Style::default().fg(t.warning()).bg(bg)
         } else if line.starts_with("  ▸") || line.starts_with("  /") || line.starts_with("  Ctrl")
         {
@@ -2424,31 +2405,60 @@ mod tests {
         seg.render(area, &mut buf, &Alpharius, SegmentRenderMode::Full);
         let text = buf_text(&buf, area);
 
-        assert!(text.contains("╭") || text.contains("╮"), "system segment should use rounded card chrome: {text}");
-        assert!(text.contains("Provider connected"), "system message body should render: {text}");
-        assert!(!text.contains("▎"), "legacy left-banner accent bar should be gone: {text}");
+        assert!(
+            text.contains("╭") || text.contains("╮"),
+            "system segment should use rounded card chrome: {text}"
+        );
+        assert!(
+            text.contains("Provider connected"),
+            "system message body should render: {text}"
+        );
+        assert!(
+            !text.contains("▎"),
+            "legacy left-banner accent bar should be gone: {text}"
+        );
     }
 
     #[test]
     fn token_usage_format_compact_uses_k_and_m_suffixes() {
         assert_eq!(
-            TokenUsage { input: 0, output: 0 }.format_compact(),
+            TokenUsage {
+                input: 0,
+                output: 0
+            }
+            .format_compact(),
             "↑0 ↓0"
         );
         assert_eq!(
-            TokenUsage { input: 999, output: 1 }.format_compact(),
+            TokenUsage {
+                input: 999,
+                output: 1
+            }
+            .format_compact(),
             "↑999 ↓1"
         );
         assert_eq!(
-            TokenUsage { input: 1_234, output: 567 }.format_compact(),
+            TokenUsage {
+                input: 1_234,
+                output: 567
+            }
+            .format_compact(),
             "↑1.2k ↓567"
         );
         assert_eq!(
-            TokenUsage { input: 12_500, output: 1_000 }.format_compact(),
+            TokenUsage {
+                input: 12_500,
+                output: 1_000
+            }
+            .format_compact(),
             "↑12.5k ↓1.0k"
         );
         assert_eq!(
-            TokenUsage { input: 1_500_000, output: 250_000 }.format_compact(),
+            TokenUsage {
+                input: 1_500_000,
+                output: 250_000
+            }
+            .format_compact(),
             "↑1.5M ↓250.0k"
         );
     }
@@ -2659,8 +2669,14 @@ mod tests {
         let text = buf_text(&buf, area);
 
         // Multi-file: per-file headers with the ▸ glyph and the path.
-        assert!(text.contains("▸ src/a.rs"), "first file header missing: {text}");
-        assert!(text.contains("▸ src/b.rs"), "second file header missing: {text}");
+        assert!(
+            text.contains("▸ src/a.rs"),
+            "first file header missing: {text}"
+        );
+        assert!(
+            text.contains("▸ src/b.rs"),
+            "second file header missing: {text}"
+        );
         // Summary line: 2 edits, +3 added, -2 removed
         assert!(
             text.contains("2 edit") && text.contains("+3") && text.contains("-2"),
@@ -3074,8 +3090,14 @@ mod tests {
             "bold markers should not leak literally into the rendered card: {text}"
         );
         for body_cell in [
-            "src/app.rs", "10-20", "45.38", "fn render()",
-            "src/lib.rs", "1-9", "11.20", "helper",
+            "src/app.rs",
+            "10-20",
+            "45.38",
+            "fn render()",
+            "src/lib.rs",
+            "1-9",
+            "11.20",
+            "helper",
         ] {
             assert!(
                 text.contains(body_cell),
@@ -3217,7 +3239,14 @@ mod tests {
             text.contains("Here are the strongest matches:"),
             "leading prose should remain visible: {text}"
         );
-        for cell in ["File", "Score", "src/app.rs", "45.38", "src/lib.rs", "11.20"] {
+        for cell in [
+            "File",
+            "Score",
+            "src/app.rs",
+            "45.38",
+            "src/lib.rs",
+            "11.20",
+        ] {
             assert!(
                 text.contains(cell),
                 "table should contain cell {cell:?}: {text}"
@@ -3289,7 +3318,10 @@ mod tests {
         let text = buf_text(&buf, area);
 
         // Status header populated from progress fields
-        assert!(text.contains("running"), "status header should show 'running' fallback phase: {text}");
+        assert!(
+            text.contains("running"),
+            "status header should show 'running' fallback phase: {text}"
+        );
         assert!(
             text.contains("4 lines"),
             "status header should show units count from partial: {text}"
@@ -3427,8 +3459,7 @@ mod tests {
         // and a partial whose internal `elapsed_ms` says only 2 seconds
         // (i.e. the partial was emitted early in the run and is now
         // stale). The rendered output should show ~8s, not 2s.
-        let started_in_past =
-            std::time::Instant::now() - std::time::Duration::from_secs(8);
+        let started_in_past = std::time::Instant::now() - std::time::Duration::from_secs(8);
         let stale_partial = omegon_traits::PartialToolResult {
             tail: "still working".to_string(),
             progress: omegon_traits::ToolProgress {
@@ -3539,10 +3570,22 @@ mod tests {
         let (area, mut buf) = make_buf(90, 18);
         seg.render(area, &mut buf, &Alpharius, SegmentRenderMode::Full);
         let text = buf_text(&buf, area);
-        assert!(text.contains("│ File"), "table header should still render: {text}");
-        assert!(text.contains("Preview"), "preview column should remain visible: {text}");
-        assert!(text.contains("… │") || text.contains("…│"), "wide preview cell should be truncated instead of wrapping the whole row: {text}");
-        assert!(!text.contains("let mut app = test_app();"), "overflow preview content should not spill into wrapped continuation lines: {text}");
+        assert!(
+            text.contains("│ File"),
+            "table header should still render: {text}"
+        );
+        assert!(
+            text.contains("Preview"),
+            "preview column should remain visible: {text}"
+        );
+        assert!(
+            text.contains("… │") || text.contains("…│"),
+            "wide preview cell should be truncated instead of wrapping the whole row: {text}"
+        );
+        assert!(
+            !text.contains("let mut app = test_app();"),
+            "overflow preview content should not spill into wrapped continuation lines: {text}"
+        );
     }
 
     #[test]
@@ -3989,8 +4032,7 @@ mod tests {
         // render_table_line now takes pre-computed shared widths from
         // compute_table_widths instead of computing per-row widths.
         let widths = vec![10, 10];
-        let line =
-            render_table_line("| Name | Value |", true, &widths, &Alpharius);
+        let line = render_table_line("| Name | Value |", true, &widths, &Alpharius);
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(
             text.contains("Name"),
@@ -4027,18 +4069,18 @@ mod tests {
         // caused these body rows to fall through to the non-table
         // rendering path and disappear. This test pins the relaxed
         // definition.
-        assert!(is_table_line("| a | b |"));       // full pipes
-        assert!(is_table_line("| a | b"));          // no trailing pipe
-        assert!(is_table_line("| a | b |   "));     // trailing whitespace
-        assert!(is_table_line("| a | b   "));       // trailing whitespace, no pipe
-        assert!(!is_table_line("| single"));        // only one pipe (not a table row)
+        assert!(is_table_line("| a | b |")); // full pipes
+        assert!(is_table_line("| a | b")); // no trailing pipe
+        assert!(is_table_line("| a | b |   ")); // trailing whitespace
+        assert!(is_table_line("| a | b   ")); // trailing whitespace, no pipe
+        assert!(!is_table_line("| single")); // only one pipe (not a table row)
         assert!(!is_table_line("not a table row")); // no leading pipe
-        assert!(!is_table_line("||"));              // too short
-        assert!(!is_table_line("|"));               // too short
+        assert!(!is_table_line("||")); // too short
+        assert!(!is_table_line("|")); // too short
 
         // Separator rows can also miss the trailing pipe
-        assert!(is_table_separator("|---|---|"));    // full
-        assert!(is_table_separator("|---|---"));     // no trailing pipe
+        assert!(is_table_separator("|---|---|")); // full
+        assert!(is_table_separator("|---|---")); // no trailing pipe
         assert!(is_table_separator("| --- | ---")); // spaced, no trailing pipe
     }
 
@@ -4063,7 +4105,10 @@ mod tests {
 
         // Header cells should render
         for cell in ["Setting", "Endpoint", "Filter"] {
-            assert!(text.contains(cell), "header should contain {cell:?}: {text}");
+            assert!(
+                text.contains(cell),
+                "header should contain {cell:?}: {text}"
+            );
         }
         // Body cells MUST render — this is the bug being fixed
         assert!(

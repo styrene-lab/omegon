@@ -153,8 +153,10 @@ impl ScanCache {
                 continue;
             }
             let path_str = path.to_string_lossy();
-            self.conn
-                .execute("DELETE FROM code_chunks WHERE path = ?1", params![path_str.as_ref()])?;
+            self.conn.execute(
+                "DELETE FROM code_chunks WHERE path = ?1",
+                params![path_str.as_ref()],
+            )?;
             self.conn.execute(
                 "DELETE FROM knowledge_chunks WHERE path = ?1",
                 params![path_str.as_ref()],
@@ -404,10 +406,8 @@ mod tests {
             )
             .unwrap();
 
-        let live_paths = HashSet::from([
-            PathBuf::from("src/keep.rs"),
-            PathBuf::from("docs/keep.md"),
-        ]);
+        let live_paths =
+            HashSet::from([PathBuf::from("src/keep.rs"), PathBuf::from("docs/keep.md")]);
         cache.prune_missing_paths(&live_paths).unwrap();
 
         let code = cache.all_code_chunks().unwrap();

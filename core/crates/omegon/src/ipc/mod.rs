@@ -77,21 +77,18 @@ pub fn start_ipc_server(
     shared_cancel: SharedCancel,
     cancel: CancellationToken,
 ) {
-    crate::task_spawn::spawn_infra(
-        "ipc-server",
-        async move {
-            run_server(
-                cfg,
-                handles,
-                events_tx,
-                command_tx,
-                shared_settings,
-                shared_cancel,
-                cancel,
-            )
-            .await
-        },
-    );
+    crate::task_spawn::spawn_infra("ipc-server", async move {
+        run_server(
+            cfg,
+            handles,
+            events_tx,
+            command_tx,
+            shared_settings,
+            shared_cancel,
+            cancel,
+        )
+        .await
+    });
 }
 
 async fn run_server(

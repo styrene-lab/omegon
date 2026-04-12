@@ -565,8 +565,12 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                 autonomy_mode: harness
                     .as_ref()
                     .map(|h| match h.autonomy_mode {
-                        omegon_traits::OmegonAutonomyMode::OperatorDriven => "operator-driven".to_string(),
-                        omegon_traits::OmegonAutonomyMode::GuardedAutonomous => "guarded-autonomous".to_string(),
+                        omegon_traits::OmegonAutonomyMode::OperatorDriven => {
+                            "operator-driven".to_string()
+                        }
+                        omegon_traits::OmegonAutonomyMode::GuardedAutonomous => {
+                            "guarded-autonomous".to_string()
+                        }
                         omegon_traits::OmegonAutonomyMode::Autonomous => "autonomous".to_string(),
                     })
                     .unwrap_or_else(|| "operator-driven".into()),
@@ -574,20 +578,32 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                     available_options: harness
                         .as_ref()
                         .map(|h| h.dispatcher.available_options.clone())
-                        .unwrap_or_else(|| vec!["retribution".into(), "victory".into(), "gloriana".into()]),
+                        .unwrap_or_else(|| {
+                            vec!["retribution".into(), "victory".into(), "gloriana".into()]
+                        }),
                     switch_state: harness
                         .as_ref()
                         .map(|h| h.dispatcher.switch_state.clone())
                         .unwrap_or_else(|| "idle".into()),
-                    request_id: harness.as_ref().and_then(|h| h.dispatcher.request_id.clone()),
-                    expected_profile: harness.as_ref().and_then(|h| h.dispatcher.expected_profile.clone()),
-                    expected_model: harness.as_ref().and_then(|h| h.dispatcher.expected_model.clone()),
+                    request_id: harness
+                        .as_ref()
+                        .and_then(|h| h.dispatcher.request_id.clone()),
+                    expected_profile: harness
+                        .as_ref()
+                        .and_then(|h| h.dispatcher.expected_profile.clone()),
+                    expected_model: harness
+                        .as_ref()
+                        .and_then(|h| h.dispatcher.expected_model.clone()),
                     active_profile: harness
                         .as_ref()
                         .and_then(|h| h.dispatcher.active_profile.clone())
                         .or_else(|| Some("victory".into())),
-                    active_model: harness.as_ref().and_then(|h| h.dispatcher.active_model.clone()),
-                    failure_code: harness.as_ref().and_then(|h| h.dispatcher.failure_code.clone()),
+                    active_model: harness
+                        .as_ref()
+                        .and_then(|h| h.dispatcher.active_model.clone()),
+                    failure_code: harness
+                        .as_ref()
+                        .and_then(|h| h.dispatcher.failure_code.clone()),
                     note: harness.as_ref().and_then(|h| h.dispatcher.note.clone()),
                 },
                 memory_available: harness.as_ref().is_some_and(|h| h.memory_available),
@@ -778,12 +794,8 @@ mod tests {
             payload: serde_json::json!({"ok": true}),
             caller_role: Some("admin".into()),
         };
-        let (status, Json(payload)) = post_event(
-            axum::extract::State(test_state()),
-            headers,
-            Json(event),
-        )
-        .await;
+        let (status, Json(payload)) =
+            post_event(axum::extract::State(test_state()), headers, Json(event)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert!(!payload.accepted);
     }
@@ -803,7 +815,8 @@ mod tests {
             payload: serde_json::json!({}),
             caller_role: Some("read".into()),
         };
-        let (status, Json(payload)) = post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
+        let (status, Json(payload)) =
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert!(!payload.accepted);
         assert_eq!(payload.queued_events, 0);
@@ -825,7 +838,8 @@ mod tests {
             payload: serde_json::json!({"ok": true}),
             caller_role: Some("admin".into()),
         };
-        let (status, Json(payload)) = post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
+        let (status, Json(payload)) =
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
         assert!(payload.accepted);
         assert_eq!(payload.queued_events, 1);
@@ -848,7 +862,8 @@ mod tests {
             payload: serde_json::json!({}),
             caller_role: Some("admin".into()),
         };
-        let (status, Json(payload)) = post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
+        let (status, Json(payload)) =
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
         assert!(payload.accepted);
         assert_eq!(payload.queued_events, 1);
@@ -871,7 +886,8 @@ mod tests {
             payload: serde_json::json!({}),
             caller_role: Some("admin".into()),
         };
-        let (status, Json(payload)) = post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
+        let (status, Json(payload)) =
+            post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
         assert!(payload.accepted);
         assert_eq!(payload.queued_events, 1);
@@ -925,7 +941,10 @@ mod tests {
         let snap = build_snapshot(&state);
         let child = &snap.cleave.children[0];
         let runtime = child.runtime.as_ref().expect("runtime should be present");
-        assert_eq!(runtime.model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
+        assert_eq!(
+            runtime.model.as_deref(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
         assert_eq!(runtime.context_class.as_deref(), Some("legion"));
         assert_eq!(runtime.disabled_tools, vec!["bash"]);
         assert_eq!(runtime.enabled_extensions, vec!["alpha"]);

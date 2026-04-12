@@ -71,7 +71,8 @@ impl Indexer {
             .cloned()
             .collect();
         let stale: HashSet<PathBuf> = cache.stale_paths(&all_hashes).into_iter().collect();
-        let live_paths: HashSet<PathBuf> = all_hashes.iter().map(|(path, _)| path.clone()).collect();
+        let live_paths: HashSet<PathBuf> =
+            all_hashes.iter().map(|(path, _)| path.clone()).collect();
         cache.prune_missing_paths(&live_paths)?;
 
         for (path, hash) in &code_hashes {
@@ -255,7 +256,8 @@ mod tests {
         let repo = dir.path();
         std::fs::create_dir_all(repo.join("src")).unwrap();
         std::fs::write(repo.join("src/main.rs"), "fn canonical() {}").unwrap();
-        std::fs::create_dir_all(repo.join(".omegon/cleave-workspace/0-wt-code-survey/src")).unwrap();
+        std::fs::create_dir_all(repo.join(".omegon/cleave-workspace/0-wt-code-survey/src"))
+            .unwrap();
         std::fs::write(
             repo.join(".omegon/cleave-workspace/0-wt-code-survey/src/tui_tests.rs"),
             "fn transient_workspace_copy() {}",
@@ -277,7 +279,9 @@ mod tests {
                 Path::new(".omegon/cleave-workspace/0-wt-code-survey/src/tui_tests.rs"),
                 "stale",
                 &[crate::code::CodeChunk {
-                    path: PathBuf::from(".omegon/cleave-workspace/0-wt-code-survey/src/tui_tests.rs"),
+                    path: PathBuf::from(
+                        ".omegon/cleave-workspace/0-wt-code-survey/src/tui_tests.rs",
+                    ),
                     start_line: 1,
                     end_line: 1,
                     item_name: "transient_workspace_copy".into(),
@@ -290,11 +294,15 @@ mod tests {
         let mut cache = ScanCache::open(&cache_path).unwrap();
         Indexer::run(repo, &mut cache).unwrap();
 
-        let chunks = ScanCache::open(&cache_path).unwrap().all_code_chunks().unwrap();
+        let chunks = ScanCache::open(&cache_path)
+            .unwrap()
+            .all_code_chunks()
+            .unwrap();
         assert!(
-            chunks
-                .iter()
-                .all(|chunk| !chunk.path.to_string_lossy().contains(".omegon/cleave-workspace")),
+            chunks.iter().all(|chunk| !chunk
+                .path
+                .to_string_lossy()
+                .contains(".omegon/cleave-workspace")),
             "indexed chunks should prune stale .omegon workspace entries: {chunks:?}"
         );
         assert!(

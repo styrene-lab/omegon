@@ -62,13 +62,16 @@ fn format_env_var_statuses(env_keys: &[&str]) -> String {
     let mut output = String::new();
 
     for key in env_keys {
-        let status = if std::env::var(key).is_ok() { "Set" } else { "Not set" };
+        let status = if std::env::var(key).is_ok() {
+            "Set"
+        } else {
+            "Not set"
+        };
         output.push_str(&format!("- **{}:** {}\n", key, status));
     }
 
     output
 }
-
 
 #[async_trait]
 impl Feature for AuthFeature {

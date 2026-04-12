@@ -45,7 +45,8 @@ pub fn read_workspace_lease(cwd: &Path) -> anyhow::Result<Option<WorkspaceLease>
     if !path.exists() {
         return Ok(None);
     }
-    let text = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     let lease = serde_json::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
     Ok(Some(lease))
 }
@@ -63,8 +64,10 @@ pub fn read_workspace_registry(cwd: &Path) -> anyhow::Result<Option<WorkspaceReg
     if !path.exists() {
         return Ok(None);
     }
-    let text = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let registry = serde_json::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let registry =
+        serde_json::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
     Ok(Some(registry))
 }
 
@@ -126,13 +129,22 @@ mod tests {
         std::fs::create_dir_all(&cwd).unwrap();
         assert_eq!(workspace_root(&cwd), dir.path());
         assert_eq!(runtime_dir(&cwd), dir.path().join(".omegon/runtime"));
-        assert_eq!(workspace_lease_path(&cwd), dir.path().join(".omegon/runtime/workspace.json"));
-        assert_eq!(workspace_registry_path(&cwd), dir.path().join(".omegon/runtime/workspaces.json"));
+        assert_eq!(
+            workspace_lease_path(&cwd),
+            dir.path().join(".omegon/runtime/workspace.json")
+        );
+        assert_eq!(
+            workspace_registry_path(&cwd),
+            dir.path().join(".omegon/runtime/workspaces.json")
+        );
     }
 
     #[test]
     fn workspace_id_is_deterministic_from_path() {
-        assert_eq!(workspace_id_from_path(Path::new("/tmp/example-project")), "tmp::example-project");
+        assert_eq!(
+            workspace_id_from_path(Path::new("/tmp/example-project")),
+            "tmp::example-project"
+        );
     }
 
     #[test]

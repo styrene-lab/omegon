@@ -218,7 +218,9 @@ const GLOBAL_ERROR_RULES: &[ErrorRule] = &[
             "server closed the connection without sending any data",
             "cf_bad_gateway",
         ],
-        word_tokens: &["500", "502", "503", "504", "520", "521", "522", "523", "524", "525", "526", "530"],
+        word_tokens: &[
+            "500", "502", "503", "504", "520", "521", "522", "523", "524", "525", "526", "530",
+        ],
     },
     ErrorRule {
         providers: &[],

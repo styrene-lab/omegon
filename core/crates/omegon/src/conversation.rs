@@ -63,13 +63,15 @@ impl ConversationState {
         provider: Option<&str>,
     ) -> Option<omegon_traits::ProviderTelemetrySnapshot> {
         self.canonical.iter().rev().find_map(|msg| match msg {
-            AgentMessage::Assistant(assistant, _) => assistant.provider_telemetry.clone().and_then(|t| {
-                if provider.is_none_or(|p| t.provider == p) {
-                    Some(t)
-                } else {
-                    None
-                }
-            }),
+            AgentMessage::Assistant(assistant, _) => {
+                assistant.provider_telemetry.clone().and_then(|t| {
+                    if provider.is_none_or(|p| t.provider == p) {
+                        Some(t)
+                    } else {
+                        None
+                    }
+                })
+            }
             _ => None,
         })
     }
@@ -998,7 +1000,10 @@ impl ConversationState {
                 } else if lines <= 3 {
                     format!("[{}{ctx_suffix}: {}]", result.tool_name, text.trim())
                 } else {
-                    format!("[{}{ctx_suffix}: {lines} lines. {preview}]", result.tool_name)
+                    format!(
+                        "[{}{ctx_suffix}: {lines} lines. {preview}]",
+                        result.tool_name
+                    )
                 }
             }
         }

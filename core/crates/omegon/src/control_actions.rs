@@ -129,7 +129,10 @@ pub fn classify_ipc_method(method: &str) -> ClassifiedAction {
     }
 }
 
-pub fn classify_ipc_set_model_request(current_model: &str, requested_model: &str) -> ClassifiedAction {
+pub fn classify_ipc_set_model_request(
+    current_model: &str,
+    requested_model: &str,
+) -> ClassifiedAction {
     let requested = requested_model.trim();
     if requested.is_empty() {
         return ClassifiedAction {
@@ -142,12 +145,17 @@ pub fn classify_ipc_set_model_request(current_model: &str, requested_model: &str
 
     let current_provider = crate::providers::infer_provider_id(current_model);
     let requested_provider = crate::providers::infer_provider_id(requested);
-    let explicit_provider_switch = requested.contains(':') && requested_provider != current_provider;
+    let explicit_provider_switch =
+        requested.contains(':') && requested_provider != current_provider;
 
     let (action, role, remote_safe) = if explicit_provider_switch {
         (CanonicalAction::ProviderSwitch, ControlRole::Admin, false)
     } else {
-        (CanonicalAction::ModelSetSameProvider, ControlRole::Edit, true)
+        (
+            CanonicalAction::ModelSetSameProvider,
+            ControlRole::Edit,
+            true,
+        )
     };
 
     ClassifiedAction {
@@ -202,7 +210,10 @@ pub fn classify_web_method(method: &str) -> ClassifiedAction {
     }
 }
 
-pub fn classify_web_set_model_request(current_model: &str, requested_model: &str) -> ClassifiedAction {
+pub fn classify_web_set_model_request(
+    current_model: &str,
+    requested_model: &str,
+) -> ClassifiedAction {
     let mut classified = classify_ipc_set_model_request(current_model, requested_model);
     classified.ingress = ControlIngress::WebDaemon;
     classified
@@ -242,12 +253,18 @@ pub fn classify_slash_command(name: &str, args: &str) -> ClassifiedAction {
             } else if trimmed.contains(':') {
                 (CanonicalAction::ProviderSwitch, ControlRole::Admin, false)
             } else {
-                (CanonicalAction::ModelSetSameProvider, ControlRole::Edit, true)
+                (
+                    CanonicalAction::ModelSetSameProvider,
+                    ControlRole::Edit,
+                    true,
+                )
             }
         }
         "think" => (CanonicalAction::ThinkingSet, ControlRole::Edit, true),
         "context" => match canonical_slash_command("context", args) {
-            Some(crate::tui::CanonicalSlashCommand::ContextStatus) | None if args.trim().is_empty() => {
+            Some(crate::tui::CanonicalSlashCommand::ContextStatus) | None
+                if args.trim().is_empty() =>
+            {
                 (CanonicalAction::ContextView, ControlRole::Read, true)
             }
             Some(crate::tui::CanonicalSlashCommand::ContextStatus) => {
@@ -490,7 +507,8 @@ mod tests {
 
     #[test]
     fn classifies_ipc_set_model_request_same_provider_as_edit() {
-        let action = classify_ipc_set_model_request("anthropic:claude-sonnet-4-6", "claude-opus-4-6");
+        let action =
+            classify_ipc_set_model_request("anthropic:claude-sonnet-4-6", "claude-opus-4-6");
         assert_eq!(action.action, CanonicalAction::ModelSetSameProvider);
         assert_eq!(action.role, ControlRole::Edit);
         assert!(action.remote_safe);
@@ -498,10 +516,8 @@ mod tests {
 
     #[test]
     fn classifies_ipc_set_model_request_explicit_provider_switch_as_admin() {
-        let action = classify_ipc_set_model_request(
-            "anthropic:claude-sonnet-4-6",
-            "openai:gpt-5.4",
-        );
+        let action =
+            classify_ipc_set_model_request("anthropic:claude-sonnet-4-6", "openai:gpt-5.4");
         assert_eq!(action.action, CanonicalAction::ProviderSwitch);
         assert_eq!(action.role, ControlRole::Admin);
         assert!(!action.remote_safe);
@@ -517,7 +533,8 @@ mod tests {
 
     #[test]
     fn classifies_web_set_model_request_same_provider_as_edit() {
-        let action = classify_web_set_model_request("anthropic:claude-sonnet-4-6", "claude-opus-4-6");
+        let action =
+            classify_web_set_model_request("anthropic:claude-sonnet-4-6", "claude-opus-4-6");
         assert_eq!(action.action, CanonicalAction::ModelSetSameProvider);
         assert_eq!(action.role, ControlRole::Edit);
         assert!(action.remote_safe);
@@ -525,10 +542,8 @@ mod tests {
 
     #[test]
     fn classifies_web_set_model_request_provider_switch_as_admin() {
-        let action = classify_web_set_model_request(
-            "anthropic:claude-sonnet-4-6",
-            "openai:gpt-5.4",
-        );
+        let action =
+            classify_web_set_model_request("anthropic:claude-sonnet-4-6", "openai:gpt-5.4");
         assert_eq!(action.action, CanonicalAction::ProviderSwitch);
         assert_eq!(action.role, ControlRole::Admin);
         assert!(!action.remote_safe);

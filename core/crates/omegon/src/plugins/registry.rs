@@ -180,7 +180,11 @@ impl PluginRegistry {
     }
 
     #[cfg(test)]
-    fn load_skills_subset_from_explicit(&mut self, dirs: &[std::path::PathBuf], allowed: &[String]) {
+    fn load_skills_subset_from_explicit(
+        &mut self,
+        dirs: &[std::path::PathBuf],
+        allowed: &[String],
+    ) {
         self.loaded_skills = Self::load_from_dirs_filtered(dirs, allowed);
     }
 

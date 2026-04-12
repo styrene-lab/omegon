@@ -47,9 +47,15 @@ fn resolve_omegon_binary() -> Result<PathBuf> {
     }
 
     let current = std::env::current_exe().context("current_exe")?;
-    let deps_dir = current.parent().context("integration test executable has no parent")?;
+    let deps_dir = current
+        .parent()
+        .context("integration test executable has no parent")?;
     let debug_dir = deps_dir.parent().context("deps dir has no parent")?;
-    let candidate = debug_dir.join(if cfg!(windows) { "omegon.exe" } else { "omegon" });
+    let candidate = debug_dir.join(if cfg!(windows) {
+        "omegon.exe"
+    } else {
+        "omegon"
+    });
     if candidate.is_file() {
         return Ok(candidate);
     }

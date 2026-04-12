@@ -59,7 +59,11 @@ mod tests {
     #[test]
     fn infer_mixed_workspace() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname='x'\nversion='0.1.0'\n").unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname='x'\nversion='0.1.0'\n",
+        )
+        .unwrap();
         std::fs::create_dir_all(dir.path().join("docs")).unwrap();
         assert_eq!(infer_workspace_kind(dir.path()), WorkspaceKind::Mixed);
     }

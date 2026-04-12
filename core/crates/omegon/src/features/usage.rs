@@ -8,7 +8,9 @@ use omegon_traits::{
     BusEvent, BusRequest, CommandDefinition, CommandResult, Feature, ProviderTelemetrySnapshot,
 };
 
-use crate::usage::{authoritative_links, derive_headroom_state, derive_rationale, format_raw_telemetry_lines};
+use crate::usage::{
+    authoritative_links, derive_headroom_state, derive_rationale, format_raw_telemetry_lines,
+};
 
 #[derive(Debug, Clone, Default)]
 struct LatestUsageSnapshot {
@@ -150,7 +152,9 @@ mod tests {
         assert!(text.contains("7d utilization: 64%"), "got: {text}");
         assert!(text.contains("headroom: healthy"), "got: {text}");
         assert!(
-            text.contains("bounded manual thinking for minimal/low and adaptive thinking for medium/high"),
+            text.contains(
+                "bounded manual thinking for minimal/low and adaptive thinking for medium/high"
+            ),
             "got: {text}"
         );
         assert!(
@@ -190,7 +194,10 @@ mod tests {
         assert!(text.contains("primary remaining: 1%"), "got: {text}");
         assert!(text.contains("headroom: exhausted"), "got: {text}");
         assert!(text.contains("OpenAI help"), "got: {text}");
-        assert!(text.contains("developers.openai.com/api/docs/guides/rate-limits"), "got: {text}");
+        assert!(
+            text.contains("developers.openai.com/api/docs/guides/rate-limits"),
+            "got: {text}"
+        );
     }
 
     #[test]
@@ -202,7 +209,10 @@ mod tests {
         }) else {
             panic!("expected display result");
         };
-        assert!(text.contains("none captured yet in this session"), "got: {text}");
+        assert!(
+            text.contains("none captured yet in this session"),
+            "got: {text}"
+        );
         assert!(text.contains("headroom: unknown"), "got: {text}");
     }
 }

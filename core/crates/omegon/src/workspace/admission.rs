@@ -55,8 +55,9 @@ fn authority_denial_reason(
         }
         WorkspaceActionKind::BenchmarkRun => {
             if request.requested_role != WorkspaceRole::Benchmark {
-                return Some("release-evaluation benchmark runs require a benchmark workspace role"
-                    .into());
+                return Some(
+                    "release-evaluation benchmark runs require a benchmark workspace role".into(),
+                );
             }
         }
         _ => {}
@@ -118,7 +119,10 @@ mod tests {
             session_id: Some("session-2".into()),
             action: WorkspaceActionKind::SessionStart,
         };
-        assert_eq!(classify_admission(None, &req, 1_000, None), AdmissionOutcome::GrantedMutable);
+        assert_eq!(
+            classify_admission(None, &req, 1_000, None),
+            AdmissionOutcome::GrantedMutable
+        );
     }
 
     #[test]

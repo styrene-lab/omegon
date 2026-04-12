@@ -24,13 +24,13 @@ mod cleave_smoke;
 mod clipboard;
 mod context;
 mod control_actions;
-mod embedding;
 mod control_runtime;
-mod shadow_context;
+mod embedding;
 pub mod extensions;
 pub mod features;
 mod ipc;
 mod migrate;
+mod shadow_context;
 mod skills;
 mod smoke;
 mod switch;
@@ -40,6 +40,8 @@ mod upstream_errors;
 mod usage;
 mod workspace;
 
+mod checkpoint;
+mod child_agent;
 mod conversation;
 mod lifecycle;
 mod r#loop;
@@ -59,8 +61,6 @@ mod tools;
 mod tui;
 pub mod util;
 mod web;
-mod child_agent;
-mod checkpoint;
 mod workflow;
 
 use bridge::LlmBridge;
@@ -624,7 +624,11 @@ async fn main() -> anyhow::Result<()> {
             SkillsAction::Install => skills::cmd_install().map_err(Into::into),
         },
         Some(Commands::Bench { ref action }) => match action {
-            BenchAction::RunTask { prompt, usage_json, slim } => {
+            BenchAction::RunTask {
+                prompt,
+                usage_json,
+                slim,
+            } => {
                 let mut bench_cli = Cli {
                     command: None,
                     cwd: cli.cwd.clone(),
@@ -699,8 +703,7 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
         profile.apply_to(&mut s);
     }
 
-    let mut agent =
-        setup::AgentSetup::new(&cwd, None, Some(shared_settings.clone())).await?;
+    let mut agent = setup::AgentSetup::new(&cwd, None, Some(shared_settings.clone())).await?;
     agent.initial_harness_status.update_runtime_posture(
         omegon_traits::OmegonRuntimeProfile::LongRunningDaemon,
         omegon_traits::OmegonAutonomyMode::GuardedAutonomous,
@@ -745,10 +748,7 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
     }
 
     // ─── Web control plane ──────────────────────────────────────────────
-    let state = web::WebState::new(
-        agent.dashboard_handles.clone(),
-        events_tx.clone(),
-    );
+    let state = web::WebState::new(agent.dashboard_handles.clone(), events_tx.clone());
     let (startup, mut cmd_rx) =
         web::start_server_with_options(state, control_port, strict_port).await?;
 
@@ -970,11 +970,8 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
     }
 
     // ─── Cleanup ────────────────────────────────────────────────────────
-    if let Err(e) = session::save_session(
-        &agent.conversation,
-        &agent.cwd,
-        Some(&agent.session_id),
-    ) {
+    if let Err(e) = session::save_session(&agent.conversation, &agent.cwd, Some(&agent.session_id))
+    {
         tracing::debug!("Daemon session save failed (non-fatal): {e}");
     }
     bridge.shutdown().await;
@@ -1051,7 +1048,8 @@ pub(crate) fn format_cleave_merge_result(
     match outcome {
         cleave::orchestrator::MergeOutcome::Success => {
             if let Some(child) = child {
-                if child.error.as_deref() == Some("merged after salvaging work from a failed child") {
+                if child.error.as_deref() == Some("merged after salvaging work from a failed child")
+                {
                     format!("  ↺ {label} salvaged and merged after failure")
                 } else {
                     format!("  ✓ {label} merged")
@@ -1144,9 +1142,10 @@ async fn run_cleave_command(
         cancel_clone.cancel();
     });
 
-    let result =
-        cleave::run_cleave(&plan, directive, &repo_path, workspace, &config, cancel, None)
-            .await?;
+    let result = cleave::run_cleave(
+        &plan, directive, &repo_path, workspace, &config, cancel, None,
+    )
+    .await?;
 
     // Print report
     eprintln!("\n## Cleave Report: {}", result.state.run_id);
@@ -1985,6 +1984,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                             image_paths: Vec::new(),
                                             submitted_by: "web-dashboard".to_string(),
                                             via: "websocket",
+                                            queue_mode: crate::tui::PromptQueueMode::InterruptAfterTurn,
                                         })
                                     }
                                     web::WebCommand::SlashCommand {
@@ -2372,7 +2372,11 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 };
                 let via = control_surface_from_via(&prompt.via);
 
-                runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via);
+                runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via, Some(match prompt.queue_mode {
+                        crate::tui::PromptQueueMode::InterruptAfterTurn => QueueMode::InterruptAfterTurn,
+                        crate::tui::PromptQueueMode::UntilReady => QueueMode::UntilReady,
+                        crate::tui::PromptQueueMode::Immediate => QueueMode::Immediate,
+                    }));
 
                 if runtime.is_busy() {
                     continue;
@@ -2430,7 +2434,11 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                             label: prompt.submitted_by.clone(),
                                         };
                                         let via = control_surface_from_via(&prompt.via);
-                                        runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via);
+                                        runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via, Some(match prompt.queue_mode {
+                                            crate::tui::PromptQueueMode::InterruptAfterTurn => QueueMode::InterruptAfterTurn,
+                                            crate::tui::PromptQueueMode::UntilReady => QueueMode::UntilReady,
+                                            crate::tui::PromptQueueMode::Immediate => QueueMode::Immediate,
+                                        }));
                                     }
                                     tui::TuiCommand::Quit => {
                                         quit_after_turn = true;
@@ -2481,10 +2489,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         .await
 }
 
-fn mark_interactive_session_busy(
-    handles: &crate::tui::dashboard::DashboardHandles,
-    busy: bool,
-) {
+fn mark_interactive_session_busy(handles: &crate::tui::dashboard::DashboardHandles, busy: bool) {
     if let Ok(mut ss) = handles.session.lock() {
         ss.busy = busy;
     }
@@ -2509,33 +2514,38 @@ fn format_agent_error(
 
     if provider_id == "anthropic" {
         let headroom = crate::usage::derive_headroom_state(recent_telemetry);
-        if matches!(upstream_class, crate::upstream_errors::UpstreamErrorClass::StalledStream)
-            && matches!(
-                headroom,
-                crate::usage::UsageHeadroomState::Constrained
-                    | crate::usage::UsageHeadroomState::Exhausted
-            )
-        {
+        if matches!(
+            upstream_class,
+            crate::upstream_errors::UpstreamErrorClass::StalledStream
+        ) && matches!(
+            headroom,
+            crate::usage::UsageHeadroomState::Constrained
+                | crate::usage::UsageHeadroomState::Exhausted
+        ) {
             let rationale = crate::usage::derive_rationale(recent_telemetry, &headroom);
             return format!(
                 "⚠ Provider pressure (Anthropic/Claude) — the stream stopped after recent quota telemetry showed {state} headroom. This is likely usage-window backpressure or exhaustion, not a generic transport stall. Wait for reset or switch provider with /model. ({rationale})",
                 state = headroom.as_str(),
             );
         }
-        if matches!(upstream_class, crate::upstream_errors::UpstreamErrorClass::QuotaExceeded) {
+        if matches!(
+            upstream_class,
+            crate::upstream_errors::UpstreamErrorClass::QuotaExceeded
+        ) {
             let rationale = crate::usage::derive_rationale(recent_telemetry, &headroom);
             return format!(
                 "⚠ Usage limit reached (Anthropic/Claude) — recent upstream telemetry indicates {state} headroom. Wait for the Anthropic usage window to reset or switch provider with /model. ({rationale})",
                 state = headroom.as_str(),
             );
         }
-        if matches!(upstream_class, crate::upstream_errors::UpstreamErrorClass::RateLimited)
-            && matches!(
-                headroom,
-                crate::usage::UsageHeadroomState::Constrained
-                    | crate::usage::UsageHeadroomState::Exhausted
-            )
-        {
+        if matches!(
+            upstream_class,
+            crate::upstream_errors::UpstreamErrorClass::RateLimited
+        ) && matches!(
+            headroom,
+            crate::usage::UsageHeadroomState::Constrained
+                | crate::usage::UsageHeadroomState::Exhausted
+        ) {
             let rationale = crate::usage::derive_rationale(recent_telemetry, &headroom);
             return format!(
                 "⚠ Rate limit / usage pressure (Anthropic/Claude) — recent upstream telemetry indicates {state} headroom. Anthropic is likely throttling or exhausting this session's usage window. Wait for reset or switch provider with /model. ({rationale})",
@@ -2673,6 +2683,19 @@ enum ControlSurface {
     Internal,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueueMode {
+    InterruptAfterTurn,
+    UntilReady,
+    Immediate,
+}
+
+impl Default for QueueMode {
+    fn default() -> Self {
+        Self::InterruptAfterTurn
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PromptEnvelope {
     id: u64,
@@ -2680,6 +2703,7 @@ struct PromptEnvelope {
     image_paths: Vec<PathBuf>,
     submitted_by: RuntimeActor,
     via: ControlSurface,
+    queue_mode: QueueMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2749,7 +2773,9 @@ fn interactive_resume_mode(cli: &Cli) -> Option<Option<&str>> {
     }
 }
 
-fn split_interactive_agent(agent: setup::AgentSetup) -> (InteractiveAgentHost, InteractiveAgentState) {
+fn split_interactive_agent(
+    agent: setup::AgentSetup,
+) -> (InteractiveAgentHost, InteractiveAgentState) {
     let host = InteractiveAgentHost {
         session_id: agent.session_id,
         context_metrics: agent.context_metrics,
@@ -2863,11 +2889,12 @@ async fn run_interactive_active_turn(
     .await
     {
         drop(bridge_guard);
-        let recent_telemetry = runtime_state
-            .conversation
-            .last_provider_telemetry(None);
+        let recent_telemetry = runtime_state.conversation.last_provider_telemetry(None);
         let user_msg = format_agent_error(&e, recent_telemetry.as_ref());
-        tracing::error!(runtime_turn_id = active.runtime_turn_id, "Agent loop error: {e}");
+        tracing::error!(
+            runtime_turn_id = active.runtime_turn_id,
+            "Agent loop error: {e}"
+        );
         let _ = events_tx.send(AgentEvent::SystemNotification { message: user_msg });
         let _ = events_tx.send(AgentEvent::AgentEnd);
     }
@@ -2902,6 +2929,7 @@ struct InteractiveRuntimeSupervisor {
     active_turn: Option<ActiveTurnMeta>,
     next_prompt_id: u64,
     next_runtime_turn_id: u64,
+    default_queue_mode: QueueMode,
 }
 
 impl InteractiveRuntimeSupervisor {
@@ -2911,6 +2939,7 @@ impl InteractiveRuntimeSupervisor {
         image_paths: Vec<PathBuf>,
         actor: RuntimeActor,
         via: ControlSurface,
+        queue_mode: Option<QueueMode>,
     ) -> u64 {
         self.next_prompt_id += 1;
         let prompt_id = self.next_prompt_id;
@@ -2920,12 +2949,44 @@ impl InteractiveRuntimeSupervisor {
             image_paths,
             submitted_by: actor,
             via,
+            queue_mode: queue_mode.unwrap_or(self.default_queue_mode),
         });
         prompt_id
     }
 
     fn queue_depth(&self) -> usize {
         self.queue.len()
+    }
+
+    fn queue_preview(&self) -> Vec<String> {
+        self.queue
+            .iter()
+            .map(|prompt| {
+                let attachment_summary = if prompt.image_paths.is_empty() {
+                    String::new()
+                } else {
+                    let names = prompt
+                        .image_paths
+                        .iter()
+                        .take(3)
+                        .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
+                        .collect::<Vec<_>>();
+                    let suffix = if prompt.image_paths.len() > names.len() {
+                        format!(" +{} more", prompt.image_paths.len() - names.len())
+                    } else {
+                        String::new()
+                    };
+                    format!(" [{}{}]", names.join(", "), suffix)
+                };
+                let preview = prompt.text.chars().take(48).collect::<String>();
+                let mode = match prompt.queue_mode {
+                    QueueMode::InterruptAfterTurn => "after-turn",
+                    QueueMode::UntilReady => "ready",
+                    QueueMode::Immediate => "now",
+                };
+                format!("#{} {mode}: {}{}", prompt.id, preview, attachment_summary)
+            })
+            .collect()
     }
 
     fn is_busy(&self) -> bool {
@@ -2964,6 +3025,18 @@ impl InteractiveRuntimeSupervisor {
 
     fn complete_active_turn(&mut self) -> Option<ActiveTurnMeta> {
         self.active_turn.take()
+    }
+
+    fn pop_front_prompt(&mut self) -> Option<PromptEnvelope> {
+        self.queue.pop_front()
+    }
+
+    fn push_front_prompt(&mut self, prompt: PromptEnvelope) {
+        self.queue.push_front(prompt);
+    }
+
+    fn clear_queue(&mut self) {
+        self.queue.clear();
     }
 }
 
@@ -3013,7 +3086,11 @@ impl BenchmarkUsageSummary {
     }
 
     fn avg_usize(total: usize, turns: u32) -> usize {
-        if turns == 0 { 0 } else { total / turns as usize }
+        if turns == 0 {
+            0
+        } else {
+            total / turns as usize
+        }
     }
 
     fn observe_turn(
@@ -3344,7 +3421,8 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
                             provider_telemetry,
                         );
                         if let Some(path) = usage_json_task.as_ref()
-                            && let Err(err) = write_benchmark_usage_json(path, &summary, "in_progress")
+                            && let Err(err) =
+                                write_benchmark_usage_json(path, &summary, "in_progress")
                         {
                             tracing::warn!(path = %path.display(), error = %err, "failed to checkpoint benchmark usage json at turn boundary");
                         }
@@ -3435,7 +3513,9 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     match tokio::time::timeout(std::time::Duration::from_millis(250), event_task).await {
         Ok(_) => {}
         Err(_) => {
-            tracing::warn!("headless benchmark event-printer task did not drain before shutdown; aborting it");
+            tracing::warn!(
+                "headless benchmark event-printer task did not drain before shutdown; aborting it"
+            );
         }
     }
 
@@ -3774,7 +3854,10 @@ mod tests {
     fn format_agent_error_collapses_openai_provider_side_failures() {
         let e = anyhow::anyhow!("LLM error: Codex 520: error code: 520");
         let result = format_agent_error(&e, None);
-        assert!(result.contains("Upstream error (OpenAI/Codex)"), "got: {result}");
+        assert!(
+            result.contains("Upstream error (OpenAI/Codex)"),
+            "got: {result}"
+        );
         assert!(result.contains("status.openai.com"), "got: {result}");
         assert!(!result.contains("error code: 520"), "got: {result}");
     }
@@ -3785,10 +3868,16 @@ mod tests {
             "LLM error: Codex 401: You have insufficient permissions for this operation. Missing scopes: api.responses.write"
         );
         let result = format_agent_error(&e, None);
-        assert!(result.contains("Authentication error (OpenAI/Codex)"), "got: {result}");
+        assert!(
+            result.contains("Authentication error (OpenAI/Codex)"),
+            "got: {result}"
+        );
         assert!(result.contains("expired/invalid session"), "got: {result}");
         assert!(!result.contains("api.responses.write"), "got: {result}");
-        assert!(!result.contains("insufficient permissions"), "got: {result}");
+        assert!(
+            !result.contains("insufficient permissions"),
+            "got: {result}"
+        );
     }
 
     #[test]
@@ -3797,7 +3886,10 @@ mod tests {
             "LLM error: Codex 401 Unauthorized: session expired, please log in again"
         );
         let result = format_agent_error(&e, None);
-        assert!(result.contains("Authentication error (OpenAI/Codex)"), "got: {result}");
+        assert!(
+            result.contains("Authentication error (OpenAI/Codex)"),
+            "got: {result}"
+        );
         assert!(result.contains("session appears expired"), "got: {result}");
         assert!(!result.contains("please log in again"), "got: {result}");
     }
@@ -3813,8 +3905,14 @@ mod tests {
             ..Default::default()
         };
         let result = format_agent_error(&e, Some(&telemetry));
-        assert!(result.contains("Provider pressure (Anthropic/Claude)"), "got: {result}");
-        assert!(result.contains("usage-window backpressure or exhaustion"), "got: {result}");
+        assert!(
+            result.contains("Provider pressure (Anthropic/Claude)"),
+            "got: {result}"
+        );
+        assert!(
+            result.contains("usage-window backpressure or exhaustion"),
+            "got: {result}"
+        );
         assert!(result.contains("5h 97%"), "got: {result}");
         assert!(!result.contains("provider-side failure"), "got: {result}");
     }
@@ -3830,7 +3928,10 @@ mod tests {
             ..Default::default()
         };
         let result = format_agent_error(&e, Some(&telemetry));
-        assert!(result.contains("Usage limit reached (Anthropic/Claude)"), "got: {result}");
+        assert!(
+            result.contains("Usage limit reached (Anthropic/Claude)"),
+            "got: {result}"
+        );
         assert!(
             result.contains("Anthropic usage window to reset"),
             "got: {result}"
@@ -3869,12 +3970,14 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            None,
         );
         supervisor.enqueue_prompt(
             "second".to_string(),
             Vec::new(),
             RuntimeActor::auspex(),
             ControlSurface::Ipc,
+            None,
         );
 
         let active = supervisor
@@ -3896,6 +3999,7 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            None,
         );
         supervisor.maybe_start_next_turn().expect("active turn");
 
@@ -3922,6 +4026,7 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            None,
         );
         supervisor.maybe_start_next_turn().expect("active turn");
         supervisor.request_cancel(RuntimeActor::tui(), ControlSurface::Tui);
@@ -3941,15 +4046,19 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            None,
         );
         supervisor.enqueue_prompt(
             "second".to_string(),
             vec![PathBuf::from("/tmp/paste.png")],
             RuntimeActor::auspex(),
             ControlSurface::Ipc,
+            None,
         );
 
-        supervisor.maybe_start_next_turn().expect("first active turn");
+        supervisor
+            .maybe_start_next_turn()
+            .expect("first active turn");
         supervisor.complete_active_turn().expect("first completion");
         let active = supervisor
             .maybe_start_next_turn()
@@ -3957,7 +4066,10 @@ mod tests {
 
         assert_eq!(active.runtime_turn_id, 2);
         assert_eq!(active.prompt.text, "second");
-        assert_eq!(active.prompt.image_paths, vec![PathBuf::from("/tmp/paste.png")]);
+        assert_eq!(
+            active.prompt.image_paths,
+            vec![PathBuf::from("/tmp/paste.png")]
+        );
         assert_eq!(active.prompt.submitted_by.kind, RuntimeActorKind::Auspex);
         assert_eq!(supervisor.queue_depth(), 0);
     }
@@ -3970,15 +4082,19 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            None,
         );
         supervisor.enqueue_prompt(
             "second".to_string(),
             Vec::new(),
             RuntimeActor::auspex(),
             ControlSurface::Ipc,
+            None,
         );
 
-        supervisor.maybe_start_next_turn().expect("first active turn");
+        supervisor
+            .maybe_start_next_turn()
+            .expect("first active turn");
         supervisor.request_cancel(RuntimeActor::tui(), ControlSurface::Tui);
         let completed = supervisor.complete_active_turn().expect("completed turn");
         assert_eq!(completed.prompt.text, "first");
@@ -3998,21 +4114,32 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            None,
         );
         supervisor.enqueue_prompt(
             "second".to_string(),
             Vec::new(),
             RuntimeActor::auspex(),
             ControlSurface::Ipc,
+            None,
         );
-        supervisor.maybe_start_next_turn().expect("first active turn");
+        supervisor
+            .maybe_start_next_turn()
+            .expect("first active turn");
 
         let active = supervisor
             .request_cancel(RuntimeActor::tui(), ControlSurface::Tui)
             .expect("quit should target active turn");
         assert!(matches!(active.phase, ActiveTurnPhase::Cancelling { .. }));
-        assert_eq!(supervisor.queue_depth(), 1, "quit should not drop queued prompts implicitly");
-        assert!(supervisor.is_busy(), "quit requests cancellation but active turn remains busy until completion");
+        assert_eq!(
+            supervisor.queue_depth(),
+            1,
+            "quit should not drop queued prompts implicitly"
+        );
+        assert!(
+            supervisor.is_busy(),
+            "quit requests cancellation but active turn remains busy until completion"
+        );
     }
 
     #[tokio::test]
@@ -4030,9 +4157,18 @@ mod tests {
 
         assert_eq!(host.session_id, expected_session_id);
         assert_eq!(host.cwd, expected_cwd);
-        assert_eq!(host.resume_info.as_ref().map(|r| r.session_id.clone()), expected_resume);
-        assert_eq!(runtime_state.conversation.message_count(), expected_message_count);
-        assert_eq!(runtime_state.bus.tool_definitions().len(), expected_tool_count);
+        assert_eq!(
+            host.resume_info.as_ref().map(|r| r.session_id.clone()),
+            expected_resume
+        );
+        assert_eq!(
+            runtime_state.conversation.message_count(),
+            expected_message_count
+        );
+        assert_eq!(
+            runtime_state.bus.tool_definitions().len(),
+            expected_tool_count
+        );
     }
 
     #[tokio::test]
@@ -4043,7 +4179,9 @@ mod tests {
         let expected_cwd = agent.cwd.clone();
         let (host, mut runtime_state) = split_interactive_agent(agent);
 
-        runtime_state.conversation.push_user("hello from runtime state".to_string());
+        runtime_state
+            .conversation
+            .push_user("hello from runtime state".to_string());
         let system_prompt = runtime_state.context_manager.build_system_prompt(
             runtime_state.conversation.last_user_prompt(),
             &runtime_state.conversation,
@@ -4086,7 +4224,10 @@ mod tests {
             "⚠ Interactive turn worker crashed — ending session safely: {}",
             text
         );
-        assert!(message.contains("Interactive turn worker crashed"), "got: {message}");
+        assert!(
+            message.contains("Interactive turn worker crashed"),
+            "got: {message}"
+        );
         assert!(message.contains("ending session safely"), "got: {message}");
         assert!(message.contains("boom"), "got: {message}");
     }
@@ -4149,14 +4290,16 @@ mod tests {
     #[test]
     fn remote_slash_login_is_classified_as_interactive_only_for_openai_api() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let agent = rt.block_on(setup::AgentSetup::new(Path::new("."), None, None)).unwrap();
+        let agent = rt
+            .block_on(setup::AgentSetup::new(Path::new("."), None, None))
+            .unwrap();
         let (events_tx, _) = broadcast::channel(16);
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
             "anthropic:claude-sonnet-4-6",
         )));
-        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(
-            Box::new(crate::bridge::NullBridge) as Box<dyn LlmBridge>
-        ));
+        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(Box::new(
+            crate::bridge::NullBridge,
+        ) as Box<dyn LlmBridge>));
         let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
         let cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
 
@@ -4181,14 +4324,16 @@ mod tests {
     #[test]
     fn remote_slash_logout_requires_provider() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let agent = rt.block_on(setup::AgentSetup::new(Path::new("."), None, None)).unwrap();
+        let agent = rt
+            .block_on(setup::AgentSetup::new(Path::new("."), None, None))
+            .unwrap();
         let (events_tx, _) = broadcast::channel(16);
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
             "anthropic:claude-sonnet-4-6",
         )));
-        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(
-            Box::new(crate::bridge::NullBridge) as Box<dyn LlmBridge>
-        ));
+        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(Box::new(
+            crate::bridge::NullBridge,
+        ) as Box<dyn LlmBridge>));
         let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
         let cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
 
@@ -4207,23 +4352,27 @@ mod tests {
         ));
 
         assert!(!response.accepted);
-        assert!(response
-            .output
-            .unwrap()
-            .contains("interactive-only or unavailable"));
+        assert!(
+            response
+                .output
+                .unwrap()
+                .contains("interactive-only or unavailable")
+        );
     }
 
     #[test]
     fn remote_slash_logout_accepts_openai_codex_provider() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let agent = rt.block_on(setup::AgentSetup::new(Path::new("."), None, None)).unwrap();
+        let agent = rt
+            .block_on(setup::AgentSetup::new(Path::new("."), None, None))
+            .unwrap();
         let (events_tx, _) = broadcast::channel(16);
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
             "anthropic:claude-sonnet-4-6",
         )));
-        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(
-            Box::new(crate::bridge::NullBridge) as Box<dyn LlmBridge>
-        ));
+        let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(Box::new(
+            crate::bridge::NullBridge,
+        ) as Box<dyn LlmBridge>));
         let login_prompt_tx = std::sync::Arc::new(tokio::sync::Mutex::new(None));
         let cli = Cli::try_parse_from(vec!["omegon"]).unwrap();
 
@@ -4388,10 +4537,10 @@ mod tests {
                 pid: None,
                 started_at_unix_ms: None,
                 last_activity_unix_ms: None,
-            adoption_worktree_path: None,
-            adoption_model: None,
-            supervisor_token: None,
-        },
+                adoption_worktree_path: None,
+                adoption_model: None,
+                supervisor_token: None,
+            },
             cleave::state::ChildState {
                 child_id: 1,
                 label: "failed".to_string(),
@@ -4411,10 +4560,10 @@ mod tests {
                 pid: None,
                 started_at_unix_ms: None,
                 last_activity_unix_ms: None,
-            adoption_worktree_path: None,
-            adoption_model: None,
-            supervisor_token: None,
-        },
+                adoption_worktree_path: None,
+                adoption_model: None,
+                supervisor_token: None,
+            },
             cleave::state::ChildState {
                 child_id: 2,
                 label: "exhausted".to_string(),
@@ -4434,10 +4583,10 @@ mod tests {
                 pid: None,
                 started_at_unix_ms: None,
                 last_activity_unix_ms: None,
-            adoption_worktree_path: None,
-            adoption_model: None,
-            supervisor_token: None,
-        },
+                adoption_worktree_path: None,
+                adoption_model: None,
+                supervisor_token: None,
+            },
             cleave::state::ChildState {
                 child_id: 3,
                 label: "pending".to_string(),
@@ -4457,10 +4606,10 @@ mod tests {
                 pid: None,
                 started_at_unix_ms: None,
                 last_activity_unix_ms: None,
-            adoption_worktree_path: None,
-            adoption_model: None,
-            supervisor_token: None,
-        },
+                adoption_worktree_path: None,
+                adoption_model: None,
+                supervisor_token: None,
+            },
         ];
 
         let (completed, failed, upstream_exhausted, unfinished) =
@@ -4569,11 +4718,12 @@ mod tests {
 
         match cli.command.unwrap() {
             Commands::Bench {
-                action: BenchAction::RunTask {
-                    prompt,
-                    usage_json,
-                    slim,
-                },
+                action:
+                    BenchAction::RunTask {
+                        prompt,
+                        usage_json,
+                        slim,
+                    },
             } => {
                 assert_eq!(prompt, "benchmark prompt");
                 assert_eq!(usage_json, PathBuf::from("usage.json"));
@@ -4610,7 +4760,10 @@ mod tests {
         let s = shared_settings.lock().unwrap();
         assert!(s.slim_mode);
         assert_eq!(s.thinking, crate::settings::ThinkingLevel::Minimal);
-        assert_eq!(s.requested_context_class, Some(crate::settings::ContextClass::Squad));
+        assert_eq!(
+            s.requested_context_class,
+            Some(crate::settings::ContextClass::Squad)
+        );
     }
 
     #[test]
@@ -4722,7 +4875,10 @@ mod tests {
         );
 
         assert_eq!(summary.turn_count, 2);
-        assert_eq!(summary.requested_model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
+        assert_eq!(
+            summary.requested_model.as_deref(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
         assert_eq!(summary.requested_provider.as_deref(), Some("anthropic"));
         assert_eq!(summary.resolved_provider.as_deref(), Some("anthropic"));
         assert_eq!(summary.input_tokens, 200);
@@ -4942,7 +5098,10 @@ mod tests {
         });
 
         let wait = tokio::time::timeout(std::time::Duration::from_millis(50), blocker).await;
-        assert!(wait.is_err(), "event task should still be blocked before forced shutdown handling");
+        assert!(
+            wait.is_err(),
+            "event task should still be blocked before forced shutdown handling"
+        );
     }
 
     #[test]

@@ -289,10 +289,7 @@ impl ArmoryFeature {
 /// we finish writing). All other I/O errors are silently dropped — if
 /// the child can't receive its arguments, that will surface as a tool
 /// error from the script's own behavior, not from this function.
-async fn write_stdin_best_effort(
-    stdin: Option<tokio::process::ChildStdin>,
-    input: &[u8],
-) {
+async fn write_stdin_best_effort(stdin: Option<tokio::process::ChildStdin>, input: &[u8]) {
     let Some(mut stdin) = stdin else {
         return;
     };

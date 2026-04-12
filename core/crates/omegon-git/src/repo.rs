@@ -239,7 +239,7 @@ impl RepoModel {
         path.starts_with("ai/")           // canonical location
             || path.starts_with("openspec/")  // legacy
             || path.starts_with("docs/")      // legacy
-            || path.starts_with(".omegon/")   // tool config
+            || path.starts_with(".omegon/") // tool config
     }
 
     /// Record a lifecycle file write (OpenSpec, design-tree).

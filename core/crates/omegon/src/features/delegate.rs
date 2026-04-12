@@ -15,12 +15,12 @@ use std::sync::{Arc, Mutex};
 pub type DelegateEventSlot = Arc<Mutex<Option<BusRequestSink>>>;
 use std::time::SystemTime;
 
+use crate::child_agent::{
+    ChildAgentRuntimeProfile, ChildAgentSpawnConfig, spawn_headless_child_agent,
+    write_child_prompt_file,
+};
 use anyhow::Context;
 use async_trait::async_trait;
-use crate::child_agent::{
-    spawn_headless_child_agent, write_child_prompt_file, ChildAgentRuntimeProfile,
-    ChildAgentSpawnConfig,
-};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -38,7 +38,6 @@ pub struct AgentSpec {
     pub description: String,
     pub is_write_agent: bool,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct DelegateProgressChild {
@@ -167,7 +166,10 @@ impl DelegateResultStore {
             };
             progress.children.push(DelegateProgressChild {
                 task_id: task.task_id.clone(),
-                label: task.agent_name.clone().unwrap_or_else(|| task.task_id.clone()),
+                label: task
+                    .agent_name
+                    .clone()
+                    .unwrap_or_else(|| task.task_id.clone()),
                 status: status.to_string(),
                 last_tool: None,
                 started_at: Some(task.started_at),
@@ -175,7 +177,7 @@ impl DelegateResultStore {
                 result_summary: task.result.as_ref().map(|r| crate::util::truncate(r, 40)),
             });
         }
-        progress.children.sort_by(|a,b| a.task_id.cmp(&b.task_id));
+        progress.children.sort_by(|a, b| a.task_id.cmp(&b.task_id));
         progress
     }
 }
@@ -263,7 +265,12 @@ impl DelegateWorkerProfile {
             ..Default::default()
         };
         runtime.enabled_tools = match self {
-            Self::Scout => vec!["read".into(), "bash".into(), "codebase_search".into(), "view".into()],
+            Self::Scout => vec![
+                "read".into(),
+                "bash".into(),
+                "codebase_search".into(),
+                "view".into(),
+            ],
             Self::Patch => vec!["read".into(), "edit".into(), "change".into(), "bash".into()],
             Self::Verify => vec!["read".into(), "bash".into()],
         };
@@ -369,8 +376,7 @@ If blocked, say the blocker plainly.\n",
                 mind,
             ),
         };
-        let (child, _pid) =
-            spawn_headless_child_agent(&child_config, &self.cwd, &prompt_path)?;
+        let (child, _pid) = spawn_headless_child_agent(&child_config, &self.cwd, &prompt_path)?;
         let output = child
             .wait_with_output()
             .await
@@ -553,7 +559,6 @@ impl DelegateFeature {
         }
     }
 }
-
 
 impl DelegateFeature {
     pub fn progress_handle(&self) -> Arc<Mutex<DelegateProgress>> {

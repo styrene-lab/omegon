@@ -24,8 +24,8 @@ use tokio::sync::{broadcast, mpsc};
 use crate::tui::dashboard::DashboardHandles;
 pub use auth::{WEB_AUTH_SECRET_NAME, WebAuthSource, WebAuthState};
 use omegon_traits::{
-    DaemonEventEnvelope, IpcHarnessSnapshot, IpcHealthSnapshot, IpcHealthState,
-    IpcMemorySnapshot, OmegonTransportSecurity,
+    DaemonEventEnvelope, IpcHarnessSnapshot, IpcHealthSnapshot, IpcHealthState, IpcMemorySnapshot,
+    OmegonTransportSecurity,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -196,11 +196,7 @@ fn project_web_instance(
         turns: 0,
         tool_calls: 0,
         compactions: 0,
-        busy: handles
-            .session
-            .lock()
-            .map(|s| s.busy)
-            .unwrap_or(false),
+        busy: handles.session.lock().map(|s| s.busy).unwrap_or(false),
         git_branch,
         git_detached,
         session_id: None,
@@ -225,7 +221,8 @@ fn project_web_instance(
     instance.control_plane.ws_url = Some(startup.ws_url.clone());
     instance.control_plane.auth_mode = Some(startup.auth_mode.clone());
     instance.control_plane.auth_source = Some(startup.auth_source.clone());
-    instance.control_plane.http_transport_security = Some(OmegonTransportSecurity::InsecureBootstrap);
+    instance.control_plane.http_transport_security =
+        Some(OmegonTransportSecurity::InsecureBootstrap);
     instance.control_plane.ws_transport_security = Some(OmegonTransportSecurity::InsecureBootstrap);
     instance
 }
@@ -411,7 +408,8 @@ pub async fn start_server_with_options(
 
 fn default_transport_warnings() -> Vec<String> {
     vec![
-        "HTTP and WebSocket control-plane transports use insecure bootstrap tokens on localhost.".into(),
+        "HTTP and WebSocket control-plane transports use insecure bootstrap tokens on localhost."
+            .into(),
     ]
 }
 
@@ -435,9 +433,15 @@ fn refresh_startup_daemon_status(state: &WebState) {
                         label: child.label.clone(),
                         status: child.status.clone(),
                         supervision_mode: child.supervision_mode.map(|mode| match mode {
-                            crate::features::cleave::ChildSupervisionMode::Attached => "attached".to_string(),
-                            crate::features::cleave::ChildSupervisionMode::RecoveredDegraded => "recovered_degraded".to_string(),
-                            crate::features::cleave::ChildSupervisionMode::Lost => "lost".to_string(),
+                            crate::features::cleave::ChildSupervisionMode::Attached => {
+                                "attached".to_string()
+                            }
+                            crate::features::cleave::ChildSupervisionMode::RecoveredDegraded => {
+                                "recovered_degraded".to_string()
+                            }
+                            crate::features::cleave::ChildSupervisionMode::Lost => {
+                                "lost".to_string()
+                            }
                         }),
                         pid: child.pid,
                         model: runtime.model.clone(),
@@ -592,12 +596,14 @@ pub(crate) async fn process_next_daemon_event(state: &WebState) -> anyhow::Resul
                     event.trigger_kind, event.source
                 ));
             }
-            let _ = state.events_tx.send(omegon_traits::AgentEvent::SystemNotification {
-                message: format!(
-                    "⚠ Daemon event ingress is degraded: unsupported trigger '{}' from {}",
-                    event.trigger_kind, event.source
-                ),
-            });
+            let _ = state
+                .events_tx
+                .send(omegon_traits::AgentEvent::SystemNotification {
+                    message: format!(
+                        "⚠ Daemon event ingress is degraded: unsupported trigger '{}' from {}",
+                        event.trigger_kind, event.source
+                    ),
+                });
         }
     }
 
@@ -712,7 +718,13 @@ mod tests {
         assert_eq!(startup.ws_url, "ws://127.0.0.1:7842/ws?token=token-123");
         assert_eq!(startup.control_plane_state, ControlPlaneState::Ready);
         assert_eq!(startup.daemon_status.queued_events, 0);
-        assert!(startup.daemon_status.transport_warnings.iter().any(|warning| warning.contains("insecure bootstrap")));
+        assert!(
+            startup
+                .daemon_status
+                .transport_warnings
+                .iter()
+                .any(|warning| warning.contains("insecure bootstrap"))
+        );
         let descriptor = project_web_instance(&state.handles, &startup);
         assert_eq!(
             descriptor.control_plane.http_transport_security,
@@ -775,13 +787,17 @@ mod tests {
             startup_info: Arc::new(Mutex::new(Some(startup))),
             ..state
         };
-        state.daemon_events.lock().unwrap().push(DaemonEventEnvelope {
-            event_id: "evt-1".into(),
-            source: "manual/test".into(),
-            trigger_kind: "prompt".into(),
-            payload: serde_json::json!({"text": "hello from queue"}),
-            caller_role: Some("admin".into()),
-        });
+        state
+            .daemon_events
+            .lock()
+            .unwrap()
+            .push(DaemonEventEnvelope {
+                event_id: "evt-1".into(),
+                source: "manual/test".into(),
+                trigger_kind: "prompt".into(),
+                payload: serde_json::json!({"text": "hello from queue"}),
+                caller_role: Some("admin".into()),
+            });
         state.daemon_status.lock().unwrap().queued_events = 1;
 
         let processed = process_next_daemon_event(&state).await.unwrap();
@@ -814,13 +830,17 @@ mod tests {
             command_tx,
             ..state
         };
-        state.daemon_events.lock().unwrap().push(DaemonEventEnvelope {
-            event_id: "evt-new-session".into(),
-            source: "manual/test".into(),
-            trigger_kind: "new-session".into(),
-            payload: serde_json::json!({}),
-            caller_role: Some("admin".into()),
-        });
+        state
+            .daemon_events
+            .lock()
+            .unwrap()
+            .push(DaemonEventEnvelope {
+                event_id: "evt-new-session".into(),
+                source: "manual/test".into(),
+                trigger_kind: "new-session".into(),
+                payload: serde_json::json!({}),
+                caller_role: Some("admin".into()),
+            });
         state.daemon_status.lock().unwrap().queued_events = 1;
 
         let processed = process_next_daemon_event(&state).await.unwrap();
@@ -847,13 +867,17 @@ mod tests {
             command_tx,
             ..state
         };
-        state.daemon_events.lock().unwrap().push(DaemonEventEnvelope {
-            event_id: "evt-shutdown".into(),
-            source: "manual/test".into(),
-            trigger_kind: "shutdown".into(),
-            payload: serde_json::json!({}),
-            caller_role: Some("admin".into()),
-        });
+        state
+            .daemon_events
+            .lock()
+            .unwrap()
+            .push(DaemonEventEnvelope {
+                event_id: "evt-shutdown".into(),
+                source: "manual/test".into(),
+                trigger_kind: "shutdown".into(),
+                payload: serde_json::json!({}),
+                caller_role: Some("admin".into()),
+            });
         state.daemon_status.lock().unwrap().queued_events = 1;
 
         let processed = process_next_daemon_event(&state).await.unwrap();
@@ -877,13 +901,17 @@ mod tests {
             command_tx,
             ..state
         };
-        state.daemon_events.lock().unwrap().push(DaemonEventEnvelope {
-            event_id: "evt-cancel-child".into(),
-            source: "manual/test".into(),
-            trigger_kind: "cancel-cleave-child".into(),
-            payload: serde_json::json!({"label": "alpha"}),
-            caller_role: Some("admin".into()),
-        });
+        state
+            .daemon_events
+            .lock()
+            .unwrap()
+            .push(DaemonEventEnvelope {
+                event_id: "evt-cancel-child".into(),
+                source: "manual/test".into(),
+                trigger_kind: "cancel-cleave-child".into(),
+                payload: serde_json::json!({"label": "alpha"}),
+                caller_role: Some("admin".into()),
+            });
         state.daemon_status.lock().unwrap().queued_events = 1;
 
         let processed = process_next_daemon_event(&state).await.unwrap();
@@ -901,39 +929,43 @@ mod tests {
         let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
         let state = WebState::with_auth_state(
             DashboardHandles {
-                cleave: Some(Arc::new(Mutex::new(crate::features::cleave::CleaveProgress {
-                    active: true,
-                    run_id: "run-1".into(),
-                    total_children: 1,
-                    completed: 0,
-                    failed: 0,
-                    children: vec![crate::features::cleave::ChildProgress {
-                        label: "child-1".into(),
-                        status: "running".into(),
-                        supervision_mode: Some(crate::features::cleave::ChildSupervisionMode::RecoveredDegraded),
-                        duration_secs: None,
-                        pid: Some(4242),
-                        last_tool: None,
-                        last_turn: None,
-                        started_at: None,
-                        last_activity_at: None,
-                        tokens_in: 0,
-                        tokens_out: 0,
-                        runtime: Some(crate::features::cleave::ChildRuntimeSummary {
-                            model: Some("anthropic:claude-sonnet-4-6".into()),
-                            thinking_level: Some("high".into()),
-                            context_class: Some("legion".into()),
-                            enabled_tools: vec!["read".into()],
-                            disabled_tools: vec!["bash".into()],
-                            skills: vec!["security".into()],
-                            enabled_extensions: vec!["alpha".into()],
-                            disabled_extensions: vec!["beta".into()],
-                            preloaded_files: vec!["docs/runtime-preload.md".into()],
-                        }),
-                    }],
-                    total_tokens_in: 0,
-                    total_tokens_out: 0,
-                }))),
+                cleave: Some(Arc::new(Mutex::new(
+                    crate::features::cleave::CleaveProgress {
+                        active: true,
+                        run_id: "run-1".into(),
+                        total_children: 1,
+                        completed: 0,
+                        failed: 0,
+                        children: vec![crate::features::cleave::ChildProgress {
+                            label: "child-1".into(),
+                            status: "running".into(),
+                            supervision_mode: Some(
+                                crate::features::cleave::ChildSupervisionMode::RecoveredDegraded,
+                            ),
+                            duration_secs: None,
+                            pid: Some(4242),
+                            last_tool: None,
+                            last_turn: None,
+                            started_at: None,
+                            last_activity_at: None,
+                            tokens_in: 0,
+                            tokens_out: 0,
+                            runtime: Some(crate::features::cleave::ChildRuntimeSummary {
+                                model: Some("anthropic:claude-sonnet-4-6".into()),
+                                thinking_level: Some("high".into()),
+                                context_class: Some("legion".into()),
+                                enabled_tools: vec!["read".into()],
+                                disabled_tools: vec!["bash".into()],
+                                skills: vec!["security".into()],
+                                enabled_extensions: vec!["alpha".into()],
+                                disabled_extensions: vec!["beta".into()],
+                                preloaded_files: vec!["docs/runtime-preload.md".into()],
+                            }),
+                        }],
+                        total_tokens_in: 0,
+                        total_tokens_out: 0,
+                    },
+                ))),
                 ..DashboardHandles::default()
             },
             events_tx,
@@ -961,13 +993,17 @@ mod tests {
             ..state
         };
         refresh_startup_daemon_status(&state);
-        state.daemon_events.lock().unwrap().push(DaemonEventEnvelope {
-            event_id: "evt-rt-1".into(),
-            source: "manual/test".into(),
-            trigger_kind: "prompt".into(),
-            payload: serde_json::json!({"text": "runtime check"}),
-            caller_role: Some("admin".into()),
-        });
+        state
+            .daemon_events
+            .lock()
+            .unwrap()
+            .push(DaemonEventEnvelope {
+                event_id: "evt-rt-1".into(),
+                source: "manual/test".into(),
+                trigger_kind: "prompt".into(),
+                payload: serde_json::json!({"text": "runtime check"}),
+                caller_role: Some("admin".into()),
+            });
         state.daemon_status.lock().unwrap().queued_events = 1;
 
         let processed = process_next_daemon_event(&state).await.unwrap();
@@ -991,7 +1027,10 @@ mod tests {
         let child = &startup_status.active_child_runtimes[0];
         assert_eq!(child.label, "child-1");
         assert_eq!(child.pid, Some(4242));
-        assert_eq!(child.supervision_mode.as_deref(), Some("recovered_degraded"));
+        assert_eq!(
+            child.supervision_mode.as_deref(),
+            Some("recovered_degraded")
+        );
         assert_eq!(child.model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
         assert_eq!(child.thinking_level.as_deref(), Some("high"));
         assert_eq!(child.context_class.as_deref(), Some("legion"));
@@ -1004,20 +1043,29 @@ mod tests {
     async fn daemon_event_worker_marks_unsupported_trigger_as_degraded() {
         let (events_tx, mut events_rx) = tokio::sync::broadcast::channel(4);
         let state = WebState::new(DashboardHandles::default(), events_tx);
-        state.daemon_events.lock().unwrap().push(DaemonEventEnvelope {
-            event_id: "evt-2".into(),
-            source: "manual/test".into(),
-            trigger_kind: "mystery".into(),
-            payload: serde_json::json!({"ignored": true}),
-            caller_role: Some("admin".into()),
-        });
+        state
+            .daemon_events
+            .lock()
+            .unwrap()
+            .push(DaemonEventEnvelope {
+                event_id: "evt-2".into(),
+                source: "manual/test".into(),
+                trigger_kind: "mystery".into(),
+                payload: serde_json::json!({"ignored": true}),
+                caller_role: Some("admin".into()),
+            });
         state.daemon_status.lock().unwrap().queued_events = 1;
 
         let processed = process_next_daemon_event(&state).await.unwrap();
         assert!(processed);
         let status = state.daemon_status.lock().unwrap().clone();
         assert_eq!(status.queued_events, 0);
-        assert!(status.transport_warnings.iter().any(|warning| warning.contains("Unsupported daemon event trigger 'mystery'")));
+        assert!(
+            status
+                .transport_warnings
+                .iter()
+                .any(|warning| warning.contains("Unsupported daemon event trigger 'mystery'"))
+        );
         let event = events_rx.recv().await.unwrap();
         match event {
             omegon_traits::AgentEvent::SystemNotification { message } => {

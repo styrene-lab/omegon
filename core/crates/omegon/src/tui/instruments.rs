@@ -242,14 +242,14 @@ fn intensity_color(intensity: f64) -> Color {
 pub(crate) fn tool_short_name(name: &str) -> String {
     let (glyph, label) = match name {
         // ── Core file ops ──
-        "bash" => (">", "sh"),                    // shell prompt — was ⌘
-        "read" | "Read" => ("◇", "read"),         // open diamond = readonly
-        "write" | "Write" => ("◆", "write"),      // filled = mutating
-        "edit" | "Edit" => ("✎", "edit"),         // U+270E (NOT U+270F which is emoji)
+        "bash" => (">", "sh"),               // shell prompt — was ⌘
+        "read" | "Read" => ("◇", "read"),    // open diamond = readonly
+        "write" | "Write" => ("◆", "write"), // filled = mutating
+        "edit" | "Edit" => ("✎", "edit"),    // U+270E (NOT U+270F which is emoji)
         "view" => ("◈", "view"),
         // ── Git / speculate ──
-        "commit" => ("⊕", "commit"),              // add to history
-        "speculate_start" => ("⎇", "spec∘"),      // alternative key = branch — was ⊘
+        "commit" => ("⊕", "commit"),         // add to history
+        "speculate_start" => ("⎇", "spec∘"), // alternative key = branch — was ⊘
         "speculate_check" => ("⎇", "spec?"),
         "speculate_commit" => ("⎇", "spec✓"),
         "speculate_rollback" => ("⎇", "spec✗"),
@@ -271,13 +271,13 @@ pub(crate) fn tool_short_name(name: &str) -> String {
         "design_tree_update" => ("⟁", "d.tree↑"), // nested triangle — was ▲ (emoji)
         "openspec_manage" => ("◎", "opsx"),
         // ── Cleave / decomposition ──
-        "cleave_assess" => ("⊳", "assess"),       // math triangle — was ⟁ (now design_tree_update)
+        "cleave_assess" => ("⊳", "assess"), // math triangle — was ⟁ (now design_tree_update)
         "cleave_run" => ("⊳", "cleave"),
         "delegate" => ("⇉", "deleg"),
         "delegate_result" => ("⇉", "d.res"),
         "delegate_status" => ("⇉", "d.stat"),
         // ── Web / render ──
-        "web_search" => ("⌖", "search"),          // position indicator — was ⊕ (collided with commit)
+        "web_search" => ("⌖", "search"), // position indicator — was ⊕ (collided with commit)
         "codebase_search" => ("⌕", "cbase"),
         "codebase_index" => ("⌕", "cidx"),
         "render_diagram" => ("⬡", "diag"),
@@ -291,9 +291,9 @@ pub(crate) fn tool_short_name(name: &str) -> String {
         "set_thinking_level" => ("⌥", "think"),
         "switch_to_offline_driver" => ("⌥", "offln"),
         "manage_tools" => ("⌥", "tools"),
-        "whoami" => ("⊙", "whoami"),              // self/identity — was ⚙
-        "chronos" => ("◷", "chrono"),             // clock-quadrant — was ⚙
-        "change" => ("Δ", "change"),              // delta — was ⚙
+        "whoami" => ("⊙", "whoami"),  // self/identity — was ⚙
+        "chronos" => ("◷", "chrono"), // clock-quadrant — was ⚙
+        "change" => ("Δ", "change"),  // delta — was ⚙
         // ── Auth / persona ── (⚿ is in the emoji set; using ※)
         "auth_status" => ("※", "auth"),
         "harness_settings" => ("※", "hrnss"),
@@ -687,8 +687,7 @@ impl InstrumentPanel {
         let tool_schema = composition.tool_schema_tokens as f64;
         let tool_history = composition.tool_history_tokens as f64;
         let thinking = composition.thinking_tokens as f64;
-        let used_reported =
-            conversation + system + memory + tool_schema + tool_history + thinking;
+        let used_reported = conversation + system + memory + tool_schema + tool_history + thinking;
         let scale = if used_reported > 0.0 {
             used_target / used_reported
         } else {
@@ -1180,15 +1179,24 @@ impl InstrumentPanel {
                 }
                 ActivityMode::ToolChurn => {
                     let c = if activity_phase > 0.66 { '#' } else { '%' };
-                    (c, Self::activity_color(ActivityMode::ToolChurn, activity_phase))
+                    (
+                        c,
+                        Self::activity_color(ActivityMode::ToolChurn, activity_phase),
+                    )
                 }
                 ActivityMode::Waiting => {
                     let c = if activity_phase > 0.66 { '~' } else { '-' };
-                    (c, Self::activity_color(ActivityMode::Waiting, activity_phase))
+                    (
+                        c,
+                        Self::activity_color(ActivityMode::Waiting, activity_phase),
+                    )
                 }
                 ActivityMode::Thinking => {
                     let c = if activity_phase > 0.72 { '^' } else { ':' };
-                    (c, Self::activity_color(ActivityMode::Thinking, activity_phase))
+                    (
+                        c,
+                        Self::activity_color(ActivityMode::Thinking, activity_phase),
+                    )
                 }
             };
 
@@ -1539,7 +1547,11 @@ impl InstrumentPanel {
         t: &dyn Theme,
         dp: &DelegateProgress,
     ) {
-        let title_text = format!(" ↗ delegate {}/{} ", dp.completed + dp.failed, dp.children.len());
+        let title_text = format!(
+            " ↗ delegate {}/{} ",
+            dp.completed + dp.failed,
+            dp.children.len()
+        );
         let title_color = if dp.failed > 0 {
             Color::Rgb(224, 72, 72)
         } else if dp.active {
@@ -1552,7 +1564,10 @@ impl InstrumentPanel {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border).bg(t.footer_bg()))
             .border_type(ratatui::widgets::BorderType::Plain)
-            .title(Span::styled(title_text, Style::default().fg(title_color).bg(t.footer_bg())))
+            .title(Span::styled(
+                title_text,
+                Style::default().fg(title_color).bg(t.footer_bg()),
+            ))
             .style(Style::default().bg(t.footer_bg()));
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -1567,7 +1582,9 @@ impl InstrumentPanel {
         let activity_w: usize = w.saturating_sub(2 + label_w + 1 + elapsed_w);
         let child_rows = (inner.height as usize).saturating_sub(1);
         for (row, child) in dp.children.iter().enumerate() {
-            if row >= child_rows { break; }
+            if row >= child_rows {
+                break;
+            }
             let y = inner.y + row as u16;
             clear_row(y, inner.x, inner.right(), buf, panel_bg(t));
             let (ind_ch, ind_color) = match child.status.as_str() {
@@ -1580,35 +1597,75 @@ impl InstrumentPanel {
             x = render_str_colored(ind_ch, x, y, inner.right(), panel_bg(t), buf, |_| ind_color);
             let label_color = ind_color;
             let display_label: String = child.label.chars().take(label_w).collect();
-            x = render_str_colored(&display_label, x, y, inner.right(), panel_bg(t), buf, |_| label_color);
+            x = render_str_colored(
+                &display_label,
+                x,
+                y,
+                inner.right(),
+                panel_bg(t),
+                buf,
+                |_| label_color,
+            );
             while x < inner.x + 2 + label_w as u16 {
-                if x >= inner.right() { break; }
-                if let Some(cell) = buf.cell_mut(Position::new(x, y)) { cell.set_char(' '); cell.set_bg(panel_bg(t)); }
+                if x >= inner.right() {
+                    break;
+                }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(' ');
+                    cell.set_bg(panel_bg(t));
+                }
                 x += 1;
             }
-            let activity = child.result_summary.clone().or_else(|| child.last_tool.clone()).unwrap_or_default();
+            let activity = child
+                .result_summary
+                .clone()
+                .or_else(|| child.last_tool.clone())
+                .unwrap_or_default();
             let act_color = Color::Rgb(36, 80, 96);
             let sanitized = strip_terminal_control(&activity);
             let act_display = if UnicodeWidthStr::width(sanitized.as_str()) > activity_w {
                 truncate_display_width(&sanitized, activity_w)
-            } else { sanitized };
-            x = render_str_colored(&act_display, x, y, inner.right(), panel_bg(t), buf, |_| act_color);
+            } else {
+                sanitized
+            };
+            x = render_str_colored(&act_display, x, y, inner.right(), panel_bg(t), buf, |_| {
+                act_color
+            });
             let act_end_x = inner.x + 2 + label_w as u16 + activity_w as u16;
             while x < act_end_x {
-                if x >= inner.right() { break; }
-                if let Some(cell) = buf.cell_mut(Position::new(x, y)) { cell.set_char(' '); cell.set_bg(panel_bg(t)); }
+                if x >= inner.right() {
+                    break;
+                }
+                if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                    cell.set_char(' ');
+                    cell.set_bg(panel_bg(t));
+                }
                 x += 1;
             }
-            let elapsed_secs = child.started_at.and_then(|s| s.elapsed().ok()).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+            let elapsed_secs = child
+                .started_at
+                .and_then(|s| s.elapsed().ok())
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0);
             let elapsed_str = Self::format_elapsed(elapsed_secs);
             let elapsed_color = Color::Rgb(36, 60, 76);
-            let _ = render_str_colored(&elapsed_str, x, y, inner.right(), panel_bg(t), buf, |_| elapsed_color);
+            let _ = render_str_colored(&elapsed_str, x, y, inner.right(), panel_bg(t), buf, |_| {
+                elapsed_color
+            });
         }
         let summary_y = inner.y + child_rows as u16;
         if summary_y < inner.bottom() {
             clear_row(summary_y, inner.x, inner.right(), buf, panel_bg(t));
             let summary = format!("{} run {}✓ {}✗", dp.running, dp.completed, dp.failed);
-            let _ = render_str_colored(&summary, inner.x, summary_y, inner.right(), panel_bg(t), buf, |_| Color::Rgb(36, 60, 76));
+            let _ = render_str_colored(
+                &summary,
+                inner.x,
+                summary_y,
+                inner.right(),
+                panel_bg(t),
+                buf,
+                |_| Color::Rgb(36, 60, 76),
+            );
         }
     }
 
@@ -1983,12 +2040,20 @@ mod tests {
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         let t = crate::tui::theme::Alpharius;
 
-        terminal.draw(|f| panel.render_tools_panel(area, f, &t)).unwrap();
+        terminal
+            .draw(|f| panel.render_tools_panel(area, f, &t))
+            .unwrap();
 
         let buf = terminal.backend().buffer().clone();
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();
-        assert!(text.contains("↺") || text.contains("⚡"), "expected non-red reconciled indicator: {text}");
-        assert!(!text.contains("✗ alpha"), "salvaged merge should not render as hard failure: {text}");
+        assert!(
+            text.contains("↺") || text.contains("⚡"),
+            "expected non-red reconciled indicator: {text}"
+        );
+        assert!(
+            !text.contains("✗ alpha"),
+            "salvaged merge should not render as hard failure: {text}"
+        );
     }
 
     #[test]
@@ -2227,33 +2292,64 @@ mod tests {
         // emoji-set codepoints we deliberately avoid.
         let known = [
             // core
-            "bash", "read", "write", "edit", "view",
+            "bash",
+            "read",
+            "write",
+            "edit",
+            "view",
             // git/speculate
-            "commit", "speculate_start", "speculate_check",
-            "speculate_commit", "speculate_rollback",
+            "commit",
+            "speculate_start",
+            "speculate_check",
+            "speculate_commit",
+            "speculate_rollback",
             // memory
-            "memory_store", "memory_recall", "memory_query",
-            "memory_archive", "memory_supersede", "memory_connect",
-            "memory_focus", "memory_release", "memory_episodes",
-            "memory_compact", "memory_search_archive",
+            "memory_store",
+            "memory_recall",
+            "memory_query",
+            "memory_archive",
+            "memory_supersede",
+            "memory_connect",
+            "memory_focus",
+            "memory_release",
+            "memory_episodes",
+            "memory_compact",
+            "memory_search_archive",
             "memory_ingest_lifecycle",
             // design + lifecycle
-            "design_tree", "design_tree_update", "openspec_manage",
+            "design_tree",
+            "design_tree_update",
+            "openspec_manage",
             // cleave
-            "cleave_assess", "cleave_run", "delegate",
-            "delegate_result", "delegate_status",
+            "cleave_assess",
+            "cleave_run",
+            "delegate",
+            "delegate_result",
+            "delegate_status",
             // web/render
-            "web_search", "codebase_search", "codebase_index",
-            "render_diagram", "generate_image_local",
+            "web_search",
+            "codebase_search",
+            "codebase_index",
+            "render_diagram",
+            "generate_image_local",
             // local inference
-            "ask_local_model", "list_local_models", "manage_ollama",
+            "ask_local_model",
+            "list_local_models",
+            "manage_ollama",
             // settings/meta
-            "set_model_tier", "set_thinking_level",
-            "switch_to_offline_driver", "manage_tools",
-            "whoami", "chronos", "change",
+            "set_model_tier",
+            "set_thinking_level",
+            "switch_to_offline_driver",
+            "manage_tools",
+            "whoami",
+            "chronos",
+            "change",
             // auth/persona
-            "auth_status", "harness_settings", "switch_persona",
-            "switch_tone", "list_personas",
+            "auth_status",
+            "harness_settings",
+            "switch_persona",
+            "switch_tone",
+            "list_personas",
         ];
         for name in known {
             let result = tool_short_name(name);
@@ -2791,7 +2887,16 @@ mod tests {
         let mut panel = InstrumentPanel::default();
         panel.note_thinking_activity();
         panel.tool_started("bash");
-        panel.update_telemetry(40.0, 200_000, Some("bash"), false, "high", None, true, 0.016);
+        panel.update_telemetry(
+            40.0,
+            200_000,
+            Some("bash"),
+            false,
+            "high",
+            None,
+            true,
+            0.016,
+        );
         assert_eq!(panel.activity_mode(), ActivityMode::ToolChurn);
     }
 
@@ -2807,14 +2912,23 @@ mod tests {
         let schema = InstrumentPanel::activity_color(ActivityMode::ToolChurn, 0.9);
         let history = InstrumentPanel::activity_color(ActivityMode::ToolChurn, 0.1);
         assert_eq!(schema, InstrumentPanel::band_color(ContextBand::ToolSchema));
-        assert_eq!(history, InstrumentPanel::band_color(ContextBand::ToolHistory));
+        assert_eq!(
+            history,
+            InstrumentPanel::band_color(ContextBand::ToolHistory)
+        );
     }
 
     #[test]
     fn waiting_activity_stays_distinct_from_tool_and_thinking_bands() {
         let waiting = InstrumentPanel::activity_color(ActivityMode::Waiting, 0.8);
-        assert_ne!(waiting, InstrumentPanel::band_color(ContextBand::ToolSchema));
-        assert_ne!(waiting, InstrumentPanel::band_color(ContextBand::ToolHistory));
+        assert_ne!(
+            waiting,
+            InstrumentPanel::band_color(ContextBand::ToolSchema)
+        );
+        assert_ne!(
+            waiting,
+            InstrumentPanel::band_color(ContextBand::ToolHistory)
+        );
         assert_ne!(waiting, InstrumentPanel::band_color(ContextBand::Thinking));
     }
 
@@ -2869,9 +2983,18 @@ mod tests {
             }
             text.push('\n');
         }
-        assert!(text.contains("change"), "tools panel should render its own content: {text}");
-        assert!(!text.contains("egon"), "inference content leaked into tools panel: {text}");
-        assert!(!text.contains("⠊"), "braille wave glyphs leaked into tools panel: {text}");
+        assert!(
+            text.contains("change"),
+            "tools panel should render its own content: {text}"
+        );
+        assert!(
+            !text.contains("egon"),
+            "inference content leaked into tools panel: {text}"
+        );
+        assert!(
+            !text.contains("⠊"),
+            "braille wave glyphs leaked into tools panel: {text}"
+        );
     }
 
     fn fact_count_changes_pluck_project_wave() {
@@ -3033,9 +3156,7 @@ mod tests {
             "activity row should be glyph-only, not centered text: {activity_row}"
         );
         assert!(
-            activity_row
-                .chars()
-                .any(|ch| matches!(ch, ':' | '^')),
+            activity_row.chars().any(|ch| matches!(ch, ':' | '^')),
             "thinking activity row should use sane ASCII support glyphs: {activity_row}"
         );
         assert!(
@@ -3233,7 +3354,16 @@ mod tests {
             },
             200_000,
         );
-        panel.update_telemetry(68.0, 200_000, Some("read"), false, "high", None, true, 0.016);
+        panel.update_telemetry(
+            68.0,
+            200_000,
+            Some("read"),
+            false,
+            "high",
+            None,
+            true,
+            0.016,
+        );
 
         let breakdown = panel.context_breakdown();
         let tool_schema = breakdown
@@ -3249,9 +3379,18 @@ mod tests {
             .find_map(|(band, frac)| (*band == ContextBand::Conversation).then_some(*frac))
             .unwrap_or(0.0);
 
-        assert!(tool_schema > 0.0, "active tool definitions should reserve some context surface");
-        assert!(tool_history > 0.0, "tool history should reserve some context surface");
-        assert!(conversation > 0.0, "conversation should still retain its own band");
+        assert!(
+            tool_schema > 0.0,
+            "active tool definitions should reserve some context surface"
+        );
+        assert!(
+            tool_history > 0.0,
+            "tool history should reserve some context surface"
+        );
+        assert!(
+            conversation > 0.0,
+            "conversation should still retain its own band"
+        );
     }
 }
 

@@ -245,10 +245,12 @@ impl Editor {
     }
 
     fn set_projected_cursor(&mut self, projected_idx: usize) {
-        self.textarea.move_cursor(ratatui_textarea::CursorMove::Head);
+        self.textarea
+            .move_cursor(ratatui_textarea::CursorMove::Head);
         while self.textarea.cursor().0 > 0 {
             self.textarea.move_cursor(ratatui_textarea::CursorMove::Up);
-            self.textarea.move_cursor(ratatui_textarea::CursorMove::Head);
+            self.textarea
+                .move_cursor(ratatui_textarea::CursorMove::Head);
         }
         for _ in 0..projected_idx {
             self.textarea
@@ -370,7 +372,9 @@ impl Editor {
         if !should_expand {
             return None;
         }
-        let Some(InlineToken::CollapsedPaste { text }) = self.inline_tokens.get(span.token_ord).cloned() else {
+        let Some(InlineToken::CollapsedPaste { text }) =
+            self.inline_tokens.get(span.token_ord).cloned()
+        else {
             return None;
         };
 
@@ -379,7 +383,11 @@ impl Editor {
         self.model_text.replace_range(start..end, &text);
         self.inline_tokens.remove(span.token_ord);
         let expanded_projection_len = self.projection().text.chars().count();
-        let cursor = if is_sole_token { 0 } else { span.start.min(expanded_projection_len) };
+        let cursor = if is_sole_token {
+            0
+        } else {
+            span.start.min(expanded_projection_len)
+        };
         self.sync_textarea_from_model(cursor);
         Some(cursor)
     }
@@ -446,7 +454,6 @@ impl Editor {
         self.inline_tokens = new_tokens;
         self.sync_textarea_from_model(start);
     }
-
 
     /// Apply theme styles to the textarea.
     pub fn apply_theme(&mut self, t: &dyn Theme) {
@@ -766,10 +773,17 @@ impl Editor {
         let model_idx = self.projected_cursor_to_model_insert_idx(projected_idx);
         let byte_idx = Self::char_to_byte_idx(&self.model_text, model_idx);
         if Self::should_collapse_paste(&normalized) {
-            self.model_text.insert(byte_idx, Self::INLINE_TOKEN_SENTINEL);
-            let ord = self.token_ord_before_model_idx(model_idx + 1).saturating_sub(1);
-            self.inline_tokens
-                .insert(ord, InlineToken::CollapsedPaste { text: normalized.clone() });
+            self.model_text
+                .insert(byte_idx, Self::INLINE_TOKEN_SENTINEL);
+            let ord = self
+                .token_ord_before_model_idx(model_idx + 1)
+                .saturating_sub(1);
+            self.inline_tokens.insert(
+                ord,
+                InlineToken::CollapsedPaste {
+                    text: normalized.clone(),
+                },
+            );
             let label_len = self
                 .inline_tokens
                 .get(ord)
@@ -808,9 +822,13 @@ impl Editor {
         let projected_idx = self.projected_cursor();
         let model_idx = self.projected_cursor_to_model_insert_idx(projected_idx);
         let byte_idx = Self::char_to_byte_idx(&self.model_text, model_idx);
-        self.model_text.insert(byte_idx, Self::INLINE_TOKEN_SENTINEL);
-        let ord = self.token_ord_before_model_idx(model_idx + 1).saturating_sub(1);
-        self.inline_tokens.insert(ord, InlineToken::Attachment(path));
+        self.model_text
+            .insert(byte_idx, Self::INLINE_TOKEN_SENTINEL);
+        let ord = self
+            .token_ord_before_model_idx(model_idx + 1)
+            .saturating_sub(1);
+        self.inline_tokens
+            .insert(ord, InlineToken::Attachment(path));
         let label_len = self
             .inline_tokens
             .get(ord)

@@ -185,7 +185,8 @@ impl FooterData {
         let label_width = 7usize;
         let value_width = inner
             .width
-            .saturating_sub((label_width as u16).saturating_add(2)) as usize;
+            .saturating_sub((label_width as u16).saturating_add(2))
+            as usize;
 
         let push_row = |lines: &mut Vec<Line<'static>>,
                         label: &str,
@@ -653,7 +654,11 @@ impl FooterData {
             _ => t.dim(),
         };
         let context_badge = if self.context_class != self.actual_context_class {
-            format!("{}→{}", self.context_class.short(), self.actual_context_class.short())
+            format!(
+                "{}→{}",
+                self.context_class.short(),
+                self.actual_context_class.short()
+            )
         } else {
             self.actual_context_class.short().to_string()
         };
@@ -665,10 +670,7 @@ impl FooterData {
                 Style::default().fg(t.fg()).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" · ", Style::default().fg(t.border_dim())),
-            Span::styled(
-                context_badge,
-                Style::default().fg(ctx_class_color),
-            ),
+            Span::styled(context_badge, Style::default().fg(ctx_class_color)),
             Span::styled(
                 format!(" {:.0}%", self.context_percent.min(100.0)),
                 Style::default().fg(widgets::percent_color(self.context_percent, t)),
@@ -1014,13 +1016,23 @@ fn version_spans(update_available: Option<&str>, t: &dyn Theme) -> Vec<Span<'sta
     let (base, suffix) = current.split_once("-").unwrap_or((current, ""));
     let mut spans = vec![Span::styled(
         format!("v{base}"),
-        Style::default().fg(t.accent_bright()).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(t.accent_bright())
+            .add_modifier(Modifier::BOLD),
     )];
     if !suffix.is_empty() {
-        spans.push(Span::styled(format!("-{suffix}"), Style::default().fg(t.dim())));
+        spans.push(Span::styled(
+            format!("-{suffix}"),
+            Style::default().fg(t.dim()),
+        ));
     }
     if update_available.is_some() {
-        spans.push(Span::styled("*", Style::default().fg(t.warning()).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            "*",
+            Style::default()
+                .fg(t.warning())
+                .add_modifier(Modifier::BOLD),
+        ));
         spans.push(Span::styled(" - /update", Style::default().fg(t.dim())));
     }
     spans
@@ -1322,17 +1334,16 @@ mod tests {
 
     #[test]
     fn provider_telemetry_line_formats_unified_usage() {
-        let text = format_provider_telemetry_compact(Some(
-            &omegon_traits::ProviderTelemetrySnapshot {
+        let text =
+            format_provider_telemetry_compact(Some(&omegon_traits::ProviderTelemetrySnapshot {
                 provider: "anthropic".into(),
                 source: "response_headers".into(),
                 unified_5h_utilization_pct: Some(42.0),
                 unified_7d_utilization_pct: Some(64.0),
                 retry_after_secs: Some(17),
                 ..Default::default()
-            },
-        ))
-        .expect("telemetry line");
+            }))
+            .expect("telemetry line");
         assert!(text.contains("5h 42%"), "got {text}");
         assert!(text.contains("7d 64%"), "got {text}");
         assert!(text.contains("retry 17s"), "got {text}");
@@ -1341,8 +1352,8 @@ mod tests {
 
     #[test]
     fn provider_telemetry_line_formats_codex_headers() {
-        let text = format_provider_telemetry_compact(Some(
-            &omegon_traits::ProviderTelemetrySnapshot {
+        let text =
+            format_provider_telemetry_compact(Some(&omegon_traits::ProviderTelemetrySnapshot {
                 provider: "openai-codex".into(),
                 source: "response_headers".into(),
                 codex_active_limit: Some("codex".into()),
@@ -1353,9 +1364,8 @@ mod tests {
                 codex_credits_unlimited: Some(false),
                 codex_limit_name: Some("GPT-5.3-Codex-Spark".into()),
                 ..Default::default()
-            },
-        ))
-        .expect("telemetry line");
+            }))
+            .expect("telemetry line");
         assert!(!text.contains("GPT-5.3-Codex-Spark"), "got {text}");
         assert!(text.contains("codex 100% left"), "got {text}");
         assert!(!text.contains("resets 3h47m"), "got {text}");
@@ -1384,7 +1394,10 @@ mod tests {
             .chars()
             .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
             .sum();
-        assert!(rendered_width <= 10, "got {truncated:?} width {rendered_width}");
+        assert!(
+            rendered_width <= 10,
+            "got {truncated:?} width {rendered_width}"
+        );
         assert!(truncated.ends_with('…'), "got {truncated:?}");
     }
 
@@ -1463,7 +1476,10 @@ mod tests {
         assert_eq!(stable, format!("v{}", env!("CARGO_PKG_VERSION")));
 
         let upgrade = format_version_text(Some("9.9.9"));
-        assert_eq!(upgrade, format!("v{}* - /update", env!("CARGO_PKG_VERSION")));
+        assert_eq!(
+            upgrade,
+            format!("v{}* - /update", env!("CARGO_PKG_VERSION"))
+        );
     }
 
     #[test]

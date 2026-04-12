@@ -32,8 +32,8 @@ fn main() {
         "--untracked-files=no",
         "--ignored=no",
     ])
-        .map(|s| if s.is_empty() { "" } else { "-dirty" })
-        .unwrap_or("");
+    .map(|s| if s.is_empty() { "" } else { "-dirty" })
+    .unwrap_or("");
 
     // Commit date (not author date — survives rebase)
     let date =

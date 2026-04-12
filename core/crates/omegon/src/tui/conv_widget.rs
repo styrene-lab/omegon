@@ -584,7 +584,8 @@ mod tests {
                 },
             },
         ];
-        let widget = ConversationWidget::new(&segments, &Alpharius).with_mode(SegmentRenderMode::Slim);
+        let widget =
+            ConversationWidget::new(&segments, &Alpharius).with_mode(SegmentRenderMode::Slim);
         let area = Rect::new(0, 0, 80, 12);
         let mut buf = Buffer::empty(area);
         let mut state = ConvState::new();
@@ -597,8 +598,13 @@ mod tests {
             }
             text.push('\n');
         }
-        assert!(!text.contains("╭"), "slim mode should avoid rounded card chrome: {text}");
-        assert!(!text.contains("│"), "slim mode should avoid left-rule chrome too: {text}");
+        assert!(
+            !text.contains("╭"),
+            "slim mode should avoid rounded card chrome: {text}"
+        );
+        assert!(
+            !text.contains("│"),
+            "slim mode should avoid left-rule chrome too: {text}"
+        );
     }
-
 }

@@ -65,9 +65,21 @@ pub fn build_base_prompt_with_breakdown(
         ),
         prompt_section("core_directives", "Core Directives", &lex_imperialis),
         prompt_section("project_lifecycle", "Project Lifecycle", &lifecycle_context),
-        prompt_section("operator_directives", "Operator Directives", &global_directives),
-        prompt_section("project_directives", "Project Directives", &project_directives),
-        prompt_section("project_conventions", "Project Conventions", &project_conventions),
+        prompt_section(
+            "operator_directives",
+            "Operator Directives",
+            &global_directives,
+        ),
+        prompt_section(
+            "project_directives",
+            "Project Directives",
+            &project_directives,
+        ),
+        prompt_section(
+            "project_conventions",
+            "Project Conventions",
+            &project_conventions,
+        ),
         prompt_section(
             "runtime_context",
             "Runtime Context",
@@ -78,7 +90,10 @@ pub fn build_base_prompt_with_breakdown(
         ),
     ];
 
-    let prompt: String = sections.iter().map(|section| section.content.as_str()).collect();
+    let prompt: String = sections
+        .iter()
+        .map(|section| section.content.as_str())
+        .collect();
     let composition = PromptComposition {
         sections: sections
             .iter()
@@ -93,7 +108,10 @@ pub fn build_base_prompt_with_breakdown(
         total_estimated_tokens: estimate_chars_to_tokens(prompt.len()),
     };
 
-    PromptAssembly { prompt, composition }
+    PromptAssembly {
+        prompt,
+        composition,
+    }
 }
 
 /// Rich tool guidelines — how to use each tool well, not just what it does.
@@ -512,7 +530,11 @@ mod tests {
         assert!(section_keys.contains(&"core_directives"));
         assert!(assembly.prompt.contains("OM coding mode"));
         assert!(assembly.prompt.contains("lean terminal coding loop"));
-        assert!(!assembly.prompt.contains("recommend escalating to full Omegon"));
+        assert!(
+            !assembly
+                .prompt
+                .contains("recommend escalating to full Omegon")
+        );
         assert!(assembly.prompt.contains("Lex Imperialis"));
     }
 

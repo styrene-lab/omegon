@@ -73,16 +73,11 @@ impl Feature for ClipboardFeature {
                              enable automatic cleanup."
                                 .to_string()
                         } else {
-                            format!(
-                                "Clipboard prune: retention = {hours}h\n{}",
-                                stats.summary()
-                            )
+                            format!("Clipboard prune: retention = {hours}h\n{}", stats.summary())
                         };
                         CommandResult::Display(header)
                     }
-                    Err(e) => CommandResult::Display(format!(
-                        "Clipboard prune failed: {e}"
-                    )),
+                    Err(e) => CommandResult::Display(format!("Clipboard prune failed: {e}")),
                 }
             }
             other => CommandResult::Display(format!(

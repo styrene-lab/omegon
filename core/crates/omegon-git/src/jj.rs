@@ -188,8 +188,16 @@ pub fn sync_to_git_main(repo_path: &Path) -> Result<()> {
         .unwrap_or_default();
 
     match classify_sync_action(
-        if jj_parent.is_empty() { None } else { Some(jj_parent.as_str()) },
-        if main_sha.is_empty() { None } else { Some(main_sha.as_str()) },
+        if jj_parent.is_empty() {
+            None
+        } else {
+            Some(jj_parent.as_str())
+        },
+        if main_sha.is_empty() {
+            None
+        } else {
+            Some(main_sha.as_str())
+        },
         |ancestor, descendant| {
             std::process::Command::new("git")
                 .args(["merge-base", "--is-ancestor", ancestor, descendant])
@@ -332,8 +340,14 @@ mod tests {
             classify_sync_action(Some("same"), Some("same"), |_a, _d| false),
             GitSyncAction::Noop
         );
-        assert_eq!(classify_sync_action(None, Some("main"), |_a, _d| true), GitSyncAction::Noop);
-        assert_eq!(classify_sync_action(Some("jj"), None, |_a, _d| true), GitSyncAction::Noop);
+        assert_eq!(
+            classify_sync_action(None, Some("main"), |_a, _d| true),
+            GitSyncAction::Noop
+        );
+        assert_eq!(
+            classify_sync_action(Some("jj"), None, |_a, _d| true),
+            GitSyncAction::Noop
+        );
     }
 
     #[cfg(feature = "jj-lib")]

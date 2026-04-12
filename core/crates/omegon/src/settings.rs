@@ -229,7 +229,10 @@ pub struct PersonaState {
 
 impl PersonaState {
     pub fn from_ids(persona_id: Option<String>, mind_id: Option<String>) -> Self {
-        Self { persona_id, mind_id }
+        Self {
+            persona_id,
+            mind_id,
+        }
     }
 }
 
@@ -1147,7 +1150,10 @@ mod tests {
     #[test]
     fn posture_default_is_architect() {
         let s = Settings::default();
-        assert_eq!(s.posture, BehavioralPosture::fixed(PosturePreset::Architect));
+        assert_eq!(
+            s.posture,
+            BehavioralPosture::fixed(PosturePreset::Architect)
+        );
         assert_eq!(s.resource_envelope().thinking, ThinkingLevel::Medium);
         assert_eq!(
             s.resource_envelope().requested_context_class,
@@ -1186,9 +1192,15 @@ mod tests {
         s.set_posture(PosturePreset::Fabricator);
 
         let profile = s.operating_profile();
-        assert_eq!(profile.posture, BehavioralPosture::fixed(PosturePreset::Fabricator));
+        assert_eq!(
+            profile.posture,
+            BehavioralPosture::fixed(PosturePreset::Fabricator)
+        );
         assert_eq!(profile.resources.thinking, ThinkingLevel::Low);
-        assert_eq!(profile.resources.requested_context_class, ContextClass::Maniple);
+        assert_eq!(
+            profile.resources.requested_context_class,
+            ContextClass::Maniple
+        );
         assert_eq!(profile.identity, RuntimeIdentity::local_interactive());
         assert_eq!(
             profile.authorization,
@@ -1261,13 +1273,19 @@ mod tests {
     fn set_posture_updates_behavioral_defaults() {
         let mut s = Settings::new("anthropic:claude-sonnet-4-6");
         s.set_posture(PosturePreset::Fabricator);
-        assert_eq!(s.posture, BehavioralPosture::fixed(PosturePreset::Fabricator));
+        assert_eq!(
+            s.posture,
+            BehavioralPosture::fixed(PosturePreset::Fabricator)
+        );
         assert!(!s.slim_mode);
         assert_eq!(s.thinking, ThinkingLevel::Low);
         assert_eq!(s.requested_context_class, Some(ContextClass::Maniple));
 
         s.set_posture(PosturePreset::Devastator);
-        assert_eq!(s.posture, BehavioralPosture::fixed(PosturePreset::Devastator));
+        assert_eq!(
+            s.posture,
+            BehavioralPosture::fixed(PosturePreset::Devastator)
+        );
         assert_eq!(s.thinking, ThinkingLevel::High);
         assert_eq!(s.requested_context_class, Some(ContextClass::Legion));
     }

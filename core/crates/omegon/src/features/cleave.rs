@@ -337,7 +337,9 @@ pub struct ChildProgress {
     pub runtime: Option<ChildRuntimeSummary>,
 }
 
-fn child_runtime_summary(runtime: &crate::cleave::CleaveChildRuntimeProfile) -> ChildRuntimeSummary {
+fn child_runtime_summary(
+    runtime: &crate::cleave::CleaveChildRuntimeProfile,
+) -> ChildRuntimeSummary {
     ChildRuntimeSummary {
         model: runtime.model.clone(),
         thinking_level: runtime.thinking_level.clone(),
@@ -541,13 +543,25 @@ impl CleaveFeature {
             return;
         };
         for line in content.lines() {
-            if let Some(event) = crate::cleave::progress::parse_child_activity(&progress.label, line) {
+            if let Some(event) =
+                crate::cleave::progress::parse_child_activity(&progress.label, line)
+            {
                 match event {
-                    crate::cleave::progress::ProgressEvent::ChildActivity { turn, tool, .. } => {
-                        if let Some(turn) = turn { progress.last_turn = Some(turn); }
-                        if let Some(tool) = tool { progress.last_tool = Some(tool); }
+                    crate::cleave::progress::ProgressEvent::ChildActivity {
+                        turn, tool, ..
+                    } => {
+                        if let Some(turn) = turn {
+                            progress.last_turn = Some(turn);
+                        }
+                        if let Some(tool) = tool {
+                            progress.last_tool = Some(tool);
+                        }
                     }
-                    crate::cleave::progress::ProgressEvent::ChildTokens { input_tokens, output_tokens, .. } => {
+                    crate::cleave::progress::ProgressEvent::ChildTokens {
+                        input_tokens,
+                        output_tokens,
+                        ..
+                    } => {
                         progress.tokens_in = progress.tokens_in.saturating_add(input_tokens);
                         progress.tokens_out = progress.tokens_out.saturating_add(output_tokens);
                         if let Some(turn_pos) = line.find("Turn ") {
@@ -653,7 +667,16 @@ impl CleaveFeature {
                 child
             })
             .collect();
-        progress.active = progress.children.iter().any(|c| matches!(c.supervision_mode, Some(ChildSupervisionMode::Attached | ChildSupervisionMode::RecoveredDegraded | ChildSupervisionMode::Lost)) || c.status == "running");
+        progress.active = progress.children.iter().any(|c| {
+            matches!(
+                c.supervision_mode,
+                Some(
+                    ChildSupervisionMode::Attached
+                        | ChildSupervisionMode::RecoveredDegraded
+                        | ChildSupervisionMode::Lost
+                )
+            ) || c.status == "running"
+        });
     }
 
     /// Get a clone of the current progress for dashboard rendering.
@@ -679,17 +702,13 @@ impl CleaveFeature {
             return true;
         }
 
-        let fallback_pid = self
-            .progress
-            .lock()
-            .ok()
-            .and_then(|progress| {
-                progress
-                    .children
-                    .iter()
-                    .find(|child| child.label == label)
-                    .and_then(|child| child.pid)
-            });
+        let fallback_pid = self.progress.lock().ok().and_then(|progress| {
+            progress
+                .children
+                .iter()
+                .find(|child| child.label == label)
+                .and_then(|child| child.pid)
+        });
 
         let state_path = self.workspace_state_path();
         let Ok(mut state) = crate::cleave::state::CleaveState::load(&state_path) else {
@@ -822,8 +841,7 @@ impl CleaveFeature {
                 if let ProgressEvent::ChildStatus { child, status, .. } = event {
                     let success = matches!(
                         status,
-                        ChildProgressStatus::Completed
-                            | ChildProgressStatus::MergedAfterFailure
+                        ChildProgressStatus::Completed | ChildProgressStatus::MergedAfterFailure
                     );
                     sink.send(BusRequest::EmitAgentEvent {
                         event: AgentEvent::DecompositionChildCompleted {
@@ -919,13 +937,17 @@ impl CleaveFeature {
                 .state
                 .children
                 .iter()
-                .filter(|c| c.status == ChildStatus::Failed || c.status == ChildStatus::UpstreamExhausted)
+                .filter(|c| {
+                    c.status == ChildStatus::Failed || c.status == ChildStatus::UpstreamExhausted
+                })
                 .count();
             for (i, child) in result.state.children.iter().enumerate() {
                 if let Some(p) = prog.children.get_mut(i) {
                     p.status = match child.status {
                         ChildStatus::Completed => {
-                            if child.error.as_deref() == Some("merged after salvaging work from a failed child") {
+                            if child.error.as_deref()
+                                == Some("merged after salvaging work from a failed child")
+                            {
                                 "merged_after_failure".into()
                             } else {
                                 "completed".into()
@@ -985,7 +1007,9 @@ impl CleaveFeature {
         for child in &result.state.children {
             let icon = match child.status {
                 ChildStatus::Completed => {
-                    if child.error.as_deref() == Some("merged after salvaging work from a failed child") {
+                    if child.error.as_deref()
+                        == Some("merged after salvaging work from a failed child")
+                    {
                         "↺"
                     } else {
                         "✓"
@@ -1029,9 +1053,12 @@ impl CleaveFeature {
         for (label, outcome) in &result.merge_results {
             match outcome {
                 cleave::orchestrator::MergeOutcome::Success => {
-                    let child = result.state.children.iter().find(|child| child.label == *label);
-                    if child
-                        .and_then(|child| child.error.as_deref())
+                    let child = result
+                        .state
+                        .children
+                        .iter()
+                        .find(|child| child.label == *label);
+                    if child.and_then(|child| child.error.as_deref())
                         == Some("merged after salvaging work from a failed child")
                     {
                         report.push_str(&format!(
@@ -1462,8 +1489,7 @@ mod tests {
     /// Test helper: build a `BusRequestSink` that forwards
     /// `BusRequest::EmitAgentEvent` requests onto a broadcast channel,
     /// returning the receiver so the test can assert what arrived.
-    fn test_sink_with_receiver() -> (BusRequestSink, tokio::sync::broadcast::Receiver<AgentEvent>)
-    {
+    fn test_sink_with_receiver() -> (BusRequestSink, tokio::sync::broadcast::Receiver<AgentEvent>) {
         let (tx, rx) = tokio::sync::broadcast::channel::<AgentEvent>(8);
         let sink = BusRequestSink::from_fn(move |request| {
             if let BusRequest::EmitAgentEvent { event } = request {
@@ -1608,7 +1634,11 @@ mod tests {
             }],
             "plan": {"children": []}
         });
-        std::fs::write(&state_path, serde_json::to_string_pretty(&state_json).unwrap()).unwrap();
+        std::fs::write(
+            &state_path,
+            serde_json::to_string_pretty(&state_json).unwrap(),
+        )
+        .unwrap();
 
         let feature = CleaveFeature::new(dir.path(), vec![]);
         let progress = feature.progress();
@@ -1617,7 +1647,10 @@ mod tests {
         assert_eq!(progress.total_children, 1);
         assert_eq!(progress.children[0].label, "alpha");
         assert_eq!(progress.children[0].status, "running");
-        assert_eq!(progress.children[0].supervision_mode, Some(ChildSupervisionMode::RecoveredDegraded));
+        assert_eq!(
+            progress.children[0].supervision_mode,
+            Some(ChildSupervisionMode::RecoveredDegraded)
+        );
         assert_eq!(progress.children[0].pid, Some(std::process::id()));
     }
 
@@ -1652,13 +1685,20 @@ mod tests {
             }],
             "plan": {"children": []}
         });
-        std::fs::write(&state_path, serde_json::to_string_pretty(&state_json).unwrap()).unwrap();
+        std::fs::write(
+            &state_path,
+            serde_json::to_string_pretty(&state_json).unwrap(),
+        )
+        .unwrap();
 
         let feature = CleaveFeature::new(dir.path(), vec![]);
         let progress = feature.progress();
         assert!(progress.active);
         assert_eq!(progress.children[0].status, "pending");
-        assert_eq!(progress.children[0].supervision_mode, Some(ChildSupervisionMode::Lost));
+        assert_eq!(
+            progress.children[0].supervision_mode,
+            Some(ChildSupervisionMode::Lost)
+        );
         assert_eq!(progress.children[0].pid, Some(std::process::id()));
     }
 
@@ -1693,7 +1733,11 @@ mod tests {
             }],
             "plan": {"children": []}
         });
-        std::fs::write(&state_path, serde_json::to_string_pretty(&state_json).unwrap()).unwrap();
+        std::fs::write(
+            &state_path,
+            serde_json::to_string_pretty(&state_json).unwrap(),
+        )
+        .unwrap();
 
         let feature = CleaveFeature::new(dir.path(), vec![]);
         assert!(feature.cancel_child("alpha"));
@@ -1744,14 +1788,21 @@ mod tests {
             }],
             "plan": {"children": []}
         });
-        std::fs::write(workspace.join("state.json"), serde_json::to_string_pretty(&state_json).unwrap()).unwrap();
+        std::fs::write(
+            workspace.join("state.json"),
+            serde_json::to_string_pretty(&state_json).unwrap(),
+        )
+        .unwrap();
 
         let feature = CleaveFeature::new(dir.path(), vec![]);
         let progress = feature.progress();
         let child = &progress.children[0];
         assert_eq!(child.last_tool.as_deref(), Some("bash"));
         assert_eq!(child.last_turn, Some(3));
-        assert_eq!(child.supervision_mode, Some(ChildSupervisionMode::RecoveredDegraded));
+        assert_eq!(
+            child.supervision_mode,
+            Some(ChildSupervisionMode::RecoveredDegraded)
+        );
         assert_eq!(child.tokens_in, 123);
         assert_eq!(child.tokens_out, 45);
         assert!(child.last_activity_at.is_some());
@@ -1802,7 +1853,10 @@ mod tests {
         {
             let progress = shared.lock().unwrap();
             assert_eq!(progress.children[0].status, "running");
-            assert_eq!(progress.children[0].supervision_mode, Some(ChildSupervisionMode::Attached));
+            assert_eq!(
+                progress.children[0].supervision_mode,
+                Some(ChildSupervisionMode::Attached)
+            );
             assert_eq!(progress.children[0].pid, Some(42));
             assert!(progress.children[0].started_at.is_some());
             assert!(progress.children[0].last_activity_at.is_some());
@@ -2067,7 +2121,10 @@ mod tests {
                 repo_path: "/tmp/repo".into(),
                 workspace_path: "/tmp/workspace".into(),
                 supervisor_token: "test-supervisor".into(),
-                children: vec![mk_child(ChildStatus::Completed), mk_child(ChildStatus::Failed)],
+                children: vec![
+                    mk_child(ChildStatus::Completed),
+                    mk_child(ChildStatus::Failed),
+                ],
                 plan: json!({}),
                 started_at: None,
             },

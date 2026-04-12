@@ -3,11 +3,10 @@
 use omegon_traits::{
     IpcChangeSnapshot, IpcChildSnapshot, IpcCleaveSnapshot, IpcDesignCounts, IpcDesignTreeSnapshot,
     IpcDispatcherSnapshot, IpcFocusedNode, IpcHarnessSnapshot, IpcHealthSnapshot, IpcHealthState,
-    IpcMemorySnapshot, IpcNodeBrief, IpcOpenSpecSnapshot, IpcProviderSnapshot,
-    IpcSessionSnapshot, IpcStateSnapshot, OmegonAutonomyMode, OmegonControlPlane,
-    OmegonDeploymentKind, OmegonIdentity, OmegonInstanceDescriptor, OmegonOwnerKind,
-    OmegonOwnership, OmegonPlacement, OmegonPlacementKind, OmegonRole, OmegonRuntime,
-    OmegonRuntimeHealth, OmegonRuntimeProfile,
+    IpcMemorySnapshot, IpcNodeBrief, IpcOpenSpecSnapshot, IpcProviderSnapshot, IpcSessionSnapshot,
+    IpcStateSnapshot, OmegonAutonomyMode, OmegonControlPlane, OmegonDeploymentKind, OmegonIdentity,
+    OmegonInstanceDescriptor, OmegonOwnerKind, OmegonOwnership, OmegonPlacement,
+    OmegonPlacementKind, OmegonRole, OmegonRuntime, OmegonRuntimeHealth, OmegonRuntimeProfile,
 };
 
 use crate::tui::dashboard::{DashboardHandles, SharedSessionStats};
@@ -536,7 +535,11 @@ mod tests {
                 runtime_profile: omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
                 autonomy_mode: omegon_traits::OmegonAutonomyMode::OperatorDriven,
                 dispatcher: crate::status::DispatcherStatus {
-                    available_options: vec!["retribution".into(), "victory".into(), "gloriana".into()],
+                    available_options: vec![
+                        "retribution".into(),
+                        "victory".into(),
+                        "gloriana".into(),
+                    ],
                     switch_state: "idle".into(),
                     request_id: None,
                     expected_profile: None,
@@ -571,8 +574,14 @@ mod tests {
         assert_eq!(snap.harness.runtime_profile, "primary-interactive");
         assert_eq!(snap.harness.autonomy_mode, "operator-driven");
         assert_eq!(snap.harness.dispatcher.switch_state, "idle");
-        assert_eq!(snap.harness.dispatcher.active_profile.as_deref(), Some("victory"));
-        assert_eq!(snap.harness.dispatcher.active_model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
+        assert_eq!(
+            snap.harness.dispatcher.active_profile.as_deref(),
+            Some("victory")
+        );
+        assert_eq!(
+            snap.harness.dispatcher.active_model.as_deref(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
         assert_eq!(
             snap.instance.control_plane.server_instance_id,
             "instance-123"

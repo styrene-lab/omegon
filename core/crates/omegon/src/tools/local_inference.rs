@@ -585,7 +585,8 @@ mod tests {
         // OpenAI sends an initial chunk with `delta: {"role": "assistant"}`
         // and a final chunk with `delta: {}` followed by [DONE]. Both
         // should deserialize cleanly with `content` as None.
-        let initial = r#"{"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}"#;
+        let initial =
+            r#"{"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}"#;
         let chunk: StreamingChatChunk = serde_json::from_str(initial).unwrap();
         assert!(chunk.choices[0].delta.content.is_none());
 

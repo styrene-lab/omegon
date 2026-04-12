@@ -231,7 +231,10 @@ async fn run_scenario(cli: &Cli, scenario: &SmokeScenario) -> anyhow::Result<()>
     if scenario.name == "runtime_profile_enforced" {
         let docs = repo.join("docs");
         std::fs::create_dir_all(&docs)?;
-        std::fs::write(docs.join("runtime-preload.md"), "preloaded runtime context\n")?;
+        std::fs::write(
+            docs.join("runtime-preload.md"),
+            "preloaded runtime context\n",
+        )?;
         let plugins_dir = repo.join(".omegon").join("plugins");
         std::fs::create_dir_all(plugins_dir.join("alpha"))?;
         std::fs::write(

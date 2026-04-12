@@ -568,10 +568,7 @@ fn summarize_usage_by_model(entries: &[&str]) -> BTreeMap<String, UsageBucket> {
     summarize_usage_breakdown(entries, |parsed| parsed.model.to_string())
 }
 
-fn summarize_usage_breakdown<F>(
-    entries: &[&str],
-    key_fn: F,
-) -> BTreeMap<String, UsageBucket>
+fn summarize_usage_breakdown<F>(entries: &[&str], key_fn: F) -> BTreeMap<String, UsageBucket>
 where
     F: Fn(&ParsedTurnUsage<'_>) -> String,
 {
@@ -585,7 +582,9 @@ where
             let Some(parsed) = parse_turn_usage_line(trimmed) else {
                 continue;
             };
-            let bucket = buckets.entry(key_fn(&parsed)).or_insert_with(UsageBucket::default);
+            let bucket = buckets
+                .entry(key_fn(&parsed))
+                .or_insert_with(UsageBucket::default);
             bucket.turns += 1;
             bucket.total_input_tokens += parsed.input_tokens;
             bucket.total_output_tokens += parsed.output_tokens;
@@ -703,7 +702,10 @@ fn format_turn_summary(summary: &TurnSummary) -> String {
                 }
                 if let Some(pct) = telemetry.codex_primary_used_pct {
                     parts.push(format!("primary used {:.0}%", pct));
-                    parts.push(format!("primary left {:.0}%", (100.0 - pct).clamp(0.0, 100.0)));
+                    parts.push(format!(
+                        "primary left {:.0}%",
+                        (100.0 - pct).clamp(0.0, 100.0)
+                    ));
                 }
                 if let Some(secs) = telemetry.codex_primary_reset_secs {
                     parts.push(format!("primary↻ {}s", secs));
@@ -1051,8 +1053,14 @@ mod tests {
             "should record provider/model"
         );
         assert!(content.contains("5h 42%"), "should record telemetry");
-        assert!(content.contains("ctx est:"), "should record context composition");
-        assert!(content.contains("sys:"), "should record composition components");
+        assert!(
+            content.contains("ctx est:"),
+            "should record context composition"
+        );
+        assert!(
+            content.contains("sys:"),
+            "should record composition components"
+        );
     }
 
     #[test]
@@ -1114,7 +1122,10 @@ mod tests {
         );
         assert_eq!(details["total_input_tokens"].as_u64(), Some(3600));
         assert_eq!(details["turns"].as_u64(), Some(3));
-        assert_eq!(details["provider_breakdown"][0]["name"].as_str(), Some("anthropic"));
+        assert_eq!(
+            details["provider_breakdown"][0]["name"].as_str(),
+            Some("anthropic")
+        );
         assert_eq!(details["provider_breakdown"][0]["turns"].as_u64(), Some(2));
         assert_eq!(
             details["provider_breakdown"][0]["avg_ctx_est_tokens"].as_u64(),

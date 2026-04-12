@@ -14,8 +14,8 @@ use crate::upstream_errors::{
     classify_upstream_error_for_provider, is_context_overflow, is_malformed_history,
 };
 use omegon_traits::{
-    AgentEvent, ContentBlock, ContextComposition, DriftKind, OodaPhase,
-    ProgressNudgeReason, TurnEndReason,
+    AgentEvent, ContentBlock, ContextComposition, DriftKind, OodaPhase, ProgressNudgeReason,
+    TurnEndReason,
 };
 
 use serde_json::Value;
@@ -104,7 +104,9 @@ fn classify_auto_delegate_plan(
         return None;
     }
     if matches!(drift_kind, Some(DriftKind::OrientationChurn))
-        && tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name))
+        && tool_calls
+            .iter()
+            .all(|call| is_repo_inspection_tool(&call.name))
     {
         return Some(AutoDelegatePlan {
             worker_profile: "scout",
@@ -117,9 +119,7 @@ fn classify_auto_delegate_plan(
             background: false,
         });
     }
-    if matches!(dominant_phase, Some(OodaPhase::Act))
-        && tool_calls.iter().all(is_validation_tool)
-    {
+    if matches!(dominant_phase, Some(OodaPhase::Act)) && tool_calls.iter().all(is_validation_tool) {
         return Some(AutoDelegatePlan {
             worker_profile: "verify",
             background: false,
@@ -128,22 +128,20 @@ fn classify_auto_delegate_plan(
     None
 }
 
-fn auto_delegate_tool_call(
-    conversation: &ConversationState,
-    plan: AutoDelegatePlan,
-) -> ToolCall {
+fn auto_delegate_tool_call(conversation: &ConversationState, plan: AutoDelegatePlan) -> ToolCall {
     let last_prompt = conversation.last_user_prompt();
     let task = if !last_prompt.trim().is_empty() {
         last_prompt.trim().to_string()
     } else {
-        conversation
-            .intent
-            .current_task
-            .clone()
-            .unwrap_or_else(|| "Inspect the current bounded task and return concise findings.".to_string())
+        conversation.intent.current_task.clone().unwrap_or_else(|| {
+            "Inspect the current bounded task and return concise findings.".to_string()
+        })
     };
     ToolCall {
-        id: format!("auto-delegate-{}", conversation.turn_count().saturating_add(1)),
+        id: format!(
+            "auto-delegate-{}",
+            conversation.turn_count().saturating_add(1)
+        ),
         name: "delegate".to_string(),
         arguments: serde_json::json!({
             "task": task,
@@ -216,16 +214,17 @@ fn mutation_targets_within_limit(tool_calls: &[ToolCall], max_files: usize) -> b
 }
 
 fn is_narrow_patch_candidate(tool_calls: &[ToolCall]) -> bool {
-    if !tool_calls.iter().any(|call| is_mutation_tool_name(&call.name)) {
+    if !tool_calls
+        .iter()
+        .any(|call| is_mutation_tool_name(&call.name))
+    {
         return false;
     }
     if !mutation_targets_within_limit(tool_calls, 2) {
         return false;
     }
     tool_calls.iter().all(|call| {
-        is_mutation_tool_name(&call.name)
-            || call.name == "read"
-            || is_validation_tool(call)
+        is_mutation_tool_name(&call.name) || call.name == "read" || is_validation_tool(call)
     })
 }
 
@@ -275,11 +274,17 @@ fn classify_turn_phase(tool_calls: &[ToolCall], results: &[ToolResultEntry]) -> 
         return Some(OodaPhase::Act);
     }
 
-    if tool_calls.iter().all(|call| is_orientation_tool(&call.name)) {
+    if tool_calls
+        .iter()
+        .all(|call| is_orientation_tool(&call.name))
+    {
         return Some(OodaPhase::Observe);
     }
 
-    if tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name)) {
+    if tool_calls
+        .iter()
+        .all(|call| is_repo_inspection_tool(&call.name))
+    {
         return Some(OodaPhase::Observe);
     }
 
@@ -318,7 +323,9 @@ fn classify_drift_kind(
 
     if conversation.intent.files_modified.is_empty()
         && !conversation.intent.files_read.is_empty()
-        && tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name))
+        && tool_calls
+            .iter()
+            .all(|call| is_repo_inspection_tool(&call.name))
         && turn >= 3
         && broad_repo_inspection_calls > 0
         && targeted_repo_inspection_calls <= 1
@@ -364,14 +371,25 @@ fn classify_drift_kind(
         return Some(DriftKind::RepeatedActionFailure);
     }
 
-    let validation_calls = tool_calls.iter().filter(|call| is_validation_tool(call)).count();
-    let targeted_validation = matches!(classify_validation_scope(tool_calls, results), ProgressSignal::TargetedValidation);
-    if validation_calls >= 2 && conversation.intent.files_modified.is_empty() && !targeted_validation {
+    let validation_calls = tool_calls
+        .iter()
+        .filter(|call| is_validation_tool(call))
+        .count();
+    let targeted_validation = matches!(
+        classify_validation_scope(tool_calls, results),
+        ProgressSignal::TargetedValidation
+    );
+    if validation_calls >= 2
+        && conversation.intent.files_modified.is_empty()
+        && !targeted_validation
+    {
         return Some(DriftKind::ValidationThrash);
     }
 
     if !conversation.intent.files_modified.is_empty()
-        && tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name))
+        && tool_calls
+            .iter()
+            .all(|call| is_repo_inspection_tool(&call.name))
         && broad_repo_inspection_calls > 0
     {
         return Some(DriftKind::ClosureStall);
@@ -398,7 +416,9 @@ fn is_first_turn_orientation_churn(
     config.enforce_first_turn_execution_bias
         && turn == 1
         && !tool_calls.is_empty()
-        && tool_calls.iter().all(|call| is_orientation_tool(&call.name))
+        && tool_calls
+            .iter()
+            .all(|call| is_orientation_tool(&call.name))
         && conversation.intent.files_read.is_empty()
         && conversation.intent.files_modified.is_empty()
 }
@@ -413,7 +433,9 @@ fn should_inject_execution_pressure(
         || tool_calls.is_empty()
         || !conversation.intent.files_modified.is_empty()
         || conversation.intent.files_read.is_empty()
-        || !tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name))
+        || !tool_calls
+            .iter()
+            .all(|call| is_repo_inspection_tool(&call.name))
     {
         return false;
     }
@@ -506,8 +528,7 @@ impl ControllerState {
             self.consecutive_tool_continuations = 0;
         }
 
-        self.orientation_churn_streak = if matches!(drift_kind, Some(DriftKind::OrientationChurn))
-        {
+        self.orientation_churn_streak = if matches!(drift_kind, Some(DriftKind::OrientationChurn)) {
             self.orientation_churn_streak.saturating_add(1)
         } else {
             0
@@ -518,12 +539,11 @@ impl ControllerState {
             } else {
                 0
             };
-        self.validation_thrash_streak =
-            if matches!(drift_kind, Some(DriftKind::ValidationThrash)) {
-                self.validation_thrash_streak.saturating_add(1)
-            } else {
-                0
-            };
+        self.validation_thrash_streak = if matches!(drift_kind, Some(DriftKind::ValidationThrash)) {
+            self.validation_thrash_streak.saturating_add(1)
+        } else {
+            0
+        };
         self.closure_stall_streak = if matches!(drift_kind, Some(DriftKind::ClosureStall)) {
             self.closure_stall_streak.saturating_add(1)
         } else {
@@ -562,12 +582,16 @@ where
 }
 
 fn has_progress_boundary(tool_calls: &[ToolCall], results: &[ToolResultEntry]) -> bool {
-    has_successful_tool_call(tool_calls, results, |call| is_mutation_tool_name(&call.name))
-        || has_successful_tool_call(tool_calls, results, is_validation_tool)
+    has_successful_tool_call(tool_calls, results, |call| {
+        is_mutation_tool_name(&call.name)
+    }) || has_successful_tool_call(tool_calls, results, is_validation_tool)
         || has_successful_tool_call(tool_calls, results, |call| call.name == "commit")
 }
 
-fn classify_validation_scope(tool_calls: &[ToolCall], results: &[ToolResultEntry]) -> ProgressSignal {
+fn classify_validation_scope(
+    tool_calls: &[ToolCall],
+    results: &[ToolResultEntry],
+) -> ProgressSignal {
     let successful_validation_calls: Vec<&ToolCall> = tool_calls
         .iter()
         .filter(|call| {
@@ -634,7 +658,9 @@ fn classify_progress_signal(
     if has_successful_tool_call(tool_calls, results, |call| call.name == "commit") {
         return ProgressSignal::Commit;
     }
-    if has_successful_tool_call(tool_calls, results, |call| is_mutation_tool_name(&call.name)) {
+    if has_successful_tool_call(tool_calls, results, |call| {
+        is_mutation_tool_name(&call.name)
+    }) {
         return ProgressSignal::Mutation;
     }
 
@@ -687,7 +713,10 @@ fn detect_evidence_sufficiency(
             && tool_calls.iter().any(is_validation_tool)
     });
 
-    if targeted_validation || failed_mutation_on_known_target || inspection_backed_by_validation_failure {
+    if targeted_validation
+        || failed_mutation_on_known_target
+        || inspection_backed_by_validation_failure
+    {
         EvidenceSufficiency::Sufficient
     } else {
         EvidenceSufficiency::None
@@ -821,12 +850,9 @@ pub(crate) fn compute_context_composition(
                 );
             }
             LlmMessage::ToolResult {
-                content,
-                tool_name,
-                ..
+                content, tool_name, ..
             } => {
-                tool_history_tokens +=
-                    estimate_chars_to_tokens(content.len() + tool_name.len());
+                tool_history_tokens += estimate_chars_to_tokens(content.len() + tool_name.len());
                 if tool_name.starts_with("memory_") {
                     memory_tokens += estimate_chars_to_tokens(content.len());
                 }
@@ -854,7 +880,9 @@ pub(crate) fn compute_context_composition(
         base_prompt_tokens: estimate_chars_to_tokens(prompt_telemetry.base_prompt_chars),
         session_hud_tokens: estimate_chars_to_tokens(prompt_telemetry.session_hud_chars),
         intent_tokens: estimate_chars_to_tokens(prompt_telemetry.intent_chars),
-        external_injection_tokens: estimate_chars_to_tokens(prompt_telemetry.external_injection_chars),
+        external_injection_tokens: estimate_chars_to_tokens(
+            prompt_telemetry.external_injection_chars,
+        ),
         tool_guidance_tokens: estimate_chars_to_tokens(prompt_telemetry.tool_guidance_chars),
         file_guidance_tokens: estimate_chars_to_tokens(prompt_telemetry.file_guidance_chars),
     }
@@ -907,7 +935,11 @@ pub async fn run(
             .as_ref()
             .and_then(|s| s.lock().ok().map(|g| g.context_window))
             .unwrap_or(200_000);
-        if let Some(settings) = config.settings.as_ref().and_then(|s| s.lock().ok().map(|g| g.clone())) {
+        if let Some(settings) = config
+            .settings
+            .as_ref()
+            .and_then(|s| s.lock().ok().map(|g| g.clone()))
+        {
             context.set_selector_policy(settings.selector_policy());
         } else {
             context.set_context_window(context_window);
@@ -1236,8 +1268,8 @@ pub async fn run(
                     estimated_tokens: conversation.estimate_tokens(),
                     context_window,
                     context_composition: {
-                        let system_prompt =
-                            context.build_system_prompt(conversation.last_user_prompt(), conversation);
+                        let system_prompt = context
+                            .build_system_prompt(conversation.last_user_prompt(), conversation);
                         let llm_messages = conversation.build_llm_view();
                         let prompt_telemetry = context.last_prompt_telemetry();
                         compute_context_composition(
@@ -1261,8 +1293,8 @@ pub async fn run(
                     estimated_tokens: conversation.estimate_tokens(),
                     context_window,
                     context_composition: {
-                        let system_prompt =
-                            context.build_system_prompt(conversation.last_user_prompt(), conversation);
+                        let system_prompt = context
+                            .build_system_prompt(conversation.last_user_prompt(), conversation);
                         let llm_messages = conversation.build_llm_view();
                         let prompt_telemetry = context.last_prompt_telemetry();
                         compute_context_composition(
@@ -1290,7 +1322,8 @@ pub async fn run(
                 });
                 continue; // give it one more turn to commit
             }
-            let system_prompt = context.build_system_prompt(conversation.last_user_prompt(), conversation);
+            let system_prompt =
+                context.build_system_prompt(conversation.last_user_prompt(), conversation);
             let llm_messages = conversation.build_llm_view();
             let prompt_telemetry = context.last_prompt_telemetry();
             let turn_context_composition = compute_context_composition(
@@ -1348,13 +1381,8 @@ pub async fn run(
         }
 
         // ─── Dispatch tool calls ────────────────────────────────────
-        let auto_delegate_plan = classify_auto_delegate_plan(
-            config,
-            conversation,
-            tool_calls,
-            None,
-            None,
-        );
+        let auto_delegate_plan =
+            classify_auto_delegate_plan(config, conversation, tool_calls, None, None);
         let dispatch_calls_storage;
         let dispatch_calls: &[ToolCall] = if let Some(plan) = auto_delegate_plan {
             dispatch_calls_storage = vec![auto_delegate_tool_call(conversation, plan)];
@@ -1376,14 +1404,19 @@ pub async fn run(
         for result in &results {
             conversation.push_tool_result(result.clone());
         }
-        conversation.intent.update_from_tools(dispatch_calls, &results);
+        conversation
+            .intent
+            .update_from_tools(dispatch_calls, &results);
 
         let dominant_phase = classify_turn_phase(dispatch_calls, &results);
         let drift_kind = classify_drift_kind(turn, conversation, dispatch_calls, &results);
         let constraints_before = captured
             .iter()
             .filter(|capture| {
-                matches!(capture, crate::lifecycle::capture::AmbientCapture::Constraint(_))
+                matches!(
+                    capture,
+                    crate::lifecycle::capture::AmbientCapture::Constraint(_)
+                )
             })
             .count();
         let constraints_after = conversation.intent.constraints_discovered.len();
@@ -1393,7 +1426,8 @@ pub async fn run(
             dispatch_calls,
             &results,
         );
-        let evidence_sufficiency = detect_evidence_sufficiency(conversation, dispatch_calls, &results);
+        let evidence_sufficiency =
+            detect_evidence_sufficiency(conversation, dispatch_calls, &results);
         controller.observe_turn(
             TurnEndReason::ToolContinuation,
             drift_kind,
@@ -1409,7 +1443,9 @@ pub async fn run(
         );
 
         if is_first_turn_orientation_churn(turn, config, conversation, dispatch_calls) {
-            tracing::info!("First-turn orientation churn detected — injecting execution-bias nudge");
+            tracing::info!(
+                "First-turn orientation churn detected — injecting execution-bias nudge"
+            );
             conversation.push_user(
                 "[System: This run is execution-biased. Stop spending turns on orientation tools unless they are strictly required to unblock execution. On the next turn, take a concrete repo-inspection or implementation step: read the most relevant file, search the codebase for the target symbol/path, or make the smallest justified change.]"
                     .to_string(),
@@ -1425,13 +1461,18 @@ pub async fn run(
             tracing::info!("Evidence sufficiency reached — injecting forced-convergence nudge");
             conversation.push_user(evidence_sufficiency_message());
         } else if should_inject_execution_pressure(turn, config, conversation, dispatch_calls) {
-            tracing::info!("Execution stall detected after repo inspection — injecting execution-pressure nudge");
+            tracing::info!(
+                "Execution stall detected after repo inspection — injecting execution-pressure nudge"
+            );
             conversation.push_user(
                 "[System: You now have enough local evidence. Do not use broad inspection/search tools again until you do one of these two things: (1) make one concrete code edit, or (2) name one specific blocking ambiguity tied to a file or symbol. Stop narrating. Pick the smallest justified patch now, apply it, then run the narrowest relevant validation.]"
                     .to_string(),
             );
         } else if let Some(tier) = continuation_tier {
-            tracing::info!(tier, "Sustained tool-continuation churn detected — injecting continuation-pressure nudge");
+            tracing::info!(
+                tier,
+                "Sustained tool-continuation churn detected — injecting continuation-pressure nudge"
+            );
             conversation.push_user(continuation_pressure_message(tier));
         }
 
@@ -1467,7 +1508,8 @@ pub async fn run(
             stuck_detector.record(call, is_error);
         }
 
-        let system_prompt = context.build_system_prompt(conversation.last_user_prompt(), conversation);
+        let system_prompt =
+            context.build_system_prompt(conversation.last_user_prompt(), conversation);
         let llm_messages = conversation.build_llm_view();
         let prompt_telemetry = context.last_prompt_telemetry();
         let turn_context_composition = compute_context_composition(
@@ -3134,7 +3176,12 @@ mod tests {
                 arguments: Value::Null,
             },
         ];
-        assert!(is_first_turn_orientation_churn(1, &config, &conversation, &tool_calls));
+        assert!(is_first_turn_orientation_churn(
+            1,
+            &config,
+            &conversation,
+            &tool_calls
+        ));
     }
 
     #[test]
@@ -3153,7 +3200,12 @@ mod tests {
             name: "memory_recall".into(),
             arguments: Value::Null,
         }];
-        assert!(!is_first_turn_orientation_churn(1, &config, &conversation, &tool_calls));
+        assert!(!is_first_turn_orientation_churn(
+            1,
+            &config,
+            &conversation,
+            &tool_calls
+        ));
     }
 
     #[test]
@@ -3165,7 +3217,12 @@ mod tests {
             name: "memory_recall".into(),
             arguments: Value::Null,
         }];
-        assert!(!is_first_turn_orientation_churn(1, &config, &conversation, &tool_calls));
+        assert!(!is_first_turn_orientation_churn(
+            1,
+            &config,
+            &conversation,
+            &tool_calls
+        ));
     }
 
     #[test]
@@ -3191,7 +3248,12 @@ mod tests {
                 arguments: Value::Null,
             },
         ];
-        assert!(should_inject_execution_pressure(4, &config, &conversation, &tool_calls));
+        assert!(should_inject_execution_pressure(
+            4,
+            &config,
+            &conversation,
+            &tool_calls
+        ));
     }
 
     #[test]
@@ -3217,7 +3279,12 @@ mod tests {
                 arguments: Value::Null,
             },
         ];
-        assert!(!should_inject_execution_pressure(4, &config, &conversation, &tool_calls));
+        assert!(!should_inject_execution_pressure(
+            4,
+            &config,
+            &conversation,
+            &tool_calls
+        ));
     }
 
     #[test]
@@ -3236,11 +3303,17 @@ mod tests {
             name: "read".into(),
             arguments: serde_json::json!({"path": "core/src/context.rs"}),
         }];
-        assert!(!should_inject_execution_pressure(4, &config, &conversation, &tool_calls));
+        assert!(!should_inject_execution_pressure(
+            4,
+            &config,
+            &conversation,
+            &tool_calls
+        ));
     }
 
     #[test]
-    fn execution_pressure_detected_for_repeated_targeted_read_only_batches_after_local_hypothesis_stalls() {
+    fn execution_pressure_detected_for_repeated_targeted_read_only_batches_after_local_hypothesis_stalls()
+     {
         let config = LoopConfig {
             enforce_first_turn_execution_bias: true,
             ..LoopConfig::default()
@@ -3255,7 +3328,12 @@ mod tests {
             name: "read".into(),
             arguments: serde_json::json!({"path": "core/src/context.rs"}),
         }];
-        assert!(should_inject_execution_pressure(5, &config, &conversation, &tool_calls));
+        assert!(should_inject_execution_pressure(
+            5,
+            &config,
+            &conversation,
+            &tool_calls
+        ));
     }
 
     #[test]
@@ -3345,7 +3423,10 @@ mod tests {
             is_error: false,
             args_summary: None,
         }];
-        assert_eq!(classify_drift_kind(3, &conversation, &tool_calls, &results), None);
+        assert_eq!(
+            classify_drift_kind(3, &conversation, &tool_calls, &results),
+            None
+        );
     }
 
     #[test]
@@ -3408,19 +3489,26 @@ mod tests {
             ToolResultEntry {
                 call_id: "1".into(),
                 tool_name: "edit".into(),
-                content: vec![ContentBlock::Text { text: "fail".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "fail".into(),
+                }],
                 is_error: true,
                 args_summary: None,
             },
             ToolResultEntry {
                 call_id: "2".into(),
                 tool_name: "edit".into(),
-                content: vec![ContentBlock::Text { text: "fail".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "fail".into(),
+                }],
                 is_error: true,
                 args_summary: None,
             },
         ];
-        assert_eq!(classify_drift_kind(3, &conversation, &tool_calls, &results), None);
+        assert_eq!(
+            classify_drift_kind(3, &conversation, &tool_calls, &results),
+            None
+        );
     }
 
     #[test]
@@ -3442,14 +3530,18 @@ mod tests {
             ToolResultEntry {
                 call_id: "1".into(),
                 tool_name: "edit".into(),
-                content: vec![ContentBlock::Text { text: "fail".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "fail".into(),
+                }],
                 is_error: true,
                 args_summary: None,
             },
             ToolResultEntry {
                 call_id: "2".into(),
                 tool_name: "edit".into(),
-                content: vec![ContentBlock::Text { text: "fail".into() }],
+                content: vec![ContentBlock::Text {
+                    text: "fail".into(),
+                }],
                 is_error: true,
                 args_summary: None,
             },
@@ -3491,7 +3583,10 @@ mod tests {
                 args_summary: None,
             },
         ];
-        assert_eq!(classify_drift_kind(3, &conversation, &tool_calls, &results), None);
+        assert_eq!(
+            classify_drift_kind(3, &conversation, &tool_calls, &results),
+            None
+        );
     }
 
     #[test]
@@ -3738,7 +3833,12 @@ mod tests {
             name: "codebase_search".into(),
             arguments: Value::Null,
         }];
-        assert!(!should_inject_execution_pressure(4, &config, &conversation, &tool_calls));
+        assert!(!should_inject_execution_pressure(
+            4,
+            &config,
+            &conversation,
+            &tool_calls
+        ));
     }
 
     #[test]
@@ -3761,7 +3861,12 @@ mod tests {
             name: "read".into(),
             arguments: Value::Null,
         }];
-        assert!(!should_inject_execution_pressure(4, &config, &conversation, &tool_calls));
+        assert!(!should_inject_execution_pressure(
+            4,
+            &config,
+            &conversation,
+            &tool_calls
+        ));
     }
 
     fn controller_partial_reset_for_constraint_discovery() {
@@ -3839,8 +3944,16 @@ mod tests {
         };
         let conversation = ConversationState::new();
         let tool_calls = vec![
-            ToolCall { id: "1".into(), name: "read".into(), arguments: Value::Null },
-            ToolCall { id: "2".into(), name: "codebase_search".into(), arguments: Value::Null },
+            ToolCall {
+                id: "1".into(),
+                name: "read".into(),
+                arguments: Value::Null,
+            },
+            ToolCall {
+                id: "2".into(),
+                name: "codebase_search".into(),
+                arguments: Value::Null,
+            },
         ];
         let plan = classify_auto_delegate_plan(
             &config,
@@ -3957,8 +4070,15 @@ mod tests {
             ..LoopConfig::default()
         };
         let mut conversation = ConversationState::new();
-        conversation.intent.files_modified.insert(std::path::PathBuf::from("src/lib.rs"));
-        let tool_calls = vec![ToolCall { id: "1".into(), name: "read".into(), arguments: Value::Null }];
+        conversation
+            .intent
+            .files_modified
+            .insert(std::path::PathBuf::from("src/lib.rs"));
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: Value::Null,
+        }];
         let plan = classify_auto_delegate_plan(
             &config,
             &conversation,

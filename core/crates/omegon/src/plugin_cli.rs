@@ -75,7 +75,10 @@ pub fn list_summary() -> anyhow::Result<String> {
     }
 
     let mut lines = vec![
-        format!("{:<20} {:<12} {:<10} DESCRIPTION", "NAME", "TYPE", "VERSION"),
+        format!(
+            "{:<20} {:<12} {:<10} DESCRIPTION",
+            "NAME", "TYPE", "VERSION"
+        ),
         "─".repeat(72),
     ];
 
@@ -91,7 +94,10 @@ pub fn list_summary() -> anyhow::Result<String> {
         let manifest_path = resolved.join("plugin.toml");
         if !manifest_path.exists() {
             let name = dir.file_name().unwrap_or_default().to_string_lossy();
-            lines.push(format!("{:<20} {:<12} {:<10} (no plugin.toml)", name, "?", "?"));
+            lines.push(format!(
+                "{:<20} {:<12} {:<10} (no plugin.toml)",
+                name, "?", "?"
+            ));
             continue;
         }
 

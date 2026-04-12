@@ -198,7 +198,8 @@ async fn handle_client_command(
                         omegon_traits::ControlOutputResponse {
                             accepted: false,
                             output: Some(
-                                "model_view executor dropped response before completion".to_string(),
+                                "model_view executor dropped response before completion"
+                                    .to_string(),
                             ),
                         },
                     ),
@@ -242,7 +243,8 @@ async fn handle_client_command(
                         omegon_traits::ControlOutputResponse {
                             accepted: false,
                             output: Some(
-                                "model_list executor dropped response before completion".to_string(),
+                                "model_list executor dropped response before completion"
+                                    .to_string(),
                             ),
                         },
                     ),
@@ -286,7 +288,8 @@ async fn handle_client_command(
                         omegon_traits::ControlOutputResponse {
                             accepted: false,
                             output: Some(
-                                "skills_view executor dropped response before completion".to_string(),
+                                "skills_view executor dropped response before completion"
+                                    .to_string(),
                             ),
                         },
                     ),
@@ -375,7 +378,8 @@ async fn handle_client_command(
                         omegon_traits::ControlOutputResponse {
                             accepted: false,
                             output: Some(
-                                "plugin_view executor dropped response before completion".to_string(),
+                                "plugin_view executor dropped response before completion"
+                                    .to_string(),
                             ),
                         },
                     ),
@@ -398,7 +402,12 @@ async fn handle_client_command(
                     .harness
                     .as_ref()
                     .and_then(|lock| lock.lock().ok())
-                    .and_then(|h| h.providers.iter().find(|p| p.authenticated).and_then(|p| p.model.clone()))
+                    .and_then(|h| {
+                        h.providers
+                            .iter()
+                            .find(|p| p.authenticated)
+                            .and_then(|p| p.model.clone())
+                    })
                     .unwrap_or_default();
                 let classified = if current_model.is_empty() {
                     crate::control_actions::classify_web_method("set_model")
@@ -433,7 +442,8 @@ async fn handle_client_command(
                             omegon_traits::ControlOutputResponse {
                                 accepted: false,
                                 output: Some(
-                                    "set_model executor dropped response before completion".to_string(),
+                                    "set_model executor dropped response before completion"
+                                        .to_string(),
                                 ),
                             },
                         ),
@@ -453,7 +463,10 @@ async fn handle_client_command(
         "switch_dispatcher" => {
             let request_id = cmd["request_id"].as_str().unwrap_or("").trim();
             let profile = cmd["profile"].as_str().unwrap_or("").trim();
-            let model = cmd["model"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty());
+            let model = cmd["model"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
             let classified = crate::control_actions::classify_web_method("switch_dispatcher");
             if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
                 let _ = snapshot_tx
@@ -545,7 +558,8 @@ async fn handle_client_command(
                             omegon_traits::ControlOutputResponse {
                                 accepted: false,
                                 output: Some(
-                                    "set_thinking executor dropped response before completion".to_string(),
+                                    "set_thinking executor dropped response before completion"
+                                        .to_string(),
                                 ),
                             },
                         ),
@@ -676,7 +690,10 @@ async fn handle_client_command(
             let accepted = command_tx
                 .send(WebCommand::ExecuteControl {
                     request: crate::control_runtime::ControlRequest::PluginUpdate {
-                        name: cmd["name"].as_str().map(|s| s.to_string()).filter(|s| !s.is_empty()),
+                        name: cmd["name"]
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .filter(|s| !s.is_empty()),
                     },
                     respond_to: Some(reply_tx),
                 })
@@ -1243,7 +1260,8 @@ async fn handle_client_command(
                         omegon_traits::ControlOutputResponse {
                             accepted: false,
                             output: Some(
-                                "auth_status executor dropped response before completion".to_string(),
+                                "auth_status executor dropped response before completion"
+                                    .to_string(),
                             ),
                         },
                     ),
@@ -1287,7 +1305,8 @@ async fn handle_client_command(
                         omegon_traits::ControlOutputResponse {
                             accepted: false,
                             output: Some(
-                                "context_status executor dropped response before completion".to_string(),
+                                "context_status executor dropped response before completion"
+                                    .to_string(),
                             ),
                         },
                     ),
@@ -1331,7 +1350,8 @@ async fn handle_client_command(
                         omegon_traits::ControlOutputResponse {
                             accepted: false,
                             output: Some(
-                                "context_compact executor dropped response before completion".to_string(),
+                                "context_compact executor dropped response before completion"
+                                    .to_string(),
                             ),
                         },
                     ),
@@ -1375,7 +1395,8 @@ async fn handle_client_command(
                         omegon_traits::ControlOutputResponse {
                             accepted: false,
                             output: Some(
-                                "context_clear executor dropped response before completion".to_string(),
+                                "context_clear executor dropped response before completion"
+                                    .to_string(),
                             ),
                         },
                     ),
@@ -1863,7 +1884,10 @@ mod tests {
         let (events_tx, _) = tokio::sync::broadcast::channel(4);
         let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
         let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
-        let state = WebState::new(crate::tui::dashboard::DashboardHandles::default(), events_tx);
+        let state = WebState::new(
+            crate::tui::dashboard::DashboardHandles::default(),
+            events_tx,
+        );
 
         let cmd = serde_json::json!({
             "type": "switch_dispatcher",
@@ -1879,7 +1903,10 @@ mod tests {
         });
 
         match command_rx.recv().await.expect("command") {
-            WebCommand::ExecuteControl { request, respond_to } => {
+            WebCommand::ExecuteControl {
+                request,
+                respond_to,
+            } => {
                 match request {
                     crate::control_runtime::ControlRequest::SwitchDispatcher {
                         request_id,
@@ -1916,7 +1943,10 @@ mod tests {
         let (events_tx, _) = tokio::sync::broadcast::channel(4);
         let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
         let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
-        let state = WebState::new(crate::tui::dashboard::DashboardHandles::default(), events_tx);
+        let state = WebState::new(
+            crate::tui::dashboard::DashboardHandles::default(),
+            events_tx,
+        );
 
         let cmd = serde_json::json!({
             "type": "switch_dispatcher",
@@ -1929,7 +1959,10 @@ mod tests {
         assert!(command_rx.try_recv().is_err(), "should not enqueue command");
         let msg = snapshot_rx.recv().await.expect("snapshot message");
         assert_eq!(msg["type"], "system_message");
-        assert_eq!(msg["message"], "caller role is insufficient for switch_dispatcher");
+        assert_eq!(
+            msg["message"],
+            "caller role is insufficient for switch_dispatcher"
+        );
     }
 
     #[tokio::test]
@@ -1937,7 +1970,10 @@ mod tests {
         let (events_tx, _) = tokio::sync::broadcast::channel(4);
         let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
         let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
-        let state = WebState::new(crate::tui::dashboard::DashboardHandles::default(), events_tx);
+        let state = WebState::new(
+            crate::tui::dashboard::DashboardHandles::default(),
+            events_tx,
+        );
 
         let cmd = serde_json::json!({
             "type": "cancel_cleave_child",
@@ -1951,7 +1987,10 @@ mod tests {
         });
 
         match command_rx.recv().await.expect("command") {
-            WebCommand::ExecuteControl { request, respond_to } => {
+            WebCommand::ExecuteControl {
+                request,
+                respond_to,
+            } => {
                 match request {
                     crate::control_runtime::ControlRequest::CleaveCancelChild { label } => {
                         assert_eq!(label, "alpha");
@@ -1982,7 +2021,10 @@ mod tests {
         let (events_tx, _) = tokio::sync::broadcast::channel(4);
         let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
         let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
-        let state = WebState::new(crate::tui::dashboard::DashboardHandles::default(), events_tx);
+        let state = WebState::new(
+            crate::tui::dashboard::DashboardHandles::default(),
+            events_tx,
+        );
 
         let cmd = serde_json::json!({
             "type": "secrets_view",
@@ -1995,8 +2037,14 @@ mod tests {
         });
 
         match command_rx.recv().await.expect("command") {
-            WebCommand::ExecuteControl { request, respond_to } => {
-                assert!(matches!(request, crate::control_runtime::ControlRequest::SecretsView));
+            WebCommand::ExecuteControl {
+                request,
+                respond_to,
+            } => {
+                assert!(matches!(
+                    request,
+                    crate::control_runtime::ControlRequest::SecretsView
+                ));
                 respond_to
                     .expect("respond_to")
                     .send(omegon_traits::ControlOutputResponse {
@@ -2021,7 +2069,10 @@ mod tests {
         let (events_tx, _) = tokio::sync::broadcast::channel(4);
         let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
         let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
-        let state = WebState::new(crate::tui::dashboard::DashboardHandles::default(), events_tx);
+        let state = WebState::new(
+            crate::tui::dashboard::DashboardHandles::default(),
+            events_tx,
+        );
 
         let cmd = serde_json::json!({
             "type": "cleave_status",
@@ -2034,8 +2085,14 @@ mod tests {
         });
 
         match command_rx.recv().await.expect("command") {
-            WebCommand::ExecuteControl { request, respond_to } => {
-                assert!(matches!(request, crate::control_runtime::ControlRequest::CleaveStatus));
+            WebCommand::ExecuteControl {
+                request,
+                respond_to,
+            } => {
+                assert!(matches!(
+                    request,
+                    crate::control_runtime::ControlRequest::CleaveStatus
+                ));
                 respond_to
                     .expect("respond_to")
                     .send(omegon_traits::ControlOutputResponse {
@@ -2060,7 +2117,10 @@ mod tests {
         let (events_tx, _) = tokio::sync::broadcast::channel(4);
         let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
         let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
-        let state = WebState::new(crate::tui::dashboard::DashboardHandles::default(), events_tx);
+        let state = WebState::new(
+            crate::tui::dashboard::DashboardHandles::default(),
+            events_tx,
+        );
 
         let cmd = serde_json::json!({
             "type": "delegate_status",
@@ -2073,8 +2133,14 @@ mod tests {
         });
 
         match command_rx.recv().await.expect("command") {
-            WebCommand::ExecuteControl { request, respond_to } => {
-                assert!(matches!(request, crate::control_runtime::ControlRequest::DelegateStatus));
+            WebCommand::ExecuteControl {
+                request,
+                respond_to,
+            } => {
+                assert!(matches!(
+                    request,
+                    crate::control_runtime::ControlRequest::DelegateStatus
+                ));
                 respond_to
                     .expect("respond_to")
                     .send(omegon_traits::ControlOutputResponse {
@@ -2099,7 +2165,10 @@ mod tests {
         let (events_tx, _) = tokio::sync::broadcast::channel(4);
         let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(4);
         let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel(4);
-        let state = WebState::new(crate::tui::dashboard::DashboardHandles::default(), events_tx);
+        let state = WebState::new(
+            crate::tui::dashboard::DashboardHandles::default(),
+            events_tx,
+        );
 
         let cmd = serde_json::json!({
             "type": "vault_status",
@@ -2112,8 +2181,14 @@ mod tests {
         });
 
         match command_rx.recv().await.expect("command") {
-            WebCommand::ExecuteControl { request, respond_to } => {
-                assert!(matches!(request, crate::control_runtime::ControlRequest::VaultStatus));
+            WebCommand::ExecuteControl {
+                request,
+                respond_to,
+            } => {
+                assert!(matches!(
+                    request,
+                    crate::control_runtime::ControlRequest::VaultStatus
+                ));
                 respond_to
                     .expect("respond_to")
                     .send(omegon_traits::ControlOutputResponse {

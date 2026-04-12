@@ -197,7 +197,10 @@ mod tests {
         let parsed: TurnCheckpoint = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.turn, 5);
         assert_eq!(parsed.session_id, "test-session");
-        assert_eq!(parsed.intent.current_task.as_deref(), Some("implement auth"));
+        assert_eq!(
+            parsed.intent.current_task.as_deref(),
+            Some("implement auth")
+        );
         assert_eq!(parsed.metrics.context_class, "clan");
     }
 

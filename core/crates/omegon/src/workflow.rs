@@ -52,10 +52,7 @@ impl WorkflowTemplate {
     }
 
     /// Get the phase config for a lifecycle phase.
-    pub fn phase_config(
-        &self,
-        phase: &omegon_traits::LifecyclePhase,
-    ) -> Option<&PhaseConfig> {
+    pub fn phase_config(&self, phase: &omegon_traits::LifecyclePhase) -> Option<&PhaseConfig> {
         use omegon_traits::LifecyclePhase;
         match phase {
             LifecyclePhase::Exploring { .. } => self.phases.exploring.as_ref(),
@@ -237,18 +234,16 @@ thinking_level = "high"
     fn phase_config_lookup() {
         let template: WorkflowTemplate = toml::from_str(EXAMPLE_TOML).unwrap();
 
-        let result = template.phase_config(&omegon_traits::LifecyclePhase::Exploring {
-            node_id: None,
-        });
+        let result =
+            template.phase_config(&omegon_traits::LifecyclePhase::Exploring { node_id: None });
         assert!(result.is_some());
         assert_eq!(result.unwrap().persona.as_deref(), Some("researcher"));
 
         let result = template.phase_config(&omegon_traits::LifecyclePhase::Idle);
         assert!(result.is_none());
 
-        let result = template.phase_config(&omegon_traits::LifecyclePhase::Specifying {
-            change_id: None,
-        });
+        let result =
+            template.phase_config(&omegon_traits::LifecyclePhase::Specifying { change_id: None });
         assert!(result.is_none());
     }
 

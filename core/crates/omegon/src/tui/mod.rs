@@ -58,7 +58,7 @@ use self::dashboard::DashboardState;
 use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
-use self::segments::{build_meta_tag, SegmentContent, SegmentExportMode, SegmentRenderMode};
+use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode, build_meta_tag};
 
 #[derive(Debug, Clone)]
 pub struct PromptSubmission {
@@ -66,6 +66,15 @@ pub struct PromptSubmission {
     pub image_paths: Vec<std::path::PathBuf>,
     pub submitted_by: String,
     pub via: &'static str,
+    pub queue_mode: PromptQueueMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PromptQueueMode {
+    #[default]
+    InterruptAfterTurn,
+    UntilReady,
+    Immediate,
 }
 
 /// Messages from TUI to the agent coordinator.
@@ -271,6 +280,8 @@ pub struct App {
     web_server_addr: Option<std::net::SocketAddr>,
     /// Prompts queued while the agent is busy — drained only after authoritative AgentEnd.
     queued_prompts: std::collections::VecDeque<(String, Vec<std::path::PathBuf>)>,
+    /// Local default queue policy for interactive submissions.
+    queue_mode: PromptQueueMode,
     /// Inline operator-facing transient events (replaces floating toasts).
     operator_events: std::collections::VecDeque<OperatorEvent>,
     /// Previous harness status for diffing on HarnessStatusChanged.
@@ -405,8 +416,9 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
     match cmd {
         "model" if args == "list" => Some(CanonicalSlashCommand::ModelList),
         "model" if !args.is_empty() => Some(CanonicalSlashCommand::SetModel(args.to_string())),
-        "think" => crate::settings::ThinkingLevel::parse(args)
-            .map(CanonicalSlashCommand::SetThinking),
+        "think" => {
+            crate::settings::ThinkingLevel::parse(args).map(CanonicalSlashCommand::SetThinking)
+        }
         "status" if args.is_empty() => Some(CanonicalSlashCommand::StatusView),
         "workspace" if args.is_empty() => Some(CanonicalSlashCommand::WorkspaceStatusView),
         "workspace" if args == "status" => Some(CanonicalSlashCommand::WorkspaceStatusView),
@@ -421,13 +433,31 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "workspace" if args == "kind" => Some(CanonicalSlashCommand::WorkspaceKindView),
         "workspace" if args == "kind clear" => Some(CanonicalSlashCommand::WorkspaceKindClear),
         "workspace" => {
-            if let Some(label) = args.strip_prefix("new ").map(str::trim).filter(|label| !label.is_empty()) {
+            if let Some(label) = args
+                .strip_prefix("new ")
+                .map(str::trim)
+                .filter(|label| !label.is_empty())
+            {
                 Some(CanonicalSlashCommand::WorkspaceNew(label.to_string()))
-            } else if let Some(target) = args.strip_prefix("destroy ").map(str::trim).filter(|value| !value.is_empty()) {
+            } else if let Some(target) = args
+                .strip_prefix("destroy ")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
                 Some(CanonicalSlashCommand::WorkspaceDestroy(target.to_string()))
-            } else if let Some(milestone) = args.strip_prefix("bind milestone ").map(str::trim).filter(|value| !value.is_empty()) {
-                Some(CanonicalSlashCommand::WorkspaceBindMilestone(milestone.to_string()))
-            } else if let Some(node) = args.strip_prefix("bind node ").map(str::trim).filter(|value| !value.is_empty()) {
+            } else if let Some(milestone) = args
+                .strip_prefix("bind milestone ")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                Some(CanonicalSlashCommand::WorkspaceBindMilestone(
+                    milestone.to_string(),
+                ))
+            } else if let Some(node) = args
+                .strip_prefix("bind node ")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
                 Some(CanonicalSlashCommand::WorkspaceBindNode(node.to_string()))
             } else if let Some(role) = args
                 .strip_prefix("role set ")
@@ -442,9 +472,15 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         }
         "stats" if args.is_empty() => Some(CanonicalSlashCommand::SessionStatsView),
         "tree" => Some(CanonicalSlashCommand::TreeView {
-            args: if args.is_empty() { "list".to_string() } else { args.to_string() },
+            args: if args.is_empty() {
+                "list".to_string()
+            } else {
+                args.to_string()
+            },
         }),
-        "note" if !args.is_empty() => Some(CanonicalSlashCommand::NoteAdd { text: args.to_string() }),
+        "note" if !args.is_empty() => Some(CanonicalSlashCommand::NoteAdd {
+            text: args.to_string(),
+        }),
         "notes" if args.is_empty() => Some(CanonicalSlashCommand::NotesView),
         "notes" if args == "clear" => Some(CanonicalSlashCommand::NotesClear),
         "checkin" if args.is_empty() => Some(CanonicalSlashCommand::CheckinView),
@@ -457,7 +493,9 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 "request" => {
                     if rest.starts_with('{') {
                         match serde_json::from_str::<serde_json::Value>(rest) {
-                            Ok(value) if value.get("requests").and_then(|v| v.as_array()).is_some() => {
+                            Ok(value)
+                                if value.get("requests").and_then(|v| v.as_array()).is_some() =>
+                            {
                                 Some(CanonicalSlashCommand::ContextRequestJson(rest.to_string()))
                             }
                             _ => None,
@@ -486,9 +524,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             _ => None,
         },
         "login" if !args.is_empty() => Some(CanonicalSlashCommand::AuthLogin(args.to_string())),
-        "logout" if !args.is_empty() => {
-            Some(CanonicalSlashCommand::AuthLogout(args.to_string()))
-        }
+        "logout" if !args.is_empty() => Some(CanonicalSlashCommand::AuthLogout(args.to_string())),
         "skills" => match args {
             "" | "list" => Some(CanonicalSlashCommand::SkillsView),
             "install" => Some(CanonicalSlashCommand::SkillsInstall),
@@ -507,7 +543,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 Some(CanonicalSlashCommand::PluginUpdate(None))
             } else if let Some(name) = args.strip_prefix("update ") {
                 let name = name.trim();
-                (!name.is_empty()).then(|| CanonicalSlashCommand::PluginUpdate(Some(name.to_string())))
+                (!name.is_empty())
+                    .then(|| CanonicalSlashCommand::PluginUpdate(Some(name.to_string())))
             } else {
                 None
             }
@@ -520,12 +557,12 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                     name: parts[1].trim().to_string(),
                     value: parts[2].trim().to_string(),
                 }),
-                "get" if parts.len() >= 2 => {
-                    Some(CanonicalSlashCommand::SecretsGet(parts[1].trim().to_string()))
-                }
-                "delete" if parts.len() >= 2 => {
-                    Some(CanonicalSlashCommand::SecretsDelete(parts[1].trim().to_string()))
-                }
+                "get" if parts.len() >= 2 => Some(CanonicalSlashCommand::SecretsGet(
+                    parts[1].trim().to_string(),
+                )),
+                "delete" if parts.len() >= 2 => Some(CanonicalSlashCommand::SecretsDelete(
+                    parts[1].trim().to_string(),
+                )),
                 _ => None,
             }
         }
@@ -542,7 +579,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 Some(CanonicalSlashCommand::CleaveStatus)
             } else if let Some(label) = args.strip_prefix("cancel ") {
                 let label = label.trim();
-                (!label.is_empty()).then(|| CanonicalSlashCommand::CleaveCancelChild(label.to_string()))
+                (!label.is_empty())
+                    .then(|| CanonicalSlashCommand::CleaveCancelChild(label.to_string()))
             } else {
                 None
             }
@@ -595,7 +633,10 @@ fn launch_auspex_with_startup(startup: &crate::web::WebStartupInfo) -> anyhow::R
         anyhow::anyhow!("Auspex not detected. Set AUSPEX_BIN or install Auspex first.")
     })?;
     if let AuspexCompatibility::Incompatible(reason) = &probe.compatibility {
-        anyhow::bail!("Auspex detected at {} but is not compatible: {reason}", probe.target);
+        anyhow::bail!(
+            "Auspex detected at {} but is not compatible: {reason}",
+            probe.target
+        );
     }
 
     let target = probe.target;
@@ -946,6 +987,7 @@ impl App {
             web_startup: None,
             web_server_addr: None,
             queued_prompts: std::collections::VecDeque::new(),
+            queue_mode: PromptQueueMode::InterruptAfterTurn,
             operator_events: std::collections::VecDeque::new(),
             previous_harness_status: None,
             capability_tier: None,
@@ -1009,8 +1051,16 @@ impl App {
         };
         format!(
             "UI mode: {mode}\n  dashboard: {}\n  instruments: {}\n  footer: {}\n\nPresets\n  /ui full\n  /ui slim\n\nSurfaces\n  /ui show dashboard\n  /ui hide dashboard\n  /ui toggle dashboard\n  /ui show instruments\n  /ui hide instruments\n  /ui toggle instruments\n  /ui show footer\n  /ui hide footer\n  /ui toggle footer",
-            if self.ui_surfaces.dashboard { "on" } else { "off" },
-            if self.ui_surfaces.instruments { "on" } else { "off" },
+            if self.ui_surfaces.dashboard {
+                "on"
+            } else {
+                "off"
+            },
+            if self.ui_surfaces.instruments {
+                "on"
+            } else {
+                "off"
+            },
             if self.ui_surfaces.footer { "on" } else { "off" },
         )
     }
@@ -1190,9 +1240,8 @@ impl App {
     fn open_tone_selector(&mut self) {
         let (_, tones) = crate::plugins::persona_loader::scan_available();
         if tones.is_empty() {
-            self.conversation.push_system(
-                "No tones installed. Install with: omegon plugin install <git-url>",
-            );
+            self.conversation
+                .push_system("No tones installed. Install with: omegon plugin install <git-url>");
             return;
         }
 
@@ -1322,22 +1371,21 @@ impl App {
 
     fn open_update_channel_selector(&mut self) {
         let current = self.settings().update_channel;
-        let options = [crate::update::UpdateChannel::Stable, crate::update::UpdateChannel::Nightly]
-            .into_iter()
-            .map(|channel| selector::SelectOption {
-                value: channel.as_str().to_string(),
-                label: channel.as_str().to_string(),
-                description: match channel {
-                    crate::update::UpdateChannel::Stable => {
-                        "Release builds only".to_string()
-                    }
-                    crate::update::UpdateChannel::Nightly => {
-                        "Nightly prerelease / RC lane".to_string()
-                    }
-                },
-                active: current == channel.as_str(),
-            })
-            .collect();
+        let options = [
+            crate::update::UpdateChannel::Stable,
+            crate::update::UpdateChannel::Nightly,
+        ]
+        .into_iter()
+        .map(|channel| selector::SelectOption {
+            value: channel.as_str().to_string(),
+            label: channel.as_str().to_string(),
+            description: match channel {
+                crate::update::UpdateChannel::Stable => "Release builds only".to_string(),
+                crate::update::UpdateChannel::Nightly => "Nightly prerelease / RC lane".to_string(),
+            },
+            active: current == channel.as_str(),
+        })
+        .collect();
         self.selector = Some(selector::Selector::new("Update Channel", options));
         self.selector_kind = Some(SelectorKind::UpdateChannel);
     }
@@ -1592,7 +1640,8 @@ impl App {
                             .unwrap_or(value.as_str());
                         Some(format!("Opening browser for {label} login…"))
                     }
-                    "openai" | "openrouter" | "ollama-cloud" | "brave" | "tavily" | "serper" | "huggingface" => {
+                    "openai" | "openrouter" | "ollama-cloud" | "brave" | "tavily" | "serper"
+                    | "huggingface" => {
                         // Map to the correct env var name for storage
                         let key_name = match value.as_str() {
                             "openai" => "OPENAI_API_KEY",
@@ -1654,7 +1703,9 @@ impl App {
                     if suggested.is_empty() {
                         // Direct value — enter masked secret input mode
                         self.editor.start_secret_input(&value);
-                        Some(format!("🔒 Paste or type value for {value} (input is hidden):"))
+                        Some(format!(
+                            "🔒 Paste or type value for {value} (input is hidden):"
+                        ))
                     } else {
                         // Dynamic recipe — set immediately
                         if let Some(request) = crate::control_runtime::control_request_from_slash(
@@ -1852,7 +1903,8 @@ impl App {
             }
             _ => {
                 if let Some(command) = canonical_slash_command("secrets", args) {
-                    if let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    if let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                     {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
                             request,
@@ -1867,8 +1919,7 @@ impl App {
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /secrets [list|get <name>|set <name> <value>|delete <name>]"
-                            .into(),
+                        "Usage: /secrets [list|get <name>|set <name> <value>|delete <name>]".into(),
                     )
                 }
             }
@@ -2278,17 +2329,27 @@ impl App {
         }
     }
 
-    fn queue_prompt(&mut self, text: String, attachments: Vec<std::path::PathBuf>) {
-        let preview = if attachments.is_empty() {
-            text.clone()
+    fn queue_prompt_preview(text: &str, attachments: &[std::path::PathBuf]) -> String {
+        let preview = text.chars().take(48).collect::<String>();
+        if attachments.is_empty() {
+            preview
         } else {
-            format!(
-                "{} (+{} attachment{})",
-                text,
-                attachments.len(),
-                if attachments.len() == 1 { "" } else { "s" }
-            )
-        };
+            let names = attachments
+                .iter()
+                .take(3)
+                .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
+                .collect::<Vec<_>>();
+            let suffix = if attachments.len() > names.len() {
+                format!(" +{} more", attachments.len() - names.len())
+            } else {
+                String::new()
+            };
+            format!("{} [{}{}]", preview, names.join(", "), suffix)
+        }
+    }
+
+    fn queue_prompt(&mut self, text: String, attachments: Vec<std::path::PathBuf>) {
+        let preview = Self::queue_prompt_preview(&text, &attachments);
         self.queued_prompts.push_back((text, attachments));
         let queued = self.queued_prompts.len();
         self.conversation
@@ -2321,7 +2382,19 @@ impl App {
                 }
                 SlashResult::NotACommand => {
                     if self.agent_active {
-                        self.queue_prompt(text.clone(), attachments);
+                        let should_interrupt =
+                            matches!(self.queue_mode, PromptQueueMode::InterruptAfterTurn);
+                        let mode_label = match self.queue_mode {
+                            PromptQueueMode::InterruptAfterTurn => "after-turn",
+                            PromptQueueMode::UntilReady => "ready",
+                            PromptQueueMode::Immediate => "now",
+                        };
+                        self.queue_prompt(text.clone(), attachments.clone());
+                        self.conversation
+                            .push_system(&format!("Queue mode: {mode_label}"));
+                        if should_interrupt {
+                            let _ = self.interrupt();
+                        }
                     } else {
                         if attachments.is_empty() {
                             self.conversation.push_user(&text);
@@ -2342,6 +2415,7 @@ impl App {
                                     image_paths: Vec::new(),
                                     submitted_by: "local-tui".to_string(),
                                     via: "tui",
+                                    queue_mode: self.queue_mode,
                                 }))
                                 .await;
                         } else {
@@ -2351,6 +2425,7 @@ impl App {
                                     image_paths: attachments,
                                     submitted_by: "local-tui".to_string(),
                                     via: "tui",
+                                    queue_mode: self.queue_mode,
                                 }))
                                 .await;
                         }
@@ -2361,7 +2436,18 @@ impl App {
         }
 
         if self.agent_active {
-            self.queue_prompt(text.clone(), attachments);
+            let should_interrupt = matches!(self.queue_mode, PromptQueueMode::InterruptAfterTurn);
+            let mode_label = match self.queue_mode {
+                PromptQueueMode::InterruptAfterTurn => "after-turn",
+                PromptQueueMode::UntilReady => "ready",
+                PromptQueueMode::Immediate => "now",
+            };
+            self.queue_prompt(text.clone(), attachments.clone());
+            self.conversation
+                .push_system(&format!("Queue mode: {mode_label}"));
+            if should_interrupt {
+                let _ = self.interrupt();
+            }
             if let Some(ref mut overlay) = self.tutorial_overlay {
                 overlay.check_any_input();
             }
@@ -2386,6 +2472,7 @@ impl App {
                 image_paths: attachments,
                 submitted_by: "local-tui".to_string(),
                 via: "tui",
+                queue_mode: self.queue_mode,
             }))
             .await;
         if let Some(ref mut overlay) = self.tutorial_overlay {
@@ -2449,7 +2536,10 @@ impl App {
     fn draw(&mut self, frame: &mut Frame) {
         let area = frame.area();
         frame.render_widget(Clear, area);
-        frame.render_widget(Block::default().style(Style::default().bg(self.theme.bg())), area);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(self.theme.bg())),
+            area,
+        );
 
         // Check for available update (non-blocking)
         let update_toast: Option<String> = self.update_rx.as_ref().and_then(|rx| {
@@ -2566,7 +2656,10 @@ impl App {
         // Render tab bar + conversation/widget content
         let t = &self.theme;
         let has_multiple_tabs = self.conversation.tabs.tabs.len() > 1;
-        let show_tab_bar = has_multiple_tabs && !(matches!(self.ui_mode, UiMode::Slim) && !self.ui_surfaces.dashboard && !self.ui_surfaces.footer);
+        let show_tab_bar = has_multiple_tabs
+            && !(matches!(self.ui_mode, UiMode::Slim)
+                && !self.ui_surfaces.dashboard
+                && !self.ui_surfaces.footer);
 
         let content_area = if show_tab_bar {
             // Split conversation area into tab bar + content
@@ -2660,7 +2753,11 @@ impl App {
             self.footer_data.context_window = s.context_window;
             self.footer_data.thinking_level = s.thinking.as_str().to_string();
             self.footer_data.posture = s.posture.effective.display_name().to_string();
-            self.footer_data.principal_id = s.operating_profile().identity.summary_principal().to_string();
+            self.footer_data.principal_id = s
+                .operating_profile()
+                .identity
+                .summary_principal()
+                .to_string();
             self.footer_data.authorization = s.operating_profile().authorization.summary();
             self.footer_data.provider_connected = s.provider_connected;
             self.footer_data.is_oauth = crate::providers::resolve_api_key_sync(s.provider())
@@ -2793,7 +2890,8 @@ impl App {
                     .render_tools_panel(footer_cols[4], frame, t.as_ref());
                 footer_cols[2].union(footer_cols[4])
             } else {
-                self.footer_data.render_left_panel(footer_area, frame, t.as_ref());
+                self.footer_data
+                    .render_left_panel(footer_area, frame, t.as_ref());
                 footer_area
             }
         } else {
@@ -3091,22 +3189,37 @@ impl App {
 
             let is_selected = selected == Some(idx);
             let (role, sigil, color) = match segment.role() {
-                crate::tui::segments::SegmentRole::Operator => ("operator", "OP", self.theme.accent()),
-                crate::tui::segments::SegmentRole::Assistant => ("assistant", "Ω", self.theme.success()),
+                crate::tui::segments::SegmentRole::Operator => {
+                    ("operator", "OP", self.theme.accent())
+                }
+                crate::tui::segments::SegmentRole::Assistant => {
+                    ("assistant", "Ω", self.theme.success())
+                }
                 crate::tui::segments::SegmentRole::Tool => ("tool", "⚙", self.theme.warning()),
                 crate::tui::segments::SegmentRole::System => ("system", "ℹ", self.theme.dim()),
                 crate::tui::segments::SegmentRole::Lifecycle => ("event", "⚡", self.theme.dim()),
-                crate::tui::segments::SegmentRole::Media => ("media", "◈", self.theme.accent_muted()),
+                crate::tui::segments::SegmentRole::Media => {
+                    ("media", "◈", self.theme.accent_muted())
+                }
                 crate::tui::segments::SegmentRole::Separator => ("separator", "", self.theme.dim()),
             };
-            let timestamp = segment
-                .meta
-                .timestamp
-                .and_then(|ts| chrono::DateTime::<chrono::Local>::from(ts).format("%H:%M").to_string().into());
+            let timestamp = segment.meta.timestamp.and_then(|ts| {
+                chrono::DateTime::<chrono::Local>::from(ts)
+                    .format("%H:%M")
+                    .to_string()
+                    .into()
+            });
             let meta = build_meta_tag(&segment.meta);
             let mut content = segment.export_text(SegmentExportMode::Plaintext);
-            let expanded = matches!(segment.content, SegmentContent::ToolCard { expanded: true, .. });
-            let max_chars = if is_selected || expanded { usize::MAX } else { 2000 };
+            let expanded = matches!(
+                segment.content,
+                SegmentContent::ToolCard { expanded: true, .. }
+            );
+            let max_chars = if is_selected || expanded {
+                usize::MAX
+            } else {
+                2000
+            };
             if content.chars().count() > max_chars {
                 content = crate::util::truncate(&content, 2000);
                 content.push_str("\n… truncated (press Enter to expand)");
@@ -3114,22 +3227,42 @@ impl App {
 
             let gutter = if is_selected { "▶" } else { "│" };
             lines.push(Line::from(vec![
-                Span::styled(format!("{gutter} {sigil}"), Style::default().fg(color).add_modifier(if is_selected { Modifier::BOLD } else { Modifier::empty() })),
+                Span::styled(
+                    format!("{gutter} {sigil}"),
+                    Style::default().fg(color).add_modifier(if is_selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+                ),
                 Span::raw(" "),
                 Span::styled(role.to_string(), Style::default().fg(color)),
                 Span::raw(" · "),
                 Span::styled(meta, Style::default().fg(self.theme.dim())),
                 Span::raw(" "),
-                Span::styled(timestamp.unwrap_or_default(), Style::default().fg(self.theme.dim())),
+                Span::styled(
+                    timestamp.unwrap_or_default(),
+                    Style::default().fg(self.theme.dim()),
+                ),
             ]));
             lines.push(Line::from(Span::styled(
                 format!("  {}", content.lines().next().unwrap_or_default()),
                 Style::default().fg(self.theme.fg()),
             )));
             for line in content.lines().skip(1).take(40) {
-                lines.push(Line::from(Span::styled(format!("  {line}"), Style::default().fg(self.theme.fg()))));
+                lines.push(Line::from(Span::styled(
+                    format!("  {line}"),
+                    Style::default().fg(self.theme.fg()),
+                )));
             }
-            lines.push(Line::from(Span::styled(if is_selected { "  └─ selected" } else { "  └─" }, Style::default().fg(self.theme.dim()))));
+            lines.push(Line::from(Span::styled(
+                if is_selected {
+                    "  └─ selected"
+                } else {
+                    "  └─"
+                },
+                Style::default().fg(self.theme.dim()),
+            )));
             lines.push(Line::default());
         }
         if lines.last().is_some_and(|line| line.spans.is_empty()) {
@@ -3145,16 +3278,30 @@ impl App {
         let top_line = max_scroll.saturating_sub(self.conversation.conv_state.scroll_offset);
 
         let paragraph = Paragraph::new(lines)
-            .style(Style::default().fg(self.theme.fg()).bg(self.theme.surface_bg()))
+            .style(
+                Style::default()
+                    .fg(self.theme.fg())
+                    .bg(self.theme.surface_bg()),
+            )
             .wrap(Wrap { trim: false })
             .scroll((top_line, 0));
-        let text_area = Rect { x: area.x, y: area.y, width: area.width, height: viewport_height };
+        let text_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: viewport_height,
+        };
         frame.render_widget(paragraph, text_area);
 
         let overlay = Paragraph::new("↑/↓ scroll · PgUp/PgDn jump · Home/End top/bottom · Enter expand/collapse selected · Ctrl+Y copy segment · Esc or /focus to return")
             .style(Style::default().fg(self.theme.dim()).bg(self.theme.surface_bg()))
             .alignment(Alignment::Center);
-        let overlay_area = Rect { x: area.x, y: area.bottom().saturating_sub(1), width: area.width, height: 1 };
+        let overlay_area = Rect {
+            x: area.x,
+            y: area.bottom().saturating_sub(1),
+            width: area.width,
+            height: 1,
+        };
         frame.render_widget(overlay, overlay_area);
     }
 
@@ -3436,13 +3583,15 @@ impl App {
         (
             "logout",
             "log out of provider",
-            &["anthropic", "openai", "openai-codex", "openrouter", "ollama-cloud"],
+            &[
+                "anthropic",
+                "openai",
+                "openai-codex",
+                "openrouter",
+                "ollama-cloud",
+            ],
         ),
-        (
-            "auth",
-            "authentication management",
-            &["status", "unlock"],
-        ),
+        ("auth", "authentication management", &["status", "unlock"]),
         (
             "chronos",
             "date/time context",
@@ -3626,7 +3775,8 @@ impl App {
 
             "skills" => {
                 if let Some(command) = canonical_slash_command("skills", args) {
-                    if let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    if let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                     {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
                             request,
@@ -3643,7 +3793,8 @@ impl App {
 
             "plugin" => {
                 if let Some(command) = canonical_slash_command("plugin", args) {
-                    if let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    if let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                     {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
                             request,
@@ -3658,15 +3809,15 @@ impl App {
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /plugin [list|install <uri>|remove <name>|update [name]]"
-                            .into(),
+                        "Usage: /plugin [list|install <uri>|remove <name>|update [name]]".into(),
                     )
                 }
             }
 
             "stats" => {
                 if let Some(command) = canonical_slash_command("stats", args)
-                    && let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    && let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                 {
                     let _ = tx.try_send(TuiCommand::ExecuteControl {
                         request,
@@ -3680,7 +3831,8 @@ impl App {
 
             "status" => {
                 if let Some(command) = canonical_slash_command("status", args)
-                    && let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    && let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                 {
                     let _ = tx.try_send(TuiCommand::ExecuteControl {
                         request,
@@ -3700,7 +3852,8 @@ impl App {
                     self.open_workspace_kind_selector();
                     SlashResult::Handled
                 } else {
-                    let request = if let Some(command) = canonical_slash_command("workspace", args) {
+                    let request = if let Some(command) = canonical_slash_command("workspace", args)
+                    {
                         match command {
                             CanonicalSlashCommand::WorkspaceStatusView => {
                                 crate::control_runtime::ControlRequest::WorkspaceStatusView
@@ -3902,9 +4055,8 @@ impl App {
                             SlashResult::Display("Clearing context…".into())
                         }
                         Some(CanonicalSlashCommand::ContextRequest { kind, query }) => {
-                            let display = format!(
-                                "Requesting mediated context pack for {kind}: {query}"
-                            );
+                            let display =
+                                format!("Requesting mediated context pack for {kind}: {query}");
                             let _ = tx.try_send(TuiCommand::ExecuteControl {
                                 request: crate::control_runtime::ControlRequest::ContextRequest {
                                     kind,
@@ -3916,9 +4068,10 @@ impl App {
                         }
                         Some(CanonicalSlashCommand::ContextRequestJson(raw)) => {
                             let _ = tx.try_send(TuiCommand::ExecuteControl {
-                                request: crate::control_runtime::ControlRequest::ContextRequestJson {
-                                    raw,
-                                },
+                                request:
+                                    crate::control_runtime::ControlRequest::ContextRequestJson {
+                                        raw,
+                                    },
                                 respond_to: None,
                             });
                             SlashResult::Display(
@@ -3973,21 +4126,19 @@ impl App {
                     .unwrap_or_else(|| "none".to_string()),
             )),
 
-            "auth" => {
-                match canonical_slash_command("auth", args) {
-                    Some(CanonicalSlashCommand::AuthStatus) => {
-                        let _ = tx.try_send(TuiCommand::AuthStatus { respond_to: None });
-                        SlashResult::Handled
-                    }
-                    Some(CanonicalSlashCommand::AuthUnlock) => {
-                        let _ = tx.try_send(TuiCommand::AuthUnlock { respond_to: None });
-                        SlashResult::Handled
-                    }
-                    _ => SlashResult::Display(format!(
-                        "Unknown auth command: {args}\n\nUsage:\n  /auth status\n  /auth unlock\n\nUse /login <provider> or /logout <provider> for provider authentication."
-                    )),
+            "auth" => match canonical_slash_command("auth", args) {
+                Some(CanonicalSlashCommand::AuthStatus) => {
+                    let _ = tx.try_send(TuiCommand::AuthStatus { respond_to: None });
+                    SlashResult::Handled
                 }
-            }
+                Some(CanonicalSlashCommand::AuthUnlock) => {
+                    let _ = tx.try_send(TuiCommand::AuthUnlock { respond_to: None });
+                    SlashResult::Handled
+                }
+                _ => SlashResult::Display(format!(
+                    "Unknown auth command: {args}\n\nUsage:\n  /auth status\n  /auth unlock\n\nUse /login <provider> or /logout <provider> for provider authentication."
+                )),
+            },
 
             "update" => {
                 let trimmed = args.trim();
@@ -4093,29 +4244,27 @@ impl App {
                 }
             }
 
-            "auspex" => {
-                match args {
-                    "" | "status" => SlashResult::Display(self.auspex_status_text()),
-                    "open" => {
-                        if let Some(ref startup) = self.web_startup {
-                            match launch_auspex_with_startup(startup) {
-                                Ok(target) => SlashResult::Display(format!(
-                                    "Launching Auspex via the primary local desktop handoff ({target}).\n\nOmegon is passing native attach metadata for the current live session over `AUSPEX_OMEGON_ATTACH_JSON` with `transport=omegon-ipc`. The embedded browser bridge remains available only as compatibility/debug support behind `/dash`."
-                                )),
-                                Err(e) => SlashResult::Display(format!("Failed to launch Auspex: {e}")),
-                            }
-                        } else {
-                            let _ = tx.try_send(TuiCommand::StartWebDashboard);
-                            SlashResult::Display(
+            "auspex" => match args {
+                "" | "status" => SlashResult::Display(self.auspex_status_text()),
+                "open" => {
+                    if let Some(ref startup) = self.web_startup {
+                        match launch_auspex_with_startup(startup) {
+                            Ok(target) => SlashResult::Display(format!(
+                                "Launching Auspex via the primary local desktop handoff ({target}).\n\nOmegon is passing native attach metadata for the current live session over `AUSPEX_OMEGON_ATTACH_JSON` with `transport=omegon-ipc`. The embedded browser bridge remains available only as compatibility/debug support behind `/dash`."
+                            )),
+                            Err(e) => SlashResult::Display(format!("Failed to launch Auspex: {e}")),
+                        }
+                    } else {
+                        let _ = tx.try_send(TuiCommand::StartWebDashboard);
+                        SlashResult::Display(
                                 "Preparing the local compatibility surface so `/auspex open` can complete the native desktop handoff once startup metadata is available. `/dash` remains the explicit compatibility/debug browser path.".into()
                             )
-                        }
                     }
-                    other => SlashResult::Display(format!(
-                        "Usage: /auspex status | /auspex open\n\nUnknown subcommand: {other}"
-                    )),
                 }
-            }
+                other => SlashResult::Display(format!(
+                    "Usage: /auspex status | /auspex open\n\nUnknown subcommand: {other}"
+                )),
+            },
 
             "dash" => {
                 // /dash remains the compatibility/debug command for opening the browser UI.
@@ -4152,9 +4301,7 @@ impl App {
                     }
                 } else {
                     let _ = tx.try_send(TuiCommand::StartWebDashboard);
-                    SlashResult::Display(
-                        "Starting Auspex compatibility/debug browser path…".into()
-                    )
+                    SlashResult::Display("Starting Auspex compatibility/debug browser path…".into())
                 }
             }
 
@@ -4166,7 +4313,8 @@ impl App {
 
             "delegate" => {
                 if let Some(command) = canonical_slash_command("delegate", args) {
-                    if let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    if let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                     {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
                             request,
@@ -4205,7 +4353,9 @@ impl App {
                     SlashResult::Display(self.ui_status_text())
                 } else if args == "full" {
                     self.set_ui_mode(UiMode::Full);
-                    SlashResult::Display("UI mode → full (dashboard, instruments, footer enabled)".into())
+                    SlashResult::Display(
+                        "UI mode → full (dashboard, instruments, footer enabled)".into(),
+                    )
                 } else if args == "slim" {
                     self.set_ui_mode(UiMode::Slim);
                     SlashResult::Display("UI mode → slim (conversation-first surfaces)".into())
@@ -4215,20 +4365,30 @@ impl App {
                         "dashboard" | "dash" | "tree" => !self.ui_surfaces.dashboard,
                         "instruments" | "instrument" | "tools" => !self.ui_surfaces.instruments,
                         "footer" | "status" => !self.ui_surfaces.footer,
-                        other => return SlashResult::Display(format!("Unknown UI surface: {other}")),
+                        other => {
+                            return SlashResult::Display(format!("Unknown UI surface: {other}"));
+                        }
                     };
                     match self.toggle_ui_surface(surface, enabled) {
-                        Ok(()) => SlashResult::Display(format!("UI surface {}: {}", if enabled { "enabled" } else { "disabled" }, surface)),
+                        Ok(()) => SlashResult::Display(format!(
+                            "UI surface {}: {}",
+                            if enabled { "enabled" } else { "disabled" },
+                            surface
+                        )),
                         Err(err) => SlashResult::Display(err),
                     }
                 } else if let Some(surface) = args.strip_prefix("show ") {
                     match self.toggle_ui_surface(surface.trim(), true) {
-                        Ok(()) => SlashResult::Display(format!("UI surface enabled: {}", surface.trim())),
+                        Ok(()) => {
+                            SlashResult::Display(format!("UI surface enabled: {}", surface.trim()))
+                        }
                         Err(err) => SlashResult::Display(err),
                     }
                 } else if let Some(surface) = args.strip_prefix("hide ") {
                     match self.toggle_ui_surface(surface.trim(), false) {
-                        Ok(()) => SlashResult::Display(format!("UI surface disabled: {}", surface.trim())),
+                        Ok(()) => {
+                            SlashResult::Display(format!("UI surface disabled: {}", surface.trim()))
+                        }
                         Err(err) => SlashResult::Display(err),
                     }
                 } else {
@@ -4246,11 +4406,12 @@ impl App {
                     SlashResult::Handled
                 }
                 _ => SlashResult::Display("Usage: /copy [raw|plain]".into()),
-            }
+            },
 
             "tree" => {
                 if let Some(command) = canonical_slash_command("tree", args)
-                    && let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    && let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                 {
                     let _ = tx.try_send(TuiCommand::ExecuteControl {
                         request,
@@ -4295,7 +4456,8 @@ impl App {
                     self.selector_kind = Some(SelectorKind::VaultConfigure);
                     SlashResult::Handled
                 } else if let Some(command) = canonical_slash_command("vault", args) {
-                    if let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    if let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                     {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
                             request,
@@ -4303,18 +4465,14 @@ impl App {
                         });
                         SlashResult::Handled
                     } else {
-                        SlashResult::Display(
-                            format!(
-                                "Unknown vault subcommand: {args}\nOptions: status, unseal, login, configure, init-policy"
-                            ),
-                        )
+                        SlashResult::Display(format!(
+                            "Unknown vault subcommand: {args}\nOptions: status, unseal, login, configure, init-policy"
+                        ))
                     }
                 } else {
-                    SlashResult::Display(
-                        format!(
-                            "Unknown vault subcommand: {args}\nOptions: status, unseal, login, configure, init-policy"
-                        ),
-                    )
+                    SlashResult::Display(format!(
+                        "Unknown vault subcommand: {args}\nOptions: status, unseal, login, configure, init-policy"
+                    ))
                 }
             }
 
@@ -4370,7 +4528,8 @@ impl App {
                     return self.handle_slash_command("/notes", tx);
                 }
                 if let Some(command) = canonical_slash_command("note", args)
-                    && let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    && let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                 {
                     let _ = tx.try_send(TuiCommand::ExecuteControl {
                         request,
@@ -4385,7 +4544,8 @@ impl App {
             // /notes [clear] — show or clear pending notes
             "notes" => {
                 if let Some(command) = canonical_slash_command("notes", args)
-                    && let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    && let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                 {
                     let _ = tx.try_send(TuiCommand::ExecuteControl {
                         request,
@@ -4400,7 +4560,8 @@ impl App {
             // /checkin — interactive triage of what needs attention
             "checkin" => {
                 if let Some(command) = canonical_slash_command("checkin", args)
-                    && let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    && let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                 {
                     let _ = tx.try_send(TuiCommand::ExecuteControl {
                         request,
@@ -4440,7 +4601,8 @@ impl App {
                     );
                 }
                 if let Some(command) = canonical_slash_command("cleave", args) {
-                    if let Some(request) = crate::control_runtime::control_request_from_slash(&command)
+                    if let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
                     {
                         let _ = tx.try_send(TuiCommand::ExecuteControl {
                             request,
@@ -4467,8 +4629,7 @@ impl App {
                     SlashResult::Handled
                 } else {
                     SlashResult::Display(
-                        "Cleave extension not loaded. Run omegon from a project directory."
-                            .into(),
+                        "Cleave extension not loaded. Run omegon from a project directory.".into(),
                     )
                 }
             }
@@ -4551,7 +4712,9 @@ impl App {
                 if Self::is_hidden_bus_command(&cmd.name) {
                     continue;
                 }
-                if (prefix.is_empty() || cmd.name.starts_with(prefix)) && seen.insert(cmd.name.clone()) {
+                if (prefix.is_empty() || cmd.name.starts_with(prefix))
+                    && seen.insert(cmd.name.clone())
+                {
                     matches.push((cmd.name.clone(), cmd.description.clone()));
                 }
             }
@@ -4718,12 +4881,14 @@ impl App {
                 if (actual_input_tokens > 0 || actual_output_tokens > 0)
                     && let Some(model_id) = model
                 {
-                    self.footer_data.session_usage_slices.push(SessionUsageSlice {
-                        model_id,
-                        provider: provider.unwrap_or_default(),
-                        input_tokens: actual_input_tokens,
-                        output_tokens: actual_output_tokens,
-                    });
+                    self.footer_data
+                        .session_usage_slices
+                        .push(SessionUsageSlice {
+                            model_id,
+                            provider: provider.unwrap_or_default(),
+                            input_tokens: actual_input_tokens,
+                            output_tokens: actual_output_tokens,
+                        });
                 }
                 // Forward raw token counts to the instrument panel
                 self.instrument_panel.update_turn_tokens(
@@ -4931,8 +5096,7 @@ impl App {
                     self.footer_data.total_facts += 1;
                     self.instrument_panel.bump_memory_store();
                 } else if completed_name == "memory_archive" {
-                    self.footer_data.total_facts =
-                        self.footer_data.total_facts.saturating_sub(1);
+                    self.footer_data.total_facts = self.footer_data.total_facts.saturating_sub(1);
                 }
                 if is_memory_mutation {
                     self.memory_ops_this_frame += 1;
@@ -4951,7 +5115,8 @@ impl App {
                     self.memory_ops_this_frame += 1;
                     self.instrument_panel.bump_memory_recall();
                 }
-                self.instrument_panel.tool_finished(completed_name, is_error);
+                self.instrument_panel
+                    .tool_finished(completed_name, is_error);
                 self.completed_tool_name = self.last_tool_name.take().or(Some(name));
             }
             AgentEvent::AgentEnd => {
@@ -6279,16 +6444,22 @@ pub async fn run_tui(
                                                 if !app.agent_active {
                                                     app.conversation.push_system("▸ tutorial step");
                                                     app.agent_active = true;
-                                                    if let Ok(mut ss) = app.dashboard_handles.session.lock() {
+                                                    if let Ok(mut ss) =
+                                                        app.dashboard_handles.session.lock()
+                                                    {
                                                         ss.busy = true;
                                                     }
                                                     let _ = command_tx
-                                                        .send(TuiCommand::SubmitPrompt(PromptSubmission {
-                                                            text: prompt,
-                                                            image_paths: Vec::new(),
-                                                            submitted_by: "local-tui".to_string(),
-                                                            via: "tui",
-                                                        }))
+                                                        .send(TuiCommand::SubmitPrompt(
+                                                            PromptSubmission {
+                                                                text: prompt,
+                                                                image_paths: Vec::new(),
+                                                                submitted_by: "local-tui"
+                                                                    .to_string(),
+                                                                via: "tui",
+                                                                queue_mode: app.queue_mode,
+                                                            },
+                                                        ))
                                                         .await;
                                                 } else {
                                                     app.queue_prompt(prompt, Vec::new());
@@ -6309,16 +6480,22 @@ pub async fn run_tui(
                                                 if !app.agent_active {
                                                     app.conversation.push_system("▸ tutorial step");
                                                     app.agent_active = true;
-                                                    if let Ok(mut ss) = app.dashboard_handles.session.lock() {
+                                                    if let Ok(mut ss) =
+                                                        app.dashboard_handles.session.lock()
+                                                    {
                                                         ss.busy = true;
                                                     }
                                                     let _ = command_tx
-                                                        .send(TuiCommand::SubmitPrompt(PromptSubmission {
-                                                            text: prompt,
-                                                            image_paths: Vec::new(),
-                                                            submitted_by: "local-tui".to_string(),
-                                                            via: "tui",
-                                                        }))
+                                                        .send(TuiCommand::SubmitPrompt(
+                                                            PromptSubmission {
+                                                                text: prompt,
+                                                                image_paths: Vec::new(),
+                                                                submitted_by: "local-tui"
+                                                                    .to_string(),
+                                                                via: "tui",
+                                                                queue_mode: app.queue_mode,
+                                                            },
+                                                        ))
                                                         .await;
                                                 } else {
                                                     app.queue_prompt(prompt, Vec::new());
@@ -6456,8 +6633,9 @@ pub async fn run_tui(
                                 app.set_focus_mode(false);
                             } else if app.agent_active {
                                 if app.interrupt() {
-                                    app.conversation
-                                        .push_system("⎋ Interrupt requested — waiting for turn to stop");
+                                    app.conversation.push_system(
+                                        "⎋ Interrupt requested — waiting for turn to stop",
+                                    );
                                 } else {
                                     app.conversation.push_system("⎋ Interrupt requested");
                                 }
@@ -6470,7 +6648,8 @@ pub async fn run_tui(
                                         "⎋ Interrupt requested (Ctrl+C) — waiting for turn to stop",
                                     );
                                 } else {
-                                    app.conversation.push_system("⎋ Interrupt requested (Ctrl+C)");
+                                    app.conversation
+                                        .push_system("⎋ Interrupt requested (Ctrl+C)");
                                 }
                             } else if !app.editor.is_empty() {
                                 // Clear the line first (like a real terminal)
@@ -6731,6 +6910,7 @@ pub async fn run_tui(
                         image_paths: Vec::new(),
                         submitted_by: "local-tui".to_string(),
                         via: "tui",
+                        queue_mode: app.queue_mode,
                     }))
                     .await;
             } else {
@@ -6740,6 +6920,7 @@ pub async fn run_tui(
                         image_paths: attachments,
                         submitted_by: "local-tui".to_string(),
                         via: "tui",
+                        queue_mode: app.queue_mode,
                     }))
                     .await;
             }

@@ -119,7 +119,9 @@ pub fn derive_rationale(
                 "derived from Anthropic upstream 7d utilization header: {:.0}%",
                 long
             ),
-            _ => "Anthropic provider selected, but no utilization headers were captured".to_string(),
+            _ => {
+                "Anthropic provider selected, but no utilization headers were captured".to_string()
+            }
         },
         "openai-codex" => match t.codex_primary_used_pct {
             Some(pct) => format!(
@@ -130,7 +132,8 @@ pub fn derive_rationale(
                     .map(|secs| format!(", reset in {}", format_duration_compact(secs)))
                     .unwrap_or_default()
             ),
-            None => "Codex provider selected, but no primary used-percent header was captured".to_string(),
+            None => "Codex provider selected, but no primary used-percent header was captured"
+                .to_string(),
         },
         _ => {
             let mut parts = Vec::new();
@@ -144,7 +147,10 @@ pub fn derive_rationale(
                 parts.push(format!("retry-after {}", format_duration_compact(secs)));
             }
             if parts.is_empty() {
-                format!("no recognized quota headers captured; advisory remains {}", headroom.as_str())
+                format!(
+                    "no recognized quota headers captured; advisory remains {}",
+                    headroom.as_str()
+                )
             } else {
                 format!(
                     "best-effort advisory from generic quota headers: {}",
@@ -178,17 +184,26 @@ pub fn format_raw_telemetry_lines(t: &ProviderTelemetrySnapshot) -> Vec<String> 
             }
             if let Some(pct) = t.codex_primary_used_pct {
                 lines.push(format!("primary used: {:.0}%", pct));
-                lines.push(format!("primary remaining: {:.0}%", (100.0 - pct).clamp(0.0, 100.0)));
+                lines.push(format!(
+                    "primary remaining: {:.0}%",
+                    (100.0 - pct).clamp(0.0, 100.0)
+                ));
             }
             if let Some(pct) = t.codex_secondary_used_pct {
                 lines.push(format!("secondary used: {:.0}%", pct));
-                lines.push(format!("secondary remaining: {:.0}%", (100.0 - pct).clamp(0.0, 100.0)));
+                lines.push(format!(
+                    "secondary remaining: {:.0}%",
+                    (100.0 - pct).clamp(0.0, 100.0)
+                ));
             }
             if let Some(secs) = t.codex_primary_reset_secs {
                 lines.push(format!("primary reset: {}", format_duration_compact(secs)));
             }
             if let Some(secs) = t.codex_secondary_reset_secs {
-                lines.push(format!("secondary reset: {}", format_duration_compact(secs)));
+                lines.push(format!(
+                    "secondary reset: {}",
+                    format_duration_compact(secs)
+                ));
             }
             if let Some(unlimited) = t.codex_credits_unlimited {
                 lines.push(format!(
@@ -256,7 +271,10 @@ pub fn format_provider_telemetry_compact(
         "openai-codex" => {
             let family = t.codex_active_limit.as_deref().unwrap_or("codex");
             if let Some(used) = t.codex_primary_used_pct {
-                parts.push(format!("{family} {:.0}% left", (100.0 - used).clamp(0.0, 100.0)));
+                parts.push(format!(
+                    "{family} {:.0}% left",
+                    (100.0 - used).clamp(0.0, 100.0)
+                ));
             } else {
                 parts.push(family.to_string());
             }
@@ -266,7 +284,10 @@ pub fn format_provider_telemetry_compact(
                 parts.push(format!("weekly {}", format_duration_compact(secs)));
             }
             if let Some(secs) = t.codex_primary_reset_secs
-                && matches!(derive_headroom_state(Some(t)), UsageHeadroomState::Constrained | UsageHeadroomState::Exhausted)
+                && matches!(
+                    derive_headroom_state(Some(t)),
+                    UsageHeadroomState::Constrained | UsageHeadroomState::Exhausted
+                )
             {
                 parts.push(format!("resets {}", format_duration_compact(secs)));
             }

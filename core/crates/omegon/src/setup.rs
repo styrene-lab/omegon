@@ -330,7 +330,8 @@ impl AgentSetup {
         };
         let mut memory_warning: Option<String> = None;
 
-        let mut context_memory_backend: Option<std::sync::Arc<dyn omegon_memory::MemoryBackend>> = None;
+        let mut context_memory_backend: Option<std::sync::Arc<dyn omegon_memory::MemoryBackend>> =
+            None;
         let mut context_memory_mind: Option<String> = None;
 
         if let Ok(backend) = omegon_memory::SqliteBackend::open(&db_path) {
@@ -378,9 +379,7 @@ impl AgentSetup {
             context_memory_mind = Some(mind.clone());
 
             // ── Embedding service (optional, for hybrid search) ──
-            let embed_service: Option<
-                std::sync::Arc<dyn omegon_memory::EmbeddingService>,
-            > = {
+            let embed_service: Option<std::sync::Arc<dyn omegon_memory::EmbeddingService>> = {
                 let profile = crate::settings::Profile::load(&cwd);
                 let svc = crate::embedding::OllamaEmbeddingService::from_config(
                     profile.embed_url.as_deref(),
@@ -399,8 +398,7 @@ impl AgentSetup {
                 }
             };
 
-            let mut memory_feature =
-                features::memory::MemoryFeature::new(memory_backend, mind);
+            let mut memory_feature = features::memory::MemoryFeature::new(memory_backend, mind);
             if let Some(svc) = embed_service {
                 memory_feature = memory_feature.with_embed_service(svc);
             }
@@ -495,9 +493,10 @@ impl AgentSetup {
         if let Ok(persona_name) = std::env::var("OMEGON_CHILD_PERSONA") {
             let (personas, _) = crate::plugins::persona_loader::scan_available();
             let target = persona_name.to_lowercase();
-            if let Some(available) = personas.iter().find(|p| {
-                p.name.to_lowercase() == target || p.id.to_lowercase().contains(&target)
-            }) {
+            if let Some(available) = personas
+                .iter()
+                .find(|p| p.name.to_lowercase() == target || p.id.to_lowercase().contains(&target))
+            {
                 match crate::plugins::persona_loader::load_persona(&available.path) {
                     Ok(loaded) => {
                         tracing::info!(persona = %loaded.name, "activating startup persona");
@@ -532,14 +531,16 @@ impl AgentSetup {
         // ─── Context management provider ───────────────────────────────
         let context_metrics = features::context::SharedContextMetrics::new();
         let command_tx = features::context::new_shared_command_tx();
-        bus.register(Box::new(features::context::ContextProvider::new_with_sources(
-            context_metrics.clone(),
-            command_tx.clone(),
-            Some(lifecycle_handle.clone()),
-            context_memory_backend.clone(),
-            context_memory_mind.clone(),
-            Some(project_root.clone()),
-        )));
+        bus.register(Box::new(
+            features::context::ContextProvider::new_with_sources(
+                context_metrics.clone(),
+                command_tx.clone(),
+                Some(lifecycle_handle.clone()),
+                context_memory_backend.clone(),
+                context_memory_mind.clone(),
+                Some(project_root.clone()),
+            ),
+        ));
 
         // ─── Operator-installed extensions (RPC + OCI) ────────────────
         // All extensions, including bundled ones (scribe-rpc), are discovered here
@@ -558,12 +559,9 @@ impl AgentSetup {
             enabled_extensions: crate::parse_csv_env("OMEGON_CHILD_ENABLED_EXTENSIONS"),
             disabled_extensions: crate::parse_csv_env("OMEGON_CHILD_DISABLED_EXTENSIONS"),
         };
-        let plugins = crate::plugins::discover_plugins_filtered(
-            &cwd,
-            Some(secrets.as_ref()),
-            &plugin_filter,
-        )
-        .await;
+        let plugins =
+            crate::plugins::discover_plugins_filtered(&cwd, Some(secrets.as_ref()), &plugin_filter)
+                .await;
         for plugin in plugins {
             bus.register(plugin);
         }
@@ -713,7 +711,8 @@ impl AgentSetup {
             .as_ref()
             .and_then(|s| s.lock().ok().map(|g| g.slim_mode))
             .unwrap_or(false);
-        let base_prompt = prompt::build_base_prompt_with_breakdown(&cwd, &tool_defs, slim_mode).prompt;
+        let base_prompt =
+            prompt::build_base_prompt_with_breakdown(&cwd, &tool_defs, slim_mode).prompt;
 
         // Context providers: the bus collects context from features, but we
         // still need the ContextManager for the injection pipeline (TTL decay,
@@ -801,9 +800,9 @@ impl AgentSetup {
         let existing_workspace_lease = crate::workspace::runtime::read_workspace_lease(&cwd)
             .ok()
             .flatten();
-        let existing_heartbeat = existing_workspace_lease
-            .as_ref()
-            .and_then(|lease| crate::workspace::runtime::heartbeat_epoch_secs(&lease.last_heartbeat));
+        let existing_heartbeat = existing_workspace_lease.as_ref().and_then(|lease| {
+            crate::workspace::runtime::heartbeat_epoch_secs(&lease.last_heartbeat)
+        });
         let startup_session_id_hint = existing_workspace_lease
             .as_ref()
             .and_then(|lease| lease.owner_session_id.clone())
@@ -831,12 +830,14 @@ impl AgentSetup {
                 .unwrap_or_else(|| "primary".into()),
             path: cwd.display().to_string(),
             backend_kind: crate::workspace::types::WorkspaceBackendKind::LocalDir,
-            vcs_ref: repo_model.as_ref().map(|model| crate::workspace::types::WorkspaceVcsRef {
-                vcs: "git".into(),
-                branch: model.branch(),
-                revision: None,
-                remote: Some("origin".into()),
-            }),
+            vcs_ref: repo_model
+                .as_ref()
+                .map(|model| crate::workspace::types::WorkspaceVcsRef {
+                    vcs: "git".into(),
+                    branch: model.branch(),
+                    revision: None,
+                    remote: Some("origin".into()),
+                }),
             bindings: existing_workspace_lease
                 .as_ref()
                 .map(|lease| lease.bindings.clone())
@@ -1058,8 +1059,11 @@ fn hydrate_provider_auth_env_from_auth_json(
     settings: Option<&crate::settings::SharedSettings>,
     session_secret_env: &mut Vec<(String, String)>,
 ) {
-    let provider = settings
-        .and_then(|s| s.lock().ok().map(|g| crate::providers::infer_provider_id(&g.model)));
+    let provider = settings.and_then(|s| {
+        s.lock()
+            .ok()
+            .map(|g| crate::providers::infer_provider_id(&g.model))
+    });
     let Some(provider) = provider else {
         return;
     };
@@ -1067,13 +1071,20 @@ fn hydrate_provider_auth_env_from_auth_json(
     let Some(primary_env) = env_vars.first().copied() else {
         return;
     };
-    if session_secret_env.iter().any(|(name, _)| name == primary_env) {
+    if session_secret_env
+        .iter()
+        .any(|(name, _)| name == primary_env)
+    {
         return;
     }
     let auth_key = crate::auth::auth_json_key(&provider);
     if let Some(creds) = crate::auth::read_credentials(auth_key) {
         session_secret_env.push((primary_env.to_string(), creds.access));
-        tracing::info!(provider, env = primary_env, "hydrated provider auth env from auth.json");
+        tracing::info!(
+            provider,
+            env = primary_env,
+            "hydrated provider auth env from auth.json"
+        );
     }
 }
 

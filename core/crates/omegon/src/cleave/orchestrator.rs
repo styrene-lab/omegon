@@ -9,11 +9,11 @@ use super::progress::{self, ChildProgressStatus, ProgressEvent, SharedProgressSi
 use super::state::{self, ChildStatus, CleaveState};
 use super::waves::compute_waves;
 use super::worktree;
-use anyhow::{Context, Result};
 use crate::child_agent::{
-    spawn_headless_child_agent, write_child_prompt_file, ChildAgentRuntimeProfile,
-    ChildAgentSpawnConfig,
+    ChildAgentRuntimeProfile, ChildAgentSpawnConfig, spawn_headless_child_agent,
+    write_child_prompt_file,
 };
+use anyhow::{Context, Result};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -100,7 +100,9 @@ pub async fn run_cleave(
     workspace_path: &Path,
     config: &CleaveConfig,
     cancel: CancellationToken,
-    child_cancel_registry: Option<Arc<std::sync::Mutex<std::collections::HashMap<String, CancellationToken>>>>,
+    child_cancel_registry: Option<
+        Arc<std::sync::Mutex<std::collections::HashMap<String, CancellationToken>>>,
+    >,
 ) -> Result<CleaveResult> {
     let started = Instant::now();
 
@@ -120,8 +122,15 @@ pub async fn run_cleave(
         s.started_at = Some(Instant::now());
         match (reconciliation.requeued, reconciliation.still_running) {
             (0, 0) => tracing::info!("resuming from existing state.json"),
-            (0, still_running) => tracing::warn!(still_running, "resuming from existing state.json with verified live child processes"),
-            (requeued, still_running) => tracing::warn!(requeued, still_running, "resuming from existing state.json after interruption; re-queued stale running children and preserved verified live children"),
+            (0, still_running) => tracing::warn!(
+                still_running,
+                "resuming from existing state.json with verified live child processes"
+            ),
+            (requeued, still_running) => tracing::warn!(
+                requeued,
+                still_running,
+                "resuming from existing state.json after interruption; re-queued stale running children and preserved verified live children"
+            ),
         }
         s
     } else {
@@ -262,8 +271,10 @@ pub async fn run_cleave(
                                 explicit.clone()
                             } else {
                                 let inv = inv_lock.read().await;
-                                let parent_tier = crate::routing::infer_model_tier(&effective_model);
-                                let scope_tier = crate::routing::infer_capability_tier(child_state.scope.len());
+                                let parent_tier =
+                                    crate::routing::infer_model_tier(&effective_model);
+                                let scope_tier =
+                                    crate::routing::infer_capability_tier(child_state.scope.len());
                                 let tier = scope_tier.min(parent_tier);
                                 let req = crate::routing::CapabilityRequest {
                                     tier,
@@ -353,12 +364,8 @@ pub async fn run_cleave(
                 progress_sink,
             };
 
-            let (child_process, pid) = spawn_child_process(
-                &dispatch_config,
-                &info.wt_path,
-                &info.label,
-                &info.prompt,
-            )?;
+            let (child_process, pid) =
+                spawn_child_process(&dispatch_config, &info.wt_path, &info.label, &info.prompt)?;
             state.mark_child_spawned(info.child_idx, pid);
             if let Some(registry) = &child_cancel_registry
                 && let Ok(mut registry) = registry.lock()
@@ -784,14 +791,19 @@ fn classify_child_error(model: &str, e: anyhow::Error) -> ChildError {
     let provider = model.split(':').next().unwrap_or("unknown").to_string();
     let msg = e.to_string();
     if msg.contains("exit code 2") || msg.contains("upstream exhausted:") {
-        ChildError::UpstreamExhausted { provider, message: msg }
+        ChildError::UpstreamExhausted {
+            provider,
+            message: msg,
+        }
     } else {
         ChildError::Failed(msg)
     }
 }
 
 fn child_activity_log_path(config: &ChildDispatchConfig, label: &str) -> PathBuf {
-    config.workspace_path.join(format!("child-{}.activity.log", label))
+    config
+        .workspace_path
+        .join(format!("child-{}.activity.log", label))
 }
 
 fn append_child_activity_log(path: &Path, line: &str) {
@@ -799,7 +811,11 @@ fn append_child_activity_log(path: &Path, line: &str) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         let _ = writeln!(file, "{line}");
     }
 }
@@ -817,7 +833,10 @@ async fn terminate_child_process(
         Ok(Err(e)) => Err(classify_child_error(&config.model, e.into())),
         Err(_) => {
             let _ = child.kill().await;
-            child.wait().await.map_err(|e| classify_child_error(&config.model, e.into()))
+            child
+                .wait()
+                .await
+                .map_err(|e| classify_child_error(&config.model, e.into()))
         }
     }
 }
@@ -846,7 +865,10 @@ fn spawn_child_process(
     tracing::info!(child = %label, inherited_env = config.inherited_env.len(), injected_env = config.injected_env.len(), inherited_env_names = ?config.inherited_env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), injected_env_names = ?config.injected_env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), "child env inheritance");
     let (child, pid) = spawn_headless_child_agent(&child_config, cwd, &prompt_file)?;
     tracing::info!(child = %label, pid, "child spawned");
-    config.progress_sink.emit(&ProgressEvent::ChildSpawned { child: label.to_string(), pid });
+    config.progress_sink.emit(&ProgressEvent::ChildSpawned {
+        child: label.to_string(),
+        pid,
+    });
     Ok((child, pid))
 }
 
@@ -908,18 +930,40 @@ async fn monitor_child_process(
     }
     let duration_secs = started.elapsed().as_secs_f64();
     let tail_snippet = |tail: &VecDeque<String>| -> String {
-        if tail.is_empty() { return String::new(); }
+        if tail.is_empty() {
+            return String::new();
+        }
         let lines: Vec<&str> = tail.iter().map(|s| s.as_str()).collect();
-        format!("
+        format!(
+            "
 --- last {} stderr lines ---
 {}
----", lines.len(), lines.join("
-"))
+---",
+            lines.len(),
+            lines.join(
+                "
+"
+            )
+        )
     };
     match io_result {
-        Ok(()) if exit.success() => Ok(ChildOutput { duration_secs, stdout: stdout_buf, pid }),
-        Ok(()) => Err(classify_child_error(&config.model, anyhow::anyhow!("Child exited with code {}{}", exit.code().unwrap_or(-1), tail_snippet(&stderr_tail)))),
-        Err(e) => Err(classify_child_error(&config.model, anyhow::anyhow!("{}{}", e, tail_snippet(&stderr_tail)))),
+        Ok(()) if exit.success() => Ok(ChildOutput {
+            duration_secs,
+            stdout: stdout_buf,
+            pid,
+        }),
+        Ok(()) => Err(classify_child_error(
+            &config.model,
+            anyhow::anyhow!(
+                "Child exited with code {}{}",
+                exit.code().unwrap_or(-1),
+                tail_snippet(&stderr_tail)
+            ),
+        )),
+        Err(e) => Err(classify_child_error(
+            &config.model,
+            anyhow::anyhow!("{}{}", e, tail_snippet(&stderr_tail)),
+        )),
     }
 }
 
@@ -1284,8 +1328,8 @@ mod tests {
                 last_activity_unix_ms: None,
                 adoption_worktree_path: None,
                 adoption_model: None,
-            supervisor_token: None,
-        },
+                supervisor_token: None,
+            },
             crate::cleave::state::ChildState {
                 child_id: 2,
                 label: "gamma".into(),
@@ -1307,8 +1351,8 @@ mod tests {
                 last_activity_unix_ms: None,
                 adoption_worktree_path: None,
                 adoption_model: None,
-            supervisor_token: None,
-        },
+                supervisor_token: None,
+            },
         ];
 
         let task = build_task_file(
@@ -1348,8 +1392,8 @@ mod tests {
             pid: None,
             started_at_unix_ms: None,
             last_activity_unix_ms: None,
-                adoption_worktree_path: None,
-                adoption_model: None,
+            adoption_worktree_path: None,
+            adoption_model: None,
             supervisor_token: None,
         };
 
@@ -1526,8 +1570,8 @@ fn build_task_file_rust_scope_gets_rust_test_convention() {
         pid: None,
         started_at_unix_ms: None,
         last_activity_unix_ms: None,
-                adoption_worktree_path: None,
-                adoption_model: None,
+        adoption_worktree_path: None,
+        adoption_model: None,
         supervisor_token: None,
     }];
     let task = build_task_file(

@@ -27,12 +27,20 @@ pub struct ChildAgentSpawnConfig {
     pub runtime: ChildAgentRuntimeProfile,
 }
 
-pub fn write_child_prompt_file(cwd: &Path, file_name: &str, prompt: &str) -> anyhow::Result<PathBuf> {
+pub fn write_child_prompt_file(
+    cwd: &Path,
+    file_name: &str,
+    prompt: &str,
+) -> anyhow::Result<PathBuf> {
     let prompt_file = std::fs::canonicalize(cwd)
         .unwrap_or_else(|_| cwd.to_path_buf())
         .join(file_name);
-    std::fs::write(&prompt_file, prompt)
-        .with_context(|| format!("Failed to write child prompt file {}", prompt_file.display()))?;
+    std::fs::write(&prompt_file, prompt).with_context(|| {
+        format!(
+            "Failed to write child prompt file {}",
+            prompt_file.display()
+        )
+    })?;
     Ok(prompt_file)
 }
 
@@ -83,27 +91,44 @@ pub fn spawn_headless_child_agent(
         child.env("OMEGON_CHILD_CONTEXT_CLASS", context_class);
     }
     if !config.runtime.enabled_tools.is_empty() {
-        child.env("OMEGON_CHILD_ENABLED_TOOLS", config.runtime.enabled_tools.join(","));
+        child.env(
+            "OMEGON_CHILD_ENABLED_TOOLS",
+            config.runtime.enabled_tools.join(","),
+        );
     }
     if !config.runtime.disabled_tools.is_empty() {
-        child.env("OMEGON_CHILD_DISABLED_TOOLS", config.runtime.disabled_tools.join(","));
+        child.env(
+            "OMEGON_CHILD_DISABLED_TOOLS",
+            config.runtime.disabled_tools.join(","),
+        );
     }
     if !config.runtime.skills.is_empty() {
         child.env("OMEGON_CHILD_SKILLS", config.runtime.skills.join(","));
     }
     if !config.runtime.enabled_extensions.is_empty() {
-        child.env("OMEGON_CHILD_ENABLED_EXTENSIONS", config.runtime.enabled_extensions.join(","));
+        child.env(
+            "OMEGON_CHILD_ENABLED_EXTENSIONS",
+            config.runtime.enabled_extensions.join(","),
+        );
     }
     if !config.runtime.disabled_extensions.is_empty() {
-        child.env("OMEGON_CHILD_DISABLED_EXTENSIONS", config.runtime.disabled_extensions.join(","));
+        child.env(
+            "OMEGON_CHILD_DISABLED_EXTENSIONS",
+            config.runtime.disabled_extensions.join(","),
+        );
     }
     if !config.runtime.preloaded_files.is_empty() {
-        child.env("OMEGON_CHILD_PRELOADED_FILES", config.runtime.preloaded_files.join(":"));
+        child.env(
+            "OMEGON_CHILD_PRELOADED_FILES",
+            config.runtime.preloaded_files.join(":"),
+        );
     }
     if let Some(ref persona) = config.runtime.persona {
         child.env("OMEGON_CHILD_PERSONA", persona);
     }
-    let child = child.spawn().context("Failed to spawn headless child agent")?;
+    let child = child
+        .spawn()
+        .context("Failed to spawn headless child agent")?;
     let pid = child.id().unwrap_or(0);
     Ok((child, pid))
 }

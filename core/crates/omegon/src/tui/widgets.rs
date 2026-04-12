@@ -667,7 +667,11 @@ pub fn highlight_line<'a>(line: &str, t: &dyn Theme) -> Line<'a> {
 }
 
 /// Apply inline highlighting with a caller-provided base style.
-pub fn highlight_inline_with_base<'a>(text: &str, t: &dyn Theme, base_style: Style) -> Vec<Span<'a>> {
+pub fn highlight_inline_with_base<'a>(
+    text: &str,
+    t: &dyn Theme,
+    base_style: Style,
+) -> Vec<Span<'a>> {
     let mut spans: Vec<Span<'a>> = Vec::new();
     let mut chars = text.char_indices().peekable();
     let mut buf = String::new();

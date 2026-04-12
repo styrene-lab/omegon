@@ -729,8 +729,7 @@ impl ToolProvider for CoreTools {
                 let cmd_lower = command.to_lowercase();
                 if cmd_lower.contains("git commit")
                     || cmd_lower.contains("git add ")
-                    || (cmd_lower.contains("git stash")
-                        && !cmd_lower.contains("git stash list"))
+                    || (cmd_lower.contains("git stash") && !cmd_lower.contains("git stash list"))
                 {
                     tracing::warn!(
                         command = command,

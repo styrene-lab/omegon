@@ -129,6 +129,7 @@ async fn submit_editor_buffer_sends_plain_prompt_after_attachment_token_removed(
             image_paths,
             submitted_by,
             via,
+            ..
         }) => {
             assert_eq!(text, "please inspect this");
             assert!(image_paths.is_empty());
@@ -158,6 +159,7 @@ async fn submit_editor_buffer_sends_prompt_with_images_when_attachment_token_pre
             image_paths,
             submitted_by,
             via,
+            ..
         }) => {
             assert_eq!(text, "please inspect this");
             assert_eq!(
@@ -190,12 +192,16 @@ fn collapsed_paste_token_renders_as_editor_chip() {
 fn queued_prompt_preview_mentions_attachment_count() {
     let mut app = test_app();
     app.queue_prompt(
-        "describe this".to_string(),
+        "describe this long image task".to_string(),
         vec![std::path::PathBuf::from("/tmp/paste.png")],
     );
     let rendered = render_app_to_string(&mut app, 100, 20);
     assert!(rendered.contains("Queued [1]"), "{rendered}");
-    assert!(rendered.contains("+1 attachment"), "{rendered}");
+    assert!(rendered.contains("paste.png"), "{rendered}");
+    assert!(
+        rendered.contains("describe this long image task"),
+        "{rendered}"
+    );
 }
 
 #[test]
@@ -1355,7 +1361,10 @@ fn slash_update_channel_without_args_opens_selector() {
     let tx = test_tx();
     let result = app.handle_slash_command("/update channel", &tx);
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.selector.is_some(), "expected update channel selector to open");
+    assert!(
+        app.selector.is_some(),
+        "expected update channel selector to open"
+    );
     assert_eq!(app.selector_kind, Some(SelectorKind::UpdateChannel));
 }
 
@@ -1570,7 +1579,10 @@ fn slash_workspace_role_without_args_opens_selector() {
 
     let result = app.handle_slash_command("/workspace role", &tx);
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.selector.is_some(), "expected workspace role selector to open");
+    assert!(
+        app.selector.is_some(),
+        "expected workspace role selector to open"
+    );
     assert_eq!(app.selector_kind, Some(SelectorKind::WorkspaceRole));
 }
 
@@ -1677,7 +1689,10 @@ fn slash_workspace_kind_without_args_opens_selector() {
 
     let result = app.handle_slash_command("/workspace kind", &tx);
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.selector.is_some(), "expected workspace kind selector to open");
+    assert!(
+        app.selector.is_some(),
+        "expected workspace kind selector to open"
+    );
     assert_eq!(app.selector_kind, Some(SelectorKind::WorkspaceKind));
 }
 
@@ -1784,7 +1799,10 @@ fn slash_context_no_args_opens_selector() {
     let tx = test_tx();
     let result = app.handle_slash_command("/context", &tx);
     assert!(matches!(result, SlashResult::Handled));
-    assert!(app.selector.is_some(), "bare /context should open the selector");
+    assert!(
+        app.selector.is_some(),
+        "bare /context should open the selector"
+    );
     assert_eq!(app.selector_kind, Some(SelectorKind::ContextClass));
 }
 
@@ -1804,7 +1822,10 @@ fn context_selector_confirm_enqueues_set_context_class() {
     let message = app
         .confirm_selector(&tx)
         .expect("selector confirmation should return message");
-    assert!(message.contains("Context policy → Clan"), "unexpected message: {message}");
+    assert!(
+        message.contains("Context policy → Clan"),
+        "unexpected message: {message}"
+    );
 
     match rx.try_recv().expect("queued command") {
         TuiCommand::ExecuteControl {
@@ -2050,10 +2071,22 @@ fn slash_memory_returns_stats() {
     let tx = test_tx();
     let result = app.handle_slash_command("/memory", &tx);
     if let SlashResult::Display(text) = result {
-        assert!(text.contains("Memory Overview"), "should show titled memory view: {text}");
-        assert!(text.contains("Injected"), "should show injected facts: {text}");
-        assert!(text.contains("Project facts"), "should show harness memory breakdown: {text}");
-        assert!(text.contains("Engineer"), "should show active persona memory: {text}");
+        assert!(
+            text.contains("Memory Overview"),
+            "should show titled memory view: {text}"
+        );
+        assert!(
+            text.contains("Injected"),
+            "should show injected facts: {text}"
+        );
+        assert!(
+            text.contains("Project facts"),
+            "should show harness memory breakdown: {text}"
+        );
+        assert!(
+            text.contains("Engineer"),
+            "should show active persona memory: {text}"
+        );
     } else {
         panic!(
             "expected Display result, got {:?}",
@@ -2470,8 +2503,14 @@ fn footer_instrument_layout_reserves_gutters_between_engine_inference_and_tools(
     );
 
     let rendered = render_app_to_string(&mut app, 140, 20);
-    assert!(rendered.contains("inference"), "expected inference panel: {rendered}");
-    assert!(rendered.contains("tools"), "expected tools panel: {rendered}");
+    assert!(
+        rendered.contains("inference"),
+        "expected inference panel: {rendered}"
+    );
+    assert!(
+        rendered.contains("tools"),
+        "expected tools panel: {rendered}"
+    );
 
     let footer_lines: Vec<&str> = rendered.lines().rev().take(6).collect();
     let gutter_present = footer_lines.iter().any(|line| line.contains("│ │"));
@@ -2690,7 +2729,10 @@ fn slash_vault_configure_opens_selector() {
     let result = app.handle_slash_command("/vault configure", &tx);
     assert!(matches!(result, SlashResult::Handled));
     assert!(app.selector.is_some(), "expected vault selector to open");
-    assert!(matches!(app.selector_kind, Some(super::SelectorKind::VaultConfigure)));
+    assert!(matches!(
+        app.selector_kind,
+        Some(super::SelectorKind::VaultConfigure)
+    ));
 }
 
 #[test]
@@ -2736,7 +2778,10 @@ fn slash_secrets_configure_without_value_opens_selector() {
     let result = app.handle_slash_command("/secrets configure", &tx);
     assert!(matches!(result, SlashResult::Handled));
     assert!(app.selector.is_some(), "expected secret selector to open");
-    assert!(matches!(app.selector_kind, Some(super::SelectorKind::SecretName)));
+    assert!(matches!(
+        app.selector_kind,
+        Some(super::SelectorKind::SecretName)
+    ));
 }
 
 #[test]
