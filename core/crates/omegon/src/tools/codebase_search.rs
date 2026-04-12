@@ -99,22 +99,29 @@ impl CodescanProvider {
         );
 
         for r in &results {
-            let preview_text: String = r
+            let preview_raw: String = r
                 .preview
                 .chars()
-                .take(180)
+                .take(300)
                 .collect::<String>()
-                .replace('\n', " · ")
-                .replace('\r', "")
-                .replace('|', "¦");
+                .replace('\r', "");
+            // Indent each line so the preview renders as a recognisable
+            // code block under the bullet header, preserving line structure
+            // instead of flattening everything into a middot-separated blob.
+            let preview_lines: String = preview_raw
+                .lines()
+                .take(8)
+                .map(|l| format!("    {l}"))
+                .collect::<Vec<_>>()
+                .join("\n");
             table.push_str(&format!(
-                "- `{}`:{}-{} · {} · score {:.2}\n  {}\n\n",
+                "- `{}`:{}-{} · {} · score {:.2}\n{}\n\n",
                 r.file,
                 r.start_line,
                 r.end_line,
                 r.chunk_type.as_str(),
                 r.score,
-                preview_text
+                preview_lines
             ));
         }
         table.push_str("*Use `read` with offset/limit for full chunk content.*");

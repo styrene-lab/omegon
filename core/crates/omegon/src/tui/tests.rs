@@ -52,15 +52,20 @@ fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
 fn editor_inline_attachment_tokens_submit_as_multimodal_prompt() {
     let mut app = test_app();
     app.editor.set_text("please inspect this");
-    app.editor.insert_attachment(std::path::PathBuf::from("/tmp/paste.png"));
+    app.editor
+        .insert_attachment(std::path::PathBuf::from("/tmp/paste.png"));
 
     assert_eq!(app.editor.render_text(), "please inspect this[image0]");
 
     let (text, attachments) = app.editor.take_submission();
     assert_eq!(text, "please inspect this");
-    assert_eq!(attachments, vec![std::path::PathBuf::from("/tmp/paste.png")]);
+    assert_eq!(
+        attachments,
+        vec![std::path::PathBuf::from("/tmp/paste.png")]
+    );
 
-    app.conversation.push_user_with_attachments(&text, &attachments);
+    app.conversation
+        .push_user_with_attachments(&text, &attachments);
     assert_eq!(app.conversation.segments().len(), 2);
     assert!(matches!(
         &app.conversation.segments()[0].content,
@@ -96,7 +101,10 @@ fn session_reset_clears_instrument_panel_tool_activity() {
 
     let after = render_app_to_string(&mut app, 140, 36);
     assert!(!after.contains("context_cl"), "got {after}");
-    assert!(after.contains("New session started. Previous session saved."), "got {after}");
+    assert!(
+        after.contains("New session started. Previous session saved."),
+        "got {after}"
+    );
 }
 
 #[tokio::test]
@@ -105,7 +113,8 @@ async fn submit_editor_buffer_sends_plain_prompt_after_attachment_token_removed(
     let (tx, mut rx) = test_tx_with_rx();
 
     app.editor.set_text("please inspect this");
-    app.editor.insert_attachment(std::path::PathBuf::from("/tmp/paste.png"));
+    app.editor
+        .insert_attachment(std::path::PathBuf::from("/tmp/paste.png"));
     assert_eq!(app.editor.render_text(), "please inspect this[image0]");
 
     app.editor.backspace();
@@ -137,7 +146,8 @@ async fn submit_editor_buffer_sends_prompt_with_images_when_attachment_token_pre
     let (tx, mut rx) = test_tx_with_rx();
 
     app.editor.set_text("please inspect this");
-    app.editor.insert_attachment(std::path::PathBuf::from("/tmp/paste.png"));
+    app.editor
+        .insert_attachment(std::path::PathBuf::from("/tmp/paste.png"));
 
     app.submit_editor_buffer(&tx).await;
 
@@ -150,7 +160,10 @@ async fn submit_editor_buffer_sends_prompt_with_images_when_attachment_token_pre
             via,
         }) => {
             assert_eq!(text, "please inspect this");
-            assert_eq!(image_paths, vec![std::path::PathBuf::from("/tmp/paste.png")]);
+            assert_eq!(
+                image_paths,
+                vec![std::path::PathBuf::from("/tmp/paste.png")]
+            );
             assert_eq!(submitted_by, "local-tui");
             assert_eq!(via, "tui");
         }
@@ -167,7 +180,10 @@ fn collapsed_paste_token_renders_as_editor_chip() {
 
     assert!(rendered.contains(" paste "), "got {rendered}");
     assert!(rendered.contains("1 +2 lines"), "got {rendered}");
-    assert!(!rendered.contains("[Pasted text #1 +2 lines]"), "got {rendered}");
+    assert!(
+        !rendered.contains("[Pasted text #1 +2 lines]"),
+        "got {rendered}"
+    );
 }
 
 #[test]
@@ -189,7 +205,10 @@ fn queue_prompt_preserves_fifo_order() {
     app.queue_prompt("second".to_string(), Vec::new());
 
     let first = app.queued_prompts.pop_front().expect("first queued prompt");
-    let second = app.queued_prompts.pop_front().expect("second queued prompt");
+    let second = app
+        .queued_prompts
+        .pop_front()
+        .expect("second queued prompt");
 
     assert_eq!(first.0, "first");
     assert_eq!(second.0, "second");
@@ -271,7 +290,10 @@ fn turn_end_does_not_overwrite_footer_context_with_last_request_input_tokens() {
         thinking_level: "high".into(),
     });
     let before = app.footer_data.context_percent;
-    assert!(before > 52.0 && before < 54.0, "expected ~53%, got {before}");
+    assert!(
+        before > 52.0 && before < 54.0,
+        "expected ~53%, got {before}"
+    );
 
     app.handle_agent_event(AgentEvent::TurnEnd {
         turn: 3,
@@ -1191,7 +1213,10 @@ fn ui_command_can_toggle_individual_surfaces() {
     let result = app.handle_slash_command("/ui hide instruments", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
     assert!(!app.ui_surfaces.instruments);
-    assert!(app.ui_surfaces.footer, "hiding instruments should not remove footer status");
+    assert!(
+        app.ui_surfaces.footer,
+        "hiding instruments should not remove footer status"
+    );
 }
 
 #[test]
@@ -1535,9 +1560,7 @@ fn slash_workspace_new_enqueues_execute_control() {
 
     match rx.try_recv().expect("queued command") {
         TuiCommand::ExecuteControl {
-            request: crate::control_runtime::ControlRequest::WorkspaceNew {
-                label: ref label,
-            },
+            request: crate::control_runtime::ControlRequest::WorkspaceNew { label: ref label },
             ..
         } if label == "docs-pass" => {}
         other => panic!("expected workspace new request, got {other:?}"),
@@ -1554,9 +1577,10 @@ fn slash_workspace_role_set_enqueues_execute_control() {
 
     match rx.try_recv().expect("queued command") {
         TuiCommand::ExecuteControl {
-            request: crate::control_runtime::ControlRequest::WorkspaceRoleSet {
-                role: crate::workspace::types::WorkspaceRole::Release,
-            },
+            request:
+                crate::control_runtime::ControlRequest::WorkspaceRoleSet {
+                    role: crate::workspace::types::WorkspaceRole::Release,
+                },
             ..
         } => {}
         other => panic!("expected workspace role set request, got {other:?}"),
@@ -1590,9 +1614,7 @@ fn slash_workspace_bind_milestone_enqueues_execute_control() {
 
     match rx.try_recv().expect("queued command") {
         TuiCommand::ExecuteControl {
-            request: crate::control_runtime::ControlRequest::WorkspaceBindMilestone {
-                milestone_id,
-            },
+            request: crate::control_runtime::ControlRequest::WorkspaceBindMilestone { milestone_id },
             ..
         } if milestone_id == "0.15.10" => {}
         other => panic!("expected workspace bind milestone request, got {other:?}"),
@@ -1609,9 +1631,7 @@ fn slash_workspace_bind_node_enqueues_execute_control() {
 
     match rx.try_recv().expect("queued command") {
         TuiCommand::ExecuteControl {
-            request: crate::control_runtime::ControlRequest::WorkspaceBindNode {
-                design_node_id,
-            },
+            request: crate::control_runtime::ControlRequest::WorkspaceBindNode { design_node_id },
             ..
         } if design_node_id == "workspace-ownership-model" => {}
         other => panic!("expected workspace bind node request, got {other:?}"),
@@ -1645,9 +1665,10 @@ fn slash_workspace_kind_set_enqueues_execute_control() {
 
     match rx.try_recv().expect("queued command") {
         TuiCommand::ExecuteControl {
-            request: crate::control_runtime::ControlRequest::WorkspaceKindSet {
-                kind: crate::workspace::types::WorkspaceKind::Vault,
-            },
+            request:
+                crate::control_runtime::ControlRequest::WorkspaceKindSet {
+                    kind: crate::workspace::types::WorkspaceKind::Vault,
+                },
             ..
         } => {}
         other => panic!("expected workspace kind set request, got {other:?}"),
@@ -1730,7 +1751,7 @@ fn slash_context_no_args_opens_selector() {
     let result = app.handle_slash_command("/context", &tx);
     assert!(matches!(result, SlashResult::Handled));
     assert!(app.selector.is_some(), "bare /context should open the selector");
-    assert!(matches!(app.selector_kind, Some(super::SelectorKind::ContextClass)));
+    assert_eq!(app.selector_kind, Some(SelectorKind::ContextClass));
 }
 
 #[test]
@@ -1749,7 +1770,7 @@ fn context_selector_confirm_enqueues_set_context_class() {
     let message = app
         .confirm_selector(&tx)
         .expect("selector confirmation should return message");
-    assert!(message.contains("400k"), "unexpected message: {message}");
+    assert!(message.contains("Context policy → Clan"), "unexpected message: {message}");
 
     match rx.try_recv().expect("queued command") {
         TuiCommand::ExecuteControl {
@@ -1769,7 +1790,10 @@ fn slash_context_request_dispatches_direct_context_pack() {
 
     match result {
         super::SlashResult::Display(text) => {
-            assert!(text.contains("Requesting mediated context pack for code"), "got {text}");
+            assert!(
+                text.contains("Requesting mediated context pack for code"),
+                "got {text}"
+            );
         }
         other => panic!("unexpected result: {other:?}"),
     }
@@ -1824,19 +1848,42 @@ fn slash_compact_is_unknown() {
 }
 
 #[test]
-fn slash_persona_no_args_lists_personas() {
+fn slash_persona_no_args_opens_selector() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join(".omegon/plugins/test-persona");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(plugin_dir.join("PERSONA.md"), "Be useful.\n").unwrap();
+    std::fs::write(
+        plugin_dir.join("plugin.toml"),
+        r#"
+[plugin]
+type = "persona"
+id = "dev.test.persona"
+name = "Test Persona"
+version = "1.0.0"
+description = "Test persona"
+
+[persona.identity]
+directive = "PERSONA.md"
+"#,
+    )
+    .unwrap();
+
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(dir.path()).unwrap();
+
     let mut app = test_app();
     let tx = test_tx();
     let result = app.handle_slash_command("/persona", &tx);
-    if let SlashResult::Display(text) = result {
-        // Either shows available personas or "no personas installed"
-        assert!(
-            text.contains("persona") || text.contains("Persona") || text.contains("installed"),
-            "should mention personas: {text}"
-        );
-    } else {
-        panic!("expected Display result");
-    }
+
+    std::env::set_current_dir(prev).unwrap();
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(
+        app.selector.is_some(),
+        "bare /persona should open the selector"
+    );
+    assert_eq!(app.selector_kind, Some(SelectorKind::Persona));
 }
 
 #[test]
@@ -1855,18 +1902,42 @@ fn slash_persona_off_deactivates() {
 }
 
 #[test]
-fn slash_tone_no_args_lists_tones() {
+fn slash_tone_no_args_opens_selector() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join(".omegon/plugins/test-tone");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(plugin_dir.join("TONE.md"), "Stay concise.\n").unwrap();
+    std::fs::write(
+        plugin_dir.join("plugin.toml"),
+        r#"
+[plugin]
+type = "tone"
+id = "dev.test.tone"
+name = "Test Tone"
+version = "1.0.0"
+description = "Test tone"
+
+[tone]
+directive = "TONE.md"
+"#,
+    )
+    .unwrap();
+
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(dir.path()).unwrap();
+
     let mut app = test_app();
     let tx = test_tx();
     let result = app.handle_slash_command("/tone", &tx);
-    if let SlashResult::Display(text) = result {
-        assert!(
-            text.contains("tone") || text.contains("Tone") || text.contains("installed"),
-            "should mention tones: {text}"
-        );
-    } else {
-        panic!("expected Display result");
-    }
+
+    std::env::set_current_dir(prev).unwrap();
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(
+        app.selector.is_some(),
+        "bare /tone should open the selector"
+    );
+    assert_eq!(app.selector_kind, Some(SelectorKind::Tone));
 }
 
 #[test]
@@ -1900,7 +1971,10 @@ fn slash_auth_login_redirects_to_top_level_login() {
     let SlashResult::Display(text) = result else {
         panic!("expected Display result");
     };
-    assert!(text.contains("Use /login <provider> or /logout <provider>"), "got: {text}");
+    assert!(
+        text.contains("Use /login <provider> or /logout <provider>"),
+        "got: {text}"
+    );
 }
 
 #[test]
@@ -1921,7 +1995,10 @@ fn slash_logout_without_provider_shows_provider_usage() {
             assert!(text.contains("Usage: /logout <provider>"), "got: {text}");
             assert!(text.contains("openai-codex"), "got: {text}");
         }
-        other => panic!("expected Display result, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Display result, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     }
 }
 
@@ -2058,20 +2135,101 @@ fn context_selector_confirm_changes_settings() {
     let tx = test_tx();
     app.open_context_selector();
 
-    // Navigate down to select a non-default option and confirm
-    if let Some(ref mut sel) = app.selector {
-        sel.move_down(); // Move to second option (Maniple)
-    }
-    let _msg = app.confirm_selector(&tx);
+    let expected = {
+        let sel = app.selector.as_mut().expect("selector");
+        sel.move_down();
+        sel.selected_value().to_string()
+    };
+    let message = app.confirm_selector(&tx).expect("confirmation message");
 
-    // Check that settings were updated
+    assert!(message.contains("Context policy →"));
     let s = app.settings.lock().unwrap();
-    // Should be Maniple (second option) or whatever the selector landed on
-    assert_ne!(
-        s.context_class,
-        ContextClass::Squad,
-        "should have changed from default Squad"
+    assert_eq!(s.context_class.short(), expected);
+}
+
+#[test]
+fn persona_selector_confirm_activates_selected_persona() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join(".omegon/plugins/test-persona");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(plugin_dir.join("PERSONA.md"), "Be useful.\n").unwrap();
+    std::fs::write(
+        plugin_dir.join("plugin.toml"),
+        r#"
+[plugin]
+type = "persona"
+id = "dev.test.persona"
+name = "Test Persona"
+version = "1.0.0"
+description = "Test persona"
+
+[persona.identity]
+directive = "PERSONA.md"
+"#,
+    )
+    .unwrap();
+
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(dir.path()).unwrap();
+
+    let mut app = test_app();
+    app.open_persona_selector();
+    let tx = test_tx();
+    let message = app.confirm_selector(&tx);
+
+    std::env::set_current_dir(prev).unwrap();
+
+    assert_eq!(
+        message.as_deref(),
+        Some("⚙ Persona activated: Test Persona (0 mind facts)")
     );
+    let active = app
+        .plugin_registry
+        .as_ref()
+        .and_then(|registry| registry.active_persona())
+        .map(|persona| persona.id.as_str());
+    assert_eq!(active, Some("dev.test.persona"));
+}
+
+#[test]
+fn tone_selector_confirm_activates_selected_tone() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join(".omegon/plugins/test-tone");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(plugin_dir.join("TONE.md"), "Stay concise.\n").unwrap();
+    std::fs::write(
+        plugin_dir.join("plugin.toml"),
+        r#"
+[plugin]
+type = "tone"
+id = "dev.test.tone"
+name = "Test Tone"
+version = "1.0.0"
+description = "Test tone"
+
+[tone]
+directive = "TONE.md"
+"#,
+    )
+    .unwrap();
+
+    let prev = std::env::current_dir().unwrap();
+    std::env::set_current_dir(dir.path()).unwrap();
+
+    let mut app = test_app();
+    app.open_tone_selector();
+    let tx = test_tx();
+    let message = app.confirm_selector(&tx);
+
+    std::env::set_current_dir(prev).unwrap();
+
+    assert_eq!(message.as_deref(), Some("♪ Tone activated: Test Tone"));
+    let active = app
+        .plugin_registry
+        .as_ref()
+        .and_then(|registry| registry.active_tone())
+        .map(|tone| tone.id.as_str());
+    assert_eq!(active, Some("dev.test.tone"));
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2083,16 +2241,17 @@ fn draw_clears_stale_completed_cleave_snapshot_from_tools_panel() {
     let mut app = test_app();
     app.ui_surfaces.footer = true;
     app.ui_surfaces.instruments = true;
-    app.instrument_panel.set_cleave_progress(Some(crate::features::cleave::CleaveProgress {
-        active: false,
-        run_id: "done-run".into(),
-        total_children: 3,
-        completed: 3,
-        failed: 0,
-        children: vec![],
-        total_tokens_in: 100,
-        total_tokens_out: 50,
-    }));
+    app.instrument_panel
+        .set_cleave_progress(Some(crate::features::cleave::CleaveProgress {
+            active: false,
+            run_id: "done-run".into(),
+            total_children: 3,
+            completed: 3,
+            failed: 0,
+            children: vec![],
+            total_tokens_in: 100,
+            total_tokens_out: 50,
+        }));
     app.dashboard_handles.cleave = Some(std::sync::Arc::new(std::sync::Mutex::new(
         crate::features::cleave::CleaveProgress {
             active: false,
@@ -2506,7 +2665,10 @@ fn slash_secrets_set_without_value_opens_selector() {
     let result = app.handle_slash_command("/secrets set", &tx);
     assert!(matches!(result, SlashResult::Handled));
     assert!(app.selector.is_some(), "expected secret selector to open");
-    assert!(matches!(app.selector_kind, Some(super::SelectorKind::SecretName)));
+    assert!(matches!(
+        app.selector_kind,
+        Some(super::SelectorKind::SecretName)
+    ));
 }
 
 #[test]
@@ -2637,7 +2799,10 @@ fn palette_deduplicates_builtin_and_bus_commands() {
     app.editor.set_text("/cl");
     let matches = app.matching_commands();
     let cleave_count = matches.iter().filter(|(name, _)| name == "cleave").count();
-    assert_eq!(cleave_count, 1, "expected one /cleave entry, got: {matches:?}");
+    assert_eq!(
+        cleave_count, 1,
+        "expected one /cleave entry, got: {matches:?}"
+    );
 }
 
 #[test]
@@ -2844,7 +3009,10 @@ fn slash_dash_status_uses_compatibility_wording() {
         panic!("expected Display result");
     };
 
-    assert!(text.contains("compatibility/debug browser path"), "got: {text}");
+    assert!(
+        text.contains("compatibility/debug browser path"),
+        "got: {text}"
+    );
     assert!(text.contains("http://127.0.0.1:7842"), "got: {text}");
     assert!(text.contains("queue depth:"), "got: {text}");
     assert!(text.contains("transport warnings:"), "got: {text}");
@@ -2885,7 +3053,9 @@ fn web_dashboard_started_event_updates_cached_addr() {
         Some("127.0.0.1:7842".into())
     );
     assert_eq!(
-        app.web_startup.as_ref().map(|startup| startup.token.as_str()),
+        app.web_startup
+            .as_ref()
+            .map(|startup| startup.token.as_str()),
         Some("test")
     );
     assert_eq!(
@@ -2976,8 +3146,8 @@ fn auspex_attach_payload_carries_startup_and_instance_metadata() {
         }),
     };
 
-    let payload = super::build_auspex_attach_payload(&startup, super::AuspexHandoffMode::Env)
-        .unwrap();
+    let payload =
+        super::build_auspex_attach_payload(&startup, super::AuspexHandoffMode::Env).unwrap();
     let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
     assert_eq!(json["transport"], "omegon-ipc");
     assert_eq!(json["preferred_handoff"], "env");
@@ -3430,7 +3600,10 @@ fn recovery_hint_ollama_connection() {
 #[test]
 fn recovery_hint_context_window() {
     let hint = App::recovery_hint(None, "context_length_exceeded: too many tokens");
-    assert!(hint.contains("/context compact"), "should suggest context compact: {hint}");
+    assert!(
+        hint.contains("/context compact"),
+        "should suggest context compact: {hint}"
+    );
 }
 
 #[test]
@@ -3480,8 +3653,16 @@ fn active_tool_phase_beats_runtime_thinking_in_tui() {
         args: serde_json::json!({"command": "pwd"}),
     });
 
-    app.instrument_panel
-        .update_telemetry(40.0, 200_000, Some("bash"), false, "high", None, true, 0.016);
+    app.instrument_panel.update_telemetry(
+        40.0,
+        200_000,
+        Some("bash"),
+        false,
+        "high",
+        None,
+        true,
+        0.016,
+    );
 
     assert_eq!(app.instrument_panel.debug_activity_mode(), "tool");
 }
@@ -3532,7 +3713,10 @@ fn tool_end_aggregates_all_text_blocks() {
         panic!("expected tool card");
     };
     let detail = detail_result.as_deref().unwrap_or("");
-    assert!(detail.contains("## codebase_search: `foo`"), "missing heading: {detail}");
+    assert!(
+        detail.contains("## codebase_search: `foo`"),
+        "missing heading: {detail}"
+    );
     assert!(
         detail.contains("**2 result(s)** (scope: `code`)"),
         "missing summary line: {detail}"

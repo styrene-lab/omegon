@@ -3044,7 +3044,7 @@ mod tests {
                 detail_args: Some("{\"query\":\"foo\"}".into()),
                 result_summary: None,
                 detail_result: Some(
-                    "## codebase_search: `foo`\n\n**2 result(s)** (scope: `code`)\n\n- `src/app.rs`:10-20 · code · score 45.38\n  fn render()\n\n- `src/lib.rs`:1-9 · code · score 11.20\n  helper\n"
+                    "## codebase_search: `foo`\n\n**2 result(s)** (scope: `code`)\n\n- `src/app.rs`:10-20 · code · score 45.38\n    fn render()\n\n- `src/lib.rs`:1-9 · code · score 11.20\n    helper\n"
                         .into(),
                 ),
                 is_error: false,
