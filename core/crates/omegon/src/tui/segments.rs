@@ -1385,6 +1385,18 @@ fn render_tool_card(
         // partial actually carries `tail` text (bash + local_inference
         // both do; mcp progress notifications carry only phase/units
         // and leave tail empty, which is correct).
+        //
+        // Bash output deliberately preserves SGR color codes (the
+        // `strip_terminal_noise` helper in `tools/bash.rs` strips
+        // mouse / cursor / OSC sequences but keeps SGR for downstream
+        // colorization). We feed the tail through the same
+        // `ansi_to_tui::IntoText` parser that the completed-result
+        // section uses, which both colorizes the output AND filters
+        // out the raw ESC bytes — without this step the live tail
+        // would write SGR escape bytes directly into the cell buffer
+        // and the terminal would interpret them as the start of new
+        // sequences, swallowing nearby cells. (Same root cause as the
+        // instruments-panel ANSI fragment leakage.)
         if let Some(partial) = live_partial {
             if !partial.tail.is_empty() {
                 let tail_lines: Vec<&str> = partial.tail.lines().collect();
@@ -1393,13 +1405,50 @@ fn render_tool_card(
                 // Show the LAST N lines, not the first N — for streaming
                 // output the latest content is what the operator wants.
                 let start = tail_lines.len().saturating_sub(take);
+                let visible_tail: String = tail_lines[start..].join("\n");
+                let has_ansi = visible_tail.contains('\x1b');
                 let tail_style = Style::default().fg(t.muted()).bg(bg);
-                for line in &tail_lines[start..] {
-                    lines.push(Line::from(Span::styled(
-                        line.to_string(),
-                        tail_style,
-                    )));
-                    live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+
+                if has_ansi {
+                    use ansi_to_tui::IntoText as _;
+                    if let Ok(text) = visible_tail.into_text() {
+                        for line in text.lines {
+                            let spans: Vec<Span<'_>> = line
+                                .spans
+                                .into_iter()
+                                .map(|mut s| {
+                                    s.style = s.style.bg(bg);
+                                    if s.style.fg.is_none() {
+                                        s.style = s.style.fg(t.muted());
+                                    }
+                                    s
+                                })
+                                .collect();
+                            lines.push(Line::from(spans));
+                            live_row_fills
+                                .push((lines.len().saturating_sub(1) as u16, bg));
+                        }
+                    } else {
+                        // ANSI parse failed — strip raw ESC bytes
+                        // defensively rather than letting them write
+                        // into cell symbols.
+                        for line in &tail_lines[start..] {
+                            let stripped: String =
+                                line.chars().filter(|c| !c.is_control()).collect();
+                            lines.push(Line::from(Span::styled(stripped, tail_style)));
+                            live_row_fills
+                                .push((lines.len().saturating_sub(1) as u16, bg));
+                        }
+                    }
+                } else {
+                    for line in &tail_lines[start..] {
+                        // Even on the no-ANSI path, drop any stray
+                        // control bytes — defense in depth.
+                        let stripped: String =
+                            line.chars().filter(|c| !c.is_control()).collect();
+                        lines.push(Line::from(Span::styled(stripped, tail_style)));
+                        live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+                    }
                 }
             }
         }
@@ -1470,6 +1519,15 @@ fn render_tool_card(
         // Per-block diff body. Each block is preceded by a `▸ {file}`
         // header (only when there's more than one block) so the
         // operator can tell which file each hunk belongs to.
+        //
+        // Each emitted line is filtered for control bytes via
+        // `sanitize_diff_line` — the agent's `oldText`/`newText` args
+        // shouldn't normally contain ESC bytes, but if they do, we
+        // don't want them ending up in cell symbols where the
+        // terminal would interpret them as escape sequences.
+        let sanitize_diff_line = |s: &str| -> String {
+            s.chars().filter(|c| !c.is_control()).collect()
+        };
         let multi_block = blocks.len() > 1;
         'outer: for block in &blocks {
             if multi_block {
@@ -1477,7 +1535,7 @@ fn render_tool_card(
                     break;
                 }
                 lines.push(Line::from(Span::styled(
-                    format!("▸ {}", block.file),
+                    format!("▸ {}", sanitize_diff_line(&block.file)),
                     header_style,
                 )));
                 result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
@@ -1488,7 +1546,7 @@ fn render_tool_card(
                     break 'outer;
                 }
                 lines.push(Line::from(Span::styled(
-                    format!("- {line}"),
+                    format!("- {}", sanitize_diff_line(line)),
                     removed_style,
                 )));
                 result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
@@ -1499,7 +1557,7 @@ fn render_tool_card(
                     break 'outer;
                 }
                 lines.push(Line::from(Span::styled(
-                    format!("+ {line}"),
+                    format!("+ {}", sanitize_diff_line(line)),
                     added_style,
                 )));
                 result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
@@ -3248,6 +3306,80 @@ mod tests {
         assert!(
             text.contains("running"),
             "in-flight card with no partial should show 'running' placeholder: {text}"
+        );
+    }
+
+    #[test]
+    fn in_flight_tool_card_strips_raw_ansi_bytes_from_live_tail() {
+        // Bash output is allowed to carry SGR color escapes (the
+        // strip_terminal_noise pass in tools/bash.rs deliberately
+        // preserves them for downstream colorization). Without the
+        // ansi_to_tui parse on the live tail, those raw ESC bytes
+        // would write into the cell buffer and the terminal would
+        // misinterpret them — the operator's screenshot showed the
+        // resulting fragment leakage in the right-side instruments
+        // panel. This test pins the protection: a tail carrying ESC
+        // sequences should render as the visible text only, no raw
+        // control bytes anywhere in the rendered cells.
+        let partial = omegon_traits::PartialToolResult {
+            tail: "\x1b[32mcompiling foo\x1b[0m\nlinking target/debug/myapp".to_string(),
+            progress: omegon_traits::ToolProgress {
+                elapsed_ms: 1_500,
+                heartbeat: false,
+                phase: None,
+                units: None,
+                tally: None,
+            },
+            details: serde_json::json!(null),
+        };
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "bash".into(),
+                args_summary: None,
+                detail_args: Some("cargo build".into()),
+                result_summary: None,
+                detail_result: None,
+                is_error: false,
+                complete: false,
+                expanded: false,
+                live_partial: Some(partial),
+                started_at: None,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 12);
+        seg.render(area, &mut buf, &Alpharius);
+
+        // Walk every cell and assert no control char ended up in the
+        // buffer. The visible content should still be present.
+        let text = buf_text(&buf, area);
+        assert!(
+            text.contains("compiling foo"),
+            "visible content should survive: {text}"
+        );
+        assert!(
+            text.contains("linking"),
+            "second tail line should render: {text}"
+        );
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                let sym = buf[(x, y)].symbol();
+                for ch in sym.chars() {
+                    assert!(
+                        !ch.is_control(),
+                        "rendered cell at ({x}, {y}) contains control char {ch:?} (U+{:04X})",
+                        ch as u32
+                    );
+                }
+            }
+        }
+        // The literal `[32m` and `[0m` SGR parameter strings should
+        // NOT appear as visible text either — ansi_to_tui consumes
+        // them and applies the styling instead.
+        assert!(
+            !text.contains("[32m") && !text.contains("[0m"),
+            "ANSI parameter sequences should be parsed away, not rendered as text: {text}"
         );
     }
 

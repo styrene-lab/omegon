@@ -40,6 +40,16 @@ fn panel_bg(t: &dyn Theme) -> Color {
 /// `widgets::visible_width()`, which is what the surrounding layout
 /// math uses. Mixing the two produced a 1-cell off-by-one that pushed
 /// names like `read` off-axis (the original "◇  read" extra-space bug).
+///
+/// **Control character filtering**: any input character that is a
+/// Unicode control byte (`is_control()` — `\x1b` ESC, `\x07` BEL,
+/// `\x00` NUL, etc.) is silently dropped before being written to the
+/// cell buffer. This is a global defense against ANSI escape sequence
+/// fragments leaking into the rendered TUI from corrupted tool names
+/// or unsanitized cleave-activity strings — any path that ultimately
+/// renders through this function gets the protection automatically
+/// without per-call-site sanitization. The instruments panel never
+/// legitimately needs to write control bytes into a cell.
 fn render_str_colored<F>(
     text: &str,
     x: u16,
@@ -56,6 +66,13 @@ where
     for ch in text.chars() {
         if cur_x >= max_x {
             break;
+        }
+        // Skip control bytes — they would otherwise be written to a
+        // cell and the terminal might interpret them as the start of
+        // a new escape sequence, swallowing nearby visible characters
+        // and producing the "ANSI fragment leakage" failure mode.
+        if ch.is_control() {
+            continue;
         }
         let w = UnicodeWidthChar::width(ch).unwrap_or(1) as u16;
         if cur_x.saturating_add(w) > max_x {
@@ -141,6 +158,13 @@ fn strip_terminal_control(input: &str) -> String {
 /// `UnicodeWidthChar::width()` (non-CJK) for the same reason as
 /// `render_str_colored` above — keeps the cell math consistent with
 /// `widgets::visible_width()` and the surrounding layout code.
+///
+/// Also drops control characters before measuring/emitting so the
+/// truncation length matches what `render_str_colored` will actually
+/// draw. Without this filter, an input like `bash\x1b[38m` would be
+/// "measured" as 9 cells (the ESC + 4 visible bytes counted by their
+/// `width()` returns) but rendered as just 4 visible cells, leaving
+/// downstream layout math off-by-five.
 fn truncate_display_width(input: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
@@ -148,6 +172,9 @@ fn truncate_display_width(input: &str, max_width: usize) -> String {
     let mut out = String::new();
     let mut used = 0usize;
     for ch in input.chars() {
+        if ch.is_control() {
+            continue;
+        }
         let w = UnicodeWidthChar::width(ch).unwrap_or(1);
         if used + w > max_width {
             break;
@@ -2153,6 +2180,76 @@ mod tests {
         assert_eq!(chars.next(), Some(' '));
         let label: String = chars.collect();
         assert_eq!(label, "context_status");
+    }
+
+    #[test]
+    fn render_str_colored_strips_control_bytes_to_prevent_ansi_leakage() {
+        // The headline failure mode this guards against: a tool name
+        // (or any other text rendered through this function) carrying
+        // an embedded ANSI escape sequence. The previous version
+        // would write the ESC byte into a cell, the terminal would
+        // try to interpret it as the start of a new sequence, and
+        // visible fragments like `e[38` and `;14m` would surface
+        // mid-row in the tools panel. (See operator screenshot
+        // documented in the commit message.)
+        //
+        // The fix: silently drop any `is_control()` char before
+        // touching the cell buffer. This is purely defensive — the
+        // panel never legitimately needs to write control bytes —
+        // and applies globally so individual call sites don't have
+        // to remember to sanitize.
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+        let bg = Color::Rgb(0, 0, 0);
+        let dirty = "bash\u{1b}[38;5;14mlive\u{1b}[0m";
+        let end_x = render_str_colored(dirty, 0, 0, area.right(), bg, &mut buf, |_| {
+            Color::Rgb(255, 255, 255)
+        });
+
+        // Read back what was actually written.
+        let mut rendered = String::new();
+        for x in 0..end_x {
+            rendered.push_str(buf[(x, 0)].symbol());
+        }
+        assert_eq!(
+            rendered, "bash[38;5;14mlive[0m",
+            "control bytes should be stripped, but the rest of the input remains \
+             (the panel still sees garbage if the source is corrupt — the strip \
+             only protects against terminal-interpretation leakage, not against \
+             unsanitized input from upstream)"
+        );
+        // Critically: no ESC byte in the output. That's the load-bearing
+        // property — the terminal can't interpret what isn't there.
+        for x in 0..end_x {
+            let sym = buf[(x, 0)].symbol();
+            for ch in sym.chars() {
+                assert!(
+                    !ch.is_control(),
+                    "rendered cell at x={x} contains control char {ch:?} (U+{:04X})",
+                    ch as u32
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn truncate_display_width_strips_control_bytes_too() {
+        // The truncation path also has to drop control bytes,
+        // otherwise its measured "max_width" would diverge from what
+        // render_str_colored actually draws and downstream column
+        // alignment math would be off. Input has 2 visible chars
+        // (`a`, `b`) before the ESC, and we ask for 4 cells, so the
+        // result should be 4 visible chars from after stripping the
+        // ESC bytes: `ab` + `[3` (the `1m` overflows the budget).
+        let result = truncate_display_width("ab\u{1b}[31mcd\u{1b}[0m", 4);
+        assert_eq!(
+            result, "ab[3",
+            "should drop ESC bytes and measure only the visible chars"
+        );
+        // Larger budget proves the rest of the input flows through
+        // (minus the second ESC).
+        let larger = truncate_display_width("ab\u{1b}[31mcd\u{1b}[0m", 20);
+        assert_eq!(larger, "ab[31mcd[0m");
     }
 
     #[test]
