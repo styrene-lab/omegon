@@ -2996,7 +2996,7 @@ mod tests {
                 detail_args: Some("{\"query\":\"foo\"}".into()),
                 result_summary: None,
                 detail_result: Some(
-                    "## codebase_search: `foo`\n\n**2 result(s)** (scope: `code`)\n\n| File | Lines | Type | Score | Preview |\n|------|-------|------|-------|---------|\n| `src/app.rs` | 10-20 | code | 45.38 | fn render() |\n| `src/lib.rs` | 1-9 | code | 11.20 | helper |\n"
+                    "## codebase_search: `foo`\n\n**2 result(s)** (scope: `code`)\n\n- `src/app.rs`:10-20 · code · score 45.38\n  fn render()\n\n- `src/lib.rs`:1-9 · code · score 11.20\n  helper\n"
                         .into(),
                 ),
                 is_error: false,
@@ -3025,24 +3025,6 @@ mod tests {
             !text.contains("**2 result(s)**"),
             "bold markers should not leak literally into the rendered card: {text}"
         );
-        // Header cells should all be present, separated by pipes,
-        // regardless of exact padding (which is determined by the
-        // cross-row max from `compute_table_widths`).
-        for header_cell in ["File", "Lines", "Type", "Score", "Preview"] {
-            assert!(
-                text.contains(header_cell),
-                "header should contain cell {header_cell:?}: {text}"
-            );
-        }
-        assert!(
-            text.contains("├") || text.contains("┼"),
-            "separator row should render box drawing characters: {text}"
-        );
-        // Body cells likewise — and crucially, the rows must align
-        // across the table block. Both body rows must render with the
-        // same column structure even though `src/lib.rs` has shorter
-        // content than `src/app.rs`. The previous per-row width
-        // computation broke this.
         for body_cell in [
             "src/app.rs", "10-20", "45.38", "fn render()",
             "src/lib.rs", "1-9", "11.20", "helper",
@@ -3052,23 +3034,9 @@ mod tests {
                 "body should contain cell {body_cell:?}: {text}"
             );
         }
-        // Cross-row alignment check: both body rows should start at
-        // the same screen column (i.e. render with the same number of
-        // leading characters before the first cell). Find both row
-        // start positions and compare them.
-        let row1_start = text
-            .find("src/app.rs")
-            .expect("first body row should be present");
-        let row2_start = text
-            .find("src/lib.rs")
-            .expect("second body row should be present");
-        // Walk back to the most recent newline to find the column
-        // offset for each row. They must be equal.
-        let col1 = row1_start - text[..row1_start].rfind('\n').map(|i| i + 1).unwrap_or(0);
-        let col2 = row2_start - text[..row2_start].rfind('\n').map(|i| i + 1).unwrap_or(0);
-        assert_eq!(
-            col1, col2,
-            "body rows must start at the same column for cross-row alignment: row1 col={col1} row2 col={col2}"
+        assert!(
+            text.contains("score 45.38") && text.contains("score 11.20"),
+            "search results should render as compact line-oriented blocks: {text}"
         );
     }
 

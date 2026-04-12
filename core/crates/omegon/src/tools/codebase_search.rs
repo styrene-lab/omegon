@@ -86,28 +86,29 @@ impl CodescanProvider {
             });
         }
 
-        // ── Build result table ───────────────────────────────────────────
+        // ── Build TUI-safe result list ─────────────────────────────────────
+        // Markdown tables looked nice in ideal conditions, but rich previews can
+        // still shred row structure in the terminal renderer. Emit a compact,
+        // line-oriented format instead: header + one block per result. The
+        // structured JSON details remain the authoritative machine-readable form.
         let mut table = format!(
             "## codebase_search: `{}`\n\n**{} result(s)** (scope: `{}`)\n\n",
             query,
             results.len(),
             scope_str
         );
-        table.push_str("| File | Lines | Type | Score | Preview |\n");
-        table.push_str("|------|-------|------|-------|---------|\n");
 
         for r in &results {
-            // Show up to 300 chars across lines, collapsing newlines to spaces
             let preview_text: String = r
                 .preview
                 .chars()
-                .take(300)
+                .take(180)
                 .collect::<String>()
                 .replace('\n', " · ")
                 .replace('\r', "")
-                .replace('|', "\\|");
+                .replace('|', "¦");
             table.push_str(&format!(
-                "| `{}` | {}-{} | {} | {:.2} | {} |\n",
+                "- `{}`:{}-{} · {} · score {:.2}\n  {}\n\n",
                 r.file,
                 r.start_line,
                 r.end_line,
@@ -116,7 +117,7 @@ impl CodescanProvider {
                 preview_text
             ));
         }
-        table.push_str("\n*Use `read` with offset/limit for full chunk content.*");
+        table.push_str("*Use `read` with offset/limit for full chunk content.*");
 
         // Spawn background HEAD check (rate-limited)
         self.maybe_spawn_head_check();
