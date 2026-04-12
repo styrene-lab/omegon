@@ -9,13 +9,17 @@
 //! when background tasks complete.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use omegon_traits::{
@@ -29,6 +33,20 @@ pub struct AgentSpec {
     pub name: String,
     pub description: String,
     pub is_write_agent: bool,
+}
+
+fn parse_csv_env_local(name: &str) -> Vec<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Status of a delegate task
@@ -114,6 +132,13 @@ impl DelegateResultStore {
     }
 }
 
+#[derive(Debug, Clone)]
+struct DelegateRuntimeRequest {
+    scope: Option<Vec<String>>,
+    model: Option<String>,
+    thinking_level: Option<String>,
+}
+
 /// Mock delegate runner for this implementation
 /// In a real implementation, this would interface with the actual delegate engine
 pub struct DelegateRunner {
@@ -126,14 +151,129 @@ impl DelegateRunner {
         Self { cwd, result_store }
     }
 
+    fn build_delegate_prompt(
+        &self,
+        task: &str,
+        scope: Option<&[String]>,
+        facts: Option<&[String]>,
+        field_kit_context: &str,
+    ) -> String {
+        let mut prompt = String::from(
+            "You are a delegated Omegon subagent running a bounded child task. \
+Work directly, stay within scope, and finish with a concise final result.\n\n",
+        );
+        prompt.push_str("## Task\n");
+        prompt.push_str(task);
+        prompt.push_str("\n");
+        if let Some(scope) = scope
+            && !scope.is_empty()
+        {
+            prompt.push_str("\n## Scope\n");
+            for entry in scope {
+                prompt.push_str(&format!("- {entry}\n"));
+            }
+            prompt.push_str("Only touch files within this declared scope unless blocked.\n");
+        }
+        if let Some(facts) = facts
+            && !facts.is_empty()
+        {
+            prompt.push_str("\n## Facts\n");
+            for fact in facts {
+                prompt.push_str(&format!("- {fact}\n"));
+            }
+        }
+        if !field_kit_context.is_empty() {
+            prompt.push_str(field_kit_context);
+            prompt.push('\n');
+        }
+        prompt.push_str(
+            "\n## Output contract\nReturn the concrete result of the delegated task. \
+If you edited files, say which ones. If you validated, say what ran. \
+If blocked, say the blocker plainly.\n",
+        );
+        prompt
+    }
+
+    async fn run_delegate_child(
+        &self,
+        prompt: &str,
+        runtime: &DelegateRuntimeRequest,
+        mind: Option<&str>,
+    ) -> anyhow::Result<String> {
+        let agent_binary = std::env::current_exe().context("delegate runner could not locate current executable")?;
+        let prompt_path = self.cwd.join(".omegon").join("delegate-prompt.md");
+        if let Some(parent) = prompt_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create delegate prompt dir {}", parent.display()))?;
+        }
+        std::fs::write(&prompt_path, prompt)
+            .with_context(|| format!("failed to write delegate prompt {}", prompt_path.display()))?;
+
+        let model = runtime
+            .model
+            .clone()
+            .unwrap_or_else(|| "qwen3:4b".to_string());
+        let mut cmd = Command::new(&agent_binary);
+        cmd.arg("agent")
+            .arg("--prompt-file")
+            .arg(&prompt_path)
+            .arg("--cwd")
+            .arg(&self.cwd)
+            .arg("--model")
+            .arg(&model)
+            .arg("--max-turns")
+            .arg("8")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .env("OMEGON_CHILD", "1")
+            .env("OMEGON_CHILD_ENABLED_TOOLS", "read,write,edit,change,bash")
+            .env("OMEGON_CHILD_DISABLED_TOOLS", "web_search,design_tree,design_tree_update,openspec_manage,lifecycle_doctor,cleave_assess,cleave_run,request_context,context_compact,context_clear")
+            .env("OMEGON_CHILD_CONTEXT_CLASS", "squad")
+            .env(
+                "OMEGON_CHILD_THINKING_LEVEL",
+                runtime.thinking_level.as_deref().unwrap_or("minimal"),
+            );
+        if let Some(scope) = runtime.scope.as_ref()
+            && !scope.is_empty()
+        {
+            cmd.env("OMEGON_CHILD_PRELOADED_FILES", scope.join(":"));
+        }
+        if let Some(persona) = mind
+            && !persona.is_empty()
+        {
+            cmd.env("OMEGON_CHILD_PERSONA", persona);
+        }
+        for tool in parse_csv_env_local("OMEGON_CHILD_ENABLED_TOOLS") {
+            let _ = tool;
+        }
+
+        let output = cmd.output().await.context("delegate child process failed to execute")?;
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if stdout.is_empty() {
+                Ok("Delegate completed with no stdout.".to_string())
+            } else {
+                Ok(stdout)
+            }
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(anyhow::anyhow!(
+                "delegate child exited with code {:?}: {}",
+                output.status.code(),
+                stderr
+            ))
+        }
+    }
+
     pub async fn spawn_delegate(
         &self,
         task_id: String,
         agent_name: Option<String>,
         task: String,
-        _scope: Option<Vec<String>>,
-        _model: Option<String>,
-        _thinking_level: Option<String>,
+        scope: Option<Vec<String>>,
+        model: Option<String>,
+        thinking_level: Option<String>,
         facts: Option<Vec<String>>,
         mind: Option<String>,
     ) -> anyhow::Result<()> {
@@ -184,22 +324,44 @@ impl DelegateRunner {
 
         self.result_store.store_task(task_entry);
 
-        // Best-effort simulated background completion.
-        let store = self.result_store.clone();
-        let field_kit = field_kit_context;
-        crate::task_spawn::spawn_best_effort("delegate-simulated-task", async move {
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        let runtime = DelegateRuntimeRequest {
+            scope: scope.clone(),
+            model,
+            thinking_level,
+        };
+        let prompt = self.build_delegate_prompt(
+            &task,
+            scope.as_deref(),
+            facts.as_deref(),
+            &field_kit_context,
+        );
 
-            let result = if field_kit.is_empty() {
-                format!("Task completed: {task}")
-            } else {
-                format!("Task completed: {task}\n\nField kit applied:{field_kit}")
-            };
-            store.update_task_status(
-                &task_id,
-                DelegateTaskStatus::Completed { success: true },
-                Some(result),
-            );
+        let store = self.result_store.clone();
+        let cwd = self.cwd.clone();
+        crate::task_spawn::spawn_best_effort_result("delegate-real-task", async move {
+            let runner = DelegateRunner::new(cwd, store.clone());
+            match runner
+                .run_delegate_child(&prompt, &runtime, mind.as_deref())
+                .await
+            {
+                Ok(result) => {
+                    store.update_task_status(
+                        &task_id,
+                        DelegateTaskStatus::Completed { success: true },
+                        Some(result),
+                    );
+                }
+                Err(err) => {
+                    store.update_task_status(
+                        &task_id,
+                        DelegateTaskStatus::Failed {
+                            error: err.to_string(),
+                        },
+                        None,
+                    );
+                }
+            }
+            Ok(())
         });
 
         Ok(())
@@ -208,11 +370,12 @@ impl DelegateRunner {
     pub async fn wait_for_result(
         &self,
         task_id: &str,
-        _cancel: CancellationToken,
+        cancel: CancellationToken,
     ) -> anyhow::Result<String> {
-        // Poll for completion (in real implementation, this would be more sophisticated)
-        for _ in 0..30 {
-            // 30 second timeout
+        for _ in 0..60 {
+            if cancel.is_cancelled() {
+                anyhow::bail!("Delegate task cancelled")
+            }
             if let Some(task) = self.result_store.get_task(task_id) {
                 match task.status {
                     DelegateTaskStatus::Completed { success: true } => {
@@ -225,7 +388,7 @@ impl DelegateRunner {
                         return Err(anyhow::anyhow!("Task failed: {}", error));
                     }
                     DelegateTaskStatus::Running => {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     }
                 }
             } else {
