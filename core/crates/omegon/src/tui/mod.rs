@@ -316,6 +316,8 @@ enum SelectorKind {
     Model,
     ThinkingLevel,
     ContextClass,
+    Persona,
+    Tone,
     SecretName,
     LoginProvider,
 }
@@ -1155,6 +1157,58 @@ impl App {
         self.selector_kind = Some(SelectorKind::ContextClass);
     }
 
+    fn open_persona_selector(&mut self) {
+        let (personas, _) = crate::plugins::persona_loader::scan_available();
+        if personas.is_empty() {
+            self.conversation.push_system(
+                "No personas installed. Install with: omegon plugin install <git-url>",
+            );
+            return;
+        }
+
+        let active_id = self
+            .plugin_registry
+            .as_ref()
+            .and_then(|registry| registry.active_persona().map(|persona| persona.id.clone()));
+        let options = personas
+            .into_iter()
+            .map(|persona| selector::SelectOption {
+                active: active_id.as_deref() == Some(persona.id.as_str()),
+                value: persona.id,
+                label: persona.name,
+                description: persona.description,
+            })
+            .collect();
+        self.selector = Some(selector::Selector::new("Select Persona", options));
+        self.selector_kind = Some(SelectorKind::Persona);
+    }
+
+    fn open_tone_selector(&mut self) {
+        let (_, tones) = crate::plugins::persona_loader::scan_available();
+        if tones.is_empty() {
+            self.conversation.push_system(
+                "No tones installed. Install with: omegon plugin install <git-url>",
+            );
+            return;
+        }
+
+        let active_id = self
+            .plugin_registry
+            .as_ref()
+            .and_then(|registry| registry.active_tone().map(|tone| tone.id.clone()));
+        let options = tones
+            .into_iter()
+            .map(|tone| selector::SelectOption {
+                active: active_id.as_deref() == Some(tone.id.as_str()),
+                value: tone.id,
+                label: tone.name,
+                description: tone.description,
+            })
+            .collect();
+        self.selector = Some(selector::Selector::new("Select Tone", options));
+        self.selector_kind = Some(SelectorKind::Tone);
+    }
+
     /// Shorthand for the current working directory as a Path.
     fn cwd(&self) -> &std::path::Path {
         std::path::Path::new(&self.footer_data.cwd)
@@ -1414,6 +1468,44 @@ impl App {
                     Some(format!("Context policy → {}", class.label()))
                 } else {
                     Some(format!("Unknown context class: {value}"))
+                }
+            }
+            SelectorKind::Persona => {
+                let (personas, _) = crate::plugins::persona_loader::scan_available();
+                if let Some(available) = personas.into_iter().find(|persona| persona.id == value) {
+                    match crate::plugins::persona_loader::load_persona(&available.path) {
+                        Ok(persona) => {
+                            let name = persona.name.clone();
+                            let badge = persona.badge.clone().unwrap_or_else(|| "⚙".into());
+                            let fact_count = persona.mind_facts.len();
+                            if let Some(ref mut registry) = self.plugin_registry {
+                                registry.activate_persona(persona);
+                            }
+                            Some(format!(
+                                "{badge} Persona activated: {name} ({fact_count} mind facts)"
+                            ))
+                        }
+                        Err(e) => Some(format!("Failed to load persona: {e}")),
+                    }
+                } else {
+                    Some(format!("Persona '{value}' no longer available."))
+                }
+            }
+            SelectorKind::Tone => {
+                let (_, tones) = crate::plugins::persona_loader::scan_available();
+                if let Some(available) = tones.into_iter().find(|tone| tone.id == value) {
+                    match crate::plugins::persona_loader::load_tone(&available.path) {
+                        Ok(tone) => {
+                            let name = tone.name.clone();
+                            if let Some(ref mut registry) = self.plugin_registry {
+                                registry.activate_tone(tone);
+                            }
+                            Some(format!("♪ Tone activated: {name}"))
+                        }
+                        Err(e) => Some(format!("Failed to load tone: {e}")),
+                    }
+                } else {
+                    Some(format!("Tone '{value}' no longer available."))
                 }
             }
             SelectorKind::LoginProvider => {
@@ -3565,31 +3657,8 @@ impl App {
                         SlashResult::Display("Plugin registry not initialized.".into())
                     }
                 } else if args.is_empty() {
-                    // List available personas
-                    let (personas, _) = crate::plugins::persona_loader::scan_available();
-                    if personas.is_empty() {
-                        SlashResult::Display("No personas installed.\n  Install with: omegon plugin install <git-url>".into())
-                    } else {
-                        let active_id = self
-                            .plugin_registry
-                            .as_ref()
-                            .and_then(|r| r.active_persona().map(|p| p.id.clone()));
-                        let lines: Vec<String> = personas
-                            .iter()
-                            .map(|p| {
-                                let marker = if active_id.as_deref() == Some(&p.id) {
-                                    " ●"
-                                } else {
-                                    ""
-                                };
-                                format!("  {:<20} {}{}", p.name, p.description, marker)
-                            })
-                            .collect();
-                        SlashResult::Display(format!(
-                            "Available personas:\n{}\n\n  /persona <name> to activate, /persona off to deactivate",
-                            lines.join("\n")
-                        ))
-                    }
+                    self.open_persona_selector();
+                    SlashResult::Handled
                 } else {
                     // Activate by name (case-insensitive match)
                     let (personas, _) = crate::plugins::persona_loader::scan_available();
@@ -3634,33 +3703,8 @@ impl App {
                         SlashResult::Display("Plugin registry not initialized.".into())
                     }
                 } else if args.is_empty() {
-                    let (_, tones) = crate::plugins::persona_loader::scan_available();
-                    if tones.is_empty() {
-                        SlashResult::Display(
-                            "No tones installed.\n  Install with: omegon plugin install <git-url>"
-                                .into(),
-                        )
-                    } else {
-                        let active_id = self
-                            .plugin_registry
-                            .as_ref()
-                            .and_then(|r| r.active_tone().map(|t| t.id.clone()));
-                        let lines: Vec<String> = tones
-                            .iter()
-                            .map(|t| {
-                                let marker = if active_id.as_deref() == Some(&t.id) {
-                                    " ●"
-                                } else {
-                                    ""
-                                };
-                                format!("  {:<20} {}{}", t.name, t.description, marker)
-                            })
-                            .collect();
-                        SlashResult::Display(format!(
-                            "Available tones:\n{}\n\n  /tone <name> to activate, /tone off to deactivate",
-                            lines.join("\n")
-                        ))
-                    }
+                    self.open_tone_selector();
+                    SlashResult::Handled
                 } else {
                     let (_, tones) = crate::plugins::persona_loader::scan_available();
                     let target = args.to_lowercase();
@@ -3712,7 +3756,7 @@ impl App {
 
             "context" => {
                 if args.is_empty() {
-                    let _ = tx.try_send(TuiCommand::ContextStatus { respond_to: None });
+                    self.open_context_selector();
                     SlashResult::Handled
                 } else {
                     match canonical_slash_command("context", args) {
