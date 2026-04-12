@@ -332,6 +332,20 @@ fn verify_certificate_identity(cert_pem: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Detect whether the running binary is managed by Homebrew.
+///
+/// Homebrew installs to paths like:
+///   /opt/homebrew/Cellar/omegon/<version>/bin/omegon   (macOS arm64)
+///   /usr/local/Cellar/omegon/<version>/bin/omegon       (macOS x86_64)
+///   /home/linuxbrew/.linuxbrew/Cellar/omegon/...        (Linux)
+///
+/// In-place upgrade of a Cellar-managed binary corrupts brew's tracking —
+/// brew still reports the old version after the binary is replaced.
+pub fn is_homebrew_managed(exe: &Path) -> bool {
+    exe.components()
+        .any(|c| c.as_os_str() == "Cellar" || c.as_os_str() == ".linuxbrew")
+}
+
 /// Download, verify, and replace the current binary, then exec() into it.
 /// Returns the path to the new binary on success (caller does the exec).
 pub async fn download_and_replace(info: &UpdateInfo) -> anyhow::Result<PathBuf> {
@@ -343,6 +357,18 @@ pub async fn download_and_replace(info: &UpdateInfo) -> anyhow::Result<PathBuf> 
     }
 
     let current_exe = std::env::current_exe()?;
+
+    if is_homebrew_managed(&current_exe) {
+        let formula = if info.latest.contains("-rc.") {
+            "styrene-lab/tap/omegon-rc"
+        } else {
+            "omegon"
+        };
+        anyhow::bail!(
+            "This binary is managed by Homebrew — in-place upgrade would corrupt brew's \
+             version tracking.\n\nTo upgrade, run:\n  brew upgrade {formula}"
+        );
+    }
     let tmp_path = current_exe.with_extension("new");
     let archive_path = current_exe.with_extension("tar.gz");
     let signature_path = current_exe.with_extension("tar.gz.sig");
@@ -448,6 +474,26 @@ pub fn exec_restart(binary: &Path, args: &[String]) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn homebrew_managed_detection() {
+        assert!(is_homebrew_managed(Path::new(
+            "/opt/homebrew/Cellar/omegon/0.15.4/bin/omegon"
+        )));
+        assert!(is_homebrew_managed(Path::new(
+            "/usr/local/Cellar/omegon/0.15.4/bin/omegon"
+        )));
+        assert!(is_homebrew_managed(Path::new(
+            "/home/linuxbrew/.linuxbrew/Cellar/omegon/0.15.4/bin/omegon"
+        )));
+        assert!(!is_homebrew_managed(Path::new("/usr/local/bin/omegon")));
+        assert!(!is_homebrew_managed(Path::new(
+            "/Users/cwilson/.local/bin/omegon"
+        )));
+        assert!(!is_homebrew_managed(Path::new(
+            "/tmp/omegon-release-ws/core/target/release/omegon"
+        )));
+    }
 
     #[test]
     fn version_comparison() {
