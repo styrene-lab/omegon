@@ -10,6 +10,7 @@ Map all distribution channels for the omegon binary: install.sh, GitHub Releases
 |---|---|---|---|
 | `install.sh` | Working | SHA-256 mandatory, cosign optional | Automatic |
 | GitHub Releases | Working | cosign keyless + SBOM + attestations | Manual |
+| Homebrew stable / RC tap | Working | points at GitHub Release assets | Automatic formula update |
 | npm (`omegon`) | Working | npm provenance | Automatic |
 | Local build | Working | Developer ID (YubiKey) | `codesign -dvvv` |
 
@@ -53,9 +54,13 @@ The release.yml workflow can notarize macOS binaries if we add the API key as a 
 
 ## Homebrew Tap
 
-Formula at `homebrew/Formula/omegon.rb`. Auto-updated by `.github/workflows/homebrew.yml` on stable releases.
+Stable and RC formulas are updated by `.github/workflows/homebrew.yml` in the separate `styrene-lab/homebrew-tap` repository:
+- stable → `Formula/omegon.rb`
+- rc → `Formula/omegon-rc.rb`
 
-Install: `brew tap styrene-lab/tap && brew install omegon`
+Install:
+- stable: `brew tap styrene-lab/tap && brew install omegon`
+- rc: `brew tap styrene-lab/tap && brew install styrene-lab/tap/omegon-rc`
 
 ## Linux ABI compatibility
 

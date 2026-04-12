@@ -79,16 +79,16 @@ Linux install surfaces must state runtime ABI requirements explicitly. `brew ins
 - Cons: requires publishing omegon to npm; pi-mono must be published first for each release
 
 **Option B: curl installer script**
-- `curl -fsSL https://omegon.dev/install | sh`
-- Script clones repo, runs npm install + npm link
-- Pros: works without publishing to npm, full control
-- Cons: still a git clone under the hood, needs git+node prereqs
+- `curl -fsSL https://omegon.styrene.io/install.sh | sh`
+- Installs the packaged Omegon binary and standard entrypoints
+- Pros: fastest path, no git clone, no Node/npm runtime required
+- Cons: shell installer policy may be disallowed in some environments
 
 **Option C: Homebrew tap**
-- `brew install cwilson613/tap/omegon`
-- Formula downloads tarball, runs build
-- Pros: familiar macOS install path
-- Cons: macOS only, tap maintenance overhead
+- `brew tap styrene-lab/tap && brew install omegon`
+- RC lane: `brew install styrene-lab/tap/omegon-rc`
+- Pros: familiar macOS install path, separate stable vs RC lanes
+- Cons: Homebrew on Linux does not solve host glibc/runtime ABI mismatches
 
 **Option D: npm install -g + postinstall fetch**
 - Publish omegon to npm without vendor/
@@ -103,9 +103,9 @@ Linux install surfaces must state runtime ABI requirements explicitly. `brew ins
 Omegon is the single installed product boundary. `vendor/pi-mono` is a contributor/dev source of implementation, not a second installed product.
 
 The authoritative update path therefore must:
-- mutate the package/runtime surface (`git pull` + submodule sync + build + dependency refresh + `npm link --force` in dev mode, or `npm install -g omegon@latest` in installed mode)
-- verify the active `omegon` executable still resolves to Omegon
-- stop at a deliberate restart handoff that tells the operator to relaunch `omegon`
+- mutate the installed runtime surface (`/update install`, `brew upgrade omegon`, `brew upgrade styrene-lab/tap/omegon-rc`, or reinstall via `install.sh` depending on channel)
+- verify the active `omegon` / `om` executable still resolves to Omegon
+- stop at a deliberate restart handoff that tells the operator to relaunch `om` or `omegon`
 
 `/refresh` is intentionally narrower: it only clears transient caches and reloads extensions. It is not equivalent to `/update` after package/runtime mutation.
 

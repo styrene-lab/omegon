@@ -92,14 +92,14 @@ omegon --slim
 
 ```sh
 export ANTHROPIC_API_KEY=sk-ant-...
-omegon
+om
 ```
 
 ### Local path
 
 ```sh
 ollama pull qwen3:32b
-omegon
+om
 ```
 
 If you want the shortest happy path instead of a full tour, start here:
