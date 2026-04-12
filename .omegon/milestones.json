@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 79,
+    "rc_count": 80,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -481,6 +481,7 @@
       "feat(docs-copy): Update long-lived docs that currently frame the browser experience around `/dash` or the embedded web dashboard. Rewrite them to present Auspex as the primary browser surface, while keeping any necessary historical/local compatibility notes. Focus on docs/embedded-web-dashboard.md, docs/display-tool-artifacts.md, docs/native-plan-mode.md, docs/conversation-rendering-engine.md, and other directly relevant docs that mention `/dash` as the primary browser path.",
       "feat(event-loop-status): Implement the basic daemon event worker/dispatcher loop and operator-visible/runtime-visible status surfaces: process queued daemon events in a minimal loop, surface queue depth/transport warnings in startup or status output, and add tests for durable queue behavior and degraded transport reporting.",
       "feat(glyph-ui): Rework the inference panel glyph language in core/crates/omegon/src/tui/instruments.rs to use sane, legible symbols for context/activity, update or add focused tests/snapshots that prove the new behavior, and validate the Rust test targets affected by the change. Do not cut the RC inside the child; leave the tree ready for parent verification and release.",
+      "feat(homebrew): install om alias alongside omegon",
       "feat(identity): add descriptive runtime identity presets",
       "feat(install): make install.sh canonical with RC/nightly channels",
       "feat(ipc): add canonical omegon instance descriptor",
@@ -503,6 +504,7 @@
       "feat(runtime): add daemon event-ingress skeleton",
       "feat(runtime): add interactive turn supervisor scaffold",
       "feat(runtime): add rc update lane and slim launch aliases",
+      "feat(runtime): make slim mode preserve memory and runtime profile switching",
       "feat(runtime): run ! commands directly and poll update severity",
       "feat(runtime): split rc update channel and add slim/full warp controls",
       "feat(runtime): surface child runtime metadata in daemon status",
@@ -682,6 +684,7 @@
       "fix(tui): clip inference wave rendering to its panel",
       "fix(tui): clip tool rows to panel width",
       "fix(tui): compact engine usage telemetry",
+      "fix(tui): default slim ui to terminal copy mode",
       "fix(tui): execute direct context request slash path",
       "fix(tui): extend tools-panel recent fade window",
       "fix(tui): harden cleave panel against border glyph leakage",
@@ -714,6 +717,7 @@
       "fix(tui): restore interactive slash selectors",
       "fix(tui): restore model selector modal for bare slash command",
       "fix(tui): restyle system notifications as conversation cards",
+      "fix(tui): route mouse wheel by hovered pane",
       "fix(tui): separate defs and history context colors",
       "fix(tui): shift tool history band to ice blue",
       "fix(tui): show provider telemetry in split footer",
@@ -733,6 +737,7 @@
       "fix(tui): truncate footer engine rows by display width",
       "fix(tui): truncate tools panel labels by display width",
       "fix(tui): unify tool result block backgrounds",
+      "fix(tui): use display width for markdown table layout",
       "fix(tui,web): isolate focus mode and expose auspex startup version handoff",
       "fix(tutorial): restore Tutorial::with_context() as gate-free constructor",
       "fix(ui): clarify provider labels and codex limit telemetry",
@@ -785,7 +790,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.85",
-    "last_rc": "2026-04-12T19:15:26Z"
+    "rc_version": "0.15.10-rc.86",
+    "last_rc": "2026-04-12T21:28:51Z"
   }
 }
