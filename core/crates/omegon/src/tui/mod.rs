@@ -3947,11 +3947,20 @@ impl App {
             }
 
             "memory" => SlashResult::Display(format!(
-                "Memory:\n  Facts:          {}\n  Injected:       {}\n  Working memory: {}\n  ~{} tokens",
+                "Memory Overview\n\nFacts\n  Total:            {}\n  Injected:         {}\n  Working set:      {}\n  Estimate:         ~{} tokens\n\nHarness\n  Project facts:    {}\n  Persona facts:    {}\n  Episodes:         {}\n  Active persona:   {}",
                 self.footer_data.total_facts,
                 self.footer_data.injected_facts,
                 self.footer_data.working_memory,
                 self.footer_data.memory_tokens_est,
+                self.footer_data.harness.memory.project_facts,
+                self.footer_data.harness.memory.persona_facts,
+                self.footer_data.harness.memory.episodes,
+                self.footer_data
+                    .harness
+                    .memory
+                    .active_persona_mind
+                    .clone()
+                    .unwrap_or_else(|| "none".to_string()),
             )),
 
             "auth" => {

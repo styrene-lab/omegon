@@ -2039,15 +2039,21 @@ fn slash_logout_without_provider_shows_provider_usage() {
 #[test]
 fn slash_memory_returns_stats() {
     let mut app = test_app();
+    app.footer_data.total_facts = 18;
+    app.footer_data.injected_facts = 3;
+    app.footer_data.working_memory = 4;
+    app.footer_data.memory_tokens_est = 1200;
+    app.footer_data.harness.memory.project_facts = 11;
+    app.footer_data.harness.memory.persona_facts = 2;
+    app.footer_data.harness.memory.episodes = 5;
+    app.footer_data.harness.memory.active_persona_mind = Some("Engineer".into());
     let tx = test_tx();
     let result = app.handle_slash_command("/memory", &tx);
     if let SlashResult::Display(text) = result {
-        assert!(
-            text.to_lowercase().contains("memory")
-                || text.contains("facts")
-                || text.contains("Facts"),
-            "should show memory info: {text}"
-        );
+        assert!(text.contains("Memory Overview"), "should show titled memory view: {text}");
+        assert!(text.contains("Injected"), "should show injected facts: {text}");
+        assert!(text.contains("Project facts"), "should show harness memory breakdown: {text}");
+        assert!(text.contains("Engineer"), "should show active persona memory: {text}");
     } else {
         panic!(
             "expected Display result, got {:?}",

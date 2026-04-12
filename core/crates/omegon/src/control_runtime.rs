@@ -1569,21 +1569,47 @@ pub async fn session_stats_view_response(
         .as_ref()
         .and_then(|h| h.lock().ok().map(|status| status.clone()))
         .unwrap_or_else(crate::status::HarnessStatus::assemble);
+    let usage_pct = if settings.context_window > 0 {
+        (est as f64 / settings.context_window as f64) * 100.0
+    } else {
+        0.0
+    };
+    let persona = live_harness
+        .active_persona
+        .as_ref()
+        .map(|persona| format!("{} {}", persona.badge, persona.name))
+        .unwrap_or_else(|| "none".to_string());
+    let tone = live_harness
+        .active_tone
+        .as_ref()
+        .map(|tone| tone.name.clone())
+        .unwrap_or_else(|| "none".to_string());
+    let provider_summary = if live_harness.providers.is_empty() {
+        "none detected".to_string()
+    } else {
+        let authenticated = live_harness
+            .providers
+            .iter()
+            .filter(|provider| provider.authenticated)
+            .count();
+        format!("{authenticated}/{} authenticated", live_harness.providers.len())
+    };
+
     SlashCommandResponse {
         accepted: true,
         output: Some(format!(
-            "Session:\n  Turns:       {}\n  Tool calls:  {}\n\nContext:\n  Usage:       {:.0}%\n  Window:      {} tokens\n  Model:       {}\n  Thinking:    {} {}\n\nFeatures:\n  Memory:      {}\n  Cleave:      {}",
+            "Session Overview\n\nActivity\n  Turns:            {}\n  Tool calls:       {}\n  Model:            {}\n  Thinking:         {} {}\n\nContext\n  Usage:            {:.0}%\n  Window:           {} tokens\n\nHarness\n  Persona:          {}\n  Tone:             {}\n  Providers:        {}\n  MCP servers:      {}\n\nCapabilities\n  Memory:           {}\n  Cleave:           {}",
             runtime_state.conversation.turn_count(),
             0,
-            if settings.context_window > 0 {
-                (est as f64 / settings.context_window as f64) * 100.0
-            } else {
-                0.0
-            },
-            settings.context_window,
             settings.model_short(),
             settings.thinking.icon(),
             settings.thinking.as_str(),
+            usage_pct,
+            settings.context_window,
+            persona,
+            tone,
+            provider_summary,
+            live_harness.mcp_servers.len(),
             if live_harness.memory_available {
                 "available"
             } else {
@@ -2536,7 +2562,30 @@ pub async fn delegate_status_response(
 }
 
 pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
-    let mut lines = vec!["Authentication Status:".to_string()];
+    let authenticated = status
+        .providers
+        .iter()
+        .filter(|provider| matches!(provider.status, auth::ProviderAuthStatus::Authenticated))
+        .count();
+    let expired = status
+        .providers
+        .iter()
+        .filter(|provider| matches!(provider.status, auth::ProviderAuthStatus::Expired))
+        .count();
+    let mut lines = vec![
+        "Authentication Overview".to_string(),
+        String::new(),
+        format!("Providers\n  Authenticated:   {authenticated}/{}", status.providers.len()),
+        format!("  Expired:         {expired}"),
+    ];
+
+    if status.providers.is_empty() {
+        lines.push("  Status:          no providers detected".to_string());
+        return lines.join("\n");
+    }
+
+    lines.push(String::new());
+    lines.push("Provider Status".to_string());
 
     for provider in &status.providers {
         let state = match provider.status {
@@ -2555,7 +2604,7 @@ pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
                 .map(|d| format!("✗ error ({d})"))
                 .unwrap_or_else(|| "✗ error".to_string()),
         };
-        lines.push(format!("  {}: {}", provider.name, state));
+        lines.push(format!("  {:<18} {}", provider.name, state));
     }
 
     lines.join("\n")
