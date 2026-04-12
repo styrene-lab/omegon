@@ -1989,17 +1989,32 @@ fn build_edit_diff_blocks(name: &str, args: &str) -> Option<Vec<EditDiffBlock>> 
     }
 }
 
-/// Detect markdown table lines: `| cell | cell |` or `|---|---|`
+/// Detect markdown table lines: `| cell | cell |` or `| cell | cell`
+/// (with or without trailing `|`).
+///
+/// The trailing pipe is optional in the CommonMark / GFM spec and many
+/// LLMs omit it on body rows even when the header row has it. The
+/// previous implementation required `ends_with('|')`, which caused body
+/// rows to fall through to the non-table rendering path and disappear
+/// from the operator's view (the "header renders, body is gone" bug
+/// from the screenshot).
+///
+/// The relaxed check: starts with `|`, is longer than 2 chars, and
+/// contains at least one more `|` after the leading one (so a line
+/// like `| single column no pipe` still doesn't match — but that's
+/// not a valid table row in any reasonable interpretation).
 fn is_table_line(line: &str) -> bool {
     let trimmed = line.trim();
-    trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.len() > 2
+    trimmed.starts_with('|') && trimmed.len() > 2 && trimmed[1..].contains('|')
 }
 
-/// Detect table separator: `|---|---|` or `| --- | --- |`
+/// Detect table separator: `|---|---|` or `| --- | --- |` or `|---|---`
+/// (trailing pipe optional, same rationale as `is_table_line`).
 fn is_table_separator(line: &str) -> bool {
     let trimmed = line.trim();
     trimmed.starts_with('|')
-        && trimmed.ends_with('|')
+        && trimmed.len() > 2
+        && trimmed[1..].contains('|')
         && trimmed
             .chars()
             .all(|c| c == '|' || c == '-' || c == ':' || c == ' ')
@@ -3986,6 +4001,70 @@ mod tests {
         assert!(
             sep_text.contains("┼"),
             "separator should have cross: {sep_text}"
+        );
+    }
+
+    #[test]
+    fn table_line_detection_accepts_missing_trailing_pipe() {
+        // Many LLMs omit the trailing `|` on body rows even when the
+        // header row has it. The previous `ends_with('|')` requirement
+        // caused these body rows to fall through to the non-table
+        // rendering path and disappear. This test pins the relaxed
+        // definition.
+        assert!(is_table_line("| a | b |"));       // full pipes
+        assert!(is_table_line("| a | b"));          // no trailing pipe
+        assert!(is_table_line("| a | b |   "));     // trailing whitespace
+        assert!(is_table_line("| a | b   "));       // trailing whitespace, no pipe
+        assert!(!is_table_line("| single"));        // only one pipe (not a table row)
+        assert!(!is_table_line("not a table row")); // no leading pipe
+        assert!(!is_table_line("||"));              // too short
+        assert!(!is_table_line("|"));               // too short
+
+        // Separator rows can also miss the trailing pipe
+        assert!(is_table_separator("|---|---|"));    // full
+        assert!(is_table_separator("|---|---"));     // no trailing pipe
+        assert!(is_table_separator("| --- | ---")); // spaced, no trailing pipe
+    }
+
+    #[test]
+    fn assistant_table_renders_body_rows_without_trailing_pipes() {
+        // The headline failure mode this test pins: the assistant
+        // writes a markdown table where the header and separator have
+        // trailing `|` but the body rows don't. Previous code showed
+        // the header + separator but the body rows were invisible.
+        let text = "Results:\n\n| Setting | Endpoint | Filter |\n|---------|----------|--------|\n| stable | /releases | prerelease=false\n| nightly | /releases | prerelease=true";
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::AssistantText {
+                text: text.into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 16);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+
+        // Header cells should render
+        for cell in ["Setting", "Endpoint", "Filter"] {
+            assert!(text.contains(cell), "header should contain {cell:?}: {text}");
+        }
+        // Body cells MUST render — this is the bug being fixed
+        assert!(
+            text.contains("stable"),
+            "first body row should render even without trailing pipe: {text}"
+        );
+        assert!(
+            text.contains("nightly"),
+            "second body row should render even without trailing pipe: {text}"
+        );
+        assert!(
+            text.contains("prerelease=false"),
+            "body cell content should be visible: {text}"
+        );
+        assert!(
+            text.contains("prerelease=true"),
+            "body cell content should be visible: {text}"
         );
     }
 
