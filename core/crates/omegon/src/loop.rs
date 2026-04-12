@@ -303,13 +303,23 @@ fn should_inject_execution_pressure(
     conversation: &ConversationState,
     tool_calls: &[ToolCall],
 ) -> bool {
-    config.enforce_first_turn_execution_bias
-        && turn >= 3
-        && !tool_calls.is_empty()
-        && conversation.intent.files_modified.is_empty()
-        && !conversation.intent.files_read.is_empty()
-        && tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name))
-        && tool_calls.iter().any(|call| is_broad_repo_inspection_tool(&call.name))
+    if !config.enforce_first_turn_execution_bias
+        || tool_calls.is_empty()
+        || !conversation.intent.files_modified.is_empty()
+        || conversation.intent.files_read.is_empty()
+        || !tool_calls.iter().all(|call| is_repo_inspection_tool(&call.name))
+    {
+        return false;
+    }
+
+    let has_broad_repo_inspection = tool_calls
+        .iter()
+        .any(|call| is_broad_repo_inspection_tool(&call.name));
+    let only_targeted_reads = tool_calls
+        .iter()
+        .all(|call| is_targeted_repo_inspection_tool(&call.name));
+
+    (turn >= 3 && has_broad_repo_inspection) || (turn >= 5 && only_targeted_reads)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3061,7 +3071,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_pressure_not_detected_for_targeted_read_only_batches() {
+    fn execution_pressure_not_detected_for_targeted_read_only_batches_too_early() {
         let config = LoopConfig {
             enforce_first_turn_execution_bias: true,
             ..LoopConfig::default()
@@ -3077,6 +3087,25 @@ mod tests {
             arguments: serde_json::json!({"path": "core/src/context.rs"}),
         }];
         assert!(!should_inject_execution_pressure(4, &config, &conversation, &tool_calls));
+    }
+
+    #[test]
+    fn execution_pressure_detected_for_repeated_targeted_read_only_batches_after_local_hypothesis_stalls() {
+        let config = LoopConfig {
+            enforce_first_turn_execution_bias: true,
+            ..LoopConfig::default()
+        };
+        let mut conversation = ConversationState::new();
+        conversation
+            .intent
+            .files_read
+            .insert(std::path::PathBuf::from("core/src/context.rs"));
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "core/src/context.rs"}),
+        }];
+        assert!(should_inject_execution_pressure(5, &config, &conversation, &tool_calls));
     }
 
     #[test]
