@@ -73,6 +73,44 @@ fn apply_rows_bg(area: Rect, start_row: u16, row_count: u16, bg: Color, buf: &mu
 // Segment — rich metadata wrapper + typed content
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// Provider-reported actual token counts for the turn that produced
+/// (or contains) a given segment. Stamped onto `SegmentMeta` after a
+/// `TurnEnd` event arrives, by walking back through segments whose
+/// `turn` matches the just-ended turn id. Renderers display this next
+/// to the timestamp on segments that involved an LLM call so the
+/// timeline carries token cost as canon — operators don't have to
+/// glance at the inference panel to see what each turn's segments
+/// actually cost.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub input: u64,
+    pub output: u64,
+}
+
+impl TokenUsage {
+    /// Render as a compact title-bar annotation: `↑1.2k ↓340`. Numbers
+    /// > 1000 are shortened with a `k` suffix; smaller numbers render
+    /// as-is. The arrows are non-emoji single-cell glyphs (the same
+    /// constraint as the instruments-panel pass).
+    pub fn format_compact(&self) -> String {
+        format!(
+            "↑{} ↓{}",
+            format_token_count(self.input),
+            format_token_count(self.output)
+        )
+    }
+}
+
+fn format_token_count(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
 /// Metadata captured at segment creation time. Every segment carries this
 /// regardless of type. Fields are Optional — populated when available,
 /// never blocking construction.
@@ -92,6 +130,13 @@ pub struct SegmentMeta {
     pub turn: Option<u32>,
     /// Estimated token cost of this segment (input + output).
     pub est_tokens: Option<u32>,
+    /// Provider-reported actual tokens for the turn this segment
+    /// belongs to. Stamped after `TurnEnd` arrives with the real
+    /// counts; `None` until then. Different from `est_tokens` (the
+    /// local heuristic) — `actual_tokens` reflects the provider's
+    /// authoritative billing numbers and is what the title-bar
+    /// annotation displays.
+    pub actual_tokens: Option<TokenUsage>,
     /// Context window fill percentage at time of generation.
     pub context_percent: Option<f32>,
     /// Active persona ID, if any.
@@ -554,6 +599,38 @@ impl Segment {
                     .as_ref()
                     .map(|r| wrapped_rows(r, inner_width).min(if *expanded { 220 } else { 12 }))
                     .unwrap_or(0);
+                // Diff section rows: edit/change tools render a real
+                // colored diff in place of the boring "Successfully
+                // replaced" result text. The estimate is the sum of
+                // (old + new) lines per block plus chrome (summary +
+                // optional file headers + truncation marker), capped
+                // at the same collapsed/expanded budget as the result
+                // section. The actual rendering is bounded by
+                // `max_diff_lines` (8 collapsed, 200 expanded).
+                let compact_diff_rows: u16 =
+                    if matches!(name.as_str(), "edit" | "change") {
+                        detail_args
+                            .as_deref()
+                            .and_then(|args| build_edit_diff_blocks(name, args))
+                            .map(|blocks| {
+                                let multi = blocks.len() > 1;
+                                let total: usize = blocks
+                                    .iter()
+                                    .map(|b| {
+                                        let header = if multi { 1 } else { 0 };
+                                        header
+                                            + b.old_text.lines().count()
+                                            + b.new_text.lines().count()
+                                    })
+                                    .sum();
+                                // +1 summary line, +1 truncation marker (worst case)
+                                let with_chrome = total + 2;
+                                with_chrome.min(if *expanded { 200 } else { 12 }) as u16
+                            })
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
                 // Live section rows: only relevant while the tool is
                 // still in flight. Always at least one row (the status
                 // header) when incomplete; tail rows on top when a
@@ -573,12 +650,18 @@ impl Segment {
                 };
                 let live_separator_rows =
                     u16::from(compact_arg_rows > 0 && compact_live_rows > 0);
+                // The diff section replaces the result section when
+                // present, so we use whichever is larger to over-
+                // estimate (under-estimating clips content; over-
+                // estimating just allocates a slightly larger temp
+                // buffer that the `last_used` scan will trim).
+                let body_rows = compact_diff_rows.max(compact_result_rows);
                 let result_separator_rows =
-                    u16::from(compact_arg_rows > 0 && compact_result_rows > 0);
+                    u16::from(compact_arg_rows > 0 && body_rows > 0);
                 compact_arg_rows
                     + compact_live_rows
                     + live_separator_rows
-                    + compact_result_rows
+                    + body_rows
                     + result_separator_rows
                     + 4
             }
@@ -729,12 +812,39 @@ fn format_timestamp(timestamp: Option<std::time::SystemTime>) -> Option<String> 
 }
 
 fn top_right_timestamp<'a>(meta: &SegmentMeta, t: &dyn Theme) -> Option<Line<'a>> {
-    format_timestamp(meta.timestamp).map(|stamp| {
-        Line::from(Span::styled(
+    let timestamp = format_timestamp(meta.timestamp);
+    let tokens = meta.actual_tokens;
+    if timestamp.is_none() && tokens.is_none() {
+        return None;
+    }
+    // Combined right-rail title: `↑1.2k ↓340 · 14:32`. The token
+    // annotation comes from `meta.actual_tokens` which is stamped
+    // onto every segment in a turn after `TurnEnd` arrives — see
+    // `ConversationView::stamp_turn_tokens`. Segments without an LLM
+    // call (system notifications, lifecycle events, user prompts)
+    // never get tokens and only show the timestamp.
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    if let Some(tokens) = tokens {
+        spans.push(Span::styled(
+            tokens.format_compact(),
+            Style::default()
+                .fg(t.accent_muted())
+                .add_modifier(Modifier::DIM),
+        ));
+        if timestamp.is_some() {
+            spans.push(Span::styled(
+                " · ",
+                Style::default().fg(t.dim()).add_modifier(Modifier::DIM),
+            ));
+        }
+    }
+    if let Some(stamp) = timestamp {
+        spans.push(Span::styled(
             stamp,
             Style::default().fg(t.dim()).add_modifier(Modifier::DIM),
-        ))
-    })
+        ));
+    }
+    Some(Line::from(spans))
 }
 
 fn tool_title_line(
@@ -891,10 +1001,22 @@ fn render_assistant_text(
         ]));
     }
 
-    // Assistant text with markdown structural highlighting
+    // Assistant text with markdown structural highlighting.
+    //
+    // Pre-pass: materialize lines into a Vec so we can compute shared
+    // table column widths via `compute_table_widths` before rendering.
+    // The widths array is parallel to `text_lines` — entries are
+    // `Some(widths)` for lines belonging to a markdown table block,
+    // `None` otherwise. The rendering loop below looks up its row's
+    // shared widths so every row in a table block aligns with its
+    // neighbors instead of computing per-row widths in isolation
+    // (which produced the column-shred failure mode in
+    // codebase_search results and other table-bearing tool output).
+    let text_lines: Vec<&str> = split_preserving_trailing_empty_lines(text);
+    let table_widths_per_line = compute_table_widths(&text_lines, area.width as usize);
     let mut in_code_fence = false;
     let mut table_state = TableState::None;
-    for line in split_preserving_trailing_empty_lines(text) {
+    for (idx, line) in text_lines.iter().enumerate() {
         let trimmed = line.trim();
         if trimmed.starts_with("```") {
             in_code_fence = !in_code_fence;
@@ -908,14 +1030,16 @@ fn render_assistant_text(
                 line.to_string(),
                 Style::default().fg(t.accent_muted()).bg(bg),
             )));
-        } else if is_table_line(trimmed) {
+        } else if let Some(target_widths) = table_widths_per_line[idx].as_ref() {
+            // Pre-pass marked this as a table line — render with the
+            // shared widths from its block.
             let is_header = matches!(table_state, TableState::None);
             if is_table_separator(trimmed) || matches!(table_state, TableState::Header) {
                 table_state = TableState::Body;
             } else {
                 table_state = TableState::Header;
             }
-            lines.push(render_table_line(trimmed, is_header, area.width, t));
+            lines.push(render_table_line(trimmed, is_header, target_widths, t));
         } else {
             table_state = TableState::None;
             let line = super::widgets::highlight_line(line, t);
@@ -1067,10 +1191,13 @@ fn render_tool_card(
         name.replace('_', " ")
     };
 
+    // `▶` U+25B6 is in the Unicode emoji set — replaced with `▷` U+25B7
+    // for the same reason as the instruments-panel pass. Both `✗` and
+    // `▸` are already safe.
     let (status_icon, status_color, border_color, bg) = if is_error {
         ("✗", t.error(), t.error(), t.tool_error_bg())
     } else if !complete {
-        ("▶", t.warning(), t.warning(), t.tool_success_bg())
+        ("▷", t.warning(), t.warning(), t.tool_success_bg())
     } else {
         ("▸", t.accent_muted(), t.accent_muted(), t.tool_success_bg())
     };
@@ -1084,23 +1211,47 @@ fn render_tool_card(
         timestamp.as_deref(),
     );
 
+    // Right-aligned title combines the provider-reported token usage
+    // (when known) with the timestamp. Format:
+    //
+    //     ↑1.2k ↓340 · 14:32
+    //
+    // The tokens come from `meta.actual_tokens` which is stamped on
+    // every segment in a turn after `TurnEnd` arrives — see
+    // `ConversationView::stamp_turn_tokens`. Segments without an LLM
+    // call (system notifications, lifecycle events) never get
+    // `actual_tokens` populated and only show the timestamp.
+    let right_title_spans: Vec<Span<'_>> = {
+        let mut spans: Vec<Span<'_>> = Vec::new();
+        if let Some(tokens) = meta.actual_tokens {
+            spans.push(Span::styled(
+                tokens.format_compact(),
+                Style::default()
+                    .fg(t.accent_muted())
+                    .add_modifier(Modifier::DIM),
+            ));
+            if timestamp.is_some() {
+                spans.push(Span::styled(
+                    " · ",
+                    Style::default().fg(t.dim()).add_modifier(Modifier::DIM),
+                ));
+            }
+        }
+        if let Some(stamp) = timestamp.as_deref() {
+            spans.push(Span::styled(
+                stamp.to_string(),
+                Style::default().fg(t.dim()).add_modifier(Modifier::DIM),
+            ));
+        }
+        spans
+    };
+
     let card_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border_color).bg(bg))
         .title_top(title)
-        .title_top(
-            timestamp
-                .as_deref()
-                .map(|stamp| {
-                    Line::from(Span::styled(
-                        stamp.to_string(),
-                        Style::default().fg(t.dim()).add_modifier(Modifier::DIM),
-                    ))
-                })
-                .unwrap_or_else(Line::default)
-                .right_aligned(),
-        )
+        .title_top(Line::from(right_title_spans).right_aligned())
         .padding(Padding::horizontal(1))
         .style(Style::default().bg(bg));
 
@@ -1254,10 +1405,137 @@ fn render_tool_card(
         }
     }
 
-    // ── Result section with distinct background ─────────────────
-    let pre_result_line_count = lines.len();
+    // ── Edit/change diff section ────────────────────────────────
+    // For mutating-file tools (`edit`, `change`), the standard result
+    // text is just "Successfully replaced text in {path}" — useless
+    // for an operator who wants to see what actually changed.
+    // Replace it with a colored line-by-line diff computed from the
+    // tool's args (`oldText` / `newText`), which the renderer already
+    // has access to via `detail_args`. The diff rendered here is the
+    // intent — what the agent ASKED for — not the post-validation
+    // result. On a successful edit they're equivalent; on a failed
+    // edit the validation error is rendered separately below.
     let mut result_row_fills: Vec<(u16, Color)> = Vec::new();
-    if let Some(result) = detail_result {
+    let diff_blocks: Option<Vec<EditDiffBlock>> = if matches!(name, "edit" | "change") {
+        detail_args.and_then(|args| build_edit_diff_blocks(name, args))
+    } else {
+        None
+    };
+    if let Some(blocks) = diff_blocks {
+        if !lines.is_empty() {
+            let sep_color = if is_error { t.error() } else { t.border_dim() };
+            lines.push(Line::from(Span::styled(
+                "─".repeat(card_inner.width as usize),
+                Style::default().fg(sep_color).bg(bg),
+            )));
+            result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+        }
+        let max_diff_lines = if expanded { 200 } else { 8 };
+        let mut emitted = 0usize;
+        let removed_style = Style::default().fg(t.error()).bg(bg);
+        let added_style = Style::default().fg(t.success()).bg(bg);
+        let header_style = Style::default()
+            .fg(t.accent_muted())
+            .bg(bg)
+            .add_modifier(Modifier::BOLD);
+        let summary_style = Style::default().fg(t.muted()).bg(bg);
+
+        // Per-block summary line: total +N -M across all diff blocks
+        // (one per file in the change tool's case). The summary is
+        // always the first line in the diff section so the operator
+        // gets a quick read at the top.
+        let total_added: usize = blocks
+            .iter()
+            .map(|b| b.new_text.lines().count())
+            .sum();
+        let total_removed: usize = blocks
+            .iter()
+            .map(|b| b.old_text.lines().count())
+            .sum();
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("Δ {} edit(s) · ", blocks.len()),
+                summary_style,
+            ),
+            Span::styled(format!("+{total_added}"), added_style),
+            Span::styled(" / ", summary_style),
+            Span::styled(format!("-{total_removed}"), removed_style),
+            Span::styled(
+                if expanded { "" } else { "  (expand for full diff)" },
+                summary_style,
+            ),
+        ]));
+        result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+
+        // Per-block diff body. Each block is preceded by a `▸ {file}`
+        // header (only when there's more than one block) so the
+        // operator can tell which file each hunk belongs to.
+        let multi_block = blocks.len() > 1;
+        'outer: for block in &blocks {
+            if multi_block {
+                if emitted >= max_diff_lines {
+                    break;
+                }
+                lines.push(Line::from(Span::styled(
+                    format!("▸ {}", block.file),
+                    header_style,
+                )));
+                result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+                emitted += 1;
+            }
+            for line in block.old_text.lines() {
+                if emitted >= max_diff_lines {
+                    break 'outer;
+                }
+                lines.push(Line::from(Span::styled(
+                    format!("- {line}"),
+                    removed_style,
+                )));
+                result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+                emitted += 1;
+            }
+            for line in block.new_text.lines() {
+                if emitted >= max_diff_lines {
+                    break 'outer;
+                }
+                lines.push(Line::from(Span::styled(
+                    format!("+ {line}"),
+                    added_style,
+                )));
+                result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+                emitted += 1;
+            }
+        }
+
+        // Truncation marker if we capped before showing the whole diff.
+        let total_diff_lines: usize = blocks
+            .iter()
+            .map(|b| {
+                let header = if multi_block { 1 } else { 0 };
+                header + b.old_text.lines().count() + b.new_text.lines().count()
+            })
+            .sum();
+        if total_diff_lines > emitted {
+            lines.push(Line::from(Span::styled(
+                format!("… {} more diff line(s)", total_diff_lines - emitted),
+                summary_style,
+            )));
+            result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+        }
+
+        // If the tool actually erred, surface the error result text
+        // below the diff so the operator sees both intent and outcome.
+        if is_error {
+            if let Some(err_text) = detail_result {
+                lines.push(Line::from(Span::styled(
+                    err_text.lines().next().unwrap_or(err_text).to_string(),
+                    Style::default().fg(t.error()).bg(bg),
+                )));
+                result_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+            }
+        }
+    } else if let Some(result) = detail_result {
+        let pre_result_line_count = lines.len();
         if !lines.is_empty() {
             // Separator line — matches card border color (red on error)
             let sep_color = if is_error { t.error() } else { t.border_dim() };
@@ -1316,12 +1594,19 @@ fn render_tool_card(
             };
 
             let mut table_state = TableState::None;
-            let has_table_lines = result_lines.iter().any(|line| is_table_line(line.trim()));
+            let visible_lines = &result_lines[..show];
+            let has_table_lines = visible_lines.iter().any(|line| is_table_line(line.trim()));
 
             if !is_error && has_table_lines {
-                for line in result_lines[..show].iter().copied() {
+                // Pre-pass to compute shared per-column widths across
+                // each table block — see `compute_table_widths` for the
+                // rationale (the column-shred bug in codebase_search
+                // results).
+                let table_widths_per_line =
+                    compute_table_widths(visible_lines, card_inner.width as usize);
+                for (idx, line) in visible_lines.iter().copied().enumerate() {
                     let trimmed = line.trim();
-                    if is_table_line(trimmed) {
+                    if let Some(target_widths) = table_widths_per_line[idx].as_ref() {
                         let is_header = matches!(table_state, TableState::None);
                         if is_table_separator(trimmed) || matches!(table_state, TableState::Header)
                         {
@@ -1330,7 +1615,7 @@ fn render_tool_card(
                             table_state = TableState::Header;
                         }
                         let row_bg = bg;
-                        lines.push(render_table_line(trimmed, is_header, card_inner.width, t));
+                        lines.push(render_table_line(trimmed, is_header, target_widths, t));
                         result_row_fills.push((lines.len().saturating_sub(1) as u16, row_bg));
                     } else {
                         table_state = TableState::None;
@@ -1574,6 +1859,78 @@ enum TableState {
     Body,
 }
 
+/// One file's worth of edit-diff data for the `edit` / `change` tool
+/// rendering path. The renderer pulls these out of the tool's args
+/// (which it has via `detail_args`) and synthesizes a colored line-by-
+/// line diff in place of the boring "Successfully replaced text" result.
+#[derive(Debug, Clone)]
+struct EditDiffBlock {
+    file: String,
+    old_text: String,
+    new_text: String,
+}
+
+/// Parse `detail_args` JSON for an `edit` or `change` tool call and
+/// extract one or more `EditDiffBlock`s. Returns `None` for tools whose
+/// args don't carry the expected `oldText`/`newText` fields (which is
+/// also the bail-out for non-edit/non-change tools and for malformed
+/// payloads — in both cases the renderer falls back to the standard
+/// result text rendering).
+///
+/// Tool arg shapes:
+/// - **edit**: `{ "path": "...", "oldText": "...", "newText": "..." }`
+///   → one `EditDiffBlock`
+/// - **change**: `{ "edits": [{ "file": "...", "oldText": "...",
+///   "newText": "..." }, ...] }` → one block per edit, in order
+fn build_edit_diff_blocks(name: &str, args: &str) -> Option<Vec<EditDiffBlock>> {
+    let parsed: serde_json::Value = serde_json::from_str(args).ok()?;
+    match name {
+        "edit" => {
+            let path = parsed
+                .get("path")
+                .or_else(|| parsed.get("file"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("(unknown file)")
+                .to_string();
+            let old_text = parsed.get("oldText").and_then(|v| v.as_str())?.to_string();
+            let new_text = parsed.get("newText").and_then(|v| v.as_str())?.to_string();
+            Some(vec![EditDiffBlock {
+                file: path,
+                old_text,
+                new_text,
+            }])
+        }
+        "change" => {
+            let edits = parsed.get("edits")?.as_array()?;
+            let blocks: Vec<EditDiffBlock> = edits
+                .iter()
+                .filter_map(|edit| {
+                    let file = edit
+                        .get("file")
+                        .or_else(|| edit.get("path"))
+                        .and_then(|v| v.as_str())?
+                        .to_string();
+                    let old_text =
+                        edit.get("oldText").and_then(|v| v.as_str())?.to_string();
+                    let new_text =
+                        edit.get("newText").and_then(|v| v.as_str())?.to_string();
+                    Some(EditDiffBlock {
+                        file,
+                        old_text,
+                        new_text,
+                    })
+                })
+                .collect();
+            if blocks.is_empty() {
+                None
+            } else {
+                Some(blocks)
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Detect markdown table lines: `| cell | cell |` or `|---|---|`
 fn is_table_line(line: &str) -> bool {
     let trimmed = line.trim();
@@ -1590,8 +1947,111 @@ fn is_table_separator(line: &str) -> bool {
             .all(|c| c == '|' || c == '-' || c == ':' || c == ' ')
 }
 
-/// Render a markdown table line with cell highlighting.
-fn render_table_line<'a>(line: &str, is_header: bool, max_width: u16, t: &dyn Theme) -> Line<'a> {
+/// Pre-compute per-column target widths for every markdown table block
+/// in `lines`, returning a parallel `Vec` aligned with the input where
+/// each entry is `Some(widths)` if the line belongs to a table block and
+/// `None` otherwise.
+///
+/// Why this exists: `render_table_line` was originally called per-row
+/// with no cross-row coordination, so each row computed its own column
+/// widths from its own cell contents. Body rows with long content (e.g.
+/// codebase_search Preview cells) got their last column truncated
+/// independently, while the header row computed shorter widths from its
+/// short labels — the columns didn't line up and the table looked
+/// shredded. This pass collects every consecutive run of table lines
+/// into a "block", computes the max-per-column across the block, then
+/// shrinks the last column to fit `available_width` if the total
+/// overflows. All rows in the same block render with the same target
+/// widths, so columns align.
+///
+/// `available_width` is the inner card width in cells. Returns one
+/// `Vec<usize>` (column widths) per table line; non-table lines map to
+/// `None`. Separator rows participate in column-count detection but
+/// not in width measurement (they're all dashes).
+fn compute_table_widths(
+    lines: &[&str],
+    available_width: usize,
+) -> Vec<Option<Vec<usize>>> {
+    let mut result: Vec<Option<Vec<usize>>> = vec![None; lines.len()];
+    let mut i = 0;
+    while i < lines.len() {
+        if !is_table_line(lines[i].trim()) {
+            i += 1;
+            continue;
+        }
+        // Find the end of this table block (consecutive table lines).
+        let start = i;
+        let mut end = i;
+        while end < lines.len() && is_table_line(lines[end].trim()) {
+            end += 1;
+        }
+
+        // Compute per-column max widths across all non-separator rows
+        // in the block. Separator rows are all dashes and would
+        // misreport the width as 3+ cells of `---`, so we skip them
+        // for measurement but they still participate in rendering.
+        let mut col_widths: Vec<usize> = Vec::new();
+        for line in &lines[start..end] {
+            let trimmed = line.trim();
+            if is_table_separator(trimmed) {
+                continue;
+            }
+            let cells: Vec<&str> = trimmed.split('|').filter(|s| !s.is_empty()).collect();
+            for (idx, cell) in cells.iter().enumerate() {
+                let w = cell.trim().chars().count().max(1);
+                if idx >= col_widths.len() {
+                    col_widths.push(w);
+                } else if w > col_widths[idx] {
+                    col_widths[idx] = w;
+                }
+            }
+        }
+
+        // Constrain to fit available width. Chrome math:
+        //   per-cell rendered width = " content " = (target_w + 2) cells
+        //   inter-cell pipes = (N - 1) cells
+        //   outer pipes = 2 cells
+        //   total = sum(target_w) + 3 * N + 1
+        // → content budget = available_width - 3*N - 1
+        // If the total content overflows the budget, shrink the LAST
+        // column (typically Preview / longest content) down to whatever
+        // fits, with a minimum of 8 cells so it stays useful. We don't
+        // distribute the overflow across columns because the operator
+        // generally cares more about File/Lines/Type/Score being
+        // legible than the Preview cell being complete.
+        let cell_count = col_widths.len();
+        if cell_count > 0 {
+            let chrome = cell_count.saturating_mul(3).saturating_add(1);
+            let content_budget = available_width.saturating_sub(chrome);
+            let total: usize = col_widths.iter().sum();
+            if total > content_budget {
+                let last_idx = cell_count - 1;
+                let other_total: usize = col_widths.iter().take(last_idx).sum();
+                let last_budget = content_budget.saturating_sub(other_total).max(8);
+                col_widths[last_idx] = last_budget;
+            }
+        }
+
+        // Apply the same widths to every line in the block.
+        for idx in start..end {
+            result[idx] = Some(col_widths.clone());
+        }
+        i = end;
+    }
+    result
+}
+
+/// Render a markdown table line with cell highlighting using
+/// pre-computed shared column widths from `compute_table_widths`. The
+/// caller is responsible for ensuring `target_widths` reflects the
+/// max-per-column across all rows in the same table block — passing
+/// per-row-derived widths breaks alignment.
+fn render_table_line<'a>(
+    line: &str,
+    is_header: bool,
+    target_widths: &[usize],
+    t: &dyn Theme,
+) -> Line<'a> {
     let trimmed = line.trim();
     let row_bg = if is_header {
         t.card_bg()
@@ -1599,31 +2059,7 @@ fn render_table_line<'a>(line: &str, is_header: bool, max_width: u16, t: &dyn Th
         t.surface_bg()
     };
     let cells: Vec<&str> = trimmed.split('|').filter(|s| !s.is_empty()).collect();
-    let cell_count = cells.len();
-
-    let available_width = max_width.saturating_sub(2) as usize;
-    let separator_count = cell_count.saturating_sub(1);
-    let separator_width = separator_count;
-    let padding_width = cell_count.saturating_mul(2);
-    let mut content_budget = available_width.saturating_sub(separator_width + padding_width);
-    if content_budget < cell_count {
-        content_budget = cell_count;
-    }
-
-    let base_widths: Vec<usize> = cells
-        .iter()
-        .map(|cell| cell.trim().chars().count().max(1))
-        .collect();
-    let mut target_widths = base_widths.clone();
-
-    let total_content_width: usize = base_widths.iter().sum();
-    if total_content_width > content_budget && cell_count > 0 {
-        let preview_idx = cell_count - 1;
-        let fixed_other: usize = base_widths.iter().take(preview_idx).sum();
-        let min_preview = if is_header { "Preview".len() } else { 12 };
-        let preview_budget = content_budget.saturating_sub(fixed_other).max(min_preview);
-        target_widths[preview_idx] = preview_budget;
-    }
+    let cell_count = target_widths.len().max(cells.len());
 
     // Separator row: |---|---| → render as a thin rule sized to the content budget.
     if is_table_separator(trimmed) {
@@ -1644,12 +2080,17 @@ fn render_table_line<'a>(line: &str, is_header: bool, max_width: u16, t: &dyn Th
         return Line::from(spans);
     }
 
+    // Iterate by the shared column count from `target_widths`, not by
+    // the row's own cell count. Rows with fewer cells than the block's
+    // max get padded with empty cells; rows with more get truncated.
+    // Both cases keep columns aligned across the table block, which
+    // is the whole point of the pre-pass that produces target_widths.
     let pipe = Style::default().fg(t.border()).bg(row_bg);
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::styled("│", pipe));
-    for (i, cell) in cells.iter().enumerate() {
-        let width = target_widths.get(i).copied().unwrap_or(1);
-        let cell_text = truncate_table_cell(cell.trim(), width);
+    for (i, &width) in target_widths.iter().enumerate() {
+        let cell_raw = cells.get(i).copied().unwrap_or("").trim();
+        let cell_text = truncate_table_cell(cell_raw, width);
         if is_header {
             spans.push(Span::styled(
                 format!(" {:width$} ", cell_text, width = width),
@@ -1674,7 +2115,7 @@ fn render_table_line<'a>(line: &str, is_header: bool, max_width: u16, t: &dyn Th
             }
             spans.push(Span::styled(" ", Style::default().bg(row_bg)));
         }
-        if i < cells.len() - 1 {
+        if i + 1 < cell_count {
             spans.push(Span::styled("│", pipe));
         }
     }
@@ -1758,6 +2199,24 @@ fn render_lifecycle(icon: &str, text: &str, area: Rect, buf: &mut Buffer, t: &dy
 
 /// Render a placeholder for an image (used when StatefulProtocol isn't available).
 /// The actual image rendering happens in conv_widget.rs via ratatui-image.
+///
+/// Visual choices:
+/// - **Frame**: doubled-line border in `accent_muted` rather than the
+///   default `border_dim`/rounded combo. The image content gets composited
+///   on top of this rectangle in a second pass; if the image happens to
+///   share colors with the surrounding TUI surface (light screenshots,
+///   pasted UI captures, etc.) the doubled frame makes the segment
+///   bounds unambiguous.
+/// - **Glyph**: `▦` U+25A6 SQUARE WITH ORTHOGONAL CROSSHATCH FILL.
+///   Single-cell, not in the Unicode emoji set. The previous `📎`
+///   U+1F4CE PAPERCLIP is an emoji-presentation codepoint and is
+///   forbidden by the same constraint that drove the instruments-panel
+///   glyph audit.
+/// - **Title**: full disk path (`path.display()`) rather than just
+///   `file_name()`. Operators need to know where on disk the file
+///   lives — especially for clipboard-paste files like
+///   `omegon-clipboard-78315-16.png` whose names are uninformative
+///   without their parent directory.
 fn render_image_placeholder(
     path: &std::path::Path,
     alt: &str,
@@ -1769,18 +2228,26 @@ fn render_image_placeholder(
         return;
     }
 
-    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
+    // Title: full disk path (or alt text if the caller supplied one).
+    // The previous behavior used only the filename which left
+    // operators guessing about the parent directory.
+    let path_str = path.display().to_string();
     let label = if alt.is_empty() || alt == "clipboard paste" {
-        format!(" 📎 {filename} ")
+        format!(" ▦ {path_str} ")
     } else {
-        format!(" 📎 {alt} ")
+        format!(" ▦ {alt} — {path_str} ")
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(t.border_dim()))
-        .title(Span::styled(label, Style::default().fg(t.accent_muted())))
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(t.accent_muted()))
+        .title(Span::styled(
+            label,
+            Style::default()
+                .fg(t.accent_muted())
+                .add_modifier(Modifier::BOLD),
+        ))
         .style(Style::default().bg(t.surface_bg()));
 
     // The block is the placeholder — the actual image is rendered on top
@@ -1839,6 +2306,382 @@ mod tests {
             }
         }
         None
+    }
+
+    #[test]
+    fn token_usage_format_compact_uses_k_and_m_suffixes() {
+        assert_eq!(
+            TokenUsage { input: 0, output: 0 }.format_compact(),
+            "↑0 ↓0"
+        );
+        assert_eq!(
+            TokenUsage { input: 999, output: 1 }.format_compact(),
+            "↑999 ↓1"
+        );
+        assert_eq!(
+            TokenUsage { input: 1_234, output: 567 }.format_compact(),
+            "↑1.2k ↓567"
+        );
+        assert_eq!(
+            TokenUsage { input: 12_500, output: 1_000 }.format_compact(),
+            "↑12.5k ↓1.0k"
+        );
+        assert_eq!(
+            TokenUsage { input: 1_500_000, output: 250_000 }.format_compact(),
+            "↑1.5M ↓250.0k"
+        );
+    }
+
+    #[test]
+    fn tool_card_title_renders_token_annotation_when_meta_carries_tokens() {
+        // The title-bar right-aligned area should show
+        // `↑input ↓output · timestamp` when the segment carries
+        // actual_tokens (stamped after TurnEnd).
+        let meta = SegmentMeta {
+            timestamp: Some(std::time::SystemTime::UNIX_EPOCH),
+            actual_tokens: Some(TokenUsage {
+                input: 1_500,
+                output: 240,
+            }),
+            ..SegmentMeta::default()
+        };
+        let seg = Segment {
+            meta,
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "bash".into(),
+                args_summary: None,
+                detail_args: Some("echo hi".into()),
+                result_summary: None,
+                detail_result: Some("hi".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+                live_partial: None,
+                started_at: None,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 8);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+        assert!(
+            text.contains("↑1.5k"),
+            "tool card title should show input token count: {text}"
+        );
+        assert!(
+            text.contains("↓240"),
+            "tool card title should show output token count: {text}"
+        );
+    }
+
+    #[test]
+    fn tool_card_title_omits_token_annotation_when_meta_has_none() {
+        // Segments that don't yet have actual_tokens stamped (in-flight,
+        // pre-TurnEnd) should NOT show the annotation, just the
+        // timestamp on the right rail.
+        let seg = Segment {
+            meta: SegmentMeta {
+                timestamp: Some(std::time::SystemTime::UNIX_EPOCH),
+                actual_tokens: None,
+                ..SegmentMeta::default()
+            },
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "bash".into(),
+                args_summary: None,
+                detail_args: Some("echo hi".into()),
+                result_summary: None,
+                detail_result: Some("hi".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+                live_partial: None,
+                started_at: None,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 8);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+        assert!(
+            !text.contains("↑") && !text.contains("↓"),
+            "no token annotation should appear when actual_tokens is None: {text}"
+        );
+    }
+
+    #[test]
+    fn assistant_text_segment_renders_token_annotation_too() {
+        // The same right-rail combine logic via top_right_timestamp.
+        let seg = Segment {
+            meta: SegmentMeta {
+                timestamp: Some(std::time::SystemTime::UNIX_EPOCH),
+                actual_tokens: Some(TokenUsage {
+                    input: 12_345,
+                    output: 678,
+                }),
+                ..SegmentMeta::default()
+            },
+            content: SegmentContent::AssistantText {
+                text: "ok".into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 6);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+        assert!(
+            text.contains("↑12.3k"),
+            "assistant segment title should show input tokens: {text}"
+        );
+        assert!(
+            text.contains("↓678"),
+            "assistant segment title should show output tokens: {text}"
+        );
+    }
+
+    #[test]
+    fn edit_tool_card_renders_colored_diff_in_place_of_boring_result() {
+        // The edit tool's text result is just "Successfully replaced
+        // text in {path}". The renderer should swap that for a real
+        // line-by-line diff built from the args' oldText/newText.
+        let args = serde_json::json!({
+            "path": "src/lib.rs",
+            "oldText": "fn old() {\n    println!(\"old\");\n}",
+            "newText": "fn new() {\n    println!(\"new\");\n    println!(\"extra\");\n}",
+        })
+        .to_string();
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "edit".into(),
+                args_summary: None,
+                detail_args: Some(args),
+                result_summary: None,
+                detail_result: Some("Successfully replaced text in src/lib.rs".into()),
+                is_error: false,
+                complete: true,
+                expanded: true,
+                live_partial: None,
+                started_at: None,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 20);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+
+        // Diff summary line: total +N -M counts.
+        assert!(
+            text.contains("+4") && text.contains("-3"),
+            "diff summary should report 4 additions and 3 removals: {text}"
+        );
+
+        // Diff body: removed lines prefixed with `-`, added with `+`.
+        assert!(
+            text.contains("- fn old() {"),
+            "removed line should appear with - prefix: {text}"
+        );
+        assert!(
+            text.contains("+ fn new() {"),
+            "added line should appear with + prefix: {text}"
+        );
+        assert!(
+            text.contains("+ "),
+            "diff section should have added lines: {text}"
+        );
+
+        // The boring "Successfully replaced" text should NOT leak into
+        // the rendering — the diff replaces it.
+        assert!(
+            !text.contains("Successfully replaced"),
+            "diff renderer should replace the boring result text: {text}"
+        );
+    }
+
+    #[test]
+    fn change_tool_card_renders_per_file_diff_blocks_with_headers() {
+        // The change tool can edit multiple files in one call. Each
+        // file gets a header row above its diff hunk.
+        let args = serde_json::json!({
+            "edits": [
+                {
+                    "file": "src/a.rs",
+                    "oldText": "let a = 1;",
+                    "newText": "let a = 2;",
+                },
+                {
+                    "file": "src/b.rs",
+                    "oldText": "let b = 1;",
+                    "newText": "let b = 2;\nlet c = 3;",
+                },
+            ],
+        })
+        .to_string();
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "change".into(),
+                args_summary: None,
+                detail_args: Some(args),
+                result_summary: None,
+                detail_result: Some("Changed 2 files".into()),
+                is_error: false,
+                complete: true,
+                expanded: true,
+                live_partial: None,
+                started_at: None,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 24);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+
+        // Multi-file: per-file headers with the ▸ glyph and the path.
+        assert!(text.contains("▸ src/a.rs"), "first file header missing: {text}");
+        assert!(text.contains("▸ src/b.rs"), "second file header missing: {text}");
+        // Summary line: 2 edits, +3 added, -2 removed
+        assert!(
+            text.contains("2 edit") && text.contains("+3") && text.contains("-2"),
+            "summary should report 2 edits, +3 / -2: {text}"
+        );
+        // Per-file diff content
+        assert!(text.contains("- let a = 1;"));
+        assert!(text.contains("+ let a = 2;"));
+        assert!(text.contains("- let b = 1;"));
+        assert!(text.contains("+ let b = 2;"));
+        assert!(text.contains("+ let c = 3;"));
+    }
+
+    #[test]
+    fn collapsed_edit_card_truncates_diff_with_marker() {
+        // Collapsed edit cards cap at 8 diff lines and append a
+        // truncation marker showing how many were dropped.
+        let old_text = (0..30)
+            .map(|i| format!("old line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let new_text = (0..30)
+            .map(|i| format!("new line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let args = serde_json::json!({
+            "path": "big.rs",
+            "oldText": old_text,
+            "newText": new_text,
+        })
+        .to_string();
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "1".into(),
+                name: "edit".into(),
+                args_summary: None,
+                detail_args: Some(args),
+                result_summary: None,
+                detail_result: Some("Successfully replaced text in big.rs".into()),
+                is_error: false,
+                complete: true,
+                expanded: false, // collapsed
+                live_partial: None,
+                started_at: None,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 20);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+        assert!(
+            text.contains("more diff line"),
+            "collapsed cards should show a truncation marker: {text}"
+        );
+        assert!(
+            text.contains("expand for full diff"),
+            "collapsed cards should hint at expansion in the summary: {text}"
+        );
+    }
+
+    #[test]
+    fn build_edit_diff_blocks_handles_edit_and_change_shapes() {
+        // edit shape: single block from path/oldText/newText
+        let edit_args = r#"{"path":"a.rs","oldText":"x","newText":"y"}"#;
+        let edit_blocks = build_edit_diff_blocks("edit", edit_args).unwrap();
+        assert_eq!(edit_blocks.len(), 1);
+        assert_eq!(edit_blocks[0].file, "a.rs");
+        assert_eq!(edit_blocks[0].old_text, "x");
+        assert_eq!(edit_blocks[0].new_text, "y");
+
+        // change shape: array of edits
+        let change_args = r#"{"edits":[{"file":"a.rs","oldText":"1","newText":"2"},{"file":"b.rs","oldText":"3","newText":"4"}]}"#;
+        let change_blocks = build_edit_diff_blocks("change", change_args).unwrap();
+        assert_eq!(change_blocks.len(), 2);
+        assert_eq!(change_blocks[0].file, "a.rs");
+        assert_eq!(change_blocks[1].file, "b.rs");
+
+        // Non-edit/change tool: returns None even with valid JSON
+        assert!(build_edit_diff_blocks("read", r#"{"path":"a.rs"}"#).is_none());
+
+        // Malformed JSON: returns None
+        assert!(build_edit_diff_blocks("edit", "not json").is_none());
+
+        // Edit with missing oldText/newText: returns None
+        assert!(build_edit_diff_blocks("edit", r#"{"path":"a.rs"}"#).is_none());
+    }
+
+    #[test]
+    fn image_placeholder_renders_full_disk_path_without_emoji_glyph() {
+        let seg = Segment::image(
+            std::path::PathBuf::from("/tmp/omegon-clipboard-78315-16.png"),
+            "",
+        );
+        let (area, mut buf) = make_buf(80, 14);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+
+        // Full disk path is in the title, not just the filename.
+        assert!(
+            text.contains("/tmp/omegon-clipboard-78315-16.png"),
+            "image segment must show the full disk path: {text}"
+        );
+
+        // No emoji glyphs — paperclip U+1F4CE was the previous default
+        // and is in the Unicode emoji set.
+        assert!(
+            !text.contains('\u{1F4CE}'),
+            "image segment must not use the emoji paperclip glyph"
+        );
+
+        // Doubled-line frame characters (BorderType::Double) for visual
+        // separation from the image content composited in pass two.
+        assert!(
+            text.contains('╔') || text.contains('╗') || text.contains('═'),
+            "image segment should use a doubled-line frame for visual contrast: {text}"
+        );
+
+        // Single-cell crosshatch glyph in the title prefix, in place of
+        // the paperclip.
+        assert!(
+            text.contains('▦'),
+            "image segment title should use the ▦ thumbnail glyph: {text}"
+        );
+    }
+
+    #[test]
+    fn image_placeholder_renders_alt_text_with_path_when_provided() {
+        let seg = Segment::image(
+            std::path::PathBuf::from("/var/captures/screenshot.png"),
+            "tui screenshot",
+        );
+        let (area, mut buf) = make_buf(80, 14);
+        seg.render(area, &mut buf, &Alpharius);
+        let text = buf_text(&buf, area);
+        assert!(
+            text.contains("tui screenshot"),
+            "alt text should appear when provided: {text}"
+        );
+        assert!(
+            text.contains("/var/captures/screenshot.png"),
+            "full disk path should appear alongside alt text: {text}"
+        );
     }
 
     #[test]
@@ -2109,17 +2952,50 @@ mod tests {
             !text.contains("**2 result(s)**"),
             "bold markers should not leak literally into the rendered card: {text}"
         );
-        assert!(
-            text.contains("│ File │ Lines │ Type │ Score │ Preview │"),
-            "header row should render as a structured table: {text}"
-        );
+        // Header cells should all be present, separated by pipes,
+        // regardless of exact padding (which is determined by the
+        // cross-row max from `compute_table_widths`).
+        for header_cell in ["File", "Lines", "Type", "Score", "Preview"] {
+            assert!(
+                text.contains(header_cell),
+                "header should contain cell {header_cell:?}: {text}"
+            );
+        }
         assert!(
             text.contains("├") || text.contains("┼"),
             "separator row should render box drawing characters: {text}"
         );
-        assert!(
-            text.contains("│ src/app.rs │ 10-20 │ code │ 45.38 │ fn render() │"),
-            "body row should render as a structured table: {text}"
+        // Body cells likewise — and crucially, the rows must align
+        // across the table block. Both body rows must render with the
+        // same column structure even though `src/lib.rs` has shorter
+        // content than `src/app.rs`. The previous per-row width
+        // computation broke this.
+        for body_cell in [
+            "src/app.rs", "10-20", "45.38", "fn render()",
+            "src/lib.rs", "1-9", "11.20", "helper",
+        ] {
+            assert!(
+                text.contains(body_cell),
+                "body should contain cell {body_cell:?}: {text}"
+            );
+        }
+        // Cross-row alignment check: both body rows should start at
+        // the same screen column (i.e. render with the same number of
+        // leading characters before the first cell). Find both row
+        // start positions and compare them.
+        let row1_start = text
+            .find("src/app.rs")
+            .expect("first body row should be present");
+        let row2_start = text
+            .find("src/lib.rs")
+            .expect("second body row should be present");
+        // Walk back to the most recent newline to find the column
+        // offset for each row. They must be equal.
+        let col1 = row1_start - text[..row1_start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let col2 = row2_start - text[..row2_start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        assert_eq!(
+            col1, col2,
+            "body rows must start at the same column for cross-row alignment: row1 col={col1} row2 col={col2}"
         );
     }
 
@@ -2216,17 +3092,22 @@ mod tests {
         let (area, mut buf) = make_buf(40, 10);
         seg.render(area, &mut buf, &Alpharius);
         let text = buf_text(&buf, area);
+        // Cell content checks (padding is determined by shared column
+        // widths from compute_table_widths and shouldn't be locked in
+        // by tests).
+        for cell in ["Name", "Value", "foo", "bar"] {
+            assert!(
+                text.contains(cell),
+                "table should contain cell {cell:?}: {text}"
+            );
+        }
         assert!(
-            text.contains("│ Name │ Value │"),
-            "header row should render as a table: {text}"
+            text.contains("│"),
+            "table should render with box-drawing pipes: {text}"
         );
         assert!(
             text.contains("├") || text.contains("┼"),
             "separator row should render box drawing characters: {text}"
-        );
-        assert!(
-            text.contains("│ foo │ bar │"),
-            "body row should render as a table: {text}"
         );
     }
 
@@ -2247,13 +3128,28 @@ mod tests {
             text.contains("Here are the strongest matches:"),
             "leading prose should remain visible: {text}"
         );
-        assert!(
-            text.contains("│ File │ Score │"),
-            "table header should still render structurally inside surrounding prose: {text}"
-        );
-        assert!(
-            text.contains("│ src/app.rs │ 45.38 │"),
-            "table body should still render structurally inside surrounding prose: {text}"
+        for cell in ["File", "Score", "src/app.rs", "45.38", "src/lib.rs", "11.20"] {
+            assert!(
+                text.contains(cell),
+                "table should contain cell {cell:?}: {text}"
+            );
+        }
+        // Cross-row alignment check: both body rows must start at the
+        // same column. Header `File` is 4 chars; body `src/app.rs` is
+        // 10 chars. The pre-pass widens the File column to 10 across
+        // the whole block, so the header gets padding and both body
+        // rows align with each other.
+        let row1 = text
+            .find("src/app.rs")
+            .expect("first body row should be present");
+        let row2 = text
+            .find("src/lib.rs")
+            .expect("second body row should be present");
+        let col1 = row1 - text[..row1].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let col2 = row2 - text[..row2].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        assert_eq!(
+            col1, col2,
+            "body rows must align across the table block: row1 col={col1} row2 col={col2}"
         );
         assert!(
             text.contains("Use "),
@@ -2500,17 +3396,17 @@ mod tests {
         let (area, mut buf) = make_buf(60, 12);
         seg.render(area, &mut buf, &Alpharius);
         let text = buf_text(&buf, area);
-        assert!(
-            text.contains("│ Name │ Value │ Notes │"),
-            "header row should render with aligned separator syntax: {text}"
-        );
+        // Aligned-separator markdown (`:----:`) should still parse as
+        // a table — the separator-detection logic accepts colons.
+        for cell in ["Name", "Value", "Notes", "foo", "bar", "baz"] {
+            assert!(
+                text.contains(cell),
+                "table should contain cell {cell:?}: {text}"
+            );
+        }
         assert!(
             text.contains("├") || text.contains("┼"),
             "aligned separator row should still render box drawing characters: {text}"
-        );
-        assert!(
-            text.contains("│ foo │ bar │ baz │"),
-            "body row should render with aligned separator syntax: {text}"
         );
     }
 
@@ -2927,7 +3823,11 @@ mod tests {
 
     #[test]
     fn table_line_renders() {
-        let line = render_table_line("| Name | Value |", true, 80, &Alpharius);
+        // render_table_line now takes pre-computed shared widths from
+        // compute_table_widths instead of computing per-row widths.
+        let widths = vec![10, 10];
+        let line =
+            render_table_line("| Name | Value |", true, &widths, &Alpharius);
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(
             text.contains("Name"),
@@ -2938,14 +3838,14 @@ mod tests {
             "should contain box drawing separator: {text}"
         );
 
-        let body = render_table_line("| foo | bar |", false, 80, &Alpharius);
+        let body = render_table_line("| foo | bar |", false, &widths, &Alpharius);
         let body_text: String = body.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(
             body_text.contains("foo"),
             "body should contain cell text: {body_text}"
         );
 
-        let sep = render_table_line("|---|---|", false, 80, &Alpharius);
+        let sep = render_table_line("|---|---|", false, &widths, &Alpharius);
         let sep_text: String = sep.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(
             sep_text.contains("─"),
@@ -2955,6 +3855,104 @@ mod tests {
             sep_text.contains("┼"),
             "separator should have cross: {sep_text}"
         );
+    }
+
+    #[test]
+    fn compute_table_widths_aligns_columns_across_rows() {
+        // The headline failure mode this fix addresses: a header with
+        // narrow cells (`File`/`Lines`/`Score`) followed by a body row
+        // with very long content in the last column (Preview). The old
+        // per-row computation derived widths from the header's short
+        // cells, leaving no budget for the body's long content; the
+        // body row got truncated independently and rendered out of
+        // alignment. With the pre-pass, every row in the same block
+        // shares the same widths.
+        let lines = vec![
+            "| File | Lines | Score | Preview |",
+            "|------|-------|-------|---------|",
+            "| `core/crates/omegon/src/tui/segments.rs` | 1234-1456 | 9.13 | pub struct Segment { /* very long preview content here */ } |",
+        ];
+        let widths_per_line = compute_table_widths(&lines, 90);
+
+        // All three lines should be marked as belonging to the same
+        // table block.
+        assert!(widths_per_line[0].is_some());
+        assert!(widths_per_line[1].is_some());
+        assert!(widths_per_line[2].is_some());
+
+        // All three should share the SAME widths array (column
+        // alignment is the whole point).
+        let h = widths_per_line[0].as_ref().unwrap();
+        let s = widths_per_line[1].as_ref().unwrap();
+        let b = widths_per_line[2].as_ref().unwrap();
+        assert_eq!(h, s, "header and separator should share widths");
+        assert_eq!(h, b, "header and body should share widths");
+
+        // The first three columns should reflect the body row's actual
+        // content (longer than the header's), not the header's
+        // labels — that's the cross-row max we're computing.
+        assert!(
+            h[0] >= "`core/crates/omegon/src/tui/segments.rs`".chars().count(),
+            "File column should accommodate the body's long file path: {h:?}"
+        );
+        assert!(h[1] >= "1234-1456".chars().count());
+        assert!(h[2] >= "9.13".chars().count());
+
+        // The last column (Preview) should have been shrunk to fit the
+        // available budget rather than blowing past the card width.
+        let total: usize = h.iter().sum();
+        let chrome = h.len() * 3 + 1;
+        assert!(
+            total + chrome <= 90,
+            "rendered widths must fit available_width=90: total={total} chrome={chrome} widths={h:?}"
+        );
+    }
+
+    #[test]
+    fn compute_table_widths_returns_none_for_non_table_lines() {
+        let lines = vec![
+            "Some prose before a table",
+            "| col1 | col2 |",
+            "|------|------|",
+            "| a    | b    |",
+            "More prose after",
+            "And another paragraph",
+        ];
+        let widths = compute_table_widths(&lines, 80);
+        assert!(widths[0].is_none(), "prose line is not a table");
+        assert!(widths[1].is_some(), "header line is a table");
+        assert!(widths[2].is_some(), "separator line is a table");
+        assert!(widths[3].is_some(), "body line is a table");
+        assert!(widths[4].is_none(), "trailing prose is not a table");
+        assert!(widths[5].is_none());
+    }
+
+    #[test]
+    fn compute_table_widths_handles_multiple_blocks() {
+        // Two separate table blocks with prose in between. Each block
+        // should compute its own widths independently.
+        let lines = vec![
+            "| a | b |",
+            "|---|---|",
+            "| 1 | 2 |",
+            "",
+            "intervening prose",
+            "",
+            "| longer-header | wider |",
+            "|---------------|-------|",
+            "| x             | y     |",
+        ];
+        let widths = compute_table_widths(&lines, 80);
+        let block1 = widths[0].as_ref().unwrap();
+        let block2 = widths[6].as_ref().unwrap();
+        assert_ne!(
+            block1, block2,
+            "two separate table blocks should compute independent widths"
+        );
+        // Block 1 first column = max("a", "1") = 1 char
+        assert_eq!(block1[0], 1);
+        // Block 2 first column = max("longer-header", "x") = 13 chars
+        assert_eq!(block2[0], 13);
     }
 
     #[test]

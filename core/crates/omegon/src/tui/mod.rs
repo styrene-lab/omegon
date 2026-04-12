@@ -773,6 +773,7 @@ impl App {
             thinking_level: Some(self.footer_data.thinking_level.clone()),
             turn: Some(self.turn),
             est_tokens: Some(self.footer_data.estimated_tokens as u32),
+            actual_tokens: None, // stamped on TurnEnd via stamp_turn_tokens
             context_percent: Some(self.footer_data.context_percent),
             persona: self
                 .plugin_registry
@@ -4418,6 +4419,23 @@ impl App {
                         (tokens as f32 / ctx_window as f32 * 100.0).min(100.0);
                 }
                 self.footer_data.provider_telemetry = provider_telemetry;
+
+                // Stamp the provider-reported actual tokens onto every
+                // segment that belongs to this turn so the title-bar
+                // annotation (`↑input ↓output` next to the timestamp)
+                // shows up across all of them at once. Tool cards,
+                // assistant text, and any other segment created during
+                // the turn share the same `meta.turn` from
+                // `current_meta()` and pick up the stamp here.
+                if actual_input_tokens > 0 || actual_output_tokens > 0 {
+                    self.conversation.stamp_turn_tokens(
+                        turn,
+                        segments::TokenUsage {
+                            input: actual_input_tokens,
+                            output: actual_output_tokens,
+                        },
+                    );
+                }
             }
             AgentEvent::MessageChunk { text } => {
                 let was_streaming = self.conversation.is_streaming();

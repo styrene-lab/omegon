@@ -5,7 +5,7 @@
 
 use super::conv_widget::ConvState;
 use super::image::ImageCache;
-use super::segments::{Segment, SegmentContent, SegmentExportMode, SegmentMeta};
+use super::segments::{Segment, SegmentContent, SegmentExportMode, SegmentMeta, TokenUsage};
 
 /// Tab variant — conversation or extension widget
 #[derive(Debug, Clone)]
@@ -374,6 +374,40 @@ impl ConversationView {
         }
     }
 
+    /// Walk back through segments belonging to a given turn and stamp
+    /// the provider-reported actual token counts onto each one. Called
+    /// from the `AgentEvent::TurnEnd` handler in `tui/mod.rs` once the
+    /// real numbers arrive. Segments emitted earlier in the turn (tool
+    /// cards, assistant text, etc.) all share the same turn id via
+    /// `current_meta()` and pick up the stamp here so the title-bar
+    /// token annotation appears across the whole turn at once.
+    ///
+    /// Walks back from the tail rather than the head because turn-end
+    /// stamps usually only need to touch a handful of recent segments.
+    /// Stops at the first segment whose `turn` is older than the
+    /// target — segments are ordered chronologically so anything older
+    /// than the target turn won't have new stamps to apply.
+    pub fn stamp_turn_tokens(&mut self, turn: u32, tokens: TokenUsage) {
+        for seg in self.segments.iter_mut().rev() {
+            match seg.meta.turn {
+                Some(t) if t == turn => {
+                    seg.meta.actual_tokens = Some(tokens);
+                }
+                Some(t) if t < turn => {
+                    // Older turn — and since segments are chronological,
+                    // anything before this is also older. Stop walking.
+                    break;
+                }
+                _ => {
+                    // No turn id (rare — pre-turn-tracking segments) or
+                    // a future turn (shouldn't happen). Skip and keep
+                    // walking back.
+                }
+            }
+        }
+        self.conv_state.invalidate();
+    }
+
     // ─── Scroll ─────────────────────────────────────────────────
 
     pub fn scroll_up(&mut self, amount: u16) {
@@ -615,6 +649,52 @@ mod tests {
     use super::*;
     use crate::tui::theme::Alpharius;
     use ratatui::prelude::*;
+
+    #[test]
+    fn stamp_turn_tokens_walks_back_and_stamps_matching_segments() {
+        // Build a conversation with three segments across two turns:
+        //   - turn 1: tool card
+        //   - turn 2: tool card
+        //   - turn 2: assistant text
+        // Then stamp turn 2 with token usage and confirm only the
+        // turn-2 segments get the actual_tokens field set.
+        let mut cv = ConversationView::new();
+
+        cv.push_tool_start("t1", "bash", Some("ls"), Some("ls"));
+        cv.stamp_meta(SegmentMeta {
+            turn: Some(1),
+            ..SegmentMeta::default()
+        });
+
+        cv.push_tool_start("t2", "read", Some("file.rs"), Some("file.rs"));
+        cv.stamp_meta(SegmentMeta {
+            turn: Some(2),
+            ..SegmentMeta::default()
+        });
+
+        cv.append_streaming("hello");
+        cv.stamp_meta(SegmentMeta {
+            turn: Some(2),
+            ..SegmentMeta::default()
+        });
+
+        cv.stamp_turn_tokens(2, TokenUsage { input: 500, output: 100 });
+
+        // Turn 1 segment: untouched
+        assert!(
+            cv.segments[0].meta.actual_tokens.is_none(),
+            "turn 1 segment must NOT be stamped with turn 2's tokens"
+        );
+        // Turn 2 segments: stamped
+        assert_eq!(
+            cv.segments[1].meta.actual_tokens,
+            Some(TokenUsage { input: 500, output: 100 })
+        );
+        assert_eq!(
+            cv.segments[2].meta.actual_tokens,
+            Some(TokenUsage { input: 500, output: 100 })
+        );
+    }
 
     #[test]
     fn user_message_creates_segments() {
