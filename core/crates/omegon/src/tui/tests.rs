@@ -18,7 +18,9 @@ fn test_settings() -> crate::settings::SharedSettings {
 }
 
 fn test_app() -> App {
-    App::new(test_settings())
+    let mut app = App::new(test_settings());
+    app.set_ui_mode(UiMode::Slim);
+    app
 }
 
 fn test_tx() -> mpsc::Sender<TuiCommand> {
@@ -87,23 +89,24 @@ fn session_reset_clears_instrument_panel_tool_activity() {
         args: serde_json::json!({}),
     });
 
-    // Use a substring stem that survives the instruments-panel column
-    // truncation. The panel renders unknown tools (i.e. ones not in
-    // `tool_short_name`'s match table) with a `· ` fallback prefix and
-    // truncates the result to fit a 14-cell name column, so the literal
-    // "context_clear" is not preserved — it ends up as `· context_cl…`.
-    // The negative assertion below uses the same stem so it remains
-    // strict against the post-reset cleared panel.
     let before = render_app_to_string(&mut app, 140, 36);
-    assert!(before.contains("context_cl"), "got {before}");
+    assert!(before.contains("context clear"), "got {before}");
 
     app.handle_agent_event(AgentEvent::SessionReset);
 
-    let after = render_app_to_string(&mut app, 140, 36);
-    assert!(!after.contains("context_cl"), "got {after}");
+    let exported = app
+        .conversation
+        .selected_segment_text_with_mode(SegmentExportMode::Plaintext)
+        .unwrap_or_default();
     assert!(
-        after.contains("New session started. Previous session saved."),
-        "got {after}"
+        exported.contains("New session started. Previous session saved."),
+        "got {exported:?}"
+    );
+
+    let after = render_app_to_string(&mut app, 140, 36);
+    assert!(
+        !after.contains("4/4 active") && !after.contains("running ·"),
+        "reset should clear tool activity chrome: {after}"
     );
 }
 
@@ -985,18 +988,17 @@ fn ctrl_y_keeps_editor_yank_outside_conversation_focus() {
 }
 
 #[test]
-fn startup_initialization_prefers_mouse_interaction_mode() {
-    let mut app = test_app();
-    app.mouse_capture_enabled = true;
-    app.terminal_copy_mode = false;
+fn startup_initialization_prefers_terminal_copy_mode_in_slim_default() {
+    let app = test_app();
 
     assert!(
-        !app.terminal_copy_mode,
-        "startup should prefer robust mouse interaction"
+        app.terminal_copy_mode,
+        "slim-default startup should prefer terminal-native selection/copy"
     );
+    assert!(matches!(app.ui_mode, UiMode::Slim));
     assert!(
-        app.mouse_capture_enabled,
-        "startup should enable mouse capture to receive wheel events directly"
+        !app.mouse_capture_enabled,
+        "slim-default startup should keep mouse capture off for free selection/paste"
     );
 }
 
@@ -1250,6 +1252,8 @@ fn slash_shackle_switches_to_slim_runtime_profile() {
     let result = app.handle_slash_command("/shackle", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
     assert_eq!(app.ui_mode, UiMode::Slim);
+    assert!(app.terminal_copy_mode);
+    assert!(!app.mouse_capture_enabled);
     let settings = app.settings.lock().unwrap().clone();
     assert!(settings.slim_mode);
 }
@@ -1266,6 +1270,8 @@ fn slash_unshackle_switches_to_full_runtime_profile() {
     let result = app.handle_slash_command("/unshackle", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
     assert_eq!(app.ui_mode, UiMode::Full);
+    assert!(!app.terminal_copy_mode);
+    assert!(app.mouse_capture_enabled);
     let settings = app.settings.lock().unwrap().clone();
     assert!(!settings.slim_mode);
 }
@@ -1294,6 +1300,8 @@ fn ui_command_switches_between_full_and_slim_presets() {
     let result = app.handle_slash_command("/ui slim", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
     assert_eq!(app.ui_mode, UiMode::Slim);
+    assert!(app.terminal_copy_mode);
+    assert!(!app.mouse_capture_enabled);
     assert!(!app.ui_surfaces.dashboard);
     assert!(!app.ui_surfaces.instruments);
     assert!(!app.ui_surfaces.footer);
@@ -1301,6 +1309,8 @@ fn ui_command_switches_between_full_and_slim_presets() {
     let result = app.handle_slash_command("/ui full", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
     assert_eq!(app.ui_mode, UiMode::Full);
+    assert!(!app.terminal_copy_mode);
+    assert!(app.mouse_capture_enabled);
     assert!(app.ui_surfaces.dashboard);
     assert!(app.ui_surfaces.instruments);
     assert!(app.ui_surfaces.footer);
@@ -1327,8 +1337,8 @@ fn ui_command_can_toggle_individual_surfaces() {
     assert!(matches!(result, SlashResult::Display(_)));
     assert!(!app.ui_surfaces.instruments);
     assert!(
-        app.ui_surfaces.footer,
-        "hiding instruments should not remove footer status"
+        !app.ui_surfaces.footer,
+        "slim mode surface hiding should leave footer hidden unless explicitly shown"
     );
 }
 
@@ -1359,7 +1369,8 @@ fn empty_editor_hint_mentions_focus_hotkey() {
     let mut app = test_app();
     let rendered = render_app_to_string(&mut app, 100, 20);
     assert!(rendered.contains("^F focus"), "{rendered}");
-    assert!(rendered.contains("^D tree"), "{rendered}");
+    assert!(!rendered.contains("^D tree"), "{rendered}");
+    assert!(rendered.contains("/ui surfaces"), "{rendered}");
 }
 
 #[test]

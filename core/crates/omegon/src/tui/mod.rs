@@ -984,8 +984,8 @@ impl App {
             },
             instrument_panel: InstrumentPanel::default(),
             focus_mode: false,
-            ui_mode: UiMode::Full,
-            ui_surfaces: UiSurfaces::full(),
+            ui_mode: UiMode::Slim,
+            ui_surfaces: UiSurfaces::slim(),
             theme: theme::default_theme(),
             settings,
             cancel: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -1056,6 +1056,19 @@ impl App {
             UiMode::Full => UiSurfaces::full(),
             UiMode::Slim => UiSurfaces::slim(),
         };
+        match mode {
+            UiMode::Slim => {
+                self.focus_mode = false;
+                self.terminal_copy_mode = true;
+                self.mouse_capture_enabled = false;
+                self.set_mouse_capture(false);
+            }
+            UiMode::Full => {
+                self.terminal_copy_mode = false;
+                self.mouse_capture_enabled = true;
+                self.set_mouse_capture(true);
+            }
+        }
     }
 
     fn toggle_ui_surface(&mut self, surface: &str, enabled: bool) -> Result<(), String> {
@@ -1122,12 +1135,13 @@ impl App {
     }
 
     fn set_terminal_copy_mode(&mut self, enabled: bool) {
-        if self.terminal_copy_mode == enabled {
-            return;
-        }
+        let changed = self.terminal_copy_mode != enabled;
         self.terminal_copy_mode = enabled;
         self.focus_mode = false;
         self.set_mouse_capture(!enabled);
+        if !changed {
+            return;
+        }
         if enabled {
             self.show_toast(
                 "Terminal-native selection active — drag to select, then use your terminal's copy shortcut",
@@ -5411,6 +5425,8 @@ impl App {
                 self.tool_calls = 0;
                 self.last_tool_name = None;
                 self.completed_tool_name = None;
+                self.active_modal = None;
+                self.active_action_prompt = None;
                 self.instrument_panel.reset();
                 self.footer_data.turn = 0;
                 self.footer_data.tool_calls = 0;
@@ -6106,10 +6122,13 @@ pub async fn run_tui(
     crate::update::spawn_polling(update_tx, channel);
     app.login_prompt_tx = config.login_prompt_tx;
 
-    // Slim starts in a conversation-first layout; richer surfaces remain
-    // summonable via /ui full or granular /ui show ... commands.
-    if app.settings().slim_mode {
-        app.set_ui_mode(UiMode::Slim);
+    // Default to slim/conversation-first startup. Operators can elevate
+    // to the full harness via /ui full, /unshackle, or /warp.
+    app.set_ui_mode(UiMode::Slim);
+    if !app.settings().slim_mode {
+        if let Ok(mut s) = app.settings.lock() {
+            s.set_slim_mode(true);
+        }
     }
 
     // Pre-populate from initial state so first frame isn't empty
