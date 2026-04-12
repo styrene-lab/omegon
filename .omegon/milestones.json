@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 70,
+    "rc_count": 71,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -622,6 +622,7 @@
       "fix(providers): send images to ollama cloud chat API",
       "fix(providers): stop sending effort in anthropic requests",
       "fix(release): build Linux artifacts with zigbuild",
+      "fix(release): create release as draft before uploading assets, publish after",
       "fix(release): defer rc mutations until preflight passes",
       "fix(release): derive Homebrew updates from published release manifest",
       "fix(release): harden signing detection and brew push flow",
@@ -675,6 +676,7 @@
       "fix(tui): remove unused widget renderer test import",
       "fix(tui): render markdown tool output and split context activity",
       "fix(tui): render operator attachments as inline placeholders",
+      "fix(tui): render table body rows that omit trailing pipe (#37)",
       "fix(tui): render tool result markdown tables",
       "fix(tui): restore editor token and paste semantics",
       "fix(tui): separate defs and history context colors",
@@ -740,7 +742,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.76",
-    "last_rc": "2026-04-12T03:31:08Z"
+    "rc_version": "0.15.10-rc.77",
+    "last_rc": "2026-04-12T03:55:40Z"
   }
 }
