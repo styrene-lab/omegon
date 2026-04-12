@@ -253,30 +253,8 @@ cut-rc:
     CURRENT=$(grep '^version = ' core/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
     MILESTONE=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//' | sed 's/-nightly\.[0-9]*//')
     mkdir -p "$WSDIR/.omegon/runtime"
-    cat > "$WSDIR/.omegon/runtime/workspace.json" <<JSON
-{
-  "project_id": "Users::cwilson::workspace::black-meridian::omegon",
-  "workspace_id": "cut-rc-workspace",
-  "label": "release",
-  "path": "$WSDIR",
-  "backend_kind": "local-dir",
-  "vcs_ref": {"vcs": "git", "branch": "main", "revision": null, "remote": "origin"},
-  "bindings": {"milestone_id": "$MILESTONE", "design_node_id": null, "openspec_change": null},
-  "branch": "main",
-  "role": "release",
-  "workspace_kind": "release",
-  "mutability": "mutable",
-  "owner_session_id": "cut-rc",
-  "owner_agent_id": "operator",
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "last_heartbeat": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "archived": false,
-  "archived_at": null,
-  "archive_reason": null,
-  "parent_workspace_id": null,
-  "source": "operator"
-}
-JSON
+    CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    python3 scripts/make-release-workspace.py "$WSDIR" "$MILESTONE" "$CREATED"
 
     # 6. Cut the RC from the release workspace
     echo "Cutting RC from release workspace..."
