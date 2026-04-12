@@ -2492,13 +2492,53 @@ fn format_interactive_turn_task_failure(join_err: &tokio::task::JoinError) -> St
 
 /// Format an agent loop error into a concise user-facing message.
 /// Extracts the meaningful part from API error JSON blobs.
-fn format_agent_error(e: &anyhow::Error) -> String {
+fn format_agent_error(
+    e: &anyhow::Error,
+    recent_telemetry: Option<&omegon_traits::ProviderTelemetrySnapshot>,
+) -> String {
     let raw = format!("{e}");
     let provider = provider_label_from_error(&raw);
     let provider_id = provider.as_deref().unwrap_or("upstream");
     let upstream_class =
         crate::upstream_errors::classify_upstream_error_for_provider(provider_id, &raw);
     let who = provider_display_name(provider_id);
+
+    if provider_id == "anthropic" {
+        let headroom = crate::usage::derive_headroom_state(recent_telemetry);
+        if matches!(upstream_class, crate::upstream_errors::UpstreamErrorClass::StalledStream)
+            && matches!(
+                headroom,
+                crate::usage::UsageHeadroomState::Constrained
+                    | crate::usage::UsageHeadroomState::Exhausted
+            )
+        {
+            let rationale = crate::usage::derive_rationale(recent_telemetry, &headroom);
+            return format!(
+                "⚠ Provider pressure (Anthropic/Claude) — the stream stopped after recent quota telemetry showed {state} headroom. This is likely usage-window backpressure or exhaustion, not a generic transport stall. Wait for reset or switch provider with /model. ({rationale})",
+                state = headroom.as_str(),
+            );
+        }
+        if matches!(upstream_class, crate::upstream_errors::UpstreamErrorClass::QuotaExceeded) {
+            let rationale = crate::usage::derive_rationale(recent_telemetry, &headroom);
+            return format!(
+                "⚠ Usage limit reached (Anthropic/Claude) — recent upstream telemetry indicates {state} headroom. Wait for the Anthropic usage window to reset or switch provider with /model. ({rationale})",
+                state = headroom.as_str(),
+            );
+        }
+        if matches!(upstream_class, crate::upstream_errors::UpstreamErrorClass::RateLimited)
+            && matches!(
+                headroom,
+                crate::usage::UsageHeadroomState::Constrained
+                    | crate::usage::UsageHeadroomState::Exhausted
+            )
+        {
+            let rationale = crate::usage::derive_rationale(recent_telemetry, &headroom);
+            return format!(
+                "⚠ Rate limit / usage pressure (Anthropic/Claude) — recent upstream telemetry indicates {state} headroom. Anthropic is likely throttling or exhausting this session's usage window. Wait for reset or switch provider with /model. ({rationale})",
+                state = headroom.as_str(),
+            );
+        }
+    }
 
     match upstream_class {
         crate::upstream_errors::UpstreamErrorClass::ProviderOverloaded
@@ -2809,7 +2849,10 @@ async fn run_interactive_active_turn(
     .await
     {
         drop(bridge_guard);
-        let user_msg = format_agent_error(&e);
+        let recent_telemetry = runtime_state
+            .conversation
+            .last_provider_telemetry(None);
+        let user_msg = format_agent_error(&e, recent_telemetry.as_ref());
         tracing::error!(runtime_turn_id = active.runtime_turn_id, "Agent loop error: {e}");
         let _ = events_tx.send(AgentEvent::SystemNotification { message: user_msg });
         let _ = events_tx.send(AgentEvent::AgentEnd);
@@ -3684,7 +3727,7 @@ mod tests {
     fn format_agent_error_extracts_message() {
         let raw = r#"Anthropic 400 Bad Request: {"type":"error","error":{"type":"invalid_request_error","message":"Input should be a valid dictionary"}}"#;
         let e = anyhow::anyhow!("{raw}");
-        let result = format_agent_error(&e);
+        let result = format_agent_error(&e, None);
         assert!(
             result.contains("Input should be a valid dictionary"),
             "got: {result}"
@@ -3695,7 +3738,7 @@ mod tests {
     fn format_agent_error_truncates_long() {
         let long = "x".repeat(500);
         let e = anyhow::anyhow!("{long}");
-        let result = format_agent_error(&e);
+        let result = format_agent_error(&e, None);
         assert!(
             result.len() < 600,
             "should truncate, got len {}",
@@ -3706,14 +3749,14 @@ mod tests {
     #[test]
     fn format_agent_error_extracts_status() {
         let e = anyhow::anyhow!("status=429 Too Many Requests blah blah");
-        let result = format_agent_error(&e);
+        let result = format_agent_error(&e, None);
         assert!(result.contains("status=429"), "got: {result}");
     }
 
     #[test]
     fn format_agent_error_collapses_openai_provider_side_failures() {
         let e = anyhow::anyhow!("LLM error: Codex 520: error code: 520");
-        let result = format_agent_error(&e);
+        let result = format_agent_error(&e, None);
         assert!(result.contains("Upstream error (OpenAI/Codex)"), "got: {result}");
         assert!(result.contains("status.openai.com"), "got: {result}");
         assert!(!result.contains("error code: 520"), "got: {result}");
@@ -3724,7 +3767,7 @@ mod tests {
         let e = anyhow::anyhow!(
             "LLM error: Codex 401: You have insufficient permissions for this operation. Missing scopes: api.responses.write"
         );
-        let result = format_agent_error(&e);
+        let result = format_agent_error(&e, None);
         assert!(result.contains("Authentication error (OpenAI/Codex)"), "got: {result}");
         assert!(result.contains("expired/invalid session"), "got: {result}");
         assert!(!result.contains("api.responses.write"), "got: {result}");
@@ -3736,10 +3779,46 @@ mod tests {
         let e = anyhow::anyhow!(
             "LLM error: Codex 401 Unauthorized: session expired, please log in again"
         );
-        let result = format_agent_error(&e);
+        let result = format_agent_error(&e, None);
         assert!(result.contains("Authentication error (OpenAI/Codex)"), "got: {result}");
         assert!(result.contains("session appears expired"), "got: {result}");
         assert!(!result.contains("please log in again"), "got: {result}");
+    }
+
+    #[test]
+    fn format_agent_error_anthropic_stall_prefers_quota_pressure_when_recent_telemetry_is_tight() {
+        let e = anyhow::anyhow!("Anthropic LLM stream idle for 90s — connection may be stalled");
+        let telemetry = omegon_traits::ProviderTelemetrySnapshot {
+            provider: "anthropic".into(),
+            source: "response_headers".into(),
+            unified_5h_utilization_pct: Some(97.0),
+            unified_7d_utilization_pct: Some(83.0),
+            ..Default::default()
+        };
+        let result = format_agent_error(&e, Some(&telemetry));
+        assert!(result.contains("Provider pressure (Anthropic/Claude)"), "got: {result}");
+        assert!(result.contains("usage-window backpressure or exhaustion"), "got: {result}");
+        assert!(result.contains("5h 97%"), "got: {result}");
+        assert!(!result.contains("provider-side failure"), "got: {result}");
+    }
+
+    #[test]
+    fn format_agent_error_anthropic_quota_prefers_usage_limit_wording() {
+        let e = anyhow::anyhow!("Anthropic quota exceeded for this workspace");
+        let telemetry = omegon_traits::ProviderTelemetrySnapshot {
+            provider: "anthropic".into(),
+            source: "response_headers".into(),
+            unified_5h_utilization_pct: Some(99.0),
+            unified_7d_utilization_pct: Some(91.0),
+            ..Default::default()
+        };
+        let result = format_agent_error(&e, Some(&telemetry));
+        assert!(result.contains("Usage limit reached (Anthropic/Claude)"), "got: {result}");
+        assert!(
+            result.contains("Anthropic usage window to reset"),
+            "got: {result}"
+        );
+        assert!(!result.contains("provider-side failure"), "got: {result}");
     }
 
     #[test]

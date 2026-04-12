@@ -57,6 +57,24 @@ impl Default for AssistantMessage {
     }
 }
 
+impl ConversationState {
+    pub fn last_provider_telemetry(
+        &self,
+        provider: Option<&str>,
+    ) -> Option<omegon_traits::ProviderTelemetrySnapshot> {
+        self.canonical.iter().rev().find_map(|msg| match msg {
+            AgentMessage::Assistant(assistant, _) => assistant.provider_telemetry.clone().and_then(|t| {
+                if provider.is_none_or(|p| t.provider == p) {
+                    Some(t)
+                } else {
+                    None
+                }
+            }),
+            _ => None,
+        })
+    }
+}
+
 impl AssistantMessage {
     pub fn text_content(&self) -> &str {
         &self.text
@@ -2157,6 +2175,42 @@ mod tests {
         assert!(matches!(&view[0], LlmMessage::User { .. }));
         assert!(matches!(&view[1], LlmMessage::Assistant { .. }));
         assert!(matches!(&view[2], LlmMessage::ToolResult { .. }));
+    }
+
+    #[test]
+    fn last_provider_telemetry_returns_latest_matching_snapshot() {
+        let mut conv = ConversationState::new();
+        conv.canonical.push(AgentMessage::Assistant(
+            AssistantMessage {
+                text: "first".into(),
+                provider_telemetry: Some(omegon_traits::ProviderTelemetrySnapshot {
+                    provider: "anthropic".into(),
+                    source: "response_headers".into(),
+                    unified_5h_utilization_pct: Some(72.0),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            1,
+        ));
+        conv.canonical.push(AgentMessage::Assistant(
+            AssistantMessage {
+                text: "second".into(),
+                provider_telemetry: Some(omegon_traits::ProviderTelemetrySnapshot {
+                    provider: "anthropic".into(),
+                    source: "response_headers".into(),
+                    unified_5h_utilization_pct: Some(97.0),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            2,
+        ));
+
+        let latest = conv
+            .last_provider_telemetry(Some("anthropic"))
+            .expect("latest telemetry");
+        assert_eq!(latest.unified_5h_utilization_pct, Some(97.0));
     }
 
     #[test]
