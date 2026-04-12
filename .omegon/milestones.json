@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 77,
+    "rc_count": 78,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -502,6 +502,8 @@
       "feat(reasoning): improve upstream thinking fidelity",
       "feat(runtime): add daemon event-ingress skeleton",
       "feat(runtime): add interactive turn supervisor scaffold",
+      "feat(runtime): add rc update lane and slim launch aliases",
+      "feat(runtime): split rc update channel and add slim/full warp controls",
       "feat(runtime): surface child runtime metadata in daemon status",
       "feat(runtime-matrix): Inspect and extend the Rust live upstream smoke/drift test surface. Define or add a checked-in expectation matrix and determine the minimal viable assertions for provider-specific endpoint drift (not just round-trip OK), plus tests or validation around the matrix parsing/execution path.",
       "feat(runtime-state): Implement persistent daemon runtime state for the serve/embedded runtime: runtime directory layout, persisted daemon instance/session metadata as appropriate, durable queued-event storage replacing in-memory-only queue, and ownership/runtime mode metadata in shared descriptors. Reuse the existing embedded/web runtime rather than introducing a new stack.",
@@ -524,6 +526,7 @@
       "feat(tui): TUI render-quality pass — live progress, table alignment, edit diffs, token annotations, clipboard retention (#34)",
       "feat(tui): add ! @ and * prompt prefixes",
       "feat(tui): add /ui surface presets for slim conversation-first mode",
+      "feat(tui): add @ file picker and command history recall",
       "feat(tui): add auspex status handoff probe",
       "feat(tui): add direct context request slash command",
       "feat(tui): add transitional auspex open bridge",
@@ -781,7 +784,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.83",
-    "last_rc": "2026-04-12T16:50:44Z"
+    "rc_version": "0.15.10-rc.84",
+    "last_rc": "2026-04-12T17:31:44Z"
   }
 }
