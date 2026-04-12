@@ -460,8 +460,10 @@ fn parse_rate_limit_snapshot(
     let snapshot = omegon_traits::ProviderTelemetrySnapshot {
         provider: provider.to_string(),
         source: "response_headers".into(),
-        unified_5h_utilization_pct: parse_pct("anthropic-ratelimit-unified-5h-utilization"),
-        unified_7d_utilization_pct: parse_pct("anthropic-ratelimit-unified-7d-utilization"),
+        unified_5h_utilization_pct: parse_pct("anthropic-ratelimit-unified-5h-utilization")
+            .or_else(|| parse_pct("x-anthropic-ratelimit-unified-5h-utilization")),
+        unified_7d_utilization_pct: parse_pct("anthropic-ratelimit-unified-7d-utilization")
+            .or_else(|| parse_pct("x-anthropic-ratelimit-unified-7d-utilization")),
         requests_remaining: parse_u64("x-ratelimit-remaining-requests")
             .or_else(|| parse_u64("ratelimit-remaining-requests")),
         tokens_remaining: parse_u64("x-ratelimit-remaining-tokens")
@@ -2635,6 +2637,24 @@ mod tests {
         assert_eq!(snapshot.unified_5h_utilization_pct, Some(42.0));
         assert_eq!(snapshot.unified_7d_utilization_pct, Some(64.0));
         assert_eq!(snapshot.retry_after_secs, Some(17));
+    }
+
+    #[test]
+    fn parse_rate_limit_snapshot_extracts_prefixed_anthropic_utilization_headers() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "x-anthropic-ratelimit-unified-5h-utilization",
+            reqwest::header::HeaderValue::from_static("42%"),
+        );
+        headers.insert(
+            "x-anthropic-ratelimit-unified-7d-utilization",
+            reqwest::header::HeaderValue::from_static("64%"),
+        );
+
+        let snapshot = parse_rate_limit_snapshot("anthropic", &headers).expect("snapshot");
+        assert_eq!(snapshot.provider, "anthropic");
+        assert_eq!(snapshot.unified_5h_utilization_pct, Some(42.0));
+        assert_eq!(snapshot.unified_7d_utilization_pct, Some(64.0));
     }
 
     #[test]
