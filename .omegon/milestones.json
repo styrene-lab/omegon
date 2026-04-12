@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 80,
+    "rc_count": 81,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -535,6 +535,7 @@
       "feat(tui): add transitional auspex open bridge",
       "feat(tui): fullscreen focus mode and inline image attachments",
       "feat(tui): make image attachments inline editor tokens",
+      "feat(tui): overhaul spinner verb system with init, glitch effect, and expanded verb list",
       "feat(tui): unify delegate and cleave worker instrumentation",
       "feat(tui): upgrade queued prompt previews and footer panel stability",
       "feat(tui-copy): Update in-product copy in the TUI/tutorial/help surfaces so operator-facing text points to Auspex as the primary browser UI, while leaving current `/dash` command behavior intact as compatibility wording. Focus on core/crates/omegon/src/tui/mod.rs, core/crates/omegon/src/tui/tutorial.rs, and nearby help/command descriptions only.",
@@ -790,7 +791,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.86",
-    "last_rc": "2026-04-12T21:28:51Z"
+    "rc_version": "0.15.10-rc.87",
+    "last_rc": "2026-04-12T23:17:59Z"
   }
 }
