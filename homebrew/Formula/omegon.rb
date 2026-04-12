@@ -38,13 +38,18 @@ class Omegon < Formula
   def install
     check_linux_glibc_requirement!
     bin.install "omegon"
+    bin.install_symlink "omegon" => "om"
   end
 
   def caveats
     <<~EOS
+      Two entrypoints are installed:
+        omegon  # full harness
+        om      # slim harness (same binary, alias-based mode)
+
       To get started:
         export ANTHROPIC_API_KEY="sk-ant-..."
-        omegon
+        om
 
       Or authenticate with Claude Pro/Max:
         omegon login

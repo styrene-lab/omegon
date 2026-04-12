@@ -158,6 +158,13 @@ def update_homebrew_formula(*, manifest_path: Path, formula_path: Path) -> None:
     else:
         raise ValueError("Formula has fewer sha256 entries than expected")
 
+    if 'bin.install_symlink "omegon" => "om"' not in updated:
+        updated = updated.replace(
+            '    bin.install "omegon"\n',
+            '    bin.install "omegon"\n    bin.install_symlink "omegon" => "om"\n',
+            1,
+        )
+
     formula_path.write_text(updated)
 
 
