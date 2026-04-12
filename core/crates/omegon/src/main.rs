@@ -644,6 +644,7 @@ async fn main() -> anyhow::Result<()> {
                     resume: cli.resume.clone(),
                     fresh: cli.fresh,
                     slim: cli.slim || *slim,
+                    full: cli.full,
                     no_session: cli.no_session,
                     no_splash: cli.no_splash,
                     tutorial: cli.tutorial,
@@ -1234,18 +1235,25 @@ async fn run_doctor_command(cli: &Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cli_prefers_slim_mode(cli: &Cli) -> bool {
+fn cli_binary_name() -> Option<String> {
+    std::env::args_os()
+        .next()
+        .and_then(|arg| std::path::Path::new(&arg).file_name().map(|name| name.to_os_string()))
+        .and_then(|name| name.into_string().ok())
+}
+
+fn cli_prefers_slim_mode_with_name(cli: &Cli, binary_name: Option<&str>) -> bool {
     if cli.full {
         return false;
     }
     if cli.slim {
         return true;
     }
-    std::env::args_os()
-        .next()
-        .and_then(|arg| std::path::Path::new(&arg).file_name().map(|name| name.to_os_string()))
-        .and_then(|name| name.into_string().ok())
-        .is_some_and(|name| name == "om")
+    binary_name.is_some_and(|name| name == "om")
+}
+
+fn cli_prefers_slim_mode(cli: &Cli) -> bool {
+    cli_prefers_slim_mode_with_name(cli, cli_binary_name().as_deref())
 }
 
 async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
@@ -3973,6 +3981,18 @@ mod tests {
     fn interactive_resume_mode_resumes_specific_session_when_requested() {
         let cli = Cli::parse_from(["omegon", "--resume", "abc123"]);
         assert_eq!(interactive_resume_mode(&cli), Some(Some("abc123")));
+    }
+
+    #[test]
+    fn cli_prefers_slim_when_invoked_as_om() {
+        let cli = Cli::parse_from(["om"]);
+        assert!(cli_prefers_slim_mode_with_name(&cli, Some("om")));
+    }
+
+    #[test]
+    fn cli_full_overrides_om_slim_preference() {
+        let cli = Cli::parse_from(["om", "--full"]);
+        assert!(!cli_prefers_slim_mode_with_name(&cli, Some("om")));
     }
 
     #[test]

@@ -149,7 +149,7 @@ pub async fn check_latest_for_channel(
             UpdateChannel::Rc => resp.prerelease && latest.contains("-rc."),
             UpdateChannel::Nightly => resp.prerelease && latest.contains("-nightly."),
         };
-        channel_match && is_newer(latest, current)
+        channel_match && is_newer(&latest, current)
     });
 
     let Some(resp) = selected else {
@@ -498,6 +498,13 @@ mod tests {
         assert!(!is_homebrew_managed(Path::new(
             "/tmp/omegon-release-ws/core/target/release/omegon"
         )));
+    }
+
+    #[test]
+    fn rc_channel_parses_distinct_from_nightly() {
+        assert_eq!(UpdateChannel::parse("rc"), Some(UpdateChannel::Rc));
+        assert_eq!(UpdateChannel::parse("nightly"), Some(UpdateChannel::Nightly));
+        assert_ne!(UpdateChannel::parse("rc"), UpdateChannel::parse("nightly"));
     }
 
     #[test]

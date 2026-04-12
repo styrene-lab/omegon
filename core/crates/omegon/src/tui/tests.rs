@@ -1230,6 +1230,50 @@ fn slash_focus_toggles_fullscreen_conversation_mode() {
 }
 
 #[test]
+fn slash_shackle_switches_to_slim_runtime_profile() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/shackle", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert_eq!(app.ui_mode, UiMode::Slim);
+    let settings = app.settings.lock().unwrap().clone();
+    assert!(settings.slim_mode);
+}
+
+#[test]
+fn slash_unshackle_switches_to_full_runtime_profile() {
+    let mut app = test_app();
+    if let Ok(mut s) = app.settings.lock() {
+        s.set_slim_mode(true);
+    }
+    app.set_ui_mode(UiMode::Slim);
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/unshackle", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert_eq!(app.ui_mode, UiMode::Full);
+    let settings = app.settings.lock().unwrap().clone();
+    assert!(!settings.slim_mode);
+}
+
+#[test]
+fn slash_warp_toggles_between_slim_and_full_modes() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/warp", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert_eq!(app.ui_mode, UiMode::Slim);
+    assert!(app.settings.lock().unwrap().slim_mode);
+
+    let result = app.handle_slash_command("/warp", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert_eq!(app.ui_mode, UiMode::Full);
+    assert!(!app.settings.lock().unwrap().slim_mode);
+}
+
+#[test]
 fn ui_command_switches_between_full_and_slim_presets() {
     let mut app = test_app();
     let tx = test_tx();
@@ -1422,9 +1466,9 @@ fn slash_update_channel_without_args_opens_selector() {
 fn slash_update_channel_changes_setting() {
     let mut app = test_app();
     let tx = test_tx();
-    let result = app.handle_slash_command("/update channel nightly", &tx);
+    let result = app.handle_slash_command("/update channel rc", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
-    assert_eq!(app.settings.lock().unwrap().update_channel, "nightly");
+    assert_eq!(app.settings.lock().unwrap().update_channel, "rc");
 }
 
 #[test]
@@ -1445,13 +1489,13 @@ fn slash_update_reports_available_version() {
         is_newer: true,
     }));
     app.update_rx = Some(update_rx);
-    app.settings.lock().unwrap().update_channel = UpdateChannel::Nightly.as_str().to_string();
+    app.settings.lock().unwrap().update_channel = UpdateChannel::Rc.as_str().to_string();
     let result = app.handle_slash_command("/update", &tx);
     if let SlashResult::Display(text) = result {
         assert!(text.contains("0.15.3-rc.7"), "{text}");
         assert!(text.contains("/update install"), "{text}");
-        assert!(text.contains("/update channel [stable|nightly]"), "{text}");
-        assert!(text.contains("nightly"), "{text}");
+        assert!(text.contains("/update channel [stable|rc|nightly]"), "{text}");
+        assert!(text.contains("rc"), "{text}");
     } else {
         panic!("expected Display result");
     }
@@ -1465,6 +1509,7 @@ fn slash_update_without_update_still_shows_channel_help() {
     if let SlashResult::Display(text) = result {
         assert!(text.contains("You're up to date"), "{text}");
         assert!(text.contains("/update channel nightly"), "{text}");
+        assert!(text.contains("/update channel rc"), "{text}");
         assert!(text.contains("/update channel stable"), "{text}");
     } else {
         panic!("expected Display result");

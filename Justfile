@@ -60,11 +60,15 @@ link:
     # Pick first writable candidate in PATH-order
     if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
         DEST="/usr/local/bin/omegon"
+        DEST_OM="/usr/local/bin/om"
         ALT="$HOME/.local/bin/omegon"
+        ALT_OM="$HOME/.local/bin/om"
     else
         mkdir -p "$HOME/.local/bin"
         DEST="$HOME/.local/bin/omegon"
+        DEST_OM="$HOME/.local/bin/om"
         ALT="/usr/local/bin/omegon"
+        ALT_OM="/usr/local/bin/om"
         if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
             echo "⚠  ~/.local/bin is not in \$PATH — add it to your shell profile:"
             echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
@@ -79,9 +83,18 @@ link:
             echo "  ! could not remove stale install at $ALT (permission denied)"
         fi
     fi
+    if [ -e "$ALT_OM" ] || [ -L "$ALT_OM" ]; then
+        if rm -f "$ALT_OM" 2>/dev/null; then
+            echo "  removed stale install at $ALT_OM"
+        else
+            echo "  ! could not remove stale install at $ALT_OM (permission denied)"
+        fi
+    fi
     ln -sf "$BINARY" "$DEST"
+    ln -sf "$BINARY" "$DEST_OM"
     echo "✓ omegon → $DEST"
-    echo "  run 'hash -d omegon 2>/dev/null || true' if your shell cached the old path"
+    echo "✓ om     → $DEST_OM"
+    echo "  run 'hash -d omegon 2>/dev/null || true; hash -d om 2>/dev/null || true' if your shell cached the old path"
     "$DEST" --version
     just install-skills
 
