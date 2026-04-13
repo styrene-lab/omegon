@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 81,
+    "rc_count": 82,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -700,6 +700,7 @@
       "fix(tui): make tool rows width-aware and clear border-adjacent cells",
       "fix(tui): make word navigation atomic over attachment tokens",
       "fix(tui): nuclear clear entire panel area before rendering instruments (#36)",
+      "fix(tui): parallel streaming bash tool and keyboard-safe shell handoff",
       "fix(tui): preserve codebase tables in narrow tool cards",
       "fix(tui): preserve operator multiline prompts in conversation",
       "fix(tui): preserve trailing blank editor lines",
@@ -791,7 +792,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.87",
-    "last_rc": "2026-04-12T23:17:59Z"
+    "rc_version": "0.15.10-rc.88",
+    "last_rc": "2026-04-13T00:07:44Z"
   }
 }
