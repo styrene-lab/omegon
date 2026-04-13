@@ -2533,6 +2533,8 @@ struct StuckDetector {
     recent: Vec<(String, u64, bool)>,
     /// Window size for pattern detection
     window: usize,
+    /// Whether we've already emitted a repeated-read warning in the current window.
+    repeated_read_warned: bool,
 }
 
 impl StuckDetector {
@@ -2540,6 +2542,7 @@ impl StuckDetector {
         Self {
             recent: Vec::new(),
             window: 10,
+            repeated_read_warned: false,
         }
     }
 
@@ -2547,6 +2550,9 @@ impl StuckDetector {
     fn record(&mut self, call: &ToolCall, is_error: bool) {
         let args_hash = hash_value(&call.arguments);
         self.recent.push((call.name.clone(), args_hash, is_error));
+        if call.name != "read" {
+            self.repeated_read_warned = false;
+        }
         if self.recent.len() > self.window * 2 {
             self.recent.drain(..self.window);
         }
@@ -2563,6 +2569,16 @@ impl StuckDetector {
 
         // Pattern 1: Same tool + same args called 3+ times
         if let Some(repeated) = self.find_repeated_call(window, 3) {
+            if repeated.0 == "read" {
+                if self.repeated_read_warned {
+                    return None;
+                }
+                return Some(
+                    "You've read the same file multiple times without modifying it. \
+                     Consider noting what you need from it, or try a different approach."
+                        .into(),
+                );
+            }
             return Some(format!(
                 "You've called `{}` with the same arguments {} times. \
                  If it's not producing the result you need, try a different approach.",
@@ -2745,8 +2761,8 @@ mod tests {
         let mut detector = StuckDetector::new();
         let call = ToolCall {
             id: "1".into(),
-            name: "read".into(),
-            arguments: serde_json::json!({"path": "foo.rs"}),
+            name: "bash".into(),
+            arguments: serde_json::json!({"command": "cargo test -p omegon"}),
         };
 
         detector.record(&call, false);
@@ -4071,6 +4087,24 @@ mod tests {
             classify_progress_signal(0, 1, &tool_calls, &results),
             ProgressSignal::None
         );
+    }
+
+    #[test]
+    fn read_repetition_prefers_file_state_guidance_over_generic_same_args_warning() {
+        let mut detector = StuckDetector::new();
+        for _ in 0..3 {
+            detector.record(
+                &ToolCall {
+                    id: "1".into(),
+                    name: "read".into(),
+                    arguments: serde_json::json!({"path": "src/lib.rs"}),
+                },
+                false,
+            );
+        }
+        let warning = detector.check().expect("warning");
+        assert!(warning.contains("same file multiple times"), "got: {warning}");
+        assert!(!warning.contains("same arguments 3 times"), "got: {warning}");
     }
 
     #[test]

@@ -460,7 +460,7 @@ impl DelegateRunner {
             prompt.push('\n');
         }
         prompt.push_str(
-            "\n## Constraints\n- Stay within the declared scope.\n- Do not broaden into design/lifecycle/spec work.\n- Do not delegate further.\n- Prefer concise output over process narration.\n",
+            "\n## Constraints\n- Stay within the declared scope.\n- Do not broaden into design/lifecycle/spec work.\n- Do not delegate further.\n- Prefer concise output over process narration.\n- Return a single final answer that ends the task cleanly; do not leave a trailing assistant prefill stub.\n",
         );
         prompt.push_str(
             "\n## Output contract\nReturn the concrete result of the delegated task. \
@@ -1200,6 +1200,26 @@ mod tests {
         assert!(runtime.disabled_tools.iter().any(|t| t == "delegate"));
         assert!(runtime.disabled_tools.iter().any(|t| t == "cleave_run"));
         assert!(runtime.disabled_tools.iter().any(|t| t == "memory_store"));
+    }
+
+    #[test]
+    fn delegate_prompt_explicitly_forbids_trailing_prefill_stub() {
+        let temp_dir = TempDir::new().unwrap();
+        let runner = DelegateRunner::new(
+            temp_dir.path().to_path_buf(),
+            std::sync::Arc::new(DelegateResultStore::new()),
+        );
+        let prompt = runner.build_delegate_prompt(
+            DelegateWorkerProfile::Patch,
+            "Fix the bug",
+            Some(&["src/lib.rs".into()]),
+            None,
+            "",
+        );
+        assert!(
+            prompt.contains("single final answer") && prompt.contains("trailing assistant prefill stub"),
+            "got: {prompt}"
+        );
     }
 
     #[test]
