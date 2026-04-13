@@ -79,6 +79,25 @@ def read_workspace_role(repo_root: Path) -> str | None:
     return role if isinstance(role, str) and role else None
 
 
+def ensure_release_workspace_role(repo_root: Path) -> None:
+    lease_path = repo_root / ".omegon" / "runtime" / "workspace.json"
+    payload: dict[str, object]
+    if lease_path.exists():
+        try:
+            loaded = json.loads(lease_path.read_text())
+            payload = loaded if isinstance(loaded, dict) else {}
+        except json.JSONDecodeError as err:
+            raise PreflightError(f"Could not parse workspace lease {lease_path}: {err}") from err
+    else:
+        payload = {}
+        lease_path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload["role"] = "release"
+    payload.setdefault("workspace_kind", "release")
+    payload.setdefault("label", "release")
+    lease_path.write_text(json.dumps(payload, indent=2) + "\n")
+
+
 def collect_failures(repo_root: Path) -> list[str]:
     failures: list[str] = []
 
@@ -118,9 +137,19 @@ def collect_failures(repo_root: Path) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--ensure-release-workspace-role",
+        action="store_true",
+        help="repair/create .omegon/runtime/workspace.json with role=release before exiting",
+    )
     args = parser.parse_args(argv)
 
     repo_root = args.repo_root.resolve()
+    if args.ensure_release_workspace_role:
+        ensure_release_workspace_role(repo_root)
+        print(repo_root / ".omegon" / "runtime" / "workspace.json")
+        return 0
+
     failures = collect_failures(repo_root)
     if failures:
         print("✗ Release preflight failed:", file=sys.stderr)

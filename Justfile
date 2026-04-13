@@ -286,11 +286,12 @@ rc-validate:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    ROOT=$(pwd)
+
     echo "Release validation..."
     echo "Rust warning gate..."
-    cd core && RUSTFLAGS="-D warnings" cargo check -p omegon -q
-    cd core && cargo test -p omegon 2>&1 | tail -3
-    cd ..
+    cd "$ROOT/core" && RUSTFLAGS="-D warnings" cargo check -p omegon -q
+    cd "$ROOT/core" && cargo test -p omegon 2>&1 | tail -3
 
 rc:
     #!/usr/bin/env bash
@@ -357,6 +358,9 @@ rc:
     fi
 
     echo "New version: $NEW_VERSION"
+
+    # Ensure this workspace presents release authority before preflight.
+    python3 scripts/release_preflight.py --ensure-release-workspace-role --repo-root .
 
     # Preflight before any mutation.
     echo "Release preflight..."
@@ -460,8 +464,11 @@ rc:
     echo "Pushing rc tag..."
     git push origin main "v${NEW_VERSION}"
 
+    echo "Publishing GitHub prerelease..."
+    gh release edit "v${NEW_VERSION}" --draft=false --prerelease
+
     echo ""
-    echo "✓ ${NEW_VERSION} — preflighted, committed, tagged, built, pushed."
+    echo "✓ ${NEW_VERSION} — preflighted, committed, tagged, built, pushed, published."
 
 # Release preflight: verify repo is releasable BEFORE any version mutation.
 # Checks: on main, clean tree, release line is an RC, changelog target exists,

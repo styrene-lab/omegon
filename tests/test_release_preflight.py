@@ -119,6 +119,35 @@ class ReleaseRecipeTests(unittest.TestCase):
             "rc recipe should relink the local binary before pushing/tag completion output",
         )
 
+    def test_rc_recipe_self_sets_release_workspace_role_before_preflight(self) -> None:
+        justfile = (ROOT / "justfile").read_text()
+        rc_start = justfile.index("rc:\n")
+        preflight_start = justfile.index("# Release preflight:")
+        rc_block = justfile[rc_start:preflight_start]
+
+        repair_line = 'python3 scripts/release_preflight.py --ensure-release-workspace-role --repo-root .'
+        preflight_line = 'python3 scripts/release_preflight.py\n'
+        self.assertIn(repair_line, rc_block)
+        self.assertIn(preflight_line, rc_block)
+        self.assertLess(
+            rc_block.index(repair_line),
+            rc_block.rindex(preflight_line),
+            "rc recipe should repair workspace role before preflight",
+        )
+
+    def test_rc_recipe_publishes_github_prerelease_before_success(self) -> None:
+        justfile = (ROOT / "justfile").read_text()
+        rc_start = justfile.index("rc:\n")
+        preflight_start = justfile.index("# Release preflight:")
+        rc_block = justfile[rc_start:preflight_start]
+
+        self.assertIn('gh release edit "v${NEW_VERSION}" --draft=false --prerelease', rc_block)
+        self.assertLess(
+            rc_block.index('gh release edit "v${NEW_VERSION}" --draft=false --prerelease'),
+            rc_block.index('echo "✓ ${NEW_VERSION} — preflighted, committed, tagged, built, pushed, published."'),
+            "rc recipe should publish the prerelease before declaring success",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
