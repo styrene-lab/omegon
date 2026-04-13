@@ -2802,7 +2802,7 @@ mod tests {
         detector.record(&call, false);
         let warning = detector.check();
         assert!(warning.is_some());
-        assert!(warning.unwrap().contains("same arguments"));
+        assert!(warning.unwrap().message.contains("same arguments"));
     }
 
     #[test]
@@ -4133,9 +4133,9 @@ mod tests {
             );
         }
         let warning = detector.check().expect("warning");
-        assert!(warning.contains("same file multiple times"), "got: {warning}");
-        assert!(warning.contains("edit, validate, or summarize"), "got: {warning}");
-        assert!(!warning.contains("same arguments 3 times"), "got: {warning}");
+        assert!(warning.message.contains("same file multiple times"), "got: {warning}");
+        assert!(warning.message.contains("edit, validate, or summarize"), "got: {warning}");
+        assert!(!warning.message.contains("same arguments 3 times"), "got: {warning}");
     }
 
     #[test]
