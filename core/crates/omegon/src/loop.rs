@@ -426,7 +426,7 @@ fn is_first_turn_orientation_churn(
 
 fn should_inject_execution_pressure(
     turn: u32,
-    config: &LoopConfig,
+    _config: &LoopConfig,
     conversation: &ConversationState,
     tool_calls: &[ToolCall],
 ) -> bool {
