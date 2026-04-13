@@ -18,6 +18,7 @@ use omegon_traits::{
     TurnEndReason,
 };
 
+use futures_util::stream::{self, StreamExt};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -2242,7 +2243,6 @@ async fn dispatch_tools(
             if is_mutation_tool(&call.name)
                 && let Some(path_str) = extract_mutation_path(&call.arguments)
             {
-                // Resolve against cwd — same as tools/mod.rs resolve_path
                 let full = cwd.join(&path_str);
                 if full.exists() {
                     if !snapshots.contains_key(&full)
@@ -2251,7 +2251,6 @@ async fn dispatch_tools(
                         snapshots.insert(full, content);
                     }
                 } else {
-                    // File doesn't exist yet — mark for deletion on rollback
                     created_files.push(full);
                 }
             }
@@ -2267,91 +2266,49 @@ async fn dispatch_tools(
         }
     }
 
+    let cwd_buf = cwd.to_path_buf();
+
+    let mut serial_calls: Vec<(usize, ToolCall)> = Vec::new();
+    let mut parallel_calls: Vec<(usize, ToolCall)> = Vec::new();
+    let allow_parallel_read_only = !batch_mode && secrets.is_none();
+    for (idx, call) in tool_calls.iter().cloned().enumerate() {
+        if allow_parallel_read_only && is_parallel_safe_read_only_tool(&call.name) {
+            parallel_calls.push((idx, call));
+        } else {
+            serial_calls.push((idx, call));
+        }
+    }
+
+    let mut indexed_results: Vec<(usize, ToolResultEntry)> = Vec::with_capacity(tool_calls.len());
+
+    if !parallel_calls.is_empty() {
+        let parallel_outcomes = stream::iter(parallel_calls.into_iter().map(|(idx, call)| {
+            let events = events.clone();
+            let cancel = cancel.clone();
+            async move {
+                let result = dispatch_single_tool(bus, &call, &events, cancel, None).await;
+                (idx, result)
+            }
+        }))
+        .buffer_unordered(4)
+        .collect::<Vec<_>>()
+        .await;
+        indexed_results.extend(parallel_outcomes);
+    }
+
     let mut batch_failed = false;
 
-    for call in tool_calls {
-        // ── Tool guard check ────────────────────────────────────────
-        if let Some(sm) = secrets
-            && let Some(decision) = sm.check_guard(&call.name, &call.arguments)
-            && decision.is_block()
-        {
-            let msg = match &decision {
-                omegon_secrets::GuardDecision::Block { reason, path } => {
-                    format!("Blocked: {reason} ({path})")
-                }
-                _ => unreachable!(),
-            };
-            tracing::warn!(tool = call.name, %msg, "tool guard blocked");
-            let _ = events.send(AgentEvent::ToolEnd {
-                id: call.id.clone(),
-                name: call.name.clone(),
-                result: omegon_traits::ToolResult {
-                    content: vec![ContentBlock::Text { text: msg.clone() }],
-                    details: Value::Null,
-                },
-                is_error: true,
-            });
-            results.push(ToolResultEntry {
-                call_id: call.id.clone(),
-                tool_name: call.name.clone(),
-                content: vec![ContentBlock::Text { text: msg }],
-                is_error: true,
-                args_summary: summarize_tool_args(&call.name, &call.arguments),
-            });
-            continue;
-        }
+    for (idx, call) in serial_calls {
+        let dispatched = dispatch_single_tool(bus, &call, events, cancel.clone(), secrets).await;
 
-        let _ = events.send(AgentEvent::ToolStart {
-            id: call.id.clone(),
-            name: call.name.clone(),
-            args: call.arguments.clone(),
-        });
-
-        // Build a progress sink that turns each partial ToolResult into a
-        // ToolUpdate event on the broadcast channel. Runners that don't
-        // override execute_with_sink (the default) simply discard the sink
-        // and behave exactly as before.
-        let sink_events = events.clone();
-        let sink_call_id = call.id.clone();
-        let sink = omegon_traits::ToolProgressSink::from_fn(move |partial| {
-            let _ = sink_events.send(AgentEvent::ToolUpdate {
-                id: sink_call_id.clone(),
-                partial,
-            });
-        });
-
-        let (result, is_error) = match bus
-            .execute_tool_with_sink(
-                &call.name,
-                &call.id,
-                call.arguments.clone(),
-                cancel.clone(),
-                sink,
-            )
-            .await
-        {
-            Ok(result) => (result, false),
-            Err(e) => (
-                omegon_traits::ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: e.to_string(),
-                    }],
-                    details: Value::Null,
-                },
-                true,
-            ),
-        };
-
-        // Track which files were successfully mutated (for rollback)
-        if !is_error
+        if !dispatched.is_error
             && is_mutation_tool(&call.name)
             && let Some(path_str) = extract_mutation_path(&call.arguments)
         {
-            mutated_files.push(cwd.join(&path_str));
+            mutated_files.push(cwd_buf.join(&path_str));
         }
 
-        // ── Auto-batch rollback on mutation failure ─────────────────
-        if is_error && batch_mode && is_mutation_tool(&call.name) && !mutated_files.is_empty() {
+        if dispatched.is_error && batch_mode && is_mutation_tool(&call.name) && !mutated_files.is_empty() {
             batch_failed = true;
             tracing::warn!(
                 failed_tool = call.name,
@@ -2365,21 +2322,17 @@ async fn dispatch_tools(
                 if let Some(original) = snapshots.get(file) {
                     match tokio::fs::write(file, original).await {
                         Ok(_) => rollback_report.push(format!("  ✓ restored {}", file.display())),
-                        Err(e) => rollback_report
-                            .push(format!("  ✗ rollback failed {}: {e}", file.display())),
+                        Err(e) => rollback_report.push(format!("  ✗ rollback failed {}: {e}", file.display())),
                     }
                 } else if created_files.contains(file) {
-                    // File was newly created — delete it
                     match tokio::fs::remove_file(file).await {
                         Ok(_) => rollback_report.push(format!("  ✓ removed {}", file.display())),
-                        Err(e) => rollback_report
-                            .push(format!("  ✗ remove failed {}: {e}", file.display())),
+                        Err(e) => rollback_report.push(format!("  ✗ remove failed {}: {e}", file.display())),
                     }
                 }
             }
 
-            // Append rollback info to the error result
-            let mut error_text = result
+            let mut error_text = dispatched
                 .content
                 .iter()
                 .filter_map(|c| c.as_text())
@@ -2400,20 +2353,19 @@ async fn dispatch_tools(
                 is_error: true,
             });
 
-            results.push(ToolResultEntry {
-                call_id: call.id.clone(),
-                tool_name: call.name.clone(),
-                content: vec![ContentBlock::Text { text: error_text }],
-                is_error: true,
-                args_summary: summarize_tool_args(&call.name, &call.arguments),
-            });
-
-            // Skip remaining mutations — they'd operate on rolled-back state
-            // Continue dispatching non-mutation tools (reads, bash, etc.)
+            indexed_results.push((
+                idx,
+                ToolResultEntry {
+                    call_id: call.id.clone(),
+                    tool_name: call.name.clone(),
+                    content: vec![ContentBlock::Text { text: error_text }],
+                    is_error: true,
+                    args_summary: summarize_tool_args(&call.name, &call.arguments),
+                },
+            ));
             continue;
         }
 
-        // Skip remaining mutations if we've already rolled back
         if batch_failed && is_mutation_tool(&call.name) {
             let skip_text = format!(
                 "Skipped {} — previous edit in this turn failed and triggered rollback.",
@@ -2430,50 +2382,129 @@ async fn dispatch_tools(
                 },
                 is_error: true,
             });
-            results.push(ToolResultEntry {
-                call_id: call.id.clone(),
-                tool_name: call.name.clone(),
-                content: vec![ContentBlock::Text { text: skip_text }],
-                is_error: true,
-                args_summary: summarize_tool_args(&call.name, &call.arguments),
-            });
+            indexed_results.push((
+                idx,
+                ToolResultEntry {
+                    call_id: call.id.clone(),
+                    tool_name: call.name.clone(),
+                    content: vec![ContentBlock::Text { text: skip_text }],
+                    is_error: true,
+                    args_summary: summarize_tool_args(&call.name, &call.arguments),
+                },
+            ));
             continue;
         }
 
-        // ── Redact secrets from output ────────────────────────────
-        let mut final_content = result.content;
-        if let Some(sm) = secrets {
-            sm.redact_content(&mut final_content);
-        }
+        indexed_results.push((idx, dispatched));
+    }
 
-        // ── Cap feature tool output ───────────────────────────────
-        // Native tools (bash, read, view) self-limit; this catches
-        // feature tools (memory_*, design_tree, cleave_*) that can
-        // return unbounded JSON/markdown. 16K chars ≈ 4K tokens —
-        // generous enough for any legitimate tool response.
-        const MAX_TOOL_OUTPUT_CHARS: usize = 16_000;
-        crate::util::truncate_content_blocks(&mut final_content, MAX_TOOL_OUTPUT_CHARS);
+    indexed_results.sort_by_key(|(idx, _)| *idx);
+    results.extend(indexed_results.into_iter().map(|(_, result)| result));
+    results
+}
 
+fn is_parallel_safe_read_only_tool(name: &str) -> bool {
+    matches!(name, "read" | "view" | "web_search" | "whoami" | "chronos")
+}
+
+async fn dispatch_single_tool(
+    bus: &crate::bus::EventBus,
+    call: &ToolCall,
+    events: &broadcast::Sender<AgentEvent>,
+    cancel: CancellationToken,
+    secrets: Option<&omegon_secrets::SecretsManager>,
+) -> ToolResultEntry {
+    if let Some(sm) = secrets
+        && let Some(decision) = sm.check_guard(&call.name, &call.arguments)
+        && decision.is_block()
+    {
+        let msg = match &decision {
+            omegon_secrets::GuardDecision::Block { reason, path } => {
+                format!("Blocked: {reason} ({path})")
+            }
+            _ => unreachable!(),
+        };
+        tracing::warn!(tool = call.name, %msg, "tool guard blocked");
         let _ = events.send(AgentEvent::ToolEnd {
             id: call.id.clone(),
             name: call.name.clone(),
             result: omegon_traits::ToolResult {
-                content: final_content.clone(),
-                details: result.details,
+                content: vec![ContentBlock::Text { text: msg.clone() }],
+                details: Value::Null,
             },
-            is_error,
+            is_error: true,
         });
-
-        results.push(ToolResultEntry {
+        return ToolResultEntry {
             call_id: call.id.clone(),
             tool_name: call.name.clone(),
-            content: final_content,
-            is_error,
+            content: vec![ContentBlock::Text { text: msg }],
+            is_error: true,
             args_summary: summarize_tool_args(&call.name, &call.arguments),
-        });
+        };
     }
 
-    results
+    let _ = events.send(AgentEvent::ToolStart {
+        id: call.id.clone(),
+        name: call.name.clone(),
+        args: call.arguments.clone(),
+    });
+
+    let sink_events = events.clone();
+    let sink_call_id = call.id.clone();
+    let sink = omegon_traits::ToolProgressSink::from_fn(move |partial| {
+        let _ = sink_events.send(AgentEvent::ToolUpdate {
+            id: sink_call_id.clone(),
+            partial,
+        });
+    });
+
+    let (result, is_error) = match bus
+        .execute_tool_with_sink(
+            &call.name,
+            &call.id,
+            call.arguments.clone(),
+            cancel,
+            sink,
+        )
+        .await
+    {
+        Ok(result) => (result, false),
+        Err(e) => (
+            omegon_traits::ToolResult {
+                content: vec![ContentBlock::Text {
+                    text: e.to_string(),
+                }],
+                details: Value::Null,
+            },
+            true,
+        ),
+    };
+
+    let mut final_content = result.content;
+    if let Some(sm) = secrets {
+        sm.redact_content(&mut final_content);
+    }
+
+    const MAX_TOOL_OUTPUT_CHARS: usize = 16_000;
+    crate::util::truncate_content_blocks(&mut final_content, MAX_TOOL_OUTPUT_CHARS);
+
+    let _ = events.send(AgentEvent::ToolEnd {
+        id: call.id.clone(),
+        name: call.name.clone(),
+        result: omegon_traits::ToolResult {
+            content: final_content.clone(),
+            details: result.details,
+        },
+        is_error,
+    });
+
+    ToolResultEntry {
+        call_id: call.id.clone(),
+        tool_name: call.name.clone(),
+        content: final_content,
+        is_error,
+        args_summary: summarize_tool_args(&call.name, &call.arguments),
+    }
 }
 
 /// Is this tool a file mutation (edit, write)?
@@ -3029,6 +3060,80 @@ mod tests {
             !text.contains("rollback"),
             "single edit should have no batch overhead"
         );
+    }
+
+    #[tokio::test]
+    async fn parallel_safe_read_only_tools_dispatch_concurrently() {
+        use omegon_traits::ToolResult;
+        use tokio::time::{Duration, Instant, sleep};
+
+        struct SlowReadOnlyProvider;
+
+        #[async_trait::async_trait]
+        impl ToolProvider for SlowReadOnlyProvider {
+            fn tools(&self) -> Vec<omegon_traits::ToolDefinition> {
+                vec![
+                    omegon_traits::ToolDefinition {
+                        name: "read".into(),
+                        label: "read".into(),
+                        description: "read file".into(),
+                        parameters: serde_json::json!({}),
+                    },
+                    omegon_traits::ToolDefinition {
+                        name: "view".into(),
+                        label: "view".into(),
+                        description: "view file".into(),
+                        parameters: serde_json::json!({}),
+                    },
+                ]
+            }
+
+            async fn execute(
+                &self,
+                _tool_name: &str,
+                _call_id: &str,
+                _args: Value,
+                _cancel: CancellationToken,
+            ) -> anyhow::Result<ToolResult> {
+                sleep(Duration::from_millis(150)).await;
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text { text: "ok".into() }],
+                    details: Value::Null,
+                })
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut bus = crate::bus::EventBus::new();
+        bus.register(Box::new(crate::features::adapter::ToolAdapter::new(
+            "test-read-only",
+            Box::new(SlowReadOnlyProvider),
+        )));
+        bus.finalize();
+
+        let (events_tx, _rx) = broadcast::channel(64);
+        let cancel = CancellationToken::new();
+        let calls = vec![
+            ToolCall {
+                id: "1".into(),
+                name: "read".into(),
+                arguments: serde_json::json!({"path": "a.txt"}),
+            },
+            ToolCall {
+                id: "2".into(),
+                name: "view".into(),
+                arguments: serde_json::json!({"path": "b.txt"}),
+            },
+        ];
+
+        let start = Instant::now();
+        let results = dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None).await;
+        let elapsed = start.elapsed();
+
+        assert_eq!(results.len(), 2);
+        assert!(elapsed < Duration::from_millis(260), "expected parallel dispatch, got {elapsed:?}");
+        assert_eq!(results[0].tool_name, "read");
+        assert_eq!(results[1].tool_name, "view");
     }
 
     // ── Turn limit + config tests ──────────────────────────────────────
