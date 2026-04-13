@@ -68,6 +68,8 @@ pub struct FooterData {
     pub thinking_level: String,
     /// Current posture name (for engine panel display).
     pub posture: String,
+    /// Short runtime brand shown in engine chrome ("OM" in slim, "Omegon" in full).
+    pub runtime_brand: String,
     /// Current runtime principal (descriptive identity only).
     pub principal_id: String,
     /// Current authorization summary (descriptive only).
@@ -216,10 +218,15 @@ impl FooterData {
         )));
 
         if !self.posture.is_empty() {
+            let posture_text = if self.runtime_brand.is_empty() {
+                self.posture.clone()
+            } else {
+                format!("{} · {}", self.posture, self.runtime_brand)
+            };
             push_row(
                 &mut lines,
                 "posture",
-                self.posture.clone(),
+                posture_text,
                 value_width,
                 t.border_dim(),
                 t.accent(),
@@ -1586,6 +1593,8 @@ mod tests {
             session_output_tokens: 3_000,
             turn: 7,
             thinking_level: "high".into(),
+            posture: "Architect".into(),
+            runtime_brand: "OM".into(),
             model_tier: "victory".into(),
             provider_connected: true,
             is_oauth: true,
@@ -1601,6 +1610,7 @@ mod tests {
         // model name is on its own row; tier + thinking on the next
         assert!(text.contains("gpt-5.4"), "got {text}");
         assert!(text.contains("version"), "got {text}");
+        assert!(text.contains("Architect · OM"), "got {text}");
         assert!(
             text.contains("Victory · High") || text.contains("victory · high"),
             "got {text}"

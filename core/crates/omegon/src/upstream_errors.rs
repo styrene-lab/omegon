@@ -510,6 +510,7 @@ pub(crate) fn is_malformed_history(msg: &str) -> bool {
         || lower.contains("must have a corresponding")
         || lower.contains("field required")
         || lower.contains("does not match pattern")
+        || lower.contains("at least one message is required")
 }
 
 fn apply_error_rules(
@@ -612,6 +613,9 @@ mod tests {
             "role must alternate between user and assistant"
         ));
         assert!(is_malformed_history("thinking.signature is required"));
+        assert!(is_malformed_history(
+            "messages: at least one message is required"
+        ));
         assert!(!is_malformed_history("rate limit exceeded"));
     }
 

@@ -1419,6 +1419,19 @@ fn ui_status_lists_toggle_controls() {
 }
 
 #[test]
+fn slash_help_lists_ui_and_runtime_mode_commands() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let result = app.handle_slash_command("/help", &tx);
+    let SlashResult::Display(text) = result else {
+        panic!("expected display");
+    };
+    assert!(text.contains("/ui"), "{text}");
+    assert!(text.contains("/shackle"), "{text}");
+    assert!(text.contains("/unshackle"), "{text}");
+}
+
+#[test]
 fn empty_editor_hint_mentions_focus_hotkey() {
     let mut app = test_app();
     let rendered = render_app_to_string(&mut app, 100, 20);

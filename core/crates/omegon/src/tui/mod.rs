@@ -2881,6 +2881,11 @@ impl App {
             self.footer_data.context_window = s.context_window;
             self.footer_data.thinking_level = s.thinking.as_str().to_string();
             self.footer_data.posture = s.posture.effective.display_name().to_string();
+            self.footer_data.runtime_brand = if matches!(self.ui_mode, UiMode::Slim) {
+                "OM".to_string()
+            } else {
+                "Omegon".to_string()
+            };
             self.footer_data.principal_id = s
                 .operating_profile()
                 .identity
@@ -3744,6 +3749,11 @@ impl App {
             "update",
             "check for and install updates",
             &["install", "channel"],
+        ),
+        (
+            "ui",
+            "switch UI presets or toggle individual surfaces",
+            &["status", "full", "slim", "show", "hide", "toggle"],
         ),
         ("shackle", "switch to slim constrained mode", &[]),
         ("unshackle", "switch to full harness mode", &[]),
@@ -6188,12 +6198,12 @@ pub async fn run_tui(
             if s.slim_mode {
                 brief.push_str("\n  Lean coding loop: inspect → edit → validate");
                 brief.push_str("\n  /ui full  reveal dashboard + instruments");
-                brief.push_str("\n  /model    switch provider   /help   commands");
-                brief.push_str("\n  /new      fresh session     Ctrl+R  search history");
+                brief.push_str("\n  /unshackle  switch to omegon mode   /help  commands");
+                brief.push_str("\n  /model      switch provider          Ctrl+R search history");
             } else {
                 brief.push_str("\n  /model  switch provider    /think  reasoning level");
-                brief.push_str("\n  /new    fresh session        /help   all commands");
-                brief.push_str("\n  Ctrl+R  search history      Ctrl+C  cancel/quit");
+                brief.push_str("\n  /shackle  lean OM mode     /help   all commands");
+                brief.push_str("\n  Ctrl+R    search history   Ctrl+C  cancel/quit");
             }
             app.conversation.push_system(&brief);
             // Orientation line: what the model was doing last
@@ -6226,13 +6236,13 @@ pub async fn run_tui(
             welcome.push('\n');
             if s.slim_mode {
                 welcome.push_str("\n  Lean coding loop: inspect → edit → validate");
-                welcome.push_str("\n  /ui full  reveal dashboard + instruments");
-                welcome.push_str("\n  /model    switch provider   /help   commands");
-                welcome.push_str("\n  Ctrl+R    search history    Ctrl+C  cancel/quit");
+                welcome.push_str("\n  /ui full     reveal dashboard + instruments");
+                welcome.push_str("\n  /unshackle   switch to omegon mode   /help commands");
+                welcome.push_str("\n  Ctrl+R       search history          Ctrl+C cancel/quit");
             } else {
-                welcome.push_str("\n  /model  switch provider    /think  reasoning level");
-                welcome.push_str("\n  /context  context class      /help   all commands");
-                welcome.push_str("\n  Ctrl+R  search history      Ctrl+C  cancel/quit");
+                welcome.push_str("\n  /model    switch provider    /think    reasoning level");
+                welcome.push_str("\n  /shackle  lean OM mode       /context  context class");
+                welcome.push_str("\n  Ctrl+R    search history     Ctrl+C   cancel/quit");
             }
             app.conversation.push_system(&welcome);
 

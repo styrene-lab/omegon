@@ -637,6 +637,34 @@ impl ConversationState {
         // messages (keep the last one — it's the most recent).
         enforce_role_alternation(&mut messages);
 
+        // Repair can leave a structurally-empty assistant turn behind
+        // (no text, no tool calls, no raw provider blocks). Drop those before
+        // final fallback synthesis.
+        messages.retain(|msg| match msg {
+            LlmMessage::Assistant {
+                text,
+                thinking,
+                tool_calls,
+                raw,
+            } => {
+                !text.is_empty()
+                    || !thinking.is_empty()
+                    || !tool_calls.is_empty()
+                    || raw.as_ref().is_some_and(|value| !value.is_null())
+            }
+            _ => true,
+        });
+
+        // Some repair paths can strip every remaining message. Anthropic rejects
+        // an empty `messages` array with `messages: at least one message is required`.
+        // Keep a minimal user turn so provider retries always have legal shape.
+        if messages.is_empty() {
+            messages.push(LlmMessage::User {
+                content: self.render_intent_for_injection(),
+                images: vec![],
+            });
+        }
+
         messages
     }
 
@@ -2301,5 +2329,42 @@ mod tests {
         assert_eq!(conv.message_count(), 3);
         conv.decay_oldest(2);
         assert_eq!(conv.message_count(), 1);
+    }
+
+    #[test]
+    fn build_llm_view_never_returns_empty_after_repair_strips_everything() {
+        let mut conv = ConversationState::new();
+        conv.intent.current_task = Some("Recover provider-compatible history".into());
+        conv.canonical.push(AgentMessage::Assistant(
+            AssistantMessage {
+                tool_calls: vec![ToolCall {
+                    id: "t1".into(),
+                    name: "read".into(),
+                    arguments: Value::Null,
+                }],
+                ..Default::default()
+            },
+            0,
+        ));
+        conv.canonical.push(AgentMessage::ToolResult(
+            ToolResultEntry {
+                call_id: "orphaned".into(),
+                tool_name: "read".into(),
+                content: vec![omegon_traits::ContentBlock::Text { text: "out".into() }],
+                is_error: false,
+                args_summary: None,
+            },
+            0,
+        ));
+
+        let view = conv.build_llm_view();
+        assert_eq!(view.len(), 1, "got {view:?}");
+        match &view[0] {
+            LlmMessage::User { content, .. } => {
+                assert!(content.contains("Intent — session state"), "{content}");
+                assert!(content.contains("Recover provider-compatible history"), "{content}");
+            }
+            other => panic!("expected fallback user message, got {other:?}"),
+        }
     }
 }
