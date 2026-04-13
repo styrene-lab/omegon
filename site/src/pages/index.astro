@@ -293,32 +293,35 @@ const modeBody = isPreviewSite
     align-items: center;
     justify-content: center;
     padding: 12px 18px;
-    border-radius: 999px;
+    border-radius: 2px;
     font-weight: 700;
     text-decoration: none;
     border: 1px solid var(--border);
+    letter-spacing: 0.02em;
   }
 
   .btn-primary {
-    background: linear-gradient(135deg, var(--accent), #188ea3);
-    color: #041018;
-    border-color: transparent;
+    background: transparent;
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   .btn-primary:hover {
-    color: #041018;
+    color: var(--fg);
     text-decoration: none;
-    filter: brightness(1.06);
+    background: rgba(42, 180, 200, 0.08);
   }
 
   .btn-secondary {
     color: var(--fg);
-    background: rgba(10, 16, 32, 0.7);
+    background: transparent;
+    border-color: var(--border-dim);
   }
 
   .btn-secondary:hover {
     text-decoration: none;
     border-color: var(--accent-muted);
+    background: rgba(26, 68, 88, 0.12);
   }
 
   .hero-proof-row {
@@ -329,11 +332,13 @@ const modeBody = isPreviewSite
 
   .hero-proof-row span {
     border: 1px solid var(--border-dim);
-    background: rgba(8, 14, 26, 0.7);
+    background: transparent;
     color: var(--muted);
-    border-radius: 999px;
+    border-radius: 0;
     padding: 8px 12px;
-    font-size: 13px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
   .hero-rail {
@@ -345,13 +350,13 @@ const modeBody = isPreviewSite
   .install-panel,
   .value-card,
   .stat-card {
-    background: linear-gradient(180deg, rgba(8, 14, 26, 0.96), rgba(4, 8, 18, 0.96));
-    border: 1px solid rgba(42, 180, 200, 0.15);
-    box-shadow: inset 0 1px 0 rgba(110, 202, 216, 0.06);
+    background: rgba(6, 10, 20, 0.94);
+    border: 1px solid rgba(42, 180, 200, 0.12);
+    box-shadow: none;
   }
 
   .brand-panel {
-    border-radius: 24px;
+    border-radius: 0;
     padding: 20px 22px;
     display: grid;
     grid-template-columns: 110px 1fr;
@@ -373,7 +378,7 @@ const modeBody = isPreviewSite
   }
 
   .install-panel {
-    border-radius: 24px;
+    border-radius: 0;
     padding: 24px;
   }
 
@@ -396,9 +401,9 @@ const modeBody = isPreviewSite
   .install-command {
     margin: 0;
     padding: 16px 52px 16px 18px;
-    background: rgba(9, 18, 34, 0.9);
+    background: rgba(4, 8, 18, 0.92);
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: 0;
     font-size: 14px;
     color: var(--accent);
     overflow-x: auto;
@@ -421,7 +426,7 @@ const modeBody = isPreviewSite
     cursor: pointer;
     color: var(--muted);
     padding: 6px;
-    border-radius: 8px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -430,7 +435,7 @@ const modeBody = isPreviewSite
 
   .copy-btn:hover {
     color: var(--fg);
-    background: rgba(26, 68, 88, 0.28);
+    background: rgba(26, 68, 88, 0.16);
   }
 
   .copy-btn.copied {
@@ -492,7 +497,7 @@ const modeBody = isPreviewSite
   }
 
   .stat-card {
-    border-radius: 18px;
+    border-radius: 0;
     padding: 18px;
     display: flex;
     flex-direction: column;
@@ -538,7 +543,7 @@ const modeBody = isPreviewSite
   }
 
   .value-card {
-    border-radius: 20px;
+    border-radius: 0;
     padding: 22px;
     min-height: 200px;
   }
