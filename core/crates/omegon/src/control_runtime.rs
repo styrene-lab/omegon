@@ -727,7 +727,7 @@ pub async fn switch_dispatcher_response(
     SlashCommandResponse {
         accepted: true,
         output: Some(match requested_model_spec.as_str() {
-            s if requested_model.is_some() => format!(
+            _s if requested_model.is_some() => format!(
                 "Dispatcher switched to {normalized_profile} (request {request_id}) using {effective_model}."
             ),
             _ => format!("Dispatcher switched to {normalized_profile} (request {request_id})."),
