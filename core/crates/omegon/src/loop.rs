@@ -1041,8 +1041,25 @@ pub async fn run(
 
         // ─── Stuck detection ────────────────────────────────────────
         if let Some(warning) = stuck_detector.check() {
-            tracing::info!("Stuck detector: {warning}");
-            conversation.push_user(format!("[System: {warning}]"));
+            tracing::info!(
+                consecutive = warning.consecutive,
+                "Stuck detector: {}",
+                warning.message
+            );
+            if warning.consecutive >= 3 {
+                tracing::warn!(
+                    "Stuck detector escalation — force-breaking agent loop after {} consecutive warnings",
+                    warning.consecutive
+                );
+                conversation.push_user(
+                    "[System: STUCK LOOP DETECTED. You have been repeating the same \
+                     actions for multiple turns despite warnings. Stop using tools. \
+                     Summarize what you know so far and respond to the user.]"
+                        .to_string(),
+                );
+                break;
+            }
+            conversation.push_user(format!("[System: {}]", warning.message));
         }
 
         // ─── Compaction check ────────────────────────────────────────
@@ -2528,11 +2545,25 @@ fn has_mutations(conversation: &ConversationState) -> bool {
 // ─── Stuck detection ────────────────────────────────────────────────────────
 
 /// Detects pathological tool-call patterns that indicate the agent is stuck.
+struct StuckWarning {
+    message: String,
+    /// How many consecutive turns the detector has fired.
+    consecutive: u32,
+}
+
+impl std::fmt::Display for StuckWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
 struct StuckDetector {
     /// Recent tool calls as (name, args_hash, was_error)
     recent: Vec<(String, u64, bool)>,
     /// Window size for pattern detection
     window: usize,
+    /// Number of consecutive turns where a stuck pattern was detected.
+    consecutive_warnings: u32,
 }
 
 impl StuckDetector {
@@ -2540,6 +2571,7 @@ impl StuckDetector {
         Self {
             recent: Vec::new(),
             window: 10,
+            consecutive_warnings: 0,
         }
     }
 
@@ -2552,10 +2584,11 @@ impl StuckDetector {
         }
     }
 
-    /// Check for stuck patterns. Returns a warning message if detected.
-    fn check(&self) -> Option<String> {
+    /// Check for stuck patterns. Returns a warning with escalation level if detected.
+    fn check(&mut self) -> Option<StuckWarning> {
         let len = self.recent.len();
         if len < 3 {
+            self.consecutive_warnings = 0;
             return None;
         }
 
@@ -2574,21 +2607,27 @@ impl StuckDetector {
                 *hash_counts.entry(*h).or_default() += 1;
             }
             if hash_counts.values().any(|&c| c >= 3) {
-                return Some(
-                    "You've read the same file multiple times without modifying it. \
-                     Stop rereading and either edit, validate, or summarize the blocker plainly."
+                self.consecutive_warnings += 1;
+                return Some(StuckWarning {
+                    message: "You've read the same file multiple times without modifying it. \
+                         Stop rereading and either edit, validate, or summarize the blocker plainly."
                         .into(),
-                );
+                    consecutive: self.consecutive_warnings,
+                });
             }
         }
 
         // Pattern 2: Same tool + same args called 3+ times
         if let Some(repeated) = self.find_repeated_call(window, 3) {
-            return Some(format!(
-                "You've called `{}` with the same arguments {} times. \
-                 If it's not producing the result you need, try a different approach.",
-                repeated.0, repeated.1
-            ));
+            self.consecutive_warnings += 1;
+            return Some(StuckWarning {
+                message: format!(
+                    "You've called `{}` with the same arguments {} times. \
+                     If it's not producing the result you need, try a different approach.",
+                    repeated.0, repeated.1
+                ),
+                consecutive: self.consecutive_warnings,
+            });
         }
 
         // Pattern 3: Edit failures — repeated error on the same tool
@@ -2596,16 +2635,21 @@ impl StuckDetector {
         if recent_errors.len() >= 3 {
             let names: Vec<_> = recent_errors.iter().map(|(n, _, _)| n.as_str()).collect();
             if names.windows(3).any(|w| w[0] == w[1] && w[1] == w[2]) {
-                return Some(format!(
-                    "Your last several `{}` calls returned errors. \
-                     Consider reading the current file state before retrying.",
-                    recent_errors.last().unwrap().0
-                ));
+                self.consecutive_warnings += 1;
+                return Some(StuckWarning {
+                    message: format!(
+                        "Your last several `{}` calls returned errors. \
+                         Consider reading the current file state before retrying.",
+                        recent_errors.last().unwrap().0
+                    ),
+                    consecutive: self.consecutive_warnings,
+                });
             }
         }
 
         // Pattern 3: read-without-modify loop handled before generic repeated-call warning.
 
+        self.consecutive_warnings = 0;
         None
     }
 
