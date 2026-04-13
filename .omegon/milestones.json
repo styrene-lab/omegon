@@ -801,5 +801,12 @@
     ],
     "rc_version": "0.15.10-rc.90",
     "last_rc": "2026-04-13T02:42:31Z"
+  },
+  "nightly": {
+    "status": "nightly",
+    "channel": "nightly",
+    "version": "0.15.10-nightly.20260413",
+    "last_build": "2026-04-13T09:14:09Z",
+    "build_count": 1
   }
 }
