@@ -141,12 +141,17 @@ class ReleaseRecipeTests(unittest.TestCase):
         preflight_start = justfile.index("# Release preflight:")
         rc_block = justfile[rc_start:preflight_start]
 
-        self.assertIn('gh release view "v${NEW_VERSION}" >/dev/null 2>&1', rc_block)
+        self.assertIn('Waiting for release artifacts...', rc_block)
+        self.assertIn('release-manifest.json', rc_block)
         self.assertIn('gh release edit "v${NEW_VERSION}" --draft=false --prerelease', rc_block)
-        self.assertIn('gh release create "v${NEW_VERSION}" --prerelease --title "${NEW_VERSION}" --notes "Release candidate ${NEW_VERSION} cut from main."', rc_block)
         self.assertLess(
-            rc_block.index('gh release view "v${NEW_VERSION}" >/dev/null 2>&1'),
-            rc_block.index('echo "✓ ${NEW_VERSION} — preflighted, committed, tagged, built, pushed, published."'),
+            rc_block.index('Waiting for release artifacts...'),
+            rc_block.index('gh release edit "v${NEW_VERSION}" --draft=false --prerelease'),
+            "rc recipe should wait for release artifacts before publishing",
+        )
+        self.assertLess(
+            rc_block.index('gh release edit "v${NEW_VERSION}" --draft=false --prerelease'),
+            rc_block.index('echo "✓ ${NEW_VERSION} — preflighted, committed, tagged, built, pushed, assets uploaded, published."'),
             "rc recipe should publish the prerelease before declaring success",
         )
 
