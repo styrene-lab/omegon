@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 87,
+    "rc_count": 88,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -770,6 +770,7 @@
       "fix(web): support canceling cleave children from dashboard",
       "fix(workspace): enforce release and benchmark roles",
       "fix(workspace): stop tracking nested runtime lease state",
+      "perf(loop): parallelize safe read-only tool dispatch",
       "refactor(auth): route slash auth through typed runtime handlers",
       "refactor(child): share headless child-agent launcher between cleave and delegate",
       "refactor(context): route request packs through shadow selector",
@@ -811,7 +812,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.93",
-    "last_rc": "2026-04-13T14:18:14Z"
+    "rc_version": "0.15.10-rc.94",
+    "last_rc": "2026-04-13T14:53:17Z"
   }
 }
