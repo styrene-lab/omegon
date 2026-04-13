@@ -635,6 +635,29 @@ fn strip_parameter_descriptions(value: &Value) -> Value {
     }
 }
 
+fn openai_function_parameters(value: &Value) -> Value {
+    let stripped = strip_parameter_descriptions(value);
+    let mut obj = match stripped {
+        Value::Object(map) => map,
+        _ => return json!({"type": "object", "properties": {}, "required": []}),
+    };
+
+    obj.remove("allOf");
+    obj.remove("anyOf");
+    obj.remove("oneOf");
+    obj.remove("not");
+    obj.remove("enum");
+
+    obj.entry("type".to_string())
+        .or_insert_with(|| Value::String("object".into()));
+    obj.entry("properties".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    obj.entry("required".to_string())
+        .or_insert_with(|| Value::Array(vec![]));
+
+    Value::Object(obj)
+}
+
 /// Map tool names to Claude Code PascalCase canonical names for OAuth.
 fn to_claude_code_name(name: &str) -> String {
     match name {
@@ -1752,15 +1775,10 @@ impl CodexClient {
         tools
             .iter()
             .map(|t| {
-                let compact = strip_parameter_descriptions(
-                    t.parameters.get("properties").unwrap_or(&json!({})),
-                );
+                let params = openai_function_parameters(&t.parameters);
                 json!({
                     "type": "function", "name": t.name, "description": t.description,
-                    "parameters": {
-                        "type": "object", "properties": compact,
-                        "required": t.parameters.get("required").cloned().unwrap_or(json!([])),
-                    },
+                    "parameters": params,
                     "strict": null,
                 })
             })
@@ -2385,7 +2403,7 @@ impl OllamaCloudClient {
     }
 
     pub fn from_env() -> Option<Self> {
-        resolve_api_key("ollama-cloud").map(Self::new)
+        resolve_api_key_sync("ollama-cloud").map(|(api_key, _)| Self::new(api_key))
     }
 
     fn endpoint_url(&self) -> String {
@@ -3093,6 +3111,44 @@ mod tests {
             stripped["nested"]["items"]["properties"]["inner"]["type"],
             "string"
         );
+    }
+
+    #[test]
+    fn openai_function_parameters_strip_top_level_combinators() {
+        let params = openai_function_parameters(&json!({
+            "type": "object",
+            "properties": {
+                "action": { "type": "string", "description": "Mutation action" }
+            },
+            "required": ["action"],
+            "allOf": [
+                {
+                    "if": { "properties": { "action": { "const": "create" } } },
+                    "then": { "required": ["action", "node_id"] }
+                }
+            ]
+        }));
+
+        assert_eq!(params["type"], "object");
+        assert!(
+            params.get("allOf").is_none(),
+            "sanitized params should drop top-level allOf"
+        );
+        assert_eq!(params["properties"]["action"]["type"], "string");
+    }
+
+    #[test]
+    fn ollama_cloud_from_env_accepts_ollama_api_key() {
+        unsafe {
+            std::env::set_var("OLLAMA_API_KEY", "ollama-cloud-test-key");
+        }
+
+        let client = OllamaCloudClient::from_env();
+        assert!(client.is_some(), "OLLAMA_API_KEY should make ollama-cloud executable");
+
+        unsafe {
+            std::env::remove_var("OLLAMA_API_KEY");
+        }
     }
 
     #[test]
