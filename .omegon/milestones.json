@@ -420,7 +420,7 @@
     "frozen": false,
     "opened": "2026-04-04T04:08:34Z",
     "released": null,
-    "rc_count": 91,
+    "rc_count": 92,
     "notes": [
       "docs(benchmark): seed design node for deferred bwrap sandbox work",
       "feat(aggregate-mode): Add a minimal directory-level aggregation/report mode for benchmark result files, shaped by existing result artifact structure. Include tests and doc updates if the mode is added.",
@@ -646,13 +646,16 @@
       "fix(loop): disable commit nudge for headless runs",
       "fix(loop): escalate post-inspection execution pressure",
       "fix(loop): escalate sooner on stalled targeted rereads",
+      "fix(loop): escalate stuck detector to force-break after repeated warnings",
       "fix(loop): escalate sustained tool-continuation churn",
       "fix(loop): force convergence once evidence is sufficient",
       "fix(loop): generalize execution-pressure heuristics",
+      "fix(loop): keep targeted read pressure conservative",
       "fix(loop): pressure repeated read-only stalls earlier",
       "fix(loop): reduce false-positive orientation churn nudges",
       "fix(loop): tighten post-sufficiency convergence pressure",
       "fix(loop): treat constraint discovery as partial progress",
+      "fix(loop): update stuck warning tests for escalation struct",
       "fix(multimodal): preserve attachment source paths for redisplay",
       "fix(multimodal): store user attachments in canonical conversation state",
       "fix(om): enforce local-first patch-or-prove behavior",
@@ -666,6 +669,7 @@
       "fix(providers): send images to ollama cloud chat API",
       "fix(providers): stop sending effort in anthropic requests",
       "fix(release): build Linux artifacts with zigbuild",
+      "fix(release): create prerelease when edit target is missing",
       "fix(release): create release as draft before uploading assets, publish after",
       "fix(release): defer rc mutations until preflight passes",
       "fix(release): derive Homebrew updates from published release manifest",
@@ -822,7 +826,7 @@
       "refactor(workspace): add backend and vcs identity boundaries",
       "refactor(workspace): separate labels from substrate identity"
     ],
-    "rc_version": "0.15.10-rc.98",
-    "last_rc": "2026-04-13T18:31:10Z"
+    "rc_version": "0.15.10-rc.99",
+    "last_rc": "2026-04-13T19:48:30Z"
   }
 }
