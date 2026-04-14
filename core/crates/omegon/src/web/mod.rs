@@ -797,6 +797,9 @@ mod tests {
                 trigger_kind: "prompt".into(),
                 payload: serde_json::json!({"text": "hello from queue"}),
                 caller_role: Some("admin".into()),
+                source_user: None,
+                source_channel: None,
+                source_thread: None,
             });
         state.daemon_status.lock().unwrap().queued_events = 1;
 
@@ -840,6 +843,9 @@ mod tests {
                 trigger_kind: "new-session".into(),
                 payload: serde_json::json!({}),
                 caller_role: Some("admin".into()),
+                source_user: None,
+                source_channel: None,
+                source_thread: None,
             });
         state.daemon_status.lock().unwrap().queued_events = 1;
 
@@ -877,6 +883,9 @@ mod tests {
                 trigger_kind: "shutdown".into(),
                 payload: serde_json::json!({}),
                 caller_role: Some("admin".into()),
+                source_user: None,
+                source_channel: None,
+                source_thread: None,
             });
         state.daemon_status.lock().unwrap().queued_events = 1;
 
@@ -911,6 +920,9 @@ mod tests {
                 trigger_kind: "cancel-cleave-child".into(),
                 payload: serde_json::json!({"label": "alpha"}),
                 caller_role: Some("admin".into()),
+                source_user: None,
+                source_channel: None,
+                source_thread: None,
             });
         state.daemon_status.lock().unwrap().queued_events = 1;
 
@@ -1003,6 +1015,9 @@ mod tests {
                 trigger_kind: "prompt".into(),
                 payload: serde_json::json!({"text": "runtime check"}),
                 caller_role: Some("admin".into()),
+                source_user: None,
+                source_channel: None,
+                source_thread: None,
             });
         state.daemon_status.lock().unwrap().queued_events = 1;
 
@@ -1053,6 +1068,9 @@ mod tests {
                 trigger_kind: "mystery".into(),
                 payload: serde_json::json!({"ignored": true}),
                 caller_role: Some("admin".into()),
+                source_user: None,
+                source_channel: None,
+                source_thread: None,
             });
         state.daemon_status.lock().unwrap().queued_events = 1;
 

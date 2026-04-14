@@ -161,6 +161,9 @@ async fn serve_accepts_cleave_child_cancel_event_over_http() -> Result<()> {
         trigger_kind: "cancel-cleave-child".into(),
         payload: serde_json::json!({"label": "alpha"}),
         caller_role: Some("admin".into()),
+        source_user: None,
+        source_channel: None,
+        source_thread: None,
     };
     let client = reqwest::Client::new();
     let resp = client

@@ -793,6 +793,9 @@ mod tests {
             trigger_kind: "manual".into(),
             payload: serde_json::json!({"ok": true}),
             caller_role: Some("admin".into()),
+            source_user: None,
+            source_channel: None,
+            source_thread: None,
         };
         let (status, Json(payload)) =
             post_event(axum::extract::State(test_state()), headers, Json(event)).await;
@@ -814,6 +817,9 @@ mod tests {
             trigger_kind: "shutdown".into(),
             payload: serde_json::json!({}),
             caller_role: Some("read".into()),
+            source_user: None,
+            source_channel: None,
+            source_thread: None,
         };
         let (status, Json(payload)) =
             post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
@@ -837,6 +843,9 @@ mod tests {
             trigger_kind: "manual".into(),
             payload: serde_json::json!({"ok": true}),
             caller_role: Some("admin".into()),
+            source_user: None,
+            source_channel: None,
+            source_thread: None,
         };
         let (status, Json(payload)) =
             post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
@@ -861,6 +870,9 @@ mod tests {
             trigger_kind: "new-session".into(),
             payload: serde_json::json!({}),
             caller_role: Some("admin".into()),
+            source_user: None,
+            source_channel: None,
+            source_thread: None,
         };
         let (status, Json(payload)) =
             post_event(axum::extract::State(state.clone()), headers, Json(event)).await;
@@ -885,6 +897,9 @@ mod tests {
             trigger_kind: "shutdown".into(),
             payload: serde_json::json!({}),
             caller_role: Some("admin".into()),
+            source_user: None,
+            source_channel: None,
+            source_thread: None,
         };
         let (status, Json(payload)) =
             post_event(axum::extract::State(state.clone()), headers, Json(event)).await;

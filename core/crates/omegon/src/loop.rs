@@ -2085,9 +2085,9 @@ async fn consume_llm_stream(
     //   default is 90s; nobody in the industry uses less than 60s)
     let initial_idle_timeout = std::time::Duration::from_secs(300);
     let content_idle_timeout = std::time::Duration::from_secs(90);
-    let received_content = std::cell::Cell::new(false);
+    let received_content = std::sync::atomic::AtomicBool::new(false);
     let idle_timeout = || {
-        if received_content.get() {
+        if received_content.load(std::sync::atomic::Ordering::Relaxed) {
             content_idle_timeout
         } else {
             initial_idle_timeout
@@ -2109,7 +2109,7 @@ async fn consume_llm_stream(
                 // Does NOT count as "content" for timeout phase transition.
             }
             LlmEvent::TextStart => {
-                received_content.set(true);
+                received_content.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             LlmEvent::TextDelta { delta } => {
                 let _ = events.send(AgentEvent::MessageChunk {
@@ -2156,7 +2156,7 @@ async fn consume_llm_stream(
                 text_parts.push(String::new());
             }
             LlmEvent::ThinkingStart => {
-                received_content.set(true);
+                received_content.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             LlmEvent::ThinkingDelta { delta } => {
                 let _ = events.send(AgentEvent::ThinkingChunk {
@@ -2172,7 +2172,7 @@ async fn consume_llm_stream(
                 thinking_parts.push(String::new());
             }
             LlmEvent::ToolCallStart => {
-                received_content.set(true);
+                received_content.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             LlmEvent::ToolCallDelta { .. } => {
                 // Deltas accumulated by the bridge — complete tool call in ToolCallEnd
