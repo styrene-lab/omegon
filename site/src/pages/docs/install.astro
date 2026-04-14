@@ -39,8 +39,8 @@ CHANNEL=rc curl -fsSL {previewSiteUrl}/install.sh | sh
 CHANNEL=nightly curl -fsSL {previewSiteUrl}/install.sh | sh
 
 # Install a specific stable, RC, or nightly-pinned version
-VERSION=0.15.10 curl -fsSL {previewSiteUrl}/install.sh | sh
-# Replace 0.15.10 with the release you actually want
+VERSION=0.15.11 curl -fsSL {previewSiteUrl}/install.sh | sh
+# Replace 0.15.11 with the release you actually want
 
 # Non-interactive (CI)
 curl -fsSL {previewSiteUrl}/install.sh | sh -s -- --no-confirm</code></pre>
@@ -49,8 +49,8 @@ curl -fsSL {previewSiteUrl}/install.sh | sh -s -- --no-confirm</code></pre>
 INSTALL_DIR=~/.local/bin curl -fsSL {canonicalSiteUrl}/install.sh | sh
 
 # Install a specific stable version
-VERSION=0.15.10 curl -fsSL {canonicalSiteUrl}/install.sh | sh
-# Replace 0.15.10 with the stable release you actually want
+VERSION=0.15.11 curl -fsSL {canonicalSiteUrl}/install.sh | sh
+# Replace 0.15.11 with the stable release you actually want
 
 # Non-interactive (CI)
 curl -fsSL {canonicalSiteUrl}/install.sh | sh -s -- --no-confirm</code></pre>
@@ -100,11 +100,10 @@ brew install omegon</code></pre>
 
   <h3>Verify a Download</h3>
   <pre><code># Verify cosign signature (keyless)
-# Replace 0.15.10 with the release you downloaded
-# Replace 0.15.10 with the release you downloaded
-cosign verify-blob omegon-0.15.10-aarch64-apple-darwin.tar.gz \
-  --signature omegon-0.15.10-aarch64-apple-darwin.tar.gz.sig \
-  --certificate omegon-0.15.10-aarch64-apple-darwin.tar.gz.pem \
+# Replace 0.15.11 with the release you downloaded
+cosign verify-blob omegon-0.15.11-aarch64-apple-darwin.tar.gz \
+  --signature omegon-0.15.11-aarch64-apple-darwin.tar.gz.sig \
+  --certificate omegon-0.15.11-aarch64-apple-darwin.tar.gz.pem \
   --certificate-identity-regexp '.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com</code></pre>
   <p>
