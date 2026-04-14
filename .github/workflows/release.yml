@@ -84,7 +84,7 @@ jobs:
           fi
 
       - name: Import Apple signing certificate
-        if: runner.os == 'macOS' && env.APPLE_SIGNING_CERT_B64 != '' && env.APPLE_SIGNING_CERT_PASSWORD != '' && env.APPLE_CODESIGN_IDENTITY != ''
+        if: runner.os == 'macOS' && env.APPLE_SIGNING_CERT_B64 != '' && env.APPLE_CODESIGN_IDENTITY != ''
         env:
           KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
@@ -101,7 +101,7 @@ jobs:
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
       - name: Sign macOS binary
-        if: runner.os == 'macOS' && env.APPLE_SIGNING_CERT_B64 != '' && env.APPLE_SIGNING_CERT_PASSWORD != '' && env.APPLE_CODESIGN_IDENTITY != ''
+        if: runner.os == 'macOS' && env.APPLE_SIGNING_CERT_B64 != '' && env.APPLE_CODESIGN_IDENTITY != ''
         run: |
           set -euo pipefail
           BINARY="core/target/${{ matrix.target }}/release/omegon"
@@ -109,7 +109,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$BINARY"
 
       - name: Notarize macOS binary
-        if: runner.os == 'macOS' && env.APPLE_SIGNING_CERT_B64 != '' && env.APPLE_SIGNING_CERT_PASSWORD != '' && env.APPLE_CODESIGN_IDENTITY != '' && env.APPLE_API_KEY_P8_B64 != '' && env.APPLE_API_KEY_ID != '' && env.APPLE_API_ISSUER != ''
+        if: runner.os == 'macOS' && env.APPLE_SIGNING_CERT_B64 != '' && env.APPLE_CODESIGN_IDENTITY != '' && env.APPLE_API_KEY_P8_B64 != '' && env.APPLE_API_KEY_ID != '' && env.APPLE_API_ISSUER != ''
         run: |
           set -euo pipefail
           BINARY="core/target/${{ matrix.target }}/release/omegon"
