@@ -581,7 +581,13 @@ impl ConversationState {
 
     pub fn first_user_text(&self) -> Option<&str> {
         self.canonical.iter().find_map(|m| match m {
-            AgentMessage::User { text, .. } if !text.is_empty() => Some(text.as_str()),
+            AgentMessage::User { text, .. }
+                if !text.is_empty()
+                    && !text.starts_with("[System:")
+                    && !text.starts_with("[Previous conversation summary]") =>
+            {
+                Some(text.as_str())
+            }
             _ => None,
         })
     }
@@ -675,11 +681,15 @@ impl ConversationState {
         // Anthropic rejects conversations ending with an assistant message
         // ("This model does not support assistant message prefill"). After
         // compaction/decay/repair, the final message can be assistant-role.
-        // Append a minimal user continuation so the provider always gets
-        // a legal conversation shape.
-        if matches!(messages.last(), Some(LlmMessage::Assistant { .. })) {
+        // Strip it rather than injecting a fake user message — a synthetic
+        // "Continue." would cause the LLM to produce unwanted output.
+        while matches!(messages.last(), Some(LlmMessage::Assistant { .. })) {
+            messages.pop();
+        }
+        // If stripping left us empty, restore a minimal user turn.
+        if messages.is_empty() {
             messages.push(LlmMessage::User {
-                content: "Continue.".into(),
+                content: self.render_intent_for_injection(),
                 images: vec![],
             });
         }
@@ -1315,16 +1325,14 @@ mod tests {
         conv.intent.stats.turns = 1; // Advance turn so the message is old
 
         let view = conv.build_llm_view();
-        // The decayed assistant message plus a trailing user continuation
-        // (build_llm_view appends one when the final message is assistant-role
-        // to satisfy provider requirements).
-        assert_eq!(view.len(), 2);
-        if let LlmMessage::Assistant { thinking, .. } = &view[0] {
-            assert!(thinking.is_empty(), "Thinking should be stripped on decay");
-        } else {
-            panic!("Expected Assistant message");
-        }
-        assert!(matches!(&view[1], LlmMessage::User { .. }));
+        // Trailing assistant messages are stripped (not kept with a fake
+        // "Continue." user message). Since stripping leaves the view empty,
+        // the empty-messages fallback injects a minimal user turn.
+        assert_eq!(view.len(), 1);
+        assert!(
+            matches!(&view[0], LlmMessage::User { .. }),
+            "should be the intent-injection fallback"
+        );
     }
 
     #[test]
@@ -1332,6 +1340,7 @@ mod tests {
         let mut conv = ConversationState::new();
         conv.decay_window = 0;
 
+        conv.push_user("initial prompt".into());
         conv.push_assistant(AssistantMessage {
             text: "x".repeat(1000),
             thinking: None,
@@ -1340,10 +1349,16 @@ mod tests {
             provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         });
-        conv.intent.stats.turns = 1;
+        conv.intent.stats.turns = 2;
+        // Add a current-turn user message so the assistant isn't trailing
+        // (trailing assistants get stripped by build_llm_view).
+        conv.push_user("continue".into());
 
         let view = conv.build_llm_view();
-        if let LlmMessage::Assistant { text, .. } = &view[0] {
+        // Find the assistant message (it's between the two user messages)
+        let assistant = view.iter().find(|m| matches!(m, LlmMessage::Assistant { .. }));
+        assert!(assistant.is_some(), "should have a decayed assistant message");
+        if let LlmMessage::Assistant { text, .. } = assistant.unwrap() {
             let combined: String = text.join("");
             assert!(
                 combined.len() < 600,
@@ -1351,8 +1366,6 @@ mod tests {
                 combined.len()
             );
             assert!(combined.contains("[truncated]"));
-        } else {
-            panic!("Expected Assistant message");
         }
     }
 
@@ -1403,7 +1416,11 @@ mod tests {
         conv.push_assistant(AssistantMessage {
             text: "I'll help".into(),
             thinking: Some("detailed thinking here...".repeat(50)),
-            tool_calls: vec![],
+            tool_calls: vec![ToolCall {
+                id: "t1".into(),
+                name: "read".into(),
+                arguments: serde_json::json!({}),
+            }],
             raw: serde_json::Value::Null,
             provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
@@ -1417,6 +1434,9 @@ mod tests {
             is_error: false,
             args_summary: None,
         });
+        // Add a trailing user message so the conversation doesn't end with
+        // a tool_result that could be stripped as trailing assistant-role.
+        conv.push_user("next step".into());
 
         // Still on turn 1 — everything should be fresh
         let view = conv.build_llm_view();
@@ -2080,6 +2100,8 @@ mod tests {
             provider_tokens: (0, 0, 0, 0),
             provider_telemetry: None,
         });
+        // Trailing user message so the assistant isn't stripped.
+        conv.push_user("next step".into());
 
         let tmp = std::env::temp_dir().join("omegon-test-decay-session.json");
         conv.save_session(&tmp).unwrap();

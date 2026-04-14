@@ -453,24 +453,30 @@ impl DelegateRunner {
         prompt.push_str("\n\n");
 
         // Inject workspace goal context if bindings are set.
-        if let Ok(Some(lease)) = crate::workspace::runtime::read_workspace_lease(&self.cwd) {
-            let b = &lease.bindings;
-            let has_bindings = b.milestone_id.is_some()
-                || b.design_node_id.is_some()
-                || b.openspec_change.is_some();
-            if has_bindings {
-                prompt.push_str("## Workspace Goal Context\n");
-                if let Some(ref m) = b.milestone_id {
-                    prompt.push_str(&format!("- Milestone: {m}\n"));
-                }
-                if let Some(ref d) = b.design_node_id {
-                    prompt.push_str(&format!("- Design node: {d}\n"));
-                }
-                if let Some(ref o) = b.openspec_change {
-                    prompt.push_str(&format!("- OpenSpec change: {o}\n"));
-                }
-                prompt.push('\n');
+        match crate::workspace::runtime::read_workspace_lease(&self.cwd) {
+            Err(e) => {
+                tracing::warn!("failed to read workspace lease for delegate prompt: {e}");
             }
+            Ok(Some(lease)) => {
+                let b = &lease.bindings;
+                let has_bindings = b.milestone_id.is_some()
+                    || b.design_node_id.is_some()
+                    || b.openspec_change.is_some();
+                if has_bindings {
+                    prompt.push_str("## Workspace Goal Context\n");
+                    if let Some(ref m) = b.milestone_id {
+                        prompt.push_str(&format!("- Milestone: {m}\n"));
+                    }
+                    if let Some(ref d) = b.design_node_id {
+                        prompt.push_str(&format!("- Design node: {d}\n"));
+                    }
+                    if let Some(ref o) = b.openspec_change {
+                        prompt.push_str(&format!("- OpenSpec change: {o}\n"));
+                    }
+                    prompt.push('\n');
+                }
+            }
+            Ok(None) => {}
         }
 
         prompt.push_str("## Task\n");
@@ -644,6 +650,11 @@ If blocked, say the blocker plainly.\n",
         let cwd = self.cwd.clone();
         let parent_model = session_model;
         let fail_counter = consecutive_failures;
+        // Pessimistic: increment counter synchronously before spawn so rapid-fire
+        // background delegates are blocked immediately. On success, reset to 0.
+        if let Ok(mut count) = fail_counter.lock() {
+            *count += 1;
+        }
         crate::task_spawn::spawn_best_effort_result("delegate-real-task", async move {
             let runner = DelegateRunner::new(cwd, store.clone());
             match runner
@@ -656,7 +667,6 @@ If blocked, say the blocker plainly.\n",
                         DelegateTaskStatus::Completed { success: true },
                         Some(result),
                     );
-                    // Reset failure counter on success.
                     if let Ok(mut count) = fail_counter.lock() {
                         *count = 0;
                     }
@@ -669,10 +679,7 @@ If blocked, say the blocker plainly.\n",
                         },
                         None,
                     );
-                    // Increment failure counter.
-                    if let Ok(mut count) = fail_counter.lock() {
-                        *count += 1;
-                    }
+                    // Counter already incremented pre-spawn; no action needed.
                 }
             }
             Ok(())
@@ -735,6 +742,10 @@ impl DelegateFeature {
         let result_store = Arc::new(DelegateResultStore::new());
         let runner = Arc::new(DelegateRunner::new(cwd.clone(), result_store.clone()));
 
+        // Seed session model from env so delegates on the first turn
+        // (before any TurnEnd fires) still inherit the operator's model.
+        let initial_model = std::env::var("OMEGON_MODEL").ok().filter(|s| !s.is_empty());
+
         let progress_handle = Arc::new(Mutex::new(DelegateProgress::default()));
         let event_slot = Arc::new(Mutex::new(None));
         Self {
@@ -743,7 +754,7 @@ impl DelegateFeature {
             runner,
             progress_handle,
             event_slot,
-            session_model: Arc::new(Mutex::new(None)),
+            session_model: Arc::new(Mutex::new(initial_model)),
             consecutive_failures: Arc::new(Mutex::new(0)),
         }
     }
@@ -1516,5 +1527,115 @@ This agent runs in write mode and can modify files.
 
         let read_agent = agents.iter().find(|a| a.name == "TestAgent2").unwrap();
         assert!(!read_agent.is_write_agent);
+    }
+
+    #[tokio::test]
+    async fn system_error_messages_rejected_as_delegate_tasks() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), vec![]);
+
+        let cases = [
+            "[System: Your last several delegate calls returned errors]",
+            "STUCK LOOP DETECTED — stop retrying",
+            "Your last several delegate calls returned errors. Read files first.",
+            "last several `delegate` calls returned errors",
+        ];
+        for task in &cases {
+            let args = json!({ "task": task, "background": false });
+            let result = feature
+                .execute("delegate", "c1", args, CancellationToken::new())
+                .await;
+            assert!(
+                result.is_err(),
+                "should reject system error as task: {task}"
+            );
+        }
+
+        // Valid task should not be rejected
+        let args = json!({ "task": "Fix the login bug", "background": true });
+        let result = feature
+            .execute("delegate", "c2", args, CancellationToken::new())
+            .await;
+        // Will error for other reasons (no binary), but not the system-message guard
+        if let Err(e) = &result {
+            assert!(
+                !e.to_string().contains("recycled system warning"),
+                "valid task should not be rejected: {e}"
+            );
+        }
+    }
+
+    #[test]
+    fn dedup_finds_completed_tasks_by_description() {
+        let store = DelegateResultStore::new();
+
+        store.store_task(DelegateTask {
+            task_id: "d_1".into(),
+            agent_name: None,
+            task_description: "Fix the auth bug".into(),
+            status: DelegateTaskStatus::Completed { success: true },
+            result: Some("Fixed in auth.rs".into()),
+            started_at: SystemTime::now(),
+            completed_at: Some(SystemTime::now()),
+        });
+
+        // Exact match (case-insensitive)
+        assert!(store.find_completed_by_description("fix the auth bug").is_some());
+        assert!(store.find_completed_by_description("FIX THE AUTH BUG").is_some());
+
+        // Different description — no match
+        assert!(store.find_completed_by_description("Fix the login bug").is_none());
+
+        // Failed task — not returned
+        store.store_task(DelegateTask {
+            task_id: "d_2".into(),
+            agent_name: None,
+            task_description: "Fix the login bug".into(),
+            status: DelegateTaskStatus::Failed {
+                error: "timeout".into(),
+            },
+            result: None,
+            started_at: SystemTime::now(),
+            completed_at: Some(SystemTime::now()),
+        });
+        assert!(store.find_completed_by_description("Fix the login bug").is_none());
+    }
+
+    #[tokio::test]
+    async fn consecutive_failures_disable_delegate() {
+        let temp_dir = TempDir::new().unwrap();
+        let feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), vec![]);
+
+        // Simulate 3 failures by directly setting the counter
+        if let Ok(mut count) = feature.consecutive_failures.lock() {
+            *count = 3;
+        }
+
+        let args = json!({ "task": "Do something", "background": false });
+        let result = feature
+            .execute("delegate", "c1", args, CancellationToken::new())
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("disabled for this session"),
+            "should report disabled: {err}"
+        );
+
+        // Reset counter — should allow again
+        if let Ok(mut count) = feature.consecutive_failures.lock() {
+            *count = 0;
+        }
+        let args = json!({ "task": "Do something else", "background": true });
+        let result = feature
+            .execute("delegate", "c2", args, CancellationToken::new())
+            .await;
+        // Won't error with the disabled message
+        if let Err(e) = &result {
+            assert!(
+                !e.to_string().contains("disabled for this session"),
+                "should not be disabled after reset: {e}"
+            );
+        }
     }
 }
