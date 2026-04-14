@@ -415,7 +415,6 @@ pub async fn delegate_default_model() -> String {
     "ollama:qwen3:32b".to_string()
 }
 
-/// Resolve a single provider by ID.
 /// Resolve a single provider by ID. Returns a bridge if the provider
 /// has credentials and a native client implementation.
 ///

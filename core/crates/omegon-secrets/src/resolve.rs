@@ -48,9 +48,24 @@ const KEYRING_SERVICE: &str = "sh.styrene.omegon";
 fn keyring_suppressed() -> bool {
     static SUPPRESSED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *SUPPRESSED.get_or_init(|| {
-        std::env::var("OMEGON_NO_KEYRING")
+        // Explicit opt-out.
+        let explicit = std::env::var("OMEGON_NO_KEYRING")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
+            .unwrap_or(false);
+        // Auto-suppress when running under cargo test (the omegon binary's
+        // tests compile omegon-secrets as a regular dep, not #[cfg(test)],
+        // so the in-memory mock doesn't apply).
+        let in_test = std::env::var("CARGO_TARGET_DIR").is_ok()
+            || std::env::var("NEXTEST").is_ok()
+            || std::env::var("OMEGON_CHILD").is_ok();
+        let suppressed = explicit || in_test;
+        if suppressed {
+            tracing::info!(
+                "keyring access suppressed ({})",
+                if explicit { "OMEGON_NO_KEYRING=1" } else { "test/child environment detected" }
+            );
+        }
+        suppressed
     })
 }
 
