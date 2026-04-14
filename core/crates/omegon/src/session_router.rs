@@ -25,13 +25,13 @@ use crate::conversation::ConversationState;
 /// Two envelopes that share the same (user, channel, thread) triple route
 /// to the same `DaemonSession`.
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct CallerKey {
+pub struct SessionKey {
     pub user: Option<String>,
     pub channel: Option<String>,
     pub thread: Option<String>,
 }
 
-impl CallerKey {
+impl SessionKey {
     /// Build a key from the identity fields of an envelope.
     pub fn from_envelope(env: &DaemonEventEnvelope) -> Self {
         Self {
@@ -48,7 +48,7 @@ impl CallerKey {
     }
 }
 
-impl std::fmt::Display for CallerKey {
+impl std::fmt::Display for SessionKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match (&self.user, &self.channel, &self.thread) {
             (None, None, None) => write!(f, "<default>"),
@@ -101,7 +101,7 @@ const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 /// agent state in `run_embedded_command`. The router only manages sessions
 /// for callers that carry identity metadata.
 pub struct SessionRouter {
-    sessions: Mutex<HashMap<CallerKey, SessionHandle>>,
+    sessions: Mutex<HashMap<SessionKey, SessionHandle>>,
     semaphore: Arc<Semaphore>,
     idle_timeout: Duration,
 }
@@ -130,7 +130,7 @@ impl SessionRouter {
     /// conversation state and a configured bus + context manager.
     pub async fn get_or_create(
         &self,
-        key: &CallerKey,
+        key: &SessionKey,
         factory: impl FnOnce() -> DaemonSession,
     ) -> SessionHandle {
         let mut sessions = self.sessions.lock().await;
@@ -141,7 +141,7 @@ impl SessionRouter {
     }
 
     /// Look up an existing session without creating one.
-    pub async fn get(&self, key: &CallerKey) -> Option<SessionHandle> {
+    pub async fn get(&self, key: &SessionKey) -> Option<SessionHandle> {
         let sessions = self.sessions.lock().await;
         sessions.get(key).cloned()
     }
@@ -159,7 +159,7 @@ impl SessionRouter {
 
     /// Remove sessions that have been idle longer than `idle_timeout`.
     /// Sessions that are currently locked (turn in progress) are never removed.
-    pub async fn park_idle_sessions(&self) -> Vec<CallerKey> {
+    pub async fn park_idle_sessions(&self) -> Vec<SessionKey> {
         let mut sessions = self.sessions.lock().await;
         let now = Instant::now();
         let mut parked = Vec::new();
@@ -215,14 +215,14 @@ mod tests {
     #[test]
     fn caller_key_default_when_no_identity() {
         let env = make_envelope(None, None, None);
-        let key = CallerKey::from_envelope(&env);
+        let key = SessionKey::from_envelope(&env);
         assert!(key.is_default());
     }
 
     #[test]
     fn caller_key_not_default_with_user() {
         let env = make_envelope(Some("U123"), None, None);
-        let key = CallerKey::from_envelope(&env);
+        let key = SessionKey::from_envelope(&env);
         assert!(!key.is_default());
     }
 
@@ -230,26 +230,26 @@ mod tests {
     fn caller_key_equality() {
         let a = make_envelope(Some("U1"), Some("C1"), Some("T1"));
         let b = make_envelope(Some("U1"), Some("C1"), Some("T1"));
-        assert_eq!(CallerKey::from_envelope(&a), CallerKey::from_envelope(&b));
+        assert_eq!(SessionKey::from_envelope(&a), SessionKey::from_envelope(&b));
     }
 
     #[test]
     fn caller_key_inequality_on_thread() {
         let a = make_envelope(Some("U1"), Some("C1"), Some("T1"));
         let b = make_envelope(Some("U1"), Some("C1"), Some("T2"));
-        assert_ne!(CallerKey::from_envelope(&a), CallerKey::from_envelope(&b));
+        assert_ne!(SessionKey::from_envelope(&a), SessionKey::from_envelope(&b));
     }
 
     #[test]
     fn caller_key_display() {
-        let key = CallerKey {
+        let key = SessionKey {
             user: Some("alice".into()),
             channel: None,
             thread: Some("t-1".into()),
         };
         assert_eq!(key.to_string(), "alice:*:t-1");
 
-        let default_key = CallerKey {
+        let default_key = SessionKey {
             user: None,
             channel: None,
             thread: None,
@@ -260,7 +260,7 @@ mod tests {
     #[tokio::test]
     async fn router_creates_session_on_first_access() {
         let router = SessionRouter::new();
-        let key = CallerKey {
+        let key = SessionKey {
             user: Some("U1".into()),
             channel: None,
             thread: None,
@@ -282,7 +282,7 @@ mod tests {
     #[tokio::test]
     async fn router_parks_idle_sessions() {
         let router = SessionRouter::with_options(8, Duration::from_millis(50));
-        let key = CallerKey {
+        let key = SessionKey {
             user: Some("U1".into()),
             channel: None,
             thread: None,
@@ -305,7 +305,7 @@ mod tests {
     #[tokio::test]
     async fn router_does_not_park_active_session() {
         let router = SessionRouter::with_options(8, Duration::from_millis(1));
-        let key = CallerKey {
+        let key = SessionKey {
             user: Some("U1".into()),
             channel: None,
             thread: None,

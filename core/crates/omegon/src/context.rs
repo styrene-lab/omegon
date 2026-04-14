@@ -66,6 +66,11 @@ impl ContextManager {
         }
     }
 
+    /// Get the base prompt (for cloning into new sessions).
+    pub fn base_prompt(&self) -> &str {
+        &self.base_prompt
+    }
+
     /// Set the context window size (in tokens) for budget calculations.
     pub fn set_context_window(&mut self, tokens: usize) {
         self.context_window = tokens;

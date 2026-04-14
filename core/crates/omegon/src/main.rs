@@ -805,6 +805,12 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
     let agent_session_id = agent.session_id.clone();
     let agent_secrets = agent.secrets.clone();
 
+    // Capture the base prompt before wrapping into the default session.
+    // Routed sessions reuse this so they get the same system prompt, tool
+    // guidance, and project context as the default session.
+    let routed_base_prompt: Arc<String> =
+        Arc::new(agent.context_manager.base_prompt().to_string());
+
     // Wrap the pre-existing agent state as the default session. This
     // preserves single-session backward compatibility — events without
     // identity metadata route here.
@@ -906,6 +912,127 @@ async fn run_embedded_command(control_port: u16, strict_port: bool) -> anyhow::R
                                 .await
                                 {
                                     tracing::error!(error = %e, "daemon agent loop error");
+                                }
+                                Ok(())
+                            },
+                        );
+                    }
+                    Some(web::WebCommand::RoutedPrompt {
+                        text,
+                        source_user,
+                        source_channel,
+                        source_thread,
+                        reply_address,
+                    }) => {
+                        let caller_key = session_router::SessionKey {
+                            user: source_user,
+                            channel: source_channel,
+                            thread: source_thread,
+                        };
+                        tracing::info!(
+                            caller = %caller_key,
+                            prompt_len = text.len(),
+                            "daemon: routed prompt"
+                        );
+
+                        let router = router.clone();
+                        let bridge = bridge.clone();
+                        let events_tx = events_tx.clone();
+                        let shared_settings = shared_settings.clone();
+                        let model = model.clone();
+                        let cwd = agent_cwd.clone();
+                        let secrets = agent_secrets.clone();
+                        let daemon_workflow = daemon_workflow.clone();
+                        let base_prompt = routed_base_prompt.clone();
+
+                        task_spawn::spawn_best_effort_result(
+                            "daemon-turn-routed",
+                            async move {
+                                let semaphore = router.semaphore().clone();
+                                let _permit = semaphore.acquire().await
+                                    .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
+
+                                let session = router
+                                    .get_or_create(&caller_key, || {
+                                        session_router::DaemonSession {
+                                            bus: crate::bus::EventBus::new(),
+                                            context_manager: crate::context::ContextManager::new(
+                                                (*base_prompt).clone(),
+                                                Vec::new(),
+                                            ),
+                                            conversation: crate::conversation::ConversationState::new(),
+                                            last_activity: std::time::Instant::now(),
+                                        }
+                                    })
+                                    .await;
+
+                                let mut sess = session.lock().await;
+                                sess.touch();
+
+                                // Inject reply_address as a system-tagged prefix that
+                                // cannot collide with user-authored content. The \x00
+                                // sentinel is stripped by the LLM tokenizer and serves
+                                // as a delimiter that no chat platform transmits.
+                                let prompt = if let Some(ref ra) = reply_address {
+                                    format!(
+                                        "\x00VOX_REPLY_ADDRESS:{}\x00\n{}",
+                                        ra, text
+                                    )
+                                } else {
+                                    text
+                                };
+                                sess.conversation.push_user(prompt);
+
+                                let mut loop_config = r#loop::LoopConfig {
+                                    max_turns: shared_settings
+                                        .lock()
+                                        .map(|s| s.max_turns)
+                                        .unwrap_or(50),
+                                    soft_limit_turns: 35,
+                                    max_retries: 0,
+                                    retry_delay_ms: 750,
+                                    model: shared_settings
+                                        .lock()
+                                        .map(|s| s.model.clone())
+                                        .unwrap_or_else(|_| model.clone()),
+                                    cwd: cwd.clone(),
+                                    extended_context: false,
+                                    settings: Some(shared_settings.clone()),
+                                    secrets: Some(secrets),
+                                    force_compact: None,
+                                    allow_commit_nudge: false,
+                                    enforce_first_turn_execution_bias: false,
+                                };
+
+                                if let Some(ref wf) = daemon_workflow {
+                                    let phase = sess.context_manager.phase();
+                                    if let Some(pc) = wf.phase_config(phase) {
+                                        workflow::apply_phase_config(
+                                            &mut loop_config,
+                                            pc,
+                                            &shared_settings,
+                                        );
+                                    }
+                                }
+
+                                let turn_cancel = CancellationToken::new();
+                                let s = &mut *sess;
+                                if let Err(e) = r#loop::run(
+                                    bridge.as_ref(),
+                                    &mut s.bus,
+                                    &mut s.context_manager,
+                                    &mut s.conversation,
+                                    &events_tx,
+                                    turn_cancel,
+                                    &loop_config,
+                                )
+                                .await
+                                {
+                                    tracing::error!(
+                                        caller = %caller_key,
+                                        error = %e,
+                                        "daemon routed turn error"
+                                    );
                                 }
                                 Ok(())
                             },
@@ -2305,6 +2432,22 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                             break;
                                         }
                                         continue;
+                                    }
+                                    web::WebCommand::RoutedPrompt { text, reply_address, .. } => {
+                                        // In TUI mode, routed prompts degrade to plain prompts
+                                        // (session routing is daemon-only).
+                                        let prompt = if let Some(ref ra) = reply_address {
+                                            format!("\x00VOX_REPLY_ADDRESS:{}\x00\n{}", ra, text)
+                                        } else {
+                                            text
+                                        };
+                                        tui::TuiCommand::SubmitPrompt(crate::tui::PromptSubmission {
+                                            text: prompt,
+                                            image_paths: Vec::new(),
+                                            submitted_by: "web-routed".to_string(),
+                                            via: "websocket",
+                                            queue_mode: crate::tui::PromptQueueMode::InterruptAfterTurn,
+                                        })
                                     }
                                     web::WebCommand::CancelCleaveChild { label, respond_to } => {
                                         let (control_tx, control_rx) = tokio::sync::oneshot::channel();

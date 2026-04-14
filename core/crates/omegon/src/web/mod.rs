@@ -287,6 +287,16 @@ impl WebState {
 #[derive(Debug)]
 pub enum WebCommand {
     UserPrompt(String),
+    /// A prompt with caller identity for session-routed dispatch.
+    RoutedPrompt {
+        text: String,
+        source_user: Option<String>,
+        source_channel: Option<String>,
+        source_thread: Option<String>,
+        /// Opaque reply address from vox, serialized as JSON. Injected into
+        /// the session context so the agent can call vox_reply.
+        reply_address: Option<serde_json::Value>,
+    },
     SlashCommand {
         name: String,
         args: String,
@@ -502,12 +512,28 @@ pub(crate) async fn process_next_daemon_event(state: &WebState) -> anyhow::Resul
         event
     };
 
+    let has_identity = event.source_user.is_some()
+        || event.source_channel.is_some()
+        || event.source_thread.is_some();
+
     let dispatch_result = match event.trigger_kind.as_str() {
         "prompt" => event
             .payload
             .get("text")
             .and_then(|value| value.as_str())
-            .map(|text| WebCommand::UserPrompt(text.to_string())),
+            .map(|text| {
+                if has_identity {
+                    WebCommand::RoutedPrompt {
+                        text: text.to_string(),
+                        source_user: event.source_user.clone(),
+                        source_channel: event.source_channel.clone(),
+                        source_thread: event.source_thread.clone(),
+                        reply_address: event.payload.get("reply_address").cloned(),
+                    }
+                } else {
+                    WebCommand::UserPrompt(text.to_string())
+                }
+            }),
         "slash-command" => event
             .payload
             .get("name")

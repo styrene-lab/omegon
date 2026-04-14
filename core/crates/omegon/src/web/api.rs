@@ -257,8 +257,19 @@ pub async fn post_event(
         );
     }
 
+    const MAX_QUEUED_EVENTS: usize = 256;
+
     match state.daemon_events.lock() {
         Ok(mut queue) => {
+            if queue.len() >= MAX_QUEUED_EVENTS {
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Json(EventAccepted {
+                        accepted: false,
+                        queued_events: queue.len(),
+                    }),
+                );
+            }
             queue.push(event);
             let queued_events = queue.len();
             if let Ok(mut status) = state.daemon_status.lock() {
