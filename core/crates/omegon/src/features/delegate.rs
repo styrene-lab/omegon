@@ -141,6 +141,22 @@ impl DelegateResultStore {
         tasks.values().cloned().collect()
     }
 
+    /// Check if a task with the same description was already completed
+    /// successfully. Returns the task_id if found.
+    pub fn find_completed_by_description(&self, description: &str) -> Option<String> {
+        let tasks = self.tasks.lock().unwrap();
+        let desc_lower = description.to_lowercase();
+        tasks.values().find_map(|t| {
+            if matches!(t.status, DelegateTaskStatus::Completed { success: true })
+                && t.task_description.to_lowercase() == desc_lower
+            {
+                Some(t.task_id.clone())
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn progress_snapshot(&self) -> DelegateProgress {
         let tasks = self.list_all_tasks();
         let mut progress = DelegateProgress::default();
@@ -229,7 +245,7 @@ impl DelegateWorkerProfile {
     ) -> ChildAgentRuntimeProfile {
         let mut runtime = ChildAgentRuntimeProfile {
             context_class: Some("squad".to_string()),
-            thinking_level: Some(thinking_level.unwrap_or("minimal").to_string()),
+            thinking_level: Some(thinking_level.unwrap_or("low").to_string()),
             disabled_tools: vec![
                 "web_search".into(),
                 "design_tree".into(),
@@ -435,6 +451,28 @@ impl DelegateRunner {
     ) -> String {
         let mut prompt = String::from(worker_profile.prompt_preamble());
         prompt.push_str("\n\n");
+
+        // Inject workspace goal context if bindings are set.
+        if let Ok(Some(lease)) = crate::workspace::runtime::read_workspace_lease(&self.cwd) {
+            let b = &lease.bindings;
+            let has_bindings = b.milestone_id.is_some()
+                || b.design_node_id.is_some()
+                || b.openspec_change.is_some();
+            if has_bindings {
+                prompt.push_str("## Workspace Goal Context\n");
+                if let Some(ref m) = b.milestone_id {
+                    prompt.push_str(&format!("- Milestone: {m}\n"));
+                }
+                if let Some(ref d) = b.design_node_id {
+                    prompt.push_str(&format!("- Design node: {d}\n"));
+                }
+                if let Some(ref o) = b.openspec_change {
+                    prompt.push_str(&format!("- OpenSpec change: {o}\n"));
+                }
+                prompt.push('\n');
+            }
+        }
+
         prompt.push_str("## Task\n");
         prompt.push_str(task);
         prompt.push_str("\n");
@@ -539,6 +577,7 @@ If blocked, say the blocker plainly.\n",
         facts: Option<Vec<String>>,
         mind: Option<String>,
         session_model: Option<String>,
+        consecutive_failures: Arc<Mutex<u32>>,
     ) -> anyhow::Result<()> {
         // Assemble field kit: load persona mind if specified
         let mut field_kit_context = String::new();
@@ -604,6 +643,7 @@ If blocked, say the blocker plainly.\n",
         let store = self.result_store.clone();
         let cwd = self.cwd.clone();
         let parent_model = session_model;
+        let fail_counter = consecutive_failures;
         crate::task_spawn::spawn_best_effort_result("delegate-real-task", async move {
             let runner = DelegateRunner::new(cwd, store.clone());
             match runner
@@ -616,6 +656,10 @@ If blocked, say the blocker plainly.\n",
                         DelegateTaskStatus::Completed { success: true },
                         Some(result),
                     );
+                    // Reset failure counter on success.
+                    if let Ok(mut count) = fail_counter.lock() {
+                        *count = 0;
+                    }
                 }
                 Err(err) => {
                     store.update_task_status(
@@ -625,6 +669,10 @@ If blocked, say the blocker plainly.\n",
                         },
                         None,
                     );
+                    // Increment failure counter.
+                    if let Ok(mut count) = fail_counter.lock() {
+                        *count += 1;
+                    }
                 }
             }
             Ok(())
@@ -676,6 +724,10 @@ pub struct DelegateFeature {
     /// for child delegates so they inherit the operator's active provider
     /// instead of falling back to a hardcoded candidate list.
     session_model: Arc<Mutex<Option<String>>>,
+    /// Consecutive delegate failure counter. After 3 consecutive failures,
+    /// the delegate tool is hard-disabled for the rest of the session to
+    /// prevent infinite retry loops.
+    consecutive_failures: Arc<Mutex<u32>>,
 }
 
 impl DelegateFeature {
@@ -692,6 +744,7 @@ impl DelegateFeature {
             progress_handle,
             event_slot,
             session_model: Arc::new(Mutex::new(None)),
+            consecutive_failures: Arc::new(Mutex::new(0)),
         }
     }
 }
@@ -826,6 +879,18 @@ impl Feature for DelegateFeature {
     ) -> anyhow::Result<ToolResult> {
         match tool_name {
             crate::tool_registry::delegate::DELEGATE => {
+                // Hard-stop after 3 consecutive delegate failures to prevent
+                // infinite retry loops.
+                let failures = self.consecutive_failures.lock().map(|g| *g).unwrap_or(0);
+                if failures >= 3 {
+                    return Err(anyhow::anyhow!(
+                        "Delegate is disabled for this session after {} consecutive \
+                         failures. The delegated tasks are failing repeatedly — \
+                         consider handling the work directly instead of delegating.",
+                        failures
+                    ));
+                }
+
                 let task: String = args
                     .get("task")
                     .and_then(|v| v.as_str())
@@ -866,11 +931,42 @@ impl Feature for DelegateFeature {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true);
 
+                // Reject tasks that are just system error messages — the LLM
+                // is regurgitating stuck-detector warnings as delegate tasks.
+                if task.starts_with("[System:")
+                    || task.contains("STUCK LOOP DETECTED")
+                    || task.contains("last several delegate calls returned errors")
+                    || task.contains("last several `delegate` calls returned errors")
+                {
+                    return Err(anyhow::anyhow!(
+                        "Delegate task rejected: the task description is a system error \
+                         message, not an actual task. Review the original goal and \
+                         formulate a concrete task description."
+                    ));
+                }
+
                 // Validate agent if specified
                 if let Some(ref agent_name) = agent
                     && !self.available_agents.iter().any(|a| a.name == *agent_name)
                 {
                     return Err(anyhow::anyhow!("Unknown agent: {}", agent_name));
+                }
+
+                // Dedup: if an identical task already completed successfully,
+                // return the prior result instead of spawning again.
+                if let Some(prior_id) = self.result_store.find_completed_by_description(&task) {
+                    if let Some(prior_task) = self.result_store.get_task(&prior_id) {
+                        let result_text = prior_task.result.unwrap_or_else(|| "completed".into());
+                        return Ok(ToolResult {
+                            content: vec![ContentBlock::Text {
+                                text: format!(
+                                    "This task was already completed ({}). Result:\n{}",
+                                    prior_id, result_text
+                                ),
+                            }],
+                            details: serde_json::json!(null),
+                        });
+                    }
                 }
 
                 let task_id = self.result_store.generate_task_id();
@@ -889,6 +985,7 @@ impl Feature for DelegateFeature {
                         facts,
                         mind,
                         parent_model,
+                        self.consecutive_failures.clone(),
                     )
                     .await?;
                 if let Ok(mut handle) = self.progress_handle.lock() {
@@ -1215,7 +1312,7 @@ mod tests {
         assert_eq!(profile, DelegateWorkerProfile::Scout);
         let runtime = profile.runtime_profile(None, None, None);
         assert_eq!(runtime.context_class.as_deref(), Some("squad"));
-        assert_eq!(runtime.thinking_level.as_deref(), Some("minimal"));
+        assert_eq!(runtime.thinking_level.as_deref(), Some("low"));
         assert_eq!(profile.max_turns(), 4);
         assert_eq!(
             runtime.enabled_tools,
