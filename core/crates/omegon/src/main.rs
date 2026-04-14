@@ -3440,7 +3440,7 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     let requested_model = cli.model.clone();
     let requested_provider = providers::infer_provider_id(&requested_model);
 
-    if maybe_run_injected_cleave_smoke_child(&cli.cwd)? {
+    if maybe_run_injected_cleave_smoke_child(&cli.cwd).await? {
         return Ok(());
     }
 
@@ -3773,7 +3773,7 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     result
 }
 
-fn maybe_run_injected_cleave_smoke_child(cwd: &Path) -> anyhow::Result<bool> {
+async fn maybe_run_injected_cleave_smoke_child(cwd: &Path) -> anyhow::Result<bool> {
     let Some(mode) = std::env::var("OMEGON_CLEAVE_SMOKE_CHILD_MODE").ok() else {
         return Ok(false);
     };
@@ -3797,9 +3797,8 @@ fn maybe_run_injected_cleave_smoke_child(cwd: &Path) -> anyhow::Result<bool> {
         }
         "report-runtime" => {
             let shared_settings = settings::shared("anthropic:claude-sonnet-4-6");
-            let agent = tokio::runtime::Handle::current().block_on(async {
-                setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await
-            })?;
+            let agent =
+                setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await?;
             let status = agent.initial_harness_status.clone();
             let tool_names: Vec<String> = agent
                 .bus
