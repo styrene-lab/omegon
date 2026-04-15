@@ -14,6 +14,7 @@ permissions:
   contents: write
   id-token: write
   attestations: write
+  packages: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -392,3 +393,64 @@ jobs:
           gh release edit "${{ env.RELEASE_TAG }}" \
             --repo "${{ github.repository }}" \
             --draft=false
+
+  oci-images:
+    name: OCI images (${{ matrix.image }})
+    needs: release
+    if: ${{ !contains(inputs.tag_name || github.ref_name, '-nightly.') }}
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: oci-base
+            description: "Minimal conversation agent"
+          - image: oci-dev
+            description: "Standard coding agent (git, search, HTTP)"
+          - image: oci-python
+            description: "Python project agent"
+          - image: oci-node
+            description: "Node.js project agent"
+          - image: oci-full
+            description: "Full-stack agent (dev + python + node + rust)"
+          - image: oci-ops
+            description: "Infrastructure / ops agent"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v17
+
+      - name: Configure Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
+
+      - name: Authenticate to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          echo "Building and pushing ${{ matrix.image }}:${VERSION}..."
+          nix run .#${{ matrix.image }}.copyToRegistry --accept-flake-config
+          echo "Pushed ${{ matrix.image }}:${VERSION} to ghcr.io"
+
+      - name: Tag as latest (stable only)
+        if: ${{ !contains(env.RELEASE_TAG, '-rc.') }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          IMAGE_NAME=$(nix eval --raw .#${{ matrix.image }}.imageName --accept-flake-config 2>/dev/null || echo "")
+          if [ -z "$IMAGE_NAME" ]; then
+            echo "Could not resolve image name, skipping latest tag"
+            exit 0
+          fi
+          skopeo copy \
+            "docker://${IMAGE_NAME}:${VERSION}" \
+            "docker://${IMAGE_NAME}:latest"
+          echo "Tagged ${IMAGE_NAME}:latest"

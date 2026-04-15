@@ -29,7 +29,7 @@
         pkgs = import nixpkgs { inherit system; };
         craneLib = crane.mkLib pkgs;
 
-        workspaceVersion = "0.15.23";
+        workspaceVersion = "0.15.24";
 
         commitSha =
           if self ? shortRev then self.shortRev
