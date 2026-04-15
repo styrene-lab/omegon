@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eval Dashboard</title>
+<style>
+  :root {
+    --bg: #020308;
+    --card-bg: #080e18;
+    --surface-bg: #060a12;
+    --border: #30708c;
+    --border-dim: #204860;
+    --fg: #c4d8e4;
+    --muted: #607888;
+    --dim: #405870;
+    --accent: #2ab4c8;
+    --accent-muted: #1a8898;
+    --success: #1ab878;
+    --error: #ef4444;
+    --warning: #f59e0b;
+    --caution: #8b5cf6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 0; border-bottom: 1px solid var(--border-dim);
+    margin-bottom: 16px;
+  }
+  header h1 { font-size: 16px; color: var(--accent); font-weight: 600; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .header-right a {
+    color: var(--muted); text-decoration: none; font-size: 12px;
+    transition: color 0.15s;
+  }
+  .header-right a:hover { color: var(--accent); }
+
+  .tab-bar { display: flex; gap: 2px; margin-bottom: 16px; }
+  .tab {
+    padding: 6px 16px; border-radius: 6px 6px 0 0; cursor: pointer;
+    background: var(--card-bg); color: var(--dim); border: 1px solid var(--border-dim);
+    border-bottom: none; font-family: inherit; font-size: 12px;
+    transition: color 0.15s, background 0.15s;
+  }
+  .tab:hover { color: var(--fg); }
+  .tab.active { background: var(--surface-bg); color: var(--accent); border-color: var(--border); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+  }
+  .card h2 {
+    font-size: 11px; color: var(--accent); margin-bottom: 10px;
+    text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600;
+    padding-bottom: 6px; border-bottom: 1px solid var(--border-dim);
+  }
+
+  /* Ranking table */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th {
+    text-align: left; padding: 6px 8px; color: var(--accent-muted);
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 8px; border-bottom: 1px solid var(--border-dim);
+    vertical-align: middle;
+  }
+  tr:hover td { background: var(--surface-bg); }
+  tr.clickable { cursor: pointer; }
+
+  /* Score indicators */
+  .score { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .score-high { color: var(--success); }
+  .score-mid { color: var(--warning); }
+  .score-low { color: var(--error); }
+  .pass-badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .pass-badge.pass { background: rgba(26,184,120,0.15); color: var(--success); }
+  .pass-badge.fail { background: rgba(239,68,68,0.15); color: var(--error); }
+
+  .trend { font-size: 11px; }
+  .trend-improving { color: var(--success); }
+  .trend-stable { color: var(--muted); }
+  .trend-declining { color: var(--error); }
+  .trend-insufficient { color: var(--dim); }
+
+  /* Dimension bars */
+  .dim-bar-container { margin: 4px 0; }
+  .dim-bar-label {
+    display: flex; justify-content: space-between; margin-bottom: 2px;
+    font-size: 11px;
+  }
+  .dim-bar-label .name { color: var(--muted); }
+  .dim-bar-label .value { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .dim-bar {
+    height: 6px; background: var(--border-dim); border-radius: 3px;
+    overflow: hidden;
+  }
+  .dim-bar-fill {
+    height: 100%; border-radius: 3px;
+    transition: width 0.4s ease;
+  }
+
+  /* Scenario list */
+  .scenario-row {
+    display: grid;
+    grid-template-columns: 20px 1fr 60px 80px 60px 80px;
+    gap: 8px; padding: 6px 0;
+    border-bottom: 1px solid var(--border-dim);
+    align-items: center; font-size: 12px;
+  }
+  .scenario-row:last-child { border-bottom: none; }
+  .scenario-icon { text-align: center; font-size: 10px; }
+  .scenario-name { font-weight: 500; }
+  .scenario-diff { font-size: 11px; color: var(--muted); }
+
+  /* Component matrix */
+  .matrix-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 8px;
+  }
+  .matrix-item {
+    background: var(--surface-bg); border: 1px solid var(--border-dim);
+    border-radius: 4px; padding: 8px;
+  }
+  .matrix-key { font-size: 10px; color: var(--accent-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+  .matrix-value { font-size: 12px; color: var(--fg); margin-top: 2px; word-break: break-all; }
+
+  /* Compare view */
+  .compare-select {
+    display: flex; gap: 12px; align-items: center; margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .compare-select select {
+    background: var(--surface-bg); color: var(--fg); border: 1px solid var(--border-dim);
+    border-radius: 4px; padding: 6px 10px; font-family: inherit; font-size: 12px;
+    min-width: 280px;
+  }
+  .compare-select button {
+    background: var(--accent-muted); color: var(--bg); border: none;
+    border-radius: 4px; padding: 6px 16px; font-family: inherit; font-size: 12px;
+    cursor: pointer; font-weight: 600;
+    transition: background 0.15s;
+  }
+  .compare-select button:hover { background: var(--accent); }
+
+  .delta { font-variant-numeric: tabular-nums; }
+  .delta-pos { color: var(--success); }
+  .delta-neg { color: var(--error); }
+  .delta-zero { color: var(--muted); }
+
+  .matrix-change {
+    padding: 4px 8px; background: var(--surface-bg); border-radius: 4px;
+    margin: 4px 0; font-size: 11px; color: var(--warning);
+  }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center; padding: 60px 20px; color: var(--dim);
+  }
+  .empty-state h3 { font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+  .empty-state p { font-size: 12px; }
+  .empty-state code {
+    display: inline-block; margin-top: 12px; padding: 6px 12px;
+    background: var(--surface-bg); border: 1px solid var(--border-dim);
+    border-radius: 4px; color: var(--accent);
+  }
+
+  /* Loading */
+  .loading { color: var(--dim); padding: 20px; text-align: center; }
+
+  /* Responsive grid */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .grid-3 { grid-template-columns: 1fr; } }
+
+  /* Stat cards */
+  .stat-card {
+    background: var(--surface-bg); border: 1px solid var(--border-dim);
+    border-radius: 6px; padding: 12px; text-align: center;
+  }
+  .stat-value { font-size: 24px; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+
+  .back-link {
+    color: var(--accent-muted); text-decoration: none; font-size: 12px;
+    cursor: pointer; display: inline-block; margin-bottom: 12px;
+  }
+  .back-link:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Eval Dashboard</h1>
+    <div class="header-right">
+      <a href="/">Agent Dashboard</a>
+    </div>
+  </header>
+
+  <div class="tab-bar">
+    <button class="tab active" data-tab="rankings">Rankings</button>
+    <button class="tab" data-tab="history">History</button>
+    <button class="tab" data-tab="detail">Detail</button>
+    <button class="tab" data-tab="compare">Compare</button>
+  </div>
+
+  <!-- Rankings Tab -->
+  <div id="tab-rankings" class="tab-content active">
+    <div id="rankings-content" class="loading">Loading...</div>
+  </div>
+
+  <!-- History Tab -->
+  <div id="tab-history" class="tab-content">
+    <div id="history-content" class="loading">Loading...</div>
+  </div>
+
+  <!-- Detail Tab -->
+  <div id="tab-detail" class="tab-content">
+    <div id="detail-content">
+      <div class="empty-state">
+        <h3>No score card selected</h3>
+        <p>Select a score card from Rankings or History to view details.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Compare Tab -->
+  <div id="tab-compare" class="tab-content">
+    <div id="compare-content">
+      <div class="compare-select">
+        <select id="compare-a"><option value="">Select card A...</option></select>
+        <span style="color:var(--dim)">vs</span>
+        <select id="compare-b"><option value="">Select card B...</option></select>
+        <button onclick="runCompare()">Compare</button>
+      </div>
+      <div id="compare-result"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────
+let evalData = null; // { entries, rankings }
+let currentCard = null;
+
+// ── Init ─────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  setupTabs();
+  fetchEvalData();
+});
+
+function setupTabs() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    });
+  });
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => {
+    c.classList.toggle('active', c.id === 'tab-' + name);
+  });
+}
+
+// ── Data Fetching ────────────────────────────────────────────────────
+async function fetchEvalData() {
+  try {
+    const res = await fetch('/api/evals');
+    if (!res.ok) throw new Error(`${res.status}`);
+    evalData = await res.json();
+    renderRankings();
+    renderHistory();
+    populateCompareSelects();
+  } catch (e) {
+    document.getElementById('rankings-content').innerHTML = renderEmpty();
+    document.getElementById('history-content').innerHTML = renderEmpty();
+  }
+}
+
+async function fetchCard(id) {
+  try {
+    const res = await fetch('/api/evals/' + encodeURIComponent(id));
+    if (!res.ok) throw new Error(`${res.status}`);
+    return await res.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchCompare(a, b) {
+  try {
+    const res = await fetch(`/api/evals/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
+    if (!res.ok) throw new Error(`${res.status}`);
+    return await res.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+// ── Rankings View ────────────────────────────────────────────────────
+function renderRankings() {
+  const el = document.getElementById('rankings-content');
+  if (!evalData || !evalData.rankings.length) {
+    el.innerHTML = renderEmpty();
+    return;
+  }
+  const r = evalData.rankings;
+  let html = '<div class="card"><h2>Agent Rankings</h2><table>';
+  html += '<tr><th>#</th><th>Agent</th><th>Suite</th><th>Score</th><th>Pass Rate</th><th>Runs</th><th>Trend</th><th>Model</th><th>Domain</th></tr>';
+  r.forEach((entry, i) => {
+    const sc = scoreClass(entry.latest_score);
+    const tc = trendClass(entry.trend);
+    const tl = trendLabel(entry.trend);
+    html += `<tr class="clickable" onclick="loadLatestCard('${esc(entry.agent_id)}','${esc(entry.suite)}')">
+      <td style="color:var(--dim)">${i + 1}</td>
+      <td style="color:var(--accent)">${esc(entry.agent_id)}</td>
+      <td>${esc(entry.suite)}</td>
+      <td class="score ${sc}">${pct(entry.latest_score)}</td>
+      <td class="score ${sc}">${pct(entry.latest_pass_rate)}</td>
+      <td style="color:var(--muted)">${entry.run_count}</td>
+      <td class="trend ${tc}">${tl}</td>
+      <td style="color:var(--dim);font-size:11px">${esc(entry.model)}</td>
+      <td style="color:var(--dim);font-size:11px">${esc(entry.domain)}</td>
+    </tr>`;
+  });
+  html += '</table></div>';
+  el.innerHTML = html;
+}
+
+function loadLatestCard(agentId, suite) {
+  if (!evalData) return;
+  const match = evalData.entries.find(e => e.agent_id === agentId && e.suite === suite);
+  if (match) showDetail(match.id);
+}
+
+// ── History View ─────────────────────────────────────────────────────
+function renderHistory() {
+  const el = document.getElementById('history-content');
+  if (!evalData || !evalData.entries.length) {
+    el.innerHTML = renderEmpty();
+    return;
+  }
+  let html = '<div class="card"><h2>Eval History</h2><table>';
+  html += '<tr><th>Timestamp</th><th>Agent</th><th>Suite</th><th>Score</th><th>Pass Rate</th><th>Scenarios</th><th>Model</th><th>Version</th></tr>';
+  evalData.entries.forEach(entry => {
+    const sc = scoreClass(entry.total_score);
+    const ts = formatTimestamp(entry.timestamp);
+    html += `<tr class="clickable" onclick="showDetail('${esc(entry.id)}')">
+      <td style="color:var(--dim)">${ts}</td>
+      <td style="color:var(--accent)">${esc(entry.agent_id)}</td>
+      <td>${esc(entry.suite)}</td>
+      <td class="score ${sc}">${pct(entry.total_score)}</td>
+      <td class="score ${sc}">${pct(entry.pass_rate)}</td>
+      <td style="color:var(--muted)">${entry.scenario_count}</td>
+      <td style="color:var(--dim);font-size:11px">${esc(entry.model)}</td>
+      <td style="color:var(--dim);font-size:11px">${esc(entry.omegon_version)}</td>
+    </tr>`;
+  });
+  html += '</table></div>';
+  el.innerHTML = html;
+}
+
+// ── Detail View ──────────────────────────────────────────────────────
+async function showDetail(id) {
+  switchTab('detail');
+  const el = document.getElementById('detail-content');
+  el.innerHTML = '<div class="loading">Loading score card...</div>';
+
+  const card = await fetchCard(id);
+  if (!card) {
+    el.innerHTML = '<div class="empty-state"><h3>Failed to load score card</h3></div>';
+    return;
+  }
+  currentCard = card;
+
+  let html = '<a class="back-link" onclick="switchTab(\'history\')">&larr; Back to history</a>';
+
+  // Header stats
+  html += '<div class="grid-3" style="margin-bottom:16px">';
+  html += statCard(pct(card.aggregate.total_score), 'Total Score', scoreClass(card.aggregate.total_score));
+  html += statCard(pct(card.aggregate.pass_rate), 'Pass Rate', scoreClass(card.aggregate.pass_rate));
+  html += statCard(card.scenarios.length.toString(), 'Scenarios', '');
+  html += '</div>';
+
+  html += '<div class="grid-3" style="margin-bottom:16px">';
+  html += statCard(card.aggregate.avg_turns.toFixed(1), 'Avg Turns', '');
+  html += statCard(Math.round(card.aggregate.avg_tokens).toLocaleString(), 'Avg Tokens', '');
+  html += statCard(formatTimestamp(card.timestamp), 'Run Time', '');
+  html += '</div>';
+
+  // Dimensions + Components side by side
+  html += '<div class="grid-2">';
+
+  // Dimension bars
+  html += '<div class="card"><h2>Dimensions</h2>';
+  const dims = Object.entries(card.aggregate.by_dimension).sort((a,b) => b[1] - a[1]);
+  if (dims.length) {
+    dims.forEach(([name, val]) => {
+      html += dimBar(name, val);
+    });
+  } else {
+    html += '<div style="color:var(--dim);font-size:12px">No dimension data</div>';
+  }
+  html += '</div>';
+
+  // By difficulty
+  html += '<div class="card"><h2>By Difficulty</h2>';
+  const diffs = Object.entries(card.aggregate.by_difficulty).sort((a,b) => Number(a[0]) - Number(b[0]));
+  if (diffs.length) {
+    diffs.forEach(([level, val]) => {
+      const label = level === '1' ? 'Easy' : level === '2' ? 'Medium' : 'Hard';
+      html += dimBar(`L${level} ${label}`, val);
+    });
+  } else {
+    html += '<div style="color:var(--dim);font-size:12px">No difficulty data</div>';
+  }
+  html += '</div>';
+  html += '</div>';
+
+  // By component
+  const comps = Object.entries(card.aggregate.by_component || {});
+  if (comps.length) {
+    html += '<div class="card"><h2>By Component</h2>';
+    comps.sort((a,b) => b[1] - a[1]).forEach(([name, val]) => {
+      html += dimBar(name, val);
+    });
+    html += '</div>';
+  }
+
+  // Scenarios
+  html += '<div class="card"><h2>Scenarios</h2>';
+  html += '<div class="scenario-row" style="color:var(--accent-muted);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border)">';
+  html += '<div></div><div>Name</div><div>Level</div><div>Score</div><div>Turns</div><div>Status</div>';
+  html += '</div>';
+  card.scenarios.forEach(s => {
+    const icon = s.passed ? '<span style="color:var(--success)">&#10003;</span>' : '<span style="color:var(--error)">&#10007;</span>';
+    const sc = scoreClass(s.weighted_score);
+    html += `<div class="scenario-row">
+      <div class="scenario-icon">${icon}</div>
+      <div class="scenario-name">${esc(s.name)}</div>
+      <div style="color:var(--dim)">L${s.difficulty}</div>
+      <div class="score ${sc}">${pct(s.weighted_score)}</div>
+      <div style="color:var(--muted)">${s.turns}</div>
+      <div><span class="pass-badge ${s.passed ? 'pass' : 'fail'}">${s.passed ? 'PASS' : 'FAIL'}</span></div>
+    </div>`;
+
+    // Dimension breakdown for this scenario
+    const sdims = Object.entries(s.scores || {});
+    if (sdims.length) {
+      html += '<div style="padding:0 0 8px 28px">';
+      sdims.forEach(([dim, val]) => {
+        html += `<span style="font-size:10px;color:var(--dim);margin-right:12px">${esc(dim)}: <span class="score ${scoreClass(val)}">${pct(val)}</span></span>`;
+      });
+      html += '</div>';
+    }
+
+    if (s.error) {
+      html += `<div style="padding:2px 0 8px 28px;font-size:11px;color:var(--error)">${esc(s.error)}</div>`;
+    }
+  });
+  html += '</div>';
+
+  // Component matrix
+  html += '<div class="card"><h2>Component Matrix</h2><div class="matrix-grid">';
+  const c = card.components;
+  html += matrixItem('Domain', c.domain);
+  html += matrixItem('Model', c.model);
+  html += matrixItem('Thinking', c.thinking_level);
+  html += matrixItem('Context', c.context_class);
+  html += matrixItem('Max Turns', c.max_turns);
+  html += matrixItem('Agent Version', c.agent_version);
+  html += matrixItem('Omegon Version', c.omegon_version);
+  if (c.persona) html += matrixItem('Persona', c.persona);
+  if (c.workflow) html += matrixItem('Workflow', c.workflow);
+  if (c.extensions && c.extensions.length) {
+    html += matrixItem('Extensions', c.extensions.map(e => `${e.name}@${e.version}`).join(', '));
+  }
+  if (c.plugins && c.plugins.length) {
+    html += matrixItem('Plugins', c.plugins.map(p => `${p.name}@${p.version}`).join(', '));
+  }
+  if (c.skills && c.skills.length) {
+    html += matrixItem('Skills', c.skills.join(', '));
+  }
+  if (c.triggers && c.triggers.length) {
+    html += matrixItem('Triggers', c.triggers.join(', '));
+  }
+  if (c.tools && c.tools.length) {
+    html += matrixItem('Tools', `${c.tools.length} registered`);
+  }
+  html += '</div></div>';
+
+  el.innerHTML = html;
+}
+
+// ── Compare View ─────────────────────────────────────────────────────
+function populateCompareSelects() {
+  if (!evalData) return;
+  const selA = document.getElementById('compare-a');
+  const selB = document.getElementById('compare-b');
+  [selA, selB].forEach(sel => {
+    sel.innerHTML = '<option value="">Select a score card...</option>';
+    evalData.entries.forEach(e => {
+      const label = `${e.agent_id} / ${e.suite} (${formatTimestamp(e.timestamp)}) — ${pct(e.total_score)}`;
+      sel.innerHTML += `<option value="${esc(e.id)}">${label}</option>`;
+    });
+  });
+}
+
+async function runCompare() {
+  const a = document.getElementById('compare-a').value;
+  const b = document.getElementById('compare-b').value;
+  const el = document.getElementById('compare-result');
+
+  if (!a || !b) {
+    el.innerHTML = '<div style="color:var(--warning);padding:12px">Select two score cards to compare.</div>';
+    return;
+  }
+  if (a === b) {
+    el.innerHTML = '<div style="color:var(--warning);padding:12px">Select two different score cards.</div>';
+    return;
+  }
+
+  el.innerHTML = '<div class="loading">Comparing...</div>';
+  const diff = await fetchCompare(a, b);
+  if (!diff) {
+    el.innerHTML = '<div style="color:var(--error);padding:12px">Failed to compare score cards.</div>';
+    return;
+  }
+
+  let html = '';
+
+  // Overall deltas
+  html += '<div class="grid-3" style="margin:16px 0">';
+  html += deltaStatCard('Score', diff.total_score_delta);
+  html += deltaStatCard('Pass Rate', diff.pass_rate_delta);
+  html += `<div class="stat-card"><div class="stat-value" style="font-size:16px;color:var(--muted)">${diff.scenario_diffs.length} scenarios</div><div class="stat-label">Compared</div></div>`;
+  html += '</div>';
+
+  // Matrix changes
+  if (diff.matrix_changes.length) {
+    html += '<div class="card"><h2>Configuration Changes</h2>';
+    diff.matrix_changes.forEach(change => {
+      html += `<div class="matrix-change">${esc(change)}</div>`;
+    });
+    html += '</div>';
+  }
+
+  // Dimension deltas
+  const dimDeltas = Object.entries(diff.dimension_deltas);
+  if (dimDeltas.length) {
+    html += '<div class="card"><h2>Dimension Changes</h2>';
+    dimDeltas.sort((a,b) => Math.abs(b[1]) - Math.abs(a[1])).forEach(([name, delta]) => {
+      html += deltaBar(name, delta);
+    });
+    html += '</div>';
+  }
+
+  // Component deltas
+  const compDeltas = Object.entries(diff.component_deltas);
+  if (compDeltas.length) {
+    html += '<div class="card"><h2>Component Changes</h2>';
+    compDeltas.sort((a,b) => Math.abs(b[1]) - Math.abs(a[1])).forEach(([name, delta]) => {
+      html += deltaBar(name, delta);
+    });
+    html += '</div>';
+  }
+
+  // Scenario diffs
+  html += '<div class="card"><h2>Scenario Changes</h2>';
+  html += '<div class="scenario-row" style="color:var(--accent-muted);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border)">';
+  html += '<div></div><div>Name</div><div>Card A</div><div>Card B</div><div>Delta</div><div>Status</div>';
+  html += '</div>';
+  diff.scenario_diffs.forEach(s => {
+    const icon = s.delta > 0.01 ? '<span style="color:var(--success)">&#9650;</span>'
+      : s.delta < -0.01 ? '<span style="color:var(--error)">&#9660;</span>'
+      : '<span style="color:var(--dim)">=</span>';
+    const dc = deltaClass(s.delta);
+    const statusBadge = s.status_change
+      ? `<span class="pass-badge ${s.status_change === 'fixed' || s.status_change === 'added' ? 'pass' : 'fail'}">${esc(s.status_change)}</span>`
+      : '';
+    html += `<div class="scenario-row">
+      <div class="scenario-icon">${icon}</div>
+      <div class="scenario-name">${esc(s.name)}</div>
+      <div style="color:var(--muted)">${s.score_a != null ? pct(s.score_a) : '—'}</div>
+      <div style="color:var(--muted)">${s.score_b != null ? pct(s.score_b) : '—'}</div>
+      <div class="delta ${dc}">${formatDelta(s.delta)}</div>
+      <div>${statusBadge}</div>
+    </div>`;
+  });
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────
+function pct(v) { return Math.round(v * 100) + '%'; }
+
+function scoreClass(v) {
+  if (v >= 0.8) return 'score-high';
+  if (v >= 0.5) return 'score-mid';
+  return 'score-low';
+}
+
+function trendClass(t) {
+  return 'trend-' + t;
+}
+
+function trendLabel(t) {
+  switch(t) {
+    case 'improving': return '&#9650; Improving';
+    case 'stable': return '&#8212; Stable';
+    case 'declining': return '&#9660; Declining';
+    default: return '&#8230; Insufficient';
+  }
+}
+
+function deltaClass(d) {
+  if (d > 0.005) return 'delta-pos';
+  if (d < -0.005) return 'delta-neg';
+  return 'delta-zero';
+}
+
+function formatDelta(d) {
+  const sign = d > 0.005 ? '+' : '';
+  return sign + Math.round(d * 100) + '%';
+}
+
+function formatTimestamp(ts) {
+  try {
+    const d = new Date(ts);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+           d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  } catch { return ts; }
+}
+
+function esc(s) {
+  if (s == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+function barColor(v) {
+  if (v >= 0.8) return 'var(--success)';
+  if (v >= 0.5) return 'var(--warning)';
+  return 'var(--error)';
+}
+
+function dimBar(name, val) {
+  return `<div class="dim-bar-container">
+    <div class="dim-bar-label"><span class="name">${esc(name)}</span><span class="value">${pct(val)}</span></div>
+    <div class="dim-bar"><div class="dim-bar-fill" style="width:${val*100}%;background:${barColor(val)}"></div></div>
+  </div>`;
+}
+
+function deltaBar(name, delta) {
+  const dc = deltaClass(delta);
+  const width = Math.min(Math.abs(delta) * 200, 100);
+  const dir = delta >= 0 ? 'right' : 'left';
+  const color = delta > 0.005 ? 'var(--success)' : delta < -0.005 ? 'var(--error)' : 'var(--muted)';
+  return `<div class="dim-bar-container">
+    <div class="dim-bar-label"><span class="name">${esc(name)}</span><span class="delta ${dc}">${formatDelta(delta)}</span></div>
+    <div class="dim-bar" style="position:relative">
+      <div style="position:absolute;${dir}:50%;width:${width}%;height:100%;background:${color};border-radius:3px"></div>
+    </div>
+  </div>`;
+}
+
+function statCard(value, label, cls) {
+  const colorStyle = cls ? '' : 'color:var(--fg)';
+  return `<div class="stat-card">
+    <div class="stat-value ${cls}" style="${colorStyle}">${value}</div>
+    <div class="stat-label">${label}</div>
+  </div>`;
+}
+
+function deltaStatCard(label, delta) {
+  const dc = deltaClass(delta);
+  return `<div class="stat-card">
+    <div class="stat-value delta ${dc}" style="font-size:20px">${formatDelta(delta)}</div>
+    <div class="stat-label">${label} Change</div>
+  </div>`;
+}
+
+function matrixItem(key, value) {
+  return `<div class="matrix-item">
+    <div class="matrix-key">${esc(key)}</div>
+    <div class="matrix-value">${esc(value)}</div>
+  </div>`;
+}
+
+function renderEmpty() {
+  return `<div class="empty-state">
+    <h3>No eval results yet</h3>
+    <p>Run an evaluation to see results here.</p>
+    <code>omegon eval --agent &lt;id&gt; --suite evals/coding/suite.toml</code>
+  </div>`;
+}
+</script>
+</body>
+</html>

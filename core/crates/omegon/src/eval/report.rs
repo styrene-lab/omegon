@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoreCard {
     pub agent_id: String,
     pub suite: String,
@@ -17,7 +17,7 @@ pub struct ScoreCard {
 
 /// Tracks every component that makes up the agent under evaluation.
 /// When a score changes between runs, diff the matrices to find what changed.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ComponentMatrix {
     /// Agent manifest version.
     pub agent_version: String,
@@ -26,29 +26,29 @@ pub struct ComponentMatrix {
     /// LLM model used (e.g., "anthropic:claude-sonnet-4-6").
     pub model: String,
     /// Active persona id (if any).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persona: Option<String>,
     /// Thinking level: off, minimal, low, medium, high.
     pub thinking_level: String,
     /// Context class: squad, maniple, clan, legion.
     pub context_class: String,
     /// Installed extensions with versions.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extensions: Vec<ComponentVersion>,
     /// Active plugins with versions.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugins: Vec<ComponentVersion>,
     /// Loaded skills.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<String>,
     /// Active triggers.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<String>,
     /// Workflow template name (if any).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow: Option<String>,
     /// Tool surface — all tools registered on the bus.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<String>,
     /// Max turns configured.
     pub max_turns: u32,
@@ -56,13 +56,13 @@ pub struct ComponentMatrix {
     pub omegon_version: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentVersion {
     pub name: String,
     pub version: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioResult {
     pub name: String,
     pub difficulty: u8,
@@ -72,14 +72,14 @@ pub struct ScenarioResult {
     pub tokens: u64,
     pub duration_secs: f64,
     pub passed: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// Which components this scenario tests (from scenario.tests_component).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tests_component: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregateScore {
     pub total_score: f64,
     pub pass_rate: f64,
@@ -89,7 +89,7 @@ pub struct AggregateScore {
     pub by_dimension: HashMap<String, f64>,
     /// Scores grouped by which component the scenario tests.
     /// Enables "the persona scores 90% but tool selection scores 60%."
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub by_component: HashMap<String, f64>,
 }
 

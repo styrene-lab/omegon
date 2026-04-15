@@ -337,7 +337,11 @@ pub async fn start_server_with_options(
         .route("/api/readyz", axum::routing::get(api::get_ready))
         .route("/api/graph", axum::routing::get(api::get_graph))
         .route("/api/events", axum::routing::post(api::post_event))
+        .route("/api/evals", axum::routing::get(api::get_evals))
+        .route("/api/evals/compare", axum::routing::get(api::get_eval_compare))
+        .route("/api/evals/{*id}", axum::routing::get(api::get_eval))
         .route("/ws", axum::routing::get(ws::ws_handler))
+        .route("/evals", axum::routing::get(serve_eval_dashboard))
         .route("/", axum::routing::get(serve_dashboard))
         .layer(
             tower_http::cors::CorsLayer::new()
@@ -614,6 +618,10 @@ pub(crate) async fn process_next_daemon_event(state: &WebState) -> anyhow::Resul
 /// Serve the embedded dashboard HTML.
 async fn serve_dashboard() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("assets/dashboard.html"))
+}
+
+async fn serve_eval_dashboard() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("assets/eval-dashboard.html"))
 }
 
 /// Bind to a port with auto-increment fallback. Returns the listener directly

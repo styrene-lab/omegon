@@ -9,6 +9,7 @@
 pub mod scenario;
 pub mod scorer;
 pub mod report;
+pub mod store;
 
 use std::path::Path;
 

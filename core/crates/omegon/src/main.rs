@@ -701,10 +701,8 @@ async fn main() -> anyhow::Result<()> {
             let suite_path = std::path::PathBuf::from(suite);
             let card = eval::run_suite(&agent, &suite_path, model_override.as_deref()).await?;
             println!("{}", card.summary());
-            let json = serde_json::to_string_pretty(&card)?;
-            let out_path = format!("eval-{}-{}.json", agent.replace('.', "-"), chrono::Utc::now().format("%Y%m%d-%H%M%S"));
-            std::fs::write(&out_path, &json)?;
-            println!("Score card written to {out_path}");
+            let stored_path = eval::store::store(&card)?;
+            println!("Score card stored at {}", stored_path.display());
             Ok(())
         }
         Some(Commands::Migrate { ref source }) => {

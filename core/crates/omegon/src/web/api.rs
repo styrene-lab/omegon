@@ -993,3 +993,43 @@ mod tests {
         assert!(json.contains("\"type\":\"parent\""), "got: {json}");
     }
 }
+
+// ── Eval API endpoints ─────────────────────────────────────────────────
+
+/// GET /api/evals — list all stored score cards (summary view).
+pub async fn get_evals() -> Result<Json<EvalListResponse>, StatusCode> {
+    let entries = crate::eval::store::list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rankings =
+        crate::eval::store::rankings().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(EvalListResponse { entries, rankings }))
+}
+
+#[derive(Serialize)]
+pub struct EvalListResponse {
+    pub entries: Vec<crate::eval::store::ScoreCardEntry>,
+    pub rankings: Vec<crate::eval::store::RankingEntry>,
+}
+
+/// GET /api/evals/:id — full score card by storage ID.
+pub async fn get_eval(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<crate::eval::report::ScoreCard>, StatusCode> {
+    let card = crate::eval::store::load(&id).map_err(|_| StatusCode::NOT_FOUND)?;
+    Ok(Json(card))
+}
+
+/// GET /api/evals/compare — diff two score cards.
+/// Query params: ?a=<id>&b=<id>
+pub async fn get_eval_compare(
+    axum::extract::Query(params): axum::extract::Query<CompareParams>,
+) -> Result<Json<crate::eval::store::ScoreCardDiff>, StatusCode> {
+    let diff = crate::eval::store::compare(&params.a, &params.b)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    Ok(Json(diff))
+}
+
+#[derive(serde::Deserialize)]
+pub struct CompareParams {
+    pub a: String,
+    pub b: String,
+}
