@@ -61,6 +61,12 @@ pub struct ScenarioMeta {
     pub domain: String,
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
+    /// Which component(s) this scenario primarily tests.
+    /// Used for attribution when analyzing score regressions.
+    /// Values: "persona", "tools", "extensions", "plugins", "model",
+    ///         "workflow", "triggers", "context", "safety"
+    #[serde(default)]
+    pub tests_component: Vec<String>,
 }
 
 fn default_difficulty() -> u8 {

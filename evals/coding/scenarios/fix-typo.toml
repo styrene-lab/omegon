@@ -4,6 +4,7 @@ description = "Fix a typo in a Python function docstring"
 difficulty = 1
 domain = "coding"
 timeout_secs = 60
+tests_component = ["tools", "persona"]
 
 [input]
 prompt = "There's a typo in src/utils.py line 12. The docstring says 'retuns' instead of 'returns'. Fix it."

@@ -4,6 +4,7 @@ description = "Write a simple function given a specification"
 difficulty = 2
 domain = "coding"
 timeout_secs = 120
+tests_component = ["tools", "model"]
 
 [input]
 prompt = "Write a Python function called `is_palindrome(s: str) -> bool` that checks if a string is a palindrome, ignoring case and spaces. Write it to a file called palindrome.py."

@@ -315,6 +315,11 @@ enum Commands {
         /// Path to eval suite TOML file.
         #[arg(long)]
         suite: String,
+
+        /// Override the model for this eval run. Run the same suite with
+        /// different models to avoid overfitting to a single provider.
+        #[arg(long)]
+        model_override: Option<String>,
     },
 
     /// Manage plugins — install, list, remove, update.
@@ -689,9 +694,12 @@ async fn main() -> anyhow::Result<()> {
             control_port,
             strict_port,
         }) => run_embedded_command(control_port, strict_port, &cli.model, None).await,
-        Some(Commands::Eval { ref agent, ref suite }) => {
+        Some(Commands::Eval { agent, suite, model_override }) => {
+            if let Some(model) = &model_override {
+                tracing::info!(model = %model, "eval: model override active — testing model portability");
+            }
             let suite_path = std::path::PathBuf::from(suite);
-            let card = eval::run_suite(agent, &suite_path).await?;
+            let card = eval::run_suite(&agent, &suite_path, model_override.as_deref()).await?;
             println!("{}", card.summary());
             let json = serde_json::to_string_pretty(&card)?;
             let out_path = format!("eval-{}-{}.json", agent.replace('.', "-"), chrono::Utc::now().format("%Y%m%d-%H%M%S"));

@@ -4,6 +4,7 @@ description = "Read a file and summarize its purpose"
 difficulty = 1
 domain = "coding"
 timeout_secs = 60
+tests_component = ["persona", "context"]
 
 [input]
 prompt = "Read the file at Cargo.toml and tell me the project name and version in one sentence."
