@@ -858,5 +858,31 @@
     "released": null,
     "rc_count": 0,
     "notes": []
+  },
+  "0.15.25": {
+    "status": "rc",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": false,
+    "opened": "2026-04-15T20:57:50Z",
+    "last_rc": "2026-04-15T20:57:50Z",
+    "rc_version": "0.15.25-rc.1",
+    "rc_count": 1,
+    "released": null,
+    "notes": [
+      "fix: resolve -D warnings in eval module",
+      "fix: hydrate all provider credentials for child process inheritance",
+      "feat(eval): score card storage, API, and eval dashboard frontend",
+      "feat(eval): component matrix tracking + model portability testing",
+      "feat: agent evaluation framework with scoring and ranking",
+      "fix: tool execution timeout + session mutex contention",
+      "fix: production hardening for daemon agent loop",
+      "feat: deterministic agent launch + Auspex spawn contract spec",
+      "feat: agent bundle verification + SBOM pipeline",
+      "feat: agent catalog with deployable manifest bundles",
+      "refactor(container): domain-based agent images",
+      "feat(ci): push OCI images to ghcr.io on release",
+      "feat: Pkl config language support via rpkl"
+    ]
   }
 }
