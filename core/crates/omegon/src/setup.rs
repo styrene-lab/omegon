@@ -213,7 +213,7 @@ impl AgentSetup {
         // Replaces the sync preflight_session_cache() which silently skips vault recipes.
         secrets.preflight_session_cache_async(preflight).await;
         let mut session_secret_env = secrets.session_env();
-        hydrate_provider_auth_env_from_auth_json(settings.as_ref(), &mut session_secret_env);
+        hydrate_provider_auth_env_from_auth_json(&mut session_secret_env);
         for (name, value) in &session_secret_env {
             // SAFETY: setup runs before provider detection for this process; exporting
             // startup-resolved secrets here makes the active provider path see the
@@ -1002,7 +1002,6 @@ fn collect_extension_secret_requirements() -> Vec<String> {
 }
 
 fn hydrate_provider_auth_env_from_auth_json(
-    _settings: Option<&crate::settings::SharedSettings>,
     session_secret_env: &mut Vec<(String, String)>,
 ) {
     // Hydrate credentials for ALL providers that have stored auth, not just the

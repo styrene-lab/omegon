@@ -162,7 +162,15 @@ pub fn list() -> anyhow::Result<Vec<ScoreCardEntry>> {
 pub fn load(id: &str) -> anyhow::Result<ScoreCard> {
     let root = eval_results_dir()?;
     let path = root.join(format!("{id}.json"));
-    load_card(&path)
+    // Canonicalize both paths and verify the target stays inside eval-results/.
+    let canonical_root = std::fs::canonicalize(&root)
+        .map_err(|_| anyhow::anyhow!("eval-results directory does not exist"))?;
+    let canonical_path = std::fs::canonicalize(&path)
+        .map_err(|_| anyhow::anyhow!("score card not found: {id}"))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        anyhow::bail!("invalid score card id: path escapes eval-results directory");
+    }
+    load_card(&canonical_path)
 }
 
 fn load_card(path: &Path) -> anyhow::Result<ScoreCard> {
@@ -298,7 +306,11 @@ fn diff_cards(id_a: &str, id_b: &str, a: &ScoreCard, b: &ScoreCard) -> ScoreCard
 
 /// Build a ranking table across all stored results.
 pub fn rankings() -> anyhow::Result<Vec<RankingEntry>> {
-    let entries = list()?;
+    rankings_from(&list()?)
+}
+
+/// Build a ranking table from a pre-fetched entry list (avoids double disk scan).
+pub fn rankings_from(entries: &[ScoreCardEntry]) -> anyhow::Result<Vec<RankingEntry>> {
     if entries.is_empty() {
         return Ok(Vec::new());
     }
@@ -306,7 +318,7 @@ pub fn rankings() -> anyhow::Result<Vec<RankingEntry>> {
     // Group by (agent_id, suite)
     let mut groups: std::collections::HashMap<(String, String), Vec<&ScoreCardEntry>> =
         std::collections::HashMap::new();
-    for entry in &entries {
+    for entry in entries {
         groups
             .entry((entry.agent_id.clone(), entry.suite.clone()))
             .or_default()

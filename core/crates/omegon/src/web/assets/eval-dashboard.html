@@ -305,7 +305,7 @@ async function fetchEvalData() {
 
 async function fetchCard(id) {
   try {
-    const res = await fetch('/api/evals/' + encodeURIComponent(id));
+    const res = await fetch('/api/evals/' + id.split('/').map(encodeURIComponent).join('/'));
     if (!res.ok) throw new Error(`${res.status}`);
     return await res.json();
   } catch (e) {
@@ -337,7 +337,7 @@ function renderRankings() {
     const sc = scoreClass(entry.latest_score);
     const tc = trendClass(entry.trend);
     const tl = trendLabel(entry.trend);
-    html += `<tr class="clickable" onclick="loadLatestCard('${esc(entry.agent_id)}','${esc(entry.suite)}')">
+    html += `<tr class="clickable" onclick="loadLatestCard('${escAttr(entry.agent_id)}','${escAttr(entry.suite)}')">
       <td style="color:var(--dim)">${i + 1}</td>
       <td style="color:var(--accent)">${esc(entry.agent_id)}</td>
       <td>${esc(entry.suite)}</td>
@@ -371,7 +371,7 @@ function renderHistory() {
   evalData.entries.forEach(entry => {
     const sc = scoreClass(entry.total_score);
     const ts = formatTimestamp(entry.timestamp);
-    html += `<tr class="clickable" onclick="showDetail('${esc(entry.id)}')">
+    html += `<tr class="clickable" onclick="showDetail('${escAttr(entry.id)}')">
       <td style="color:var(--dim)">${ts}</td>
       <td style="color:var(--accent)">${esc(entry.agent_id)}</td>
       <td>${esc(entry.suite)}</td>
@@ -527,7 +527,7 @@ function populateCompareSelects() {
     sel.innerHTML = '<option value="">Select a score card...</option>';
     evalData.entries.forEach(e => {
       const label = `${e.agent_id} / ${e.suite} (${formatTimestamp(e.timestamp)}) — ${pct(e.total_score)}`;
-      sel.innerHTML += `<option value="${esc(e.id)}">${label}</option>`;
+      sel.innerHTML += `<option value="${escAttr(e.id)}">${label}</option>`;
     });
   });
 }
@@ -666,6 +666,10 @@ function esc(s) {
   return d.innerHTML;
 }
 
+function escAttr(s) {
+  return esc(s).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+}
+
 function barColor(v) {
   if (v >= 0.8) return 'var(--success)';
   if (v >= 0.5) return 'var(--warning)';
@@ -682,12 +686,13 @@ function dimBar(name, val) {
 function deltaBar(name, delta) {
   const dc = deltaClass(delta);
   const width = Math.min(Math.abs(delta) * 200, 100);
-  const dir = delta >= 0 ? 'right' : 'left';
   const color = delta > 0.005 ? 'var(--success)' : delta < -0.005 ? 'var(--error)' : 'var(--muted)';
+  // Positive deltas grow right from center, negative grow left.
+  const left = delta >= 0 ? '50%' : `${50 - width}%`;
   return `<div class="dim-bar-container">
     <div class="dim-bar-label"><span class="name">${esc(name)}</span><span class="delta ${dc}">${formatDelta(delta)}</span></div>
     <div class="dim-bar" style="position:relative">
-      <div style="position:absolute;${dir}:50%;width:${width}%;height:100%;background:${color};border-radius:3px"></div>
+      <div style="position:absolute;left:${left};width:${width}%;height:100%;background:${color};border-radius:3px"></div>
     </div>
   </div>`;
 }

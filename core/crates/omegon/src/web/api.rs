@@ -999,8 +999,8 @@ mod tests {
 /// GET /api/evals — list all stored score cards (summary view).
 pub async fn get_evals() -> Result<Json<EvalListResponse>, StatusCode> {
     let entries = crate::eval::store::list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let rankings =
-        crate::eval::store::rankings().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rankings = crate::eval::store::rankings_from(&entries)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(EvalListResponse { entries, rankings }))
 }
 

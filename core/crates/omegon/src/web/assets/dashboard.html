@@ -37,6 +37,11 @@
   }
   header h1 { font-size: 16px; color: var(--accent); font-weight: 600; }
   .header-right { display: flex; align-items: center; gap: 12px; }
+  .nav-link {
+    color: var(--muted); text-decoration: none; font-size: 12px;
+    margin-right: 8px; transition: color 0.15s;
+  }
+  .nav-link:hover { color: var(--accent); }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .status-dot.connected { background: var(--success); }
   .status-dot.disconnected { background: var(--error); }
@@ -282,7 +287,7 @@
   <header>
     <h1>Ω Omegon Dashboard</h1>
     <div class="header-right">
-      <a href="/evals" style="color: var(--muted); text-decoration: none; font-size: 12px; margin-right: 8px; transition: color 0.15s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">Evals</a>
+      <a href="/evals" class="nav-link">Evals</a>
       <span class="status-dot" id="ws-status"></span>
       <span id="ws-label" style="color: var(--dim); font-size: 12px; margin-left: 4px;">connecting…</span>
     </div>
