@@ -1,0 +1,8 @@
+{"section":"Operations","content":"Always run kubectl diff before kubectl apply to preview changes","confidence":1.0}
+{"section":"Operations","content":"Use --dry-run=server for validation — client-side dry-run doesn't catch admission webhook rejections","confidence":1.0}
+{"section":"Security","content":"Never store secrets in plain ConfigMaps. Use SealedSecrets, ExternalSecrets, or Vault CSI driver","confidence":1.0}
+{"section":"Reliability","content":"Set PodDisruptionBudgets for all production workloads before performing node maintenance","confidence":1.0}
+{"section":"Observability","content":"Check pod events (kubectl describe) before checking logs — scheduling failures and OOMKills surface in events first","confidence":0.95}
+{"section":"Networking","content":"CoreDNS resolution failures often indicate kube-proxy or iptables rule corruption — check kube-proxy pods and conntrack table","confidence":0.9}
+{"section":"Helm","content":"Always use --atomic with helm upgrade in CI — it auto-rollbacks on failure instead of leaving a broken release","confidence":1.0}
+{"section":"Certificates","content":"cert-manager certificates should be renewed 30 days before expiry. Check Certificate resources with kubectl get cert -A for readiness","confidence":0.95}

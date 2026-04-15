@@ -1,0 +1,56 @@
+[agent]
+id = "styrene.infra-engineer"
+name = "Infrastructure Engineer"
+version = "1.0.0"
+description = "Kubernetes cluster management, deployment automation, Helm chart authoring, incident response, and infrastructure observability."
+domain = "infra"
+
+[persona]
+directive = "PERSONA.md"
+badge = "infra"
+mind_facts = "mind/facts.jsonl"
+
+[[extensions]]
+name = "vox"
+version = ">=0.3.0"
+
+[[extensions]]
+name = "scribe"
+version = ">=0.1.0"
+
+[settings]
+model = "anthropic:claude-sonnet-4-6"
+thinking_level = "medium"
+context_class = "squad"
+max_turns = 50
+
+[workflow]
+name = "ops-standard"
+
+[workflow.phases.exploring]
+model = "anthropic:claude-opus-4-6"
+max_turns = 20
+thinking_level = "high"
+
+[workflow.phases.implementing]
+model = "anthropic:claude-sonnet-4-6"
+max_turns = 50
+
+[workflow.phases.verifying]
+model = "anthropic:claude-sonnet-4-6"
+max_turns = 30
+thinking_level = "medium"
+
+[secrets]
+required = ["ANTHROPIC_API_KEY"]
+optional = ["GITHUB_TOKEN", "VOX_SLACK_BOT_TOKEN", "VOX_DISCORD_BOT_TOKEN"]
+
+[[triggers]]
+name = "daily-cluster-health"
+schedule = "daily"
+template = "Run kubectl health checks across all namespaces. Report degraded pods, pending PVCs, certificate expirations within 30 days, and node resource pressure. Summarize findings and flag anything requiring immediate attention."
+
+[[triggers]]
+name = "hourly-deployment-status"
+schedule = "hourly"
+template = "Check recent deployments across all namespaces for rollout failures, pending rollouts, and image pull errors. Report status of any deployment not fully available."

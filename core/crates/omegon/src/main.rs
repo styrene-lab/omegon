@@ -60,6 +60,8 @@ mod prompt;
 mod providers;
 pub mod routing;
 mod session;
+mod agent_manifest;
+mod catalog;
 mod session_router;
 pub mod settings;
 mod triggers;
@@ -259,6 +261,10 @@ enum Commands {
         /// Require the exact control port instead of auto-falling back.
         #[arg(long)]
         strict_port: bool,
+
+        /// Agent manifest to load from catalog (id or path to bundle dir).
+        #[arg(long)]
+        agent: Option<String>,
     },
 
     /// Run an embedded localhost control-plane for external supervisors.
@@ -664,11 +670,12 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Serve {
             control_port,
             strict_port,
-        }) => run_embedded_command(control_port, strict_port, &cli.model).await,
+            ref agent,
+        }) => run_embedded_command(control_port, strict_port, &cli.model, agent.as_deref()).await,
         Some(Commands::Embedded {
             control_port,
             strict_port,
-        }) => run_embedded_command(control_port, strict_port, &cli.model).await,
+        }) => run_embedded_command(control_port, strict_port, &cli.model, None).await,
         Some(Commands::Migrate { ref source }) => {
             let cwd = std::fs::canonicalize(&cli.cwd)?;
             let report = migrate::run(source, &cwd);
@@ -806,7 +813,7 @@ struct DefaultSession {
     conversation: conversation::ConversationState,
 }
 
-async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str) -> anyhow::Result<()> {
+async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str, agent_id: Option<&str>) -> anyhow::Result<()> {
     let cwd = std::fs::canonicalize(".")?;
 
     // ─── Shared setup ───────────────────────────────────────────────────
@@ -828,6 +835,149 @@ async fn run_embedded_command(control_port: u16, strict_port: bool, model: &str)
             omegon_traits::OmegonRuntimeProfile::LongRunningDaemon,
             omegon_traits::OmegonAutonomyMode::GuardedAutonomous,
         );
+    }
+
+    // ─── Agent manifest (--agent flag) ────────────────────────────────────
+    if let Some(agent_id) = agent_id {
+        let omegon_home = paths::omegon_home().unwrap_or_else(|_| cwd.join(".omegon"));
+        match catalog::resolve(&omegon_home, agent_id) {
+            Ok(resolved) => {
+                tracing::info!(
+                    agent = %resolved.manifest.agent.id,
+                    domain = %resolved.manifest.agent.domain,
+                    "loaded agent manifest"
+                );
+
+                // Apply settings
+                if let Some(ref s) = resolved.manifest.settings {
+                    if let Ok(mut settings) = shared_settings.lock() {
+                        if let Some(ref m) = s.model {
+                            settings.model = m.clone();
+                        }
+                        if let Some(ref tl) = s.thinking_level {
+                            if let Some(level) = settings::ThinkingLevel::parse(tl) {
+                            settings.thinking = level;
+                        }
+                        }
+                        if let Some(mt) = s.max_turns {
+                            settings.max_turns = mt;
+                        }
+                    }
+                }
+
+                // Install trigger configs
+                if let Some(ref triggers) = resolved.manifest.triggers {
+                    let trigger_dir = cwd.join(".omegon").join("triggers");
+                    std::fs::create_dir_all(&trigger_dir).ok();
+                    for t in triggers {
+                        let config = triggers::TriggerConfig {
+                            trigger: triggers::TriggerMeta {
+                                name: t.name.clone(),
+                                enabled: true,
+                                schedule: t.schedule.clone(),
+                                interval: t.interval.clone(),
+                            },
+                            filter: None,
+                            prompt: triggers::PromptTemplate {
+                                template: t.template.clone(),
+                            },
+                            session: None,
+                        };
+                        let toml_str = toml::to_string_pretty(&config).unwrap_or_default();
+                        let path = trigger_dir.join(format!("{}.toml", t.name));
+                        if let Err(e) = std::fs::write(&path, &toml_str) {
+                            tracing::warn!(trigger = %t.name, error = %e, "failed to write trigger config");
+                        }
+                    }
+                }
+
+                // Install workflow template
+                if let Some(ref wf) = resolved.manifest.workflow {
+                    let wf_dir = cwd.join(".omegon").join("workflows");
+                    std::fs::create_dir_all(&wf_dir).ok();
+                    let template = workflow::WorkflowTemplate {
+                        workflow: workflow::WorkflowMeta {
+                            name: wf.name.clone(),
+                            description: String::new(),
+                        },
+                        phases: workflow::WorkflowPhases {
+                            exploring: wf.phases.as_ref().and_then(|p| p.get("exploring")).map(|pc| {
+                                workflow::PhaseConfig {
+                                    persona: pc.persona.clone(),
+                                    model: pc.model.clone(),
+                                    max_turns: pc.max_turns,
+                                    context_class: pc.context_class.clone(),
+                                    thinking_level: pc.thinking_level.clone(),
+                                }
+                            }),
+                            specifying: wf.phases.as_ref().and_then(|p| p.get("specifying")).map(|pc| {
+                                workflow::PhaseConfig {
+                                    persona: pc.persona.clone(),
+                                    model: pc.model.clone(),
+                                    max_turns: pc.max_turns,
+                                    context_class: pc.context_class.clone(),
+                                    thinking_level: pc.thinking_level.clone(),
+                                }
+                            }),
+                            decomposing: wf.phases.as_ref().and_then(|p| p.get("decomposing")).map(|pc| {
+                                workflow::PhaseConfig {
+                                    persona: pc.persona.clone(),
+                                    model: pc.model.clone(),
+                                    max_turns: pc.max_turns,
+                                    context_class: pc.context_class.clone(),
+                                    thinking_level: pc.thinking_level.clone(),
+                                }
+                            }),
+                            implementing: wf.phases.as_ref().and_then(|p| p.get("implementing")).map(|pc| {
+                                workflow::PhaseConfig {
+                                    persona: pc.persona.clone(),
+                                    model: pc.model.clone(),
+                                    max_turns: pc.max_turns,
+                                    context_class: pc.context_class.clone(),
+                                    thinking_level: pc.thinking_level.clone(),
+                                }
+                            }),
+                            verifying: wf.phases.as_ref().and_then(|p| p.get("verifying")).map(|pc| {
+                                workflow::PhaseConfig {
+                                    persona: pc.persona.clone(),
+                                    model: pc.model.clone(),
+                                    max_turns: pc.max_turns,
+                                    context_class: pc.context_class.clone(),
+                                    thinking_level: pc.thinking_level.clone(),
+                                }
+                            }),
+                        },
+                    };
+                    let toml_str = toml::to_string_pretty(&template).unwrap_or_default();
+                    let path = wf_dir.join(format!("{}.toml", wf.name));
+                    if let Err(e) = std::fs::write(&path, &toml_str) {
+                        tracing::warn!(workflow = %wf.name, error = %e, "failed to write workflow template");
+                    }
+                }
+
+                // Log extension requirements (resolved at spawn time, not here)
+                if let Some(ref exts) = resolved.manifest.extensions {
+                    for ext in exts {
+                        tracing::info!(extension = %ext.name, version = %ext.version, "agent requires extension");
+                    }
+                }
+
+                // Log secret requirements
+                if let Some(ref secrets) = resolved.manifest.secrets {
+                    if let Some(ref required) = secrets.required {
+                        for s in required {
+                            if std::env::var(s).is_err() {
+                                tracing::warn!(secret = %s, "required secret not found in environment");
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(agent = %agent_id, error = %e, "failed to load agent manifest");
+                return Err(e);
+            }
+        }
     }
 
     // ─── LLM bridge (init once, reused across prompts) ──────────────────
@@ -5193,6 +5343,7 @@ mod tests {
             Commands::Serve {
                 control_port,
                 strict_port,
+                agent: _,
             } => {
                 assert_eq!(control_port, 7842);
                 assert!(strict_port);

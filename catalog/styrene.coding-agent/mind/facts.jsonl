@@ -1,0 +1,6 @@
+{"section":"Process","content":"Always read a file before editing it. The Edit tool will fail if old_string doesn't match.","confidence":1.0}
+{"section":"Process","content":"Run the project's existing test suite after making changes. Don't assume changes are correct without verification.","confidence":1.0}
+{"section":"Git","content":"Create focused commits with conventional commit messages. One logical change per commit.","confidence":1.0}
+{"section":"Security","content":"Never commit .env files, credentials, or API keys. Check git diff before committing.","confidence":1.0}
+{"section":"Code quality","content":"Don't add comments that restate what the code does. Only comment why, not what.","confidence":0.95}
+{"section":"Code quality","content":"Prefer composition over inheritance. Prefer plain functions over classes when state isn't needed.","confidence":0.9}

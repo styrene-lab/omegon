@@ -120,9 +120,33 @@ let
           (n2c.buildLayer { deps = [ omegon entrypoint ]; })
         ];
     };
+  # Build an OCI image from a domain + agent bundle directory.
+  # The bundle is baked into $OMEGON_HOME/catalog/ so the agent starts
+  # with --agent <id> and has everything it needs.
+  mkAgentImage = { name, tag ? version, domain, bundlePath, agentId }:
+    let
+      bundleLayer = pkgs.runCommand "omegon-agent-bundle-${name}" {} ''
+        mkdir -p $out/data/omegon/catalog
+        cp -r ${bundlePath} $out/data/omegon/catalog/${agentId}
+      '';
+      base = mkOmegonImage { inherit name tag domain; };
+    in
+    n2c.buildImage {
+      name = "ghcr.io/styrene-lab/${name}";
+      inherit tag;
+      fromImage = base;
+      config = base.config // {
+        cmd = [ "serve" "--control-port" "7842" "--agent" agentId ];
+      };
+      copyToRoot = [ bundleLayer ];
+      layers = [
+        (n2c.buildLayer { deps = [ bundleLayer ]; })
+      ];
+    };
+
 in
 {
-  inherit mkOmegonImage;
+  inherit mkOmegonImage mkAgentImage;
 
   # ── Domain images ───────────────────────────────────────────────────
 

@@ -4,11 +4,11 @@
 //! max_turns, and context_class for each lifecycle phase. The daemon dispatch bridge
 //! and cleave orchestrator consult these when dispatching work.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// A parsed workflow template.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WorkflowTemplate {
     pub workflow: WorkflowMeta,
     #[serde(default)]
@@ -16,7 +16,7 @@ pub struct WorkflowTemplate {
 }
 
 /// Top-level metadata for a workflow template.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WorkflowMeta {
     pub name: String,
     #[serde(default)]
@@ -24,7 +24,7 @@ pub struct WorkflowMeta {
 }
 
 /// Per-phase configuration. Each field is optional — only present phases are configured.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct WorkflowPhases {
     pub exploring: Option<PhaseConfig>,
     pub specifying: Option<PhaseConfig>,
@@ -34,7 +34,7 @@ pub struct WorkflowPhases {
 }
 
 /// Configuration for a single lifecycle phase.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PhaseConfig {
     pub persona: Option<String>,
     pub model: Option<String>,

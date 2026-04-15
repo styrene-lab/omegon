@@ -38,11 +38,11 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use chrono::{Datelike, Local, Timelike};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 // ── Trigger config (deserialized from TOML) ──────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TriggerConfig {
     pub trigger: TriggerMeta,
     pub filter: Option<TriggerFilter>,
@@ -50,7 +50,7 @@ pub struct TriggerConfig {
     pub session: Option<SessionConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TriggerMeta {
     pub name: String,
     #[serde(default = "default_true")]
@@ -65,18 +65,18 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TriggerFilter {
     pub source: Option<String>,
     pub trigger_kind: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PromptTemplate {
     pub template: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SessionConfig {
     pub caller_key: Option<String>,
 }

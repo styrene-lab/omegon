@@ -1,0 +1,140 @@
+/// Omegon agent manifest schema.
+///
+/// An agent manifest declares everything needed to deploy a purpose-built
+/// agent: domain (OCI image), persona, extensions, settings, workflow,
+/// secrets, and triggers. This is the unit Auspex spawns from a catalog.
+///
+/// Example:
+/// ```
+/// amends "AgentManifest.pkl"
+///
+/// agent {
+///   id = "styrene.infra-engineer"
+///   name = "Infrastructure Engineer"
+///   version = "1.0.0"
+///   domain = "infra"
+/// }
+/// persona {
+///   directive = "PERSONA.md"
+/// }
+/// ```
+module AgentManifest
+
+/// Agent identity and domain binding.
+class AgentMeta {
+  /// Unique identifier (reverse-dns style, e.g., "styrene.infra-engineer").
+  id: String(matches(Regex(#"[\w.-]+"#)))
+
+  /// Human-readable display name.
+  name: String(length > 0)
+
+  /// Semantic version.
+  version: String(matches(Regex(#"\d+\.\d+\.\d+.*"#)))
+
+  /// Description of what this agent does.
+  description: String = ""
+
+  /// Domain — maps to an OCI image (chat, coding, coding-python, infra, etc.).
+  domain: String(length > 0)
+}
+
+/// Persona configuration.
+class PersonaConfig {
+  /// Path to PERSONA.md directive file (relative to bundle dir).
+  directive: String?
+
+  /// Inline directive text (alternative to file reference).
+  directive_inline: String?
+
+  /// Emoji badge for UI display.
+  badge: String?
+
+  /// Path to JSONL seed facts file (relative to bundle dir).
+  mind_facts: String?
+
+  /// Skills to activate when this persona is loaded.
+  activated_skills: Listing<String>?
+
+  /// Tools to disable when this persona is loaded.
+  disabled_tools: Listing<String>?
+}
+
+/// Extension dependency declaration.
+class ExtensionDep {
+  /// Extension name (e.g., "vox", "scribe").
+  name: String(length > 0)
+
+  /// Version constraint (e.g., ">=0.3.0", "1.0.0").
+  version: String = "*"
+}
+
+/// Runtime settings.
+class SettingsConfig {
+  /// Default model (e.g., "anthropic:claude-sonnet-4-6").
+  model: String?
+
+  /// Thinking level: off, minimal, low, medium, high.
+  thinking_level: ("off"|"minimal"|"low"|"medium"|"high")?
+
+  /// Context class: squad, maniple, clan, legion.
+  context_class: ("squad"|"maniple"|"clan"|"legion")?
+
+  /// Maximum turns per agent loop invocation.
+  max_turns: Int(this > 0)?
+}
+
+/// Workflow phase configuration.
+class PhaseConfig {
+  model: String?
+  max_turns: Int(this > 0)?
+  thinking_level: ("off"|"minimal"|"low"|"medium"|"high")?
+  context_class: ("squad"|"maniple"|"clan"|"legion")?
+  persona: String?
+}
+
+/// Workflow template (inline in manifest).
+class WorkflowConfig {
+  /// Workflow name.
+  name: String(length > 0)
+
+  /// Per-lifecycle-phase overrides.
+  phases: Mapping<String, PhaseConfig>?
+}
+
+/// Secret requirements.
+class SecretsConfig {
+  /// Secrets that must be present for the agent to start.
+  required: Listing<String>?
+
+  /// Secrets the agent can use but doesn't require.
+  optional: Listing<String>?
+}
+
+/// Inline trigger definition.
+class TriggerDef {
+  /// Trigger name.
+  name: String(length > 0)
+
+  /// Preset schedule: hourly, daily, weekdays, weekly.
+  schedule: ("hourly"|"daily"|"weekdays"|"weekly")?
+
+  /// Interval duration: "30s", "5m", "1h".
+  interval: String(matches(Regex(#"\d+[smhd]"#)))?
+
+  /// Prompt template to execute.
+  template: String(length > 0)
+}
+
+agent: AgentMeta
+
+persona: PersonaConfig?
+
+extensions: Listing<ExtensionDep>?
+
+settings: SettingsConfig?
+
+workflow: WorkflowConfig?
+
+secrets: SecretsConfig?
+
+triggers: Listing<TriggerDef>?
