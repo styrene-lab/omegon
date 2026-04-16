@@ -4310,7 +4310,7 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     let requested_model = cli.model.clone();
     let requested_provider = providers::infer_provider_id(&requested_model);
 
-    if maybe_run_injected_cleave_smoke_child(&cli.cwd).await? {
+    if maybe_run_injected_cleave_smoke_child(&cli.cwd, &cli.model).await? {
         return Ok(());
     }
 
@@ -4350,6 +4350,17 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
         }
         if cli.max_turns != 50 {
             s.max_turns = cli.max_turns;
+        }
+        // Apply child runtime profile overrides from env (set by orchestrator).
+        if let Some(thinking) = std::env::var("OMEGON_CHILD_THINKING_LEVEL").ok()
+            .and_then(|v| settings::ThinkingLevel::parse(&v))
+        {
+            s.thinking = thinking;
+        }
+        if let Some(class) = std::env::var("OMEGON_CHILD_CONTEXT_CLASS").ok()
+            .and_then(|v| settings::ContextClass::parse(&v))
+        {
+            s.set_requested_context_class(class);
         }
     }
 
@@ -4643,7 +4654,7 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     result
 }
 
-async fn maybe_run_injected_cleave_smoke_child(cwd: &Path) -> anyhow::Result<bool> {
+async fn maybe_run_injected_cleave_smoke_child(cwd: &Path, cli_model: &str) -> anyhow::Result<bool> {
     let Some(mode) = std::env::var("OMEGON_CLEAVE_SMOKE_CHILD_MODE").ok() else {
         return Ok(false);
     };
@@ -4666,7 +4677,20 @@ async fn maybe_run_injected_cleave_smoke_child(cwd: &Path) -> anyhow::Result<boo
             Ok(true)
         }
         "report-runtime" => {
-            let shared_settings = settings::shared("anthropic:claude-sonnet-4-6");
+            let shared_settings = settings::shared(cli_model);
+            // Apply child runtime profile overrides from env (set by orchestrator)
+            if let Ok(mut s) = shared_settings.lock() {
+                if let Some(thinking) = std::env::var("OMEGON_CHILD_THINKING_LEVEL").ok()
+                    .and_then(|v| settings::ThinkingLevel::parse(&v))
+                {
+                    s.thinking = thinking;
+                }
+                if let Some(class) = std::env::var("OMEGON_CHILD_CONTEXT_CLASS").ok()
+                    .and_then(|v| settings::ContextClass::parse(&v))
+                {
+                    s.set_requested_context_class(class);
+                }
+            }
             let agent =
                 setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await?;
             let status = agent.initial_harness_status.clone();
@@ -4679,9 +4703,11 @@ async fn maybe_run_injected_cleave_smoke_child(cwd: &Path) -> anyhow::Result<boo
             let settings_guard = shared_settings.lock().ok();
             let selected_model = settings_guard
                 .as_ref()
-                .map(|s| s.model.clone())
+                .map(|s| s.model_short())
                 .unwrap_or_else(|| "unknown".into());
-            let selected_provider = crate::providers::infer_provider_id(&selected_model);
+            let selected_provider = crate::providers::infer_provider_id(
+                &settings_guard.as_ref().map(|s| s.model.clone()).unwrap_or_default(),
+            );
             let preloaded_files = child_preloaded_files()
                 .into_iter()
                 .map(|path| {
@@ -4703,8 +4729,12 @@ async fn maybe_run_injected_cleave_smoke_child(cwd: &Path) -> anyhow::Result<boo
                 "active_persona_skills": status.active_persona.as_ref().map(|p| p.activated_skills.clone()).unwrap_or_default(),
                 "requested_skill_filter": parse_csv_env("OMEGON_CHILD_SKILLS"),
                 "preloaded_files": preloaded_files,
-                "context_class": status.context_class,
-                "thinking_level": status.thinking_level,
+                "context_class": settings_guard.as_ref()
+                    .map(|s| s.effective_requested_class().short().to_string())
+                    .unwrap_or_else(|| status.context_class.clone()),
+                "thinking_level": settings_guard.as_ref()
+                    .map(|s| s.thinking.as_str().to_string())
+                    .unwrap_or_else(|| status.thinking_level.clone()),
             });
             println!("{}", serde_json::to_string(&report)?);
             Ok(true)

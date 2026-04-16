@@ -892,6 +892,7 @@ const PROVIDER_PREFIXES: &[&str] = &[
     "huggingface",
     "openrouter",
     "ollama",
+    "ollama-cloud",
     "local",
     "codex",
 ];

@@ -349,12 +349,18 @@ pub async fn run_cleave(
             let injected_env = config.injected_env.clone();
             let child_runtime = config.child_runtime.clone();
 
+            // Runtime profile model override wins over inventory-routed model.
+            let dispatch_model = child_runtime
+                .model
+                .as_ref()
+                .cloned()
+                .unwrap_or_else(|| info.model.clone());
             let dispatch_config = ChildDispatchConfig {
                 workspace_path: workspace_path.to_path_buf(),
                 agent_binary,
                 bridge_path,
                 node,
-                model: info.model.clone(),
+                model: dispatch_model,
                 max_turns,
                 timeout_secs,
                 idle_timeout_secs,

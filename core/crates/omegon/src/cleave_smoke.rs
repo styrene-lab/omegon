@@ -396,7 +396,7 @@ fn assert_runtime_profile_report(report: &serde_json::Value) -> anyhow::Result<(
     if report["context_class"] != "legion" && report["context_class"] != "Legion" {
         anyhow::bail!("context class not applied: {report}");
     }
-    if report["model"] != "anthropic:claude-sonnet-4-6" {
+    if report["model"] != "claude-sonnet-4-6" {
         anyhow::bail!("model not applied: {report}");
     }
     if report["provider"] != "anthropic" {
