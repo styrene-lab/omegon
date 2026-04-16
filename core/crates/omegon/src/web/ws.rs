@@ -1441,7 +1441,7 @@ async fn handle_client_command(
                     crate::control_runtime::ControlRequest::SetRuntimeMode { slim }
                 }
                 "set_max_turns" => {
-                    let Some(max_turns) = cmd["max_turns"].as_u64() else {
+                    let Some(raw) = cmd["max_turns"].as_u64() else {
                         let _ = snapshot_tx
                             .send(control_result_message(
                                 cmd_type,
@@ -1453,9 +1453,19 @@ async fn handle_client_command(
                             .await;
                         return;
                     };
-                    crate::control_runtime::ControlRequest::SetMaxTurns {
-                        max_turns: max_turns as u32,
-                    }
+                    let Ok(max_turns) = u32::try_from(raw) else {
+                        let _ = snapshot_tx
+                            .send(control_result_message(
+                                cmd_type,
+                                omegon_traits::ControlOutputResponse {
+                                    accepted: false,
+                                    output: Some(format!("max_turns out of range: {raw}")),
+                                },
+                            ))
+                            .await;
+                        return;
+                    };
+                    crate::control_runtime::ControlRequest::SetMaxTurns { max_turns }
                 }
                 "profile_view" => crate::control_runtime::ControlRequest::ProfileView,
                 "profile_export" => crate::control_runtime::ControlRequest::ProfileExport,

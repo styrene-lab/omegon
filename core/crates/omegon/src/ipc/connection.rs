@@ -600,8 +600,9 @@ impl IpcConnection {
                         "set_max_turns" => payload
                             .get("max_turns")
                             .and_then(|v| v.as_u64())
-                            .map(|n| crate::control_runtime::ControlRequest::SetMaxTurns {
-                                max_turns: n as u32,
+                            .and_then(|n| u32::try_from(n).ok())
+                            .map(|max_turns| crate::control_runtime::ControlRequest::SetMaxTurns {
+                                max_turns,
                             }),
                         "profile_view" => {
                             Some(crate::control_runtime::ControlRequest::ProfileView)

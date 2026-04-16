@@ -418,8 +418,8 @@ pub async fn execute_control(
         ControlRequest::ProfileExport => {
             profile_export_response(ctx.shared_settings, &ctx.agent.cwd, &ctx.agent.dashboard_handles).await
         }
-        ControlRequest::PersonaList => persona_list_daemon_response(&ctx.agent.dashboard_handles).await,
-        ControlRequest::PersonaSwitch { name } => persona_switch_daemon_response(&name).await,
+        ControlRequest::PersonaList => persona_list_response(&ctx.agent.dashboard_handles).await,
+        ControlRequest::PersonaSwitch { name } => persona_switch_response(&name).await,
     }
 }
 
@@ -501,9 +501,9 @@ pub async fn execute_daemon_control(
         ControlRequest::ProfileExport => {
             profile_export_response(shared_settings, cwd, handles).await
         }
-        ControlRequest::PersonaList => persona_list_daemon_response(handles).await,
+        ControlRequest::PersonaList => persona_list_response(handles).await,
         ControlRequest::PersonaSwitch { name } => {
-            persona_switch_daemon_response(&name).await
+            persona_switch_response(&name).await
         }
 
         // ── Operations requiring TUI state ──────────────────────────
@@ -2843,7 +2843,7 @@ pub async fn profile_export_response(
     }
 }
 
-pub async fn persona_list_daemon_response(
+pub async fn persona_list_response(
     handles: &crate::tui::dashboard::DashboardHandles,
 ) -> SlashCommandResponse {
     let (personas, tones) = crate::plugins::persona_loader::scan_available();
@@ -2888,7 +2888,7 @@ pub async fn persona_list_daemon_response(
     }
 }
 
-pub async fn persona_switch_daemon_response(name: &str) -> SlashCommandResponse {
+pub async fn persona_switch_response(name: &str) -> SlashCommandResponse {
     SlashCommandResponse {
         accepted: false,
         output: Some(format!(
