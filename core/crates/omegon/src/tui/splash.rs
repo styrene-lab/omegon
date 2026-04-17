@@ -3,11 +3,31 @@
 //! Each character has a randomized unlock frame weighted center-outward.
 //! Before unlock it shows a CRT noise glyph; after unlock the final character.
 //! Inspired by CRT phosphor aesthetics.
+//!
+//! tachyonfx effects layer on top of the character animation:
+//! - Post-convergence glow pulse (one-shot brightness sweep)
+//! - Logo breathing during hold (subtle lightness oscillation)
+//! - Dismiss dissolve (content dissolves outward on keypress)
+
+use std::time::Instant;
 
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
+use tachyonfx::{CellFilter, EffectManager, EffectTimer, Interpolation, fx};
 
 use super::theme::Theme;
+
+// ─── Effect slot keys ──────────────────────────────────────────────────────
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SplashSlot {
+    #[default]
+    Glow,
+    Breathing,
+    Dismiss,
+}
+
+use super::widgets::lerp_color;
 
 // ─── Animation parameters ───────────────────────────────────────────────────
 
@@ -390,7 +410,12 @@ pub struct SplashScreen {
     anim_done: bool,
     pub dismissed: bool,
     items: Vec<LoadItem>,
-    prompt_blink: bool,
+    // ── tachyonfx ──
+    effects: EffectManager<SplashSlot>,
+    last_frame_time: Instant,
+    glow_fired: bool,
+    dissolving: bool,
+    dissolve_start: Option<Instant>,
 }
 
 impl SplashScreen {
@@ -471,7 +496,11 @@ impl SplashScreen {
                     summary: None,
                 },
             ],
-            prompt_blink: false,
+            effects: EffectManager::default(),
+            last_frame_time: Instant::now(),
+            glow_fired: false,
+            dissolving: false,
+            dissolve_start: None,
         })
     }
 
@@ -486,13 +515,46 @@ impl SplashScreen {
 
         if self.frame >= TOTAL_FRAMES && !self.anim_done {
             self.anim_done = true;
+
+            // ── Post-convergence glow pulse ─────────────────────────
+            if !self.glow_fired {
+                self.glow_fired = true;
+                let glow = self.effects.unique(
+                    SplashSlot::Glow,
+                    fx::sequence(&[
+                        fx::hsl_shift_fg(
+                            [0.0, 0.0, 0.20],
+                            EffectTimer::from_ms(300, Interpolation::QuadOut),
+                        ),
+                        fx::hsl_shift_fg(
+                            [0.0, 0.0, -0.20],
+                            EffectTimer::from_ms(400, Interpolation::QuadIn),
+                        ),
+                    ])
+                    .with_filter(CellFilter::Text),
+                );
+                self.effects.add_effect(glow);
+
+                // ── Breathing starts after glow ─────────────────────
+                let breathe = self.effects.unique(
+                    SplashSlot::Breathing,
+                    fx::delay(
+                        700,
+                        fx::never_complete(fx::ping_pong(
+                            fx::hsl_shift_fg(
+                                [0.0, 0.0, 0.06],
+                                EffectTimer::from_ms(2500, Interpolation::SineInOut),
+                            )
+                            .with_filter(CellFilter::Text),
+                        )),
+                    ),
+                );
+                self.effects.add_effect(breathe);
+            }
         }
 
         if self.anim_done {
             self.hold_count += 1;
-            if self.hold_count.is_multiple_of(10) {
-                self.prompt_blink = !self.prompt_blink;
-            }
         }
     }
 
@@ -506,9 +568,26 @@ impl SplashScreen {
                 .all(|i| matches!(i.state, LoadState::Done | LoadState::Failed))
     }
 
-    /// Dismiss the splash (on keypress or auto).
+    /// Dismiss the splash (on keypress or auto). Starts dissolve effect;
+    /// caller should continue rendering until `is_dissolved()` returns true.
     pub fn dismiss(&mut self) {
-        self.dismissed = true;
+        if self.dissolving || self.dismissed {
+            return;
+        }
+        self.dissolving = true;
+        self.dissolve_start = Some(Instant::now());
+        // Cancel breathing so dissolve is the only active effect.
+        self.effects.cancel_unique_effect(SplashSlot::Breathing);
+        let dissolve = fx::dissolve(EffectTimer::from_ms(300, Interpolation::QuadIn));
+        self.effects.add_effect(dissolve);
+    }
+
+    /// True when the dissolve animation has completed.
+    pub fn is_dissolved(&self) -> bool {
+        self.dissolving
+            && self
+                .dissolve_start
+                .is_some_and(|t| t.elapsed() > std::time::Duration::from_millis(350))
     }
 
     /// Update a loading item's state.
@@ -543,8 +622,9 @@ impl SplashScreen {
         std::time::Duration::from_millis(FRAME_INTERVAL_MS)
     }
 
-    /// Render the splash screen into a frame.
-    pub fn draw(&self, frame: &mut ratatui::Frame, t: &dyn Theme) {
+    /// Render the splash screen into a frame. Applies tachyonfx effects
+    /// as post-processing on the rendered buffer.
+    pub fn draw(&mut self, frame: &mut ratatui::Frame, t: &dyn Theme) {
         let area = frame.area();
 
         // Fill background
@@ -612,16 +692,14 @@ impl SplashScreen {
                 lines.push(Line::from(padded));
             }
 
-            // "press any key" prompt
+            // "press any key" prompt — smooth sine pulse
             if self.ready_to_dismiss() {
                 lines.push(Line::from(""));
                 let prompt = "press any key to continue";
                 let p_pad = (area.width as usize).saturating_sub(prompt.len()) / 2;
-                let color = if self.prompt_blink {
-                    t.dim()
-                } else {
-                    t.accent()
-                };
+                // Sine interpolation between dim and accent
+                let phase = (self.hold_count as f32 * 0.15).sin() * 0.5 + 0.5;
+                let color = lerp_color(t.dim(), t.accent(), phase as f64);
                 lines.push(Line::from(vec![
                     Span::raw(" ".repeat(p_pad)),
                     Span::styled(prompt, Style::default().fg(color)),
@@ -631,6 +709,13 @@ impl SplashScreen {
 
         let widget = Paragraph::new(lines);
         frame.render_widget(widget, area);
+
+        // ── tachyonfx post-processing ──────────────────────────────────
+        let now = Instant::now();
+        let delta = now.duration_since(self.last_frame_time);
+        self.last_frame_time = now;
+        let duration = tachyonfx::Duration::from_millis(delta.as_millis() as u32);
+        self.effects.process_effects(duration, frame.buffer_mut(), area);
     }
 }
 
@@ -685,8 +770,10 @@ mod tests {
         // Now ready
         assert!(s.ready_to_dismiss());
 
+        // Dismiss starts dissolve — not immediately dismissed
         s.dismiss();
-        assert!(s.dismissed);
+        assert!(s.dissolving);
+        assert!(!s.is_dissolved()); // dissolve takes 350ms
     }
 
     #[test]

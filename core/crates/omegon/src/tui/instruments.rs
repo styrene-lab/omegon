@@ -186,6 +186,8 @@ fn truncate_display_width(input: &str, max_width: usize) -> String {
     out
 }
 
+use super::widgets::lerp_color;
+
 /// Scale an RGB color's brightness.
 fn dim_color(c: Color, factor: f64) -> Color {
     if let Color::Rgb(r, g, b) = c {
@@ -449,6 +451,11 @@ pub struct InstrumentPanel {
     cleave_progress: Option<CleaveProgress>,
     /// Live delegate progress snapshot — shown in the same worker panel grammar.
     delegate_progress: Option<DelegateProgress>,
+    // ── Activity heat (drives border color temperature) ──
+    /// Tools panel heat — rises on tool start/end, decays continuously.
+    tools_heat: f64,
+    /// Inference panel heat — rises on memory ops and context changes.
+    inference_heat: f64,
 }
 
 impl Default for InstrumentPanel {
@@ -480,6 +487,8 @@ impl Default for InstrumentPanel {
             context_composition: ContextComposition::default(),
             cleave_progress: None,
             delegate_progress: None,
+            tools_heat: 0.0,
+            inference_heat: 0.0,
         }
     }
 }
@@ -601,11 +610,14 @@ impl InstrumentPanel {
         if area.width < 20 || area.height < 4 {
             return;
         }
-        let (border, label) = if self.has_ever_fired {
-            (t.border_dim(), t.dim())
+        // Border warms with inference activity (memory ops, context changes)
+        let cold = if self.has_ever_fired {
+            t.border_dim()
         } else {
-            (dim_color(t.border_dim(), 0.5), dim_color(t.dim(), 0.55))
+            dim_color(t.border_dim(), 0.5)
         };
+        let border = lerp_color(cold, t.accent_muted(), self.inference_heat * 0.6);
+        let label = lerp_color(t.dim(), t.accent(), self.inference_heat * 0.4);
         self.render_inference(area, frame, border, label, t);
     }
 
@@ -634,11 +646,14 @@ impl InstrumentPanel {
                 return;
             }
         }
-        let (border, label) = if self.has_ever_fired {
-            (t.border_dim(), t.dim())
+        // Border warms with tool activity
+        let cold = if self.has_ever_fired {
+            t.border_dim()
         } else {
-            (dim_color(t.border_dim(), 0.5), dim_color(t.dim(), 0.55))
+            dim_color(t.border_dim(), 0.5)
         };
+        let border = lerp_color(cold, t.accent_muted(), self.tools_heat * 0.6);
+        let label = lerp_color(t.dim(), t.accent(), self.tools_heat * 0.4);
         self.render_tools(area, frame, border, label, t);
     }
 
@@ -666,11 +681,13 @@ impl InstrumentPanel {
 
         let seam = split[1];
         if seam.width > 0 {
+            let combined_heat = (self.inference_heat + self.tools_heat).min(1.0);
+            let seam_color = lerp_color(t.border_dim(), t.accent_muted(), combined_heat * 0.4);
             clear_area(seam, frame.buffer_mut(), panel_bg(t));
             for y in seam.top()..seam.bottom() {
                 if let Some(cell) = frame.buffer_mut().cell_mut(Position::new(seam.x, y)) {
                     cell.set_char('│');
-                    cell.set_fg(t.border_dim());
+                    cell.set_fg(seam_color);
                     cell.set_bg(panel_bg(t));
                 }
             }
@@ -740,6 +757,7 @@ impl InstrumentPanel {
 
     pub fn tool_started(&mut self, name: &str) {
         self.has_ever_fired = true;
+        self.tools_heat = (self.tools_heat + 0.4).min(1.0);
         if let Some(entry) = self.tools.iter_mut().find(|t| t.name == name) {
             entry.last_called = self.time;
             entry.running = true;
@@ -761,6 +779,7 @@ impl InstrumentPanel {
 
     pub fn tool_finished(&mut self, name: &str, is_error: bool) {
         self.has_ever_fired = true;
+        self.tools_heat = (self.tools_heat + 0.3).min(1.0);
         if let Some(entry) = self.tools.iter_mut().find(|t| t.name == name) {
             let started_at = entry.started_at.unwrap_or(entry.last_called);
             let duration_ms = ((self.time - started_at).max(0.0) * 1_000.0).round() as u64;
@@ -834,15 +853,21 @@ impl InstrumentPanel {
         self.last_cache_read_tokens = cache_read;
         self.context_composition = composition;
         self.context_window = context_window.max(1);
+        // Context change warms the inference panel
+        if input > 0 {
+            self.inference_heat = (self.inference_heat + 0.2).min(1.0);
+        }
     }
 
     /// Increment cumulative memory operation counters.
     pub fn bump_memory_store(&mut self) {
         self.session_stores += 1;
+        self.inference_heat = (self.inference_heat + 0.5).min(1.0);
     }
 
     pub fn bump_memory_recall(&mut self) {
         self.session_recalls += 1;
+        self.inference_heat = (self.inference_heat + 0.3).min(1.0);
     }
 
     pub fn update_mind_facts(
@@ -893,6 +918,19 @@ impl InstrumentPanel {
         dt: f64,
     ) {
         self.time += dt;
+
+        // Decay activity heat — exponential falloff, τ ≈ 4s so tools that
+        // run for minutes keep the border warm. Reaches ~5% in ~12s.
+        let decay = (-dt * 0.25).exp();
+        self.tools_heat *= decay;
+        self.inference_heat *= decay;
+
+        // Running tools maintain heat — prevents the border going cold
+        // during long-running tool calls (multi-minute bash, etc.)
+        let has_running = self.tools.iter().any(|t| t.running);
+        if has_running {
+            self.tools_heat = self.tools_heat.max(0.3);
+        }
 
         if context_window > 0 {
             self.context_window = context_window;
@@ -976,6 +1014,7 @@ impl InstrumentPanel {
 
     pub fn note_thinking_activity(&mut self) {
         self.thinking_recent_ttl = 0.75;
+        self.inference_heat = (self.inference_heat + 0.15).min(1.0);
     }
 
     pub fn toggle_focus(&mut self) {

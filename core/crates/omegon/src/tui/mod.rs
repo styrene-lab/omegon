@@ -58,7 +58,9 @@ use self::dashboard::DashboardState;
 use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
-use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode, build_meta_tag};
+use self::segments::{
+    SegmentContent, SegmentExportMode, SegmentRenderMode, ToolVisualKind, build_meta_tag,
+};
 
 #[derive(Debug, Clone)]
 pub struct PromptSubmission {
@@ -857,6 +859,41 @@ fn editor_height_for(editor: &Editor, main_area: Rect) -> u16 {
     let editor_rows = editor.visual_line_count(content_width) as u16;
     let max_editor = (main_area.height * 40 / 100).max(5).min(20);
     (editor_rows + 2).clamp(3, max_editor) // +2 for border
+}
+
+/// Compact one-line tool summary for focus mode headers.
+/// "cargo test" for bash, "src/main.rs · 4→6 lines" for edit, etc.
+fn focus_tool_summary(name: &str, detail_args: Option<&str>) -> String {
+    let args = match detail_args {
+        Some(a) => a,
+        None => return name.to_string(),
+    };
+    match name {
+        "bash" => {
+            let cmd = args.lines().next().unwrap_or(args);
+            crate::util::truncate(cmd, 60)
+        }
+        "edit" | "change" => {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(args) {
+                let path = v
+                    .get("file")
+                    .or(v.get("path"))
+                    .and_then(|f| f.as_str())
+                    .unwrap_or("?");
+                crate::util::truncate(path, 50)
+            } else {
+                crate::util::truncate(args, 50)
+            }
+        }
+        "read" | "write" | "view" => {
+            let first = args.lines().next().unwrap_or(args);
+            crate::util::truncate(first, 50)
+        }
+        _ => {
+            let first = args.lines().next().unwrap_or(args);
+            crate::util::truncate(first, 40)
+        }
+    }
 }
 
 impl App {
@@ -3326,12 +3363,54 @@ impl App {
 
         let mut lines: Vec<Line<'static>> = Vec::new();
         let segments = self.conversation.segments();
+        let mut last_turn: Option<u32> = None;
+
         for (idx, segment) in segments.iter().enumerate() {
             if matches!(segment.content, SegmentContent::TurnSeparator) {
                 continue;
             }
 
+            // ── Turn boundary header ────────────────────────────────
+            if let Some(turn) = segment.meta.turn {
+                if last_turn != Some(turn) {
+                    last_turn = Some(turn);
+                    if !lines.is_empty() {
+                        let mut turn_spans: Vec<Span<'static>> = vec![
+                            Span::styled(
+                                "─── ",
+                                Style::default().fg(self.theme.border_dim()),
+                            ),
+                            Span::styled(
+                                format!("turn {turn}"),
+                                Style::default()
+                                    .fg(self.theme.accent_muted())
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ];
+                        if let Some(ctx) =
+                            segment.meta.context_percent.filter(|p| *p > 5.0)
+                        {
+                            let ctx_color =
+                                widgets::percent_color(ctx, self.theme.as_ref());
+                            turn_spans.push(Span::styled(
+                                format!(" · ctx:{ctx:.0}%"),
+                                Style::default().fg(ctx_color),
+                            ));
+                        }
+                        let fill_width = area.width.saturating_sub(40) as usize;
+                        turn_spans.push(Span::styled(
+                            format!(" {}", "─".repeat(fill_width)),
+                            Style::default().fg(self.theme.border_dim()),
+                        ));
+                        lines.push(Line::from(turn_spans));
+                    }
+                }
+            }
+
             let is_selected = selected == Some(idx);
+            let presentation = segment.presentation();
+
+            // ── Role + color resolution ─────────────────────────────
             let (role, sigil, color) = match segment.role() {
                 crate::tui::segments::SegmentRole::Operator => {
                     ("operator", "OP", self.theme.accent())
@@ -3339,21 +3418,93 @@ impl App {
                 crate::tui::segments::SegmentRole::Assistant => {
                     ("assistant", "Ω", self.theme.success())
                 }
-                crate::tui::segments::SegmentRole::Tool => ("tool", "⚙", self.theme.warning()),
+                crate::tui::segments::SegmentRole::Tool => {
+                    let kind = presentation.tool_visual.unwrap_or(ToolVisualKind::Generic);
+                    (kind.label(), "⚙", kind.color(self.theme.as_ref()))
+                }
                 crate::tui::segments::SegmentRole::System => ("system", "ℹ", self.theme.dim()),
-                crate::tui::segments::SegmentRole::Lifecycle => ("event", "⚡", self.theme.dim()),
+                crate::tui::segments::SegmentRole::Lifecycle => {
+                    ("event", "⚡", self.theme.dim())
+                }
                 crate::tui::segments::SegmentRole::Media => {
                     ("media", "◈", self.theme.accent_muted())
                 }
-                crate::tui::segments::SegmentRole::Separator => ("separator", "", self.theme.dim()),
+                crate::tui::segments::SegmentRole::Separator => {
+                    ("separator", "", self.theme.dim())
+                }
             };
-            let timestamp = segment.meta.timestamp.and_then(|ts| {
+
+            let timestamp: Option<String> = segment.meta.timestamp.and_then(|ts| {
                 chrono::DateTime::<chrono::Local>::from(ts)
-                    .format("%H:%M")
+                    .format("%H:%M:%S")
                     .to_string()
                     .into()
             });
+
+            // Gutter styling — colored `▎` left bar runs through the
+            // entire segment, creating a visual stripe that ties header
+            // to content. Selected segments use `▌` (thicker) + bold.
+            let gutter_char = if is_selected { "▌" } else { "▎" };
+            let gutter_style = Style::default().fg(color).add_modifier(if is_selected {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            });
+
+            // ── Header line ────────────────────────────────────────
+            let mut header_spans: Vec<Span<'static>> = vec![
+                Span::styled(gutter_char.to_string(), gutter_style),
+                Span::styled(
+                    format!(" {sigil} "),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(role.to_string(), Style::default().fg(color)),
+            ];
+
+            // Tool-specific summary
+            if let SegmentContent::ToolCard {
+                ref name,
+                ref detail_args,
+                ..
+            } = segment.content
+            {
+                let tool_summary = focus_tool_summary(name, detail_args.as_deref());
+                header_spans.push(Span::styled(
+                    format!(" · {tool_summary}"),
+                    Style::default().fg(self.theme.muted()),
+                ));
+            }
+
+            // Meta tag (model · provider · tier · thinking)
             let meta = build_meta_tag(&segment.meta);
+            if !meta.is_empty() {
+                header_spans.push(Span::styled(
+                    format!("  {meta}"),
+                    Style::default().fg(self.theme.dim()),
+                ));
+            }
+
+            // Right-aligned: duration · tokens · timestamp
+            let mut right_parts: Vec<String> = Vec::new();
+            if let Some(ms) = segment.meta.duration_ms {
+                right_parts.push(segments::format_duration_compact(ms));
+            }
+            if let Some(tokens) = segment.meta.actual_tokens {
+                right_parts.push(tokens.format_compact());
+            }
+            if let Some(ref stamp) = timestamp {
+                right_parts.push(stamp.clone());
+            }
+            if !right_parts.is_empty() {
+                header_spans.push(Span::styled(
+                    format!("  {}", right_parts.join(" · ")),
+                    Style::default().fg(self.theme.dim()),
+                ));
+            }
+
+            lines.push(Line::from(header_spans));
+
+            // ── Content body with colored gutter ────────────────────
             let mut content = segment.export_text(SegmentExportMode::Plaintext);
             let expanded = matches!(
                 segment.content,
@@ -3366,47 +3517,44 @@ impl App {
             };
             if content.chars().count() > max_chars {
                 content = crate::util::truncate(&content, 2000);
-                content.push_str("\n… truncated (press Enter to expand)");
+                content.push_str("\n… truncated (Enter to expand)");
             }
 
-            let gutter = if is_selected { "▶" } else { "│" };
+            let max_lines = if is_selected || expanded { 100 } else { 40 };
+            let content_color = match segment.role() {
+                crate::tui::segments::SegmentRole::Tool if !is_selected => self.theme.muted(),
+                _ => self.theme.fg(),
+            };
+            // Every content line gets the colored gutter so the stripe
+            // runs continuously from header through footer.
+            for line in content.lines().take(max_lines) {
+                lines.push(Line::from(vec![
+                    Span::styled(gutter_char.to_string(), gutter_style),
+                    Span::styled(
+                        format!("  {line}"),
+                        Style::default().fg(content_color),
+                    ),
+                ]));
+            }
+            let total_content_lines = content.lines().count();
+            if total_content_lines > max_lines {
+                lines.push(Line::from(vec![
+                    Span::styled(gutter_char.to_string(), gutter_style),
+                    Span::styled(
+                        format!("  ⋯ {} more lines", total_content_lines - max_lines),
+                        Style::default().fg(self.theme.dim()),
+                    ),
+                ]));
+            }
+
+            // Footer — colored corner closes the stripe
             lines.push(Line::from(vec![
+                Span::styled("╰", Style::default().fg(color)),
                 Span::styled(
-                    format!("{gutter} {sigil}"),
-                    Style::default().fg(color).add_modifier(if is_selected {
-                        Modifier::BOLD
-                    } else {
-                        Modifier::empty()
-                    }),
-                ),
-                Span::raw(" "),
-                Span::styled(role.to_string(), Style::default().fg(color)),
-                Span::raw(" · "),
-                Span::styled(meta, Style::default().fg(self.theme.dim())),
-                Span::raw(" "),
-                Span::styled(
-                    timestamp.unwrap_or_default(),
-                    Style::default().fg(self.theme.dim()),
+                    if is_selected { "── ●" } else { "──" },
+                    Style::default().fg(color),
                 ),
             ]));
-            lines.push(Line::from(Span::styled(
-                format!("  {}", content.lines().next().unwrap_or_default()),
-                Style::default().fg(self.theme.fg()),
-            )));
-            for line in content.lines().skip(1).take(40) {
-                lines.push(Line::from(Span::styled(
-                    format!("  {line}"),
-                    Style::default().fg(self.theme.fg()),
-                )));
-            }
-            lines.push(Line::from(Span::styled(
-                if is_selected {
-                    "  └─ selected"
-                } else {
-                    "  └─"
-                },
-                Style::default().fg(self.theme.dim()),
-            )));
             lines.push(Line::default());
         }
         if lines.last().is_some_and(|line| line.spans.is_empty()) {
@@ -3418,7 +3566,8 @@ impl App {
         if self.conversation.conv_state.scroll_offset > max_scroll {
             self.conversation.conv_state.scroll_offset = max_scroll;
         }
-        self.conversation.conv_state.user_scrolled = self.conversation.conv_state.scroll_offset > 0;
+        self.conversation.conv_state.user_scrolled =
+            self.conversation.conv_state.scroll_offset > 0;
         let top_line = max_scroll.saturating_sub(self.conversation.conv_state.scroll_offset);
 
         let paragraph = Paragraph::new(lines)
@@ -3437,9 +3586,15 @@ impl App {
         };
         frame.render_widget(paragraph, text_area);
 
-        let overlay = Paragraph::new("↑/↓ scroll · PgUp/PgDn jump · Home/End top/bottom · Enter expand/collapse selected · Ctrl+Y copy segment · Esc or /focus to return")
-            .style(Style::default().fg(self.theme.dim()).bg(self.theme.surface_bg()))
-            .alignment(Alignment::Center);
+        let overlay = Paragraph::new(
+            "↑/↓ scroll · PgUp/PgDn jump · Home/End · Enter expand · ^Y copy · Esc exit",
+        )
+        .style(
+            Style::default()
+                .fg(self.theme.dim())
+                .bg(self.theme.surface_bg()),
+        )
+        .alignment(Alignment::Center);
         let overlay_area = Rect {
             x: area.x,
             y: area.bottom().saturating_sub(1),
@@ -5128,6 +5283,7 @@ impl App {
                 self.turn = turn;
                 self.working_verb = spinner::next_verb();
                 self.effects.start_spinner_glow();
+                self.effects.start_border_pulse();
             }
             AgentEvent::TurnEnd {
                 turn,
@@ -5179,6 +5335,13 @@ impl App {
                     self.footer_data.estimated_tokens = tokens;
                     self.footer_data.context_percent =
                         (tokens as f32 / ctx_window as f32 * 100.0).min(100.0);
+                    // Context danger pulse: activate >80%, deactivate <75% (hysteresis)
+                    let pct = self.footer_data.context_percent;
+                    if pct > 80.0 {
+                        self.effects.set_context_danger(true);
+                    } else if pct < 75.0 {
+                        self.effects.set_context_danger(false);
+                    }
                 }
                 self.footer_data.provider_telemetry = provider_telemetry;
 
@@ -5198,6 +5361,7 @@ impl App {
                         },
                     );
                 }
+                self.effects.ping_footer(self.theme.as_ref());
             }
             AgentEvent::MessageChunk { text } => {
                 let was_streaming = self.conversation.is_streaming();
@@ -5394,6 +5558,7 @@ impl App {
                 }
                 self.conversation.finalize_message();
                 self.effects.stop_spinner_glow();
+                self.effects.stop_border_pulse();
                 // Advance tutorial overlay if an AutoPrompt step just completed
                 if let Some(ref mut overlay) = self.tutorial_overlay {
                     overlay.on_agent_turn_complete();
@@ -6307,10 +6472,15 @@ pub async fn run_tui(
             let safety_timeout = std::time::Duration::from_secs(5);
 
             loop {
-                // Draw splash
+                // Draw splash (includes tachyonfx post-processing)
                 {
                     let t = &app.theme;
                     terminal.draw(|f| splash.draw(f, t.as_ref()))?;
+                }
+
+                // Exit after dissolve completes
+                if splash.is_dissolved() {
+                    break;
                 }
 
                 // Poll for keypress at animation frame rate
@@ -6320,7 +6490,7 @@ pub async fn run_tui(
                     && (splash.ready_to_dismiss()
                         || splash_start.elapsed() > std::time::Duration::from_millis(300))
                 {
-                    break;
+                    splash.dismiss(); // starts dissolve — keep rendering
                 }
 
                 splash.tick();
@@ -6347,12 +6517,12 @@ pub async fn run_tui(
                 // Safety timeout
                 if splash_start.elapsed() > safety_timeout {
                     splash.force_done();
-                    break;
+                    splash.dismiss();
                 }
 
-                // Auto-dismiss after hold period
-                if splash.ready_to_dismiss() && splash.hold_count > splash::HOLD_FRAMES + 30 {
-                    break;
+                // Auto-dismiss after hold period (~4s — enough for one breathing cycle)
+                if splash.ready_to_dismiss() && splash.hold_count > splash::HOLD_FRAMES + 90 {
+                    splash.dismiss();
                 }
             }
 
@@ -6383,10 +6553,7 @@ pub async fn run_tui(
     }
 
     // Queue startup reveal effects (footer sweep-in, conversation fade)
-    {
-        let t = &app.theme;
-        app.effects.queue_startup(t.as_ref());
-    }
+
 
     // Queue initial prompt if provided (--initial-prompt / --initial-prompt-file)
     if let Some(prompt) = config.initial_prompt {
@@ -6411,18 +6578,20 @@ pub async fn run_tui(
                         let t = &app.theme;
                         terminal.draw(|f| splash.draw(f, t.as_ref()))?;
                     }
+                    if splash.is_dissolved() {
+                        break;
+                    }
                     let interval = splash::SplashScreen::frame_interval();
                     if event::poll(interval)? {
                         let ev = event::read()?;
-                        // Any key or mouse click dismisses the replay
                         if matches!(ev, Event::Key(_) | Event::Mouse(_)) {
-                            break;
+                            splash.dismiss();
                         }
                     }
                     splash.tick();
                     // Auto-end after full animation + hold
                     if splash.frame > splash::TOTAL_FRAMES + splash::HOLD_FRAMES + 20 {
-                        break;
+                        splash.dismiss();
                     }
                 }
             }

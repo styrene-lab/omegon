@@ -19,7 +19,7 @@
 //! - `tool_card` — 1-2 line tool call rendering with args + result
 //! - `markdown_spans` — structural highlighting (headers, bold, code fences)
 
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
@@ -805,6 +805,26 @@ pub fn format_tokens_compact(count: usize) -> String {
     } else {
         format!("{}M", count / 1_000_000)
     }
+}
+
+/// Linearly interpolate between two RGB colors.
+/// `t` = 0.0 returns `a`, `t` = 1.0 returns `b`.
+/// Non-RGB colors fall back to mid-gray.
+pub fn lerp_color(a: Color, b: Color, t: f64) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    let (ar, ag, ab) = match a {
+        Color::Rgb(r, g, b) => (r as f64, g as f64, b as f64),
+        _ => (128.0, 128.0, 128.0),
+    };
+    let (br, bg, bb) = match b {
+        Color::Rgb(r, g, b) => (r as f64, g as f64, b as f64),
+        _ => (128.0, 128.0, 128.0),
+    };
+    Color::Rgb(
+        (ar + (br - ar) * t) as u8,
+        (ag + (bg - ag) * t) as u8,
+        (ab + (bb - ab) * t) as u8,
+    )
 }
 
 #[cfg(test)]

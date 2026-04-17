@@ -119,6 +119,26 @@ fn format_token_count(n: u64) -> String {
     }
 }
 
+/// Compact duration: "0.3s", "4.2s", "1m12s", "3m".
+pub fn format_duration_compact(ms: u64) -> String {
+    let secs = ms / 1000;
+    if secs == 0 {
+        let tenths = (ms % 1000) / 100;
+        format!("0.{tenths}s")
+    } else if secs < 60 {
+        let tenths = (ms % 1000) / 100;
+        format!("{secs}.{tenths}s")
+    } else {
+        let mins = secs / 60;
+        let rem = secs % 60;
+        if rem == 0 {
+            format!("{mins}m")
+        } else {
+            format!("{mins}m{rem:02}s")
+        }
+    }
+}
+
 /// Metadata captured at segment creation time. Every segment carries this
 /// regardless of type. Fields are Optional — populated when available,
 /// never blocking construction.
@@ -199,6 +219,37 @@ pub enum ToolVisualKind {
     Memory,
     Search,
     Generic,
+}
+
+impl ToolVisualKind {
+    /// Categorical color for this tool kind — subtle tinting for completed
+    /// tool card borders and focus-mode gutters. Each kind gets a distinct
+    /// hue so operators can scan the timeline by color. The palette stays
+    /// within the Alpharius tonal range (no new hues invented).
+    pub fn color(&self, t: &dyn Theme) -> Color {
+        match self {
+            Self::CommandExec => t.warning(),       // orange — shell activity
+            Self::FileRead => t.accent_muted(),     // teal — information retrieval
+            Self::FileMutation => t.caution(),       // lime — file changes
+            Self::DesignTree => t.accent_bright(),   // bright cyan — structural
+            Self::Memory => t.accent(),              // cyan — storage/recall
+            Self::Search => t.accent_muted(),        // teal — lookup
+            Self::Generic => t.border_dim(),         // neutral
+        }
+    }
+
+    /// Short label for focus-mode display.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::CommandExec => "exec",
+            Self::FileRead => "read",
+            Self::FileMutation => "mutate",
+            Self::DesignTree => "design",
+            Self::Memory => "memory",
+            Self::Search => "search",
+            Self::Generic => "tool",
+        }
+    }
 }
 
 /// Clipboard/export formatting mode for segment content.
@@ -541,6 +592,7 @@ impl Segment {
                     live_partial.as_ref(),
                     *started_at,
                     &self.meta,
+                    presentation.tool_visual,
                     area,
                     buf,
                     t,
@@ -798,7 +850,7 @@ fn render_user_prompt(
 }
 
 /// Build a compact meta tag string from SegmentMeta for display in the response header.
-/// Example: "claude-sonnet-4-6 · anthropic · victory · think:medium"
+/// Example: "claude-sonnet-4-6 · anthropic · victory · think:medium · ctx:34%"
 pub fn build_meta_tag(meta: &SegmentMeta) -> String {
     let mut parts = Vec::new();
     if let Some(ref m) = meta.model_id {
@@ -820,47 +872,56 @@ pub fn build_meta_tag(meta: &SegmentMeta) -> String {
     if let Some(ref persona) = meta.persona {
         parts.push(format!("⌘ {persona}"));
     }
+    if let Some(ctx) = meta.context_percent.filter(|p| *p > 5.0) {
+        parts.push(format!("ctx:{ctx:.0}%"));
+    }
     parts.join(" · ")
 }
 
 fn format_timestamp(timestamp: Option<std::time::SystemTime>) -> Option<String> {
     let timestamp = timestamp?;
     let datetime: chrono::DateTime<chrono::Local> = timestamp.into();
-    Some(datetime.format("%H:%M").to_string())
+    Some(datetime.format("%H:%M:%S").to_string())
 }
 
 fn top_right_timestamp<'a>(meta: &SegmentMeta, t: &dyn Theme) -> Option<Line<'a>> {
     let timestamp = format_timestamp(meta.timestamp);
     let tokens = meta.actual_tokens;
-    if timestamp.is_none() && tokens.is_none() {
+    let ctx = meta.context_percent;
+    if timestamp.is_none() && tokens.is_none() && ctx.is_none() {
         return None;
     }
-    // Combined right-rail title: `↑1.2k ↓340 · 14:32`. The token
-    // annotation comes from `meta.actual_tokens` which is stamped
-    // onto every segment in a turn after `TurnEnd` arrives — see
-    // `ConversationView::stamp_turn_tokens`. Segments without an LLM
-    // call (system notifications, lifecycle events, user prompts)
-    // never get tokens and only show the timestamp.
+    // Combined right-rail title: `ctx:45% · ↑1.2k ↓340 · 14:32`
+    let dim_style = Style::default().fg(t.dim()).add_modifier(Modifier::DIM);
+    let sep = Span::styled(" · ", dim_style);
     let mut spans: Vec<Span<'a>> = Vec::new();
+    // Context fill — only show when above 30% to avoid noise
+    if let Some(pct) = ctx.filter(|p| *p > 30.0) {
+        let ctx_color = super::widgets::percent_color(pct, t);
+        spans.push(Span::styled(
+            format!("ctx:{pct:.0}%"),
+            Style::default().fg(ctx_color).add_modifier(Modifier::DIM),
+        ));
+    }
     if let Some(tokens) = tokens {
+        if !spans.is_empty() {
+            spans.push(sep.clone());
+        }
         spans.push(Span::styled(
             tokens.format_compact(),
             Style::default()
                 .fg(t.accent_muted())
                 .add_modifier(Modifier::DIM),
         ));
-        if timestamp.is_some() {
-            spans.push(Span::styled(
-                " · ",
-                Style::default().fg(t.dim()).add_modifier(Modifier::DIM),
-            ));
-        }
     }
     if let Some(stamp) = timestamp {
-        spans.push(Span::styled(
-            stamp,
-            Style::default().fg(t.dim()).add_modifier(Modifier::DIM),
-        ));
+        if !spans.is_empty() {
+            spans.push(sep);
+        }
+        spans.push(Span::styled(stamp, dim_style));
+    }
+    if spans.is_empty() {
+        return None;
     }
     Some(Line::from(spans))
 }
@@ -1100,6 +1161,7 @@ fn render_tool_card(
     live_partial: Option<&omegon_traits::PartialToolResult>,
     started_at: Option<std::time::Instant>,
     meta: &SegmentMeta,
+    tool_visual: Option<ToolVisualKind>,
     area: Rect,
     buf: &mut Buffer,
     t: &dyn Theme,
@@ -1219,12 +1281,19 @@ fn render_tool_card(
     // `▶` U+25B6 is in the Unicode emoji set — replaced with `▷` U+25B7
     // for the same reason as the instruments-panel pass. Both `✗` and
     // `▸` are already safe.
+    //
+    // Completed tools use categorical color from ToolVisualKind so
+    // operators can scan the timeline by tool type — file mutations
+    // are lime, shell execs are orange, reads are teal, etc.
+    let kind_color = tool_visual
+        .map(|k| k.color(t))
+        .unwrap_or(t.accent_muted());
     let (status_icon, status_color, border_color, bg) = if is_error {
         ("✗", t.error(), t.error(), t.tool_error_bg())
     } else if !complete {
         ("▷", t.warning(), t.warning(), t.tool_success_bg())
     } else {
-        ("▸", t.accent_muted(), t.accent_muted(), t.tool_success_bg())
+        ("▸", kind_color, kind_color, t.tool_success_bg())
     };
 
     let timestamp = format_timestamp(meta.timestamp);
@@ -1236,37 +1305,33 @@ fn render_tool_card(
         timestamp.as_deref(),
     );
 
-    // Right-aligned title combines the provider-reported token usage
-    // (when known) with the timestamp. Format:
-    //
-    //     ↑1.2k ↓340 · 14:32
-    //
-    // The tokens come from `meta.actual_tokens` which is stamped on
-    // every segment in a turn after `TurnEnd` arrives — see
-    // `ConversationView::stamp_turn_tokens`. Segments without an LLM
-    // call (system notifications, lifecycle events) never get
-    // `actual_tokens` populated and only show the timestamp.
+    // Right-aligned title: duration · ↑1.2k ↓340 · 14:32
     let right_title_spans: Vec<Span<'_>> = {
+        let dim_style = Style::default().fg(t.dim()).add_modifier(Modifier::DIM);
+        let sep = Span::styled(" · ", dim_style);
         let mut spans: Vec<Span<'_>> = Vec::new();
+        // Execution duration for completed tools
+        if complete {
+            if let Some(ms) = meta.duration_ms {
+                spans.push(Span::styled(format_duration_compact(ms), dim_style));
+            }
+        }
         if let Some(tokens) = meta.actual_tokens {
+            if !spans.is_empty() {
+                spans.push(sep.clone());
+            }
             spans.push(Span::styled(
                 tokens.format_compact(),
                 Style::default()
                     .fg(t.accent_muted())
                     .add_modifier(Modifier::DIM),
             ));
-            if timestamp.is_some() {
-                spans.push(Span::styled(
-                    " · ",
-                    Style::default().fg(t.dim()).add_modifier(Modifier::DIM),
-                ));
-            }
         }
         if let Some(stamp) = timestamp.as_deref() {
-            spans.push(Span::styled(
-                stamp.to_string(),
-                Style::default().fg(t.dim()).add_modifier(Modifier::DIM),
-            ));
+            if !spans.is_empty() {
+                spans.push(sep);
+            }
+            spans.push(Span::styled(stamp.to_string(), dim_style));
         }
         spans
     };

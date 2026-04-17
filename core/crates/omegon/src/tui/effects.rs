@@ -5,52 +5,52 @@
 //! post-processing passes on the ratatui buffer after widgets are rendered.
 //!
 //! Integration: `App::draw()` renders widgets normally, then calls
-//! `effects.process(buf, conversation_area, footer_area)`.
+//! `effects.process(buf, conversation_area, footer_area, editor_area)`.
+//!
+//! Note: conversation-zone effects (fade, flash, dissolve) were tried and
+//! removed — whole-zone HSL shifts read as glitches, not transitions.
+//! Conversation polish requires per-segment rect targeting, which is a
+//! deeper integration. The border heat system in instruments.rs handles
+//! the visual feedback role instead.
 
 use std::time::Instant;
 
 use ratatui::prelude::*;
-use tachyonfx::{EffectManager, EffectTimer, Interpolation, fx};
+use tachyonfx::{CellFilter, EffectManager, EffectTimer, Interpolation, fx};
 
 use super::theme::Theme;
 
-/// Effect slot keys — unique effects replace any existing effect with the same key.
-/// `Default` is required by `EffectManager<K>`. The default variant (`Startup`)
-/// has no semantic significance.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ConvSlot {
-    #[default]
-    Startup,
-}
+// ─── Effect slot keys ──────────────────────────────────────────────────────
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FooterSlot {
     #[default]
-    Reveal,
     Ping,
+    ContextDanger,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EditorSlot {
     #[default]
     SpinnerGlow,
+    BorderPulse,
 }
 
 /// Manages per-zone effects and tracks frame timing.
 pub struct Effects {
-    conversation: EffectManager<ConvSlot>,
     footer: EffectManager<FooterSlot>,
     editor: EffectManager<EditorSlot>,
     last_frame: Instant,
+    context_danger_active: bool,
 }
 
 impl Effects {
     pub fn new() -> Self {
         Self {
-            conversation: EffectManager::default(),
             footer: EffectManager::default(),
             editor: EffectManager::default(),
             last_frame: Instant::now(),
+            context_danger_active: false,
         }
     }
 
@@ -59,7 +59,7 @@ impl Effects {
     pub fn process(
         &mut self,
         buf: &mut Buffer,
-        conversation_area: Rect,
+        _conversation_area: Rect,
         footer_area: Rect,
         editor_area: Rect,
     ) {
@@ -68,30 +68,58 @@ impl Effects {
         self.last_frame = now;
 
         let duration = tachyonfx::Duration::from_millis(delta.as_millis() as u32);
-        self.conversation
-            .process_effects(duration, buf, conversation_area);
         self.footer.process_effects(duration, buf, footer_area);
         self.editor.process_effects(duration, buf, editor_area);
     }
 
-    /// Queue the initial startup reveal effects.
-    /// Resets the frame timer so effects start from zero delta.
-    pub fn queue_startup(&mut self, _t: &dyn Theme) {
-        self.last_frame = Instant::now();
-        // Startup effects disabled — they were interpolating bg colors
-        // and leaving non-theme RGB values in the buffer, causing visible
-        // color mismatches between the conversation and dashboard panels.
-    }
+    // ── Footer ──────────────────────────────────────────────────────────
 
-    /// Flash effect when a footer value changes (fact count, context %, etc.).
+    /// Flash effect when a footer value changes (fact count, context %, model).
+    /// CellFilter::Text prevents painting over instrument panel bars.
     pub fn ping_footer(&mut self, _t: &dyn Theme) {
-        // Disabled: the tachyonfx footer ping was flashing green across
-        // the entire footer including the instrument panel bars. The new
-        // instrument panel provides its own visual feedback (tool list
-        // updates, memory strings pluck). The ping is redundant.
+        let ping = self.footer.unique(
+            FooterSlot::Ping,
+            fx::sequence(&[
+                fx::hsl_shift_fg(
+                    [0.0, 0.0, 0.15],
+                    EffectTimer::from_ms(120, Interpolation::QuadOut),
+                ),
+                fx::hsl_shift_fg(
+                    [0.0, 0.0, -0.15],
+                    EffectTimer::from_ms(200, Interpolation::QuadIn),
+                ),
+            ])
+            .with_filter(CellFilter::Text),
+        );
+        self.footer.add_effect(ping);
     }
 
-    /// HSL cycling glow on the editor/spinner area.
+    /// Context usage danger pulse — starts when >80%, stops when <75%.
+    pub fn set_context_danger(&mut self, active: bool) {
+        if active == self.context_danger_active {
+            return;
+        }
+        self.context_danger_active = active;
+        if active {
+            let pulse = self.footer.unique(
+                FooterSlot::ContextDanger,
+                fx::never_complete(fx::ping_pong(
+                    fx::hsl_shift_fg(
+                        [0.0, 0.0, 0.08],
+                        EffectTimer::from_ms(1500, Interpolation::SineInOut),
+                    )
+                    .with_filter(CellFilter::Text),
+                )),
+            );
+            self.footer.add_effect(pulse);
+        } else {
+            self.footer.cancel_unique_effect(FooterSlot::ContextDanger);
+        }
+    }
+
+    // ── Editor ──────────────────────────────────────────────────────────
+
+    /// HSL cycling glow on the editor/spinner area during active turns.
     pub fn start_spinner_glow(&mut self) {
         let glow = self.editor.unique(
             EditorSlot::SpinnerGlow,
@@ -108,9 +136,30 @@ impl Effects {
         self.editor.cancel_unique_effect(EditorSlot::SpinnerGlow);
     }
 
+    /// Subtle border pulse during active turns.
+    pub fn start_border_pulse(&mut self) {
+        let pulse = self.editor.unique(
+            EditorSlot::BorderPulse,
+            fx::never_complete(fx::ping_pong(
+                fx::hsl_shift_fg(
+                    [15.0, 0.0, 0.05],
+                    EffectTimer::from_ms(3000, Interpolation::SineInOut),
+                ),
+            )),
+        );
+        self.editor.add_effect(pulse);
+    }
+
+    /// Stop the border pulse.
+    pub fn stop_border_pulse(&mut self) {
+        self.editor.cancel_unique_effect(EditorSlot::BorderPulse);
+    }
+
+    // ── Query ───────────────────────────────────────────────────────────
+
     /// True if any effects are active (drives render timing).
     pub fn has_active(&self) -> bool {
-        self.conversation.is_running() || self.footer.is_running() || self.editor.is_running()
+        self.footer.is_running() || self.editor.is_running()
     }
 }
 
@@ -132,21 +181,21 @@ mod tests {
     }
 
     #[test]
-    fn queue_startup_no_effects() {
-        let mut fx = Effects::new();
-        let t = Alpharius;
-        fx.queue_startup(&t);
-        // Startup effects disabled — no bg color pollution
-        assert!(!fx.has_active());
-    }
-
-    #[test]
-    fn ping_footer_is_noop() {
+    fn ping_footer_activates_footer() {
         let mut fx = Effects::new();
         let t = Alpharius;
         fx.ping_footer(&t);
-        // ping_footer disabled — instrument panel provides its own feedback
-        assert!(!fx.has_active());
+        assert!(fx.footer.is_running());
+    }
+
+    #[test]
+    fn context_danger_toggle() {
+        let mut fx = Effects::new();
+        fx.set_context_danger(true);
+        assert!(fx.footer.is_running());
+        assert!(fx.context_danger_active);
+        fx.set_context_danger(true);
+        assert!(fx.context_danger_active);
     }
 
     #[test]
@@ -155,17 +204,13 @@ mod tests {
         fx.start_spinner_glow();
         assert!(fx.has_active());
         fx.stop_spinner_glow();
-        // Effect still active until processed — cancel marks it for removal
-        // on next process_effects cycle
     }
 
     #[test]
     fn effects_are_zone_isolated() {
         let mut fx = Effects::new();
-        // Spinner glow only affects editor zone
         fx.start_spinner_glow();
         assert!(!fx.footer.is_running());
-        assert!(!fx.conversation.is_running());
         assert!(fx.editor.is_running());
     }
 }
