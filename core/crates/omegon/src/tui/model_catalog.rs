@@ -168,6 +168,10 @@ impl ModelCatalog {
             "groq:llama-3.3-70b-versatile" => Some(TokenPricing::new(0.0, 0.0)),
 
             // xAI
+            "xai:grok-4.20-0309-reasoning" => Some(TokenPricing::new(2.0, 6.0)),
+            "xai:grok-4.20-0309-non-reasoning" => Some(TokenPricing::new(2.0, 6.0)),
+            "xai:grok-4-1-fast-reasoning" => Some(TokenPricing::new(0.2, 0.5)),
+            "xai:grok-4-1-fast-non-reasoning" => Some(TokenPricing::new(0.2, 0.5)),
             "xai:grok-4-0709" => Some(TokenPricing::new(3.0, 15.0)),
             "xai:grok-3" => Some(TokenPricing::new(2.0, 10.0)),
 
@@ -557,6 +561,68 @@ impl ModelCatalog {
             providers.insert(
                 "xAI".to_string(),
                 vec![
+                    ModelInfo {
+                        id: "xai:grok-4.20-0309-reasoning".to_string(),
+                        name: "Grok 4.2".to_string(),
+                        provider: "xAI".to_string(),
+                        context_input: 2_000_000,
+                        context_output: 32768,
+                        cost_tier: CostTier::StandardAPI,
+                        pricing: Some(TokenPricing::new(2.0, 6.0)),
+                        capabilities: vec![
+                            Capability::Reasoning,
+                            Capability::Coding,
+                            Capability::Vision,
+                        ],
+                        description: "Grok 4.2 — xAI flagship reasoning and coding model".to_string(),
+                        available: true,
+                    },
+                    ModelInfo {
+                        id: "xai:grok-4.20-0309-non-reasoning".to_string(),
+                        name: "Grok 4.2 non reasoning".to_string(),
+                        provider: "xAI".to_string(),
+                        context_input: 2_000_000,
+                        context_output: 32768,
+                        cost_tier: CostTier::StandardAPI,
+                        pricing: Some(TokenPricing::new(2.0, 6.0)),
+                        capabilities: vec![
+                            Capability::Coding,
+                            Capability::Vision,
+                        ],
+                        description: "Grok 4.2 (Non-Reasoning) — xAI flagship non-reasoning and coding model".to_string(),
+                        available: true,
+                    },
+                    ModelInfo {
+                        id: "xai:grok-4-1-fast-reasoning".to_string(),
+                        name: "Grok 4.1 Fast".to_string(),
+                        provider: "xAI".to_string(),
+                        context_input: 2_000_000,
+                        context_output: 32768,
+                        cost_tier: CostTier::CheapAPI,
+                        pricing: Some(TokenPricing::new(0.2, 0.5)),
+                        capabilities: vec![
+                            Capability::Reasoning,
+                            Capability::Coding,
+                            Capability::Vision,
+                        ],
+                        description: "Grok 4.1 Fast — A frontier multimodal model optimized specifically for high-performance agentic tool calling.".to_string(),
+                        available: true,
+                    },
+                    ModelInfo {
+                        id: "xai:grok-4-1-fast-non-reasoning".to_string(),
+                        name: "Grok 4.1 Fast (Non-Reasoning)".to_string(),
+                        provider: "xAI".to_string(),
+                        context_input: 2_000_000,
+                        context_output: 32768,
+                        cost_tier: CostTier::CheapAPI,
+                        pricing: Some(TokenPricing::new(0.2, 0.5)),
+                        capabilities: vec![
+                            Capability::Coding,
+                            Capability::Vision,
+                        ],
+                        description: "Grok 4.1 Fast (Non-Reasoning) — A frontier multimodal model optimized specifically for high-performance agentic tool calling.".to_string(),
+                        available: true,
+                    },
                     ModelInfo {
                         id: "xai:grok-4-0709".to_string(),
                         name: "Grok 4".to_string(),
