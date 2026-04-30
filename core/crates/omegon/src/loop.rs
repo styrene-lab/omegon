@@ -463,6 +463,30 @@ pub async fn run(
             .prepare_embeddings(conversation.last_user_prompt())
             .await;
 
+        // ─── Input format hints (MCQ, obfuscation) ─────────────────
+        // If the user's input was detected as MCQ or obfuscated, inject
+        // a one-shot system hint so the agent responds appropriately.
+        // These are appended as user messages that get compacted away
+        // on subsequent turns — they only affect the current response.
+        if conversation.intent.mcq_detected {
+            conversation.intent.mcq_detected = false; // one-shot
+            conversation.push_user(
+                "[System: The question above is multiple-choice. State which option \
+                 letter (A/B/C/D) is correct at the START of your response, then \
+                 explain your reasoning. Example format: \"B. The answer is B because...\"]"
+                    .to_string(),
+            );
+        }
+        if conversation.intent.obfuscation_detected {
+            conversation.intent.obfuscation_detected = false; // one-shot
+            conversation.push_user(
+                "[System: The input above appears to contain heavily obfuscated or \
+                 misspelled text. Interpret it charitably — deduce the intended \
+                 meaning despite the spelling errors and respond to the underlying question.]"
+                    .to_string(),
+            );
+        }
+
         // ─── Build LLM-facing context ───────────────────────────────
         let system_prompt =
             context.build_system_prompt(conversation.last_user_prompt(), conversation);

@@ -128,6 +128,16 @@ pub struct IntentDocument {
     #[serde(default)]
     pub skill_completion_nudged: bool,
 
+    /// Set when the user's prompt contains MCQ options (A/B/C/D pattern).
+    /// The loop injects a format hint so the agent states the letter answer.
+    #[serde(default)]
+    pub mcq_detected: bool,
+
+    /// Set when the user's prompt appears heavily obfuscated (typo injection).
+    /// The loop injects a charitable interpretation hint.
+    #[serde(default)]
+    pub obfuscation_detected: bool,
+
     pub constraints_discovered: Vec<String>,
     pub failed_approaches: Vec<FailedApproach>,
     pub open_questions: Vec<String>,
@@ -500,10 +510,28 @@ impl ConversationState {
         images: Vec<crate::bridge::ImageAttachment>,
     ) {
         let turn = self.intent.stats.turns;
+
+        // ─── Input sanitization ────────────────────────────────────
+        // Strip invisible unicode characters that serve no semantic
+        // purpose but can crash tokenizers and inflate token counts
+        // (e.g., zero-width spaces injected between every character).
+        let text = sanitize_invisible_chars(&text);
+
         // Auto-populate current_task from the first non-system user message
         if !text.starts_with("[System:") {
             self.intent.set_task_from_prompt(&text);
+
+            // Detect MCQ format for response formatting hint
+            if is_mcq_format(&text) {
+                self.intent.mcq_detected = true;
+            }
+
+            // Detect heavily obfuscated input for charitable interpretation
+            if is_obfuscated(&text) {
+                self.intent.obfuscation_detected = true;
+            }
         }
+
         self.canonical
             .push(AgentMessage::User { text, images, turn });
         self.invalidate_token_cache();
@@ -1338,6 +1366,114 @@ fn extract_identifiers(line: &str) -> impl Iterator<Item = &str> {
         results.push(&line[s..]);
     }
     results.into_iter()
+}
+
+// ── Input sanitization and format detection ─────────────────────────────
+
+/// Strip invisible unicode characters that serve no semantic purpose.
+///
+/// Zero-width characters (U+200B, U+200C, U+200D, U+FEFF, etc.) can be
+/// injected between every character as a "unicode flood" attack, inflating
+/// token count and potentially crashing tokenizers. Stripping them is
+/// lossless for all human-readable text.
+fn sanitize_invisible_chars(text: &str) -> String {
+    let original_len = text.len();
+    let cleaned: String = text
+        .chars()
+        .filter(|c| !is_invisible_char(*c))
+        .collect();
+
+    let stripped = original_len - cleaned.len();
+    if stripped > 0 {
+        tracing::warn!(
+            stripped_chars = stripped,
+            original_len = original_len,
+            "stripped invisible unicode characters from input"
+        );
+    }
+    cleaned
+}
+
+/// Returns true for unicode characters that are invisible and serve no
+/// semantic purpose in user-facing text.
+fn is_invisible_char(c: char) -> bool {
+    matches!(c,
+        '\u{200B}'  // ZERO WIDTH SPACE
+        | '\u{200C}' // ZERO WIDTH NON-JOINER
+        | '\u{200D}' // ZERO WIDTH JOINER
+        | '\u{FEFF}' // ZERO WIDTH NO-BREAK SPACE (BOM)
+        | '\u{2060}' // WORD JOINER
+        | '\u{2061}' // FUNCTION APPLICATION
+        | '\u{2062}' // INVISIBLE TIMES
+        | '\u{2063}' // INVISIBLE SEPARATOR
+        | '\u{2064}' // INVISIBLE PLUS
+        | '\u{00AD}' // SOFT HYPHEN
+        | '\u{034F}' // COMBINING GRAPHEME JOINER
+        | '\u{061C}' // ARABIC LETTER MARK
+        | '\u{180E}' // MONGOLIAN VOWEL SEPARATOR
+    ) || ('\u{FE00}'..='\u{FE0F}').contains(&c) // Variation selectors
+      || ('\u{E0100}'..='\u{E01EF}').contains(&c) // Variation selectors supplement
+      || ('\u{200E}'..='\u{200F}').contains(&c) // LTR/RTL marks
+      || ('\u{202A}'..='\u{202E}').contains(&c) // Bidi embedding controls
+      || ('\u{2066}'..='\u{2069}').contains(&c) // Bidi isolate controls
+}
+
+/// Detect multiple-choice question format in user input.
+///
+/// Matches patterns like:
+///   A) answer    B) answer    C) answer    D) answer
+///   (A) answer   (B) answer   (C) answer   (D) answer
+///   Choices: ['0', '4', '2', '6']  (HuggingFace dataset format)
+pub fn is_mcq_format(text: &str) -> bool {
+    // HuggingFace format: "Choices: ['A', 'B', ...]"
+    if text.contains("Choices:") && text.contains('[') {
+        return true;
+    }
+
+    // Standard MCQ patterns — count lines that look like options
+    let option_count = text
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            // Match: A) ..., (A) ..., A. ..., A: ...
+            for letter in &['A', 'B', 'C', 'D', 'E', 'F'] {
+                let s = format!("{letter})");
+                let s2 = format!("({letter})");
+                let s3 = format!("{letter}.");
+                let s4 = format!("{letter}:");
+                if t.starts_with(&s) || t.starts_with(&s2) || t.starts_with(&s3) || t.starts_with(&s4) {
+                    return true;
+                }
+            }
+            false
+        })
+        .count();
+
+    option_count >= 2
+}
+
+/// Detect heavily obfuscated input (typo injection attack).
+///
+/// Heuristic: if more than 30% of "words" contain 3+ consecutive
+/// repeated characters (e.g., "imppportaantt"), the input is likely
+/// obfuscated. Normal English text rarely has this pattern.
+pub fn is_obfuscated(text: &str) -> bool {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() < 5 {
+        return false; // too short to judge
+    }
+
+    let obfuscated_words = words.iter().filter(|word| {
+        let chars: Vec<char> = word.chars().collect();
+        if chars.len() < 4 {
+            return false;
+        }
+        // Check for 3+ consecutive identical characters
+        chars.windows(3).any(|w| w[0] == w[1] && w[1] == w[2])
+    }).count();
+
+    let ratio = obfuscated_words as f64 / words.len() as f64;
+    ratio > 0.3
 }
 
 #[cfg(test)]
@@ -2507,5 +2643,96 @@ mod tests {
             }
             other => panic!("expected fallback user message, got {other:?}"),
         }
+    }
+
+    // ── Input sanitization tests ──────────────────────────────────────
+
+    #[test]
+    fn sanitize_strips_zero_width_chars() {
+        let input = "H\u{200B}e\u{200C}l\u{200D}l\u{FEFF}o";
+        assert_eq!(sanitize_invisible_chars(input), "Hello");
+    }
+
+    #[test]
+    fn sanitize_strips_bidi_controls() {
+        let input = "Hello\u{202A}World\u{202C}";
+        assert_eq!(sanitize_invisible_chars(input), "HelloWorld");
+    }
+
+    #[test]
+    fn sanitize_preserves_normal_text() {
+        let input = "Hello, World! 你好世界 🌍";
+        assert_eq!(sanitize_invisible_chars(input), input);
+    }
+
+    #[test]
+    fn sanitize_preserves_common_whitespace() {
+        let input = "line one\nline two\ttabbed";
+        assert_eq!(sanitize_invisible_chars(input), input);
+    }
+
+    #[test]
+    fn sanitize_strips_variation_selectors() {
+        let input = "emoji\u{FE0F}text\u{FE0E}";
+        assert_eq!(sanitize_invisible_chars(input), "emojitext");
+    }
+
+    // ── MCQ detection tests ───────────────────────────────────────────
+
+    #[test]
+    fn mcq_detects_parenthesized_options() {
+        let text = "What is 2+2?\n(A) 3\n(B) 4\n(C) 5\n(D) 6";
+        assert!(is_mcq_format(text));
+    }
+
+    #[test]
+    fn mcq_detects_paren_right_options() {
+        let text = "Question:\nA) first\nB) second\nC) third";
+        assert!(is_mcq_format(text));
+    }
+
+    #[test]
+    fn mcq_detects_huggingface_choices() {
+        let text = "Find the degree.\nChoices: ['0', '4', '2', '6']";
+        assert!(is_mcq_format(text));
+    }
+
+    #[test]
+    fn mcq_rejects_normal_text() {
+        let text = "Write a function that takes a list and returns the sum.";
+        assert!(!is_mcq_format(text));
+    }
+
+    #[test]
+    fn mcq_rejects_short_text() {
+        let text = "A) yes";
+        assert!(!is_mcq_format(text));
+    }
+
+    // ── Obfuscation detection tests ───────────────────────────────────
+
+    #[test]
+    fn obfuscation_detects_repeated_chars() {
+        let text = "Whaaat isss theee annnswer tooo thisss qqqestion abooout mathhh?";
+        assert!(is_obfuscated(text));
+    }
+
+    #[test]
+    fn obfuscation_rejects_normal_text() {
+        let text = "What is the answer to this question about math and science?";
+        assert!(!is_obfuscated(text));
+    }
+
+    #[test]
+    fn obfuscation_rejects_short_text() {
+        let text = "Hiii";
+        assert!(!is_obfuscated(text));
+    }
+
+    #[test]
+    fn obfuscation_allows_some_repeated_chars() {
+        // Words like "committee" and "balloon" have natural double letters
+        let text = "The committee discussed the balloon festival happening tomorrow afternoon.";
+        assert!(!is_obfuscated(text));
     }
 }
