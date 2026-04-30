@@ -159,15 +159,38 @@ Guide the operator through these questions conversationally. Be concise — one 
 4. **Where should output go?** If the skill produces files, where should they be saved?
 5. **Any trigger phrases?** What would the operator say to invoke this skill? (e.g., "evaluate this opportunity")
 
-After gathering answers, generate a complete SKILL.md file with:
-- TOML frontmatter (+++...+++) with all fields from the schema
-- A clear markdown body with numbered phases if it's a workflow, or organized sections if it's conventions
+After gathering answers, generate a complete SKILL.md file using this exact TOML frontmatter schema:
+
+```toml
++++
+id = "<generate-a-uuid>"
+name = "<kebab-case-name>"
+description = "<one-line description>"
+version = "1.0.0"
+tags = ["<domain>"]
+aliases = ["<shortname>"]
+triggers = ["<phrase1>", "<phrase2>"]
+trusted_paths = ["<path1>", "<path2>"]
+output_path = "<where results go>"
+output_format = "markdown"
++++
+```
+
+Only include fields that have values — omit any that are empty or not applicable.
+The `id` field should be a freshly generated UUID.
+
+The markdown body after the frontmatter should contain:
+- If it's a workflow: numbered phases (## Phase 0: ..., ## Phase 1: ..., etc.)
+- If it's conventions: organized sections (## Setup, ## Rules, etc.)
 - Concrete, actionable instructions — not vague guidance
 
-Write the file to: {cwd}/.omegon/skills/<name>/SKILL.md
-Confirm the path and tell the operator the skill will be active in their next session.
+First create the directory, then write the file:
+  mkdir -p {cwd}/.omegon/skills/<name>/
+  Then write to {cwd}/.omegon/skills/<name>/SKILL.md
 
-Do NOT ask all questions at once. Ask one, wait for the answer, then ask the next."#,
+After writing, confirm the full path to the operator and tell them the skill will be active in their next session.
+
+Do NOT ask all questions at once. Start with question 1 only."#,
         cwd = cwd.display()
     )
 }
