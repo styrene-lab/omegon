@@ -489,6 +489,7 @@ pub(crate) enum CanonicalSlashCommand {
     AuthLogout(String),
     SkillsView,
     SkillsInstall,
+    SkillCreate,
     PluginView,
     PluginInstall(String),
     PluginRemove(String),
@@ -619,9 +620,10 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         },
         "login" if !args.is_empty() => Some(CanonicalSlashCommand::AuthLogin(args.to_string())),
         "logout" if !args.is_empty() => Some(CanonicalSlashCommand::AuthLogout(args.to_string())),
-        "skills" => match args {
+        "skills" | "skill" => match args {
             "" | "list" => Some(CanonicalSlashCommand::SkillsView),
             "install" => Some(CanonicalSlashCommand::SkillsInstall),
+            "create" | "new" => Some(CanonicalSlashCommand::SkillCreate),
             _ => None,
         },
         "plugin" => {
@@ -4543,8 +4545,17 @@ impl App {
                 }
             }
 
-            "skills" => {
-                if let Some(command) = canonical_slash_command("skills", args) {
+            "skills" | "skill" => {
+                if args == "create" || args == "new" {
+                    // Queue the skill builder prompt — the agent converses
+                    // with the operator to create a new skill.
+                    let cwd = self.cwd().to_path_buf();
+                    let builder_prompt = crate::skills::skill_builder_prompt(&cwd);
+                    self.queued_prompts.push_back((builder_prompt, Vec::new()));
+                    self.queue_mode = PromptQueueMode::InterruptAfterTurn;
+                    self.conversation.push_system("Starting skill builder...");
+                    SlashResult::Handled
+                } else if let Some(command) = canonical_slash_command("skills", args) {
                     if let Some(request) =
                         crate::control_runtime::control_request_from_slash(&command)
                     {
@@ -4554,10 +4565,10 @@ impl App {
                         });
                         SlashResult::Handled
                     } else {
-                        SlashResult::Display("Usage: /skills [list|install]".into())
+                        SlashResult::Display("Usage: /skill [list|install|create]".into())
                     }
                 } else {
-                    SlashResult::Display("Usage: /skills [list|install]".into())
+                    SlashResult::Display("Usage: /skill [list|install|create]".into())
                 }
             }
 

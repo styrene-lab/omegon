@@ -233,6 +233,9 @@ pub fn control_request_from_slash(
         },
         crate::tui::CanonicalSlashCommand::SkillsView => ControlRequest::SkillsView,
         crate::tui::CanonicalSlashCommand::SkillsInstall => ControlRequest::SkillsInstall,
+        // SkillCreate is handled directly in the TUI (queues a prompt) —
+        // it never reaches control_runtime. Return None to signal this.
+        crate::tui::CanonicalSlashCommand::SkillCreate => return None,
         crate::tui::CanonicalSlashCommand::PluginView => ControlRequest::PluginView,
         crate::tui::CanonicalSlashCommand::PluginInstall(uri) => {
             ControlRequest::PluginInstall { uri: uri.clone() }
