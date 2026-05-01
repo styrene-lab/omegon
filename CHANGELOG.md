@@ -14,6 +14,14 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.18.2] - 2026-05-01
+
+### Fixed
+
+- **OCI image build** — `iptables-nft` is not a valid nixpkgs package name. Changed to `iptables` which includes nftables backend support. All 7 OCI image builds failed in 0.18.1 due to this.
+- **`--sandboxed` image handling** — auto-pulls image if not found locally, clear error message with actionable options on pull failure, `OMEGON_SANDBOX_IMAGE` env var for custom images.
+- **Leet-speak normalization** — reverses common substitutions (3→e, @→a, 7→t) in obfuscated input. Fixed HumanEval typo injection chaos score from 39→95.
+
 ## [0.18.1] - 2026-05-01
 
 ### Added
