@@ -543,7 +543,19 @@ jobs:
             echo "Could not resolve image name, skipping latest tag"
             exit 0
           fi
-          skopeo copy \
-            "docker://${IMAGE_NAME}:${VERSION}" \
-            "docker://${IMAGE_NAME}:latest"
-          echo "Tagged ${IMAGE_NAME}:latest"
+          # Retry with backoff — registry may need time to propagate the
+          # manifest after the push step completes.
+          for attempt in 1 2 3; do
+            if skopeo copy \
+              "docker://${IMAGE_NAME}:${VERSION}" \
+              "docker://${IMAGE_NAME}:latest" 2>/dev/null; then
+              echo "Tagged ${IMAGE_NAME}:latest"
+              exit 0
+            fi
+            echo "Attempt $attempt failed — waiting 10s for registry propagation..."
+            sleep 10
+          done
+          echo "Warning: could not tag ${IMAGE_NAME}:latest after 3 attempts"
+          echo "The versioned tag :${VERSION} is available — :latest will update on next release"
+          # Don't fail the job over a missing :latest tag
+          exit 0
