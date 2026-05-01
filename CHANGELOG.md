@@ -14,6 +14,14 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.18.3] - 2026-05-01
+
+### Fixed
+
+- **OCI image version tags** — `workspaceVersion` in flake.nix was hardcoded to `"0.16.0"` since the initial OCI implementation. Every release since 0.16.0 silently pushed OCI images to the `:0.16.0` tag instead of the actual version. Now derived from Cargo.toml at Nix evaluation time.
+- **OCI "Tag as latest" step** — added retry with 10s backoff for registry propagation delay. Non-fatal on failure so the build step isn't wasted.
+- **`--sandboxed` image pull** — auto-pulls image if not found locally, clear error on failure with `OMEGON_SANDBOX_IMAGE` override.
+
 ## [0.18.2] - 2026-05-01
 
 ### Fixed
