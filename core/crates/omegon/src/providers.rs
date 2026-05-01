@@ -1688,7 +1688,8 @@ impl OpenRouterClient {
             inner: OpenAIClient {
                 client: reqwest::Client::new(),
                 api_key,
-                base_url: "https://openrouter.ai/api".into(),
+                base_url: std::env::var("OPENROUTER_BASE_URL")
+                    .unwrap_or_else(|_| "https://openrouter.ai/api".into()),
             },
         }
     }
@@ -2492,7 +2493,8 @@ impl OllamaCloudClient {
         Self {
             client: reqwest::Client::new(),
             api_key,
-            base_url: ollama_cloud_base_url().to_string(),
+            base_url: std::env::var("OLLAMA_CLOUD_BASE_URL")
+                .unwrap_or_else(|_| ollama_cloud_base_url().to_string()),
         }
     }
 
@@ -3036,7 +3038,9 @@ impl LlmBridge for AntigravityClient {
             "request": request_body,
         });
 
-        let url = "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse";
+        let url = std::env::var("ANTIGRAVITY_BASE_URL").unwrap_or_else(|_|
+            "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse".into()
+        );
 
         let mut response = self
             .client
