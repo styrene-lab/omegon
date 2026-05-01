@@ -4400,7 +4400,7 @@ dependencies = [
 
 [[package]]
 name = "omegon"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "agent-client-protocol",
  "ansi-to-tui",
@@ -4476,7 +4476,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-codescan"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "anyhow",
  "git2",
@@ -4500,7 +4500,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-extension"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4516,7 +4516,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-git"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -4529,7 +4529,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-memory"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4559,7 +4559,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-secrets"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -4589,7 +4589,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-traits"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5555,9 +5555,9 @@ dependencies = [
 
 [[package]]
 name = "ratatui-image"
-version = "10.0.7"
+version = "10.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2ade55b4df47a7e166bf842e20581778e5c315df588e87ea5ca88706d1b8577"
+checksum = "a10dbbf11c4f3cf810ec227010d1ba0a4ce515f0d3b319920e30dd4cbc99d211"
 dependencies = [
  "base64-simd",
  "icy_sixel",
@@ -5908,9 +5908,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "1.5.0"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67d69668de0b0ccd9cc435f700f3b39a7861863cf37a15e1f304ea78688a4826"
+checksum = "e12ca9067b5ebfbd5b3fcdc4acfceb81aa7d5ab2a879dff7cb75d22434276aad"
 dependencies = [
  "async-trait",
  "chrono",

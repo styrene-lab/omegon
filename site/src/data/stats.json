@@ -1,7 +1,7 @@
 {
   "crateCount": 7,
   "downloadMB": 13,
-  "releaseTag": "v0.18.0",
+  "releaseTag": "v0.18.1",
   "providerCount": 14,
   "providerNames": [
     "Anthropic/Claude",

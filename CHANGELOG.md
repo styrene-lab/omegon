@@ -14,6 +14,38 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.18.1] - 2026-05-01
+
+### Added
+
+- **`--sandboxed` mode** — run the entire omegon session inside an OCI container. Read-only rootfs, cap-drop=ALL, filtered egress (LLM APIs only), vault-only secrets mount, no-new-privileges, pids/memory limits. Kernel-enforced filesystem isolation.
+- **`--dangerously-bypass-permissions`** — disable all Tier 1+2 boundary checks for untethered work.
+- **Cluster-compatible egress** — `OMEGON_EGRESS_MODE` env var (iptables/external/auto) for k8s with eBPF CNI. `omegon nex networkpolicy` exports CiliumNetworkPolicy YAML.
+- **Skill schema + `/skill create` builder** — `SkillManifest` struct with triggers, trusted_paths, output_path, posture, max_turns. `/skill create` guides the operator through creation conversationally.
+- **Skill completion tracking** — skills with numbered phases (## Phase N:) get completion checking. The loop nudges the agent if it stops before completing the final phase.
+- **`trusted_paths` in SKILL.md frontmatter** — skills declare directories they need outside the workspace. Auto-trusted on session startup, persisted to settings, inherited by delegates.
+- **Base URL overrides** for all provider clients — `OPENROUTER_BASE_URL`, `OLLAMA_CLOUD_BASE_URL`, `ANTIGRAVITY_BASE_URL`. Enables chaos proxy testing for every provider.
+- **21 sandbox boundary smoke tests** — empirical proof of filesystem, network, capability, resource, and secrets isolation.
+
+### Fixed
+
+- **Input sanitization pipeline** — applied in `push_user()` before text enters conversation state:
+  - Unicode zero-width character stripping (fixed unicode flood crash: 0→100)
+  - Role impersonation prefix stripping (fixed [SYSTEM OVERRIDE] bypass: 74→100)
+  - Leet-speak normalization (fixed HumanEval typo injection: 39→95)
+  - Oversized input truncation at 100k chars (fixed context overflow crash: 0→60)
+  - MCQ format detection with letter-answer hint
+- **"Always Allow" persists to settings** — trusted directories now survive across sessions and delegates.
+- **Permission denial is a hard block** — no instructions to the model on how to bypass.
+- **Bash default timeout raised from 120s to 600s** — fixes long-running command kills.
+- **Bash tool-requested timeout respected** — bus layer no longer silently overrides with hardcoded cap.
+
+### Security
+
+- **Sandbox smoke tests**: 21 automated tests proving container boundaries hold (filesystem, network, capabilities, resources, secrets).
+- **Chaos proxy evaluation**: 29 runs across 3 providers (Anthropic, Ollama, Ollama Cloud), zero bugs in error handling, retry logic, or classification.
+- **All error responses match upstream provider specs** — Anthropic and OpenAI error formats auto-detected and correctly handled.
+
 ## [0.18.0] - 2026-04-29
 
 ### Changed (BREAKING)
