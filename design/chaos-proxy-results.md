@@ -67,6 +67,34 @@ Every chaos profile produced correct behavior:
 - The `anthropic-beta: oauth-2025-04-20` header is required for OAuth auth
 - Rate limits on OAuth subscription are stricter than API keys
 
+## Results: Local Ollama Provider (Pass 1)
+
+Tested with qwen3:32b via chaos proxy targeting `http://localhost:11434`.
+No rate limits, no auth, no token expiry.
+
+### Observations
+
+1. **Ollama makes multiple API calls per request**: `/api/tags` (model list),
+   `/api/ps` (running models), `/api/generate` (warmup), then `/v1/chat/completions`.
+   The proxy catches all of them — more realistic than testing only chat.
+
+2. **Pre-forward profiles behave correctly**: 429→retries, 500→retries, 401→immediate fail.
+   Same behavior as Anthropic client — the OpenAICompatClient shares the same retry logic.
+
+3. **Intermittent failure**: Omegon retried through 50% failures on both warmup and chat
+   calls, eventually got answers through.
+
+4. **Cold start timing**: qwen3:32b takes >120s to load on first call. Proxy timeout
+   needed to be raised from 120s→300s to avoid false 504s during passthrough.
+
+### Findings
+
+| Finding | Severity | Status |
+|---|---|---|
+| Proxy timeout too short for local models (120s) | Medium | **Fixed** — raised to 300s |
+| Warmup calls (/api/tags, /api/ps) also hit chaos | Informational | Correct behavior — proxy is transparent |
+| OpenAICompatClient shares retry logic with OpenAIClient | Confirmed | Same code path — Groq/xAI/Mistral/etc. covered |
+
 ## Remaining Providers for Pass 1
 
 ### OpenAI (openai, openai-codex)
