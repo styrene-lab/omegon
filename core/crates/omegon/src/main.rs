@@ -6155,11 +6155,45 @@ async fn run_sandboxed(cli: &Cli) -> anyhow::Result<()> {
         ))?;
 
     let version = env!("CARGO_PKG_VERSION");
-    let image = format!("ghcr.io/styrene-lab/omegon:{version}");
+    // Allow image override for local/custom builds
+    let image = std::env::var("OMEGON_SANDBOX_IMAGE")
+        .unwrap_or_else(|_| format!("ghcr.io/styrene-lab/omegon:{version}"));
     let cwd = std::fs::canonicalize(&cli.cwd)?;
 
     eprintln!("🔒 Running in sandboxed mode ({runtime} → {image})");
     eprintln!("   Workspace: {} → /work", cwd.display());
+
+    // Check if image exists locally; if not, try to pull it
+    let image_exists = std::process::Command::new(&runtime)
+        .args(["image", "exists", &image])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+
+    if !image_exists {
+        eprintln!("   Image not found locally — pulling...");
+        let pull_status = std::process::Command::new(&runtime)
+            .args(["pull", &image])
+            .status();
+
+        match pull_status {
+            Ok(s) if s.success() => {
+                eprintln!("   Image pulled successfully.");
+            }
+            _ => {
+                eprintln!(
+                    "\n   Failed to pull '{image}'.\n\n   \
+                     The sandboxed mode requires an OCI container image.\n   \
+                     Options:\n     \
+                     1. Build locally: nix build .#oci-coding && podman load < result\n     \
+                     2. Use a custom image: OMEGON_SANDBOX_IMAGE=<image> omegon --sandboxed\n     \
+                     3. Run without sandbox: omegon (without --sandboxed)\n"
+                );
+                std::process::exit(1);
+            }
+        }
+    }
 
     let mut cmd = std::process::Command::new(&runtime);
     cmd.arg("run");
