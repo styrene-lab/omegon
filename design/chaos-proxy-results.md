@@ -95,6 +95,33 @@ No rate limits, no auth, no token expiry.
 | Warmup calls (/api/tags, /api/ps) also hit chaos | Informational | Correct behavior — proxy is transparent |
 | OpenAICompatClient shares retry logic with OpenAIClient | Confirmed | Same code path — Groq/xAI/Mistral/etc. covered |
 
+## Results: Ollama Cloud Provider (Pass 1 — Analysis Only)
+
+Ollama Cloud uses a dedicated `OllamaCloudClient` with a hardcoded base URL
+(`https://ollama.com/api`). No env var override exists, so the chaos proxy
+cannot intercept its requests without modifying omegon.
+
+### Code Analysis
+
+The `OllamaCloudClient` (providers.rs:2671-2718) emits errors as
+`"Ollama Cloud {status}: {raw_body}"`. The global error classifier in
+`upstream_errors.rs` matches these via substring/word-token rules:
+
+- `429` → `RateLimited` (word token "429") ✓
+- `500` → matches upstream 5xx rules ✓
+- `401` → `AuthInvalid` (word token "401") ✓
+- `overloaded` → `ProviderOverloaded` (substring) ✓
+
+The retry logic in `stream_with_retry` wraps all bridges uniformly, so
+the same retry/backoff behavior verified for Anthropic and local Ollama
+applies here.
+
+### Improvement Needed
+
+Add `OLLAMA_CLOUD_BASE_URL` env var override to `OllamaCloudClient::new()`
+(same pattern as `ANTHROPIC_BASE_URL` in `AnthropicClient`). This would
+enable proxy-based testing for Ollama Cloud without modifying code.
+
 ## Remaining Providers for Pass 1
 
 ### OpenAI (openai, openai-codex)
