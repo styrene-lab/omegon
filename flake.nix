@@ -25,7 +25,20 @@
         rustToolchain = pkgs.rust-bin.stable.latest.default;
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-        workspaceVersion = "0.16.0";
+        # Read version from Cargo.toml so OCI image tags stay in sync
+        # with the binary version. Previously hardcoded to "0.16.0" which
+        # caused all OCI images to push over the same tag.
+        workspaceVersion =
+          let
+            cargoToml = builtins.readFile ./Cargo.toml;
+            # Extract: version = "X.Y.Z" from [workspace.package]
+            lines = builtins.filter
+              (l: builtins.match "^version = \".*\"$" l != null)
+              (pkgs.lib.splitString "\n" cargoToml);
+            versionLine = builtins.head lines;
+            # Strip 'version = "' prefix and '"' suffix
+            version = builtins.replaceStrings ["version = \"" "\""] ["" ""] versionLine;
+          in version;
 
         commitSha =
           if self ? shortRev then self.shortRev
