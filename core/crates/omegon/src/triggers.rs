@@ -352,7 +352,8 @@ fn load_single(path: &Path) -> anyhow::Result<TriggerConfig> {
     match ext {
         "pkl" => {
             let config: TriggerConfig =
-                rpkl::from_config(path).map_err(|e| anyhow::anyhow!("pkl: {e}"))?;
+                rpkl::from_config_with_options(path, crate::pkl_modules::omegon_eval_options())
+                    .map_err(|e| anyhow::anyhow!("pkl: {e}"))?;
             Ok(config)
         }
         _ => {

@@ -1,4 +1,4 @@
-amends "AgentManifest.pkl"
+amends "omegon://schema/AgentManifest.pkl"
 
 agent {
   id = "styrene.slack-agent"

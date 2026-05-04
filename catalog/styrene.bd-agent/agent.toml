@@ -1,0 +1,43 @@
+[agent]
+id = "styrene.bd-agent"
+name = "Business Development"
+version = "1.0.0"
+description = "Engagement tracking, opportunity assessment, proposal drafting, and client reporting. Connects to Scribe MCP for engagement data."
+domain = "ops"
+
+[persona]
+directive = "PERSONA.md"
+badge = "bd"
+mind_facts = "mind/facts.jsonl"
+
+[[extensions]]
+name = "vox"
+version = ">=0.3.0"
+
+[settings]
+model = "anthropic:claude-sonnet-4-6"
+thinking_level = "low"
+context_class = "squad"
+max_turns = 50
+
+[workflow]
+name = "doc-standard"
+
+[workflow.phases.drafting]
+model = "anthropic:claude-sonnet-4-6"
+max_turns = 40
+thinking_level = "low"
+
+[workflow.phases.reviewing]
+model = "anthropic:claude-sonnet-4-6"
+max_turns = 20
+thinking_level = "medium"
+
+[secrets]
+required = ["ANTHROPIC_API_KEY"]
+optional = ["GOOGLE_OAUTH_TOKEN", "SCRIBE_GITHUB_TOKEN", "VOX_SLACK_BOT_TOKEN"]
+
+[[triggers]]
+name = "weekly-status-report"
+schedule = "weekly"
+template = "Generate a weekly action report from Scribe engagement data for the current week. Use the report skill conventions: summarize accomplishments by engagement, flag blockers, list next steps."

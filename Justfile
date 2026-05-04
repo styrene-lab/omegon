@@ -193,6 +193,7 @@ link:
     echo "  run 'source $ALIAS_FILE' to activate in this shell"
     "$BINARY" --version
     just install-skills
+    just install-catalog
 
 # Install bundled skills to ~/.omegon/skills/ so they are available to all projects.
 # Uses the binary itself (embedded assets) so this works for both source and brew installs.
@@ -222,6 +223,36 @@ install-skills:
         rsync -a --delete "$SKILLS_SRC/" "$SKILLS_DEST/"
         count=$(find "$SKILLS_DEST" -name "SKILL.md" | wc -l | tr -d ' ')
         echo "✓ $count skill(s) → $SKILLS_DEST  (rsync fallback — build binary for embedded install)"
+    fi
+
+# Install bundled agents to ~/.omegon/catalog/ so they are available to all projects.
+# Uses the binary itself (embedded assets) so this works for both source and brew installs.
+# Project-local agents go in .omegon/catalog/ inside each repo.
+install-catalog:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Prefer the release binary; fall back to rsync from source if binary not yet built.
+    BINARY=""
+    for candidate in "$(pwd)/target/release/omegon" "$(pwd)/target/dev-release/omegon" "$(command -v omegon 2>/dev/null || true)"; do
+        if [ -f "$candidate" ] && [ -x "$candidate" ]; then
+            BINARY="$candidate"
+            break
+        fi
+    done
+    if [ -n "$BINARY" ]; then
+        "$BINARY" catalog install
+    else
+        # Binary not built yet — fall back to rsync from source tree
+        CATALOG_SRC="$(pwd)/catalog"
+        CATALOG_DEST="$HOME/.omegon/catalog"
+        if [ ! -d "$CATALOG_SRC" ]; then
+            echo "  no catalog/ directory found — skipping"
+            exit 0
+        fi
+        mkdir -p "$CATALOG_DEST"
+        rsync -a --delete "$CATALOG_SRC/" "$CATALOG_DEST/"
+        count=$(find "$CATALOG_DEST" -name "agent.toml" | wc -l | tr -d ' ')
+        echo "✓ $count agent(s) → $CATALOG_DEST  (rsync fallback — build binary for embedded install)"
     fi
 
 # Pull latest and build (handles Cargo.lock conflicts from version bumps)

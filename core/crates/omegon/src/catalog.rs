@@ -3,10 +3,282 @@
 //! Agent bundles live in `$OMEGON_HOME/catalog/` as directories containing
 //! an `agent.pkl` or `agent.toml` manifest. The catalog provides discovery
 //! and resolution for the `--agent` CLI flag and Auspex spawn contracts.
+//!
+//! # Installation
+//!
+//! `cmd_install(offline)` fetches the upstream armory registry and downloads
+//! each agent's files. When `offline = true` (or the network is unreachable),
+//! it falls back to the copies embedded in the binary at compile time.
 
 use std::path::{Path, PathBuf};
 
 use crate::agent_manifest::{self, ResolvedManifest};
+
+/// Base URL for the upstream armory catalog.
+const ARMORY_BASE: &str =
+    "https://raw.githubusercontent.com/styrene-lab/omegon-armory/main";
+
+/// Parsed entry from `catalog-registry.toml`.
+/// Only `files` is consumed; remaining fields are defined in the registry for
+/// documentation and future use (toml deserialization ignores unknown fields by default).
+#[derive(serde::Deserialize)]
+struct ArmoryEntry {
+    files: Vec<String>,
+}
+
+/// A catalog agent bundle with all files embedded at compile time.
+struct BundledAgent {
+    id: &'static str,
+    /// TOML manifest — always present; used as fallback when pkl binary unavailable.
+    agent_toml: &'static str,
+    /// Pkl manifest — present for agents that have an agent.pkl.
+    /// Enables `amends "omegon://catalog/<id>/agent.pkl"` inheritance for user overlays.
+    agent_pkl: Option<&'static str>,
+    persona_md: &'static str,
+    mind_facts: Option<&'static str>,
+}
+
+const BUNDLED: &[BundledAgent] = &[
+    BundledAgent {
+        id: "styrene.bd-agent",
+        agent_toml: include_str!("../../../../catalog/styrene.bd-agent/agent.toml"),
+        agent_pkl: Some(include_str!("../../../../catalog/styrene.bd-agent/agent.pkl")),
+        persona_md: include_str!("../../../../catalog/styrene.bd-agent/PERSONA.md"),
+        mind_facts: Some(include_str!("../../../../catalog/styrene.bd-agent/mind/facts.jsonl")),
+    },
+    BundledAgent {
+        id: "styrene.coding-agent",
+        agent_toml: include_str!("../../../../catalog/styrene.coding-agent/agent.toml"),
+        agent_pkl: None,
+        persona_md: include_str!("../../../../catalog/styrene.coding-agent/PERSONA.md"),
+        mind_facts: Some(include_str!("../../../../catalog/styrene.coding-agent/mind/facts.jsonl")),
+    },
+    BundledAgent {
+        id: "styrene.community-agent",
+        agent_toml: include_str!("../../../../catalog/styrene.community-agent/agent.toml"),
+        agent_pkl: None,
+        persona_md: include_str!("../../../../catalog/styrene.community-agent/PERSONA.md"),
+        mind_facts: Some(include_str!("../../../../catalog/styrene.community-agent/mind/facts.jsonl")),
+    },
+    BundledAgent {
+        id: "styrene.discord-agent",
+        agent_toml: include_str!("../../../../catalog/styrene.discord-agent/agent.toml"),
+        agent_pkl: Some(include_str!("../../../../catalog/styrene.discord-agent/agent.pkl")),
+        persona_md: include_str!("../../../../catalog/styrene.discord-agent/PERSONA.md"),
+        mind_facts: None,
+    },
+    BundledAgent {
+        id: "styrene.infra-engineer",
+        agent_toml: include_str!("../../../../catalog/styrene.infra-engineer/agent.toml"),
+        agent_pkl: None,
+        persona_md: include_str!("../../../../catalog/styrene.infra-engineer/PERSONA.md"),
+        mind_facts: Some(include_str!("../../../../catalog/styrene.infra-engineer/mind/facts.jsonl")),
+    },
+    BundledAgent {
+        id: "styrene.slack-agent",
+        agent_toml: include_str!("../../../../catalog/styrene.slack-agent/agent.toml"),
+        agent_pkl: Some(include_str!("../../../../catalog/styrene.slack-agent/agent.pkl")),
+        persona_md: include_str!("../../../../catalog/styrene.slack-agent/PERSONA.md"),
+        mind_facts: None,
+    },
+];
+
+fn catalog_dir() -> Option<PathBuf> {
+    crate::paths::omegon_home().ok().map(|h| h.join("catalog"))
+}
+
+/// List bundled agents and their installation status.
+pub fn cmd_list() -> anyhow::Result<()> {
+    let cat_dir = catalog_dir();
+    println!("Bundled agents ({})\n", BUNDLED.len());
+    for bundle in BUNDLED {
+        let installed = cat_dir
+            .as_ref()
+            .map(|d| d.join(bundle.id).join("agent.toml").exists())
+            .unwrap_or(false);
+        let marker = if installed { "✓" } else { "○" };
+        let (name, domain) = extract_agent_meta(bundle.agent_toml);
+        println!("  {marker} {id:<30}  {name}  [{domain}]", id = bundle.id);
+    }
+    if let Some(dir) = &cat_dir {
+        println!("\nInstall path: {}", dir.display());
+    }
+    Ok(())
+}
+
+/// Install agents to `~/.omegon/catalog/`.
+///
+/// Fetches from the upstream armory unless `offline` is `true` or the network
+/// is unavailable, in which case it falls back to the copies embedded in the
+/// binary at compile time.
+pub async fn cmd_install(offline: bool) -> anyhow::Result<()> {
+    let cat_dir =
+        catalog_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    std::fs::create_dir_all(&cat_dir)?;
+
+    if !offline {
+        match install_from_upstream(&cat_dir).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                eprintln!("  ! upstream fetch failed ({e}), falling back to bundled");
+            }
+        }
+    }
+
+    install_from_bundled(&cat_dir)
+}
+
+fn print_install_summary(installed: usize, updated: usize, cat_dir: &Path) {
+    println!(
+        "\n{installed} agent(s) installed, {updated} updated → {}",
+        cat_dir.display()
+    );
+    println!("Agents are active immediately in new sessions.");
+}
+
+/// Download all agents listed in the armory `catalog-registry.toml`.
+/// Files within each agent bundle are fetched concurrently.
+async fn install_from_upstream(cat_dir: &Path) -> anyhow::Result<()> {
+    use futures::future::try_join_all;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
+    let registry_url = format!("{ARMORY_BASE}/catalog-registry.toml");
+    let registry_text = client
+        .get(&registry_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+
+    let registry: std::collections::HashMap<String, ArmoryEntry> =
+        toml::from_str(&registry_text)?;
+
+    // Sort for stable output order.
+    let mut ids: Vec<&String> = registry.keys().collect();
+    ids.sort();
+
+    let mut installed = 0usize;
+    let mut updated = 0usize;
+
+    for id in ids {
+        let entry = &registry[id];
+        let bundle_dir = cat_dir.join(id);
+        std::fs::create_dir_all(&bundle_dir)?;
+
+        let already_exists = bundle_dir.join("agent.toml").exists();
+
+        // Fetch all files for this agent concurrently.
+        let fetches: Vec<_> = entry
+            .files
+            .iter()
+            .map(|file| {
+                let url = format!("{ARMORY_BASE}/catalog/{id}/{file}");
+                let client = client.clone();
+                async move {
+                    let bytes = client
+                        .get(&url)
+                        .send()
+                        .await?
+                        .error_for_status()?
+                        .bytes()
+                        .await?;
+                    Ok::<(String, Vec<u8>), anyhow::Error>((file.clone(), bytes.to_vec()))
+                }
+            })
+            .collect();
+
+        let results = try_join_all(fetches).await?;
+
+        let mut any_changed = false;
+        for (file, bytes) in results {
+            let dest = bundle_dir.join(&file);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let existing = std::fs::read(&dest).ok();
+            if existing.as_deref() != Some(bytes.as_slice()) {
+                std::fs::write(&dest, &bytes)?;
+                any_changed = true;
+            }
+        }
+
+        if !already_exists {
+            println!("  + {id}");
+            installed += 1;
+        } else if any_changed {
+            println!("  ↑ {id}  (updated)");
+            updated += 1;
+        } else {
+            println!("  ✓ {id}  (unchanged)");
+        }
+    }
+
+    print_install_summary(installed, updated, cat_dir);
+    Ok(())
+}
+
+/// Write the compile-time bundled agents to disk.
+fn install_from_bundled(cat_dir: &Path) -> anyhow::Result<()> {
+    let mut installed = 0usize;
+    let mut updated = 0usize;
+
+    for bundle in BUNDLED {
+        let bundle_dir = cat_dir.join(bundle.id);
+        std::fs::create_dir_all(&bundle_dir)?;
+
+        let toml_path = bundle_dir.join("agent.toml");
+        let old_content = std::fs::read_to_string(&toml_path).ok();
+        let already_exists = old_content.is_some();
+        let changed = old_content.as_deref() != Some(bundle.agent_toml);
+
+        std::fs::write(&toml_path, bundle.agent_toml)?;
+        if let Some(pkl) = bundle.agent_pkl {
+            std::fs::write(bundle_dir.join("agent.pkl"), pkl)?;
+        }
+        std::fs::write(bundle_dir.join("PERSONA.md"), bundle.persona_md)?;
+        if let Some(facts) = bundle.mind_facts {
+            let mind_dir = bundle_dir.join("mind");
+            std::fs::create_dir_all(&mind_dir)?;
+            std::fs::write(mind_dir.join("facts.jsonl"), facts)?;
+        }
+
+        if !already_exists {
+            println!("  + {}", bundle.id);
+            installed += 1;
+        } else if changed {
+            println!("  ↑ {}  (updated)", bundle.id);
+            updated += 1;
+        } else {
+            println!("  ✓ {}  (unchanged)", bundle.id);
+        }
+    }
+
+    print_install_summary(installed, updated, cat_dir);
+    Ok(())
+}
+
+/// Parse name and domain from an embedded agent.toml string.
+fn extract_agent_meta(toml_src: &str) -> (String, String) {
+    #[derive(serde::Deserialize)]
+    struct AgentSection {
+        name: Option<String>,
+        domain: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Outer {
+        agent: Option<AgentSection>,
+    }
+    let parsed: Outer = toml::from_str(toml_src).unwrap_or(Outer { agent: None });
+    let section = parsed.agent.unwrap_or(AgentSection { name: None, domain: None });
+    (
+        section.name.unwrap_or_default(),
+        section.domain.unwrap_or_default(),
+    )
+}
 
 /// Summary of an available agent in the catalog.
 #[derive(Debug, Clone)]

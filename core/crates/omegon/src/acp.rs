@@ -611,8 +611,17 @@ impl OmegonAcpAgent {
 
 // ── Entry point ────────────────────────────────────────────────────────
 
-pub async fn run(model: &str) -> anyhow::Result<()> {
+pub async fn run(
+    model: &str,
+    agent_id: Option<&str>,
+    cwd: &std::path::Path,
+) -> anyhow::Result<()> {
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+
+    if let Some(id) = agent_id {
+        let shared_settings = crate::settings::shared(model);
+        crate::apply_agent_manifest_pre_setup(id, cwd, &shared_settings)?;
+    }
 
     let agent = Rc::new(OmegonAcpAgent::new(model));
 

@@ -1355,8 +1355,9 @@ fn load_custom_posture(path: &std::path::Path) -> Result<ResolvedPosture, String
         ));
     }
 
-    let posture_file: PostureFile = rpkl::from_config(path)
-        .map_err(|e| format!("failed to load posture {}: {e}", path.display()))?;
+    let posture_file: PostureFile =
+        rpkl::from_config_with_options(path, crate::pkl_modules::omegon_eval_options())
+            .map_err(|e| format!("failed to load posture {}: {e}", path.display()))?;
 
     let base_preset = match posture_file.posture.base.to_lowercase().as_str() {
         "explorator" => PosturePreset::Explorator,
@@ -1408,10 +1409,13 @@ pub fn list_available_postures(cwd: &std::path::Path) -> Vec<(String, String, bo
                 {
                     // Skip if same name as built-in
                     if !postures.iter().any(|(n, _, _)| n == stem) {
-                        let desc = rpkl::from_config::<PostureFile>(&path)
-                            .ok()
-                            .map(|f| f.posture.description)
-                            .unwrap_or_default();
+                        let desc = rpkl::from_config_with_options::<PostureFile>(
+                            &path,
+                            crate::pkl_modules::omegon_eval_options(),
+                        )
+                        .ok()
+                        .map(|f| f.posture.description)
+                        .unwrap_or_default();
                         postures.push((stem.to_string(), desc, false));
                     }
                 }

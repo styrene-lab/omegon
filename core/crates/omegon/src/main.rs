@@ -56,6 +56,7 @@ mod workspace;
 mod agent_manifest;
 mod bundle_verify;
 mod catalog;
+mod pkl_modules;
 mod checkpoint;
 mod child_agent;
 mod conversation;
@@ -488,7 +489,11 @@ enum Commands {
 
     /// Run as an ACP (Agent Client Protocol) agent server over stdio.
     /// Used by editors like Zed, VS Code, and Emacs to embed omegon as a coding agent.
-    Acp,
+    Acp {
+        /// Agent manifest to load from catalog (id or path to bundle dir).
+        #[arg(long)]
+        agent: Option<String>,
+    },
 
     /// Audit design-tree state for suspicious lifecycle drift.
     #[command(hide = true)]
@@ -498,6 +503,12 @@ enum Commands {
     Skills {
         #[command(subcommand)]
         action: SkillsAction,
+    },
+
+    /// Manage bundled agents — list available agents and install them to ~/.omegon/catalog/.
+    Catalog {
+        #[command(subcommand)]
+        action: CatalogAction,
     },
 
     /// Hidden benchmark-oriented commands used by the local comparison harness.
@@ -552,6 +563,19 @@ enum SkillsAction {
     List,
     /// Install all bundled skills to ~/.omegon/skills/.
     Install,
+}
+
+#[derive(Subcommand)]
+enum CatalogAction {
+    /// List bundled agents and their installation status.
+    List,
+    /// Install agents — fetches from upstream armory, falls back to bundled.
+    Install {
+        /// Skip upstream fetch and install the bundled (binary-embedded) copies only.
+        /// Use this on airgapped systems or when you don't want network access.
+        #[arg(long)]
+        offline: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -940,9 +964,9 @@ async fn main() -> anyhow::Result<()> {
                 switch::interactive_picker().await
             }
         }
-        Some(Commands::Acp) => {
+        Some(Commands::Acp { ref agent }) => {
             let local = tokio::task::LocalSet::new();
-            local.run_until(acp::run(&cli.model)).await
+            local.run_until(acp::run(&cli.model, agent.as_deref(), &cli.cwd)).await
         }
         Some(Commands::Run {
             ref task_spec,
@@ -1025,6 +1049,10 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Skills { ref action }) => match action {
             SkillsAction::List => skills::cmd_list(),
             SkillsAction::Install => skills::cmd_install(),
+        },
+        Some(Commands::Catalog { ref action }) => match action {
+            CatalogAction::List => catalog::cmd_list(),
+            CatalogAction::Install { offline } => catalog::cmd_install(*offline).await,
         },
         Some(Commands::Nex { ref action }) => {
             nex_cli(action);
@@ -1191,7 +1219,7 @@ async fn run_daemon_turn(
 /// Pre-setup agent manifest resolution. Runs BEFORE AgentSetup::new() so
 /// that persona, settings, triggers, and workflows are materialized into
 /// the filesystem and environment where setup will discover them.
-fn apply_agent_manifest_pre_setup(
+pub(crate) fn apply_agent_manifest_pre_setup(
     agent_id: &str,
     cwd: &std::path::Path,
     shared_settings: &settings::SharedSettings,

@@ -6,7 +6,7 @@
 ///
 /// Example:
 /// ```
-/// amends "AgentManifest.pkl"
+/// amends "omegon://schema/AgentManifest.pkl"
 ///
 /// agent {
 ///   id = "styrene.infra-engineer"
@@ -49,8 +49,16 @@ class PersonaConfig {
   /// Emoji badge for UI display.
   badge: String?
 
-  /// Path to JSONL seed facts file (relative to bundle dir).
-  mind_facts: String?
+  /// JSONL seed facts file(s) (relative to bundle dir).
+  /// Accepts a single path or a Listing for multi-file composition.
+  /// User overlays can append their own facts with:
+  ///   mind_facts { ...super; "mind/personal_facts.jsonl" }
+  mind_facts: Listing<String>?
+
+  /// Additional persona directive files appended after `directive`.
+  /// User overlays can extend the base persona without replacing it:
+  ///   directive_extend { "PERSONA.personal.md" }
+  directive_extend: Listing<String>?
 
   /// Skills to activate when this persona is loaded.
   activated_skills: Listing<String>?
@@ -93,6 +101,16 @@ class PhaseConfig {
 }
 
 /// Workflow template (inline in manifest).
+///
+/// When setting phases in a new (non-amends) context, use explicit Mapping syntax:
+/// ```
+/// workflow = new WorkflowConfig {
+///   name = "doc-standard"
+///   phases = new Mapping<String, PhaseConfig> {
+///     ["drafting"] = new { model = "anthropic:claude-sonnet-4-6"; max_turns = 40 }
+///   }
+/// }
+/// ```
 class WorkflowConfig {
   /// Workflow name.
   name: String(length > 0)

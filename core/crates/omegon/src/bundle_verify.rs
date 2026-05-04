@@ -186,6 +186,7 @@ fn validate_manifest(manifest: &crate::agent_manifest::AgentManifest, findings: 
         "coding-node",
         "coding-rust",
         "infra",
+        "ops",
         "full",
     ];
 
@@ -223,8 +224,17 @@ fn validate_paths(resolved: &ResolvedManifest, findings: &mut Vec<Finding>) {
         if let Some(ref path) = persona.directive {
             check_path_containment(bundle_dir, path, "persona.directive", findings);
         }
-        if let Some(ref path) = persona.mind_facts {
-            check_path_containment(bundle_dir, path, "persona.mind_facts", findings);
+        if let Some(ref paths) = persona.mind_facts {
+            for (i, path) in paths.iter().enumerate() {
+                let label = format!("persona.mind_facts[{i}]");
+                check_path_containment(bundle_dir, path, &label, findings);
+            }
+        }
+        if let Some(ref paths) = persona.directive_extend {
+            for (i, path) in paths.iter().enumerate() {
+                let label = format!("persona.directive_extend[{i}]");
+                check_path_containment(bundle_dir, path, &label, findings);
+            }
         }
     }
 }
