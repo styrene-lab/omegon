@@ -6846,6 +6846,8 @@ dependencies = [
 [[package]]
 name = "styrene-mqtt"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9ae75e757cd2f22c7168af3d98bd31b76e856792b89d85415915951bf94b568"
 dependencies = [
  "async-trait",
  "bytes",
