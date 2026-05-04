@@ -14,6 +14,15 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.18.4] - 2026-05-03
+
+### Fixed
+
+- **Dead-mouse compliance-note spin on non-Claude models** — GPT-5.5 and similar models would respond to the dead-mouse nudge by writing an acknowledgment file (`system-warning-note.md`, `tool-compliance-marker.md`, etc.) and committing it, which reset the counter and allowed the loop to repeat indefinitely. The dead-mouse counter now only resets when the model does real work after a nudge — `bash`, `read`, `codebase_search`, or a write to a non-session-noise path. Writes to paths under `ai/session/`, `.omegon/`, or filenames matching compliance-note patterns (`*warning*`, `*compliance*`, `*marker*`, `*ack*`) do not satisfy the nudge.
+- **Dead-mouse nudge messages now explicitly prohibit compliance notes** — added "Do NOT write acknowledgment notes, warning logs, or compliance markers" to both nudge tiers so models with literal instruction-following get clear direction.
+- **Commit nudge no longer fires mid-task** — the commit nudge previously interrupted the agent on any text-only response after mutations, which could fire multiple times per session mid-implementation. It now only fires when the response contains recognizable completion language ("all done", "let me know if", "in summary", etc.) or when within 6 turns of the turn budget. The system prompt's "Commit when done" handles the normal case; the nudge is now a session-end safety net.
+- **MQTT bridge `AgentEvent::TurnEnd` variant shape** — `mqtt_bridge.rs` was written against the old struct-variant form of `AgentEvent::TurnEnd`. Updated to `TurnEnd(Box<AgentEventTurnEnd>)` and added `PermissionRequest` to the non-published arm to satisfy exhaustiveness.
+
 ## [0.18.3] - 2026-05-01
 
 ### Fixed

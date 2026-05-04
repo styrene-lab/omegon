@@ -78,6 +78,7 @@ x509-parser = "0.17"
 rpassword = "7"
 rpkl = "0.8"
 percent-encoding = "2"
+styrene-mqtt = { path = "../../../../styrene-rs/crates/libs/styrene-mqtt" }
 
 [features]
 default = []

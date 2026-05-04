@@ -85,6 +85,7 @@ mod tui;
 pub mod util;
 mod web;
 mod workflow;
+mod mqtt_bridge;
 
 pub mod nex;
 
@@ -1513,6 +1514,15 @@ async fn run_embedded_command(
             ipc_cancel.clone(),
         );
     }
+
+    // ─── MQTT bridge (Auspex event fabric) ────────────────────────────────
+    let _mqtt_bridge = mqtt_bridge::start_mqtt_bridge(
+        mqtt_bridge::MqttBridgeConfig {
+            instance_id: agent.session_id.clone(),
+            ..Default::default()
+        },
+        events_tx.clone(),
+    );
 
     // ─── Vox event bridge (extension-driven comms) ──────────────────────
     if !agent.vox_polling_handles.is_empty() {
@@ -2982,6 +2992,15 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             ipc_cancel.clone(),
         );
     }
+
+    // ─── MQTT bridge (Auspex event fabric) ────────────────────────────────
+    let _mqtt_bridge = mqtt_bridge::start_mqtt_bridge(
+        mqtt_bridge::MqttBridgeConfig {
+            instance_id: agent.session_id.clone(),
+            ..Default::default()
+        },
+        events_tx.clone(),
+    );
 
     let (mut agent, mut runtime_state) = split_interactive_agent(agent);
 

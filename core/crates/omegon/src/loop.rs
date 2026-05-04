@@ -243,6 +243,10 @@ pub async fn run(
     let session_start = Instant::now();
     let mut controller = ControllerState::default();
     let mut dead_mouse_nudges: u8 = 0;
+    // Set when a dead-mouse nudge message was injected this turn.
+    // Used to gate the counter reset — noise writes (compliance notes,
+    // session acks) must not satisfy the nudge and reset the counter.
+    let mut dead_mouse_nudge_injected = false;
     let mut session_used_tools: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     let mut turn: u32 = 0;
@@ -665,18 +669,27 @@ pub async fn run(
         let tool_calls = assistant_msg.tool_calls();
         if tool_calls.is_empty() {
             // Check if the agent skipped committing.
-            // If the conversation has edit/write calls but hasn't been nudged yet,
-            // give it one more turn to commit.
+            // Only nudge when the agent looks like it is wrapping up (completion
+            // language in the text response) or is close to the turn budget.
+            // Mid-task text responses (progress updates, questions) should not
+            // trigger a commit — "Commit when done" in the system prompt handles
+            // the normal case. This nudge is a safety net, not a per-cycle prompt.
+            let near_budget = turn + 6 >= config.max_turns;
+            let response_looks_done = looks_like_completion(&assistant_msg.text);
             if config.allow_commit_nudge
                 && !conversation.intent.commit_nudged
                 && has_mutations(conversation)
                 && turn < config.max_turns
+                && (near_budget || response_looks_done)
             {
                 conversation.intent.commit_nudged = true;
-                tracing::info!("Agent stopped without committing — nudging");
+                tracing::info!(
+                    near_budget,
+                    response_looks_done,
+                    "Agent finishing without committing — nudging"
+                );
                 conversation.push_user(
-                    "[System: You made file changes but did not run `git add` and `git commit`. \
-                     Please commit your work now with a descriptive message, then summarize what you did.]"
+                    "[System: You have uncommitted file changes. Commit your work before finishing.]"
                         .to_string(),
                 );
                 let nudge_system_prompt =
@@ -810,19 +823,20 @@ pub async fn run(
                 }
                 let msg = if dead_mouse_nudges == 2 {
                     "[System: You output content as text instead of using tools. \
-                     If you generated file content (HTML, code, config), use the \
-                     write tool to save it to a file. Do not paste file contents \
-                     into the conversation.]"
+                     Use the write tool to save generated content to a file. \
+                     Do NOT write acknowledgment notes, warning logs, or compliance \
+                     markers — use tools to complete the actual task.]"
                 } else {
-                    "[System: You must use tools to produce output. Write files \
-                     with the write tool, not as conversation text. This is your \
-                     final warning before the session ends.]"
+                    "[System: You must use tools to complete the task. Write task \
+                     output files with the write tool. Do not create notes about \
+                     this warning. This is your final warning before the session ends.]"
                 };
                 tracing::info!(
                     nudge = dead_mouse_nudges,
                     "Dead-mouse detection — model responded without acting"
                 );
                 conversation.push_user(msg.to_string());
+                dead_mouse_nudge_injected = true;
                 continue;
             }
 
@@ -885,7 +899,29 @@ pub async fn run(
         }
 
         // Reset dead-mouse counter — model is using tools this turn.
-        dead_mouse_nudges = 0;
+        // After a nudge was injected, only reset if the model did real work
+        // (not just wrote a noise file acknowledging the warning). Non-Claude
+        // models (e.g. GPT-5.5) tend to literalize nudges and write compliance
+        // notes, which must not satisfy the check and reset the counter.
+        if dead_mouse_nudge_injected {
+            let has_real_work = tool_calls.iter().any(|c| {
+                matches!(c.name.as_str(), "bash" | "read" | "codebase_search")
+                    || (matches!(c.name.as_str(), "write" | "edit" | "change")
+                        && !c
+                            .arguments
+                            .get("path")
+                            .and_then(|v| v.as_str())
+                            .map(is_session_noise_path)
+                            .unwrap_or(false))
+            });
+            if has_real_work {
+                dead_mouse_nudges = 0;
+                dead_mouse_nudge_injected = false;
+            }
+            // else: counter stays — noise write did not satisfy the nudge
+        } else {
+            dead_mouse_nudges = 0;
+        }
 
         // ─── Emit ToolStart bus events before dispatch ──────────────
         for call in tool_calls {
@@ -2250,6 +2286,80 @@ fn has_mutations(conversation: &ConversationState) -> bool {
     !conversation.intent.files_modified.is_empty()
 }
 
+/// Returns true if an assistant text response contains language that suggests
+/// the agent is wrapping up a task rather than pausing mid-work.
+///
+/// Used to gate the commit nudge — mid-task text responses (progress updates,
+/// questions, partial explanations) should not trigger a commit interrupt.
+/// A completion response should.
+fn looks_like_completion(text: &str) -> bool {
+    if text.len() < 20 {
+        return false;
+    }
+    let lower = text.to_lowercase();
+    // Phrases that strongly indicate the agent is done or summarizing
+    let completion_phrases = [
+        "all done",
+        "that's done",
+        "that's everything",
+        "that's all",
+        "all changes",
+        "have been made",
+        "have been applied",
+        "have been updated",
+        "all set",
+        "let me know if",
+        "let me know what",
+        "anything else",
+        "to summarize",
+        "in summary",
+        "here's a summary",
+        "here is a summary",
+        "summary of",
+        "the changes are",
+        "changes are complete",
+        "implementation is complete",
+        "task is complete",
+        "done!",
+    ];
+    completion_phrases.iter().any(|p| lower.contains(p))
+}
+
+/// Returns true if a write target path looks like a session-administrative
+/// noise file rather than real task output.
+///
+/// Non-Claude models (e.g. GPT-5.5) sometimes respond to dead-mouse nudges by
+/// writing compliance acknowledgment notes — these must not satisfy the nudge
+/// check and reset the dead-mouse counter.
+///
+/// Heuristic: path is under a known session/admin directory, OR the filename
+/// (stem) matches common compliance-note patterns.
+fn is_session_noise_path(path: &str) -> bool {
+    // Directory prefixes that are purely administrative
+    let noise_dirs = ["ai/session/", ".omegon/", "ai/lifecycle/"];
+    if noise_dirs.iter().any(|d| path.contains(d)) {
+        return true;
+    }
+    // Filename stem patterns: system-warning-note, tool-output-ack,
+    // compliance-marker, tool-compliance-marker, warning-log, etc.
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let noise_fragments = [
+        "warning",
+        "compliance",
+        "-ack",
+        "ack-",
+        "tool-output",
+        "session-note",
+        "system-note",
+        "marker",
+    ];
+    noise_fragments.iter().any(|frag| stem.contains(frag))
+}
+
 // ─── Stuck detection ────────────────────────────────────────────────────────
 
 /// Detects pathological tool-call patterns that indicate the agent is stuck.
@@ -3152,6 +3262,43 @@ mod tests {
     #[test]
     fn default_loop_config_does_not_enforce_first_turn_execution_bias() {
         assert!(!LoopConfig::default().enforce_first_turn_execution_bias);
+    }
+
+    #[test]
+    fn looks_like_completion_matches_done_phrases() {
+        assert!(looks_like_completion("All done! Let me know if you need anything else."));
+        assert!(looks_like_completion("The changes have been applied."));
+        assert!(looks_like_completion("In summary, I updated three files."));
+        assert!(looks_like_completion("Here's a summary of the changes made."));
+        assert!(looks_like_completion("All set — the implementation is complete."));
+    }
+
+    #[test]
+    fn looks_like_completion_rejects_mid_task_text() {
+        assert!(!looks_like_completion("Reading the file now to understand the structure."));
+        assert!(!looks_like_completion("Found the bug — it's in the auth middleware."));
+        assert!(!looks_like_completion("The test failed with a type mismatch."));
+        assert!(!looks_like_completion("I'll write the fix next."));
+        assert!(!looks_like_completion("short")); // too short
+    }
+
+    #[test]
+    fn session_noise_path_matches_known_patterns() {
+        assert!(is_session_noise_path("ai/session/system-warning-note.md"));
+        assert!(is_session_noise_path("ai/session/tool-output-ack.md"));
+        assert!(is_session_noise_path("ai/session/tool-compliance-marker.md"));
+        assert!(is_session_noise_path(".omegon/audit-log.jsonl"));
+        assert!(is_session_noise_path("some/dir/warning-log.md"));
+        assert!(is_session_noise_path("some/dir/ack-receipt.md"));
+    }
+
+    #[test]
+    fn session_noise_path_allows_real_output() {
+        assert!(!is_session_noise_path("src/main.rs"));
+        assert!(!is_session_noise_path("docs/architecture.md"));
+        assert!(!is_session_noise_path("CHANGELOG.md"));
+        assert!(!is_session_noise_path("ai/memory/facts.db"));
+        assert!(!is_session_noise_path("crates/omegon/src/loop.rs"));
     }
 
     #[test]
