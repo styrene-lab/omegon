@@ -1011,5 +1011,19 @@
       "refactor: decouple omegon-secrets and omegon-memory for standalone use",
       "refactor: rename opsx-core to omegon-opsx"
     ]
+  },
+  "0.18.4": {
+    "status": "rc",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": false,
+    "opened": "2026-05-04T01:26:25Z",
+    "last_rc": "2026-05-04T01:26:25Z",
+    "rc_version": "0.18.4-rc.2",
+    "rc_count": 1,
+    "released": null,
+    "notes": [
+      "fix: dead-mouse compliance-note spin + commit nudge fires mid-task"
+    ]
   }
 }
