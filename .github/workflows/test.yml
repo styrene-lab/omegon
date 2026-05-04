@@ -55,3 +55,10 @@ jobs:
           spec.loader.exec_module(m)
           print('benchmark_harness.py: ok')
           "
+
+  lipstyk:
+    name: lipstyk
+    uses: styrene-lab/lipstyk/.github/workflows/lipstyk.yml@main
+    with:
+      paths: "core/crates/"
+      threshold: 50
