@@ -11,6 +11,11 @@
 #
 # The agent's `bash` tool can only execute what's in PATH. A minimal
 # container = a constrained agent. This is a security feature.
+#
+# Profile rule: runtime availability must come from the Nix package set for
+# that domain, never from shell startup hooks like ~/.cargo/env. Container
+# agents do not get interactive profile sourcing, so PATH-critical tools must
+# be explicit here.
 
 { pkgs }:
 
