@@ -126,6 +126,7 @@ use behavior::continuation_pressure_tier;
 use behavior::is_first_turn_orientation_churn;
 use behavior::is_mutation_tool_name;
 use behavior::is_repo_inspection_tool;
+use behavior::is_validation_tool_name;
 use behavior::progress_nudge_reason_for_drift;
 use behavior::should_inject_execution_pressure;
 
@@ -908,16 +909,7 @@ pub async fn run(
         // models (e.g. GPT-5.5) tend to literalize nudges and write compliance
         // notes, which must not satisfy the check and reset the counter.
         if dead_mouse_nudge_injected {
-            let has_real_work = tool_calls.iter().any(|c| {
-                matches!(c.name.as_str(), "bash" | "read" | "codebase_search")
-                    || (matches!(c.name.as_str(), "write" | "edit" | "change")
-                        && !c
-                            .arguments
-                            .get("path")
-                            .and_then(|v| v.as_str())
-                            .map(is_session_noise_path)
-                            .unwrap_or(false))
-            });
+            let has_real_work = tool_calls.iter().any(counts_as_real_work_for_dead_mouse);
             if has_real_work {
                 dead_mouse_nudges = 0;
                 dead_mouse_nudge_injected = false;
@@ -934,6 +926,7 @@ pub async fn run(
                 id: call.id.clone(),
                 name: call.name.clone(),
                 args: call.arguments.clone(),
+                capabilities: tool_catalog.capabilities_for(&call.name),
             });
         }
 
@@ -1858,13 +1851,14 @@ async fn dispatch_tools(
     cwd: &std::path::Path,
     secrets: Option<&omegon_secrets::SecretsManager>,
 ) -> DispatchResult {
+    let tool_catalog = ToolCapabilityCatalog::from_tool_defs(&bus.all_tool_definitions());
     let mut permission_decisions: Vec<PermissionRecord> = Vec::new();
     let mut results = Vec::with_capacity(tool_calls.len());
 
     // ── Auto-batch: snapshot files targeted by mutation tools ────────
     let mutation_count = tool_calls
         .iter()
-        .filter(|c| is_mutation_tool(&c.name))
+        .filter(|c| is_mutation_tool_name(&tool_catalog, &c.name))
         .count();
     let batch_mode = mutation_count >= 2;
 
@@ -1874,7 +1868,7 @@ async fn dispatch_tools(
 
     if batch_mode {
         for call in tool_calls {
-            if is_mutation_tool(&call.name)
+            if is_mutation_tool_name(&tool_catalog, &call.name)
                 && let Some(path_str) = extract_mutation_path(&call.arguments)
             {
                 let full = cwd.join(&path_str);
@@ -1942,6 +1936,7 @@ async fn dispatch_tools(
                 bus,
                 &serial_calls,
                 serial_idx,
+                &tool_catalog,
                 events,
                 cancel.clone(),
                 cwd,
@@ -1960,7 +1955,7 @@ async fn dispatch_tools(
         }
 
         let (idx, call) = serial_calls[serial_idx].clone();
-        if batch_failed && is_mutation_tool(&call.name) {
+        if batch_failed && is_mutation_tool_name(&tool_catalog, &call.name) {
             let skip_text = format!(
                 "Skipped {} — previous edit in this turn failed and triggered rollback.",
                 call.name
@@ -2001,7 +1996,7 @@ async fn dispatch_tools(
         .await;
 
         if !dispatched.is_error
-            && is_mutation_tool(&call.name)
+            && is_mutation_tool_name(&tool_catalog, &call.name)
             && let Some(path_str) = extract_mutation_path(&call.arguments)
         {
             mutated_files.push(cwd_buf.join(&path_str));
@@ -2009,7 +2004,7 @@ async fn dispatch_tools(
 
         if dispatched.is_error
             && batch_mode
-            && is_mutation_tool(&call.name)
+            && is_mutation_tool_name(&tool_catalog, &call.name)
             && !mutated_files.is_empty()
         {
             batch_failed = true;
@@ -2365,6 +2360,7 @@ async fn dispatch_edit_batch(
     bus: &crate::bus::EventBus,
     serial_calls: &[(usize, ToolCall)],
     start_idx: usize,
+    tool_catalog: &ToolCapabilityCatalog,
     events: &broadcast::Sender<AgentEvent>,
     cancel: CancellationToken,
     cwd: &std::path::Path,
@@ -2377,6 +2373,7 @@ async fn dispatch_edit_batch(
     bool,
 )> {
     if secrets.is_some()
+        || !is_mutation_tool_name(tool_catalog, &serial_calls.get(start_idx)?.1.name)
         || serial_calls.get(start_idx)?.1.name != "edit"
         || !bus.has_registered_tool("change")
     {
@@ -2407,7 +2404,7 @@ async fn dispatch_edit_batch(
         .collect();
     let change_args = serde_json::json!({
         "edits": edits,
-        "validate": "standard",
+        "validate": "none",
     });
 
     for (_, call) in batch_slice {
@@ -2453,9 +2450,7 @@ async fn dispatch_edit_batch(
             if position == 0 {
                 batch_text.clone()
             } else {
-                format!(
-                    "Skipped edit in {path} — atomic edit batch failed.\n\n{batch_text}"
-                )
+                format!("Skipped edit in {path} — atomic edit batch failed.\n\n{batch_text}")
             }
         } else if position + 1 == batch_slice.len() {
             format!("Applied exact-text edit to {path} as part of an atomic batch.\n\n{batch_text}")
@@ -2496,12 +2491,6 @@ async fn dispatch_edit_batch(
     Some((end_idx, indexed_results, mutated_files, batch_error))
 }
 
-/// Is this tool a file mutation (edit, write)?
-/// Used for auto-batch snapshotting and rollback.
-fn is_mutation_tool(name: &str) -> bool {
-    matches!(name, "edit" | "write" | "change")
-}
-
 /// Extract the target file path from mutation tool arguments.
 fn extract_mutation_path(args: &Value) -> Option<String> {
     args.get("path")
@@ -2512,6 +2501,17 @@ fn extract_mutation_path(args: &Value) -> Option<String> {
 /// Check if the conversation contains any file mutations (edit or write calls).
 fn has_mutations(conversation: &ConversationState) -> bool {
     !conversation.intent.files_modified.is_empty()
+}
+
+fn counts_as_real_work_for_dead_mouse(call: &ToolCall) -> bool {
+    matches!(call.name.as_str(), "bash" | "read" | "codebase_search")
+        || (matches!(call.name.as_str(), "write" | "edit")
+            && !call
+                .arguments
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(is_session_noise_path)
+                .unwrap_or(false))
 }
 
 /// Returns true if an assistant text response contains language that suggests
@@ -2680,9 +2680,9 @@ impl StuckDetector {
         // same file 3-4 times.  Also skip detection if a mutation or validation
         // tool appeared in the window — that signals the agent is trying to
         // converge, not spinning.
-        let has_mutation_or_validation = window
-            .iter()
-            .any(|(name, _, _)| is_mutation_tool_name(catalog, name) || name == "bash");
+        let has_mutation_or_validation = window.iter().any(|(name, _, _)| {
+            is_mutation_tool_name(catalog, name) || is_validation_tool_name(catalog, name)
+        });
         let reads: Vec<_> = window
             .iter()
             .filter(|(name, _, _)| name == "read")
@@ -2964,6 +2964,13 @@ mod tests {
                 capabilities: vec![ToolCapability::Mutation, ToolCapability::StateChanging],
             },
             ToolDefinition {
+                name: "validate".into(),
+                label: "validate".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::Validation],
+            },
+            ToolDefinition {
                 name: "memory_recall".into(),
                 label: "memory_recall".into(),
                 description: String::new(),
@@ -3159,13 +3166,26 @@ mod tests {
     // ── Auto-batch tests ────────────────────────────────────────────
 
     #[test]
-    fn mutation_tool_detection() {
-        assert!(is_mutation_tool("edit"));
-        assert!(is_mutation_tool("write"));
-        assert!(is_mutation_tool("change"));
-        assert!(!is_mutation_tool("read"));
-        assert!(!is_mutation_tool("bash"));
-        assert!(!is_mutation_tool("web_search"));
+    fn mutation_tool_detection_is_capability_driven() {
+        let catalog = test_tool_catalog();
+        assert!(is_mutation_tool_name(&catalog, "edit"));
+        assert!(is_mutation_tool_name(&catalog, "write"));
+        assert!(is_mutation_tool_name(&catalog, "change"));
+        assert!(!is_mutation_tool_name(&catalog, "read"));
+        assert!(!is_mutation_tool_name(&catalog, "bash"));
+        assert!(!is_mutation_tool_name(&catalog, "web_search"));
+    }
+
+    #[test]
+    fn mutation_tool_detection_does_not_depend_on_tool_name() {
+        let catalog = ToolCapabilityCatalog::from_tool_defs(&[ToolDefinition {
+            name: "surgical_patch".into(),
+            label: "surgical_patch".into(),
+            description: String::new(),
+            parameters: Value::Null,
+            capabilities: vec![ToolCapability::Mutation, ToolCapability::StateChanging],
+        }]);
+        assert!(is_mutation_tool_name(&catalog, "surgical_patch"));
     }
 
     #[test]
@@ -3285,7 +3305,7 @@ mod tests {
                     label: "edit".into(),
                     description: "test".into(),
                     parameters: serde_json::json!({}),
-                    capabilities: vec![],
+                    capabilities: vec![ToolCapability::Mutation, ToolCapability::StateChanging],
                 }]
             }
 
@@ -3399,7 +3419,7 @@ mod tests {
                     label: "edit".into(),
                     description: "test".into(),
                     parameters: serde_json::json!({}),
-                    capabilities: vec![],
+                    capabilities: vec![ToolCapability::Mutation, ToolCapability::StateChanging],
                 }]
             }
 
@@ -3648,14 +3668,32 @@ mod tests {
     // ── Mutation detection ─────────────────────────────────────────────
 
     #[test]
-    fn is_mutation_tool_identifies_write_tools() {
-        assert!(is_mutation_tool("write"));
-        assert!(is_mutation_tool("edit"));
-        assert!(is_mutation_tool("change"));
-        assert!(!is_mutation_tool("bash")); // bash not tracked for auto-batch rollback
-        assert!(!is_mutation_tool("read"));
-        assert!(!is_mutation_tool("chronos"));
-        assert!(!is_mutation_tool("design_tree"));
+    fn mutation_capability_classification_excludes_non_mutation_tools() {
+        let catalog = test_tool_catalog();
+        assert!(is_mutation_tool_name(&catalog, "write"));
+        assert!(is_mutation_tool_name(&catalog, "edit"));
+        assert!(is_mutation_tool_name(&catalog, "change"));
+        assert!(!is_mutation_tool_name(&catalog, "bash"));
+        assert!(!is_mutation_tool_name(&catalog, "read"));
+        assert!(!is_mutation_tool_name(&catalog, "chronos"));
+        assert!(!is_mutation_tool_name(&catalog, "design_tree"));
+    }
+
+    #[test]
+    fn dead_mouse_real_work_excludes_hidden_change_tool() {
+        let change_call = ToolCall {
+            id: "1".into(),
+            name: "change".into(),
+            arguments: serde_json::json!({"path": "src/lib.rs"}),
+        };
+        assert!(!counts_as_real_work_for_dead_mouse(&change_call));
+
+        let edit_call = ToolCall {
+            id: "2".into(),
+            name: "edit".into(),
+            arguments: serde_json::json!({"path": "src/lib.rs"}),
+        };
+        assert!(counts_as_real_work_for_dead_mouse(&edit_call));
     }
 
     #[test]
@@ -4216,26 +4254,26 @@ mod tests {
         let tool_calls = vec![
             ToolCall {
                 id: "1".into(),
-                name: "bash".into(),
-                arguments: serde_json::json!({"command": "cargo test parser::tests::smoke"}),
+                name: "validate".into(),
+                arguments: serde_json::json!({"paths": ["src/parser.rs"], "level": "standard"}),
             },
             ToolCall {
                 id: "2".into(),
-                name: "bash".into(),
-                arguments: serde_json::json!({"command": "cargo test parser::tests::smoke -- --nocapture"}),
+                name: "validate".into(),
+                arguments: serde_json::json!({"paths": ["src/parser.rs"], "level": "standard"}),
             },
         ];
         let results = vec![
             ToolResultEntry {
                 call_id: "1".into(),
-                tool_name: "read".into(),
+                tool_name: "validate".into(),
                 content: vec![ContentBlock::Text { text: "ok".into() }],
                 is_error: false,
                 args_summary: None,
             },
             ToolResultEntry {
                 call_id: "2".into(),
-                tool_name: "codebase_search".into(),
+                tool_name: "validate".into(),
                 content: vec![ContentBlock::Text { text: "ok".into() }],
                 is_error: false,
                 args_summary: None,
@@ -4250,6 +4288,27 @@ mod tests {
                 &results
             ),
             None
+        );
+    }
+
+    #[test]
+    fn classify_turn_phase_treats_validate_tool_as_act() {
+        let tool_calls = vec![ToolCall {
+            id: "1".into(),
+            name: "validate".into(),
+            arguments: serde_json::json!({"paths": ["src/lib.rs"], "level": "standard"}),
+        }];
+        let results = vec![ToolResultEntry {
+            call_id: "1".into(),
+            tool_name: "validate".into(),
+            content: vec![ContentBlock::Text { text: "ok".into() }],
+            is_error: false,
+            args_summary: None,
+        }];
+
+        assert_eq!(
+            classify_turn_phase(&test_tool_catalog(), &tool_calls, &results),
+            Some(OodaPhase::Act)
         );
     }
 
@@ -4377,12 +4436,12 @@ mod tests {
             .insert(std::path::PathBuf::from("core/src/context.rs"));
         let tool_calls = vec![ToolCall {
             id: "1".into(),
-            name: "bash".into(),
-            arguments: serde_json::json!({"command": "cargo test parser::tests::smoke"}),
+            name: "validate".into(),
+            arguments: serde_json::json!({"paths": ["core/src/context.rs"], "level": "standard"}),
         }];
         let results = vec![ToolResultEntry {
             call_id: "1".into(),
-            tool_name: "bash".into(),
+            tool_name: "validate".into(),
             content: vec![ContentBlock::Text { text: "ok".into() }],
             is_error: false,
             args_summary: None,

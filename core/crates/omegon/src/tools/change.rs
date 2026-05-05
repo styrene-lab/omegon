@@ -1,8 +1,7 @@
-//! change tool — atomic multi-file edits with automatic validation.
+//! change tool — atomic multi-file edits with optional explicit validation.
 //!
 //! Accepts an array of edits, applies them atomically (all-or-nothing),
-//! and runs validation (type checker, linter) automatically. One tool call
-//! replaces 3 edits + 1 bash.
+//! and can optionally run explicit validation.
 //!
 //! If any edit fails, all changes are rolled back.
 //! If validation fails, changes are kept but errors are reported inline.
@@ -28,7 +27,7 @@ pub struct EditSpec {
 pub enum ValidationMode {
     /// No validation
     None,
-    /// Syntax check only (tree-sitter parse — not yet implemented, falls back to Standard)
+    /// Syntax check only (currently maps to standard validator selection)
     Quick,
     /// Syntax + type check (cargo check / tsc / ruff)
     Standard,
@@ -208,28 +207,21 @@ pub async fn execute(
         results.join("\n")
     );
 
-    // Phase 3: Validation
+    // Phase 3: Optional explicit validation
     if validate != ValidationMode::None && files_changed > 0 {
-        let mut validation_results = Vec::new();
-        let unique_files: Vec<&PathBuf> = written_files.keys().collect();
+        let unique_files: Vec<PathBuf> = written_files.keys().cloned().collect();
+        let level = match validate {
+            ValidationMode::None => None,
+            ValidationMode::Quick => Some(super::validate::ValidationLevel::Quick),
+            ValidationMode::Standard => Some(super::validate::ValidationLevel::Standard),
+            ValidationMode::Full => Some(super::validate::ValidationLevel::Full),
+        };
 
-        for file in &unique_files {
-            if let Some(val) = super::validate::validate_after_mutation(file, cwd).await {
-                validation_results.push(val);
-            }
-        }
-
-        if !validation_results.is_empty() {
+        if let Some(level) = level
+            && let Ok(validation_result) = super::validate::execute(&unique_files, level, cwd).await
+        {
             output.push_str("\n\nValidation:\n");
-            output.push_str(&validation_results.join("\n"));
-        }
-
-        if validate == ValidationMode::Full {
-            // Run affected tests
-            if let Some(test_result) = run_affected_tests(cwd, &unique_files).await {
-                output.push_str("\n\nTests:\n");
-                output.push_str(&test_result);
-            }
+            output.push_str(validation_result.content[0].as_text().unwrap_or_default());
         }
     }
 
@@ -250,99 +242,6 @@ async fn rollback(snapshots: &HashMap<PathBuf, String>, written_files: &HashMap<
         {
             tracing::error!("Rollback failed for {}: {e}", path.display());
         }
-    }
-}
-
-/// Run tests affected by the changed files. Very simple heuristic:
-/// look for co-located test files.
-async fn run_affected_tests(cwd: &Path, files: &[&PathBuf]) -> Option<String> {
-    // Find test files co-located with changed files
-    let mut test_files = Vec::new();
-    for file in files {
-        let Some(stem) = file.file_stem().and_then(|s| s.to_str()) else {
-            continue; // Skip files without a stem (binary, extensionless)
-        };
-        let Some(ext) = file.extension().and_then(|e| e.to_str()) else {
-            continue; // Skip files without an extension
-        };
-        let Some(parent) = file.parent() else {
-            continue;
-        };
-
-        let patterns = [
-            format!("{stem}.test.{ext}"),
-            format!("{stem}_test.{ext}"),
-            format!("test_{stem}.{ext}"),
-        ];
-
-        for pattern in &patterns {
-            let test_path = parent.join(pattern);
-            if test_path.exists() {
-                test_files.push(test_path);
-            }
-        }
-    }
-
-    if test_files.is_empty() {
-        return None;
-    }
-
-    // Determine test runner by the first file's extension
-    let ext = match files
-        .first()
-        .and_then(|f| f.extension())
-        .and_then(|e| e.to_str())
-    {
-        Some(e) => e,
-        None => return None,
-    };
-    let (cmd, args) = match ext {
-        "rs" => ("cargo", vec!["test".to_string()]),
-        "ts" | "tsx" => {
-            let test_file_args: Vec<String> =
-                test_files.iter().map(|p| p.display().to_string()).collect();
-            ("npx", {
-                let mut a = vec!["vitest".to_string(), "run".to_string()];
-                a.extend(test_file_args);
-                a
-            })
-        }
-        "py" => {
-            let test_file_args: Vec<String> =
-                test_files.iter().map(|p| p.display().to_string()).collect();
-            ("pytest", test_file_args)
-        }
-        _ => return None,
-    };
-
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(60),
-        tokio::process::Command::new(cmd)
-            .args(&args)
-            .current_dir(cwd)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await;
-
-    match output {
-        Ok(Ok(o)) => {
-            let exit = o.status.code().unwrap_or(-1);
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            if exit == 0 {
-                Some(format!("✓ {} test file(s) passed", test_files.len()))
-            } else {
-                let combined = format!("{stdout}\n{stderr}");
-                let tail: Vec<&str> = combined.lines().rev().take(10).collect();
-                let tail_str: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
-                Some(format!("✗ Tests failed (exit {exit}):\n{tail_str}"))
-            }
-        }
-        Ok(Err(e)) => Some(format!("Test runner error: {e}")),
-        Err(_) => Some("Tests timed out after 60s".into()),
     }
 }
 

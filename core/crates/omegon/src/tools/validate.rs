@@ -2,8 +2,10 @@
 //!
 //! Discovers project configuration (Cargo.toml, tsconfig.json, etc.) and
 //! runs the lightest validation command relevant to the edited file.
-//! Results are appended to the tool result, not returned as a separate call.
+//! Results are returned through the dedicated `validate` tool surface.
 
+use anyhow::Result;
+use omegon_traits::{ContentBlock, ToolResult};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -33,9 +35,83 @@ struct ValidatorConfig {
     args: Vec<String>,
 }
 
-/// Run validation for a file that was just modified.
-/// Returns None if no validator applies, or Some(summary) with results.
-pub async fn validate_after_mutation(file_path: &Path, cwd: &Path) -> Option<String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidationLevel {
+    Quick,
+    Standard,
+    Full,
+}
+
+impl ValidationLevel {
+    pub fn parse(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "quick" => Self::Quick,
+            "full" => Self::Full,
+            _ => Self::Standard,
+        }
+    }
+}
+
+/// Run validation for the supplied paths and return a structured tool result.
+pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> Result<ToolResult> {
+    if paths.is_empty() {
+        anyhow::bail!("No paths provided for validation");
+    }
+
+    let mut unique_paths = Vec::new();
+    for path in paths {
+        if !unique_paths.contains(path) {
+            unique_paths.push(path.clone());
+        }
+    }
+
+    let mut validation_results = Vec::new();
+    let mut validated_paths = Vec::new();
+    for path in &unique_paths {
+        if let Some(val) = validate_file(path, cwd).await {
+            validation_results.push(val);
+            validated_paths.push(path.display().to_string());
+        }
+    }
+
+    if validation_results.is_empty() {
+        anyhow::bail!(
+            "No validator applies to the supplied path set. Supported source types: Rust, TypeScript, Python."
+        );
+    }
+
+    let mut output = format!(
+        "Validated {} path(s) with {} applicable validator run(s):\n{}",
+        unique_paths.len(),
+        validation_results.len(),
+        validation_results.join("\n")
+    );
+
+    if level == ValidationLevel::Full {
+        if let Some(test_result) =
+            run_affected_tests(cwd, &unique_paths.iter().collect::<Vec<_>>()).await
+        {
+            output.push_str("\n\nTests:\n");
+            output.push_str(&test_result);
+        }
+    }
+
+    Ok(ToolResult {
+        content: vec![ContentBlock::Text { text: output }],
+        details: serde_json::json!({
+            "paths": validated_paths,
+            "level": match level {
+                ValidationLevel::Quick => "quick",
+                ValidationLevel::Standard => "standard",
+                ValidationLevel::Full => "full",
+            },
+            "validators_run": validation_results.len(),
+        }),
+    })
+}
+
+/// Run validation for a single file path.
+async fn validate_file(file_path: &Path, cwd: &Path) -> Option<String> {
     let kind = validator_for_file(file_path)?;
     let config = {
         let validators = discover_validators(cwd);
@@ -89,6 +165,75 @@ pub async fn validate_after_mutation(file_path: &Path, cwd: &Path) -> Option<Str
                 config.command, VALIDATION_TIMEOUT_SECS
             ))
         }
+    }
+}
+
+/// Run tests affected by the changed files. Very simple heuristic:
+/// look for co-located test files.
+pub async fn run_affected_tests(cwd: &Path, files: &[&PathBuf]) -> Option<String> {
+    // Find test files co-located with changed files
+    let mut test_files = Vec::new();
+    for file in files {
+        let Some(stem) = file.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(ext) = file.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        let Some(parent) = file.parent() else {
+            continue;
+        };
+
+        let patterns = [
+            format!("{stem}.test.{ext}"),
+            format!("{stem}_test.{ext}"),
+            format!("test_{stem}.{ext}"),
+        ];
+
+        for pattern in &patterns {
+            let test_path = parent.join(pattern);
+            if test_path.exists() {
+                test_files.push(test_path);
+            }
+        }
+    }
+
+    if test_files.is_empty() {
+        return None;
+    }
+
+    let cmd = if find_upward(cwd, "Cargo.toml").is_some() {
+        Some("cargo test".to_string())
+    } else if find_upward(cwd, "package.json").is_some() {
+        Some("npm test".to_string())
+    } else if find_upward(cwd, "pyproject.toml").is_some() {
+        Some("pytest".to_string())
+    } else {
+        None
+    }?;
+
+    let child = Command::new("bash")
+        .args(["-c", &cmd])
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .output();
+
+    let result = tokio::time::timeout(Duration::from_secs(VALIDATION_TIMEOUT_SECS), child).await;
+    match result {
+        Ok(Ok(output)) if output.status.success() => {
+            Some(format!("Affected tests (`{cmd}`): ✓ passed"))
+        }
+        Ok(Ok(output)) => Some(format!(
+            "Affected tests (`{cmd}`): ✗ failed\n{}",
+            truncate_validation(&String::from_utf8_lossy(&output.stderr), 500)
+        )),
+        Ok(Err(e)) => Some(format!("Affected tests (`{cmd}`): failed to execute: {e}")),
+        Err(_) => Some(format!(
+            "Affected tests (`{cmd}`): ⏱ timed out after {}s",
+            VALIDATION_TIMEOUT_SECS
+        )),
     }
 }
 
@@ -271,5 +416,14 @@ mod tests {
         assert_eq!(count_errors("error 1\nerror 2\n"), 2);
         assert_eq!(count_errors(""), 0);
         assert_eq!(count_errors("one\n\ntwo"), 2);
+    }
+
+    #[tokio::test]
+    async fn validate_rejects_empty_path_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = execute(&[], ValidationLevel::Standard, dir.path())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("No paths provided"));
     }
 }

@@ -140,16 +140,19 @@ mod tests {
             id: "1".into(),
             name: "read".into(),
             args: serde_json::json!({}),
+            capabilities: vec![],
         });
         tt.on_event(&BusEvent::ToolStart {
             id: "2".into(),
             name: "edit".into(),
             args: serde_json::json!({}),
+            capabilities: vec![],
         });
         tt.on_event(&BusEvent::ToolStart {
             id: "3".into(),
             name: "bash".into(),
             args: serde_json::json!({}),
+            capabilities: vec![],
         });
         assert_eq!(tt.tool_chain, vec!["Edit", "Bash"]); // last 2
     }

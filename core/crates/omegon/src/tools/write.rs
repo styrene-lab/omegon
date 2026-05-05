@@ -7,7 +7,7 @@ use std::path::Path;
 /// Write timeout — 30 seconds for filesystem operations.
 const WRITE_TIMEOUT_SECS: u64 = 30;
 
-pub async fn execute(path: &Path, content: &str, cwd: &Path) -> Result<ToolResult> {
+pub async fn execute(path: &Path, content: &str) -> Result<ToolResult> {
     // Create parent directories if needed
     if let Some(parent) = path.parent()
         && !parent.exists()
@@ -30,16 +30,10 @@ pub async fn execute(path: &Path, content: &str, cwd: &Path) -> Result<ToolResul
     let byte_count = content.len();
     let action = if created { "Created" } else { "Wrote" };
 
-    // Run post-mutation validation for source files
-    let validation = super::validate::validate_after_mutation(path, cwd).await;
-    let mut result_text = format!(
+    let result_text = format!(
         "{action} {path} ({line_count} lines, {byte_count} bytes)",
         path = path.display()
     );
-    if let Some(ref val) = validation {
-        result_text.push('\n');
-        result_text.push_str(val);
-    }
 
     Ok(ToolResult {
         content: vec![ContentBlock::Text { text: result_text }],
@@ -48,7 +42,6 @@ pub async fn execute(path: &Path, content: &str, cwd: &Path) -> Result<ToolResul
             "created": created,
             "lines": line_count,
             "bytes": byte_count,
-            "validation": validation,
         }),
     })
 }

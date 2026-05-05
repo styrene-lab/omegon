@@ -445,9 +445,33 @@ impl ToolProvider for CoreTools {
                 ],
             },
             ToolDefinition {
+                name: reg::VALIDATE.into(),
+                label: reg::VALIDATE.into(),
+                description: "Run narrow project validation for specific paths. Use this after edits \
+                    instead of shelling out through bash for standard typecheck/lint/test validation."
+                    .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "paths": {
+                            "type": "array",
+                            "description": "One or more file paths whose project validators should run",
+                            "items": { "type": "string" }
+                        },
+                        "level": {
+                            "type": "string",
+                            "enum": ["quick", "standard", "full"],
+                            "description": "Validation depth (default: standard)"
+                        }
+                    },
+                    "required": ["paths"]
+                }),
+                capabilities: vec![omegon_traits::ToolCapability::Validation],
+            },
+            ToolDefinition {
                 name: reg::CHANGE.into(),
                 label: reg::CHANGE.into(),
-                description: "Atomic multi-file edit with automatic validation. Hidden from the \
+                description: "Atomic multi-file edit with optional explicit validation. Hidden from the \
                     model-facing tool surface; used by the harness to batch coordinated edits."
                     .into(),
                 parameters: json!({
@@ -468,8 +492,8 @@ impl ToolProvider for CoreTools {
                         },
                         "validate": {
                             "type": "string",
-                            "description": "Validation mode: none, quick, standard (default), full (includes tests)",
-                            "default": "standard"
+                            "description": "Optional validation mode: none (default), quick, standard, full (includes tests)",
+                            "default": "none"
                         }
                     },
                     "required": ["edits"]
@@ -646,7 +670,7 @@ impl ToolProvider for CoreTools {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'content' argument"))?;
                 let path = self.resolve_path(path_str)?;
-                let result = write::execute(&path, content, &self.cwd).await;
+                let result = write::execute(&path, content).await;
                 if result.is_ok()
                     && let Some(ref model) = self.repo_model
                 {
@@ -665,7 +689,7 @@ impl ToolProvider for CoreTools {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'newText' argument"))?;
                 let path = self.resolve_path(path_str)?;
-                let result = edit::execute(&path, old_text, new_text, &self.cwd).await;
+                let result = edit::execute(&path, old_text, new_text).await;
                 if result.is_ok()
                     && let Some(ref model) = self.repo_model
                 {
@@ -682,7 +706,7 @@ impl ToolProvider for CoreTools {
                     .get("validate")
                     .and_then(|v| v.as_str())
                     .map(change::ValidationMode::parse)
-                    .unwrap_or(change::ValidationMode::Standard);
+                    .unwrap_or(change::ValidationMode::None);
                 let cwd = self.cwd.clone();
                 let cwd2 = cwd.clone();
                 let result = change::execute(&edits, validate_mode, &cwd, move |p: &str| {
@@ -699,6 +723,24 @@ impl ToolProvider for CoreTools {
                     }
                 }
                 result
+            }
+            reg::VALIDATE => {
+                let path_values = args["paths"]
+                    .as_array()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'paths' argument"))?;
+                let mut paths = Vec::new();
+                for value in path_values {
+                    let path_str = value
+                        .as_str()
+                        .ok_or_else(|| anyhow::anyhow!("validation paths must be strings"))?;
+                    paths.push(self.resolve_path(path_str)?);
+                }
+                let level = validate::ValidationLevel::parse(
+                    args.get("level")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("standard"),
+                );
+                validate::execute(&paths, level, &self.cwd).await
             }
             reg::COMMIT => {
                 let message = args["message"]
@@ -1080,6 +1122,7 @@ mod tests {
         assert!(tool_names.contains("read"));
         assert!(tool_names.contains("write"));
         assert!(tool_names.contains("edit"));
+        assert!(tool_names.contains("validate"));
         assert!(tool_names.contains("change"));
 
         // Git tools
@@ -1097,13 +1140,13 @@ mod tests {
         assert!(!tool_names.contains("list_local_models"));
         assert!(!tool_names.contains("manage_ollama"));
 
-        // 9 registered core tools. trust_directory is internal-only and not in
+        // 10 registered core tools. trust_directory is internal-only and not in
         // tool_defs; change is registered for harness batching but hidden from
         // the model-facing tool surface by EventBus filtering.
         assert_eq!(
             tool_names.len(),
-            9,
-            "Expected 9 registered core tools, got {}",
+            10,
+            "Expected 10 registered core tools, got {}",
             tool_names.len()
         );
     }
