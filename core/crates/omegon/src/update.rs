@@ -56,17 +56,17 @@ pub fn channel() -> (UpdateSender, UpdateReceiver) {
 
 /// GitHub release info (minimal subset).
 #[derive(serde::Deserialize, Clone)]
-struct GitHubRelease {
-    tag_name: String,
-    body: Option<String>,
-    assets: Vec<GitHubAsset>,
-    prerelease: bool,
+pub(crate) struct GitHubRelease {
+    pub tag_name: String,
+    pub body: Option<String>,
+    pub assets: Vec<GitHubAsset>,
+    pub prerelease: bool,
 }
 
 #[derive(serde::Deserialize, Clone)]
-struct GitHubAsset {
-    name: String,
-    browser_download_url: String,
+pub(crate) struct GitHubAsset {
+    pub name: String,
+    pub browser_download_url: String,
 }
 
 fn find_asset_url(assets: &[GitHubAsset], suffix: &str) -> String {
@@ -309,7 +309,7 @@ fn is_newer(latest: &str, current: &str) -> bool {
 }
 
 /// Platform-specific asset name pattern.
-fn platform_archive_target() -> String {
+pub(crate) fn platform_archive_target() -> String {
     if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
         "aarch64-apple-darwin".into()
     } else if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {

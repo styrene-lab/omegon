@@ -62,6 +62,7 @@ mod child_agent;
 mod conversation;
 mod eval;
 mod extension_cli;
+mod extension_registry;
 mod lifecycle;
 mod r#loop;
 mod model_registry;
@@ -624,13 +625,25 @@ enum ExtensionAction {
         /// Extension name (lowercase, alphanumeric + hyphens).
         name: String,
     },
-    /// Install an extension from a git URL or local path.
+    /// Install an extension by name from the armory, or from a git URL, tarball URL, or local path.
     Install {
-        /// Git URL or local directory path containing manifest.toml.
+        /// Extension name, git URL, tarball URL, or local directory path.
         uri: String,
+        /// Pin to a specific version (only for armory registry installs).
+        #[arg(long)]
+        version: Option<String>,
     },
-    /// List installed extensions.
-    List,
+    /// List installed extensions (use --available to show all armory extensions).
+    List {
+        /// Show all available extensions from the armory, not just installed.
+        #[arg(long)]
+        available: bool,
+    },
+    /// Search available extensions in the armory registry.
+    Search {
+        /// Search query (matches name, description, category). Omit to list all.
+        query: Option<String>,
+    },
     /// Remove an installed extension.
     Remove {
         /// Extension directory name.
@@ -871,8 +884,26 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Extension { ref action }) => {
             match action {
                 ExtensionAction::Init { name } => extension_cli::init(name)?,
-                ExtensionAction::Install { uri } => extension_cli::install(uri)?,
-                ExtensionAction::List => extension_cli::list()?,
+                ExtensionAction::Install { uri, version } => {
+                    if extension_registry::is_bare_name(uri) {
+                        extension_registry::install_by_name(uri, version.as_deref()).await?
+                    } else {
+                        if version.is_some() {
+                            anyhow::bail!("--version is only supported for armory installs (bare name)");
+                        }
+                        extension_cli::install(uri)?
+                    }
+                }
+                ExtensionAction::List { available } => {
+                    if *available {
+                        extension_registry::list_available().await?
+                    } else {
+                        extension_cli::list()?
+                    }
+                }
+                ExtensionAction::Search { query } => {
+                    extension_registry::search(query.as_deref()).await?
+                }
                 ExtensionAction::Remove { name } => extension_cli::remove(name)?,
                 ExtensionAction::Update { name } => extension_cli::update(name.as_deref())?,
                 ExtensionAction::Enable { name } => extension_cli::enable(name)?,

@@ -444,7 +444,7 @@ pub fn disable(name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn extensions_dir() -> anyhow::Result<PathBuf> {
+pub(crate) fn extensions_dir() -> anyhow::Result<PathBuf> {
     let base = crate::paths::omegon_home()?;
     Ok(base.join("extensions"))
 }
@@ -609,7 +609,7 @@ fn install_git(extensions_dir: &Path, uri: &str) -> anyhow::Result<()> {
 /// The tarball must contain a `manifest.toml` and (for native extensions) the
 /// pre-built binary.  No build step is performed — this is the path for users
 /// without a Rust toolchain.
-fn install_tarball(extensions_dir: &Path, uri: &str) -> anyhow::Result<()> {
+pub(crate) fn install_tarball(extensions_dir: &Path, uri: &str) -> anyhow::Result<()> {
     let tmp = std::env::temp_dir().join(format!(
         "omegon-ext-install-{}-{}",
         std::process::id(),
