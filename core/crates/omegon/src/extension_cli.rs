@@ -610,7 +610,14 @@ fn install_git(extensions_dir: &Path, uri: &str) -> anyhow::Result<()> {
 /// pre-built binary.  No build step is performed — this is the path for users
 /// without a Rust toolchain.
 fn install_tarball(extensions_dir: &Path, uri: &str) -> anyhow::Result<()> {
-    let tmp = std::env::temp_dir().join(format!("omegon-ext-install-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!(
+        "omegon-ext-install-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
     std::fs::create_dir_all(&tmp)?;
     let archive_path = tmp.join("extension.tar.gz");
 
@@ -931,5 +938,167 @@ binary = "target/release/test-ext"
         let link = ext_dir.path().join("test-ext");
         assert!(link.exists(), "symlink should exist");
         assert!(link.is_symlink(), "should be a symlink");
+    }
+
+    #[test]
+    fn copy_dir_recursive_copies_files_and_subdirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::write(src.join("a.txt"), "hello").unwrap();
+        std::fs::write(src.join("sub/b.txt"), "world").unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert_eq!(std::fs::read_to_string(dst.join("a.txt")).unwrap(), "hello");
+        assert_eq!(
+            std::fs::read_to_string(dst.join("sub/b.txt")).unwrap(),
+            "world"
+        );
+    }
+
+    #[test]
+    fn install_tarball_from_local_file() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Build a tarball containing manifest.toml + a fake binary
+        let staging = tmp.path().join("my-ext");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(
+            staging.join("manifest.toml"),
+            r#"
+[extension]
+name = "my-ext"
+version = "1.0.0"
+description = "Test tarball extension"
+
+[runtime]
+type = "native"
+binary = "my-ext"
+"#,
+        )
+        .unwrap();
+        // Write a fake binary (just needs to exist)
+        std::fs::write(staging.join("my-ext"), "#!/bin/sh\necho ok").unwrap();
+
+        // Create .tar.gz
+        let tarball = tmp.path().join("my-ext.tar.gz");
+        let status = std::process::Command::new("tar")
+            .args(["czf"])
+            .arg(&tarball)
+            .arg("-C")
+            .arg(tmp.path())
+            .arg("my-ext")
+            .status()
+            .unwrap();
+        assert!(status.success(), "tar should succeed");
+
+        // Install into a fresh extensions dir
+        let ext_dir = tempfile::tempdir().unwrap();
+        install_tarball(ext_dir.path(), tarball.to_str().unwrap()).unwrap();
+
+        let installed = ext_dir.path().join("my-ext");
+        assert!(installed.exists(), "extension dir should exist");
+        assert!(
+            installed.join("manifest.toml").exists(),
+            "manifest should exist"
+        );
+        assert!(
+            installed.join("my-ext").exists(),
+            "binary should exist"
+        );
+
+        // Verify it's a real copy, not a symlink
+        assert!(!installed.is_symlink(), "should not be a symlink");
+    }
+
+    #[test]
+    fn install_tarball_rejects_missing_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Build a tarball with no manifest.toml
+        let staging = tmp.path().join("bad-ext");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("README.md"), "no manifest here").unwrap();
+
+        let tarball = tmp.path().join("bad-ext.tar.gz");
+        let status = std::process::Command::new("tar")
+            .args(["czf"])
+            .arg(&tarball)
+            .arg("-C")
+            .arg(tmp.path())
+            .arg("bad-ext")
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let ext_dir = tempfile::tempdir().unwrap();
+        let err = install_tarball(ext_dir.path(), tarball.to_str().unwrap()).unwrap_err();
+        assert!(
+            err.to_string().contains("manifest.toml"),
+            "should mention missing manifest: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn install_tarball_rejects_duplicate() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let staging = tmp.path().join("dup-ext");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(
+            staging.join("manifest.toml"),
+            r#"
+[extension]
+name = "dup-ext"
+version = "1.0.0"
+description = "Duplicate test"
+
+[runtime]
+type = "native"
+binary = "dup-ext"
+"#,
+        )
+        .unwrap();
+        std::fs::write(staging.join("dup-ext"), "fake").unwrap();
+
+        let tarball = tmp.path().join("dup-ext.tar.gz");
+        std::process::Command::new("tar")
+            .args(["czf"])
+            .arg(&tarball)
+            .arg("-C")
+            .arg(tmp.path())
+            .arg("dup-ext")
+            .status()
+            .unwrap();
+
+        let ext_dir = tempfile::tempdir().unwrap();
+
+        // First install succeeds
+        install_tarball(ext_dir.path(), tarball.to_str().unwrap()).unwrap();
+
+        // Second install fails with "already installed"
+        let err = install_tarball(ext_dir.path(), tarball.to_str().unwrap()).unwrap_err();
+        assert!(
+            err.to_string().contains("already installed"),
+            "should reject duplicate: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn install_routes_tarball_url() {
+        // Verify the install() dispatcher recognizes .tar.gz URLs
+        // (will fail on network, but should not fall through to git or "invalid source")
+        let err = install("https://example.com/ext-1.0.tar.gz").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("not a valid extension source"),
+            "should route to tarball path, not reject: {}",
+            msg
+        );
     }
 }
