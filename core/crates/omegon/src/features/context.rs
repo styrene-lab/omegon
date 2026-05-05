@@ -519,6 +519,10 @@ impl Feature for ContextProvider {
                     "properties": {},
                     "required": []
                 }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::Orientation,
+                    omegon_traits::ToolCapability::BroadOrientation,
+                ],
             },
             ToolDefinition {
                 name: crate::tool_registry::context::REQUEST_CONTEXT.into(),
@@ -546,6 +550,10 @@ impl Feature for ContextProvider {
                     },
                     "required": ["requests"]
                 }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::Orientation,
+                    omegon_traits::ToolCapability::BroadOrientation,
+                ],
             },
             ToolDefinition {
                 name: crate::tool_registry::context::CONTEXT_COMPACT.into(),
@@ -556,6 +564,7 @@ impl Feature for ContextProvider {
                     "properties": {},
                     "required": []
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::context::CONTEXT_CLEAR.into(),
@@ -566,6 +575,7 @@ impl Feature for ContextProvider {
                     "properties": {},
                     "required": []
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
         ]
     }

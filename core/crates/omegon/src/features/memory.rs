@@ -201,6 +201,7 @@ If in doubt, store it. Over-storing is better than forgetting.".into(),
                         }
                     }
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_RECALL.into(),
@@ -226,6 +227,10 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         }
                     }
                 }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::Orientation,
+                    omegon_traits::ToolCapability::BroadOrientation,
+                ],
             },
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_QUERY.into(),
@@ -235,6 +240,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     "type": "object",
                     "properties": {}
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_ARCHIVE.into(),
@@ -251,6 +257,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         }
                     }
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_SUPERSEDE.into(),
@@ -265,6 +272,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         "content": { "type": "string" }
                     }
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_CONNECT.into(),
@@ -280,6 +288,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         "description": { "type": "string" }
                     }
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_FOCUS.into(),
@@ -295,6 +304,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         }
                     }
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_RELEASE.into(),
@@ -304,6 +314,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                     "type": "object",
                     "properties": {}
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_EPISODES.into(),
@@ -323,6 +334,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         }
                     }
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_COMPACT.into(),
@@ -337,6 +349,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         }
                     }
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_SEARCH_ARCHIVE.into(),
@@ -352,6 +365,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         }
                     }
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::memory::MEMORY_INGEST_LIFECYCLE.into(),
@@ -371,6 +385,7 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                         "artifact_ref_sub": { "type": "string" }
                     }
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
         ]
     }

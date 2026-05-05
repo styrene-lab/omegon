@@ -163,6 +163,7 @@ impl Feature for ModelBudget {
                     },
                     "required": ["tier", "reason"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: crate::tool_registry::model_budget::SWITCH_TO_OFFLINE_DRIVER.into(),
@@ -182,6 +183,7 @@ impl Feature for ModelBudget {
                     },
                     "required": ["reason"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: crate::tool_registry::model_budget::SET_THINKING_LEVEL.into(),
@@ -202,6 +204,7 @@ impl Feature for ModelBudget {
                     },
                     "required": ["level", "reason"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
         ]
     }

@@ -6,7 +6,7 @@
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use omegon_traits::{ContentBlock, ToolDefinition, ToolProvider, ToolResult};
+use omegon_traits::{ContentBlock, ToolCapability, ToolDefinition, ToolProvider, ToolResult};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -55,6 +55,7 @@ impl ToolProvider for RenderProvider {
                 },
                 "required": ["source"]
             }),
+            capabilities: vec![ToolCapability::StateChanging],
         }]
     }
 

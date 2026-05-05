@@ -31,6 +31,11 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::timeout as tokio_timeout;
 
+use super::tool_capabilities::{
+    ExternalExecutionHint, mcp_prompt_tool_capabilities, mcp_resource_tool_capabilities,
+    resolve_external_tool_capabilities,
+};
+
 /// Configuration for a single MCP server.
 ///
 /// Supports four execution modes:
@@ -732,6 +737,13 @@ impl Feature for McpFeature {
                 label: format!("mcp:{}", t.server_name),
                 description: t.description.clone(),
                 parameters: t.parameters.clone(),
+                capabilities: resolve_external_tool_capabilities(
+                    &[],
+                    &t.name,
+                    &t.description,
+                    &t.parameters,
+                    ExternalExecutionHint::McpDiscovery,
+                ),
             })
             .collect();
 
@@ -755,6 +767,7 @@ impl Feature for McpFeature {
                     },
                     "required": ["server", "uri"]
                 }),
+                capabilities: mcp_resource_tool_capabilities(),
             });
         }
 
@@ -783,6 +796,7 @@ impl Feature for McpFeature {
                     },
                     "required": ["server", "name"]
                 }),
+                capabilities: mcp_prompt_tool_capabilities(),
             });
         }
 

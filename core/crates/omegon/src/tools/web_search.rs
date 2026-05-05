@@ -540,6 +540,7 @@ impl ToolProvider for WebSearchProvider {
                     },
                     "required": ["query"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: crate::tool_registry::web_search::WEB_FETCH.into(),
@@ -552,6 +553,7 @@ impl ToolProvider for WebSearchProvider {
                     },
                     "required": ["url"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
         ]
     }

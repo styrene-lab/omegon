@@ -31,6 +31,7 @@ use async_trait::async_trait;
 use omegon_traits::{ContentBlock, Feature, ToolDefinition, ToolResult};
 
 use super::armory::{ArmoryManifest, ToolEntry, ToolRunner};
+use super::tool_capabilities::{ExternalExecutionHint, resolve_external_tool_capabilities};
 
 /// Build a successful text ToolResult.
 fn tool_ok(text: String) -> ToolResult {
@@ -330,6 +331,23 @@ impl Feature for ArmoryFeature {
                     label: format!("armory:{}{}", runner_prefix, t.name),
                     description: t.description.clone(),
                     parameters: t.parameters.clone(),
+                    capabilities: resolve_external_tool_capabilities(
+                        &t.capabilities,
+                        &t.name,
+                        &t.description,
+                        &t.parameters,
+                        if t.is_http()
+                            && t.method
+                                .as_deref()
+                                .is_some_and(|method| method.eq_ignore_ascii_case("GET"))
+                        {
+                            ExternalExecutionHint::HttpGet
+                        } else if t.is_http() {
+                            ExternalExecutionHint::HttpMutating
+                        } else {
+                            ExternalExecutionHint::ScriptOrContainer
+                        },
+                    ),
                 }
             })
             .collect()

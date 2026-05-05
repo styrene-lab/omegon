@@ -113,6 +113,8 @@ fn estimate_tool_schema_tokens(tools: &[omegon_traits::ToolDefinition]) -> usize
 // auto-delegation logic live in `behavior.rs`. Re-export convenience
 // aliases used by the main loop body.
 // auto-delegation disabled — import retained for the test that verifies it returns None
+use behavior::ToolCapabilityCatalog;
+use behavior::assess_evidence;
 use behavior::behavioral_tier;
 #[cfg(test)]
 use behavior::classify_auto_delegate_plan;
@@ -121,7 +123,6 @@ use behavior::classify_progress_signal;
 use behavior::classify_turn_phase;
 use behavior::continuation_pressure_message;
 use behavior::continuation_pressure_tier;
-use behavior::detect_evidence_sufficiency;
 use behavior::is_first_turn_orientation_churn;
 use behavior::is_mutation_tool_name;
 use behavior::is_repo_inspection_tool;
@@ -276,6 +277,7 @@ pub async fn run(
             // turn 1 for discovery, core + used tools on turn 2+.
             bus.tool_definitions_lazy(true, turn, &session_used_tools)
         };
+        let tool_catalog = ToolCapabilityCatalog::from_tool_defs(&tool_defs);
         let context_window = config
             .settings
             .as_ref()
@@ -371,7 +373,7 @@ pub async fn run(
         bus.emit(&omegon_traits::BusEvent::TurnStart { turn });
 
         // ─── Stuck detection ────────────────────────────────────────
-        if let Some(warning) = stuck_detector.check() {
+        if let Some(warning) = stuck_detector.check(&tool_catalog) {
             tracing::info!(
                 consecutive = warning.consecutive,
                 "Stuck detector: {}",
@@ -761,7 +763,8 @@ pub async fn run(
                 let mut incomplete = Vec::new();
                 for phase in &config.skill_phases {
                     // Check if the response mentions the final phase
-                    let phase_mentioned = response_text.contains(&format!("phase {}", phase.final_phase_number))
+                    let phase_mentioned = response_text
+                        .contains(&format!("phase {}", phase.final_phase_number))
                         || response_text.contains(&phase.final_phase_label.to_lowercase());
                     if !phase_mentioned {
                         incomplete.push(&phase.final_phase_label);
@@ -769,7 +772,8 @@ pub async fn run(
                 }
                 if !incomplete.is_empty() {
                     conversation.intent.skill_completion_nudged = true;
-                    let labels: Vec<String> = incomplete.iter().map(|l| format!("  - {l}")).collect();
+                    let labels: Vec<String> =
+                        incomplete.iter().map(|l| format!("  - {l}")).collect();
                     tracing::info!(incomplete = ?incomplete, "agent stopped before completing all skill phases — nudging");
                     conversation.push_user(format!(
                         "[System: You have not completed all phases of the active skill. \
@@ -965,8 +969,9 @@ pub async fn run(
             .intent
             .update_from_tools(dispatch_calls, &results);
 
-        let dominant_phase = classify_turn_phase(dispatch_calls, &results);
-        let drift_kind = classify_drift_kind(turn, conversation, dispatch_calls, &results);
+        let dominant_phase = classify_turn_phase(&tool_catalog, dispatch_calls, &results);
+        let drift_kind =
+            classify_drift_kind(&tool_catalog, turn, conversation, dispatch_calls, &results);
         let constraints_before = captured
             .iter()
             .filter(|capture| {
@@ -980,16 +985,16 @@ pub async fn run(
         let progress_signal = classify_progress_signal(
             constraints_after.saturating_sub(constraints_before),
             constraints_after,
+            &tool_catalog,
             dispatch_calls,
             &results,
         );
-        let evidence_sufficiency =
-            detect_evidence_sufficiency(conversation, dispatch_calls, &results);
+        let evidence = assess_evidence(conversation, &tool_catalog, dispatch_calls, &results);
         controller.observe_turn(
             TurnEndReason::ToolContinuation,
             drift_kind,
             progress_signal,
-            evidence_sufficiency,
+            evidence,
         );
         let behavior = behavioral_tier(config);
         let continuation_tier = continuation_pressure_tier(
@@ -1014,7 +1019,13 @@ pub async fn run(
             }};
         }
 
-        if is_first_turn_orientation_churn(turn, config, conversation, dispatch_calls) {
+        if is_first_turn_orientation_churn(
+            turn,
+            config,
+            conversation,
+            &tool_catalog,
+            dispatch_calls,
+        ) {
             tracing::info!("First-turn orientation churn — injecting execution-bias nudge");
             let msg = match behavior {
                 BehavioralTier::Constrained => {
@@ -1026,7 +1037,7 @@ pub async fn run(
             };
             inject_nudge!("first_turn_execution_bias", msg);
         } else if is_slim_execution_bias(config)
-            && controller.evidence_sufficient_streak > 0
+            && controller.local_evidence_sufficient_streak > 0
             && has_local_target_hypothesis(conversation)
             && continuation_tier.is_some()
         {
@@ -1042,6 +1053,7 @@ pub async fn run(
             turn,
             config,
             conversation,
+            &tool_catalog,
             dispatch_calls,
             behavior,
         ) {
@@ -1104,7 +1116,7 @@ pub async fn run(
                 .iter()
                 .find(|r| r.call_id == call.id)
                 .is_some_and(|r| r.is_error);
-            stuck_detector.record(call, is_error);
+            stuck_detector.record(&tool_catalog, call, is_error);
         }
 
         let system_prompt =
@@ -1819,11 +1831,10 @@ async fn consume_llm_stream(
 
 /// Dispatch tool calls via the EventBus.
 ///
-/// **Auto-batching**: when the LLM returns multiple edit/write calls in one turn,
-/// the loop snapshots target files before execution. If any mutation fails, all
-/// previously applied mutations are rolled back. This makes the existing `edit`
-/// tool secretly atomic across multi-file changes — the agent doesn't need to
-/// learn the `change` tool to get atomic behavior.
+/// **Auto-batching**: when the model returns multiple mutation calls in one turn,
+/// the loop snapshots target files before execution. Contiguous `edit` calls may
+/// be collapsed into one hidden transactional `change` execution, and if any
+/// mutation fails, previously applied mutations in the turn are rolled back.
 /// Record of a permission decision made during tool dispatch.
 /// Returned to the caller so it can emit BusEvent::PermissionDecision
 /// (which requires &mut bus, unavailable inside dispatch).
@@ -1923,8 +1934,62 @@ async fn dispatch_tools(
     }
 
     let mut batch_failed = false;
+    let mut serial_idx = 0usize;
 
-    for (idx, call) in serial_calls {
+    while serial_idx < serial_calls.len() {
+        if let Some((next_idx, batch_results, batch_mutated_files, edit_batch_failed)) =
+            dispatch_edit_batch(
+                bus,
+                &serial_calls,
+                serial_idx,
+                events,
+                cancel.clone(),
+                cwd,
+                secrets,
+                &mut permission_decisions,
+            )
+            .await
+        {
+            if edit_batch_failed {
+                batch_failed = true;
+            }
+            mutated_files.extend(batch_mutated_files);
+            indexed_results.extend(batch_results);
+            serial_idx = next_idx;
+            continue;
+        }
+
+        let (idx, call) = serial_calls[serial_idx].clone();
+        if batch_failed && is_mutation_tool(&call.name) {
+            let skip_text = format!(
+                "Skipped {} — previous edit in this turn failed and triggered rollback.",
+                call.name
+            );
+            let _ = events.send(AgentEvent::ToolEnd {
+                id: call.id.clone(),
+                name: call.name.clone(),
+                result: omegon_traits::ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: skip_text.clone(),
+                    }],
+                    details: Value::Null,
+                },
+                is_error: true,
+            });
+            indexed_results.push((
+                idx,
+                ToolResultEntry {
+                    call_id: call.id.clone(),
+                    tool_name: call.name.clone(),
+                    content: vec![ContentBlock::Text { text: skip_text }],
+                    is_error: true,
+                    args_summary: summarize_tool_args(&call.name, &call.arguments),
+                },
+            ));
+            serial_idx += 1;
+            continue;
+        }
+
         let dispatched = dispatch_single_tool(
             bus,
             &call,
@@ -2006,36 +2071,8 @@ async fn dispatch_tools(
             continue;
         }
 
-        if batch_failed && is_mutation_tool(&call.name) {
-            let skip_text = format!(
-                "Skipped {} — previous edit in this turn failed and triggered rollback.",
-                call.name
-            );
-            let _ = events.send(AgentEvent::ToolEnd {
-                id: call.id.clone(),
-                name: call.name.clone(),
-                result: omegon_traits::ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: skip_text.clone(),
-                    }],
-                    details: Value::Null,
-                },
-                is_error: true,
-            });
-            indexed_results.push((
-                idx,
-                ToolResultEntry {
-                    call_id: call.id.clone(),
-                    tool_name: call.name.clone(),
-                    content: vec![ContentBlock::Text { text: skip_text }],
-                    is_error: true,
-                    args_summary: summarize_tool_args(&call.name, &call.arguments),
-                },
-            ));
-            continue;
-        }
-
         indexed_results.push((idx, dispatched));
+        serial_idx += 1;
     }
 
     indexed_results.sort_by_key(|(idx, _)| *idx);
@@ -2058,8 +2095,45 @@ async fn dispatch_single_tool(
     secrets: Option<&omegon_secrets::SecretsManager>,
     permission_log: &mut Vec<PermissionRecord>,
 ) -> ToolResultEntry {
+    let (result, is_error) = execute_tool_invocation(
+        bus,
+        &call.id,
+        &call.name,
+        &call.arguments,
+        &call.name,
+        call.arguments.clone(),
+        events,
+        cancel,
+        secrets,
+        permission_log,
+        true,
+    )
+    .await;
+
+    ToolResultEntry {
+        call_id: call.id.clone(),
+        tool_name: call.name.clone(),
+        content: result.content,
+        is_error,
+        args_summary: summarize_tool_args(&call.name, &call.arguments),
+    }
+}
+
+async fn execute_tool_invocation(
+    bus: &crate::bus::EventBus,
+    visible_call_id: &str,
+    visible_tool_name: &str,
+    visible_args: &Value,
+    execution_tool_name: &str,
+    execution_args: Value,
+    events: &broadcast::Sender<AgentEvent>,
+    cancel: CancellationToken,
+    secrets: Option<&omegon_secrets::SecretsManager>,
+    permission_log: &mut Vec<PermissionRecord>,
+    emit_agent_events: bool,
+) -> (omegon_traits::ToolResult, bool) {
     if let Some(sm) = secrets
-        && let Some(decision) = sm.check_guard(&call.name, &call.arguments)
+        && let Some(decision) = sm.check_guard(visible_tool_name, visible_args)
         && decision.is_block()
     {
         let msg = match &decision {
@@ -2068,33 +2142,37 @@ async fn dispatch_single_tool(
             }
             _ => unreachable!(),
         };
-        tracing::warn!(tool = call.name, %msg, "tool guard blocked");
-        let _ = events.send(AgentEvent::ToolEnd {
-            id: call.id.clone(),
-            name: call.name.clone(),
-            result: omegon_traits::ToolResult {
-                content: vec![ContentBlock::Text { text: msg.clone() }],
+        tracing::warn!(tool = visible_tool_name, %msg, "tool guard blocked");
+        if emit_agent_events {
+            let _ = events.send(AgentEvent::ToolEnd {
+                id: visible_call_id.to_string(),
+                name: visible_tool_name.to_string(),
+                result: omegon_traits::ToolResult {
+                    content: vec![ContentBlock::Text { text: msg.clone() }],
+                    details: Value::Null,
+                },
+                is_error: true,
+            });
+        }
+        return (
+            omegon_traits::ToolResult {
+                content: vec![ContentBlock::Text { text: msg }],
                 details: Value::Null,
             },
-            is_error: true,
-        });
-        return ToolResultEntry {
-            call_id: call.id.clone(),
-            tool_name: call.name.clone(),
-            content: vec![ContentBlock::Text { text: msg }],
-            is_error: true,
-            args_summary: summarize_tool_args(&call.name, &call.arguments),
-        };
+            true,
+        );
     }
 
-    let _ = events.send(AgentEvent::ToolStart {
-        id: call.id.clone(),
-        name: call.name.clone(),
-        args: call.arguments.clone(),
-    });
+    if emit_agent_events {
+        let _ = events.send(AgentEvent::ToolStart {
+            id: visible_call_id.to_string(),
+            name: visible_tool_name.to_string(),
+            args: visible_args.clone(),
+        });
+    }
 
     let sink_events = events.clone();
-    let sink_call_id = call.id.clone();
+    let sink_call_id = visible_call_id.to_string();
     let sink = omegon_traits::ToolProgressSink::from_fn(move |partial| {
         let _ = sink_events.send(AgentEvent::ToolUpdate {
             id: sink_call_id.clone(),
@@ -2103,10 +2181,24 @@ async fn dispatch_single_tool(
     });
 
     let execute = |cancel: CancellationToken, sink: omegon_traits::ToolProgressSink| {
-        bus.execute_tool_with_sink(&call.name, &call.id, call.arguments.clone(), cancel, sink)
+        bus.execute_tool_with_sink(
+            execution_tool_name,
+            visible_call_id,
+            execution_args.clone(),
+            cancel,
+            sink,
+        )
     };
 
-    let first_result = execute(cancel.clone(), sink.clone()).await;
+    let first_result = execute(
+        cancel.clone(),
+        if emit_agent_events {
+            sink.clone()
+        } else {
+            omegon_traits::ToolProgressSink::noop()
+        },
+    )
+    .await;
 
     // Intercept PathPermissionError — show interactive TUI prompt
     let (result, is_error) = match first_result {
@@ -2120,7 +2212,7 @@ async fn dispatch_single_tool(
             let respond = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
 
             let _ = events.send(AgentEvent::PermissionRequest {
-                tool_name: call.name.clone(),
+                tool_name: visible_tool_name.to_string(),
                 path: perm_err.requested_path.clone(),
                 respond,
             });
@@ -2138,7 +2230,7 @@ async fn dispatch_single_tool(
                 omegon_traits::PermissionResponse::Allow => {
                     tracing::info!(path = %perm_err.requested_path, decision = "allow", "permission decision");
                     permission_log.push(PermissionRecord {
-                        tool_name: call.name.clone(),
+                        tool_name: visible_tool_name.to_string(),
                         path: perm_err.requested_path.clone(),
                         decision: "allow".into(),
                     });
@@ -2170,7 +2262,7 @@ async fn dispatch_single_tool(
                 omegon_traits::PermissionResponse::AlwaysAllow => {
                     tracing::info!(dir = %perm_err.directory, decision = "always_allow", "permission decision");
                     permission_log.push(PermissionRecord {
-                        tool_name: call.name.clone(),
+                        tool_name: visible_tool_name.to_string(),
                         path: perm_err.requested_path.clone(),
                         decision: "always_allow".into(),
                     });
@@ -2202,7 +2294,7 @@ async fn dispatch_single_tool(
                 omegon_traits::PermissionResponse::Deny => {
                     tracing::info!(path = %perm_err.requested_path, decision = "deny", "permission decision");
                     permission_log.push(PermissionRecord {
-                        tool_name: call.name.clone(),
+                        tool_name: visible_tool_name.to_string(),
                         path: perm_err.requested_path.clone(),
                         decision: "deny".into(),
                     });
@@ -2214,8 +2306,7 @@ async fn dispatch_single_tool(
                                      This operation was denied by the permission system. \
                                      The operator must run /trust add {} to allow \
                                      access to this directory, then re-run the task.",
-                                    perm_err.requested_path,
-                                    perm_err.directory,
+                                    perm_err.requested_path, perm_err.directory,
                                 ),
                             }],
                             details: serde_json::json!({
@@ -2249,23 +2340,160 @@ async fn dispatch_single_tool(
     const MAX_TOOL_OUTPUT_CHARS: usize = 16_000;
     crate::util::truncate_content_blocks(&mut final_content, MAX_TOOL_OUTPUT_CHARS);
 
-    let _ = events.send(AgentEvent::ToolEnd {
-        id: call.id.clone(),
-        name: call.name.clone(),
-        result: omegon_traits::ToolResult {
-            content: final_content.clone(),
+    if emit_agent_events {
+        let _ = events.send(AgentEvent::ToolEnd {
+            id: visible_call_id.to_string(),
+            name: visible_tool_name.to_string(),
+            result: omegon_traits::ToolResult {
+                content: final_content.clone(),
+                details: result.details.clone(),
+            },
+            is_error,
+        });
+    }
+
+    (
+        omegon_traits::ToolResult {
+            content: final_content,
             details: result.details,
         },
         is_error,
+    )
+}
+
+async fn dispatch_edit_batch(
+    bus: &crate::bus::EventBus,
+    serial_calls: &[(usize, ToolCall)],
+    start_idx: usize,
+    events: &broadcast::Sender<AgentEvent>,
+    cancel: CancellationToken,
+    cwd: &std::path::Path,
+    secrets: Option<&omegon_secrets::SecretsManager>,
+    permission_log: &mut Vec<PermissionRecord>,
+) -> Option<(
+    usize,
+    Vec<(usize, ToolResultEntry)>,
+    Vec<std::path::PathBuf>,
+    bool,
+)> {
+    if secrets.is_some()
+        || serial_calls.get(start_idx)?.1.name != "edit"
+        || !bus.has_registered_tool("change")
+    {
+        return None;
+    }
+
+    let mut end_idx = start_idx;
+    while let Some((_, call)) = serial_calls.get(end_idx) {
+        if call.name != "edit" {
+            break;
+        }
+        end_idx += 1;
+    }
+    if end_idx - start_idx < 2 {
+        return None;
+    }
+
+    let batch_slice = &serial_calls[start_idx..end_idx];
+    let edits: Vec<Value> = batch_slice
+        .iter()
+        .map(|(_, call)| {
+            serde_json::json!({
+                "file": call.arguments.get("path").and_then(|v| v.as_str()).unwrap_or_default(),
+                "oldText": call.arguments.get("oldText").and_then(|v| v.as_str()).unwrap_or_default(),
+                "newText": call.arguments.get("newText").and_then(|v| v.as_str()).unwrap_or_default(),
+            })
+        })
+        .collect();
+    let change_args = serde_json::json!({
+        "edits": edits,
+        "validate": "standard",
     });
 
-    ToolResultEntry {
-        call_id: call.id.clone(),
-        tool_name: call.name.clone(),
-        content: final_content,
-        is_error,
-        args_summary: summarize_tool_args(&call.name, &call.arguments),
+    for (_, call) in batch_slice {
+        let _ = events.send(AgentEvent::ToolStart {
+            id: call.id.clone(),
+            name: call.name.clone(),
+            args: call.arguments.clone(),
+        });
     }
+
+    let first_call = &batch_slice[0].1;
+    let (batch_result, batch_error) = execute_tool_invocation(
+        bus,
+        &first_call.id,
+        &first_call.name,
+        &first_call.arguments,
+        "change",
+        change_args,
+        events,
+        cancel,
+        None,
+        permission_log,
+        false,
+    )
+    .await;
+
+    let batch_text = batch_result
+        .content
+        .iter()
+        .filter_map(|block| block.as_text())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut indexed_results = Vec::with_capacity(batch_slice.len());
+    let mut mutated_files = Vec::new();
+    for (position, (idx, call)) in batch_slice.iter().enumerate() {
+        let path = call
+            .arguments
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let text = if batch_error {
+            if position == 0 {
+                batch_text.clone()
+            } else {
+                format!(
+                    "Skipped edit in {path} — atomic edit batch failed.\n\n{batch_text}"
+                )
+            }
+        } else if position + 1 == batch_slice.len() {
+            format!("Applied exact-text edit to {path} as part of an atomic batch.\n\n{batch_text}")
+        } else {
+            format!("Applied exact-text edit to {path} as part of an atomic batch.")
+        };
+
+        if !batch_error && let Some(path_str) = extract_mutation_path(&call.arguments) {
+            mutated_files.push(cwd.join(path_str));
+        }
+
+        let _ = events.send(AgentEvent::ToolEnd {
+            id: call.id.clone(),
+            name: call.name.clone(),
+            result: omegon_traits::ToolResult {
+                content: vec![ContentBlock::Text { text: text.clone() }],
+                details: if position + 1 == batch_slice.len() {
+                    batch_result.details.clone()
+                } else {
+                    Value::Null
+                },
+            },
+            is_error: batch_error,
+        });
+
+        indexed_results.push((
+            *idx,
+            ToolResultEntry {
+                call_id: call.id.clone(),
+                tool_name: call.name.clone(),
+                content: vec![ContentBlock::Text { text }],
+                is_error: batch_error,
+                args_summary: summarize_tool_args(&call.name, &call.arguments),
+            },
+        ));
+    }
+
+    Some((end_idx, indexed_results, mutated_files, batch_error))
 }
 
 /// Is this tool a file mutation (edit, write)?
@@ -2401,9 +2629,10 @@ impl StuckDetector {
     /// For read-like tools we hash only the file path, ignoring offset/limit,
     /// so that re-reads of the same file with different byte ranges are still
     /// caught as repetition.
-    fn record(&mut self, call: &ToolCall, is_error: bool) {
-        let args_hash = if matches!(call.name.as_str(), "read" | "view") {
-            // Normalize: hash path only, ignore offset/limit/lines
+    fn record(&mut self, catalog: &ToolCapabilityCatalog, call: &ToolCall, is_error: bool) {
+        let args_hash = if is_repo_inspection_tool(catalog, &call.name) {
+            // Normalize path-scoped inspection calls so repeated reads of the
+            // same file collapse even if byte ranges or line windows differ.
             call.arguments
                 .get("path")
                 .map(hash_value)
@@ -2420,11 +2649,11 @@ impl StuckDetector {
         // If this is a mutation tool, clear prior accesses for that path —
         // the agent acted on it, so post-mutation reads are legitimate
         // verification, not churn.
-        if is_mutation_tool_name(&call.name) {
+        if is_mutation_tool_name(catalog, &call.name) {
             if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
                 self.recent_file_accesses.retain(|p| p != path);
             }
-        } else if is_repo_inspection_tool(&call.name)
+        } else if is_repo_inspection_tool(catalog, &call.name)
             && let Some(path) = call.arguments.get("path").and_then(|v| v.as_str())
         {
             self.recent_file_accesses.push(path.to_string());
@@ -2435,7 +2664,7 @@ impl StuckDetector {
     }
 
     /// Check for stuck patterns. Returns a warning with escalation level if detected.
-    fn check(&mut self) -> Option<StuckWarning> {
+    fn check(&mut self, catalog: &ToolCapabilityCatalog) -> Option<StuckWarning> {
         let len = self.recent.len();
         if len < 3 {
             self.consecutive_warnings = 0;
@@ -2453,7 +2682,7 @@ impl StuckDetector {
         // converge, not spinning.
         let has_mutation_or_validation = window
             .iter()
-            .any(|(name, _, _)| is_mutation_tool_name(name) || name == "bash");
+            .any(|(name, _, _)| is_mutation_tool_name(catalog, name) || name == "bash");
         let reads: Vec<_> = window
             .iter()
             .filter(|(name, _, _)| name == "read")
@@ -2661,8 +2890,167 @@ fn hash_value(v: &Value) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::behavior::{AutoDelegatePlan, EvidenceSufficiency, ProgressSignal};
-    use omegon_traits::{OodaPhase, ToolProvider};
+    use crate::behavior::{EvidenceAssessment, EvidenceSufficiency, ProgressSignal};
+    use omegon_traits::{OodaPhase, ToolCapability, ToolDefinition, ToolProvider};
+
+    fn test_tool_catalog() -> ToolCapabilityCatalog {
+        ToolCapabilityCatalog::from_tool_defs(&[
+            ToolDefinition {
+                name: "bash".into(),
+                label: "bash".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name: "read".into(),
+                label: "read".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![
+                    ToolCapability::RepoInspection,
+                    ToolCapability::TargetedRepoInspection,
+                ],
+            },
+            ToolDefinition {
+                name: "view".into(),
+                label: "view".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![
+                    ToolCapability::RepoInspection,
+                    ToolCapability::BroadRepoInspection,
+                ],
+            },
+            ToolDefinition {
+                name: "codebase_search".into(),
+                label: "codebase_search".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![
+                    ToolCapability::RepoInspection,
+                    ToolCapability::BroadRepoInspection,
+                ],
+            },
+            ToolDefinition {
+                name: "codebase_index".into(),
+                label: "codebase_index".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![
+                    ToolCapability::RepoInspection,
+                    ToolCapability::BroadRepoInspection,
+                ],
+            },
+            ToolDefinition {
+                name: "edit".into(),
+                label: "edit".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::Mutation, ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name: "write".into(),
+                label: "write".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::Mutation, ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name: "change".into(),
+                label: "change".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::Mutation, ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name: "memory_recall".into(),
+                label: "memory_recall".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![
+                    ToolCapability::Orientation,
+                    ToolCapability::BroadOrientation,
+                ],
+            },
+            ToolDefinition {
+                name: "memory_store".into(),
+                label: "memory_store".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::Orientation],
+            },
+            ToolDefinition {
+                name: "context_status".into(),
+                label: "context_status".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![
+                    ToolCapability::Orientation,
+                    ToolCapability::BroadOrientation,
+                ],
+            },
+            ToolDefinition {
+                name: "request_context".into(),
+                label: "request_context".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![
+                    ToolCapability::Orientation,
+                    ToolCapability::BroadOrientation,
+                ],
+            },
+            ToolDefinition {
+                name: "manage_tools".into(),
+                label: "manage_tools".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::Orientation],
+            },
+            ToolDefinition {
+                name: "web_search".into(),
+                label: "web_search".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name: "delegate".into(),
+                label: "delegate".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name: "cleave_run".into(),
+                label: "cleave_run".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name: "cleave_assess".into(),
+                label: "cleave_assess".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name: "chronos".into(),
+                label: "chronos".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::Orientation],
+            },
+            ToolDefinition {
+                name: "whoami".into(),
+                label: "whoami".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![ToolCapability::Orientation],
+            },
+        ])
+    }
 
     #[test]
     fn stuck_detector_repeated_calls() {
@@ -2673,12 +3061,12 @@ mod tests {
             arguments: serde_json::json!({"command": "cargo test -p omegon"}),
         };
 
-        detector.record(&call, false);
-        detector.record(&call, false);
-        assert!(detector.check().is_none());
+        detector.record(&test_tool_catalog(), &call, false);
+        detector.record(&test_tool_catalog(), &call, false);
+        assert!(detector.check(&test_tool_catalog()).is_none());
 
-        detector.record(&call, false);
-        let warning = detector.check();
+        detector.record(&test_tool_catalog(), &call, false);
+        let warning = detector.check(&test_tool_catalog());
         assert!(warning.is_some());
         assert!(warning.unwrap().message.contains("same arguments"));
     }
@@ -2691,6 +3079,7 @@ mod tests {
         // Read the same file 3 times via different inspection tools
         for name in &["read", "view", "read"] {
             detector.record(
+                &test_tool_catalog(),
                 &ToolCall {
                     id: "r".into(),
                     name: (*name).into(),
@@ -2701,6 +3090,7 @@ mod tests {
         }
         // Mutate it — should clear prior access entries for this path
         detector.record(
+            &test_tool_catalog(),
             &ToolCall {
                 id: "m".into(),
                 name: "edit".into(),
@@ -2710,6 +3100,7 @@ mod tests {
         );
         // Read once more to verify the edit
         detector.record(
+            &test_tool_catalog(),
             &ToolCall {
                 id: "r2".into(),
                 name: "read".into(),
@@ -2718,12 +3109,33 @@ mod tests {
             false,
         );
         // Should NOT trigger cross-tool file churn — the mutation reset the counter
-        let warning = detector.check();
+        let warning = detector.check(&test_tool_catalog());
         assert!(
             warning.is_none() || !warning.as_ref().unwrap().message.contains(path),
             "mutation should clear file access history; got: {:?}",
             warning.map(|w| w.message)
         );
+    }
+
+    #[test]
+    fn stuck_detector_normalizes_path_scoped_inspection_tools_by_capability() {
+        let mut detector = StuckDetector::new();
+        let path = "src/main.rs";
+
+        for lines in &[(1, 20), (40, 80), (81, 120)] {
+            detector.record(
+                &test_tool_catalog(),
+                &ToolCall {
+                    id: format!("v-{}-{}", lines.0, lines.1),
+                    name: "view".into(),
+                    arguments: serde_json::json!({"path": path, "lines": [lines.0, lines.1]}),
+                },
+                false,
+            );
+        }
+
+        let warning = detector.check(&test_tool_catalog()).expect("warning");
+        assert!(warning.message.contains("same arguments"));
     }
 
     #[test]
@@ -2735,12 +3147,12 @@ mod tests {
             arguments: serde_json::json!({"path": "foo.rs", "oldText": "a", "newText": "b"}),
         };
 
-        detector.record(&call, true);
-        detector.record(&call, true);
-        detector.record(&call, true);
+        detector.record(&test_tool_catalog(), &call, true);
+        detector.record(&test_tool_catalog(), &call, true);
+        detector.record(&test_tool_catalog(), &call, true);
 
         // This triggers the repeated-call pattern (same args 3x)
-        let warning = detector.check();
+        let warning = detector.check(&test_tool_catalog());
         assert!(warning.is_some());
     }
 
@@ -2873,6 +3285,7 @@ mod tests {
                     label: "edit".into(),
                     description: "test".into(),
                     parameters: serde_json::json!({}),
+                    capabilities: vec![],
                 }]
             }
 
@@ -2986,6 +3399,7 @@ mod tests {
                     label: "edit".into(),
                     description: "test".into(),
                     parameters: serde_json::json!({}),
+                    capabilities: vec![],
                 }]
             }
 
@@ -3046,12 +3460,14 @@ mod tests {
                         label: "read".into(),
                         description: "read file".into(),
                         parameters: serde_json::json!({}),
+                        capabilities: vec![],
                     },
                     omegon_traits::ToolDefinition {
                         name: "view".into(),
                         label: "view".into(),
                         description: "view file".into(),
                         parameters: serde_json::json!({}),
+                        capabilities: vec![],
                     },
                 ]
             }
@@ -3266,18 +3682,30 @@ mod tests {
 
     #[test]
     fn looks_like_completion_matches_done_phrases() {
-        assert!(looks_like_completion("All done! Let me know if you need anything else."));
+        assert!(looks_like_completion(
+            "All done! Let me know if you need anything else."
+        ));
         assert!(looks_like_completion("The changes have been applied."));
         assert!(looks_like_completion("In summary, I updated three files."));
-        assert!(looks_like_completion("Here's a summary of the changes made."));
-        assert!(looks_like_completion("All set — the implementation is complete."));
+        assert!(looks_like_completion(
+            "Here's a summary of the changes made."
+        ));
+        assert!(looks_like_completion(
+            "All set — the implementation is complete."
+        ));
     }
 
     #[test]
     fn looks_like_completion_rejects_mid_task_text() {
-        assert!(!looks_like_completion("Reading the file now to understand the structure."));
-        assert!(!looks_like_completion("Found the bug — it's in the auth middleware."));
-        assert!(!looks_like_completion("The test failed with a type mismatch."));
+        assert!(!looks_like_completion(
+            "Reading the file now to understand the structure."
+        ));
+        assert!(!looks_like_completion(
+            "Found the bug — it's in the auth middleware."
+        ));
+        assert!(!looks_like_completion(
+            "The test failed with a type mismatch."
+        ));
         assert!(!looks_like_completion("I'll write the fix next."));
         assert!(!looks_like_completion("short")); // too short
     }
@@ -3286,7 +3714,9 @@ mod tests {
     fn session_noise_path_matches_known_patterns() {
         assert!(is_session_noise_path("ai/session/system-warning-note.md"));
         assert!(is_session_noise_path("ai/session/tool-output-ack.md"));
-        assert!(is_session_noise_path("ai/session/tool-compliance-marker.md"));
+        assert!(is_session_noise_path(
+            "ai/session/tool-compliance-marker.md"
+        ));
         assert!(is_session_noise_path(".omegon/audit-log.jsonl"));
         assert!(is_session_noise_path("some/dir/warning-log.md"));
         assert!(is_session_noise_path("some/dir/ack-receipt.md"));
@@ -3329,6 +3759,7 @@ mod tests {
             1,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
         ));
     }
@@ -3353,6 +3784,7 @@ mod tests {
             1,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
         ));
     }
@@ -3370,6 +3802,7 @@ mod tests {
             1,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
         ));
     }
@@ -3402,6 +3835,7 @@ mod tests {
             4,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
             BehavioralTier::Standard,
         ));
@@ -3410,6 +3844,7 @@ mod tests {
             6,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
             BehavioralTier::Standard,
         ));
@@ -3442,6 +3877,7 @@ mod tests {
             4,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
             BehavioralTier::Standard,
         ));
@@ -3468,6 +3904,7 @@ mod tests {
             1,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
             BehavioralTier::Standard,
         ));
@@ -3476,6 +3913,7 @@ mod tests {
             2,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
             BehavioralTier::Standard,
         ));
@@ -3503,6 +3941,7 @@ mod tests {
             5,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
             BehavioralTier::Standard,
         ));
@@ -3511,6 +3950,7 @@ mod tests {
             7,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
             BehavioralTier::Standard,
         ));
@@ -3530,6 +3970,7 @@ mod tests {
             closure_stall_streak: 7,
             constraint_discovery_streak: 3,
             targeted_evidence_streak: 6,
+            local_evidence_sufficient_streak: 4,
             evidence_sufficient_streak: 5,
         };
         let snapshot = controller.streaks();
@@ -3606,7 +4047,13 @@ mod tests {
             args_summary: None,
         }];
         assert_eq!(
-            classify_drift_kind(3, &conversation, &tool_calls, &results),
+            classify_drift_kind(
+                &test_tool_catalog(),
+                3,
+                &conversation,
+                &tool_calls,
+                &results
+            ),
             None
         );
     }
@@ -3648,11 +4095,23 @@ mod tests {
         ];
         // OrientationChurn requires turn >= 4 (raised from 2)
         assert_eq!(
-            classify_drift_kind(3, &conversation, &tool_calls, &results),
+            classify_drift_kind(
+                &test_tool_catalog(),
+                3,
+                &conversation,
+                &tool_calls,
+                &results
+            ),
             None
         );
         assert_eq!(
-            classify_drift_kind(5, &conversation, &tool_calls, &results),
+            classify_drift_kind(
+                &test_tool_catalog(),
+                5,
+                &conversation,
+                &tool_calls,
+                &results
+            ),
             Some(DriftKind::OrientationChurn)
         );
     }
@@ -3693,7 +4152,13 @@ mod tests {
             },
         ];
         assert_eq!(
-            classify_drift_kind(3, &conversation, &tool_calls, &results),
+            classify_drift_kind(
+                &test_tool_catalog(),
+                3,
+                &conversation,
+                &tool_calls,
+                &results
+            ),
             None
         );
     }
@@ -3734,7 +4199,13 @@ mod tests {
             },
         ];
         assert_eq!(
-            classify_drift_kind(3, &conversation, &tool_calls, &results),
+            classify_drift_kind(
+                &test_tool_catalog(),
+                3,
+                &conversation,
+                &tool_calls,
+                &results
+            ),
             Some(DriftKind::RepeatedActionFailure)
         );
     }
@@ -3771,7 +4242,13 @@ mod tests {
             },
         ];
         assert_eq!(
-            classify_drift_kind(3, &conversation, &tool_calls, &results),
+            classify_drift_kind(
+                &test_tool_catalog(),
+                3,
+                &conversation,
+                &tool_calls,
+                &results
+            ),
             None
         );
     }
@@ -3892,7 +4369,7 @@ mod tests {
     }
 
     #[test]
-    fn evidence_sufficiency_detected_after_target_file_and_targeted_validation() {
+    fn evidence_assessment_splits_local_and_global_after_targeted_validation() {
         let mut conversation = ConversationState::new();
         conversation
             .intent
@@ -3910,14 +4387,13 @@ mod tests {
             is_error: false,
             args_summary: None,
         }];
-        assert_eq!(
-            detect_evidence_sufficiency(&conversation, &tool_calls, &results),
-            EvidenceSufficiency::Actionable
-        );
+        let evidence = assess_evidence(&conversation, &test_tool_catalog(), &tool_calls, &results);
+        assert_eq!(evidence.local, EvidenceSufficiency::Targeted);
+        assert_eq!(evidence.global, EvidenceSufficiency::Actionable);
     }
 
     #[test]
-    fn evidence_sufficiency_detected_for_narrow_local_archaeology() {
+    fn evidence_assessment_keeps_narrow_local_archaeology_out_of_global_sufficiency() {
         let mut conversation = ConversationState::new();
         conversation
             .intent
@@ -3935,10 +4411,9 @@ mod tests {
             is_error: false,
             args_summary: None,
         }];
-        assert_eq!(
-            detect_evidence_sufficiency(&conversation, &tool_calls, &results),
-            EvidenceSufficiency::Actionable
-        );
+        let evidence = assess_evidence(&conversation, &test_tool_catalog(), &tool_calls, &results);
+        assert_eq!(evidence.local, EvidenceSufficiency::Actionable);
+        assert_eq!(evidence.global, EvidenceSufficiency::None);
     }
 
     #[test]
@@ -3979,7 +4454,7 @@ mod tests {
         }];
         let controller = ControllerState {
             consecutive_tool_continuations: 1,
-            evidence_sufficient_streak: 1,
+            local_evidence_sufficient_streak: 1,
             ..ControllerState::default()
         };
         assert_eq!(
@@ -3998,6 +4473,7 @@ mod tests {
     #[test]
     fn mutation_resets_evidence_sufficiency_streak() {
         let mut controller = ControllerState {
+            local_evidence_sufficient_streak: 2,
             evidence_sufficient_streak: 3,
             consecutive_tool_continuations: 5,
             ..ControllerState::default()
@@ -4006,9 +4482,13 @@ mod tests {
             TurnEndReason::ToolContinuation,
             None,
             ProgressSignal::Mutation,
-            EvidenceSufficiency::Actionable,
+            EvidenceAssessment {
+                local: EvidenceSufficiency::Actionable,
+                global: EvidenceSufficiency::Actionable,
+            },
         );
         assert_eq!(controller.evidence_sufficient_streak, 0);
+        assert_eq!(controller.local_evidence_sufficient_streak, 0);
         assert_eq!(controller.consecutive_tool_continuations, 0);
     }
 
@@ -4028,6 +4508,7 @@ mod tests {
             4,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
             BehavioralTier::Standard,
         ));
@@ -4057,6 +4538,7 @@ mod tests {
             4,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
             BehavioralTier::Standard,
         ));
@@ -4071,13 +4553,17 @@ mod tests {
             closure_stall_streak: 2,
             constraint_discovery_streak: 0,
             targeted_evidence_streak: 0,
+            local_evidence_sufficient_streak: 0,
             evidence_sufficient_streak: 0,
         };
         controller.observe_turn(
             TurnEndReason::ToolContinuation,
             Some(DriftKind::OrientationChurn),
             ProgressSignal::ConstraintDiscovery,
-            EvidenceSufficiency::None,
+            EvidenceAssessment {
+                local: EvidenceSufficiency::None,
+                global: EvidenceSufficiency::None,
+            },
         );
         assert!(controller.consecutive_tool_continuations < 8);
         assert!(controller.orientation_churn_streak < 4);
@@ -4101,7 +4587,7 @@ mod tests {
             args_summary: None,
         }];
         assert_eq!(
-            classify_progress_signal(0, 1, &tool_calls, &results),
+            classify_progress_signal(0, 1, &test_tool_catalog(), &tool_calls, &results),
             ProgressSignal::ConstraintDiscovery
         );
     }
@@ -4121,7 +4607,7 @@ mod tests {
             args_summary: None,
         }];
         assert_eq!(
-            classify_progress_signal(0, 1, &tool_calls, &results),
+            classify_progress_signal(0, 1, &test_tool_catalog(), &tool_calls, &results),
             ProgressSignal::None
         );
     }
@@ -4134,6 +4620,7 @@ mod tests {
         let mut detector = StuckDetector::new();
         for _ in 0..5 {
             detector.record(
+                &test_tool_catalog(),
                 &ToolCall {
                     id: "1".into(),
                     name: "read".into(),
@@ -4142,7 +4629,7 @@ mod tests {
                 false,
             );
         }
-        let warning = detector.check().expect("warning");
+        let warning = detector.check(&test_tool_catalog()).expect("warning");
         assert!(
             warning.message.contains("same file multiple times"),
             "got: {warning}"
@@ -4180,6 +4667,7 @@ mod tests {
             5,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
             BehavioralTier::Standard,
         ));
@@ -4188,6 +4676,7 @@ mod tests {
             7,
             &config,
             &conversation,
+            &test_tool_catalog(),
             &tool_calls,
             BehavioralTier::Standard,
         ));
@@ -4218,7 +4707,7 @@ mod tests {
             args_summary: None,
         }];
         assert_eq!(
-            classify_turn_phase(&tool_calls, &results),
+            classify_turn_phase(&test_tool_catalog(), &tool_calls, &results),
             Some(OodaPhase::Act),
             "bash must be Act, not Orient — shell commands are productive work"
         );
@@ -4271,7 +4760,7 @@ mod tests {
             args_summary: None,
         }];
         assert_eq!(
-            classify_turn_phase(&tool_calls, &results),
+            classify_turn_phase(&test_tool_catalog(), &tool_calls, &results),
             Some(OodaPhase::Act),
             "web_search must be Act — it produces external information"
         );
@@ -4294,7 +4783,7 @@ mod tests {
             args_summary: None,
         }];
         assert_eq!(
-            classify_turn_phase(&tool_calls, &results),
+            classify_turn_phase(&test_tool_catalog(), &tool_calls, &results),
             Some(OodaPhase::Observe),
             "memory_store must be Observe, not Orient — it's legitimate context work"
         );
@@ -4385,17 +4874,35 @@ mod tests {
             },
         ];
         assert_eq!(
-            classify_drift_kind(2, &conversation, &tool_calls, &results),
+            classify_drift_kind(
+                &test_tool_catalog(),
+                2,
+                &conversation,
+                &tool_calls,
+                &results
+            ),
             None,
             "Turn 2 must not flag OrientationChurn"
         );
         assert_eq!(
-            classify_drift_kind(3, &conversation, &tool_calls, &results),
+            classify_drift_kind(
+                &test_tool_catalog(),
+                3,
+                &conversation,
+                &tool_calls,
+                &results
+            ),
             None,
             "Turn 3 must not flag OrientationChurn"
         );
         assert_eq!(
-            classify_drift_kind(5, &conversation, &tool_calls, &results),
+            classify_drift_kind(
+                &test_tool_catalog(),
+                5,
+                &conversation,
+                &tool_calls,
+                &results
+            ),
             Some(DriftKind::OrientationChurn),
             "Turn 5 should flag OrientationChurn"
         );
@@ -4450,10 +4957,16 @@ mod tests {
         let conversation = ConversationState::new();
 
         for turn in 1..=6 {
-            let phase = classify_turn_phase(&bash_calls, &bash_results);
+            let phase = classify_turn_phase(&test_tool_catalog(), &bash_calls, &bash_results);
             assert_eq!(phase, Some(OodaPhase::Act), "turn {turn}: bash must be Act");
 
-            let drift = classify_drift_kind(turn, &conversation, &bash_calls, &bash_results);
+            let drift = classify_drift_kind(
+                &test_tool_catalog(),
+                turn,
+                &conversation,
+                &bash_calls,
+                &bash_results,
+            );
             // bash calls don't match any drift pattern (not repo inspection tools)
             assert_eq!(
                 drift, None,
@@ -4478,7 +4991,10 @@ mod tests {
                 omegon_traits::TurnEndReason::ToolContinuation,
                 drift,
                 ProgressSignal::None,
-                EvidenceSufficiency::None,
+                EvidenceAssessment {
+                    local: EvidenceSufficiency::None,
+                    global: EvidenceSufficiency::None,
+                },
             );
         }
 
@@ -4599,6 +5115,7 @@ mod tests {
         let mut detector = StuckDetector::new();
         // Call read 3 times (not stuck — different is_error flags don't matter)
         detector.record(
+            &test_tool_catalog(),
             &ToolCall {
                 id: "1".into(),
                 name: "read".into(),
@@ -4607,6 +5124,7 @@ mod tests {
             false,
         );
         detector.record(
+            &test_tool_catalog(),
             &ToolCall {
                 id: "2".into(),
                 name: "read".into(),
@@ -4616,6 +5134,7 @@ mod tests {
         );
         // Switch to a different tool — resets the counter
         detector.record(
+            &test_tool_catalog(),
             &ToolCall {
                 id: "3".into(),
                 name: "write".into(),
@@ -4624,7 +5143,7 @@ mod tests {
             false,
         );
         assert!(
-            detector.check().is_none(),
+            detector.check(&test_tool_catalog()).is_none(),
             "different tools should not trigger stuck"
         );
     }
@@ -4634,6 +5153,7 @@ mod tests {
         let mut detector = StuckDetector::new();
         for i in 0..10 {
             detector.record(
+                &test_tool_catalog(),
                 &ToolCall {
                     id: format!("{i}"),
                     name: "bash".into(),
@@ -4643,7 +5163,7 @@ mod tests {
             );
         }
         // After enough repeated error calls, should flag as stuck
-        let result = detector.check();
+        let result = detector.check(&test_tool_catalog());
         // May or may not fire depending on threshold — just verify it doesn't panic
         let _ = result;
     }

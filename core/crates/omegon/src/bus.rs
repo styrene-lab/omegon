@@ -40,7 +40,6 @@ fn is_core_tool(name: &str) -> bool {
             | reg::core::READ
             | reg::core::WRITE
             | reg::core::EDIT
-            | reg::core::CHANGE
             | reg::core::COMMIT
             | reg::codescan::CODEBASE_SEARCH
             | reg::context::CONTEXT_STATUS
@@ -48,6 +47,12 @@ fn is_core_tool(name: &str) -> bool {
             | reg::manage_tools::MANAGE_TOOLS
             | reg::view::VIEW
     )
+}
+
+/// Tools registered in the runtime but hidden from the model-facing tool surface.
+fn is_model_hidden_tool(name: &str) -> bool {
+    use crate::tool_registry as reg;
+    matches!(name, reg::core::CHANGE)
 }
 
 /// Strip `description` fields from tool parameter schemas to reduce token overhead.
@@ -78,6 +83,7 @@ fn compact_tool_schema(def: &ToolDefinition) -> ToolDefinition {
         // but strip parameter-level descriptions (model can infer from param names + types)
         description: def.description.clone(),
         parameters: strip_descriptions(&def.parameters),
+        capabilities: def.capabilities.clone(),
     }
 }
 
@@ -318,6 +324,7 @@ impl EventBus {
         self.tool_defs
             .iter()
             .filter(|(_, d)| disabled.as_ref().is_none_or(|set| !set.contains(&d.name)))
+            .filter(|(_, d)| !is_model_hidden_tool(&d.name))
             .map(|(_, d)| {
                 if compact {
                     compact_tool_schema(d)
@@ -372,6 +379,7 @@ impl EventBus {
         self.tool_defs
             .iter()
             .filter(|(_, d)| disabled.as_ref().is_none_or(|set| !set.contains(&d.name)))
+            .filter(|(_, d)| !is_model_hidden_tool(&d.name))
             .filter(|(_, d)| is_core_tool(&d.name) || used_tools.contains(&d.name))
             .map(|(_, d)| {
                 if compact {
@@ -387,7 +395,18 @@ impl EventBus {
     /// Used for the manage_tools list command.
     #[allow(dead_code)]
     pub fn all_tool_definitions(&self) -> Vec<ToolDefinition> {
-        self.tool_defs.iter().map(|(_, d)| d.clone()).collect()
+        self.tool_defs
+            .iter()
+            .filter(|(_, d)| !is_model_hidden_tool(&d.name))
+            .map(|(_, d)| d.clone())
+            .collect()
+    }
+
+    /// Returns true when a tool is registered in the runtime, including
+    /// model-hidden tools and explicit internal tool owners.
+    pub fn has_registered_tool(&self, tool_name: &str) -> bool {
+        self.tool_defs.iter().any(|(_, d)| d.name == tool_name)
+            || self.internal_tool_owners.contains_key(tool_name)
     }
 
     /// Find which feature owns a tool and execute it.
@@ -602,6 +621,7 @@ mod tests {
                 label: "count".into(),
                 description: "Returns the event count".into(),
                 parameters: json!({"type": "object", "properties": {}}),
+                capabilities: vec![],
             }]
         }
 
@@ -884,6 +904,7 @@ mod tests {
                 },
                 "required": ["path"]
             }),
+            capabilities: vec![],
         };
 
         let compact = compact_tool_schema(&def);
@@ -959,6 +980,7 @@ mod tests {
                 label: name.to_string(),
                 description: String::new(),
                 parameters: json!({"type": "object", "properties": {}}),
+                capabilities: vec![],
             })
             .collect();
         let disabled = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
@@ -1030,7 +1052,7 @@ mod tests {
             reg::cleave::CLEAVE_ASSESS,
         ];
 
-        let always_enabled = ["bash", "read", "write", "edit", "change", "commit"];
+        let always_enabled = ["bash", "read", "write", "edit", "commit"];
 
         let all_names: Vec<&str> = slim_only_disabled
             .iter()

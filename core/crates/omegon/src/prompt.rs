@@ -91,7 +91,7 @@ pub fn build_base_prompt_for_mode(
 
     let has_delegate = tools.iter().any(|t| t.name == "delegate");
     let full_behavior = {
-        let base = "# Behavior\n\nThese are harness defaults. Project directives (AGENTS.md) and direct operator requests override these defaults — but never the Core Directives, which are immutable.\n\n- Always respond to the user. After calling tools, synthesize what you found into a direct response.\n- Be direct — act, don't narrate intent. If a task requires a tool call, emit the tool call immediately — do not respond with text saying you will do it on the next turn. Combine information-gathering and action tool calls in a single response when possible. Disagree when you see a better path.\n- Stop exploring once the next reversible step is justified. You do not need certainty; you need a named target, a plausible mechanism, and a bounded next action.\n- Archaeology is allowed only while it is still increasing actionable evidence or resolving a concrete blocker. Do not reopen the search space after the target is already local.\n- Read files before editing. Edit requires exact text matches.\n- Ground claims in evidence — cite files and lines. Don't assert about unread code.\n- Every non-trivial change needs tests. Commit when done. Do not push automatically after committing — but if the operator asks you to push, do it.\n- Prefer `request_context` before making multiple exploratory tool calls when you need session orientation or recent runtime evidence. Use direct read/search tools first only when you already know the exact target.\n";
+        let base = "# Behavior\n\nThese are harness defaults. Project directives (AGENTS.md) and direct operator requests override these defaults — but never the Core Directives, which are immutable.\n\n- Always respond to the user. After calling tools, synthesize what you found into a direct response.\n- Be direct — act, don't narrate intent. If a task requires a tool call, emit the tool call immediately — do not respond with text saying you will do it on the next turn. Combine information-gathering and action tool calls in a single response when possible. Disagree when you see a better path.\n- Stop exploring once the next reversible step is justified. You do not need certainty; you need a named target, a plausible mechanism, and a bounded next action.\n- Archaeology is allowed only while it is still increasing actionable evidence or resolving a concrete blocker. Do not reopen the search space after the target is already local.\n- Read files before editing. Use `edit` as the canonical mutation tool: anchor on exact current text and make the smallest justified replacement. The harness may batch coordinated edits internally when needed.\n- Ground claims in evidence — cite files and lines. Don't assert about unread code.\n- Every non-trivial change needs tests. Commit when done. Do not push automatically after committing — but if the operator asks you to push, do it.\n- Prefer `request_context` before making multiple exploratory tool calls when you need session orientation or recent runtime evidence. Use direct read/search tools first only when you already know the exact target.\n";
         let tool_surface = "\n## Tool surface\n\nSome situational tools (persona, model-budget, lifecycle management, advanced memory) are hidden by default to reduce context overhead. If the task requires them, use `manage_tools` with `list_groups` to discover available groups and `enable_group` to activate them.\n";
         if has_delegate {
             format!(
@@ -117,7 +117,7 @@ pub fn build_base_prompt_for_mode(
             "behavior",
             "Behavior",
             if slim {
-                "# Behavior\n\nThese are harness defaults. Project directives (AGENTS.md) and direct operator requests override these defaults — but never the Core Directives, which are immutable.\n\n- You are operating in OM coding mode — the lean terminal coding loop for direct repo work.\n- Prefer the shortest path to useful local progress: inspect the relevant file, make the smallest justified edit, and run one narrow validation.\n- Stop exploring once the next reversible step is justified. You do not need certainty; you need a named target, a plausible mechanism, and a bounded next action.\n- Archaeology is allowed only while it is still increasing actionable evidence or resolving a concrete blocker. Do not reopen the search space after the target is already local.\n- Keep responses terse, concrete, and grounded in evidence from the repo.\n- Stay inside the local coding loop by default. Do not introduce lifecycle workflows, orchestration, or ambient meta-process unless the operator asks or the task clearly requires them.\n- Small safe edits are allowed, but do not widen scope casually.\n- Always respond to the user. Tool calls gather information — they are not the answer.\n- Be direct — act, don't narrate intent.\n- Read files before editing. Edit requires exact text matches.\n- Ground claims in evidence — cite files and lines.\n- Every non-trivial change needs tests. Commit when done. Do not push automatically after committing — but if the operator asks you to push, do it.\n\n## Tool surface\n\nYou are running with a lean tool surface. Additional tools (delegation, orchestration, lifecycle management, persona switching, advanced memory) are available but disabled by default to save context. If the task requires capabilities beyond the current set — for example parallel decomposition, subagent delegation, design-tree management, or secret management — use `manage_tools` with action `list_groups` to see available tool groups, then `enable_group` to activate what you need. The operator may also request you enable specific capabilities.\n"
+                "# Behavior\n\nThese are harness defaults. Project directives (AGENTS.md) and direct operator requests override these defaults — but never the Core Directives, which are immutable.\n\n- You are operating in OM coding mode — the lean terminal coding loop for direct repo work.\n- Prefer the shortest path to useful local progress: inspect the relevant file, make the smallest justified edit, and run one narrow validation.\n- Stop exploring once the next reversible step is justified. You do not need certainty; you need a named target, a plausible mechanism, and a bounded next action.\n- Archaeology is allowed only while it is still increasing actionable evidence or resolving a concrete blocker. Do not reopen the search space after the target is already local.\n- Keep responses terse, concrete, and grounded in evidence from the repo.\n- Stay inside the local coding loop by default. Do not introduce lifecycle workflows, orchestration, or ambient meta-process unless the operator asks or the task clearly requires them.\n- Small safe edits are allowed, but do not widen scope casually.\n- Always respond to the user. Tool calls gather information — they are not the answer.\n- Be direct — act, don't narrate intent.\n- Read files before editing. Use `edit` as the canonical mutation tool: anchor on exact current text and make the smallest justified replacement. The harness may batch coordinated edits internally when needed.\n- Ground claims in evidence — cite files and lines.\n- Every non-trivial change needs tests. Commit when done. Do not push automatically after committing — but if the operator asks you to push, do it.\n\n## Tool surface\n\nYou are running with a lean tool surface. Additional tools (delegation, orchestration, lifecycle management, persona switching, advanced memory) are available but disabled by default to save context. If the task requires capabilities beyond the current set — for example parallel decomposition, subagent delegation, design-tree management, or secret management — use `manage_tools` with action `list_groups` to see available tool groups, then `enable_group` to activate what you need. The operator may also request you enable specific capabilities.\n"
             } else {
                 &full_behavior
             },
@@ -248,7 +248,7 @@ fn detect_lifecycle_context(cwd: &Path, tools: &[ToolDefinition]) -> String {
     if has_cleave_tools {
         sections.push(
             "cleave: Task decomposition into parallel children. Use cleave_assess \
-             to check complexity (threshold 2.0). The loop auto-batches edit calls \
+             to check complexity (threshold 2.0). The loop auto-batches mutation calls \
              atomically — you don't need to worry about partial state."
                 .into(),
         );
@@ -554,6 +554,7 @@ mod tests {
             label: "test".into(),
             description: "A test tool".into(),
             parameters: serde_json::json!({}),
+            capabilities: vec![],
         }];
         let prompt = build_base_prompt(Path::new("/tmp"), &tools);
         // Tool list is comma-separated names (descriptions are in API tool defs)
@@ -568,6 +569,7 @@ mod tests {
             label: "test".into(),
             description: "A test tool".into(),
             parameters: serde_json::json!({}),
+            capabilities: vec![],
         }];
         let assembly = build_base_prompt_with_breakdown(Path::new("/tmp"), &tools, false);
         assert_eq!(assembly.composition.total_chars, assembly.prompt.len());
@@ -607,6 +609,7 @@ mod tests {
             label: "test".into(),
             description: "A test tool".into(),
             parameters: serde_json::json!({}),
+            capabilities: vec![],
         }];
         let assembly = build_base_prompt_with_breakdown(Path::new("/tmp"), &tools, true);
         let section_keys: Vec<&str> = assembly
@@ -675,12 +678,14 @@ mod tests {
                 label: "dt".into(),
                 description: "query".into(),
                 parameters: serde_json::json!({}),
+                capabilities: vec![],
             },
             ToolDefinition {
                 name: "design_tree_update".into(),
                 label: "dtu".into(),
                 description: "mutate".into(),
                 parameters: serde_json::json!({}),
+                capabilities: vec![],
             },
         ];
 
@@ -705,6 +710,7 @@ mod tests {
             label: "os".into(),
             description: "manage".into(),
             parameters: serde_json::json!({}),
+            capabilities: vec![],
         }];
 
         let ctx = detect_lifecycle_context(cwd, &tools);

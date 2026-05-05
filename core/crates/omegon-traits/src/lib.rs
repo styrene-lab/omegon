@@ -1163,12 +1163,28 @@ impl std::fmt::Debug for ToolProgressSink {
 }
 
 /// JSON Schema definition for a tool's parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCapability {
+    Orientation,
+    BroadOrientation,
+    RepoInspection,
+    BroadRepoInspection,
+    TargetedRepoInspection,
+    Mutation,
+    Validation,
+    StateChanging,
+}
+
+/// JSON Schema definition for a tool's parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
     pub name: String,
     pub label: String,
     pub description: String,
     pub parameters: Value,
+    #[serde(default)]
+    pub capabilities: Vec<ToolCapability>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

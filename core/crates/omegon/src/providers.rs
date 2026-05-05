@@ -3038,9 +3038,9 @@ impl LlmBridge for AntigravityClient {
             "request": request_body,
         });
 
-        let url = std::env::var("ANTIGRAVITY_BASE_URL").unwrap_or_else(|_|
+        let url = std::env::var("ANTIGRAVITY_BASE_URL").unwrap_or_else(|_| {
             "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse".into()
-        );
+        });
 
         let mut response = self
             .client
@@ -3726,6 +3726,7 @@ mod tests {
                     }
                 ]
             }),
+            capabilities: vec![],
         }];
 
         let wire_tools: Vec<Value> = tools
@@ -3756,18 +3757,21 @@ mod tests {
                 label: "bash".into(),
                 description: "run command".into(),
                 parameters: json!({}),
+                capabilities: vec![],
             },
             ToolDefinition {
                 name: "read".into(),
                 label: "read".into(),
                 description: "read file".into(),
                 parameters: json!({}),
+                capabilities: vec![],
             },
             ToolDefinition {
                 name: "memory_store".into(),
                 label: "memory".into(),
                 description: "store fact".into(),
                 parameters: json!({}),
+                capabilities: vec![],
             },
         ];
         let wire = AnthropicClient::build_tools(&tools, true);
@@ -3786,6 +3790,7 @@ mod tests {
             label: "bash".into(),
             description: "run command".into(),
             parameters: json!({}),
+            capabilities: vec![],
         }];
         let wire = AnthropicClient::build_tools(&tools, false);
         assert_eq!(wire[0]["name"], "bash", "API key mode preserves lowercase");
@@ -4421,6 +4426,7 @@ mod tests {
                 },
                 "required": ["command"]
             }),
+            capabilities: vec![],
         }];
         let wire = CodexClient::build_tools(&tools);
         assert_eq!(wire.len(), 1);

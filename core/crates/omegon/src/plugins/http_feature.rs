@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use super::manifest::{PluginManifest, resolve_template};
+use super::tool_capabilities::{ExternalExecutionHint, resolve_external_tool_capabilities};
 
 /// A Feature backed by HTTP endpoints declared in a plugin manifest.
 pub struct HttpPluginFeature {
@@ -77,6 +78,16 @@ impl Feature for HttpPluginFeature {
                 label: t.name.clone(),
                 description: t.description.clone(),
                 parameters: t.parameters.clone(),
+                capabilities: resolve_external_tool_capabilities(
+                    &t.capabilities,
+                    &t.name,
+                    &t.description,
+                    &t.parameters,
+                    match inferred_http_method(t).as_str() {
+                        "GET" => ExternalExecutionHint::HttpGet,
+                        _ => ExternalExecutionHint::HttpMutating,
+                    },
+                ),
             })
             .collect()
     }
@@ -244,6 +255,25 @@ impl Feature for HttpPluginFeature {
 
         vec![]
     }
+}
+
+fn inferred_http_method(tool: &super::manifest::ToolConfig) -> String {
+    tool.method
+        .as_deref()
+        .map(str::to_ascii_uppercase)
+        .unwrap_or_else(|| {
+            if tool
+                .parameters
+                .as_object()
+                .and_then(|obj| obj.get("properties"))
+                .and_then(|props| props.as_object())
+                .is_some_and(|props| !props.is_empty())
+            {
+                "POST".to_string()
+            } else {
+                "GET".to_string()
+            }
+        })
 }
 
 #[cfg(test)]

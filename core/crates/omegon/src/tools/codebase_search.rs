@@ -258,6 +258,10 @@ impl ToolProvider for CodescanProvider {
                     },
                     "required": ["query"]
                 }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::RepoInspection,
+                    omegon_traits::ToolCapability::BroadRepoInspection,
+                ],
             },
             ToolDefinition {
                 name: crate::tool_registry::codescan::CODEBASE_INDEX.into(),
@@ -269,6 +273,10 @@ impl ToolProvider for CodescanProvider {
                         "invalidate": { "type": "boolean", "description": "Drop cache and full reindex (default: false)" }
                     }
                 }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::RepoInspection,
+                    omegon_traits::ToolCapability::BroadRepoInspection,
+                ],
             },
         ]
     }

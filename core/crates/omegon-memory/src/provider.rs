@@ -62,6 +62,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                     }
                 }
             }),
+            capabilities: vec![ToolCapability::Orientation],
         },
         ToolDefinition {
             name: "memory_recall".into(),
@@ -85,6 +86,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                     }
                 }
             }),
+            capabilities: vec![ToolCapability::Orientation, ToolCapability::BroadOrientation],
         },
         ToolDefinition {
             name: "memory_query".into(),
@@ -94,6 +96,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                 "type": "object",
                 "properties": {}
             }),
+            capabilities: vec![ToolCapability::Orientation],
         },
         ToolDefinition {
             name: "memory_archive".into(),
@@ -110,6 +113,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                     }
                 }
             }),
+            capabilities: vec![ToolCapability::Orientation],
         },
         ToolDefinition {
             name: "memory_supersede".into(),
@@ -124,6 +128,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                     "content": { "type": "string" }
                 }
             }),
+            capabilities: vec![ToolCapability::Orientation],
         },
         ToolDefinition {
             name: "memory_connect".into(),
@@ -139,6 +144,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                     "description": { "type": "string" }
                 }
             }),
+            capabilities: vec![ToolCapability::Orientation],
         },
         ToolDefinition {
             name: "memory_focus".into(),
@@ -154,6 +160,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                     }
                 }
             }),
+            capabilities: vec![ToolCapability::Orientation],
         },
         ToolDefinition {
             name: "memory_release".into(),
@@ -163,6 +170,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                 "type": "object",
                 "properties": {}
             }),
+            capabilities: vec![ToolCapability::Orientation],
         },
         ToolDefinition {
             name: "memory_episodes".into(),
@@ -182,6 +190,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                     }
                 }
             }),
+            capabilities: vec![ToolCapability::Orientation],
         },
         ToolDefinition {
             name: "memory_compact".into(),
@@ -196,6 +205,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                     }
                 }
             }),
+            capabilities: vec![ToolCapability::Orientation],
         },
         ToolDefinition {
             name: "memory_ingest_lifecycle".into(),
@@ -215,6 +225,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                     "artifact_ref_sub": { "type": "string" }
                 }
             }),
+            capabilities: vec![ToolCapability::Orientation],
         },
         ToolDefinition {
             name: "memory_search_archive".into(),
@@ -230,6 +241,7 @@ fn tool_defs() -> Vec<ToolDefinition> {
                     }
                 }
             }),
+            capabilities: vec![ToolCapability::Orientation],
         },
     ]
 }

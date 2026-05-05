@@ -102,6 +102,7 @@ impl Feature for AuthFeature {
                 },
                 "required": []
             }),
+            capabilities: vec![omegon_traits::ToolCapability::Orientation],
         }]
     }
 

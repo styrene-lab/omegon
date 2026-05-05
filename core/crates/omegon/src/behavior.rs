@@ -7,49 +7,74 @@
 
 use crate::conversation::{ConversationState, ToolCall, ToolResultEntry};
 pub(crate) use omegon_traits::ProgressSignal;
-use omegon_traits::{DriftKind, OodaPhase, ProgressNudgeReason};
+use omegon_traits::{DriftKind, OodaPhase, ProgressNudgeReason, ToolCapability, ToolDefinition};
+use std::collections::{BTreeSet, HashMap};
 
 // ─── Tool classification predicates ────────────────────────────────────────
 
-pub(crate) fn is_orientation_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "memory_recall"
-            | "memory_query"
-            | "memory_store"
-            | "memory_episodes"
-            | "context_status"
-            | "request_context"
-            | "manage_tools"
-            | "chronos"
-            | "whoami"
-    )
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ToolCapabilityCatalog {
+    capabilities_by_name: HashMap<String, BTreeSet<ToolCapability>>,
 }
 
-pub(crate) fn is_repo_inspection_tool(name: &str) -> bool {
-    matches!(name, "read" | "codebase_search" | "codebase_index" | "view")
+impl ToolCapabilityCatalog {
+    pub fn from_tool_defs(tool_defs: &[ToolDefinition]) -> Self {
+        let capabilities_by_name = tool_defs
+            .iter()
+            .map(|def| {
+                (
+                    def.name.clone(),
+                    def.capabilities.iter().copied().collect::<BTreeSet<_>>(),
+                )
+            })
+            .collect();
+        Self {
+            capabilities_by_name,
+        }
+    }
+
+    fn has(&self, tool_name: &str, capability: ToolCapability) -> bool {
+        self.capabilities_by_name
+            .get(tool_name)
+            .is_some_and(|caps| caps.contains(&capability))
+    }
 }
 
-pub(crate) fn is_broad_orientation_tool(name: &str) -> bool {
-    matches!(name, "memory_recall" | "context_status" | "request_context")
+pub(crate) fn is_orientation_tool(catalog: &ToolCapabilityCatalog, name: &str) -> bool {
+    catalog.has(name, ToolCapability::Orientation)
 }
 
-pub(crate) fn is_broad_repo_inspection_tool(name: &str) -> bool {
-    matches!(name, "codebase_search" | "view")
+pub(crate) fn is_repo_inspection_tool(catalog: &ToolCapabilityCatalog, name: &str) -> bool {
+    catalog.has(name, ToolCapability::RepoInspection)
 }
 
-pub(crate) fn is_targeted_repo_inspection_tool(name: &str) -> bool {
-    name == "read"
+pub(crate) fn is_broad_orientation_tool(catalog: &ToolCapabilityCatalog, name: &str) -> bool {
+    catalog.has(name, ToolCapability::BroadOrientation)
 }
 
-pub(crate) fn is_mutation_tool_name(name: &str) -> bool {
-    matches!(name, "write" | "edit" | "change")
+pub(crate) fn is_broad_repo_inspection_tool(catalog: &ToolCapabilityCatalog, name: &str) -> bool {
+    catalog.has(name, ToolCapability::BroadRepoInspection)
 }
 
-pub(crate) fn mutation_targets_within_limit(tool_calls: &[ToolCall], max_files: usize) -> bool {
+pub(crate) fn is_targeted_repo_inspection_tool(
+    catalog: &ToolCapabilityCatalog,
+    name: &str,
+) -> bool {
+    catalog.has(name, ToolCapability::TargetedRepoInspection)
+}
+
+pub(crate) fn is_mutation_tool_name(catalog: &ToolCapabilityCatalog, name: &str) -> bool {
+    catalog.has(name, ToolCapability::Mutation)
+}
+
+pub(crate) fn mutation_targets_within_limit(
+    catalog: &ToolCapabilityCatalog,
+    tool_calls: &[ToolCall],
+    max_files: usize,
+) -> bool {
     let mut paths = std::collections::BTreeSet::new();
     for call in tool_calls {
-        if !is_mutation_tool_name(&call.name) {
+        if !is_mutation_tool_name(catalog, &call.name) {
             continue;
         }
         let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) else {
@@ -63,18 +88,23 @@ pub(crate) fn mutation_targets_within_limit(tool_calls: &[ToolCall], max_files: 
     !paths.is_empty()
 }
 
-pub(crate) fn is_narrow_patch_candidate(tool_calls: &[ToolCall]) -> bool {
+pub(crate) fn is_narrow_patch_candidate(
+    catalog: &ToolCapabilityCatalog,
+    tool_calls: &[ToolCall],
+) -> bool {
     if !tool_calls
         .iter()
-        .any(|call| is_mutation_tool_name(&call.name))
+        .any(|call| is_mutation_tool_name(catalog, &call.name))
     {
         return false;
     }
-    if !mutation_targets_within_limit(tool_calls, 2) {
+    if !mutation_targets_within_limit(catalog, tool_calls, 2) {
         return false;
     }
     tool_calls.iter().all(|call| {
-        is_mutation_tool_name(&call.name) || call.name == "read" || is_validation_tool(call)
+        is_mutation_tool_name(catalog, &call.name)
+            || is_targeted_repo_inspection_tool(catalog, &call.name)
+            || is_validation_tool(call)
     })
 }
 
@@ -107,6 +137,7 @@ pub(crate) fn is_validation_tool(call: &ToolCall) -> bool {
 // ─── Phase & drift classification ──────────────────────────────────────────
 
 pub(crate) fn classify_turn_phase(
+    catalog: &ToolCapabilityCatalog,
     tool_calls: &[ToolCall],
     results: &[ToolResultEntry],
 ) -> Option<OodaPhase> {
@@ -116,23 +147,13 @@ pub(crate) fn classify_turn_phase(
 
     // Tools that produce output or change state are Act.
     if tool_calls.iter().any(|call| {
-        matches!(
-            call.name.as_str(),
-            "commit"
-                | "delegate"
-                | "cleave_run"
-                | "cleave_assess"
-                | "bash"
-                | "web_search"
-                | "ask_local_model"
-                | "serve"
-        )
+        catalog.has(&call.name, ToolCapability::StateChanging) || is_validation_tool(call)
     }) {
         return Some(OodaPhase::Act);
     }
 
     let successful_mutation = tool_calls.iter().any(|call| {
-        is_mutation_tool_name(&call.name)
+        is_mutation_tool_name(catalog, &call.name)
             && results
                 .iter()
                 .find(|result| result.call_id == call.id)
@@ -144,14 +165,14 @@ pub(crate) fn classify_turn_phase(
 
     if tool_calls
         .iter()
-        .all(|call| is_orientation_tool(&call.name))
+        .all(|call| is_orientation_tool(catalog, &call.name))
     {
         return Some(OodaPhase::Observe);
     }
 
     if tool_calls
         .iter()
-        .all(|call| is_repo_inspection_tool(&call.name))
+        .all(|call| is_repo_inspection_tool(catalog, &call.name))
     {
         return Some(OodaPhase::Observe);
     }
@@ -162,7 +183,7 @@ pub(crate) fn classify_turn_phase(
 
     if tool_calls
         .iter()
-        .any(|call| is_mutation_tool_name(&call.name) || is_validation_tool(call))
+        .any(|call| is_mutation_tool_name(catalog, &call.name) || is_validation_tool(call))
     {
         return Some(OodaPhase::Act);
     }
@@ -171,6 +192,7 @@ pub(crate) fn classify_turn_phase(
 }
 
 pub(crate) fn classify_drift_kind(
+    catalog: &ToolCapabilityCatalog,
     turn: u32,
     conversation: &ConversationState,
     tool_calls: &[ToolCall],
@@ -178,22 +200,22 @@ pub(crate) fn classify_drift_kind(
 ) -> Option<DriftKind> {
     let broad_orientation_calls = tool_calls
         .iter()
-        .filter(|call| is_broad_orientation_tool(&call.name))
+        .filter(|call| is_broad_orientation_tool(catalog, &call.name))
         .count();
     let broad_repo_inspection_calls = tool_calls
         .iter()
-        .filter(|call| is_broad_repo_inspection_tool(&call.name))
+        .filter(|call| is_broad_repo_inspection_tool(catalog, &call.name))
         .count();
     let targeted_repo_inspection_calls = tool_calls
         .iter()
-        .filter(|call| is_targeted_repo_inspection_tool(&call.name))
+        .filter(|call| is_targeted_repo_inspection_tool(catalog, &call.name))
         .count();
 
     if conversation.intent.files_modified.is_empty()
         && !conversation.intent.files_read.is_empty()
         && tool_calls
             .iter()
-            .all(|call| is_repo_inspection_tool(&call.name))
+            .all(|call| is_repo_inspection_tool(catalog, &call.name))
         && turn >= 4
         && broad_repo_inspection_calls > 0
         && targeted_repo_inspection_calls <= 1
@@ -212,7 +234,7 @@ pub(crate) fn classify_drift_kind(
     let failing_mutations: Vec<&ToolCall> = tool_calls
         .iter()
         .filter(|call| {
-            is_mutation_tool_name(&call.name)
+            is_mutation_tool_name(catalog, &call.name)
                 && results
                     .iter()
                     .find(|result| result.call_id == call.id)
@@ -257,7 +279,7 @@ pub(crate) fn classify_drift_kind(
     if !conversation.intent.files_modified.is_empty()
         && tool_calls
             .iter()
-            .all(|call| is_repo_inspection_tool(&call.name))
+            .all(|call| is_repo_inspection_tool(catalog, &call.name))
         && broad_repo_inspection_calls > 0
     {
         return Some(DriftKind::ClosureStall);
@@ -279,6 +301,7 @@ pub(crate) fn is_first_turn_orientation_churn(
     turn: u32,
     config: &super::r#loop::LoopConfig,
     conversation: &ConversationState,
+    catalog: &ToolCapabilityCatalog,
     tool_calls: &[ToolCall],
 ) -> bool {
     config.enforce_first_turn_execution_bias
@@ -286,7 +309,7 @@ pub(crate) fn is_first_turn_orientation_churn(
         && !tool_calls.is_empty()
         && tool_calls
             .iter()
-            .all(|call| is_orientation_tool(&call.name))
+            .all(|call| is_orientation_tool(catalog, &call.name))
         && conversation.intent.files_read.is_empty()
         && conversation.intent.files_modified.is_empty()
 }
@@ -295,6 +318,7 @@ pub(crate) fn should_inject_execution_pressure(
     turn: u32,
     _config: &super::r#loop::LoopConfig,
     conversation: &ConversationState,
+    catalog: &ToolCapabilityCatalog,
     tool_calls: &[ToolCall],
     behavior: BehavioralTier,
 ) -> bool {
@@ -303,14 +327,14 @@ pub(crate) fn should_inject_execution_pressure(
         || conversation.intent.files_read.is_empty()
         || !tool_calls
             .iter()
-            .all(|call| is_repo_inspection_tool(&call.name))
+            .all(|call| is_repo_inspection_tool(catalog, &call.name))
     {
         return false;
     }
 
     let has_broad_repo_inspection = tool_calls
         .iter()
-        .any(|call| is_broad_repo_inspection_tool(&call.name));
+        .any(|call| is_broad_repo_inspection_tool(catalog, &call.name));
 
     // Give the agent time to orient before pressuring execution.
     let (broad_threshold, targeted_threshold) = match behavior {
@@ -331,6 +355,12 @@ pub(crate) enum EvidenceSufficiency {
     None,
     Targeted,
     Actionable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EvidenceAssessment {
+    pub local: EvidenceSufficiency,
+    pub global: EvidenceSufficiency,
 }
 
 /// Behavioral tier for loop control. Determines pressure thresholds and nudge style.
@@ -367,6 +397,7 @@ pub(crate) struct ControllerState {
     pub closure_stall_streak: u32,
     pub constraint_discovery_streak: u32,
     pub targeted_evidence_streak: u32,
+    pub local_evidence_sufficient_streak: u32,
     pub evidence_sufficient_streak: u32,
 }
 
@@ -393,7 +424,7 @@ impl ControllerState {
         turn_end_reason: omegon_traits::TurnEndReason,
         drift_kind: Option<DriftKind>,
         progress_signal: ProgressSignal,
-        evidence_sufficiency: EvidenceSufficiency,
+        evidence: EvidenceAssessment,
     ) {
         match progress_signal {
             ProgressSignal::Mutation | ProgressSignal::Commit | ProgressSignal::Completion => {
@@ -450,15 +481,21 @@ impl ControllerState {
                 self.constraint_discovery_streak / 2
             };
         self.targeted_evidence_streak = if matches!(
-            evidence_sufficiency,
+            evidence.local,
             EvidenceSufficiency::Targeted | EvidenceSufficiency::Actionable
         ) {
             self.targeted_evidence_streak.saturating_add(1)
         } else {
             self.targeted_evidence_streak / 2
         };
+        self.local_evidence_sufficient_streak =
+            if matches!(evidence.local, EvidenceSufficiency::Actionable) {
+                self.local_evidence_sufficient_streak.saturating_add(1)
+            } else {
+                self.local_evidence_sufficient_streak / 2
+            };
         self.evidence_sufficient_streak =
-            if matches!(evidence_sufficiency, EvidenceSufficiency::Actionable) {
+            if matches!(evidence.global, EvidenceSufficiency::Actionable) {
                 self.evidence_sufficient_streak.saturating_add(1)
             } else {
                 self.evidence_sufficient_streak / 2
@@ -485,9 +522,13 @@ where
     })
 }
 
-pub(crate) fn has_progress_boundary(tool_calls: &[ToolCall], results: &[ToolResultEntry]) -> bool {
+pub(crate) fn has_progress_boundary(
+    catalog: &ToolCapabilityCatalog,
+    tool_calls: &[ToolCall],
+    results: &[ToolResultEntry],
+) -> bool {
     has_successful_tool_call(tool_calls, results, |call| {
-        is_mutation_tool_name(&call.name)
+        is_mutation_tool_name(catalog, &call.name)
     }) || has_successful_tool_call(tool_calls, results, is_validation_tool)
         || has_successful_tool_call(tool_calls, results, |call| call.name == "commit")
 }
@@ -535,6 +576,7 @@ pub(crate) fn classify_validation_scope(
 pub(crate) fn detect_constraint_discovery(
     constraints_before: usize,
     constraints_after: usize,
+    catalog: &ToolCapabilityCatalog,
     tool_calls: &[ToolCall],
     results: &[ToolResultEntry],
 ) -> bool {
@@ -543,9 +585,9 @@ pub(crate) fn detect_constraint_discovery(
     }
 
     tool_calls.iter().any(|call| {
-        is_repo_inspection_tool(&call.name)
+        is_repo_inspection_tool(catalog, &call.name)
             || is_validation_tool(call)
-            || (is_mutation_tool_name(&call.name)
+            || (is_mutation_tool_name(catalog, &call.name)
                 && results
                     .iter()
                     .find(|result| result.call_id == call.id)
@@ -556,6 +598,7 @@ pub(crate) fn detect_constraint_discovery(
 pub(crate) fn classify_progress_signal(
     constraints_before: usize,
     constraints_after: usize,
+    catalog: &ToolCapabilityCatalog,
     tool_calls: &[ToolCall],
     results: &[ToolResultEntry],
 ) -> ProgressSignal {
@@ -563,7 +606,10 @@ pub(crate) fn classify_progress_signal(
         return ProgressSignal::Commit;
     }
     if has_successful_tool_call(tool_calls, results, |call| {
-        is_mutation_tool_name(&call.name) || matches!(call.name.as_str(), "delegate" | "cleave_run")
+        is_mutation_tool_name(catalog, &call.name)
+            || call.name == "commit"
+            || call.name == "delegate"
+            || call.name == "cleave_run"
     }) {
         return ProgressSignal::Mutation;
     }
@@ -573,24 +619,37 @@ pub(crate) fn classify_progress_signal(
         return validation_signal;
     }
 
-    if detect_constraint_discovery(constraints_before, constraints_after, tool_calls, results) {
+    if detect_constraint_discovery(
+        constraints_before,
+        constraints_after,
+        catalog,
+        tool_calls,
+        results,
+    ) {
         return ProgressSignal::ConstraintDiscovery;
     }
 
     ProgressSignal::None
 }
 
-pub(crate) fn detect_evidence_sufficiency(
+pub(crate) fn assess_evidence(
     conversation: &ConversationState,
+    catalog: &ToolCapabilityCatalog,
     tool_calls: &[ToolCall],
     results: &[ToolResultEntry],
-) -> EvidenceSufficiency {
+) -> EvidenceAssessment {
     if conversation.intent.files_read.is_empty() {
-        return EvidenceSufficiency::None;
+        return EvidenceAssessment {
+            local: EvidenceSufficiency::None,
+            global: EvidenceSufficiency::None,
+        };
     }
 
     if !conversation.intent.files_modified.is_empty() {
-        return EvidenceSufficiency::Actionable;
+        return EvidenceAssessment {
+            local: EvidenceSufficiency::Actionable,
+            global: EvidenceSufficiency::Actionable,
+        };
     }
 
     let targeted_validation = matches!(
@@ -598,7 +657,7 @@ pub(crate) fn detect_evidence_sufficiency(
         ProgressSignal::TargetedValidation
     );
     let failed_mutation_on_known_target = tool_calls.iter().any(|call| {
-        is_mutation_tool_name(&call.name)
+        is_mutation_tool_name(catalog, &call.name)
             && call
                 .arguments
                 .get("path")
@@ -616,23 +675,23 @@ pub(crate) fn detect_evidence_sufficiency(
                 })
     });
     let inspection_backed_by_validation_failure = tool_calls.iter().any(|call| {
-        is_repo_inspection_tool(&call.name)
+        is_repo_inspection_tool(catalog, &call.name)
             && results.iter().any(|result| result.is_error)
             && tool_calls.iter().any(is_validation_tool)
     });
 
     let targeted_reads: Vec<&str> = tool_calls
         .iter()
-        .filter(|call| is_targeted_repo_inspection_tool(&call.name))
+        .filter(|call| is_targeted_repo_inspection_tool(catalog, &call.name))
         .filter_map(|call| call.arguments.get("path").and_then(|v| v.as_str()))
         .collect();
     let narrow_target_cluster = !targeted_reads.is_empty()
         && tool_calls
             .iter()
-            .all(|call| is_repo_inspection_tool(&call.name))
+            .all(|call| is_repo_inspection_tool(catalog, &call.name))
         && !tool_calls
             .iter()
-            .any(|call| is_broad_repo_inspection_tool(&call.name));
+            .any(|call| is_broad_repo_inspection_tool(catalog, &call.name));
     let targeted_paths_known = narrow_target_cluster
         && targeted_reads.iter().all(|path| {
             conversation
@@ -642,18 +701,23 @@ pub(crate) fn detect_evidence_sufficiency(
                 .any(|read| read == std::path::Path::new(path))
         });
     let local_target_count = conversation.intent.files_read.len();
-
-    if targeted_validation
-        || failed_mutation_on_known_target
-        || inspection_backed_by_validation_failure
-        || (targeted_paths_known && local_target_count <= 2)
-    {
+    let local = if targeted_paths_known && local_target_count <= 2 {
         EvidenceSufficiency::Actionable
     } else if targeted_paths_known || local_target_count <= 2 {
         EvidenceSufficiency::Targeted
     } else {
         EvidenceSufficiency::None
-    }
+    };
+    let global = if targeted_validation
+        || failed_mutation_on_known_target
+        || inspection_backed_by_validation_failure
+    {
+        EvidenceSufficiency::Actionable
+    } else {
+        EvidenceSufficiency::None
+    };
+
+    EvidenceAssessment { local, global }
 }
 
 pub(crate) fn is_slim_execution_bias(config: &super::r#loop::LoopConfig) -> bool {
@@ -684,9 +748,10 @@ pub(crate) fn continuation_pressure_tier(
         return None;
     }
 
+    let local_evidence_sufficient = controller.local_evidence_sufficient_streak > 0;
     let evidence_sufficient = controller.evidence_sufficient_streak > 0;
     let om_local_first_lock = is_slim_execution_bias(config)
-        && evidence_sufficient
+        && local_evidence_sufficient
         && has_local_target_hypothesis(conversation);
     let constrained = behavior == BehavioralTier::Constrained;
     let (tier1, tier2, tier3) = if om_local_first_lock {

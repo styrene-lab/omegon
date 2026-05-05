@@ -3,6 +3,7 @@
 //! This implements the plugin.toml spec from the omegon-armory repo.
 //! See: https://github.com/styrene-lab/omegon-armory/blob/main/docs/plugin-spec.md
 
+use omegon_traits::ToolCapability;
 use serde::Deserialize;
 
 /// Plugin type discriminator.
@@ -112,6 +113,9 @@ pub struct ToolEntry {
     /// JSON Schema for parameters.
     #[serde(default = "default_params")]
     pub parameters: serde_json::Value,
+    /// Explicit behavior capabilities for loop governance.
+    #[serde(default)]
+    pub capabilities: Vec<ToolCapability>,
     /// Execution timeout in seconds (default: 30).
     #[serde(default = "default_tool_timeout")]
     pub timeout_secs: u64,
@@ -450,6 +454,7 @@ impl ArmoryManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omegon_traits::ToolCapability;
 
     #[test]
     fn parse_persona_manifest() {
@@ -538,6 +543,32 @@ mod tests {
         assert_eq!(manifest.plugin.plugin_type, PluginType::Skill);
         assert!(manifest.validate().is_empty());
         assert_eq!(manifest.skill.unwrap().guidance, "SKILL.md");
+    }
+
+    #[test]
+    fn parse_tool_capabilities() {
+        let toml = r#"
+            [plugin]
+            type = "extension"
+            id = "lab.example.capabilities"
+            name = "cap-test"
+            version = "0.1.0"
+            description = "Capability parsing test"
+
+            [[tools]]
+            name = "lookup"
+            description = "Lookup remote records"
+            endpoint = "https://example.test/tools/lookup"
+            capabilities = ["orientation", "broad_orientation"]
+        "#;
+        let manifest = ArmoryManifest::parse(toml).unwrap();
+        assert_eq!(
+            manifest.tools[0].capabilities,
+            vec![
+                ToolCapability::Orientation,
+                ToolCapability::BroadOrientation
+            ]
+        );
     }
 
     #[test]

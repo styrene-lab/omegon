@@ -66,6 +66,7 @@ impl Feature for PersonaFeature {
                     },
                     "required": ["name"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: crate::tool_registry::persona::SWITCH_TONE.into(),
@@ -85,6 +86,7 @@ impl Feature for PersonaFeature {
                     },
                     "required": ["name"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: crate::tool_registry::persona::LIST_PERSONAS.into(),
@@ -94,6 +96,7 @@ impl Feature for PersonaFeature {
                     "type": "object",
                     "properties": {},
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
         ]
     }

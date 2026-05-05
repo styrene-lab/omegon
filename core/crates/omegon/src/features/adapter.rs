@@ -163,6 +163,7 @@ mod tests {
                 label: "dummy".into(),
                 description: "test".into(),
                 parameters: json!({"type": "object"}),
+                capabilities: vec![],
             }]
         }
         async fn execute(

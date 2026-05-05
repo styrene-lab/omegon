@@ -112,6 +112,7 @@ impl Feature for ManageTools {
                 },
                 "required": ["action"]
             }),
+            capabilities: vec![omegon_traits::ToolCapability::Orientation],
         }]
     }
 

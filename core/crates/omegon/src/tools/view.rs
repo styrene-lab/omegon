@@ -135,7 +135,9 @@ pub async fn execute(
     cwd: &std::path::Path,
     boundary: Option<&super::WorkspaceBoundary>,
 ) -> anyhow::Result<omegon_traits::ToolResult> {
-    let b = boundary.cloned().unwrap_or_else(|| super::WorkspaceBoundary::new(cwd.to_path_buf()));
+    let b = boundary
+        .cloned()
+        .unwrap_or_else(|| super::WorkspaceBoundary::new(cwd.to_path_buf()));
     let provider = ViewProvider::new(cwd.to_path_buf(), b);
     provider.execute("view", _call_id, args, _cancel).await
 }
@@ -345,6 +347,10 @@ impl ToolProvider for ViewProvider {
                 },
                 "required": ["path"]
             }),
+            capabilities: vec![
+                omegon_traits::ToolCapability::RepoInspection,
+                omegon_traits::ToolCapability::BroadRepoInspection,
+            ],
         }]
     }
 

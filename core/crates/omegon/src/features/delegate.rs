@@ -370,7 +370,7 @@ impl DelegateWorkerProfile {
                 "codebase_search".into(),
                 "view".into(),
             ],
-            Self::Patch => vec!["read".into(), "edit".into(), "change".into(), "bash".into()],
+            Self::Patch => vec!["read".into(), "edit".into(), "bash".into()],
             Self::Verify => vec!["read".into(), "bash".into()],
         };
         runtime
@@ -639,7 +639,11 @@ fn format_delegate_child_failure(
 
 impl DelegateRunner {
     pub fn new(cwd: PathBuf, result_store: Arc<DelegateResultStore>, sandbox: bool) -> Self {
-        Self { cwd, result_store, sandbox }
+        Self {
+            cwd,
+            result_store,
+            sandbox,
+        }
     }
 
     fn spawn_sandboxed(
@@ -1094,7 +1098,11 @@ pub struct DelegateFeature {
 impl DelegateFeature {
     pub fn new(cwd: &Path, agents: Vec<AgentSpec>, sandbox: bool) -> Self {
         let result_store = Arc::new(DelegateResultStore::new());
-        let runner = Arc::new(DelegateRunner::new(cwd.to_path_buf(), result_store.clone(), sandbox));
+        let runner = Arc::new(DelegateRunner::new(
+            cwd.to_path_buf(),
+            result_store.clone(),
+            sandbox,
+        ));
 
         // Seed session model from env so delegates on the first turn
         // (before any TurnEnd fires) still inherit the operator's model.
@@ -1287,6 +1295,7 @@ impl Feature for DelegateFeature {
                     },
                     "required": ["task"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: crate::tool_registry::delegate::DELEGATE_RESULT.to_string(),
@@ -1302,6 +1311,7 @@ impl Feature for DelegateFeature {
                     },
                     "required": ["task_id"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::delegate::DELEGATE_STATUS.to_string(),
@@ -1311,6 +1321,7 @@ impl Feature for DelegateFeature {
                     "type": "object",
                     "properties": {}
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
         ]
     }
@@ -1947,7 +1958,7 @@ mod tests {
     #[test]
     fn delegate_worker_profiles_specialize_tool_surface() {
         let patch = DelegateWorkerProfile::Patch.runtime_profile(None, Some("minimal"), None);
-        assert_eq!(patch.enabled_tools, vec!["read", "edit", "change", "bash"]);
+        assert_eq!(patch.enabled_tools, vec!["read", "edit", "bash"]);
         assert_eq!(DelegateWorkerProfile::Patch.max_turns(), 6);
 
         let verify = DelegateWorkerProfile::Verify.runtime_profile(None, None, None);

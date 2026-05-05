@@ -7,7 +7,7 @@ use super::*;
 use crate::lifecycle::types::NodeStatus;
 use crate::settings::{ContextClass, Settings, ThinkingLevel};
 use crate::tui::dashboard::FocusedNodeSummary;
-use crate::update::{UpdateChannel, UpdateInfo};
+use crate::update::UpdateInfo;
 use crate::web::WebDaemonStatus;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;

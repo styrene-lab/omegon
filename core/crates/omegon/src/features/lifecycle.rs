@@ -968,6 +968,7 @@ impl Feature for LifecycleFeature {
                     },
                     "required": ["action"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::lifecycle::DESIGN_TREE_UPDATE.into(),
@@ -1023,6 +1024,10 @@ impl Feature for LifecycleFeature {
                         { "if": { "properties": { "action": { "const": "set_issue_type" } } }, "then": { "required": ["action", "node_id", "issue_type"] } }
                     ]
                 }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::Mutation,
+                    omegon_traits::ToolCapability::StateChanging,
+                ],
             },
             ToolDefinition {
                 name: crate::tool_registry::lifecycle::OPENSPEC_MANAGE.into(),
@@ -1041,6 +1046,10 @@ impl Feature for LifecycleFeature {
                     },
                     "required": ["action"]
                 }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::Orientation,
+                    omegon_traits::ToolCapability::StateChanging,
+                ],
             },
             ToolDefinition {
                 name: crate::tool_registry::lifecycle::LIFECYCLE_DOCTOR.into(),
@@ -1053,6 +1062,7 @@ impl Feature for LifecycleFeature {
                         "kinds": { "type": "array", "items": { "type": "string", "enum": ["implemented_has_open_questions", "resolved_without_questions", "seed_without_questions", "exploring_without_questions", "parent_implemented_with_active_children", "question_appears_answered_by_decision"] } }
                     }
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
         ]
     }

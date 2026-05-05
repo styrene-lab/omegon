@@ -1,7 +1,7 @@
 //! Core tools — the agent's primary capabilities.
 //!
 //! Phase 0: primitive tools (bash, read, write, edit).
-//! Phase 0+: higher-level tools (understand, change, execute, remember)
+//! Phase 0+: higher-level tools (change, understand, execute, remember)
 //!           that compose the primitives.
 
 pub mod bash;
@@ -354,6 +354,7 @@ impl ToolProvider for CoreTools {
                     },
                     "required": ["command"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: reg::READ.into(),
@@ -381,6 +382,10 @@ impl ToolProvider for CoreTools {
                     },
                     "required": ["path"]
                 }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::RepoInspection,
+                    omegon_traits::ToolCapability::TargetedRepoInspection,
+                ],
             },
             ToolDefinition {
                 name: reg::WRITE.into(),
@@ -404,12 +409,17 @@ impl ToolProvider for CoreTools {
                     },
                     "required": ["path", "content"]
                 }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::Mutation,
+                    omegon_traits::ToolCapability::StateChanging,
+                ],
             },
             ToolDefinition {
                 name: reg::EDIT.into(),
                 label: reg::EDIT.into(),
-                description: "Edit a file by replacing exact text. The oldText must match \
-                    exactly (including whitespace). Use this for precise, surgical edits."
+                description: "Single-target exact-text replacement in one file. The oldText must \
+                    match exactly (including whitespace). Use this for one precise, surgical \
+                    replacement when you do not need atomic coordination across multiple edits."
                     .into(),
                 parameters: json!({
                     "type": "object",
@@ -429,13 +439,16 @@ impl ToolProvider for CoreTools {
                     },
                     "required": ["path", "oldText", "newText"]
                 }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::Mutation,
+                    omegon_traits::ToolCapability::StateChanging,
+                ],
             },
             ToolDefinition {
                 name: reg::CHANGE.into(),
                 label: reg::CHANGE.into(),
-                description: "Atomic multi-file edit with automatic validation. Accepts an array \
-                    of edits, applies all atomically (rollback on any failure), then runs type \
-                    checking. One tool call replaces multiple edits + validation."
+                description: "Atomic multi-file edit with automatic validation. Hidden from the \
+                    model-facing tool surface; used by the harness to batch coordinated edits."
                     .into(),
                 parameters: json!({
                     "type": "object",
@@ -461,6 +474,10 @@ impl ToolProvider for CoreTools {
                     },
                     "required": ["edits"]
                 }),
+                capabilities: vec![
+                    omegon_traits::ToolCapability::Mutation,
+                    omegon_traits::ToolCapability::StateChanging,
+                ],
             },
             ToolDefinition {
                 name: reg::COMMIT.into(),
@@ -486,6 +503,7 @@ impl ToolProvider for CoreTools {
                     },
                     "required": ["message"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: reg::WHOAMI.into(),
@@ -500,6 +518,7 @@ impl ToolProvider for CoreTools {
                     "properties": {},
                     "required": []
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: reg::CHRONOS.into(),
@@ -537,6 +556,7 @@ impl ToolProvider for CoreTools {
                         }
                     }
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: reg::SERVE.into(),
@@ -575,6 +595,7 @@ impl ToolProvider for CoreTools {
                     },
                     "required": ["action"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             // trust_directory is NOT in the tool schema — it's internal harness
             // plumbing called via bus.execute_internal() by the permission
@@ -886,7 +907,15 @@ impl ToolProvider for CoreTools {
 
             warn_git_mutation_via_bash(self.repo_model.is_some(), command);
 
-            return bash::execute_streaming(command, &self.cwd, timeout, cancel, sink, Some(self.boundary.clone())).await;
+            return bash::execute_streaming(
+                command,
+                &self.cwd,
+                timeout,
+                cancel,
+                sink,
+                Some(self.boundary.clone()),
+            )
+            .await;
         }
 
         self.execute(tool_name, call_id, args, cancel).await
@@ -1068,12 +1097,13 @@ mod tests {
         assert!(!tool_names.contains("list_local_models"));
         assert!(!tool_names.contains("manage_ollama"));
 
-        // 9 LLM-visible core tools. trust_directory is internal-only
-        // (handled via bus.execute_internal, not in tool_defs).
+        // 9 registered core tools. trust_directory is internal-only and not in
+        // tool_defs; change is registered for harness batching but hidden from
+        // the model-facing tool surface by EventBus filtering.
         assert_eq!(
             tool_names.len(),
             9,
-            "Expected 9 core tools, got {}",
+            "Expected 9 registered core tools, got {}",
             tool_names.len()
         );
     }

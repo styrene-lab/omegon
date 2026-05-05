@@ -31,7 +31,15 @@ pub async fn execute(
     timeout_secs: Option<u64>,
     cancel: CancellationToken,
 ) -> Result<ToolResult> {
-    execute_streaming(command, cwd, timeout_secs, cancel, ToolProgressSink::noop(), None).await
+    execute_streaming(
+        command,
+        cwd,
+        timeout_secs,
+        cancel,
+        ToolProgressSink::noop(),
+        None,
+    )
+    .await
 }
 
 /// Like [`execute`] but streams partial output through `sink` while the
@@ -96,7 +104,11 @@ pub async fn execute_streaming(
                 content: vec![ContentBlock::Text {
                     text: format!(
                         "BLOCKED: command targets paths outside the workspace boundary:\n{}",
-                        violations.iter().map(|v| format!("  - {v}")).collect::<Vec<_>>().join("\n"),
+                        violations
+                            .iter()
+                            .map(|v| format!("  - {v}"))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
                     ),
                 }],
                 details: serde_json::json!({
@@ -906,7 +918,11 @@ mod tests {
     #[test]
     fn scanner_catches_redirect_to_absolute_path() {
         let b = test_boundary("/tmp/workspace");
-        let v = scan_boundary_violations("echo secret > /etc/evil.txt", &b, Path::new("/tmp/workspace"));
+        let v = scan_boundary_violations(
+            "echo secret > /etc/evil.txt",
+            &b,
+            Path::new("/tmp/workspace"),
+        );
         assert!(!v.is_empty(), "should catch redirect to /etc/evil.txt");
         assert!(v.iter().any(|p| p.contains("/etc/evil.txt")));
     }
@@ -921,14 +937,22 @@ mod tests {
     #[test]
     fn scanner_catches_tee_to_absolute_path() {
         let b = test_boundary("/tmp/workspace");
-        let v = scan_boundary_violations("echo data | tee /etc/config.yml", &b, Path::new("/tmp/workspace"));
+        let v = scan_boundary_violations(
+            "echo data | tee /etc/config.yml",
+            &b,
+            Path::new("/tmp/workspace"),
+        );
         assert!(!v.is_empty(), "should catch tee to /etc/config.yml");
     }
 
     #[test]
     fn scanner_catches_cp_to_absolute_path() {
         let b = test_boundary("/tmp/workspace");
-        let v = scan_boundary_violations("cp important.txt /etc/stolen.txt", &b, Path::new("/tmp/workspace"));
+        let v = scan_boundary_violations(
+            "cp important.txt /etc/stolen.txt",
+            &b,
+            Path::new("/tmp/workspace"),
+        );
         assert!(!v.is_empty(), "should catch cp dest /etc/stolen.txt");
     }
 
@@ -953,7 +977,11 @@ mod tests {
         let b = crate::tools::WorkspaceBoundary::new(cwd.clone());
         let cmd = format!("echo data > {}/output.txt", cwd.display());
         let v = scan_boundary_violations(&cmd, &b, &cwd);
-        assert!(v.is_empty(), "workspace-internal absolute paths should be allowed: {:?}", v);
+        assert!(
+            v.is_empty(),
+            "workspace-internal absolute paths should be allowed: {:?}",
+            v
+        );
     }
 
     #[test]
@@ -967,7 +995,11 @@ mod tests {
     fn scanner_allows_trusted_directory() {
         let b = test_boundary("/tmp/workspace");
         b.approve_directory(std::path::PathBuf::from("/opt/allowed"));
-        let v = scan_boundary_violations("echo x > /opt/allowed/file.txt", &b, Path::new("/tmp/workspace"));
+        let v = scan_boundary_violations(
+            "echo x > /opt/allowed/file.txt",
+            &b,
+            Path::new("/tmp/workspace"),
+        );
         assert!(v.is_empty(), "trusted directory should be allowed: {:?}", v);
     }
 }

@@ -1,5 +1,6 @@
 //! Plugin manifest — TOML schema for external plugin declarations.
 
+use omegon_traits::ToolCapability;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -107,6 +108,9 @@ pub struct ToolConfig {
     /// JSON Schema for tool parameters
     #[serde(default = "default_parameters")]
     pub parameters: serde_json::Value,
+    /// Explicit behavior capabilities for loop governance.
+    #[serde(default)]
+    pub capabilities: Vec<ToolCapability>,
     /// Timeout in seconds (default: 10)
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
@@ -161,6 +165,7 @@ pub fn resolve_template(template: &str, args: &HashMap<String, String>) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omegon_traits::ToolCapability;
 
     #[test]
     fn parse_minimal_manifest() {
@@ -212,6 +217,29 @@ mod tests {
         assert_eq!(manifest.tools[0].name, "scribe_status");
         assert!(manifest.context.is_some());
         assert!(manifest.events.as_ref().unwrap().turn_end.is_some());
+    }
+
+    #[test]
+    fn parse_tool_capabilities() {
+        let toml_str = r#"
+            [plugin]
+            name = "scribe"
+
+            [[tools]]
+            name = "scribe_status"
+            description = "Get engagement status"
+            endpoint = "{SCRIBE_URL}/api/status"
+            method = "GET"
+            capabilities = ["orientation", "broad_orientation"]
+        "#;
+        let manifest: PluginManifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            manifest.tools[0].capabilities,
+            vec![
+                ToolCapability::Orientation,
+                ToolCapability::BroadOrientation
+            ]
+        );
     }
 
     #[test]

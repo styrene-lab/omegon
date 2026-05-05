@@ -14,6 +14,14 @@ visibility = "private"
 All notable changes to Omegon are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Behavioral tool classification is now capability-driven** — tool governance no longer depends on hardcoded name lists in the loop. `ToolDefinition` now carries explicit capabilities, built-in and plugin tool surfaces propagate them, and evidence pressure distinguishes local coding sufficiency from global task sufficiency.
+- **`edit` is now the only model-facing file mutation primitive** — `change` remains available internally as the harness transaction engine for coordinated exact-text batches, but it is hidden from the model-facing tool surface to reduce mutation-surface ambiguity.
+- **`styrene-mqtt` now resolves as an external crate dependency** — Omegon depends on `styrene-mqtt = "0.1.0"` with a local `[patch.crates-io]` override for co-development instead of requiring a hard sibling path in the main manifest.
+
 ## [0.18.4] - 2026-05-03
 
 ### Fixed

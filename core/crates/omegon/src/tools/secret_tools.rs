@@ -5,7 +5,7 @@
 //! They intentionally do NOT return secret values to the model.
 
 use async_trait::async_trait;
-use omegon_traits::{ContentBlock, ToolDefinition, ToolProvider, ToolResult};
+use omegon_traits::{ContentBlock, ToolCapability, ToolDefinition, ToolProvider, ToolResult};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -38,6 +38,7 @@ impl ToolProvider for SecretToolsProvider {
                     "required": ["name"],
                     "additionalProperties": false
                 }),
+                capabilities: vec![ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: crate::tool_registry::secrets::SECRET_LIST.into(),
@@ -48,6 +49,7 @@ impl ToolProvider for SecretToolsProvider {
                     "properties": {},
                     "additionalProperties": false
                 }),
+                capabilities: vec![ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::secrets::SECRET_DELETE.into(),
@@ -61,6 +63,7 @@ impl ToolProvider for SecretToolsProvider {
                     "required": ["name"],
                     "additionalProperties": false
                 }),
+                capabilities: vec![ToolCapability::StateChanging],
             },
         ]
     }

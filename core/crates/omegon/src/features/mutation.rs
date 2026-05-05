@@ -1806,6 +1806,7 @@ impl Feature for MutationFeature {
                     "properties": {},
                     "additionalProperties": false,
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: tool_registry::mutation::MUTATION_ACCEPT.into(),
@@ -1823,6 +1824,7 @@ impl Feature for MutationFeature {
                     "required": ["name"],
                     "additionalProperties": false,
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: tool_registry::mutation::MUTATION_REJECT.into(),
@@ -1839,6 +1841,7 @@ impl Feature for MutationFeature {
                     "required": ["name"],
                     "additionalProperties": false,
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: tool_registry::mutation::MUTATION_STATS.into(),
@@ -1850,6 +1853,7 @@ impl Feature for MutationFeature {
                     "properties": {},
                     "additionalProperties": false,
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
         ]
     }

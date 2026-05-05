@@ -530,7 +530,11 @@ pub struct CleaveFeature {
 }
 
 impl CleaveFeature {
-    pub fn new(repo_path: &std::path::Path, session_secret_env: Vec<(String, String)>, sandbox: bool) -> Self {
+    pub fn new(
+        repo_path: &std::path::Path,
+        session_secret_env: Vec<(String, String)>,
+        sandbox: bool,
+    ) -> Self {
         let progress = Arc::new(Mutex::new(CleaveProgress::default()));
         let feature = Self {
             repo_path: repo_path.to_path_buf(),
@@ -1184,6 +1188,7 @@ impl Feature for CleaveFeature {
                     },
                     "required": ["directive"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: crate::tool_registry::cleave::CLEAVE_RUN.into(),
@@ -1207,6 +1212,7 @@ impl Feature for CleaveFeature {
                     },
                     "required": ["directive", "plan_json"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
         ]
     }

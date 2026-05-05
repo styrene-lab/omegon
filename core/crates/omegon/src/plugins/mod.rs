@@ -19,6 +19,7 @@ pub mod manifest;
 pub mod mcp;
 pub mod persona_loader;
 pub mod registry;
+pub(crate) mod tool_capabilities;
 
 use http_feature::HttpPluginFeature;
 use manifest::PluginManifest;

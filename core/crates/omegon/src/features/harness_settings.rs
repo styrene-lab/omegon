@@ -70,6 +70,10 @@ impl Feature for HarnessSettings {
                 },
                 "required": ["action"]
             }),
+            capabilities: vec![
+                omegon_traits::ToolCapability::Orientation,
+                omegon_traits::ToolCapability::StateChanging,
+            ],
         }]
     }
 

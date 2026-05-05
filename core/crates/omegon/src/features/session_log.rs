@@ -788,6 +788,7 @@ impl Feature for SessionLog {
                 },
                 "required": ["action"]
             }),
+            capabilities: vec![omegon_traits::ToolCapability::Orientation],
         }]
     }
 

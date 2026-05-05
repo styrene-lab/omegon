@@ -167,7 +167,11 @@ fn has_shell_metachar(s: &str) -> bool {
 
 // ── cat ────────────────────────────────────────────────────────────────
 
-fn cmd_cat(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_cat(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     // Skip flags we don't handle
     if args.iter().any(|a| a.starts_with('-') && a != "-") {
         return None;
@@ -203,7 +207,11 @@ fn cmd_cat(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBounda
 
 // ── head ───────────────────────────────────────────────────────────────
 
-fn cmd_head(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_head(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     let mut n: usize = 10; // default
     let mut files: Vec<&str> = Vec::new();
     let mut iter = args.iter();
@@ -263,7 +271,11 @@ fn cmd_head(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBound
 
 // ── tail ───────────────────────────────────────────────────────────────
 
-fn cmd_tail(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_tail(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     let mut n: usize = 10;
     let mut files: Vec<&str> = Vec::new();
     let mut iter = args.iter();
@@ -318,7 +330,11 @@ fn cmd_tail(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBound
 
 // ── wc ─────────────────────────────────────────────────────────────────
 
-fn cmd_wc(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_wc(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     let mut count_lines = false;
     let mut count_words = false;
     let mut count_bytes = false;
@@ -393,7 +409,11 @@ fn cmd_wc(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundar
 
 // ── ls ─────────────────────────────────────────────────────────────────
 
-fn cmd_ls(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_ls(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     let mut show_hidden = false;
     let mut long_format = false;
     let mut paths: Vec<&str> = Vec::new();
@@ -477,7 +497,11 @@ fn cmd_ls(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundar
 
 // ── find ───────────────────────────────────────────────────────────────
 
-fn cmd_find(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_find(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     // Support: find [path] -name <pattern> [-type f|d]
     // Anything else → bash fallback
     let mut search_path: Option<&str> = None;
@@ -597,7 +621,11 @@ fn simple_glob_match(pattern: &str, text: &str) -> bool {
 
 // ── mkdir ──────────────────────────────────────────────────────────────
 
-fn cmd_mkdir(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_mkdir(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     let mut parents = false;
     let mut dirs: Vec<&str> = Vec::new();
 
@@ -642,7 +670,11 @@ fn cmd_mkdir(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoun
 
 // ── grep ───────────────────────────────────────────────────────────────
 
-fn cmd_grep(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_grep(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     let mut recursive = false;
     let mut line_numbers = false;
     let mut case_insensitive = false;
@@ -820,7 +852,11 @@ fn cmd_grep(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBound
 
 // ── touch ──────────────────────────────────────────────────────────────
 
-fn cmd_touch(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_touch(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     let mut files: Vec<&str> = Vec::new();
     for arg in args {
         if arg.starts_with('-') {
@@ -862,7 +898,11 @@ fn cmd_touch(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoun
 
 // ── rm ─────────────────────────────────────────────────────────────────
 
-fn cmd_rm(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_rm(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     let mut recursive = false;
     let mut force = false;
     let mut files: Vec<&str> = Vec::new();
@@ -969,7 +1009,11 @@ fn is_dangerous_rm_target(path: &Path) -> bool {
 
 // ── cp ─────────────────────────────────────────────────────────────────
 
-fn cmd_cp(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_cp(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     let mut recursive = false;
     let mut paths: Vec<&str> = Vec::new();
 
@@ -1086,7 +1130,11 @@ fn copy_dir_recursive_depth(src: &Path, dest: &Path, depth: usize) -> std::io::R
 
 // ── mv ─────────────────────────────────────────────────────────────────
 
-fn cmd_mv(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_mv(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     let mut paths: Vec<&str> = Vec::new();
     for arg in args {
         if arg.starts_with('-') {
@@ -1152,7 +1200,11 @@ fn cmd_mv(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundar
 
 // ── sort ───────────────────────────────────────────────────────────────
 
-fn cmd_sort(args: &[String], cwd: &Path, boundary: Option<&super::WorkspaceBoundary>) -> Option<NativeResult> {
+fn cmd_sort(
+    args: &[String],
+    cwd: &Path,
+    boundary: Option<&super::WorkspaceBoundary>,
+) -> Option<NativeResult> {
     let mut reverse = false;
     let mut unique = false;
     let mut numeric = false;
@@ -1562,13 +1614,15 @@ mod tests {
 
     #[test]
     fn basename_extracts_filename() {
-        let result = try_dispatch("basename /usr/local/bin/omegon", Path::new("/tmp"), None).unwrap();
+        let result =
+            try_dispatch("basename /usr/local/bin/omegon", Path::new("/tmp"), None).unwrap();
         assert_eq!(result.stdout.trim(), "omegon");
     }
 
     #[test]
     fn dirname_extracts_parent() {
-        let result = try_dispatch("dirname /usr/local/bin/omegon", Path::new("/tmp"), None).unwrap();
+        let result =
+            try_dispatch("dirname /usr/local/bin/omegon", Path::new("/tmp"), None).unwrap();
         assert_eq!(result.stdout.trim(), "/usr/local/bin");
     }
 
@@ -1600,7 +1654,8 @@ mod tests {
     #[test]
     fn boundary_blocks_cat_outside_workspace() {
         let b = test_boundary("/tmp/workspace");
-        let result = try_dispatch("cat /etc/passwd", Path::new("/tmp/workspace"), Some(&b)).unwrap();
+        let result =
+            try_dispatch("cat /etc/passwd", Path::new("/tmp/workspace"), Some(&b)).unwrap();
         assert_eq!(result.exit_code, 1);
         assert!(result.stdout.contains("BLOCKED"), "got: {}", result.stdout);
     }
@@ -1619,7 +1674,8 @@ mod tests {
     #[test]
     fn boundary_blocks_mkdir_outside_workspace() {
         let b = test_boundary("/tmp/workspace");
-        let result = try_dispatch("mkdir /outside/dir", Path::new("/tmp/workspace"), Some(&b)).unwrap();
+        let result =
+            try_dispatch("mkdir /outside/dir", Path::new("/tmp/workspace"), Some(&b)).unwrap();
         assert_eq!(result.exit_code, 1);
         assert!(result.stdout.contains("BLOCKED"));
     }
@@ -1657,7 +1713,8 @@ mod tests {
     #[test]
     fn boundary_blocks_touch_outside_workspace() {
         let b = test_boundary("/tmp/workspace");
-        let result = try_dispatch("touch /etc/evil.txt", Path::new("/tmp/workspace"), Some(&b)).unwrap();
+        let result =
+            try_dispatch("touch /etc/evil.txt", Path::new("/tmp/workspace"), Some(&b)).unwrap();
         assert_eq!(result.exit_code, 1);
         assert!(result.stdout.contains("BLOCKED"));
     }
@@ -1673,7 +1730,8 @@ mod tests {
     #[test]
     fn boundary_blocks_head_outside_workspace() {
         let b = test_boundary("/tmp/workspace");
-        let result = try_dispatch("head /etc/passwd", Path::new("/tmp/workspace"), Some(&b)).unwrap();
+        let result =
+            try_dispatch("head /etc/passwd", Path::new("/tmp/workspace"), Some(&b)).unwrap();
         assert_eq!(result.exit_code, 1);
         assert!(result.stdout.contains("BLOCKED"));
     }
@@ -1681,7 +1739,12 @@ mod tests {
     #[test]
     fn boundary_blocks_find_outside_workspace() {
         let b = test_boundary("/tmp/workspace");
-        let result = try_dispatch("find /etc -name passwd", Path::new("/tmp/workspace"), Some(&b)).unwrap();
+        let result = try_dispatch(
+            "find /etc -name passwd",
+            Path::new("/tmp/workspace"),
+            Some(&b),
+        )
+        .unwrap();
         assert_eq!(result.exit_code, 1);
         assert!(result.stdout.contains("BLOCKED"));
     }
@@ -1694,7 +1757,11 @@ mod tests {
         // Should not be blocked (though /etc may not have the expected format,
         // the point is it's not BLOCKED)
         if let Some(r) = result {
-            assert!(!r.stdout.contains("BLOCKED"), "trusted dir should not be blocked: {}", r.stdout);
+            assert!(
+                !r.stdout.contains("BLOCKED"),
+                "trusted dir should not be blocked: {}",
+                r.stdout
+            );
         }
     }
 

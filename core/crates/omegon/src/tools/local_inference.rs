@@ -512,12 +512,14 @@ impl ToolProvider for LocalInferenceProvider {
                     },
                     "required": ["prompt"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
             ToolDefinition {
                 name: crate::tool_registry::local_inference::LIST_LOCAL_MODELS.into(),
                 label: "List Local Models".into(),
                 description: "List all models currently available in the local inference server (Ollama).".into(),
                 parameters: json!({ "type": "object", "properties": {} }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
                 name: crate::tool_registry::local_inference::MANAGE_OLLAMA.into(),
@@ -531,6 +533,7 @@ impl ToolProvider for LocalInferenceProvider {
                     },
                     "required": ["action"]
                 }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
         ]
     }

@@ -274,7 +274,7 @@ impl AgentSetup {
             }
         };
 
-        // ─── Core tools (bash, read, write, edit, change, commit) ──
+        // ─── Core tools (bash, read, write, edit, commit; hidden internal change) ──
         let core_tools = if let Some(ref model) = repo_model {
             tools::CoreTools::with_repo_model(cwd.clone(), model.clone())
         } else {
@@ -306,7 +306,10 @@ impl AgentSetup {
         )));
         bus.register(Box::new(features::adapter::ToolAdapter::new(
             "view",
-            Box::new(tools::view::ViewProvider::new(cwd.clone(), boundary.clone())),
+            Box::new(tools::view::ViewProvider::new(
+                cwd.clone(),
+                boundary.clone(),
+            )),
         )));
         bus.register(Box::new(features::adapter::ToolAdapter::new(
             "render",
@@ -473,7 +476,8 @@ impl AgentSetup {
             .unwrap_or(false);
 
         // ─── Cleave (decomposition + dispatch) ─────────────────────────
-        let cleave_feature = features::cleave::CleaveFeature::new(&cwd, session_secret_env.clone(), sandbox);
+        let cleave_feature =
+            features::cleave::CleaveFeature::new(&cwd, session_secret_env.clone(), sandbox);
         let cleave_handle = cleave_feature.shared_progress();
         // Capture the event-sender slot before bus.register consumes the
         // typed feature. main.rs writes the AgentEvent broadcast sender
