@@ -169,6 +169,10 @@ async fn worker_loop(
                             omegon_traits::AgentEvent::SystemNotification { message } => {
                                 Some(WorkerEvent::StatusUpdate(message))
                             }
+                            omegon_traits::AgentEvent::MessageAbort { reason } => {
+                                let msg = reason.unwrap_or_else(|| "Request aborted".into());
+                                Some(WorkerEvent::StatusUpdate(format!("[Error: {msg}]")))
+                            }
                             _ => None,
                         };
                         if let Some(e) = worker_event {
