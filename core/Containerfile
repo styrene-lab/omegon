@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install omegon from GitHub Releases
-RUN curl -fsSL https://raw.githubusercontent.com/styrene-lab/omegon/main/install.sh | sh
+RUN curl -fsSL https://raw.githubusercontent.com/styrene-lab/omegon/main/core/install.sh | sh
 
 # Verify binary exists and runs
 RUN omegon --help

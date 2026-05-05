@@ -8,7 +8,7 @@
 #   curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --no-confirm
 #
 # Or directly from GitHub:
-#   curl -fsSL https://raw.githubusercontent.com/styrene-lab/omegon/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/styrene-lab/omegon/main/core/install.sh | sh
 #
 # Environment variables:
 #   INSTALL_DIR   — installation directory (default: /usr/local/bin)
