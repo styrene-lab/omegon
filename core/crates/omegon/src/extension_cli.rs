@@ -9,9 +9,11 @@
 //! ```sh
 //! omegon extension install https://github.com/user/my-extension
 //! omegon extension install ./local/path/to/extension
+//! omegon extension install https://example.com/my-extension-v1.0-aarch64-apple-darwin.tar.gz
 //! ```
 //!
 //! Git URIs are cloned. Local paths are symlinked (development mode).
+//! Tarball URLs (.tar.gz) are downloaded and extracted — no build step required.
 //!
 //! ## List
 //!
@@ -206,12 +208,14 @@ pub fn install(uri: &str) -> anyhow::Result<()> {
 
     if local_path.exists() && local_path.join("manifest.toml").exists() {
         install_local(&extensions_dir, local_path)
+    } else if uri.ends_with(".tar.gz") || uri.ends_with(".tgz") {
+        install_tarball(&extensions_dir, uri)
     } else if uri.contains("://") || uri.contains("git@") || uri.ends_with(".git") {
         install_git(&extensions_dir, uri)
     } else {
         anyhow::bail!(
             "'{uri}' is not a valid extension source.\n\
-             Expected: a git URL or a local directory containing manifest.toml"
+             Expected: a git URL, a tarball URL (.tar.gz), or a local directory containing manifest.toml"
         );
     }
 }
@@ -597,6 +601,135 @@ fn install_git(extensions_dir: &Path, uri: &str) -> anyhow::Result<()> {
     );
     print_secrets_hint(&manifest);
 
+    Ok(())
+}
+
+/// Install a pre-built extension from a tarball URL or local .tar.gz file.
+///
+/// The tarball must contain a `manifest.toml` and (for native extensions) the
+/// pre-built binary.  No build step is performed — this is the path for users
+/// without a Rust toolchain.
+fn install_tarball(extensions_dir: &Path, uri: &str) -> anyhow::Result<()> {
+    let tmp = std::env::temp_dir().join(format!("omegon-ext-install-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp)?;
+    let archive_path = tmp.join("extension.tar.gz");
+
+    if uri.starts_with("http://") || uri.starts_with("https://") {
+        // Download
+        println!("Downloading {uri}...");
+        let status = std::process::Command::new("curl")
+            .args(["-fSL", "-o"])
+            .arg(&archive_path)
+            .arg(uri)
+            .status()?;
+        if !status.success() {
+            anyhow::bail!("download failed for {uri}");
+        }
+    } else {
+        // Local tarball
+        let local = Path::new(uri);
+        if !local.exists() {
+            anyhow::bail!("tarball not found: {uri}");
+        }
+        std::fs::copy(local, &archive_path)?;
+    }
+
+    // Extract
+    let extract_dir = tmp.join("extracted");
+    std::fs::create_dir_all(&extract_dir)?;
+    let status = std::process::Command::new("tar")
+        .args(["xzf"])
+        .arg(&archive_path)
+        .arg("-C")
+        .arg(&extract_dir)
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("failed to extract tarball");
+    }
+
+    // Find manifest.toml — may be at root or one level deep
+    let manifest_path = if extract_dir.join("manifest.toml").exists() {
+        extract_dir.join("manifest.toml")
+    } else {
+        // Check one level deep (tarball may have a top-level directory)
+        let mut found = None;
+        for entry in std::fs::read_dir(&extract_dir)? {
+            let entry = entry?;
+            if entry.path().is_dir() && entry.path().join("manifest.toml").exists() {
+                found = Some(entry.path().join("manifest.toml"));
+                break;
+            }
+        }
+        found.ok_or_else(|| anyhow::anyhow!("tarball does not contain manifest.toml"))?
+    };
+
+    let ext_root = manifest_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("invalid manifest path"))?;
+    let manifest = ExtensionManifest::from_file(&manifest_path)?;
+    let name = &manifest.extension.name;
+
+    let target = extensions_dir.join(name);
+    if target.exists() || target.is_symlink() {
+        anyhow::bail!(
+            "Extension '{}' already installed at {}. Remove first with: omegon extension remove {}",
+            name,
+            target.display(),
+            name
+        );
+    }
+
+    // Copy extracted contents to extensions dir (not symlink — this is a real install)
+    copy_dir_recursive(ext_root, &target)?;
+
+    // Make native binary executable
+    if manifest.is_native() {
+        if let Ok(bin_path) = manifest.native_binary_path(&target) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&bin_path)?.permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(&bin_path, perms)?;
+            }
+            println!(
+                "Installed extension '{}' v{} (pre-built binary)",
+                name, manifest.extension.version
+            );
+        } else {
+            println!(
+                "Installed extension '{}' v{} (warning: native binary not found in tarball)",
+                name, manifest.extension.version
+            );
+        }
+    } else {
+        println!(
+            "Installed extension '{}' v{}",
+            name, manifest.extension.version
+        );
+    }
+
+    print_secrets_hint(&manifest);
+
+    // Clean up temp dir
+    std::fs::remove_dir_all(&tmp).ok();
+
+    Ok(())
+}
+
+/// Recursively copy a directory tree.
+fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let dest_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&entry.path(), &dest_path)?;
+        } else {
+            std::fs::copy(entry.path(), &dest_path)?;
+        }
+    }
     Ok(())
 }
 
