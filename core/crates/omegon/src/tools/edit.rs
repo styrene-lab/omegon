@@ -7,12 +7,7 @@ use std::path::Path;
 /// Timeout for filesystem operations during edit.
 const EDIT_TIMEOUT_SECS: u64 = 30;
 
-pub async fn execute(
-    path: &Path,
-    old_text: &str,
-    new_text: &str,
-    cwd: &Path,
-) -> Result<ToolResult> {
+pub async fn execute(path: &Path, old_text: &str, new_text: &str) -> Result<ToolResult> {
     if !path.exists() {
         anyhow::bail!("File not found: {}", path.display());
     }
@@ -129,13 +124,7 @@ pub async fn execute(
         )
     };
 
-    // Run post-mutation validation
-    let validation = super::validate::validate_after_mutation(path, cwd).await;
-    let mut result_text = format!("Successfully replaced text in {}.", path.display());
-    if let Some(ref val) = validation {
-        result_text.push('\n');
-        result_text.push_str(val);
-    }
+    let result_text = format!("Successfully replaced text in {}.", path.display());
 
     Ok(ToolResult {
         content: vec![ContentBlock::Text { text: result_text }],
@@ -144,7 +133,6 @@ pub async fn execute(
             "diff": diff_summary,
             "oldLines": old_lines,
             "newLines": new_lines,
-            "validation": validation,
         }),
     })
 }
@@ -218,9 +206,7 @@ mod tests {
             .write_all(b"hello world\nfoo bar\nbaz")
             .unwrap();
 
-        let result = execute(&file, "foo bar", "replaced", dir.path())
-            .await
-            .unwrap();
+        let result = execute(&file, "foo bar", "replaced").await.unwrap();
         assert!(
             result.content[0]
                 .clone()
@@ -241,9 +227,7 @@ mod tests {
             .write_all(b"foo\nfoo\nbar")
             .unwrap();
 
-        let err = execute(&file, "foo", "replaced", dir.path())
-            .await
-            .unwrap_err();
+        let err = execute(&file, "foo", "replaced").await.unwrap_err();
         assert!(err.to_string().contains("2 occurrences"));
     }
 
@@ -256,9 +240,7 @@ mod tests {
             .write_all(b"hello world")
             .unwrap();
 
-        let err = execute(&file, "not found", "replaced", dir.path())
-            .await
-            .unwrap_err();
+        let err = execute(&file, "not found", "replaced").await.unwrap_err();
         assert!(err.to_string().contains("Could not find"));
     }
 
@@ -297,14 +279,9 @@ mod tests {
             .unwrap();
 
         // oldText has slightly wrong content but a recognizable key line
-        let err = execute(
-            &file,
-            "fn hello() {\n    println!(\"wrong\");\n}",
-            "x",
-            dir.path(),
-        )
-        .await
-        .unwrap_err();
+        let err = execute(&file, "fn hello() {\n    println!(\"wrong\");\n}", "x")
+            .await
+            .unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("Could not find"), "msg: {msg}");
         // Hint should be present since "fn hello()" is in the file

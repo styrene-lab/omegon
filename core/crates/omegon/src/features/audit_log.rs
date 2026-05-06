@@ -235,7 +235,7 @@ impl Feature for AuditLog {
                 });
             }
 
-            BusEvent::ToolStart { id, name, args } => {
+            BusEvent::ToolStart { id, name, args, .. } => {
                 self.append(&AuditEntry {
                     ts,
                     session,

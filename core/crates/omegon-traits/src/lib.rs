@@ -1296,6 +1296,7 @@ pub enum BusEvent {
         id: String,
         name: String,
         args: Value,
+        capabilities: Vec<ToolCapability>,
     },
     ToolEnd {
         id: String,

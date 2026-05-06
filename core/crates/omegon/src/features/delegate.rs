@@ -1750,7 +1750,7 @@ impl Feature for DelegateFeature {
             BusEvent::ToolStart { name, args, .. } => {
                 // Track files the parent reads/edits so we can auto-populate
                 // delegate scope when the model doesn't provide one.
-                if matches!(name.as_str(), "read" | "view" | "edit" | "write" | "change") {
+                if matches!(name.as_str(), "read" | "view" | "edit" | "write") {
                     let path = args
                         .get("path")
                         .or_else(|| args.get("file_path"))
@@ -1914,6 +1914,21 @@ mod tests {
         assert!(rendered.contains("worker_profile: patch"));
         assert!(rendered.contains("scope: src/lib.rs"));
         assert!(rendered.contains("Suggested next step"));
+    }
+
+    #[test]
+    fn hidden_change_tool_does_not_seed_recent_parent_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), vec![], false);
+
+        feature.on_event(&BusEvent::ToolStart {
+            id: "1".into(),
+            name: "change".into(),
+            args: serde_json::json!({"path": "src/lib.rs"}),
+            capabilities: vec![],
+        });
+
+        assert!(feature.recent_parent_files.is_empty());
     }
 
     #[test]

@@ -38,6 +38,13 @@ impl ToolCapabilityCatalog {
             .get(tool_name)
             .is_some_and(|caps| caps.contains(&capability))
     }
+
+    pub fn capabilities_for(&self, tool_name: &str) -> Vec<ToolCapability> {
+        self.capabilities_by_name
+            .get(tool_name)
+            .map(|caps| caps.iter().copied().collect())
+            .unwrap_or_default()
+    }
 }
 
 pub(crate) fn is_orientation_tool(catalog: &ToolCapabilityCatalog, name: &str) -> bool {
@@ -65,6 +72,10 @@ pub(crate) fn is_targeted_repo_inspection_tool(
 
 pub(crate) fn is_mutation_tool_name(catalog: &ToolCapabilityCatalog, name: &str) -> bool {
     catalog.has(name, ToolCapability::Mutation)
+}
+
+pub(crate) fn is_validation_tool_name(catalog: &ToolCapabilityCatalog, name: &str) -> bool {
+    catalog.has(name, ToolCapability::Validation)
 }
 
 pub(crate) fn mutation_targets_within_limit(
@@ -104,34 +115,8 @@ pub(crate) fn is_narrow_patch_candidate(
     tool_calls.iter().all(|call| {
         is_mutation_tool_name(catalog, &call.name)
             || is_targeted_repo_inspection_tool(catalog, &call.name)
-            || is_validation_tool(call)
+            || is_validation_tool_name(catalog, &call.name)
     })
-}
-
-pub(crate) fn is_validation_tool(call: &ToolCall) -> bool {
-    if call.name != "bash" {
-        return false;
-    }
-    let Some(command) = call.arguments.get("command").and_then(|v| v.as_str()) else {
-        return false;
-    };
-    let lower = command.to_ascii_lowercase();
-    [
-        "cargo test",
-        "cargo check",
-        "cargo clippy",
-        "cargo fmt",
-        "pytest",
-        "npm test",
-        "npm run test",
-        "npm run check",
-        "npm run typecheck",
-        "tsc --noemit",
-        "ruff check",
-        "ruff format --check",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
 }
 
 // ─── Phase & drift classification ──────────────────────────────────────────
@@ -147,7 +132,8 @@ pub(crate) fn classify_turn_phase(
 
     // Tools that produce output or change state are Act.
     if tool_calls.iter().any(|call| {
-        catalog.has(&call.name, ToolCapability::StateChanging) || is_validation_tool(call)
+        catalog.has(&call.name, ToolCapability::StateChanging)
+            || is_validation_tool_name(catalog, &call.name)
     }) {
         return Some(OodaPhase::Act);
     }
@@ -177,14 +163,16 @@ pub(crate) fn classify_turn_phase(
         return Some(OodaPhase::Observe);
     }
 
-    if tool_calls.iter().all(is_validation_tool) {
+    if tool_calls
+        .iter()
+        .all(|call| is_validation_tool_name(catalog, &call.name))
+    {
         return Some(OodaPhase::Act);
     }
 
-    if tool_calls
-        .iter()
-        .any(|call| is_mutation_tool_name(catalog, &call.name) || is_validation_tool(call))
-    {
+    if tool_calls.iter().any(|call| {
+        is_mutation_tool_name(catalog, &call.name) || is_validation_tool_name(catalog, &call.name)
+    }) {
         return Some(OodaPhase::Act);
     }
 
@@ -263,10 +251,10 @@ pub(crate) fn classify_drift_kind(
 
     let validation_calls = tool_calls
         .iter()
-        .filter(|call| is_validation_tool(call))
+        .filter(|call| is_validation_tool_name(catalog, &call.name))
         .count();
     let targeted_validation = matches!(
-        classify_validation_scope(tool_calls, results),
+        classify_validation_scope(catalog, tool_calls, results),
         ProgressSignal::TargetedValidation
     );
     if validation_calls >= 2
@@ -529,18 +517,20 @@ pub(crate) fn has_progress_boundary(
 ) -> bool {
     has_successful_tool_call(tool_calls, results, |call| {
         is_mutation_tool_name(catalog, &call.name)
-    }) || has_successful_tool_call(tool_calls, results, is_validation_tool)
-        || has_successful_tool_call(tool_calls, results, |call| call.name == "commit")
+    }) || has_successful_tool_call(tool_calls, results, |call| {
+        is_validation_tool_name(catalog, &call.name)
+    }) || has_successful_tool_call(tool_calls, results, |call| call.name == "commit")
 }
 
 pub(crate) fn classify_validation_scope(
+    catalog: &ToolCapabilityCatalog,
     tool_calls: &[ToolCall],
     results: &[ToolResultEntry],
 ) -> ProgressSignal {
     let successful_validation_calls: Vec<&ToolCall> = tool_calls
         .iter()
         .filter(|call| {
-            is_validation_tool(call)
+            is_validation_tool_name(catalog, &call.name)
                 && results
                     .iter()
                     .find(|result| result.call_id == call.id)
@@ -553,17 +543,20 @@ pub(crate) fn classify_validation_scope(
     }
 
     let is_targeted = successful_validation_calls.iter().any(|call| {
-        call.arguments
-            .get("command")
+        let level = call
+            .arguments
+            .get("level")
             .and_then(|v| v.as_str())
-            .is_some_and(|command| {
-                let lower = command.to_ascii_lowercase();
-                lower.contains(" -k ")
-                    || lower.contains(" --test ")
-                    || lower.contains("::")
-                    || lower.contains(" shadow_context")
-                    || lower.contains(" tests/")
-            })
+            .unwrap_or("standard");
+        if level == "full" {
+            return false;
+        }
+
+        call.arguments
+            .get("paths")
+            .and_then(|v| v.as_array())
+            .is_some_and(|paths| !paths.is_empty() && paths.len() <= 2)
+            || call.arguments.get("path").is_some()
     });
 
     if is_targeted {
@@ -586,7 +579,7 @@ pub(crate) fn detect_constraint_discovery(
 
     tool_calls.iter().any(|call| {
         is_repo_inspection_tool(catalog, &call.name)
-            || is_validation_tool(call)
+            || is_validation_tool_name(catalog, &call.name)
             || (is_mutation_tool_name(catalog, &call.name)
                 && results
                     .iter()
@@ -614,7 +607,7 @@ pub(crate) fn classify_progress_signal(
         return ProgressSignal::Mutation;
     }
 
-    let validation_signal = classify_validation_scope(tool_calls, results);
+    let validation_signal = classify_validation_scope(catalog, tool_calls, results);
     if !matches!(validation_signal, ProgressSignal::None) {
         return validation_signal;
     }
@@ -653,7 +646,7 @@ pub(crate) fn assess_evidence(
     }
 
     let targeted_validation = matches!(
-        classify_validation_scope(tool_calls, results),
+        classify_validation_scope(catalog, tool_calls, results),
         ProgressSignal::TargetedValidation
     );
     let failed_mutation_on_known_target = tool_calls.iter().any(|call| {
@@ -677,7 +670,9 @@ pub(crate) fn assess_evidence(
     let inspection_backed_by_validation_failure = tool_calls.iter().any(|call| {
         is_repo_inspection_tool(catalog, &call.name)
             && results.iter().any(|result| result.is_error)
-            && tool_calls.iter().any(is_validation_tool)
+            && tool_calls
+                .iter()
+                .any(|validation| is_validation_tool_name(catalog, &validation.name))
     });
 
     let targeted_reads: Vec<&str> = tool_calls

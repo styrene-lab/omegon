@@ -22,6 +22,7 @@ pub mod core {
     pub const READ: &str = "read";
     pub const WRITE: &str = "write";
     pub const EDIT: &str = "edit";
+    pub const VALIDATE: &str = "validate";
     pub const CHANGE: &str = "change";
     pub const COMMIT: &str = "commit";
     pub const WHOAMI: &str = "whoami";
@@ -163,7 +164,7 @@ pub mod mutation {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 61;
+pub const TOOL_COUNT: usize = 62;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
@@ -172,6 +173,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         core::READ,
         core::WRITE,
         core::EDIT,
+        core::VALIDATE,
         core::CHANGE,
         core::COMMIT,
         core::WHOAMI,
@@ -248,7 +250,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         mutation::MUTATION_REJECT,
         mutation::MUTATION_STATS,
     ]
-    // Total: 9+1+2+3+12+4+2+3+1+3+1+1+1+4+3+2+3+4 = 59
+    // Total: 62
 }
 
 #[cfg(test)]

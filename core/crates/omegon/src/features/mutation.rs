@@ -10,7 +10,7 @@
 use async_trait::async_trait;
 use omegon_traits::{
     BusEvent, BusRequest, ContentBlock, DriftKind, Feature, NotifyLevel, OodaPhase, ProgressSignal,
-    ToolDefinition, ToolResult,
+    ToolCapability, ToolDefinition, ToolResult,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -321,6 +321,7 @@ const RECOVERY_TOKEN_THRESHOLD: u64 = 10_000;
 struct ToolCallTrace {
     call_id: String,
     name: String,
+    capabilities: Vec<ToolCapability>,
     /// Compact args: only "path" and "command" fields preserved.
     args_summary: Value,
     /// File path extracted from args, if present.
@@ -470,9 +471,8 @@ fn owning_crate(tool_name: &str) -> &'static str {
     }
 }
 
-/// Mutation tool names that indicate the agent changed code (not just inspected).
-fn is_mutation_tool(name: &str) -> bool {
-    matches!(name, "write" | "edit" | "change")
+fn trace_is_mutation_tool(trace: &ToolCallTrace) -> bool {
+    trace.capabilities.contains(&ToolCapability::Mutation)
 }
 
 // ─── Feature ────────────────────────────────────────────────────────────────
@@ -515,7 +515,13 @@ impl MutationFeature {
 
     // ── Trajectory accumulation ─────────────────────────────────────────
 
-    fn on_tool_start(&mut self, id: &str, name: &str, args: &Value) {
+    fn on_tool_start(
+        &mut self,
+        id: &str,
+        name: &str,
+        args: &Value,
+        capabilities: &[ToolCapability],
+    ) {
         let target_path = args.get("path").and_then(|v| v.as_str()).map(String::from);
         let mut summary = serde_json::Map::new();
         if let Some(p) = args.get("path") {
@@ -527,6 +533,7 @@ impl MutationFeature {
         self.trajectory.pending_tools.push(ToolCallTrace {
             call_id: id.to_string(),
             name: name.to_string(),
+            capabilities: capabilities.to_vec(),
             args_summary: Value::Object(summary),
             target_path,
             is_error: false,
@@ -624,7 +631,7 @@ impl MutationFeature {
                 {
                     // Same tool, same target — check what changed.
                     let intervening_mutation = flat[i + 1..j].iter().any(|(_, t)| {
-                        is_mutation_tool(&t.name)
+                        trace_is_mutation_tool(t)
                             && !t.is_error
                             && t.target_path == fail_trace.target_path
                     });
@@ -637,8 +644,8 @@ impl MutationFeature {
                     }
                 } else if succ_trace.target_path.is_some()
                     && succ_trace.target_path == fail_trace.target_path
-                    && is_mutation_tool(&fail_trace.name)
-                    && is_mutation_tool(&succ_trace.name)
+                    && trace_is_mutation_tool(fail_trace)
+                    && trace_is_mutation_tool(succ_trace)
                 {
                     // Different mutation tool targeting the same file — tool switch.
                     Some(RecoveryKind::ToolSwitch {
@@ -1966,8 +1973,13 @@ impl Feature for MutationFeature {
                 };
                 vec![]
             }
-            BusEvent::ToolStart { id, name, args } => {
-                self.on_tool_start(id, name, args);
+            BusEvent::ToolStart {
+                id,
+                name,
+                args,
+                capabilities,
+            } => {
+                self.on_tool_start(id, name, args, capabilities);
                 vec![]
             }
             BusEvent::ToolEnd { id, is_error, .. } => {
@@ -2222,6 +2234,10 @@ mod tests {
         ToolCallTrace {
             call_id: format!("call-{}", fxhash(name) % 1000),
             name: name.into(),
+            capabilities: match name {
+                "edit" | "write" | "change" => vec![ToolCapability::Mutation],
+                _ => vec![],
+            },
             args_summary: Value::Object(summary),
             target_path: path.map(String::from),
             is_error,
@@ -2680,6 +2696,7 @@ mod tests {
             id: "c1".into(),
             name: "read".into(),
             args: serde_json::json!({"path": "src/main.rs"}),
+            capabilities: vec![ToolCapability::RepoInspection],
         });
         feature.on_event(&BusEvent::ToolEnd {
             id: "c1".into(),
@@ -2718,6 +2735,30 @@ mod tests {
         assert_eq!(feature.trajectory.total_input_tokens, 1200);
         assert_eq!(feature.trajectory.total_output_tokens, 300);
         assert_eq!(feature.trajectory.last_model, "anthropic:claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn trajectory_records_capabilities_from_tool_start() {
+        let mut feature = MutationFeature::new(PathBuf::from("/tmp/test-omegon-caps"));
+        feature.on_event(&BusEvent::SessionStart {
+            cwd: PathBuf::from("/tmp"),
+            session_id: "test-caps".into(),
+        });
+
+        feature.on_event(&BusEvent::ToolStart {
+            id: "c1".into(),
+            name: "surgical_patch".into(),
+            args: serde_json::json!({"path": "src/main.rs"}),
+            capabilities: vec![ToolCapability::Mutation, ToolCapability::StateChanging],
+        });
+
+        let trace = feature
+            .trajectory
+            .pending_tools
+            .first()
+            .expect("pending tool trace");
+        assert_eq!(trace.name, "surgical_patch");
+        assert!(trace_is_mutation_tool(trace));
     }
 
     #[test]

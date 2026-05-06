@@ -251,9 +251,7 @@ impl ContextManager {
     pub fn update_phase_from_activity(&mut self, tool_calls: &[crate::conversation::ToolCall]) {
         for call in tool_calls {
             match call.name.as_str() {
-                "change" | "write" | "edit"
-                    if !matches!(self.phase, LifecyclePhase::Implementing { .. }) =>
-                {
+                "write" | "edit" if !matches!(self.phase, LifecyclePhase::Implementing { .. }) => {
                     self.phase = LifecyclePhase::Implementing { change_id: None };
                 }
                 "understand" | "read" => {
@@ -664,5 +662,18 @@ mod tests {
             !prompt.contains("guidelines:"),
             "core tools should not trigger group injection"
         );
+    }
+
+    #[test]
+    fn hidden_change_tool_does_not_advance_implementing_phase() {
+        let mut cm = ContextManager::new("base".into(), vec![]);
+        let calls = vec![crate::conversation::ToolCall {
+            id: "1".into(),
+            name: "change".into(),
+            arguments: serde_json::json!({}),
+        }];
+
+        cm.update_phase_from_activity(&calls);
+        assert!(matches!(cm.phase(), LifecyclePhase::Idle));
     }
 }

@@ -20,6 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - **Behavioral tool classification is now capability-driven** — tool governance no longer depends on hardcoded name lists in the loop. `ToolDefinition` now carries explicit capabilities, built-in and plugin tool surfaces propagate them, and evidence pressure distinguishes local coding sufficiency from global task sufficiency.
 - **`edit` is now the only model-facing file mutation primitive** — `change` remains available internally as the harness transaction engine for coordinated exact-text batches, but it is hidden from the model-facing tool surface to reduce mutation-surface ambiguity.
+- **`validate` is now the canonical model-facing validation tool** — validation is no longer inferred from `bash` command text or run implicitly after every edit/write. The loop classifies validation through explicit tool capabilities, and mutation tools now rely on explicit `validate` calls instead of hidden post-mutation checks.
 - **`styrene-mqtt` now resolves as an external crate dependency** — Omegon depends on `styrene-mqtt = "0.1.0"` from crates.io instead of requiring a hard sibling path or local patch override in the main manifest.
 
 ## [0.18.4] - 2026-05-03
