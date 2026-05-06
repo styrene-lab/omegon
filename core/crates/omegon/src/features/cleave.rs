@@ -1212,7 +1212,10 @@ impl Feature for CleaveFeature {
                     },
                     "required": ["directive", "plan_json"]
                 }),
-                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
+                capabilities: vec![
+                    omegon_traits::ToolCapability::StateChanging,
+                    omegon_traits::ToolCapability::ProgressBoundary,
+                ],
             },
         ]
     }

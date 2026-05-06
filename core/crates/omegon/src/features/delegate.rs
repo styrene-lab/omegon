@@ -1295,7 +1295,10 @@ impl Feature for DelegateFeature {
                     },
                     "required": ["task"]
                 }),
-                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
+                capabilities: vec![
+                    omegon_traits::ToolCapability::StateChanging,
+                    omegon_traits::ToolCapability::ProgressBoundary,
+                ],
             },
             ToolDefinition {
                 name: crate::tool_registry::delegate::DELEGATE_RESULT.to_string(),

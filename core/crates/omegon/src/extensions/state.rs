@@ -9,6 +9,7 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtensionState {
     /// Whether the extension is enabled (should be spawned on TUI startup)
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
 
     /// ISO 8601 timestamp when extension was last enabled
@@ -26,6 +27,7 @@ pub struct ExtensionState {
 
 /// Crash and health tracking for extension.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct StabilityMetrics {
     /// Number of crashes in current TUI session
     pub crashes_this_session: u32,
@@ -34,16 +36,17 @@ pub struct StabilityMetrics {
     pub health_check_failures: u32,
 
     /// Last error message (if any)
-    #[serde(default)]
     pub last_error: Option<String>,
 
     /// ISO 8601 timestamp of last error
-    #[serde(default)]
     pub last_error_at: Option<String>,
 
     /// Whether extension was auto-disabled due to crashes
-    #[serde(default)]
     pub auto_disabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 impl ExtensionState {
@@ -227,5 +230,12 @@ mod tests {
         state.record_error("crash 3".to_string());
         // After 3 crashes, it's auto-disabled, so status shows "disabled: {error}"
         assert!(state.status_text().contains("disabled:"));
+    }
+
+    #[test]
+    fn missing_enabled_field_defaults_to_true() {
+        let toml = "[stability]\ncrashes_this_session = 0\n";
+        let state: ExtensionState = toml::from_str(toml).unwrap();
+        assert!(state.enabled);
     }
 }

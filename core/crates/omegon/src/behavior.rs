@@ -78,6 +78,10 @@ pub(crate) fn is_validation_tool_name(catalog: &ToolCapabilityCatalog, name: &st
     catalog.has(name, ToolCapability::Validation)
 }
 
+pub(crate) fn is_progress_boundary_tool(catalog: &ToolCapabilityCatalog, name: &str) -> bool {
+    catalog.has(name, ToolCapability::ProgressBoundary)
+}
+
 pub(crate) fn mutation_targets_within_limit(
     catalog: &ToolCapabilityCatalog,
     tool_calls: &[ToolCall],
@@ -519,7 +523,9 @@ pub(crate) fn has_progress_boundary(
         is_mutation_tool_name(catalog, &call.name)
     }) || has_successful_tool_call(tool_calls, results, |call| {
         is_validation_tool_name(catalog, &call.name)
-    }) || has_successful_tool_call(tool_calls, results, |call| call.name == "commit")
+    }) || has_successful_tool_call(tool_calls, results, |call| {
+        is_progress_boundary_tool(catalog, &call.name)
+    })
 }
 
 pub(crate) fn classify_validation_scope(
@@ -595,14 +601,14 @@ pub(crate) fn classify_progress_signal(
     tool_calls: &[ToolCall],
     results: &[ToolResultEntry],
 ) -> ProgressSignal {
-    if has_successful_tool_call(tool_calls, results, |call| call.name == "commit") {
+    if has_successful_tool_call(tool_calls, results, |call| {
+        is_progress_boundary_tool(catalog, &call.name)
+    }) {
         return ProgressSignal::Commit;
     }
     if has_successful_tool_call(tool_calls, results, |call| {
         is_mutation_tool_name(catalog, &call.name)
-            || call.name == "commit"
-            || call.name == "delegate"
-            || call.name == "cleave_run"
+            || is_progress_boundary_tool(catalog, &call.name)
     }) {
         return ProgressSignal::Mutation;
     }

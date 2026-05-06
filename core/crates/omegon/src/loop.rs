@@ -2673,19 +2673,19 @@ impl StuckDetector {
 
         let window = &self.recent[len.saturating_sub(self.window)..];
 
-        // Pattern 1: read-without-modify loop — same file (path-normalized)
-        // read 5+ times without any write/edit to that file.  Threshold is 5
-        // (not 3) because path normalization collapses offset/limit variations,
-        // and a legitimate explore→test→re-read→edit workflow may read the
-        // same file 3-4 times.  Also skip detection if a mutation or validation
-        // tool appeared in the window — that signals the agent is trying to
-        // converge, not spinning.
+        // Pattern 1: inspect-without-modify loop — same file (path-normalized)
+        // inspected 5+ times without any write/edit to that file.  Threshold
+        // is 5 (not 3) because path normalization collapses offset/limit
+        // variations, and a legitimate explore→test→re-read→edit workflow may
+        // read the same file 3-4 times.  Also skip detection if a mutation or
+        // validation tool appeared in the window — that signals the agent is
+        // trying to converge, not spinning.
         let has_mutation_or_validation = window.iter().any(|(name, _, _)| {
             is_mutation_tool_name(catalog, name) || is_validation_tool_name(catalog, name)
         });
         let reads: Vec<_> = window
             .iter()
-            .filter(|(name, _, _)| name == "read")
+            .filter(|(name, _, _)| is_repo_inspection_tool(catalog, name))
             .collect();
         if !has_mutation_or_validation && reads.len() >= 5 {
             let mut hash_counts: HashMap<u64, u32> = HashMap::new();
@@ -2695,8 +2695,8 @@ impl StuckDetector {
             if hash_counts.values().any(|&c| c >= 5) {
                 self.consecutive_warnings += 1;
                 return Some(StuckWarning {
-                    message: "You've read the same file multiple times without modifying it. \
-                         Stop rereading and either edit, validate, or summarize the blocker plainly."
+                    message: "You've inspected the same target multiple times without modifying it. \
+                         Stop re-reading and either edit, validate, or summarize the blocker plainly."
                         .into(),
                     consecutive: self.consecutive_warnings,
                 });
@@ -3022,18 +3022,34 @@ mod tests {
                 capabilities: vec![ToolCapability::StateChanging],
             },
             ToolDefinition {
+                name: "commit".into(),
+                label: "commit".into(),
+                description: String::new(),
+                parameters: Value::Null,
+                capabilities: vec![
+                    ToolCapability::StateChanging,
+                    ToolCapability::ProgressBoundary,
+                ],
+            },
+            ToolDefinition {
                 name: "delegate".into(),
                 label: "delegate".into(),
                 description: String::new(),
                 parameters: Value::Null,
-                capabilities: vec![ToolCapability::StateChanging],
+                capabilities: vec![
+                    ToolCapability::StateChanging,
+                    ToolCapability::ProgressBoundary,
+                ],
             },
             ToolDefinition {
                 name: "cleave_run".into(),
                 label: "cleave_run".into(),
                 description: String::new(),
                 parameters: Value::Null,
-                capabilities: vec![ToolCapability::StateChanging],
+                capabilities: vec![
+                    ToolCapability::StateChanging,
+                    ToolCapability::ProgressBoundary,
+                ],
             },
             ToolDefinition {
                 name: "cleave_assess".into(),
@@ -4690,7 +4706,7 @@ mod tests {
         }
         let warning = detector.check(&test_tool_catalog()).expect("warning");
         assert!(
-            warning.message.contains("same file multiple times"),
+            warning.message.contains("same target multiple times"),
             "got: {warning}"
         );
         assert!(

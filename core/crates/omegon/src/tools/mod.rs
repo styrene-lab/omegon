@@ -527,7 +527,10 @@ impl ToolProvider for CoreTools {
                     },
                     "required": ["message"]
                 }),
-                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
+                capabilities: vec![
+                    omegon_traits::ToolCapability::StateChanging,
+                    omegon_traits::ToolCapability::ProgressBoundary,
+                ],
             },
             ToolDefinition {
                 name: reg::WHOAMI.into(),

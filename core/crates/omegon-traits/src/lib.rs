@@ -1174,6 +1174,7 @@ pub enum ToolCapability {
     Mutation,
     Validation,
     StateChanging,
+    ProgressBoundary,
 }
 
 /// JSON Schema definition for a tool's parameters.
