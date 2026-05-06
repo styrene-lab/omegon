@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn github_slug_extracts_owner_repo() {
         let entry = RegistryEntry {
-            repo: "https://github.com/styrene-lab/codex".into(),
+            repo: "https://github.com/styrene-lab/flynt".into(),
             description: String::new(),
             category: String::new(),
             maintainer: String::new(),
@@ -326,7 +326,7 @@ mod tests {
             min_sdk: None,
             asset_prefix: None,
         };
-        assert_eq!(entry.github_slug(), Some("styrene-lab/codex"));
+        assert_eq!(entry.github_slug(), Some("styrene-lab/flynt"));
     }
 
     #[test]
