@@ -57,6 +57,12 @@ const SAFE_INHERIT_ENVS: &[&str] = &[
     // Rust runtime
     "RUST_LOG",
     "RUST_BACKTRACE",
+    // Flynt vault root — read by the flynt-agent extension to locate the user's
+    // active vault. Not a secret (just a filesystem path) and required for the
+    // agent to answer "what document am I looking at?". CODEX_VAULT is kept for
+    // pre-rename installs.
+    "FLYNT_VAULT",
+    "CODEX_VAULT",
 ];
 
 /// Handles for communicating with an extension process.

@@ -797,13 +797,19 @@ pub(crate) fn continuation_pressure_tier(
 }
 
 pub(crate) fn continuation_pressure_message(tier: u8, behavior: BehavioralTier) -> String {
+    // IMPORTANT: A direct text reply IS valid output. Do NOT bias toward file
+    // mutations — many sessions are Q&A / explanation work where writing a
+    // file is wrong (e.g. answering "summarize this doc" by creating a new
+    // summary file the user never asked for). File writes are listed only as
+    // an option, after answering, and only when the user explicitly asked to
+    // change a file.
     match (tier, behavior) {
-        (1, BehavioralTier::Constrained) => "[System: You have been exploring. Produce output now — write, edit, or state what's blocking you.]".to_string(),
-        (2, BehavioralTier::Constrained) => "[System: Produce output now. Write or edit a file, or state the blocker.]".to_string(),
-        (_, BehavioralTier::Constrained) => "[System: You must produce output on this turn. Write, edit, or explain why you cannot.]".to_string(),
-        (1, _) => "[System: You have spent several turns exploring without producing output. You likely have enough context. Take the next concrete step toward completing the user's request — write a file, make an edit, run a command that produces a result, or explain what's blocking you.]".to_string(),
-        (2, _) => "[System: You are still exploring. Produce a concrete result now: write or edit a file, run a command that changes state, or tell the user exactly what's blocking progress.]".to_string(),
-        _ => "[System: You have been exploring for many turns without producing output. On this turn, you must do one of: (1) write or edit a file, (2) run a command that produces the requested result, or (3) tell the user exactly what is preventing you from completing the task.]".to_string(),
+        (1, BehavioralTier::Constrained) => "[System: You have been exploring. Produce output now — answer the user, or state what's blocking you.]".to_string(),
+        (2, BehavioralTier::Constrained) => "[System: Produce output now. Answer the user, or (only if they explicitly asked you to change a file) write/edit one. Otherwise state the blocker.]".to_string(),
+        (_, BehavioralTier::Constrained) => "[System: You must produce output on this turn. Answer the user, or explain why you cannot.]".to_string(),
+        (1, _) => "[System: You have spent several turns exploring without producing output. You likely have enough context. Take the next concrete step toward completing the user's request — answer them directly. If — and only if — they explicitly asked you to modify a file, do that instead. Otherwise reply in chat.]".to_string(),
+        (2, _) => "[System: You are still exploring. Produce a concrete result now: answer the user's question, or (only if they explicitly asked) write/edit a file. Do not invent file-writing tasks the user did not request.]".to_string(),
+        _ => "[System: You have been exploring for many turns without producing output. On this turn, you must do one of: (1) answer the user directly in chat, (2) write or edit a file ONLY if the user explicitly asked for that, or (3) tell the user exactly what is preventing you from completing the task.]".to_string(),
     }
 }
 
@@ -837,15 +843,15 @@ pub(crate) fn classify_auto_delegate_plan(
 
 pub(crate) fn evidence_sufficiency_message(behavior: BehavioralTier) -> String {
     match behavior {
-        BehavioralTier::Constrained => "[System: You have enough context. Produce output now.]".to_string(),
-        BehavioralTier::Standard => "[System: You have gathered enough context to act. Produce a concrete result — write a file, make an edit, or explain what's blocking you.]".to_string(),
+        BehavioralTier::Constrained => "[System: You have enough context. Produce output now — answer the user.]".to_string(),
+        BehavioralTier::Standard => "[System: You have gathered enough context to act. Produce a concrete result — answer the user's question. If they explicitly asked you to modify a file, do that. Otherwise reply in chat; do not invent file-writing work.]".to_string(),
     }
 }
 
 pub(crate) fn om_local_first_message(behavior: BehavioralTier) -> String {
     match behavior {
-        BehavioralTier::Constrained => "[System: Produce output now. Do not search again.]".to_string(),
-        BehavioralTier::Standard => "[System: You have enough context. Produce the requested output — write, edit, or state the blocker.]".to_string(),
+        BehavioralTier::Constrained => "[System: Produce output now. Do not search again. Answer the user.]".to_string(),
+        BehavioralTier::Standard => "[System: You have enough context. Produce the requested output — answer the user. If they explicitly asked you to modify a file, do that; otherwise reply in chat.]".to_string(),
     }
 }
 

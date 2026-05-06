@@ -799,26 +799,76 @@ pub async fn run(
             // Guards against false positives:
             // - Skip turn 1: a text-only first response is normal
             // - Skip if model never used tools: conversational exchange
-            // - First text-only response gets a free pass (summary)
+            // - Skip if the user's prompt looks like a question or any
+            //   read-style request (rundown / overview / give me / show me)
+            // - Skip if the last assistant reply was substantial (>=200
+            //   chars of natural language) — that IS the output, regardless
+            //   of whether tools were called to gather context first
+            // - Skip if the user explicitly did not ask for a file write
             let in_task_mode = conversation.intent.stats.tool_calls > 0;
-            // Skip dead-mouse if the user's last prompt looks like a question
-            // or request for explanation — text-only responses are legitimate.
+            // Skip dead-mouse if the user's last prompt looks like a question,
+            // rundown, summary, or any read/explain-style request — text-only
+            // responses are legitimate. We err *strongly* on the side of NOT
+            // firing: false positives push the model to invent file-writing
+            // work the user never requested (worse failure mode than false
+            // negatives).
             let user_asked_question = {
                 let prompt = conversation.last_user_prompt().to_lowercase();
+                let starts = |w: &str| prompt.trim_start().starts_with(w);
                 prompt.contains('?')
-                    || prompt.starts_with("explain")
-                    || prompt.starts_with("what ")
-                    || prompt.starts_with("why ")
-                    || prompt.starts_with("how ")
-                    || prompt.starts_with("describe")
-                    || prompt.starts_with("summarize")
-                    || prompt.starts_with("tell me")
-                    || prompt.starts_with("list ")
+                    || starts("explain")
+                    || starts("what")
+                    || starts("why")
+                    || starts("how")
+                    || starts("when")
+                    || starts("where")
+                    || starts("which")
+                    || starts("who")
+                    || starts("describe")
+                    || starts("summarize")
+                    || starts("summary")
+                    || starts("rundown")
+                    || starts("overview")
+                    || starts("review")
+                    || starts("analyze")
+                    || starts("compare")
+                    || starts("contrast")
+                    || starts("outline")
+                    || starts("discuss")
+                    || starts("tell me")
+                    || starts("show me")
+                    || starts("give me")
+                    || starts("list")
+                    || starts("can you")
+                    || starts("could you")
+                    || starts("do you")
+                    || starts("is ")
+                    || starts("are ")
+                    || starts("does")
+                    || starts("did")
+                    || starts("read")
+                    || starts("look")
+                    || starts("check")
+                    || starts("find")
+                    || starts("search")
+                    || prompt.contains(" rundown")
+                    || prompt.contains(" summary")
+                    || prompt.contains(" overview")
             };
+            // If the model's last assistant message was substantial natural
+            // language (i.e. it produced an actual answer), treat the turn
+            // as complete regardless of mutations. Q&A is a primary mode for
+            // many embedders (e.g. Flynt) and the previous heuristic
+            // mistreated text answers as "narration without action".
+            let last_assistant_substantial = conversation
+                .last_assistant_text()
+                .map(|t| t.trim().len() >= 200)
+                .unwrap_or(false);
             if !has_mutations(conversation)
                 && turn > 1
                 && in_task_mode
                 && !user_asked_question
+                && !last_assistant_substantial
                 && turn < config.max_turns
                 && dead_mouse_nudges < 3
             {
@@ -1022,10 +1072,10 @@ pub async fn run(
             tracing::info!("First-turn orientation churn — injecting execution-bias nudge");
             let msg = match behavior {
                 BehavioralTier::Constrained => {
-                    "[System: Read the relevant file or produce output. Do not use broad orientation tools.]"
+                    "[System: Read the relevant file or answer the user. Do not use broad orientation tools.]"
                 }
                 BehavioralTier::Standard => {
-                    "[System: Focus on the user's request. Read the most relevant file, or start producing the requested output.]"
+                    "[System: Focus on the user's request. Read the most relevant file, then answer them in chat.]"
                 }
             };
             inject_nudge!("first_turn_execution_bias", msg);
@@ -1053,10 +1103,10 @@ pub async fn run(
             tracing::info!("Execution stall — injecting execution-pressure nudge");
             let msg = match behavior {
                 BehavioralTier::Constrained => {
-                    "[System: You have enough context. Produce output now.]"
+                    "[System: You have enough context. Answer the user now.]"
                 }
                 BehavioralTier::Standard => {
-                    "[System: You have enough context. Produce the requested result or explain what's blocking you.]"
+                    "[System: You have enough context. Answer the user, or explain what's blocking you. Do not invent file-writing work the user didn't ask for.]"
                 }
             };
             inject_nudge!("execution_pressure", msg);

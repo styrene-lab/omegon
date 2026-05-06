@@ -182,6 +182,29 @@ impl OmegonAcpAgent {
             let _ = tx.send(req).await;
         }
     }
+
+    /// Same as [`send_to_worker`], spelled out for clarity at sites that
+    /// also await an ack channel separately.
+    async fn send_to_worker_ack(&self, req: WorkerRequest) {
+        self.send_to_worker(req).await;
+    }
+
+    /// Read the worker's current settings — model/thinking/posture as actually
+    /// applied. Falls back to the bootstrap defaults if the worker isn't up yet
+    /// or the lock is poisoned.
+    fn current_settings(&self) -> (String, String, String) {
+        let settings_arc = self.worker.borrow().as_ref().map(|w| w.settings.clone());
+        if let Some(s) = settings_arc
+            && let Ok(g) = s.lock()
+        {
+            return (
+                g.model.clone(),
+                g.thinking.as_str().to_string(),
+                g.posture.effective.as_str().to_string(),
+            );
+        }
+        (self.model.clone(), "minimal".into(), "fabricator".into())
+    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -218,8 +241,15 @@ impl Agent for OmegonAcpAgent {
         let mut response = NewSessionResponse::new(sid.clone());
         response.modes = Some(Self::modes());
 
-        let model = self.model.clone();
-        response.config_options = Some(self.build_config_options(&model, "minimal", "fabricator"));
+        // Read the *worker's* current settings, not self.model — the worker may
+        // have already received SetModel/SetThinking/SetPosture before this
+        // session started, and we need to advertise what's actually running.
+        let (current_model, current_thinking, current_posture) = self.current_settings();
+        response.config_options = Some(self.build_config_options(
+            &current_model,
+            &current_thinking,
+            &current_posture,
+        ));
 
         // Send available commands after response (via spawned task)
         let conn = self.conn.clone();
@@ -342,10 +372,11 @@ impl Agent for OmegonAcpAgent {
                                     .await;
                             }
                         }
-                        Ok(WorkerEvent::ToolStart { id, name }) => {
+                        Ok(WorkerEvent::ToolStart { id, name, args }) => {
                             if let Some(c) = conn.borrow().as_ref() {
                                 let mut tc = ToolCall::new(ToolCallId::new(id), name);
                                 tc.status = ToolCallStatus::InProgress;
+                                tc.raw_input = args;
                                 let _ = c
                                     .session_notification(SessionNotification::new(
                                         stream_sid.clone(),
@@ -442,8 +473,11 @@ impl Agent for OmegonAcpAgent {
             "agent" => "devastator",
             _ => return Err(Error::invalid_params()),
         };
-        self.send_to_worker(WorkerRequest::SetPosture(posture.to_string()))
-            .await;
+        self.send_to_worker_ack(WorkerRequest::SetPosture {
+            value: posture.to_string(),
+            ack: None,
+        })
+        .await;
         Ok(SetSessionModeResponse::new())
     }
 
@@ -454,43 +488,64 @@ impl Agent for OmegonAcpAgent {
         let config_id = args.config_id.0.to_string();
         let value = args.value.0.to_string();
 
-        match config_id.as_str() {
+        // Use ack so we read shared_settings AFTER the worker has applied the
+        // mutation. Without this the response would race the worker thread
+        // and report the previous value.
+        let (req, ack_rx) = match config_id.as_str() {
             "model" => {
-                self.send_to_worker(WorkerRequest::SetModel(value.clone()))
-                    .await
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                (
+                    WorkerRequest::SetModel { value: value.clone(), ack: Some(tx) },
+                    rx,
+                )
             }
             "thinking" => {
-                self.send_to_worker(WorkerRequest::SetThinking(value.clone()))
-                    .await
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                (
+                    WorkerRequest::SetThinking { value: value.clone(), ack: Some(tx) },
+                    rx,
+                )
             }
             "posture" => {
-                self.send_to_worker(WorkerRequest::SetPosture(value.clone()))
-                    .await
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                (
+                    WorkerRequest::SetPosture { value: value.clone(), ack: Some(tx) },
+                    rx,
+                )
             }
             _ => return Err(Error::invalid_params()),
+        };
+        self.send_to_worker_ack(req).await;
+        let _ = ack_rx.await;
+
+        // Read back from the worker's settings — send_to_worker awaits the
+        // mutation, so this captures the actually-applied state (which may
+        // differ from `value` if the worker rejected/normalised the input).
+        let (current_model, current_thinking, current_posture) = self.current_settings();
+        let options = self.build_config_options(&current_model, &current_thinking, &current_posture);
+
+        // Also push a ConfigOptionUpdate notification so clients that don't
+        // inspect the response value (e.g. flynt-app's set_config which
+        // discards the response, or any client that triggers a config change
+        // through a different path) still see the new state.
+        if let Some(sid) = self.session_id.borrow().clone() {
+            let conn = self.conn.clone();
+            let push_options = options.clone();
+            tokio::task::spawn_local(async move {
+                if let Some(c) = conn.borrow().as_ref() {
+                    let _ = c
+                        .session_notification(SessionNotification::new(
+                            sid,
+                            SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
+                                push_options,
+                            )),
+                        ))
+                        .await;
+                }
+            });
         }
 
-        // Return the full config list with updated value so Zed keeps
-        // showing all dropdowns. Rebuilding the options is cheap.
-        let current_model = if config_id == "model" {
-            value.clone()
-        } else {
-            self.model.clone()
-        };
-        let current_thinking = if config_id == "thinking" {
-            value.clone()
-        } else {
-            "minimal".into()
-        };
-        let current_posture = if config_id == "posture" {
-            value.clone()
-        } else {
-            "fabricator".into()
-        };
-
-        Ok(SetSessionConfigOptionResponse::new(
-            self.build_config_options(&current_model, &current_thinking, &current_posture),
-        ))
+        Ok(SetSessionConfigOptionResponse::new(options))
     }
 
     async fn load_session(&self, args: LoadSessionRequest) -> Result<LoadSessionResponse> {
@@ -533,7 +588,10 @@ impl OmegonAcpAgent {
                 let rt = tokio::runtime::Handle::current();
                 let tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
                 if let Some(tx) = tx {
-                    let _ = rt.block_on(tx.send(WorkerRequest::SetModel(args.trim().to_string())));
+                    let _ = rt.block_on(tx.send(WorkerRequest::SetModel {
+                        value: args.trim().to_string(),
+                        ack: None,
+                    }));
                 }
                 format!("Model set to: {}", args.trim())
             }
@@ -541,9 +599,12 @@ impl OmegonAcpAgent {
             "/thinking" if !args.is_empty() => {
                 let tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
                 if let Some(tx) = tx {
-                    let _ = tokio::runtime::Handle::current().block_on(
-                        tx.send(WorkerRequest::SetThinking(args.trim().to_string()))
-                    );
+                    let _ = tokio::runtime::Handle::current().block_on(tx.send(
+                        WorkerRequest::SetThinking {
+                            value: args.trim().to_string(),
+                            ack: None,
+                        },
+                    ));
                 }
                 format!("Thinking set to: {}", args.trim())
             }
@@ -551,9 +612,12 @@ impl OmegonAcpAgent {
             "/posture" if !args.is_empty() => {
                 let tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
                 if let Some(tx) = tx {
-                    let _ = tokio::runtime::Handle::current().block_on(
-                        tx.send(WorkerRequest::SetPosture(args.trim().to_string()))
-                    );
+                    let _ = tokio::runtime::Handle::current().block_on(tx.send(
+                        WorkerRequest::SetPosture {
+                            value: args.trim().to_string(),
+                            ack: None,
+                        },
+                    ));
                 }
                 format!("Posture set to: {}", args.trim())
             }

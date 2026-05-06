@@ -18,12 +18,14 @@ pub enum WorkerRequest {
     },
     /// Cancel the current prompt.
     Cancel,
-    /// Change the model.
-    SetModel(String),
+    /// Change the model. `ack` (when provided) fires after shared_settings is
+    /// updated so the caller can read the applied state without racing the
+    /// channel.
+    SetModel { value: String, ack: Option<oneshot::Sender<()>> },
     /// Change thinking level.
-    SetThinking(String),
+    SetThinking { value: String, ack: Option<oneshot::Sender<()>> },
     /// Change posture.
-    SetPosture(String),
+    SetPosture { value: String, ack: Option<oneshot::Sender<()>> },
     /// Shut down the worker.
     Shutdown,
 }
@@ -42,6 +44,9 @@ pub enum WorkerEvent {
     ToolStart {
         id: String,
         name: String,
+        /// Raw input arguments to the tool (forwarded as ACP ToolCall.raw_input
+        /// so clients can render call metadata, not just the bare tool name).
+        args: Option<serde_json::Value>,
     },
     ToolEnd {
         id: String,
@@ -56,12 +61,20 @@ pub enum WorkerEvent {
 pub struct WorkerHandle {
     pub request_tx: mpsc::Sender<WorkerRequest>,
     pub event_rx: tokio::sync::broadcast::Receiver<WorkerEvent>,
+    /// Live settings owned by the worker. Allows the ACP transport thread to
+    /// observe the current effective model/thinking/posture without round-
+    /// tripping a request — needed because new_session and dropdown
+    /// rebuilds must reflect the actual values the worker is using.
+    pub settings: crate::settings::SharedSettings,
 }
 
 /// Spawn the worker thread. Returns a handle for communication.
 pub fn spawn_worker(model: String, cwd: PathBuf) -> WorkerHandle {
     let (request_tx, request_rx) = mpsc::channel::<WorkerRequest>(16);
     let (event_tx, event_rx) = tokio::sync::broadcast::channel::<WorkerEvent>(256);
+
+    let shared_settings = crate::settings::shared(&model);
+    let worker_settings = shared_settings.clone();
 
     std::thread::Builder::new()
         .name("omegon-acp-worker".into())
@@ -72,13 +85,14 @@ pub fn spawn_worker(model: String, cwd: PathBuf) -> WorkerHandle {
                 .expect("worker runtime");
 
             let local = tokio::task::LocalSet::new();
-            local.block_on(&rt, worker_loop(model, cwd, request_rx, event_tx));
+            local.block_on(&rt, worker_loop(model, cwd, worker_settings, request_rx, event_tx));
         })
         .expect("failed to spawn worker thread");
 
     WorkerHandle {
         request_tx,
         event_rx,
+        settings: shared_settings,
     }
 }
 
@@ -86,12 +100,13 @@ pub fn spawn_worker(model: String, cwd: PathBuf) -> WorkerHandle {
 async fn worker_loop(
     model: String,
     cwd: PathBuf,
+    shared_settings: crate::settings::SharedSettings,
     mut request_rx: mpsc::Receiver<WorkerRequest>,
     event_tx: tokio::sync::broadcast::Sender<WorkerEvent>,
 ) {
-    // Create the agent setup once — this is the expensive part (loads tools,
-    // memory, features). Runs on the worker thread so it doesn't block ACP I/O.
-    let shared_settings = crate::settings::shared(&model);
+    // Apply profile + initial model to the shared settings provided by spawn_worker.
+    // Worker mutates these on SetModel/SetThinking/SetPosture; the ACP transport
+    // thread reads them when rebuilding ConfigOption lists.
     if let Ok(mut s) = shared_settings.lock() {
         let profile = crate::settings::Profile::load(&cwd);
         profile.apply_to_with_posture(&mut s, &cwd);
@@ -157,8 +172,12 @@ async fn worker_loop(
                             omegon_traits::AgentEvent::ThinkingChunk { text, .. } => {
                                 Some(WorkerEvent::ThinkingChunk(text))
                             }
-                            omegon_traits::AgentEvent::ToolStart { id, name, .. } => {
-                                Some(WorkerEvent::ToolStart { id, name })
+                            omegon_traits::AgentEvent::ToolStart { id, name, args, .. } => {
+                                Some(WorkerEvent::ToolStart {
+                                    id,
+                                    name,
+                                    args: if args.is_null() { None } else { Some(args) },
+                                })
                             }
                             omegon_traits::AgentEvent::ToolEnd { id, is_error, .. } => {
                                 Some(WorkerEvent::ToolEnd {
@@ -238,22 +257,28 @@ async fn worker_loop(
                 cancel.cancel();
             }
 
-            WorkerRequest::SetModel(m) => {
+            WorkerRequest::SetModel { value, ack } => {
                 if let Ok(mut s) = shared_settings.lock() {
-                    s.set_model(&m);
+                    s.set_model(&value);
+                }
+                if let Some(tx) = ack {
+                    let _ = tx.send(());
                 }
             }
 
-            WorkerRequest::SetThinking(level) => {
-                if let Some(l) = crate::settings::ThinkingLevel::parse(&level)
+            WorkerRequest::SetThinking { value, ack } => {
+                if let Some(l) = crate::settings::ThinkingLevel::parse(&value)
                     && let Ok(mut s) = shared_settings.lock()
                 {
                     s.thinking = l;
                 }
+                if let Some(tx) = ack {
+                    let _ = tx.send(());
+                }
             }
 
-            WorkerRequest::SetPosture(name) => {
-                let posture = match name.as_str() {
+            WorkerRequest::SetPosture { value, ack } => {
+                let posture = match value.as_str() {
                     "fabricator" => Some(crate::settings::PosturePreset::Fabricator),
                     "architect" => Some(crate::settings::PosturePreset::Architect),
                     "explorator" => Some(crate::settings::PosturePreset::Explorator),
@@ -264,6 +289,9 @@ async fn worker_loop(
                     && let Ok(mut s) = shared_settings.lock()
                 {
                     s.set_posture(p);
+                }
+                if let Some(tx) = ack {
+                    let _ = tx.send(());
                 }
             }
 
