@@ -66,12 +66,16 @@ pub struct WorkerHandle {
     /// tripping a request — needed because new_session and dropdown
     /// rebuilds must reflect the actual values the worker is using.
     pub settings: crate::settings::SharedSettings,
+    /// Secrets manager from the worker — arrives asynchronously after setup.
+    /// Used by the ACP transport to redact streaming output before emission.
+    pub secrets_rx: tokio::sync::oneshot::Receiver<std::sync::Arc<omegon_secrets::SecretsManager>>,
 }
 
 /// Spawn the worker thread. Returns a handle for communication.
 pub fn spawn_worker(model: String, cwd: PathBuf) -> WorkerHandle {
     let (request_tx, request_rx) = mpsc::channel::<WorkerRequest>(16);
     let (event_tx, event_rx) = tokio::sync::broadcast::channel::<WorkerEvent>(256);
+    let (secrets_tx, secrets_rx) = tokio::sync::oneshot::channel();
 
     let shared_settings = crate::settings::shared(&model);
     let worker_settings = shared_settings.clone();
@@ -85,7 +89,7 @@ pub fn spawn_worker(model: String, cwd: PathBuf) -> WorkerHandle {
                 .expect("worker runtime");
 
             let local = tokio::task::LocalSet::new();
-            local.block_on(&rt, worker_loop(model, cwd, worker_settings, request_rx, event_tx));
+            local.block_on(&rt, worker_loop(model, cwd, worker_settings, request_rx, event_tx, secrets_tx));
         })
         .expect("failed to spawn worker thread");
 
@@ -93,6 +97,7 @@ pub fn spawn_worker(model: String, cwd: PathBuf) -> WorkerHandle {
         request_tx,
         event_rx,
         settings: shared_settings,
+        secrets_rx,
     }
 }
 
@@ -103,6 +108,7 @@ async fn worker_loop(
     shared_settings: crate::settings::SharedSettings,
     mut request_rx: mpsc::Receiver<WorkerRequest>,
     event_tx: tokio::sync::broadcast::Sender<WorkerEvent>,
+    secrets_tx: tokio::sync::oneshot::Sender<std::sync::Arc<omegon_secrets::SecretsManager>>,
 ) {
     // Apply profile + initial model to the shared settings provided by spawn_worker.
     // Worker mutates these on SetModel/SetThinking/SetPosture; the ACP transport
@@ -128,6 +134,7 @@ async fn worker_loop(
     let secrets = agent_setup.secrets;
     let mut cancel = CancellationToken::new();
 
+    let _ = secrets_tx.send(secrets.clone());
     tracing::info!(model = %model, "ACP worker ready");
 
     // Process requests

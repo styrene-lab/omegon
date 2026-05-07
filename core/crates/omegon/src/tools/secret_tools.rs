@@ -102,6 +102,18 @@ impl ToolProvider for SecretToolsProvider {
                         })
                     }
                     (None, Some(recipe)) => {
+                        // Only allow safe recipe types from the model.
+                        // cmd: and file: enable arbitrary code execution and
+                        // filesystem reads — restrict to operator-only CLI.
+                        let safe = recipe.starts_with("keyring:")
+                            || recipe.starts_with("env:");
+                        if !safe {
+                            anyhow::bail!(
+                                "Recipe type not allowed from agent tools. \
+                                 Only keyring: and env: recipes can be set programmatically. \
+                                 Use `omegon secrets set` in a terminal for cmd:, file:, and vault: recipes."
+                            );
+                        }
                         self.secrets.set_recipe(name, recipe)?;
                         Ok(ToolResult {
                             content: vec![ContentBlock::Text {

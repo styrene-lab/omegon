@@ -120,7 +120,7 @@ pub use elicitation::{ElicitationAction, ElicitationParams, ElicitationResult, E
 pub use error::{Error, ErrorCode, Result};
 pub use extension::{Extension, HostProxy};
 use extension::{ExtensionServe, MessageRouter};
-pub use manifest::{ExtensionManifest, ManifestError};
+pub use manifest::{ConfigField, ConfigFieldType, ExtensionManifest, ManifestError};
 pub use mind::{
     AddFactResponse, Episode, Fact, FactOpResponse, GetMindResponse, LoadMindResponse,
     MindMetadata, StoreMindResponse,

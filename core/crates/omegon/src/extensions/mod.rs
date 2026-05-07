@@ -480,7 +480,16 @@ async fn handshake(
                 "bootstrap_secrets delivered"
             ),
             Err(e) => {
-                tracing::warn!(extension = name, error = %e, "bootstrap_secrets not acknowledged — extension may not support it")
+                tracing::error!(
+                    extension = name,
+                    error = %e,
+                    "bootstrap_secrets delivery failed — extension will run without secrets"
+                );
+                return Err(anyhow!(
+                    "extension '{}' failed to accept bootstrap_secrets: {e}. \
+                     Secrets delivery is required for extensions that declare secrets.",
+                    name,
+                ));
             }
         }
     }

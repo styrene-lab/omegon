@@ -53,6 +53,16 @@ pub trait Extension: Send + Sync {
     async fn on_initialized(&self, _host: HostProxy) {
         // Default: no-op
     }
+
+    /// Called when the host delivers configuration values declared in the
+    /// manifest's `[config]` section. Extensions should store these for use
+    /// during tool execution.
+    ///
+    /// Called after `on_initialized`, before any tool invocations. May be
+    /// called again if the user updates config at runtime (hot-reload).
+    async fn on_config(&self, _config: std::collections::HashMap<String, serde_json::Value>) {
+        // Default: ignore config
+    }
 }
 
 // ─── HostProxy ────────────────────────────────────────────────────────────

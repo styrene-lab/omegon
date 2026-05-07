@@ -133,17 +133,22 @@ impl RecipeStore {
             recipes: self.recipes.clone(),
         };
         let json = serde_json::to_string_pretty(&file)?;
-        std::fs::write(&self.path, &json)?;
 
-        // Restrict file permissions — recipes contain sensitive metadata
-        // (keyring service names, file paths, vault paths, shell commands).
+        // Atomic write: write to temp file then rename. Prevents data loss
+        // if the process crashes or is killed mid-write.
+        let tmp_path = self.path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, &json)?;
+
+        // Restrict file permissions before rename — recipes contain sensitive
+        // metadata (keyring service names, file paths, vault paths, shell commands).
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let perms = std::fs::Permissions::from_mode(0o600);
-            std::fs::set_permissions(&self.path, perms)?;
+            std::fs::set_permissions(&tmp_path, perms)?;
         }
 
+        std::fs::rename(&tmp_path, &self.path)?;
         Ok(())
     }
 }

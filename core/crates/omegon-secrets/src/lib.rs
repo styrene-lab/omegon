@@ -587,6 +587,10 @@ impl SecretsManager {
             .write()
             .unwrap()
             .insert(name.to_string(), SecretString::from(value));
+        // Rebuild the Aho-Corasick automaton so redact() catches this value
+        // immediately. Without this, the automaton is stale and the secret
+        // passes through unredacted until the next preflight.
+        self.rebuild_redactor();
         self.hydrate_process_env();
         Ok(())
     }

@@ -38,6 +38,72 @@ pub struct ExtensionManifest {
     pub widgets: HashMap<String, WidgetConfig>,
     #[serde(default)]
     pub mind: MindConfig,
+    #[serde(default)]
+    pub config: HashMap<String, ConfigField>,
+}
+
+/// A declared configuration field in the extension manifest.
+///
+/// Extensions declare their config requirements in `[config.<field_name>]`
+/// tables. The host resolves values from per-extension config files and
+/// delivers them via `bootstrap_config` RPC after initialization.
+///
+/// Example manifest:
+/// ```toml
+/// [config.signal_phone]
+/// type = "string"
+/// label = "Signal phone number"
+/// description = "E.164 format, e.g. +14155551234"
+/// required = true
+///
+/// [config.webhook_enabled]
+/// type = "boolean"
+/// label = "Enable webhook"
+/// default = "false"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigField {
+    /// Field type — determines validation and UI widget.
+    #[serde(rename = "type")]
+    pub field_type: ConfigFieldType,
+
+    /// Human-readable label for settings UI.
+    pub label: String,
+
+    /// Longer description / help text.
+    #[serde(default)]
+    pub description: String,
+
+    /// Whether the field must have a value before the extension can start.
+    #[serde(default)]
+    pub required: bool,
+
+    /// Default value (as string — parsed according to `field_type`).
+    #[serde(default)]
+    pub default: Option<String>,
+
+    /// For `string` fields: regex pattern the value must match.
+    #[serde(default)]
+    pub pattern: Option<String>,
+
+    /// For `string` fields: hint shown as input placeholder.
+    #[serde(default)]
+    pub placeholder: Option<String>,
+
+    /// For `enum` fields: allowed values.
+    #[serde(default)]
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConfigFieldType {
+    String,
+    Number,
+    Boolean,
+    Enum,
+    /// Multi-line text (rendered as textarea).
+    Text,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,6 +268,30 @@ impl ExtensionManifest {
             ));
         }
 
+        // Validate config fields
+        for (name, field) in &self.config {
+            if name.is_empty() {
+                return Err(ManifestError::fatal("config field name must not be empty"));
+            }
+            if field.label.is_empty() {
+                return Err(ManifestError::fatal(format!(
+                    "config.{name}.label must not be empty"
+                )));
+            }
+            if field.field_type == ConfigFieldType::Enum && field.values.is_empty() {
+                return Err(ManifestError::fatal(format!(
+                    "config.{name} is type 'enum' but declares no values"
+                )));
+            }
+            if let Some(ref pattern) = field.pattern {
+                if pattern.is_empty() {
+                    return Err(ManifestError::fatal(format!(
+                        "config.{name}.pattern must not be empty if specified"
+                    )));
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -254,6 +344,7 @@ mod tests {
             startup: StartupConfig::default(),
             widgets: HashMap::new(),
             mind: MindConfig::default(),
+            config: HashMap::new(),
         };
 
         assert!(manifest.validate().is_ok());
@@ -274,6 +365,7 @@ mod tests {
             startup: StartupConfig::default(),
             widgets: HashMap::new(),
             mind: MindConfig::default(),
+            config: HashMap::new(),
         };
 
         assert!(manifest.validate().is_err());
@@ -294,6 +386,7 @@ mod tests {
             startup: StartupConfig::default(),
             widgets: HashMap::new(),
             mind: MindConfig::default(),
+            config: HashMap::new(),
         };
 
         // Exact match
@@ -302,5 +395,104 @@ mod tests {
         assert!(manifest.check_sdk_version("0.15.6-rc.1").is_ok());
         // Mismatch
         assert!(manifest.check_sdk_version("0.16.0").is_err());
+    }
+
+    #[test]
+    fn test_config_fields_parse_from_toml() {
+        let toml_str = r#"
+[extension]
+name = "vox"
+version = "0.1.0"
+
+[runtime]
+type = "native"
+binary = "target/release/vox"
+
+[config.signal_phone]
+type = "string"
+label = "Signal phone number"
+description = "E.164 format"
+required = true
+pattern = '^\+[1-9]\d{1,14}$'
+placeholder = "+14155551234"
+
+[config.webhook_enabled]
+type = "boolean"
+label = "Enable webhook"
+default = "false"
+
+[config.imap_provider]
+type = "enum"
+label = "IMAP provider"
+values = ["gmail", "fastmail", "custom"]
+default = "gmail"
+"#;
+
+        let manifest: ExtensionManifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(manifest.config.len(), 3);
+
+        let phone = &manifest.config["signal_phone"];
+        assert_eq!(phone.field_type, ConfigFieldType::String);
+        assert!(phone.required);
+        assert_eq!(phone.pattern.as_deref(), Some(r"^\+[1-9]\d{1,14}$"));
+
+        let webhook = &manifest.config["webhook_enabled"];
+        assert_eq!(webhook.field_type, ConfigFieldType::Boolean);
+        assert!(!webhook.required);
+        assert_eq!(webhook.default.as_deref(), Some("false"));
+
+        let imap = &manifest.config["imap_provider"];
+        assert_eq!(imap.field_type, ConfigFieldType::Enum);
+        assert_eq!(imap.values, vec!["gmail", "fastmail", "custom"]);
+
+        assert!(manifest.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_enum_requires_values() {
+        let manifest = ExtensionManifest {
+            extension: ExtensionMetadata {
+                name: "test".into(),
+                version: "0.1.0".into(),
+                description: "".into(),
+                sdk_version: "".into(),
+            },
+            runtime: RuntimeConfig::Native { binary: "bin".into() },
+            startup: StartupConfig::default(),
+            widgets: HashMap::new(),
+            mind: MindConfig::default(),
+            config: HashMap::from([(
+                "my_enum".into(),
+                ConfigField {
+                    field_type: ConfigFieldType::Enum,
+                    label: "Pick one".into(),
+                    description: "".into(),
+                    required: false,
+                    default: None,
+                    pattern: None,
+                    placeholder: None,
+                    values: vec![],
+                },
+            )]),
+        };
+
+        let err = manifest.validate().unwrap_err();
+        assert!(err.reason.contains("no values"));
+    }
+
+    #[test]
+    fn test_config_backwards_compat_no_config_section() {
+        let toml_str = r#"
+[extension]
+name = "old-ext"
+version = "0.1.0"
+
+[runtime]
+type = "native"
+binary = "target/release/old"
+"#;
+        let manifest: ExtensionManifest = toml::from_str(toml_str).unwrap();
+        assert!(manifest.config.is_empty());
+        assert!(manifest.validate().is_ok());
     }
 }

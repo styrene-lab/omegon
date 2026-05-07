@@ -19,6 +19,7 @@ pub struct OmegonAcpAgent {
     worker: RefCell<Option<WorkerHandle>>,
     conn: Rc<RefCell<Option<AgentSideConnection>>>,
     session_id: RefCell<Option<SessionId>>,
+    secrets: RefCell<Option<std::sync::Arc<omegon_secrets::SecretsManager>>>,
 }
 
 impl OmegonAcpAgent {
@@ -28,6 +29,7 @@ impl OmegonAcpAgent {
             worker: RefCell::new(None),
             conn: Rc::new(RefCell::new(None)),
             session_id: RefCell::new(None),
+            secrets: RefCell::new(None),
         }
     }
 
@@ -170,7 +172,20 @@ impl OmegonAcpAgent {
 
     fn ensure_worker(&self, cwd: &std::path::Path) {
         if self.worker.borrow().is_none() {
-            let handle = acp_worker::spawn_worker(self.model.clone(), cwd.to_path_buf());
+            let mut handle = acp_worker::spawn_worker(self.model.clone(), cwd.to_path_buf());
+            // Drain the secrets channel asynchronously — the worker sends it
+            // after AgentSetup completes. Store in self.secrets for redaction.
+            let secrets_cell = self.secrets.clone();
+            let rx = std::mem::replace(
+                &mut handle.secrets_rx,
+                // Replace with a dummy channel that will never fire
+                tokio::sync::oneshot::channel().1,
+            );
+            tokio::task::spawn_local(async move {
+                if let Ok(mgr) = rx.await {
+                    *secrets_cell.borrow_mut() = Some(mgr);
+                }
+            });
             *self.worker.borrow_mut() = Some(handle);
         }
     }
@@ -187,6 +202,15 @@ impl OmegonAcpAgent {
     /// also await an ack channel separately.
     async fn send_to_worker_ack(&self, req: WorkerRequest) {
         self.send_to_worker(req).await;
+    }
+
+    /// Redact secret values from text before sending over ACP.
+    fn redact(&self, text: &str) -> String {
+        if let Some(ref mgr) = *self.secrets.borrow() {
+            mgr.redact(text)
+        } else {
+            text.to_string()
+        }
     }
 
     /// Read the worker's current settings — model/thinking/posture as actually
@@ -345,10 +369,20 @@ impl Agent for OmegonAcpAgent {
         if let Some(mut event_rx) = event_rx {
             let conn = self.conn.clone();
             let stream_sid = sid.clone();
+            let secrets_ref = self.secrets.clone();
             tokio::task::spawn_local(async move {
+                // Closure to redact text through the secrets manager if available.
+                let redact = |text: &str| -> String {
+                    if let Some(ref mgr) = *secrets_ref.borrow() {
+                        mgr.redact(text)
+                    } else {
+                        text.to_string()
+                    }
+                };
                 loop {
                     match event_rx.recv().await {
                         Ok(WorkerEvent::TextChunk(text)) => {
+                            let text = redact(&text);
                             if let Some(c) = conn.borrow().as_ref() {
                                 let _ = c
                                     .session_notification(SessionNotification::new(
@@ -361,6 +395,7 @@ impl Agent for OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ThinkingChunk(text)) => {
+                            let text = redact(&text);
                             if let Some(c) = conn.borrow().as_ref() {
                                 let _ = c
                                     .session_notification(SessionNotification::new(
@@ -373,6 +408,10 @@ impl Agent for OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ToolStart { id, name, args }) => {
+                            let args = args.map(|a| {
+                                let s = redact(&a.to_string());
+                                serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))
+                            });
                             if let Some(c) = conn.borrow().as_ref() {
                                 let mut tc = ToolCall::new(ToolCallId::new(id), name);
                                 tc.status = ToolCallStatus::InProgress;
@@ -386,6 +425,7 @@ impl Agent for OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::StatusUpdate(msg)) => {
+                            let msg = redact(&msg);
                             if let Some(c) = conn.borrow().as_ref() {
                                 let _ = c
                                     .session_notification(SessionNotification::new(
@@ -438,7 +478,7 @@ impl Agent for OmegonAcpAgent {
         if let Some(error) = &worker_resp.error {
             let conn = self.conn.clone();
             let err_sid = sid.clone();
-            let err_text = format!("[Error: {error}]");
+            let err_text = self.redact(&format!("[Error: {error}]"));
             tokio::task::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 if let Some(c) = conn.borrow().as_ref() {

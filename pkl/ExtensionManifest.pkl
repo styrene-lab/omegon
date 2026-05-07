@@ -99,6 +99,26 @@ class WidgetConfig {
   description: String = ""
 }
 
+/// Configuration field schema — declares a single configurable setting.
+class ConfigFieldSchema {
+  /// Field type: determines validation rules and UI widget.
+  type: ("string"|"number"|"boolean"|"enum"|"text")
+  /// Human-readable label for settings UI.
+  label: String(length > 0)
+  /// Longer description / help text.
+  description: String = ""
+  /// Whether the field must have a value before the extension can start.
+  required: Boolean = false
+  /// Default value (as string, parsed according to type).
+  default: String?
+  /// Regex pattern the value must match (string fields only).
+  pattern: String?
+  /// Placeholder text for the input field.
+  placeholder: String?
+  /// Allowed values (enum fields only, required when type = "enum").
+  values: Listing<String>?
+}
+
 extension: ExtensionMeta
 
 runtime: RuntimeConfig
@@ -110,6 +130,29 @@ secrets: SecretsConfig?
 /// MCP capability declaration (optional).
 /// If present, this extension supports remote access via MCP.
 mcp: McpConfig?
+
+/// Configuration field declarations, keyed by field name.
+/// The host resolves values from per-extension config and delivers
+/// them via `bootstrap_config` RPC after initialization.
+///
+/// Example:
+/// ```
+/// config {
+///   ["signal_phone"] {
+///     type = "string"
+///     label = "Signal phone number"
+///     description = "E.164 format"
+///     required = true
+///     pattern = #"^\+[1-9]\d{1,14}$"#
+///   }
+///   ["webhook_enabled"] {
+///     type = "boolean"
+///     label = "Enable webhook"
+///     default = "false"
+///   }
+/// }
+/// ```
+config: Mapping<String, ConfigFieldSchema>?
 
 /// Widget declarations, keyed by widget ID.
 widgets: Mapping<String, WidgetConfig>?
