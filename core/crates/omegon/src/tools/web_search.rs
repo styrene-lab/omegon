@@ -45,19 +45,22 @@ impl WebSearchProvider {
 
     fn available_providers(&self) -> Vec<&'static str> {
         let mut providers = Vec::new();
-        if self.resolve_key("BRAVE_API_KEY").is_some() {
-            providers.push("brave");
-        }
+        // API-key providers — best quality when available
         if self.resolve_key("TAVILY_API_KEY").is_some() {
             providers.push("tavily");
         }
         if self.resolve_key("SERPER_API_KEY").is_some() {
             providers.push("serper");
         }
+        if self.resolve_key("BRAVE_API_KEY").is_some() {
+            providers.push("brave");
+        }
         if self.resolve_key("FIRECRAWL_API_KEY").is_some() {
             providers.push("firecrawl");
         }
-        // DuckDuckGo is always available — no API key needed
+        // Free engines — always available, no API key
+        providers.push("google");
+        providers.push("bing");
         providers.push("ddg");
         providers
     }
@@ -134,8 +137,8 @@ impl WebSearchProvider {
             anyhow::bail!("Response too large: {} bytes (max 1MB)", bytes.len());
         }
         let body = String::from_utf8_lossy(&bytes);
-        let stripped = strip_html_tags(&body);
-        Ok(crate::util::truncate(&stripped, 50_000))
+        let extracted = omegon_web::extract_content(&body);
+        Ok(crate::util::truncate(&extracted, 50_000))
     }
 
     /// DuckDuckGo HTML search — zero-config, no API key.
@@ -368,7 +371,25 @@ impl WebSearchProvider {
             "tavily" => self.search_tavily(query, max_results, topic).await,
             "serper" => self.search_serper(query, max_results, topic).await,
             "firecrawl" => self.search_firecrawl(query, max_results).await,
-            "ddg" => self.search_ddg(query, max_results).await,
+            "google" | "bing" | "ddg" => {
+                let engine = match provider {
+                    "google" => omegon_web::Engine::Google,
+                    "bing" => omegon_web::Engine::Bing,
+                    _ => omegon_web::Engine::DuckDuckGo,
+                };
+                let results = omegon_web::search(query, &omegon_web::SearchOptions {
+                    max_results,
+                    engines: vec![engine],
+                    aggregate: false,
+                }).await?;
+                Ok(results.into_iter().map(|r| SearchResult {
+                    title: r.title,
+                    url: r.url,
+                    snippet: r.snippet,
+                    content: None,
+                    provider: r.engine.to_string(),
+                }).collect())
+            }
             _ => anyhow::bail!("Unknown provider: {provider}"),
         }
     }
@@ -528,12 +549,12 @@ impl ToolProvider for WebSearchProvider {
             ToolDefinition {
                 name: crate::tool_registry::web_search::WEB_SEARCH.into(),
                 label: "Web Search".into(),
-                description: "Search the web. Works out of the box via DuckDuckGo; API keys (brave, tavily, serper, firecrawl) optional for deeper results.".into(),
+                description: "Search the web. Works out of the box via Google, Bing, and DuckDuckGo (no API keys). API keys (brave, tavily, serper, firecrawl) optional for premium results.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "query": { "type": "string", "description": "Search query" },
-                        "provider": { "type": "string", "enum": ["brave", "tavily", "serper", "firecrawl", "ddg"], "description": "Specific provider. Omit to auto-select." },
+                        "provider": { "type": "string", "enum": ["brave", "tavily", "serper", "firecrawl", "google", "bing", "ddg"], "description": "Specific provider. Omit to auto-select." },
                         "mode": { "type": "string", "enum": ["quick", "deep", "compare"], "description": "Search mode. Default: quick" },
                         "max_results": { "type": "number", "description": "Max results per provider. Default: 5", "minimum": 1, "maximum": 20 },
                         "topic": { "type": "string", "enum": ["general", "news"], "description": "Search topic. Default: general" }
@@ -545,7 +566,7 @@ impl ToolProvider for WebSearchProvider {
             ToolDefinition {
                 name: crate::tool_registry::web_search::WEB_FETCH.into(),
                 label: "Web Fetch".into(),
-                description: "Fetch a URL's content as clean text. Uses Firecrawl for markdown conversion if available, falls back to curl with HTML stripping.".into(),
+                description: "Fetch a URL's content as clean text. Uses Firecrawl for markdown conversion if available, falls back to readability-style content extraction.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {

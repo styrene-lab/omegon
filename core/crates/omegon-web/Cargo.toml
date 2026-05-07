@@ -1,0 +1,20 @@
+[package]
+name = "omegon-web"
+description = "Zero-config web search and content extraction for omegon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+reqwest = { version = "0.13", features = ["json", "form"] }
+scraper = "0.22"
+url = "2"
+percent-encoding = "2"
+base64 = "0.22"
+rand = "0.9"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = "0.1"
