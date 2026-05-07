@@ -794,6 +794,40 @@ impl OmegonAcpAgent {
                 Ok(serde_json::json!({ "ok": true }))
             }
 
+            // ── Extension CRUD ──────────────────────────────────────
+
+            "extensions/install" => {
+                let uri = params["uri"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'uri' field"))?;
+                crate::extension_cli::install(uri)?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+
+            "extensions/remove" => {
+                let ext_name = params["extension"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
+                crate::extension_cli::remove(ext_name)?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+
+            "extensions/update" => {
+                let ext_name = params.get("extension").and_then(|v| v.as_str());
+                crate::extension_cli::update(ext_name)?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+
+            // ── Skills ────────────────────────────────────────────
+
+            "skills/list" => {
+                let summary = crate::skills::list_summary()?;
+                Ok(serde_json::json!({ "summary": summary }))
+            }
+
+            "skills/install" => {
+                crate::skills::cmd_install()?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+
             _ => anyhow::bail!("unknown extension method: {method}"),
         }
     }
