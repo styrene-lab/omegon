@@ -1,3 +1,14 @@
++++
+id = "ede48d02-39ef-4fc3-ac85-75a7dccc5c89"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Splash screen systems check visualization — Tasks
 
 ## 1. Startup probe module (`core/crates/omegon/src/startup.rs`) — NEW

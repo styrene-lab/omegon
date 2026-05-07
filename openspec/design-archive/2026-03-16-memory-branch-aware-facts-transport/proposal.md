@@ -1,3 +1,14 @@
++++
+id = "444dd09f-7f1d-493e-86cb-be28042ff1c4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory branch-aware facts transport — isolate tracked facts.jsonl intent from branch-local runtime drift
 
 ## Intent

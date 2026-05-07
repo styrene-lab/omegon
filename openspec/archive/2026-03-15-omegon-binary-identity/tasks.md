@@ -1,3 +1,14 @@
++++
+id = "6ecb049d-deb2-4437-9f71-ff69a835cb35"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon binary identity — eliminate direct product exposure as `pi` — Tasks
 
 ## 1. Canonical executable boundary <!-- specs: runtime/binary-identity -->

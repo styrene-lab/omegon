@@ -1,15 +1,13 @@
----
-id: self-curated-memory
-title: Self-curated memory — agent writes to its own durable knowledge layer
-status: deferred
-parent: omega-memory-backend
-tags: [rust, memory, autonomy, self-improvement, mind]
-open_questions:
-  - "How does self-curated memory interact with the existing mind system's section taxonomy (Architecture, Decisions, Constraints, etc.)? Is it a separate section with its own decay, or a different trust tier within the same sections?"
-  - Should the operator see self-curated facts in the dashboard and be able to promote them to operator-curated (authoritative) status?
-issue_type: feature
-priority: 3
----
++++
+id = "e94e65e3-528f-4bc9-8d8b-0b837a078c80"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Self-curated memory — agent writes to its own durable knowledge layer
 

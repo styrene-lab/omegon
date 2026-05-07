@@ -1,3 +1,14 @@
++++
+id = "80a2e918-7946-4627-922e-22509c75e890"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Assessment — Harvestable patterns from claudeblattman.com
 
 ## Intent

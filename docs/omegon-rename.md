@@ -1,10 +1,13 @@
----
-id: omegon-rename
-title: Rename pi-kit → Omegon
-status: implemented
-tags: [rename, identity, branding, package, breaking-change]
-open_questions: []
----
++++
+id = "a57b8359-15cd-4e82-9458-07aaa2894329"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rename pi-kit → Omegon
 

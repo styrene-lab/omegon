@@ -1,3 +1,14 @@
++++
+id = "86d7e67a-d3f1-4364-8346-63ee2926d803"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Unified auth surface — single /login command, agent-callable, all backends
 
 ## Intent

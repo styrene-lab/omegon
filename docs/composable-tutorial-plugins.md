@@ -1,20 +1,13 @@
----
-id: composable-tutorial-plugins
-title: Composable tutorial plugins — URL-addressable tutorial packs as the onboarding primitive
-status: exploring
-parent: tutorial-system
-tags: [architecture, tutorials, plugins, onboarding, ux, extensibility, 0.16.0]
-open_questions:
-  - What is the tutorial pack manifest format — TOML like plugins, or markdown with frontmatter like the current lessons?
-  - How do tutorial packs declare and bundle seed artifacts (design nodes, memory facts, OpenSpec changes, project files) vs. generating them at runtime via auto-prompts?
-  - Should tutorial steps remain compiled Rust consts, or should the overlay engine accept runtime-loaded step definitions from the pack format?
-  - "What is the URL addressing scheme — git URLs like persona repos, or a registry/namespace like `omegon tutorial run styrene-lab/rust-onboarding`?"
-  - "How does the tutorial sandbox interact with the user's real project — isolated temp dir (like current demo), overlay on the user's repo, or configurable per-pack?"
-  - What validation and security model applies to community tutorial packs — can auto-prompts execute arbitrary tool calls, and how is that trust boundary managed?
-jj_change_id: rmurttsluurmpnuxnswpwyswlzlzvlqn
-issue_type: feature
-priority: 2
----
++++
+id = "87ebd478-1b88-41ec-a960-1f51fb10b535"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Composable tutorial plugins — URL-addressable tutorial packs as the onboarding primitive
 

@@ -1,3 +1,14 @@
++++
+id = "c4f9a699-71ab-4b93-aa1d-2a33944f9007"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Raised Dashboard: Horizontal Split Layout — Tasks
 
 ## 1. Rendering primitives — new extensions/dashboard/render-utils.ts

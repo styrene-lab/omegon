@@ -1,3 +1,14 @@
++++
+id = "fd1e72a1-e922-43f8-bc9c-f4e8c72ddd89"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Alpharius Theme — Alpha Legion visual identity
 
 ## Intent

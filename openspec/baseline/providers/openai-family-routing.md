@@ -1,3 +1,14 @@
++++
+id = "cba5b691-4ac0-4c0b-a16e-2c35ce60f716"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # providers/openai-family-routing
 
 ### Requirement: OpenAI API authentication is distinct from ChatGPT/Codex OAuth

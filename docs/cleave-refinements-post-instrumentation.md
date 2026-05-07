@@ -1,16 +1,13 @@
----
-id: cleave-refinements-post-instrumentation
-title: "Cleave refinements: panel restore, segment rendering, schema hardening"
-status: resolved
-tags: [cleave, tui, dx, harness]
-open_questions:
-  - "Why does the instruments panel not revert to the tools view after cleave completes? Is the CleaveProgress.active flag being cleared, and is the render-path guard checking it correctly?"
-  - "What should the cleave_run segment renderer show? Compact header (N children, truncated directive) + per-child label/status icon on result — but where in the TS harness is the current renderer and what does it currently emit?"
-  - "Where in the harness is the cleave tool schema defined (system prompt, tool spec, AGENTS.md, skill file)? What is the authoritative injection point so the schema is always present at call time?"
-  - "Does the cleave merge logic do any deduplication of test blocks, or does it blindly append? What is the right fix — pre-merge dedup pass, or anchor detection that skips adding to a file if the target symbol already exists?"
-dependencies: []
-related: []
----
++++
+id = "d9af635a-e302-4420-bf6c-af30f768e820"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave refinements: panel restore, segment rendering, schema hardening
 

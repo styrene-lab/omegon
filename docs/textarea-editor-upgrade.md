@@ -1,13 +1,13 @@
----
-id: textarea-editor-upgrade
-title: Replace custom Editor with ratatui-textarea — multi-line input with clipboard paste
-status: implemented
-parent: rust-phase-2
-tags: [tui, editor, input, clipboard, ux]
-open_questions: []
-issue_type: feature
-priority: 2
----
++++
+id = "ae06a374-530e-4111-9dbf-ad7bc689a6ef"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Replace custom Editor with ratatui-textarea — multi-line input with clipboard paste
 

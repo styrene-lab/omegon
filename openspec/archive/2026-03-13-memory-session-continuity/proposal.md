@@ -1,3 +1,14 @@
++++
+id = "f1130c43-397a-4ee2-8490-b4d54a88dc2f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory: Session Continuity — Proactive startup injection and recency window
 
 ## Intent

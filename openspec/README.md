@@ -1,3 +1,14 @@
++++
+id = "a5057e27-827a-48c9-b359-6312dea32fcf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # OpenSpec
 
 Spec-driven development artifacts for Omegon.

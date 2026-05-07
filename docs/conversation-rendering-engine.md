@@ -1,17 +1,13 @@
----
-id: conversation-rendering-engine
-title: "Conversation Rendering Engine"
-status: exploring
-tags: [tui, rendering, conversation, artifacts]
-open_questions: []
-dependencies: []
-related:
-  - conversation-widget
-  - inline-image-rendering
-  - display-tool-artifacts
-  - embedded-web-dashboard
-  - native-plan-mode
----
++++
+id = "b4c3d54e-8da8-44c8-90bf-5ddb756199bc"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Conversation Rendering Engine
 

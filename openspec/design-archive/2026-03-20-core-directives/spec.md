@@ -1,3 +1,14 @@
++++
+id = "a376f7eb-46d2-405b-84fb-8f46d14edee4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Core system directives — always-on behavioral axioms beneath all personas — Design Spec (extracted)
 
 > Auto-extracted from docs/core-directives.md at decide-time.

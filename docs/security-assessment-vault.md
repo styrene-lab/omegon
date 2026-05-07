@@ -1,3 +1,14 @@
++++
+id = "f5274add-23a2-49c4-a24e-866e916fe681"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Security Assessment: Vault Secret Backend
 
 **Date:** 2026-03-20

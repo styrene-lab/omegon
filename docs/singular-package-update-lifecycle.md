@@ -1,16 +1,13 @@
----
-id: singular-package-update-lifecycle
-title: Singular package integration and full-lifecycle update parity
-status: implemented
-parent: pi-fork-update-flow
-dependencies: [pi-fork-worktree-reconciliation, singular-package-runtime-boundary, update-lifecycle-parity]
-tags: [pi-mono, packaging, update, integration, architecture]
-open_questions: []
-branches: []
-openspec_change: singular-package-update-lifecycle
-issue_type: feature
-priority: 1
----
++++
+id = "1656f4c7-4098-4373-98d5-28d31c137243"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Singular package integration and full-lifecycle update parity
 

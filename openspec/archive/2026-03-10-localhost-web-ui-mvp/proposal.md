@@ -1,3 +1,14 @@
++++
+id = "8929e1d4-e354-44cd-8e4f-48bd33b27164"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Localhost Read-Only Web UI MVP
 
 ## Intent

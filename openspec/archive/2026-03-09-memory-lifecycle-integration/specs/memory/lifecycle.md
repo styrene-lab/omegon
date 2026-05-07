@@ -1,3 +1,14 @@
++++
+id = "52140358-2975-4d65-a047-0e291767cd1e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # memory/lifecycle — Delta Spec
 
 ## ADDED Requirements

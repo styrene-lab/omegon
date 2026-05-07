@@ -1,3 +1,14 @@
++++
+id = "38c4c74a-fa46-4f7d-8b36-2403a5d5c9eb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Monorepo migration — absorb core into omegon, eliminate submodule
 
 ## Intent

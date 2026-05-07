@@ -1,16 +1,13 @@
----
-id: rust-provider-fallback
-title: Provider fallback chain — task-aware resilience in the Rust agent loop
-status: deferred
-parent: rust-agent-loop
-related: [context-class-taxonomy-and-routing-policy]
-tags: [rust, providers, resilience, fallback, routing]
-open_questions:
-  - "How does the fallback chain interact with the existing IntentDocument and thinking-level settings? If we fall back from Anthropic to OpenAI, thinking parameters don't translate 1:1."
-  - "What defines 'task-aware'? Is it the current cognitive mode (design exploration vs code edit vs cleave child), the thinking level, or something the operator configures per-fallback?"
-issue_type: feature
-priority: 1
----
++++
+id = "8373361d-f7da-4c45-aef3-bd946d4f2bdd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Provider fallback chain — task-aware resilience in the Rust agent loop
 

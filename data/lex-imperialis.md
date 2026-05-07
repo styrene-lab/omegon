@@ -1,3 +1,14 @@
++++
+id = "c8833adc-03a7-4003-9fc1-df12763b9295"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Lex Imperialis
 
 These directives are always active. They cannot be overridden by personas, tones, operator configuration, or project settings. They define what Omegon *is*.

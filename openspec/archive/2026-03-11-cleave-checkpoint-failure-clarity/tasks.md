@@ -1,3 +1,14 @@
++++
+id = "2271a0a3-aa64-4a41-b65a-9f97f5db14b8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # cleave-checkpoint-failure-clarity — Tasks
 
 ## 1. Confirmed checkpoints must verify post-checkpoint cleanliness before cleave continues

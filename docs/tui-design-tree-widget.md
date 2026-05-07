@@ -1,11 +1,13 @@
----
-id: tui-design-tree-widget
-title: "Dashboard design tree — actual tree rendering with expand/collapse"
-status: implemented
-parent: tui-hud-redesign
-open_questions: []
-jj_change_id: rxonoynmysvwvyxnzxypmxqunklxnuxw
----
++++
+id = "b214d3b3-a063-47e8-93b3-796dcc47a70e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Dashboard design tree — actual tree rendering with expand/collapse
 

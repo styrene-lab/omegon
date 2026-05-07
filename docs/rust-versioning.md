@@ -1,11 +1,13 @@
----
-id: rust-versioning
-title: Rust versioning system — semver, changelog, --version, release workflow
-status: implemented
-parent: core-distribution
-tags: [versioning, release, ci, rust, semver]
-open_questions: []
----
++++
+id = "17c4dfa4-a6af-4239-9946-5dd93a923ce0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rust versioning system — semver, changelog, --version, release workflow
 

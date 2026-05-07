@@ -1,3 +1,14 @@
++++
+id = "94e5f136-cbe1-415f-bd20-eaaba0cd0d85"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust settings integration — context class, provider preference, and downgrade overrides
 
 ## Intent

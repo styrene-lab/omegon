@@ -1,3 +1,14 @@
++++
+id = "a945f83d-896a-4f9c-8286-42170bdcce7f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Footer redesign — engine display + linked minds
 
 ## Intent

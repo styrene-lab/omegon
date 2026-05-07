@@ -1,3 +1,14 @@
++++
+id = "f6644dc6-1ed2-4d1a-9aea-8146ac640ff3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Extension Mind RPC Interface Design
 
 ## Overview

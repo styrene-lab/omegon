@@ -1,3 +1,14 @@
++++
+id = "187fad9e-318c-48ac-855e-dc08c7127920"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Core binary distribution — shipping Rust alongside and eventually instead of TypeScript — Design Spec (extracted)
 
 > Auto-extracted from docs/core-distribution.md at decide-time.

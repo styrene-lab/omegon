@@ -1,3 +1,14 @@
++++
+id = "15d254c5-bd48-4399-b8b5-c49a8e66a825"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rewrite chronos as pure TypeScript — eliminate BSD/GNU date dependency — Design Spec (extracted)
 
 > Auto-extracted from docs/chronos-native-ts.md at decide-time.

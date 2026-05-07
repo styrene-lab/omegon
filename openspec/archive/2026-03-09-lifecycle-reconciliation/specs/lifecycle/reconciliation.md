@@ -1,3 +1,14 @@
++++
+id = "27f06a8d-889f-47f5-8502-8e8a8949c9d2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # lifecycle/reconciliation — Delta Spec
 
 ## ADDED Requirements

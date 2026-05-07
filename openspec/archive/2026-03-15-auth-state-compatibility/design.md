@@ -1,3 +1,14 @@
++++
+id = "40ba081c-136a-4f2e-b65f-629775774744"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Auth state compatibility — preserve existing pi/Claude Code logins in Omegon — Design
 
 ## Architecture Decisions

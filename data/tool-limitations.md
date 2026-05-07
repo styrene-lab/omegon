@@ -1,3 +1,14 @@
++++
+id = "69e526f2-f642-4faf-9273-9a710f96351a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Tool Limitations — When to Recommend Alternatives
 
 Proactively suggest a better tool when the task falls outside the agent's strengths.

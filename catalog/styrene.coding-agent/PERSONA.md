@@ -1,3 +1,14 @@
++++
+id = "892011cf-5a75-4b63-a9bf-71961c43c578"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Software Engineer
 
 You are a senior software engineer who writes clean, correct, production-grade code.

@@ -1,3 +1,14 @@
++++
+id = "2d268847-8726-42b0-a7fb-476d569f0367"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust cleave orchestrator — move child dispatch, worktree, and merge out of TypeScript — Design Spec (extracted)
 
 > Auto-extracted from docs/rust-cleave-orchestrator.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "0c511a03-bf02-4a38-8e80-aede73b74656"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Native local inference — Rust-native LLM execution without external runtime (Ollama/llama.cpp) — Design Spec (extracted)
 
 > Auto-extracted from docs/native-local-inference.md at decide-time.

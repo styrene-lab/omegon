@@ -1,13 +1,13 @@
----
-id: model-selector-ux
-title: "Model selector UX — browse and pick, don't memorize"
-status: seed
-parent: tui-surface-pass
-tags: [ux, tui, models, discovery, onboarding]
-open_questions: []
-dependencies: []
-related: []
----
++++
+id = "47db0ef7-b434-42be-8155-6ac07b798f28"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Model selector UX — browse and pick, don't memorize
 

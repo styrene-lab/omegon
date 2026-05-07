@@ -1,3 +1,14 @@
++++
+id = "6c0d6c1c-ca70-4074-b19d-843e19b79413"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Styrene Identity as operator credential root — RNS identity for secret unlocking and trust — Design Spec (extracted)
 
 > Auto-extracted from docs/styrene-identity-secrets.md at decide-time.

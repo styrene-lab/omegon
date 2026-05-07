@@ -1,3 +1,14 @@
++++
+id = "5f50940c-d293-4730-9808-6ff7e1f9aa0c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Repurpose `omegon` npm package as Rust binary platform wrapper — Design Spec (extracted)
 
 > Auto-extracted from docs/npm-omegon-rust-wrapper.md at decide-time.

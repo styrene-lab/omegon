@@ -1,3 +1,14 @@
++++
+id = "602d5bcc-9629-412d-8f33-4f0bb5040cb3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Spec
 
 ### Requirement: Design assessment must produce deterministic results without nested subprocess fragility

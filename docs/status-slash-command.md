@@ -1,13 +1,13 @@
----
-id: status-slash-command
-title: "/status slash command — re-display bootstrap panel mid-session"
-status: implemented
-parent: harness-status-contract
-tags: [ux, tui, commands, bootstrap, status]
-open_questions: []
-issue_type: task
-priority: 4
----
++++
+id = "d0a9f1a1-76d4-4d82-a64a-f2d5adf4a6ff"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # /status slash command — re-display bootstrap panel mid-session
 

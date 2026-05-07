@@ -1,3 +1,14 @@
++++
+id = "2e71adfc-71fd-4f54-a414-a2222d3d0fe3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # 0.6.6 stability step — subprocess boundary hardening and memory search resilience follow-up
 
 ## Intent

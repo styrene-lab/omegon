@@ -1,3 +1,14 @@
++++
+id = "87dc8a6b-78e3-44a4-a4bd-3845259ad823"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Scribe × Omegon integration — wrapper harness vs bolt-on extension
 
 ## Intent

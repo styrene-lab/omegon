@@ -1,3 +1,14 @@
++++
+id = "e4d8699a-ea5c-42b5-ac42-688be7b1f6fb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # TUI surface pass — expose new subsystems in dashboard, footer, selectors, and commands — Design Spec (extracted)
 
 > Auto-extracted from docs/tui-surface-pass.md at decide-time.

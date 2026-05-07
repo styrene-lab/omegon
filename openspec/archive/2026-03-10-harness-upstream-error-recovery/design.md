@@ -1,3 +1,14 @@
++++
+id = "750a74b0-f623-4ce7-8338-03e690d0fd3a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # harness-upstream-error-recovery — Design
 
 ## Spec-Derived Architecture

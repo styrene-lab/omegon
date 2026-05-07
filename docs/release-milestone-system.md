@@ -1,11 +1,13 @@
----
-id: release-milestone-system
-title: Release milestone and feature freeze system
-status: implemented
-tags: [meta, process]
-open_questions: []
-jj_change_id: ulryuzrsrlwyxtyysnklyxxtuuqqyxzy
----
++++
+id = "ebd74178-6739-49a4-8a2d-7e753fb00ee6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Release milestone and feature freeze system
 

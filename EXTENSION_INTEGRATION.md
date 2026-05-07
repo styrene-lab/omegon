@@ -1,3 +1,14 @@
++++
+id = "082f267e-4e58-432c-9af5-b77a1845f769"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon Extension Integration Guide
 
 This guide covers advanced patterns for extensions built with the Omegon Extension SDK.

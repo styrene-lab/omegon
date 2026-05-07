@@ -1,3 +1,14 @@
++++
+id = "e2c3dc2e-0220-4d0e-9302-8995d955e81d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon directive authority — code-level opinions over filesystem discovery — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

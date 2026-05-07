@@ -1,12 +1,13 @@
----
-id: memory-session-continuity
-title: "Memory: Session Continuity — Proactive startup injection and recency window"
-status: implemented
-parent: memory-system-overhaul
-open_questions: []
-branches: ["feature/memory-session-continuity"]
-openspec_change: memory-session-continuity
----
++++
+id = "7f01937b-9ed3-4576-a8ea-760ff306dfbf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Memory: Session Continuity — Proactive startup injection and recency window
 

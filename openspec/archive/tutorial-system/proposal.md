@@ -1,3 +1,14 @@
++++
+id = "e37064bf-e43a-4175-a3f1-fe64b636ef91"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Interactive /tutorial system — structured onboarding replacing /demo
 
 ## Intent

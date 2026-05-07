@@ -1,3 +1,14 @@
++++
+id = "4ee387f9-9df7-47f4-8a9b-7f8536d64cf3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Assessment — Harvestable patterns from claudeblattman.com — Design Spec (extracted)
 
 > Auto-extracted from docs/blattman-pattern-harvest.md at decide-time.

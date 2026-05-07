@@ -1,3 +1,14 @@
++++
+id = "febb1482-6325-4da5-a569-dba7a820f3d3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Functional plugins — code-backed skills with tools, endpoints, and runtime logic
 
 ## Intent

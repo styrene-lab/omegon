@@ -1,3 +1,14 @@
++++
+id = "990ba124-3019-4b8b-8591-53d338647a2b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Fast-forward edge case generation and task enrichment — Design Spec (extracted)
 
 > Auto-extracted from docs/fast-forward-edge-case-generation.md at decide-time.

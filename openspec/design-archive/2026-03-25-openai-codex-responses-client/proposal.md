@@ -1,3 +1,14 @@
++++
+id = "0218ba75-4735-4590-90a0-919435419e6e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # OpenAI Codex Responses API client — native Rust client for ChatGPT OAuth JWT tokens
 
 ## Intent

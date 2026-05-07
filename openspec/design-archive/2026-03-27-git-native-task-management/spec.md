@@ -1,3 +1,14 @@
++++
+id = "1c23658b-49f0-4990-98de-3ef5a0fda2ed"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Git-native task management — extend design tree into a full in-repo issue/task system — Design Spec (extracted)
 
 > Auto-extracted from docs/git-native-task-management.md at decide-time.

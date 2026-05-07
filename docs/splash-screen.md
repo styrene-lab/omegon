@@ -1,11 +1,13 @@
----
-id: splash-screen
-title: "Branded splash/loading screen for Omegon startup"
-status: implemented
-tags: [ux, tui, startup]
-open_questions: []
-jj_change_id: ulryuzrsrlwyxtyysnklyxxtuuqqyxzy
----
++++
+id = "f03ee676-1959-4590-b5b9-23f73ffd793e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Branded splash/loading screen for Omegon startup
 

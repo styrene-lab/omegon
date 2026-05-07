@@ -1,3 +1,14 @@
++++
+id = "b2e9b7f3-4346-4255-984f-a14af32b4be9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave task-level progress tracking and operator display — Design Spec (extracted)
 
 > Auto-extracted from docs/cleave-task-progress.md at decide-time.

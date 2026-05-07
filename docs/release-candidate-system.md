@@ -1,13 +1,13 @@
----
-id: release-candidate-system
-title: "Release candidate system — identifiable pre-release builds with deployment verification"
-status: implemented
-parent: core-distribution
-tags: [release, distribution, versioning, ci, diagnostics]
-open_questions: []
-dependencies: []
-related: []
----
++++
+id = "2260cc89-04d3-4e73-aee7-2e9899b59fab"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Release candidate system — identifiable pre-release builds with deployment verification
 

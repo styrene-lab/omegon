@@ -1,3 +1,14 @@
++++
+id = "2f0a671f-553a-430e-84b8-fa267796154c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Persona System — domain-expert identities with dedicated mind stores
 
 ## Intent

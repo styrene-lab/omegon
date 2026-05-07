@@ -1,18 +1,13 @@
----
-id: push-based-context-injection
-title: "Push-based pre-turn context injection — automatic shadow-context priming from incoming prompt"
-status: exploring
-parent: lifecycle-native-loop
-tags: [context, shadow-context, ContextManager, performance, dx, prompt-injection]
-open_questions:
-  - "What is the right token budget for the auto-injected context block? Too small and it's not useful; too large and it consumes budget that conversation needs."
-  - "Should the injected block be stable across turns (cached until the user prompt changes significantly) or re-scored every turn? Re-scoring every turn is more accurate but burns selector CPU on unchanged context."
-  - "[assumption] The existing BM25 selector in shadow_context.rs is fast enough to run synchronously before the first LLM token without meaningful latency impact."
-  - "Should auto-injected context be surfaced to the model as attributed (e.g. \\\"[context from memory]\\\") or silently prepended? Attributed = model knows it's synthetic; silent = cleaner prompt but the model may not discount it appropriately."
-  - "Does injecting context before the model's first token cause any provider-specific formatting issues (e.g. Anthropic system prompt length limits, Codex system prompt truncation)?"
-dependencies: []
-related: []
----
++++
+id = "316c3878-3926-485c-98ea-d5f8d44203c5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Push-based pre-turn context injection — automatic shadow-context priming from incoming prompt
 

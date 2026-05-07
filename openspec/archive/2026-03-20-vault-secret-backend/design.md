@@ -1,3 +1,14 @@
++++
+id = "4bb194d4-e259-4a62-b5d9-7d0bb2b0f1f7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Vault as first-class secret backend — operator-controlled secret storage with unseal lifecycle — Design
 
 ## Architecture Decisions

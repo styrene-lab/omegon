@@ -1,11 +1,13 @@
----
-id: unified-dashboard
-title: Unified Live Dashboard for Cleave + Design Tree + OpenSpec
-status: implemented
-related: [dashboard-cleanup]
-tags: [tui, ux, dashboard, Omegon]
-open_questions: []
----
++++
+id = "d99f2814-dc83-44f4-b8cc-2469e8df5e9b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Unified Live Dashboard for Cleave + Design Tree + OpenSpec
 

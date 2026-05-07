@@ -1,9 +1,13 @@
----
-title: Token efficiency comparison harness v1
-status: exploring
-tags: [testing, benchmarking, token-efficiency, anthropic, harness]
-date: 2026-04-09
----
++++
+id = "77fb01a7-f553-4928-af73-cd0daf63e95e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Token efficiency comparison harness v1
 

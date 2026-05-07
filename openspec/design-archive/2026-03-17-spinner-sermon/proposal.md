@@ -1,3 +1,14 @@
++++
+id = "89618c6a-c675-4110-b3a8-a795a5d1a1e8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Spinner Sermon — Crawler-style scrawling text during long operations
 
 ## Intent

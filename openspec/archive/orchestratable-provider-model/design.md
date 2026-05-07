@@ -1,3 +1,14 @@
++++
+id = "ab085e1f-2339-4945-9fcb-cb02bb95f581"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Orchestratable provider model — treat providers as assignable resources, not user preferences — Design
 
 ## Architecture Decisions

@@ -1,13 +1,13 @@
----
-subsystem: slash-command-bridge
-design_docs:
-  - design/agent-assess-tooling-access.md
-  - design/bridge-all-slash-commands.md
-openspec_baselines:
-  - harness/slash-command-bridge.md
-  - harness/slash-commands.md
-last_updated: 2026-03-10
----
++++
+id = "26ed668d-2ea6-46a8-a345-2a17606e20fa"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Slash Command Bridge
 

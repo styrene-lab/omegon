@@ -1,3 +1,14 @@
++++
+id = "5d533509-dfca-45c1-92ad-034570b12adf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # harness/slash-commands — Delta Spec
 
 ## ADDED Requirements

@@ -1,12 +1,13 @@
----
-id: cleave-submodule-worktree
-title: Cleave worktree submodule failures — root cause and fix
-status: implemented
-tags: [cleave, git, submodule, reliability]
-open_questions: []
-branches: []
-openspec_change: cleave-submodule-worktree
----
++++
+id = "8d9faddc-a1a9-419b-8fd9-8f92359733e2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave worktree submodule failures — root cause and fix
 

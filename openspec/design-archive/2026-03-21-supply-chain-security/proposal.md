@@ -1,3 +1,14 @@
++++
+id = "898f35d9-9262-41b6-b996-35e4956baae8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Supply chain security — code signing, SBOM generation, and release provenance for Rust binary
 
 ## Intent

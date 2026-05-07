@@ -1,12 +1,13 @@
----
-id: pikit-auspex-extension
-title: "Omegon: auspex extension — visualization daemon bridge"
-status: deferred
-related: [markdown-viewport, conversation-rendering-engine, omega]
-tags: [Omegon, extension, auspex, bridge]
-open_questions: []
-issue_type: feature
----
++++
+id = "7558f2de-5115-4081-8c7a-74764dc87c6f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Omegon: auspex extension — visualization daemon bridge
 

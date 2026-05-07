@@ -1,3 +1,14 @@
++++
+id = "5fd42df1-6431-4277-988c-de0a8d4e10c3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Port secrets system to Rust (redaction, recipes, tool guards) — Design Spec (extracted)
 
 > Auto-extracted from docs/rust-secrets.md at decide-time.

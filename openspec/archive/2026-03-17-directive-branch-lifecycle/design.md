@@ -1,3 +1,14 @@
++++
+id = "2f7dc912-dabf-4644-aa7f-dd0f62e97a65"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # directive-branch-lifecycle — Design
 
 ## Spec-Derived Architecture

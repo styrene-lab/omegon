@@ -1,3 +1,14 @@
++++
+id = "75da3beb-d934-4f50-95ec-891293df296d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Deterministic Guardrail Integration — Baking Static Analysis into the Feature Lifecycle — Design
 
 ## Architecture Decisions

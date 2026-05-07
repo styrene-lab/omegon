@@ -1,3 +1,14 @@
++++
+id = "56da7422-2b2c-4b77-962f-1d1f92806775"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # harness/upstream-error-recovery — Delta Spec
 
 ## ADDED Requirements

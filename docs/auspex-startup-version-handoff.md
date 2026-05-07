@@ -1,8 +1,13 @@
----
-title: Auspex startup version handoff requirement
-status: implementing
-tags: [auspex, startup, compatibility, control-plane]
----
++++
+id = "72159983-23a7-4960-ba61-68cd6c75a13f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Auspex startup version handoff requirement
 

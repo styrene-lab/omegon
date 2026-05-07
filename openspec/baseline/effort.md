@@ -1,3 +1,14 @@
++++
+id = "00d9d16d-9f6f-460b-ae62-bdb457f525af"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # effort
 
 ### Requirement: Tier configuration returns correct EffortConfig for each level

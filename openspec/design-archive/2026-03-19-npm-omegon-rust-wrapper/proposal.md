@@ -1,3 +1,14 @@
++++
+id = "023afe2a-e264-4b5e-b195-5fe5fddfc3a9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Repurpose `omegon` npm package as Rust binary platform wrapper
 
 ## Intent

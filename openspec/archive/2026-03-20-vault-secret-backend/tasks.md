@@ -1,3 +1,14 @@
++++
+id = "176a9553-36dd-4bdb-9199-8845748d59fa"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Vault as first-class secret backend — Tasks
 
 ## 1. Vault HTTP client + config (core/crates/omegon-secrets)

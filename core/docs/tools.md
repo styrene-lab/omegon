@@ -1,3 +1,14 @@
++++
+id = "89686993-3955-4f7d-ba17-c44116e44b5b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Tools
 
 Tools are capabilities the agent can invoke during a session. They are dispatched through the EventBus and executed by the feature that registered them.

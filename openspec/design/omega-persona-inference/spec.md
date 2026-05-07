@@ -1,3 +1,14 @@
++++
+id = "39697e89-f7f6-40b8-863d-56e0a3119b20"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omega persona inference — automatic domain detection and persona activation — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

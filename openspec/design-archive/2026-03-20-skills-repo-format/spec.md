@@ -1,3 +1,14 @@
++++
+id = "3ee8fa4a-8500-4245-93e5-a622bb7cc27f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Simple skills repo addition — open format for community skill packages — Design Spec (extracted)
 
 > Auto-extracted from docs/skills-repo-format.md at decide-time.

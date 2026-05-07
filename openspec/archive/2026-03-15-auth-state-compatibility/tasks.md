@@ -1,3 +1,14 @@
++++
+id = "ac18d485-7a05-4a8b-8811-d32ec98a039a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Auth state compatibility — preserve existing pi/Claude Code logins in Omegon — Tasks
 
 ## 1. Runtime state/resource split in `bin/omegon.mjs`

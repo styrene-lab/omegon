@@ -1,3 +1,14 @@
++++
+id = "e5876704-f550-4e35-81bd-b180001ba54d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Compaction policy hotfix for heavy local models and temp-path hygiene
 
 ## Intent

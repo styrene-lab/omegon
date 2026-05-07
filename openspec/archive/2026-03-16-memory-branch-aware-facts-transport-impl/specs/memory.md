@@ -1,3 +1,14 @@
++++
+id = "2599dd92-7efb-4bb1-81c2-a7064ddfe9de"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # memory — Delta Spec
 
 ## ADDED Requirements

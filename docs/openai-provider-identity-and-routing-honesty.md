@@ -1,16 +1,13 @@
----
-id: openai-provider-identity-and-routing-honesty
-title: "OpenAI provider identity and routing honesty — separate API vs ChatGPT/Codex auth, route GPT models correctly, and surface the active engine truthfully"
-status: implemented
-parent: bridge-provider-routing
-tags: [providers, routing, auth, ux, bugfix, rust]
-open_questions: []
-branches: ["feature/openai-provider-identity-and-routing-honesty"]
-openspec_change: openai-provider-identity-and-routing-honesty
-jj_change_id: wttqnnrppkokqxvqnunuwmxnsolyvqpk
-issue_type: bug
-priority: 1
----
++++
+id = "be3d37b1-9865-4154-a277-c80fb42babcb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # OpenAI provider identity and routing honesty — separate API vs ChatGPT/Codex auth, route GPT models correctly, and surface the active engine truthfully
 

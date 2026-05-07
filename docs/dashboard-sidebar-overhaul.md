@@ -1,12 +1,13 @@
----
-id: dashboard-sidebar-overhaul
-title: Dashboard sidebar overhaul — rich tree widget with lifecycle state
-status: implemented
-parent: rust-agent-loop
-tags: [tui, dashboard, tree-widget, eid]
-open_questions: []
-jj_change_id: rxonoynmysvwvyxnzxypmxqunklxnuxw
----
++++
+id = "92349aa1-ce06-4964-894b-7c74460ea265"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Dashboard sidebar overhaul — rich tree widget with lifecycle state
 

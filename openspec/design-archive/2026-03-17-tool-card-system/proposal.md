@@ -1,3 +1,14 @@
++++
+id = "7271ea90-82bd-4696-adb8-ce815881bdac"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Tool Card Visual System — Omegon-owned card rendering with borders, state colors, and glyphs
 
 ## Intent

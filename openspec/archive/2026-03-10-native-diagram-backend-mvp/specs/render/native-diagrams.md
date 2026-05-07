@@ -1,3 +1,14 @@
++++
+id = "bcefdb10-14fa-4be4-84c7-be04e0242e50"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # render/native-diagrams — Delta Spec
 
 ## ADDED Requirements

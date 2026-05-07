@@ -1,13 +1,13 @@
----
-id: mouse-text-selection
-title: Mouse text selection — EnableMouseCapture blocks native terminal selection
-status: implemented
-tags: [tui, ux, mouse, clipboard, accessibility]
-open_questions: []
-jj_change_id: ulryuzrsrlwyxtyysnklyxxtuuqqyxzy
-issue_type: bug
-priority: 1
----
++++
+id = "654438b1-a39a-4fa8-8d92-0dd6d1f3ee7d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Mouse text selection — EnableMouseCapture blocks native terminal selection
 

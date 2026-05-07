@@ -1,3 +1,14 @@
++++
+id = "1d13b2e9-c4ed-496e-b94b-0340bb04444e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # openspec-assess-lifecycle-integration — Tasks
 
 Dependencies:

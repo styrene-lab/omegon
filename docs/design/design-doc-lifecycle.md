@@ -1,10 +1,13 @@
----
-id: design-doc-lifecycle
-title: Design Doc Lifecycle — Closing the Loop from Exploration to Reference Documentation
-status: implemented
-tags: [documentation, design-tree, lifecycle, architecture, dx]
-open_questions: []
----
++++
+id = "6d56978a-8663-4235-96d2-655ffb2f1daf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Design Doc Lifecycle — Closing the Loop from Exploration to Reference Documentation
 

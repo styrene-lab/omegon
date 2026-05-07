@@ -1,3 +1,14 @@
++++
+id = "d58d2e25-d069-46bd-8ba9-b228954ac706"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Context Class Taxonomy and Routing Policy — named context classes, route envelopes, downgrade safeguards — Design Spec (extracted)
 
 > Auto-extracted from docs/context-class-taxonomy-and-routing-policy.md at decide-time.

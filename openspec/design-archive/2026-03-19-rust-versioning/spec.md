@@ -1,3 +1,14 @@
++++
+id = "74cec6b4-9160-4c89-ad61-a7c1e5f1e632"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust versioning system — semver, changelog, --version, release workflow — Design Spec (extracted)
 
 > Auto-extracted from docs/rust-versioning.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "f99331cd-aaa7-4ab3-a8ac-8ad352518b1f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Bridge all pi-kit slash commands through SlashCommandBridge
 
 ## Intent

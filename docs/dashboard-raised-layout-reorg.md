@@ -1,15 +1,13 @@
----
-id: dashboard-raised-layout-reorg
-title: Raised dashboard layout reorganization — design-dominant workspace and contextual implementation rail
-status: implemented
-parent: unified-dashboard
-tags: [dashboard, footer, ux, layout, responsive]
-open_questions: []
-branches: []
-openspec_change: dashboard-raised-layout-reorg
-issue_type: feature
-priority: 2
----
++++
+id = "3fa61035-feb7-4f46-a60d-0acad77e0094"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Raised dashboard layout reorganization — design-dominant workspace and contextual implementation rail
 

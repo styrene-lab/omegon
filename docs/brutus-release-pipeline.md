@@ -1,10 +1,13 @@
----
-id: brutus-release-pipeline
-title: Brutus release pipeline
-status: implemented
-parent: rust-versioning
-open_questions: []
----
++++
+id = "6c0dc46a-2c06-4e73-9cae-7773b6f62afd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Brutus release pipeline
 

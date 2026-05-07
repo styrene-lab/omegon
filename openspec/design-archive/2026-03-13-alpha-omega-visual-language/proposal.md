@@ -1,3 +1,14 @@
++++
+id = "c028f96d-56b0-4c8a-ba82-7e1c2ef63c68"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # α→ω Visual Language — Lifecycle Symbol System
 
 ## Intent

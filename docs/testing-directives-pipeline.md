@@ -1,12 +1,13 @@
----
-id: testing-directives-pipeline
-title: Testing directives pipeline — falsifiable testing paths from design through implementation
-status: implemented
-tags: [testing, cleave, openspec, dx]
-open_questions: []
-issue_type: epic
-priority: 2
----
++++
+id = "bde10289-ed03-4bd3-bedf-7fb816eb2fa2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Testing directives pipeline — falsifiable testing paths from design through implementation
 

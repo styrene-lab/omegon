@@ -1,12 +1,13 @@
----
-id: mcp-transport
-title: MCP transport for plugin tools — Model Context Protocol as first-class tool source
-status: implemented
-tags: [architecture, plugins, mcp, tools, interoperability, standards]
-open_questions: []
-issue_type: feature
-priority: 1
----
++++
+id = "ddf369bd-c863-4635-8037-e88f882654e8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # MCP transport for plugin tools — Model Context Protocol as first-class tool source
 

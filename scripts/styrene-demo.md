@@ -1,6 +1,14 @@
----
-description: Demo recording — styrene-rs codebase exploration and parallel Cleave execution
----
++++
+id = "210176e9-b646-4074-b67d-ff84617bc150"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Styrene-rs Demo
 
 You are in a Rust workspace implementing the Reticulum Network Stack (RNS) and LXMF messaging protocol. Do the following two tasks in sequence.

@@ -1,3 +1,14 @@
++++
+id = "b6f7a34c-1ddb-4db7-8cc3-2b28fde9bed7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # localhost-web-ui-mvp — Tasks
 
 ## 1. Start a localhost-only web UI server

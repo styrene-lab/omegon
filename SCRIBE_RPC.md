@@ -1,3 +1,14 @@
++++
+id = "f6870d9c-fbef-43de-8bb5-4afeb911258b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Scribe RPC — First Rust-Native Omegon Extension
 
 This is the canonical implementation of the **Rust-native extension** pattern for omegon. Scribe is fully integrated into the Rust runtime via the `Feature` trait.

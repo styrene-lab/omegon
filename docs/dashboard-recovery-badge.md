@@ -1,11 +1,13 @@
----
-id: dashboard-recovery-badge
-title: Dashboard Recovery Badge — Actionability
-status: implemented
-parent: unified-dashboard
-tags: [dashboard, recovery, ux]
-open_questions: []
----
++++
+id = "6e9e5b57-4548-471b-9e5a-d2d555e7c9e2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Dashboard Recovery Badge — Actionability
 

@@ -1,12 +1,13 @@
----
-id: monorepo-migration
-title: Monorepo migration — absorb core into omegon, eliminate submodule
-status: implemented
-parent: git-harness-integration
-tags: [architecture, git, monorepo, jj]
-open_questions: []
-priority: 1
----
++++
+id = "f1c5ab7a-3b52-448c-ae5e-c7ec20c961ce"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Monorepo migration — absorb core into omegon, eliminate submodule
 

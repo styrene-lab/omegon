@@ -1,3 +1,14 @@
++++
+id = "6bdccde5-defa-4369-940e-61e83efd90f6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Archive Gate — OpenSpec Archive Triggers Implemented
 
 ## Requirements

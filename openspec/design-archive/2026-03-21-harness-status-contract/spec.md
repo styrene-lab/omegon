@@ -1,3 +1,14 @@
++++
+id = "963c65f4-8a65-421b-8d90-cfec9b69cf99"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # HarnessStatus contract — unified status surface for TUI, web dashboard, and bootstrap — Design Spec (extracted)
 
 > Auto-extracted from docs/harness-status-contract.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "b5372dc2-4ca6-4619-a81a-eceb4b59eb9a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon — asciinema demo script
 
 Record a ~90-second demo showing Omegon reading code, finding a bug,

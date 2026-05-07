@@ -1,11 +1,13 @@
----
-id: tui-visual-system
-title: TUI visual system — conversation view, event cards, widget primitives
-status: implemented
-parent: harness-honest-assessment
-tags: [tui, ratatui, visual, conversation]
-open_questions: []
----
++++
+id = "704bf110-83bd-4879-b4c3-bfa3f4377a7b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # TUI visual system — conversation view, event cards, widget primitives
 

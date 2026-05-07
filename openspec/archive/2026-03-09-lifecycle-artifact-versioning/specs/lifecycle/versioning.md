@@ -1,3 +1,14 @@
++++
+id = "be310c15-a370-4e0a-b0a3-bee4665f03a5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # lifecycle/versioning — Delta Spec
 
 ## ADDED Requirements

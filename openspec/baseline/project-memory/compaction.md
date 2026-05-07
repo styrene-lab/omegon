@@ -1,3 +1,14 @@
++++
+id = "063232d9-9294-4209-8ce3-6a38b87b7767"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # project-memory/compaction
 
 ### Requirement: Normal compaction must not silently prefer heavy local inference

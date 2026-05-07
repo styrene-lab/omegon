@@ -1,3 +1,14 @@
++++
+id = "ac1fecff-a6d9-4aba-bf51-55a3765f14b8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Splash screen systems check visualization — real loading behind the animation — Design
 
 ## Architecture Decisions

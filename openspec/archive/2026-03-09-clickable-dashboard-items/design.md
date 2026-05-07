@@ -1,3 +1,14 @@
++++
+id = "2cde9900-0a1a-4329-b86a-87c5803233c3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # clickable-dashboard-items — Design
 
 ## Spec-Derived Architecture

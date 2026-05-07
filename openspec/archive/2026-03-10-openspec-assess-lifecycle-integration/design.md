@@ -1,3 +1,14 @@
++++
+id = "af05d1f9-4d71-47fa-9367-c7d9bb936b4d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # OpenSpec lifecycle integration with structured assessment results — Design
 
 ## Architecture Decisions

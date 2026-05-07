@@ -1,3 +1,14 @@
++++
+id = "4838f235-aadd-40e0-9951-fbbcfff7fdc0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # TUI surface pass — expose new subsystems in dashboard, footer, selectors, and commands
 
 ## Intent

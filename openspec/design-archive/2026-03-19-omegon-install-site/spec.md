@@ -1,3 +1,14 @@
++++
+id = "eb0fbc13-1b10-456b-8e03-cc518772bcfb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # omegon.styrene.dev — installation landing page + install.sh hosting — Design Spec (extracted)
 
 > Auto-extracted from docs/omegon-install-site.md at decide-time.

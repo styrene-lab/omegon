@@ -1,3 +1,14 @@
++++
+id = "7c186522-2c84-48a2-8f05-4d73ddbffa44"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Knowledge quadrant lifecycle — guide design progression through the Rumsfeld Matrix — Tasks
 
 ## 1. core/crates/omegon/src/lifecycle/design.rs (modified)

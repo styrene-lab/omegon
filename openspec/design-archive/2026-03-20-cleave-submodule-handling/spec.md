@@ -1,3 +1,14 @@
++++
+id = "ebaa1c8a-d7e8-47b8-93fb-272309ff7c35"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave submodule-aware commit and merge — Design Spec (extracted)
 
 > Auto-extracted from docs/cleave-submodule-handling.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "3cf24d87-61be-4b10-a780-eb6365883478"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Styrene Identity as operator credential root — RNS identity for secret unlocking and trust — Tasks
 
 ## 1. Separate secrets.db, encrypted at rest, never in git

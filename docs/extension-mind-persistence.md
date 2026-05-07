@@ -1,3 +1,14 @@
++++
+id = "beaec53b-2864-45eb-bfaa-daf17977760c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Extension Mind Persistence Design
 
 ## Overview

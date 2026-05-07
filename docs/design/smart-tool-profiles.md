@@ -1,10 +1,13 @@
----
-id: smart-tool-profiles
-title: "Smart Tool & Skill Profiles for Project Context"
-status: implemented
-tags: [ux, configuration, extensions]
-open_questions: []
----
++++
+id = "e2bfaa57-97b9-49e4-bd32-032bd73b4238"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Smart Tool & Skill Profiles for Project Context
 

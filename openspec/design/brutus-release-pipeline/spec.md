@@ -1,3 +1,14 @@
++++
+id = "c6a4ee64-77db-4476-8ccc-f89e754a941f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Brutus release pipeline — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

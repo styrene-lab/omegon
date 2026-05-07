@@ -1,3 +1,14 @@
++++
+id = "4a01b697-7aad-4342-a801-98713d0ad9cb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Design Tree Lifecycle: Implementation Tracking + Branch Binding — Design
 
 ## Architecture Decisions

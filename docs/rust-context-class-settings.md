@@ -1,11 +1,13 @@
----
-id: rust-context-class-settings
-title: Rust settings integration — context class, provider preference, and downgrade overrides
-status: implemented
-parent: context-class-taxonomy-and-routing-policy
-tags: [rust, settings, routing, persistence, context-class]
-open_questions: []
----
++++
+id = "a238c868-f0f3-4292-a187-ce06d9f04ca0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rust settings integration — context class, provider preference, and downgrade overrides
 

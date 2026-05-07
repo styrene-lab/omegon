@@ -1,16 +1,13 @@
----
-id: web-dashboard-agent-context
-title: "Web dashboard agent context — pass active tab and visible state to the agent with prompts"
-status: archived
-parent: auto-doc-generation
-tags: [web, dashboard, ux, agent, context]
-open_questions: []
-dependencies: []
-related: []
-archive_reason: "superseded"
-superseded_by: "auspex-agent-context-bridge"
-archived_at: "1775247150"
----
++++
+id = "3e1d60a5-1dae-4e69-8c3d-09a2806fdacf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Web dashboard agent context — pass active tab and visible state to the agent with prompts
 

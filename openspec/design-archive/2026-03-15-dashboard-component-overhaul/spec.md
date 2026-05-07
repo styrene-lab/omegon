@@ -1,3 +1,14 @@
++++
+id = "98676521-c339-460e-9217-faa5121f3d70"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Raised dashboard component overhaul — model topology clarity and horizontal layout — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

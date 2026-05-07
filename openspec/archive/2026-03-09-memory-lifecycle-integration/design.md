@@ -1,3 +1,14 @@
++++
+id = "f0ee8220-fea8-4ade-9b3f-253ebe9fcde2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory integration with Cleave, Design Tree, and OpenSpec — Design
 
 ## Architecture Decisions

@@ -1,10 +1,13 @@
----
-id: omegon-install
-title: "Omegon Installation & Distribution"
-status: implemented
-tags: [distribution, dx, packaging]
-open_questions: []
----
++++
+id = "0e5685f9-3cae-4575-80ef-adcb3f98426b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Omegon Installation & Distribution
 

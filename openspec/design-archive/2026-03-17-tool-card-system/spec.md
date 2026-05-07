@@ -1,3 +1,14 @@
++++
+id = "1bad22ff-5c06-412b-a02c-9969cc5e74d9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Tool Card Visual System — Omegon-owned card rendering with borders, state colors, and glyphs — Design Spec (extracted)
 
 > Auto-extracted from docs/tool-card-system.md at decide-time.

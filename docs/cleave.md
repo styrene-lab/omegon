@@ -1,13 +1,13 @@
----
-subsystem: cleave
-design_docs:
-  - design/cleave-dirty-tree-checkpointing.md
-  - design/cleave-title-progress-sync.md
-openspec_baselines:
-  - cleave/preflight.md
-  - cleave/spec.md
-last_updated: 2026-03-10
----
++++
+id = "8d79d172-92c2-4635-9a3d-6ffa4dd924be"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave
 

@@ -1,3 +1,14 @@
++++
+id = "4475c0ab-1a9f-4bfb-83b9-9b0d99e57252"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # 0.6.6 stability step — subprocess boundary hardening and memory search resilience follow-up — Tasks
 
 ## 1. extensions/project-memory/factstore.ts (modified)

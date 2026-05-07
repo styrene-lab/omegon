@@ -1,3 +1,14 @@
++++
+id = "c229c70e-baa0-49c6-9442-d1ddd0ddf4db"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory: Episode Generation Reliability — Cloud fallback and guaranteed per-session narrative — Design
 
 ## Architecture Decisions

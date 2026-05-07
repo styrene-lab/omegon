@@ -1,13 +1,13 @@
----
-id: openspec-assess-lifecycle-integration
-title: OpenSpec lifecycle integration with structured assessment results
-status: implemented
-parent: agent-assess-tooling-access
-tags: [openspec, assess, lifecycle, workflow, harness]
-open_questions: []
-branches: ["feature/openspec-assess-lifecycle-integration"]
-openspec_change: openspec-assess-lifecycle-integration
----
++++
+id = "5a6fbd28-3e98-4806-8350-ac1fc526b5c2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # OpenSpec lifecycle integration with structured assessment results
 

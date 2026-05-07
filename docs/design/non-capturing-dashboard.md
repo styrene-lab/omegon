@@ -1,10 +1,13 @@
----
-id: non-capturing-dashboard
-title: Non-Capturing Dashboard Overlay
-status: implemented
-tags: [dashboard, overlay, upstream-api]
-open_questions: []
----
++++
+id = "3fe3d754-c37d-4776-a636-1a07226d9a43"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Non-Capturing Dashboard Overlay
 

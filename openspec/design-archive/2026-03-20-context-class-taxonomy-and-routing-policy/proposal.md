@@ -1,3 +1,14 @@
++++
+id = "50f68ed1-51b0-4a03-9af8-619dc1e375d4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Context Class Taxonomy and Routing Policy — named context classes, route envelopes, downgrade safeguards
 
 ## Intent

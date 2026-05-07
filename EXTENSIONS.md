@@ -1,3 +1,14 @@
++++
+id = "15c420f3-8777-4347-8c7b-f7c866a0eb35"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon Extension Ecosystem
 
 This document provides an overview of Omegon's extension system — how it works, what's available for developers, and how to build extensions.

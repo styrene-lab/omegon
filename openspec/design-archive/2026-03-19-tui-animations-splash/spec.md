@@ -1,3 +1,14 @@
++++
+id = "251a6383-d2f2-44ae-8c24-1a057e94f640"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # TUI animations and splash screen — tachyonfx + Omegon branding — Design Spec (extracted)
 
 > Auto-extracted from docs/tui-animations-splash.md at decide-time.

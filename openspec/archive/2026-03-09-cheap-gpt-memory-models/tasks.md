@@ -1,3 +1,14 @@
++++
+id = "378c6ab5-c2a9-4bb0-8885-b3b38e264e3f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # cheap-gpt-memory-models — Tasks
 
 ## 1. Default memory extraction uses a cheap GPT cloud model

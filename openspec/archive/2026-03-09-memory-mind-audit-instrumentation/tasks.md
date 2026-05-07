@@ -1,3 +1,14 @@
++++
+id = "7e851505-6d99-4e4b-942a-0edbc0be7063"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # memory-mind-audit-instrumentation — Tasks
 
 ## 1. Memory injection metrics are recorded at generation time

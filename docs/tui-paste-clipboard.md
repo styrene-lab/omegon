@@ -1,11 +1,13 @@
----
-id: tui-paste-clipboard
-title: TUI paste and clipboard handling — images, files, multiline
-status: implemented
-parent: tui-visual-system
-tags: [tui, ux, clipboard]
-open_questions: []
----
++++
+id = "802962d8-2b50-42e0-8a5d-c47333e4bfab"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # TUI paste and clipboard handling — images, files, multiline
 

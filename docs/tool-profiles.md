@@ -1,10 +1,13 @@
----
-subsystem: tool-profiles
-design_docs:
-  - design/smart-tool-profiles.md
-openspec_baselines: []
-last_updated: 2026-03-10
----
++++
+id = "d391161a-f374-4f6f-a7a9-e5b1d6f9efd2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Tool Profiles
 

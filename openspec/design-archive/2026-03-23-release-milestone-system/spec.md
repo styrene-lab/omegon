@@ -1,3 +1,14 @@
++++
+id = "0d9fd0aa-60d4-4fee-889b-c4b7bd1eab1f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Release milestone and feature freeze system — Design Spec (extracted)
 
 > Auto-extracted from docs/release-milestone-system.md at decide-time.

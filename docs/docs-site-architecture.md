@@ -1,10 +1,13 @@
----
-id: docs-site-architecture
-title: Documentation site architecture — omegon.styrene.dev scope and structure
-status: implemented
-parent: rust-versioning
-open_questions: []
----
++++
+id = "29970213-d6b2-4b33-98b9-62f446a1ef76"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Documentation site architecture — omegon.styrene.dev scope and structure
 

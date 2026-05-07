@@ -1,3 +1,14 @@
++++
+id = "0a88f16f-1c55-45ec-ae15-892faea63ed8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Raised dashboard layout reorganization — design-dominant workspace and contextual implementation rail
 
 ## Intent

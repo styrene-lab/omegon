@@ -1,16 +1,13 @@
----
-id: styrene-ipc-mcp-transport
-title: Native styrene-ipc MCP transport — zero-overhead mesh tool execution via DaemonFleet
-status: exploring
-parent: mcp-transport
-dependencies: [mcp-transport]
-related: [styrene-identity-secrets]
-tags: [architecture, styrene, mcp, mesh, rns, pqc, transport]
-open_questions:
-  - Now that rmcp Streamable HTTP transport is enabled, does native styrene-ipc still add value over routing mesh MCP servers through the HTTP transport with Styrene tunnel as the network layer?
-issue_type: feature
-priority: 2
----
++++
+id = "859a696f-6236-4e8c-b7fe-3deaa20f8859"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Native styrene-ipc MCP transport — zero-overhead mesh tool execution via DaemonFleet
 

@@ -1,3 +1,14 @@
++++
+id = "cdd6f80a-5f0d-45b4-b550-c976e05053d8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # facts.jsonl stability — durable transport without runtime churn — Tasks
 
 ## 1. Stable transport export in `extensions/project-memory/factstore.ts`

@@ -1,9 +1,13 @@
----
-title: Runtime Identity, Authorization, Persona, Posture, and Resource Envelope Stack
-status: active
-tags: [architecture, identity, rbac, persona, posture, runtime]
-date: 2026-04-11
----
++++
+id = "5f83a73e-d20a-4e43-b22a-d6bac7c98f82"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Runtime Identity, Authorization, Persona, Posture, and Resource Envelope Stack
 

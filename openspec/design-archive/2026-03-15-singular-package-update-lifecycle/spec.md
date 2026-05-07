@@ -1,3 +1,14 @@
++++
+id = "931c9f6e-3924-4995-9260-afefb1047a45"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Singular package integration and full-lifecycle update parity — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

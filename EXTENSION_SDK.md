@@ -1,3 +1,14 @@
++++
+id = "61da9829-6fc2-40b3-a84b-9cd10ac73853"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon Extension SDK
 
 The Omegon Extension SDK (`omegon-extension` crate) provides a safe, versioned interface for third-party developers to build extensions for Omegon.

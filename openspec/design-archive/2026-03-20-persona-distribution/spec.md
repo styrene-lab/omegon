@@ -1,3 +1,14 @@
++++
+id = "433d07cd-45c9-4200-af65-3fcbf5aa5fd5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Persona distribution — repos, manifests, and URI addressing — Design Spec (extracted)
 
 > Auto-extracted from docs/persona-distribution.md at decide-time.

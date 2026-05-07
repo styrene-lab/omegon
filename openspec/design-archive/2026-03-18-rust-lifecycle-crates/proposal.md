@@ -1,3 +1,14 @@
++++
+id = "113a2e43-dfe2-492c-8a09-4c5b32884f38"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust lifecycle crates — design-tree + openspec as native Rust modules
 
 ## Intent

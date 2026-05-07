@@ -1,3 +1,14 @@
++++
+id = "351e74dc-153e-409e-a20d-662eb9e563aa"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Provider landscape assessment — gap analysis against upstream and strategic positioning — Design Spec (extracted)
 
 > Auto-extracted from docs/provider-landscape-assessment.md at decide-time.

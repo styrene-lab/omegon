@@ -1,13 +1,13 @@
----
-id: omegon-version-switcher
-title: Version switcher — tfswitch-style binary management for Omegon
-status: implemented
-parent: release-candidate-system
-open_questions: []
-branches: ["feature/omegon-version-switcher"]
-openspec_change: omegon-version-switcher
-jj_change_id: ymrwmkxqnkwmptrqkkpnlovwvrnroktl
----
++++
+id = "e7151d51-69bc-42e3-85ce-eb1674d21368"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Version switcher — tfswitch-style binary management for Omegon
 

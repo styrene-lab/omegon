@@ -1,3 +1,14 @@
++++
+id = "fb760877-ffb5-4a36-a3de-ab70bdc3e8f8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Conversation visual identity — differentiate operator, agent, thinking, tools — Design Spec (extracted)
 
 > Auto-extracted from docs/conversation-visual-identity.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "3bb52cd4-c33c-4ec7-8f7c-29c4bf57bb84"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # uri-resolver — Delta Spec
 
 ## ADDED Requirements

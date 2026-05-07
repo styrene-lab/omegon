@@ -1,3 +1,14 @@
++++
+id = "7f0b0a12-b362-4291-921f-0da5f47e3c07"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # dashboard-wide-truncation — Tasks
 
 ## 1. Intelligent truncation preserves high-value dashboard semantics

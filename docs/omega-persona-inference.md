@@ -1,13 +1,13 @@
----
-id: omega-persona-inference
-title: Omega persona inference — automatic domain detection and persona activation
-status: exploring
-parent: persona-system
-dependencies: [persona-distribution]
-open_questions:
-  - "How does omega self-injection work — when the harness internalizes its own identity, does it auto-select/adapt persona based on project context?"
-issue_type: feature
----
++++
+id = "13705307-3f46-4fdf-a398-2b1bfb28a7ea"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Omega persona inference — automatic domain detection and persona activation
 

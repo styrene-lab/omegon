@@ -1,3 +1,14 @@
++++
+id = "c0e7546a-b16c-481a-b9ec-f67a41c3743b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # routing
 
 ### Requirement: Operator-facing model controls describe capability tiers, not Anthropic-only products

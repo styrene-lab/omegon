@@ -1,3 +1,14 @@
++++
+id = "f46eecf0-54c4-4603-a840-d745cf0124db"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory branch-aware facts transport — isolate tracked facts.jsonl intent from branch-local runtime drift — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

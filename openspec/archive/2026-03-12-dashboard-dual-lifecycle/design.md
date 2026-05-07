@@ -1,3 +1,14 @@
++++
+id = "12895cb4-fb74-46da-809a-bc3979e6ba0b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dashboard: Surface Dual-Lifecycle State — Design
 
 ## Architecture Decisions

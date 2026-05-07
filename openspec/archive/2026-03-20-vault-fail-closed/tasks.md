@@ -1,3 +1,14 @@
++++
+id = "dc52d685-debf-468a-8827-cde7c83d654c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Vault client fail-closed security hardening — Tasks
 
 ## 1. PathPolicy enum and fail-closed path enforcement (vault.rs)

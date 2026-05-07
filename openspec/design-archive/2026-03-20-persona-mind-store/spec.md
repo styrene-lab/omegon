@@ -1,3 +1,14 @@
++++
+id = "ecdaa028-cba5-4609-8ed7-a11298c1b5e5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Persona mind stores — dedicated memory layers per persona identity — Design Spec (extracted)
 
 > Auto-extracted from docs/persona-mind-store.md at decide-time.

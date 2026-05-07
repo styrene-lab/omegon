@@ -1,3 +1,14 @@
++++
+id = "287c3896-2483-4fca-a53f-a5692701a073"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # models/profile
 
 ### Requirement: Operator capability profile persists public role mappings in config

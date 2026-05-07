@@ -1,3 +1,14 @@
++++
+id = "7929a4da-1a0c-40e0-bf72-91f4ad72f2f5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Fractal dashboard ring — living AI state visualization in the dashboard header — Design Spec (extracted)
 
 > Auto-extracted from docs/fractal-dashboard-ring.md at decide-time.

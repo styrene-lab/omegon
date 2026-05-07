@@ -1,3 +1,14 @@
++++
+id = "b62ed93e-c7e0-415f-88f6-e94b0115332a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # dashboard/raised-layout
 
 ### Requirement: Raised dashboard uses explicit responsive card layouts

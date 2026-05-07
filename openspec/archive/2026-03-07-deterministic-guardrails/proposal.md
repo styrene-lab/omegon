@@ -1,3 +1,14 @@
++++
+id = "645ecbdc-5e75-471a-9fc1-f5482ca72b1a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Deterministic Guardrail Integration — Baking Static Analysis into the Feature Lifecycle
 
 ## Intent

@@ -1,11 +1,13 @@
----
-id: core-directives
-title: Core system directives — always-on behavioral axioms beneath all personas
-status: implemented
-parent: persona-system
-open_questions: []
-issue_type: feature
----
++++
+id = "c67034cf-7236-471b-9e03-0798d456fed8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Core system directives — always-on behavioral axioms beneath all personas
 

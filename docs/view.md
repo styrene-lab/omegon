@@ -1,11 +1,13 @@
----
-subsystem: view
-design_docs:
-  - design/context-aware-uri.md
-openspec_baselines:
-  - uri-resolver.md
-last_updated: 2026-03-10
----
++++
+id = "79a19ea8-3bee-4dba-8f1a-27f90716ff8e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # View & URI
 

@@ -1,14 +1,13 @@
----
-id: rust-native-sigstore-update-verification
-title: "Rust-native Sigstore verification for self-update"
-status: exploring
-parent: update-check-restart
-tags: [release, security, update, rust]
-open_questions:
-  - "Does `sigstore-verification` support verifying detached blob signatures + certificate identity constraints for GitHub Release assets directly, or do we need to use lower-level `sigstore` APIs?"
-dependencies: []
-related: []
----
++++
+id = "836efc6b-15cb-46cd-bcd0-62a12c0f708b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rust-native Sigstore verification for self-update
 

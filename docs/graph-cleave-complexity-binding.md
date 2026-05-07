@@ -1,12 +1,13 @@
----
-id: graph-cleave-complexity-binding
-title: Bind web UI graph view to cleave complexity seed points — shared node values
-status: seed
-parent: unified-dashboard
-tags: [dashboard, cleave, graph, visualization, web-ui]
-open_questions: []
-issue_type: feature
----
++++
+id = "18c90717-cd29-4300-964b-455e9cf4f312"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Bind web UI graph view to cleave complexity seed points — shared node values
 

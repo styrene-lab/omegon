@@ -1,3 +1,14 @@
++++
+id = "6c4bb0dc-1e24-4920-a76f-fe25a9fbb8cb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # TUI surface pass — expose new subsystems in dashboard, footer, selectors, and commands — Design
 
 ## Architecture Decisions

@@ -1,3 +1,14 @@
++++
+id = "480f4460-e5b3-4ca3-b23b-f4d0c5354b3d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # progress — Delta Spec
 
 ## ADDED Requirements

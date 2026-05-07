@@ -1,3 +1,14 @@
++++
+id = "d8697e83-90e3-4d95-b77d-bfbda9da211d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Spinner Sermon — Crawler-style scrawling text during long operations — Design Spec (extracted)
 
 > Auto-extracted from docs/spinner-sermon.md at decide-time.

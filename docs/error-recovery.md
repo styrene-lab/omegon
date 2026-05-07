@@ -1,11 +1,13 @@
----
-subsystem: error-recovery
-design_docs:
-  - design/harness-upstream-error-recovery.md
-openspec_baselines:
-  - harness/upstream-error-recovery.md
-last_updated: 2026-03-10
----
++++
+id = "2edde31a-96fa-4154-b1f0-c3eb8c192d64"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Error Recovery
 

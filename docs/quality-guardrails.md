@@ -1,11 +1,13 @@
----
-subsystem: quality-guardrails
-design_docs:
-  - design/deterministic-guardrails.md
-  - design/extension-type-safety.md
-openspec_baselines: []
-last_updated: 2026-03-10
----
++++
+id = "06462e8d-f35a-4e3b-bf0a-384915e91136"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Quality & Guardrails
 

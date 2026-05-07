@@ -1,3 +1,14 @@
++++
+id = "2bbc7696-d396-4a80-a7e5-7df56573292d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # lifecycle/versioning
 
 ### Requirement: Durable lifecycle artifacts are version controlled

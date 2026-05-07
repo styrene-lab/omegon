@@ -1,16 +1,13 @@
----
-id: pi-fork-worktree-reconciliation
-title: "pi-mono local fork worktree reconciliation"
-status: archived
-parent: singular-package-update-lifecycle
-tags: []
-open_questions: []
-dependencies: []
-related: []
-archive_reason: "historical"
-superseded_by: "rust-agent-loop"
-archived_at: "1775246736"
----
++++
+id = "e8d42130-3cba-4e9d-afa2-028767f77f75"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # pi-mono local fork worktree reconciliation
 

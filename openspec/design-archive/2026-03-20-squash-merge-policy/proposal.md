@@ -1,3 +1,14 @@
++++
+id = "de99e8a3-158c-4ff9-a95d-907b034be983"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Squash-merge policy for feature branches
 
 ## Intent

@@ -1,3 +1,14 @@
++++
+id = "50aabc50-e465-4c2a-bf10-430c62d8966a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # security/processes
 
 ### Requirement: Browser launch helpers avoid shell-string command construction

@@ -1,3 +1,14 @@
++++
+id = "a933b3d4-5cac-4959-ab46-e3b406bb9bd0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dual-Lifecycle OpenSpec — Design Layer + Implementation Layer — Design
 
 ## Architecture Decisions

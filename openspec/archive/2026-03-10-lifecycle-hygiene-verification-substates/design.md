@@ -1,3 +1,14 @@
++++
+id = "21400288-15a0-4e97-9500-dea0f1a8c3a7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # lifecycle-hygiene-verification-substates — Design
 
 ## Spec-Derived Architecture

@@ -1,3 +1,14 @@
++++
+id = "793e7063-d516-481e-b32f-85b89bbab98b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Conversation visual identity — differentiate operator, agent, thinking, tools
 
 ## Intent

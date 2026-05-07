@@ -1,3 +1,14 @@
++++
+id = "99b2f55e-175c-42ca-a498-27a982f939a6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Terms of Use
 
 **Omegon** is software developed and distributed by Black Meridian, LLC ("Black Meridian", "we", "us").

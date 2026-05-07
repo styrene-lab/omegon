@@ -1,3 +1,14 @@
++++
+id = "9520b187-20f9-46d3-a92c-dab79e301dc7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Supply chain security — code signing, SBOM generation, and release provenance for Rust binary — Design Spec (extracted)
 
 > Auto-extracted from docs/supply-chain-security.md at decide-time.

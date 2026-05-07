@@ -1,12 +1,13 @@
----
-id: spinner-sermon
-title: Spinner Sermon — Crawler-style scrawling text during long operations
-status: deferred
-tags: [ux, spinner, annihilation]
-open_questions:
-  - What is the right scrawl speed — characters per second? Should it vary (faster bursts, pauses at punctuation)?
-  - Should the sermon text be a single continuous passage or drawn from fragments? Does it loop or terminate?
----
++++
+id = "ea886989-7da9-4852-bba4-c930f999bc19"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Spinner Sermon — Crawler-style scrawling text during long operations
 

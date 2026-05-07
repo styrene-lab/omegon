@@ -1,3 +1,14 @@
++++
+id = "9982dfce-a0e5-44e7-95ea-4160e30a11c5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Extension Type Safety — Preventing API Hallucinations — Design
 
 ## Architecture Decisions

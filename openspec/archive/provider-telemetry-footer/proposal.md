@@ -1,3 +1,14 @@
++++
+id = "6e48373c-1221-4df9-84b9-6beccf51d547"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Provider telemetry footer and session audit
 
 ## Intent

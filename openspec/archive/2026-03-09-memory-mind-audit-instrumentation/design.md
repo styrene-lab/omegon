@@ -1,3 +1,14 @@
++++
+id = "0046320d-ee40-4211-9883-1ac026325eb6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # memory-mind-audit-instrumentation — Design
 
 ## Spec-Derived Architecture

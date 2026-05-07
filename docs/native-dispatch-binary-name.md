@@ -1,13 +1,13 @@
----
-id: native-dispatch-binary-name
-title: Fix native dispatch binary resolution — omegon-agent → omegon rename, drop unnecessary --bridge
-status: implemented
-parent: rust-cleave-orchestrator
-tags: [cleave, subprocess, binary, dispatch, bugfix]
-open_questions: []
-issue_type: bug
-priority: 1
----
++++
+id = "b422553d-617e-4b9c-b5cb-b902e6e5a082"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Fix native dispatch binary resolution — omegon-agent → omegon rename, drop unnecessary --bridge
 

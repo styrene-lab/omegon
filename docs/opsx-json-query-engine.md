@@ -1,14 +1,13 @@
----
-id: opsx-json-query-engine
-title: JSON query engine for opsx-core — jsongrep integration for state.json querying
-status: seed
-parent: opsx-core-rust-fsm
-open_questions:
-  - Should jsongrep be a dependency of opsx-core (library crate) or a separate opsx-query crate that depends on opsx-core?
-  - "What's the operator-facing syntax? jsongrep uses regular path expressions (e.g. $.nodes[*].state). Do we expose this directly or wrap it in domain-specific commands (/query nodes where status=exploring)?"
-  - "Should the query engine also index the audit log for time-range queries (e.g. 'all transitions in the last 24h')?"
-jj_change_id: rmkuvnoxwqnkmyskvqxvkwsswlnmnlzv
----
++++
+id = "2dc9e6b3-bd27-4642-b480-48badd39cf7d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # JSON query engine for opsx-core — jsongrep integration for state.json querying
 

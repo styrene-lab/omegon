@@ -1,3 +1,14 @@
++++
+id = "11fa6470-fa18-4af1-b43f-60d5e45b804f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Version switcher — tfswitch-style binary management for Omegon — Design Spec (extracted)
 
 > Auto-extracted from docs/omegon-version-switcher.md at decide-time.

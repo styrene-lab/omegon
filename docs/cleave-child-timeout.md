@@ -1,10 +1,13 @@
----
-id: cleave-child-timeout
-title: Cleave child timeout and idle detection
-status: implemented
-tags: [cleave, reliability, timeout]
-open_questions: []
----
++++
+id = "9881f84b-5af9-4363-9d72-6e331c20f500"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave child timeout and idle detection
 

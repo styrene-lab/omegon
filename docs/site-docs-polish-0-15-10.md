@@ -1,14 +1,13 @@
----
-id: site-docs-polish-0-15-10
-title: "Site/docs polish for 0.15.10 — reconcile public docs with current product reality"
-status: exploring
-tags: [docs, site, release, 0.15.10, documentation, polish]
-open_questions:
-  - "Which public-facing pages should be treated as release-gated truth for 0.15.10: README + install + quickstart + providers + commands + tutorial + TUI, or a broader set including migration/get-started pages?"
-  - "[assumption] The command surface documented on the site still matches the shipped TUI slash-command registry; this should be verified before editing the command reference."
-dependencies: []
-related: []
----
++++
+id = "3ace7acb-c974-412a-ae0e-3fb8543b96d4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Site/docs polish for 0.15.10 — reconcile public docs with current product reality
 

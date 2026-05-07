@@ -1,3 +1,14 @@
++++
+id = "436fbb1e-ed01-46bc-aa1c-92d6b73852eb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory crate interface boundary — MemoryBackend trait + integration with agent loop traits — Design Spec (extracted)
 
 > Auto-extracted from docs/memory-crate-interface.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "74f22dd2-5ae8-49ab-8281-e4203f87f3ac"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory: Session Continuity — Proactive startup injection and recency window — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

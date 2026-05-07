@@ -1,3 +1,14 @@
++++
+id = "2fb457aa-33c2-481f-b09c-e7ca395cbf97"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave worktree submodule failures — root cause and fix
 
 ## Intent

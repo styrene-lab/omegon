@@ -1,11 +1,13 @@
----
-id: cleave-prerequisite-prompting
-title: Cleave prerequisite prompting — project context and finalization instructions
-status: implemented
-parent: cleave-child-dispatch-quality
-open_questions: []
-priority: 2
----
++++
+id = "56cc3327-69d8-4f11-9873-1c5a0579d9b9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave prerequisite prompting — project context and finalization instructions
 

@@ -1,10 +1,13 @@
----
-subsystem: design-tree
-design_docs:
-  - design/design-tree-lifecycle.md
-openspec_baselines: []
-last_updated: 2026-03-12
----
++++
+id = "1fe4c9f9-4bd7-4bd7-8b3a-f2ae076645af"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Design Tree
 

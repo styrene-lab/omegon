@@ -1,12 +1,13 @@
----
-id: archive-branch-cleanup
-title: Auto-delete merged feature branches on OpenSpec archive
-status: implemented
-tags: [openspec, git, lifecycle, cleanup]
-open_questions: []
-branches: []
-openspec_change: archive-branch-cleanup
----
++++
+id = "36881f1a-d86e-432a-a1a2-8146dddab67a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Auto-delete merged feature branches on OpenSpec archive
 

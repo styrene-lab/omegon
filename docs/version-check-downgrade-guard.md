@@ -1,15 +1,13 @@
----
-id: version-check-downgrade-guard
-title: Version check downgrade guard — suppress false update prompts from older registry versions
-status: implemented
-parent: pi-fork-update-flow
-tags: [pi-mono, version-check, bugfix, ux]
-open_questions: []
-branches: []
-openspec_change: version-check-downgrade-guard
-issue_type: bug
-priority: 2
----
++++
+id = "910ddc6f-feeb-43ac-9bb6-0f9c618c5a13"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Version check downgrade guard — suppress false update prompts from older registry versions
 

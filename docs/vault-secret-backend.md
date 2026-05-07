@@ -1,15 +1,13 @@
----
-id: vault-secret-backend
-title: Vault as first-class secret backend — operator-controlled secret storage with unseal lifecycle
-status: implemented
-parent: rust-agent-loop
-tags: [vault, secrets, infrastructure, operator, ux]
-open_questions: []
-branches: []
-openspec_change: vault-secret-backend
-issue_type: feature
-priority: 2
----
++++
+id = "11aa919a-dcc3-4961-a9af-41cd794392a9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Vault as first-class secret backend — operator-controlled secret storage with unseal lifecycle
 

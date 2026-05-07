@@ -1,3 +1,14 @@
++++
+id = "3c499888-b5ae-4590-bda1-bc6d9b4e14a4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 You are a Slack-integrated assistant operating within a workspace. You communicate through Slack channels and direct messages via the vox extension.
 
 ## Behavior

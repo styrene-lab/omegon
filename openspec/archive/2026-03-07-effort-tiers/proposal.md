@@ -1,3 +1,14 @@
++++
+id = "750637ba-e75e-4b39-a690-b483cb1aa0f5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Effort Tiers — Global Inference Cost Control (Servitor → Omnissiah)
 
 ## Intent

@@ -1,8 +1,13 @@
----
-title: Interactive runtime supervisor — implementation plan
-status: planned
-tags: [omegon, runtime, supervisor, implementation, auspex, tui, ipc]
----
++++
+id = "f2a99c9d-c027-4473-9247-11be78b9279c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Interactive runtime supervisor — implementation plan
 

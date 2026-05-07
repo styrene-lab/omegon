@@ -1,3 +1,14 @@
++++
+id = "8210ef35-bd58-4910-9b1c-6640855ecfbd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Raised dashboard component overhaul — model topology clarity and horizontal layout — Design
 
 ## Architecture Decisions

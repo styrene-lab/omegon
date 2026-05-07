@@ -1,12 +1,13 @@
----
-id: extension-migration-architecture
-title: Extension migration architecture — TS extensions → Rust integrated features
-status: implemented
-tags: [architecture, migration, extensions, event-bus]
-open_questions: []
-issue_type: epic
-priority: 1
----
++++
+id = "b3e1788a-3d84-45cd-81fd-6b9f715e8286"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Extension migration architecture — TS extensions → Rust integrated features
 

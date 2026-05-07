@@ -1,16 +1,13 @@
----
-id: tutorial-video-showcase-overhaul
-title: "Tutorial video/showcase overhaul — deterministic, recordable onboarding flow"
-status: exploring
-parent: tutorial-system
-tags: [tutorial, onboarding, demo, video, ux, site]
-open_questions:
-  - "What is the primary product for this overhaul: a deterministic showcase flow optimized for recording, a first-run onboarding flow optimized for live operators, or a single system that must serve both without branching into contradictory UX?"
-  - "How much of the current-project adaptive path should remain inside `/tutorial` once the showcase flow becomes more structured — full lifecycle mutation, read-only orientation, or an explicitly separate onboarding mode?"
-  - "[assumption] A deterministic video-grade tutorial requires stronger control over prompts, timing, and visible outputs than the current AutoPrompt/live-agent flow can guarantee."
-dependencies: []
-related: []
----
++++
+id = "d52dc400-ea9f-497f-bdd0-fa725099aec0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Tutorial video/showcase overhaul — deterministic, recordable onboarding flow
 

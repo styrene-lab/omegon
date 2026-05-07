@@ -1,11 +1,13 @@
----
-id: lsp-monorepo-workspace-handling
-title: LSP workspace root strategy for monorepos
-status: decided
-parent: lsp-integration
-open_questions: []
-jj_change_id: ykqqlwnsttquosykvkzllqlnqkwqookt
----
++++
+id = "4214d219-6a99-4c96-9440-1ceb49ef7aa8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # LSP workspace root strategy for monorepos
 

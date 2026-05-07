@@ -1,3 +1,14 @@
++++
+id = "bb412f7d-62da-4881-955a-2fc388a31df1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # cleave/checkpoint
 
 ### Requirement: Confirmed checkpoints must verify post-checkpoint cleanliness before cleave continues

@@ -1,3 +1,14 @@
++++
+id = "51f1e7e6-1216-4520-a1c0-b956520167d2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Third-Party Notices
 
 Omegon is built using open-source software. This file lists the third-party components compiled into or distributed with Omegon, along with their licenses and copyright holders.

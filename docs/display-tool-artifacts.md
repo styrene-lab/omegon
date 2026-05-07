@@ -1,16 +1,13 @@
----
-id: display-tool-artifacts
-title: "Display tool — agent-driven visual artifacts in the conversation"
-status: resolved
-parent: conversation-rendering-engine
-tags: []
-open_questions: []
-dependencies: []
-related:
-  - conversation-widget
-  - embedded-web-dashboard
-  - inline-image-rendering
----
++++
+id = "42dcd703-7512-4117-89ef-66dadb941eaa"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Display tool — agent-driven visual artifacts in the conversation
 

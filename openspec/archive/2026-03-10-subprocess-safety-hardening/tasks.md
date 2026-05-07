@@ -1,3 +1,14 @@
++++
+id = "1ba19aee-7822-4a14-9be0-b8c29e6cddf9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Subprocess safety hardening — Tasks
 
 ## 1. Harden browser launch helpers

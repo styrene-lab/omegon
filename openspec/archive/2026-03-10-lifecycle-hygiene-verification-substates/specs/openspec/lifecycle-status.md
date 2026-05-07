@@ -1,3 +1,14 @@
++++
+id = "46a900a9-ece3-4de1-a7be-e7766a1d1173"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # openspec/lifecycle-status — Delta Spec
 
 ## ADDED Requirements

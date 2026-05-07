@@ -1,12 +1,13 @@
----
-id: extension-hot-reload
-title: "Extension Hot-Reload (Development)"
-status: seed
-tags: [extensions, development, iteration]
-open_questions: []
-dependencies: []
-related: []
----
++++
+id = "d6d13479-a20c-4586-a983-df1770a7e51d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Extension Hot-Reload (Development)
 

@@ -1,3 +1,14 @@
++++
+id = "12b7e023-ad30-4468-a1a9-a99aba5dbb30"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # TUI surface pass — Tasks
 
 ## 1. Dashboard harness section (dashboard.rs)

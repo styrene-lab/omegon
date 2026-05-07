@@ -1,11 +1,13 @@
----
-id: pikit-web-ui-hosting
-title: Omegon self-hosted web UI
-status: implemented
-parent: repo-consolidation-hardening
-open_questions: []
-openspec_change: localhost-web-ui-mvp
----
++++
+id = "5da96a20-12e3-445b-bb20-5e6ba25f9403"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Omegon self-hosted web UI
 

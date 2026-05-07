@@ -1,13 +1,13 @@
----
-id: local-inference-guide
-title: Local inference setup guide — tutorial-style Ollama onboarding
-status: seed
-parent: tutorial-system
-tags: [tutorial, local-inference, ollama, onboarding, 0.16.0]
-open_questions: []
-jj_change_id: xwnrqnuystrovmssnxktvlkuqoxwymxu
-issue_type: feature
----
++++
+id = "be410247-1b00-416d-bb02-5708e7ea1529"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Local inference setup guide — tutorial-style Ollama onboarding
 

@@ -1,3 +1,14 @@
++++
+id = "0bbab83a-97ba-4095-8c3e-9cbfc53fe0d3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Terminal responsive degradation — graceful layout collapse on resize — Design Spec (extracted)
 
 > Auto-extracted from docs/terminal-responsive-degradation.md at decide-time.

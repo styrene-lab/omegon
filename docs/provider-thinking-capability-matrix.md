@@ -1,9 +1,13 @@
----
-title: Provider thinking capability matrix
-status: implemented
-tags: [providers, reasoning, thinking, matrix]
-date: 2026-04-08
----
++++
+id = "accac304-8c26-4b58-a735-07a42b21ec7b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Provider thinking capability matrix
 

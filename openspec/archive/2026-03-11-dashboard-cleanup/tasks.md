@@ -1,3 +1,14 @@
++++
+id = "9ff550a5-d5be-4ff4-8506-b4cdf3ef7924"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dashboard cleanup and footer coherence — Tasks
 
 ## 1. Refactor the raised footer layout around a pinned metadata block

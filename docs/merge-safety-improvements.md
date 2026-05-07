@@ -1,13 +1,13 @@
----
-id: merge-safety-improvements
-title: Merge safety improvements — prevent squash-merge regressions and lost work
-status: decided
-tags: [architecture, git, workflow, process, quality, strategic]
-open_questions: []
-jj_change_id: xnnsvvsxxkvwpnyynuuoswsrpkorsklo
-issue_type: epic
-priority: 1
----
++++
+id = "1ddb274b-9f71-4ee2-9993-0559c65e49c1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Merge safety improvements — prevent squash-merge regressions and lost work
 

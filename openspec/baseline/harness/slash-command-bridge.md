@@ -1,3 +1,14 @@
++++
+id = "bc04c2fc-0199-4471-b041-cfa07a6b372a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # harness/slash-command-bridge
 
 ### Requirement: All OpenSpec commands are agent-callable via execute_slash_command

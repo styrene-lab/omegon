@@ -1,11 +1,13 @@
----
-id: omegon-site-docs
-title: "omegon.styrene.dev/docs — documentation and architecture sub-site"
-status: implemented
-parent: omegon-install-site
-tags: [docs, site, architecture, marketing, astro]
-open_questions: []
----
++++
+id = "075ec0ea-6b90-4fb1-a5f1-7d822e2ca789"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # omegon.styrene.dev/docs — documentation and architecture sub-site
 

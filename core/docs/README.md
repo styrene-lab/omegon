@@ -1,3 +1,14 @@
++++
+id = "b67ca0f4-75d3-4627-892a-3908797b810f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon Documentation
 
 User-facing documentation for Omegon. Served via [mdserve](https://github.com/jfernandez/mdserve) during development and deployed as part of the release pipeline.

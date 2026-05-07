@@ -1,3 +1,14 @@
++++
+id = "c90e3f99-3388-47bb-b705-a8083a7d75e2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # RepoModel — git state tracking in Rust core — Design Spec (extracted)
 
 > Auto-extracted from docs/repo-model.md at decide-time.

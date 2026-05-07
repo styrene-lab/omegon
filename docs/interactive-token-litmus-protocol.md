@@ -1,10 +1,13 @@
----
-title: Interactive Token Litmus Protocol
-author: omegon
-status: active
-tags: [benchmark, interactive, token-efficiency, release, litmus]
-date: 2026-04-11
----
++++
+id = "e9c7f78d-4ee5-4cc8-b5c5-26bb50445b77"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Interactive Token Litmus Protocol
 

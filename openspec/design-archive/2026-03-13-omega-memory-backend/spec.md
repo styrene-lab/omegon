@@ -1,3 +1,14 @@
++++
+id = "c63ffd5d-9061-4fae-b863-c8d4341de2ae"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omega memory backend — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

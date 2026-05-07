@@ -1,3 +1,14 @@
++++
+id = "0e67fa7f-bec5-4f3d-9246-60ebfddb4123"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Version switcher — Tasks
 
 ## 1. core/crates/omegon/src/switch.rs (new)

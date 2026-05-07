@@ -1,3 +1,14 @@
++++
+id = "fccda730-f984-4ac2-b533-bc87df623e7b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # cleave-process-tree — Design
 
 ## Spec-Derived Architecture

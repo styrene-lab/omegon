@@ -1,3 +1,14 @@
++++
+id = "dfcdebeb-32b1-4c0c-941e-ef39968ddb92"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Context Class Taxonomy and Routing Policy — named context classes, route envelopes, downgrade safeguards — Design
 
 ## Architecture Decisions

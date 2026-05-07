@@ -1,3 +1,14 @@
++++
+id = "5612e8be-aabb-43d9-b023-1982edbc7b7b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Tutorial demo project — self-seeded repo with live cleave demonstration — Design Spec (extracted)
 
 > Auto-extracted from docs/tutorial-demo-project.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "ebc69aa2-a05c-42e0-8beb-cf7c747b5b9c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Plugin loader — TOML manifest discovery, HTTP-backed tools and context — Design Spec (extracted)
 
 > Auto-extracted from docs/plugin-loader.md at decide-time.

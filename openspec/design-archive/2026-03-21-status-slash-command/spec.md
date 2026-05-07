@@ -1,3 +1,14 @@
++++
+id = "fc89537e-11be-4158-a92d-83368910e6a0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # /status slash command — re-display bootstrap panel mid-session — Design Spec (extracted)
 
 > Auto-extracted from docs/status-slash-command.md at decide-time.

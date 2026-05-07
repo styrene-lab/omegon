@@ -1,3 +1,14 @@
++++
+id = "a7700ffe-37a1-4ffc-9992-85ead00c3781"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # facts.jsonl stability
 
 ## Requirement: Reinforcement-only activity does not churn tracked fact transport

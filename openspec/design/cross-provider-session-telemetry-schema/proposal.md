@@ -1,3 +1,14 @@
++++
+id = "6249d3c6-48ce-49a1-9f80-5e13c6fb3054"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cross-provider session telemetry schema for replay and inspection
 
 ## Intent

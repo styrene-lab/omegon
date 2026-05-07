@@ -1,3 +1,14 @@
++++
+id = "62331edc-fdcd-480f-92a2-28661fc20cdb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # lifecycle — Delta Spec
 
 ## ADDED Requirements

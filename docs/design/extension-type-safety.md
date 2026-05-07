@@ -1,12 +1,13 @@
----
-id: extension-type-safety
-title: Extension Type Safety — Preventing API Hallucinations
-status: implemented
-tags: [dx, quality, guardrails]
-open_questions: []
-branches: ["feature/extension-type-safety"]
-openspec_change: extension-type-safety
----
++++
+id = "8436b899-1f11-47ac-ab16-6d405631a888"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Extension Type Safety — Preventing API Hallucinations
 

@@ -1,3 +1,14 @@
++++
+id = "a84fee27-6adf-4717-a7dc-340d6356c000"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Monorepo migration — absorb core into omegon, eliminate submodule — Design Spec (extracted)
 
 > Auto-extracted from docs/monorepo-migration.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "52945155-d725-43ee-a5d2-2c92bd794d47"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # dashboard/footer — Delta Spec
 
 ## ADDED Requirements

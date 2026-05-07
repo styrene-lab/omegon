@@ -1,9 +1,13 @@
----
-subsystem: local-inference
-design_docs: []
-openspec_baselines: []
-last_updated: 2026-03-10
----
++++
+id = "ddd73e71-6d5a-4a15-87b6-40ec0639d30c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Local Inference
 

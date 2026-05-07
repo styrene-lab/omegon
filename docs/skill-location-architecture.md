@@ -1,17 +1,13 @@
----
-id: skill-location-architecture
-title: "Skill location standard and bundled skill distribution"
-status: resolved
-tags: [skills, architecture, distribution, dx]
-open_questions:
-  - "What is the lookup mechanism for bundled skills? Options: (a) a `~/.config/omegon/skills/index.json` manifest generated at install time, (b) filesystem glob at startup, (c) skills compiled into the binary as `include_str!`. Which wins on startup cost vs. updateability?"
-  - "How does the harness load skills into context? Are all active skills injected into the system prompt at session start, or loaded on-demand? What is the size budget constraint?"
-  - "[assumption] The existing `skills/` SKILL.md files are worth preserving as bundled skills. Are any of them stale enough to delete rather than migrate (same question as the cleave skill)?"
-  - "Does the plugin system (armory.rs / registry.rs) need to change to support the three-tier load order (project-local → bundled → default), or is this purely a path-resolution change at the loader level?"
-  - "What is the install-time mechanism for copying `skills/` to `~/.config/omegon/skills/`? Is this a `just install` step, a post-install hook in the brew formula, or both?"
-dependencies: []
-related: []
----
++++
+id = "4071287e-61c3-4c66-83b5-f85562f4ab7b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Skill location standard and bundled skill distribution
 

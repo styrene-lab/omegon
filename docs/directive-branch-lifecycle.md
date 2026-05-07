@@ -1,12 +1,13 @@
----
-id: directive-branch-lifecycle
-title: Directive-Branch Lifecycle — git branch as the unified task boundary
-status: implemented
-tags: [architecture, lifecycle, git, workflow, design-tree, openspec, cleave]
-open_questions: []
-issue_type: feature
-priority: 1
----
++++
+id = "20557716-04db-49ab-a9d7-8b7e6d1d2981"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Directive-Branch Lifecycle — git branch as the unified task boundary
 

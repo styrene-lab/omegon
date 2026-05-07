@@ -1,13 +1,13 @@
----
-id: subprocess-safety-hardening
-title: Subprocess safety hardening
-status: implemented
-parent: repo-consolidation-hardening
-tags: [security, process, subprocess, hardening]
-open_questions: []
-branches: []
-openspec_change: subprocess-safety-hardening
----
++++
+id = "11fde41e-21f6-44c0-84d4-2f171078bb30"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Subprocess safety hardening
 

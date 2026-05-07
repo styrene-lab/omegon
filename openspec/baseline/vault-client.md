@@ -1,3 +1,14 @@
++++
+id = "56a1bdc4-0ee3-4250-81d5-b256a7410624"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # vault-client
 
 ### Requirement: Vault recipe resolution

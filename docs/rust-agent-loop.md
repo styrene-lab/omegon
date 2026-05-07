@@ -1,14 +1,13 @@
----
-id: rust-agent-loop
-title: "Rust-native agent loop — middle-out replacement of pi's orchestration core"
-status: implemented
-parent: omega
-related: [Omegon-standalone, omega-memory-backend]
-tags: [rust, architecture, agent-loop, pi-mono, strategic, middle-out]
-open_questions: []
-issue_type: epic
-priority: 1
----
++++
+id = "c7fba3a9-a167-4219-b2e9-cf809e8ceebc"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rust-native agent loop — middle-out replacement of pi's orchestration core
 

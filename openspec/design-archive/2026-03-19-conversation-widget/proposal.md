@@ -1,3 +1,14 @@
++++
+id = "68138c15-649b-4d64-805c-d5e094bb49cc"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Conversation widget — structured rendering for all message types
 
 ## Intent

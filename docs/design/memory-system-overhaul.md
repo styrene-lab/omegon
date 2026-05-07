@@ -1,10 +1,13 @@
----
-id: memory-system-overhaul
-title: Memory System Overhaul — Reliable Cross-Session Context Continuity
-status: implemented
-tags: [memory, context, sessions, reliability, dx]
-open_questions: []
----
++++
+id = "4090acab-009a-4614-89f7-aadaec82e024"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Memory System Overhaul — Reliable Cross-Session Context Continuity
 

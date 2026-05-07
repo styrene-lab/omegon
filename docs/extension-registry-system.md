@@ -1,12 +1,13 @@
----
-id: extension-registry-system
-title: "Extension Registry System"
-status: seed
-tags: [extensions, registry, discovery]
-open_questions: []
-dependencies: []
-related: []
----
++++
+id = "e820353d-8bf5-4831-b049-7024d0b17a0c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Extension Registry System
 

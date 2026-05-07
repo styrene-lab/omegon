@@ -1,3 +1,14 @@
++++
+id = "3cc74307-0c13-41e9-86dc-43043da0a67e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # dashboard/terminal-title
 
 ### Requirement: Terminal title reflects live cleave child progress

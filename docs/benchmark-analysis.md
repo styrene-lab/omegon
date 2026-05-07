@@ -1,11 +1,13 @@
----
-id: benchmark-analysis
-title: Benchmark analysis — comparison, regression detection, emergent signal
-status: seed
-parent: demo-qa-benchmark
-open_questions: []
-jj_change_id: vkpoqrqrqqvroqyzvtoynxvyukwqotxs
----
++++
+id = "39ae8896-b7e3-42ac-876c-08b6393702ea"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Benchmark analysis — comparison, regression detection, emergent signal
 

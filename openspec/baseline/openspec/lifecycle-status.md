@@ -1,3 +1,14 @@
++++
+id = "9abb47a2-0e1c-46b7-9558-6e5422a67f71"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # openspec/lifecycle-status
 
 ### Requirement: Task-complete changes expose concrete verification substates

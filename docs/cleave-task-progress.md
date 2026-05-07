@@ -1,11 +1,13 @@
----
-id: cleave-task-progress
-title: Cleave task-level progress tracking and operator display
-status: implemented
-parent: cleave-child-dispatch-quality
-open_questions: []
-priority: 3
----
++++
+id = "eecf30b3-1c6e-4d00-985b-b1337afb80b6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave task-level progress tracking and operator display
 

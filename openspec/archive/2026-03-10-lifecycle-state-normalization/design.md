@@ -1,3 +1,14 @@
++++
+id = "46dd0c52-8e2e-431a-bfcf-c7edde14a418"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Lifecycle state normalization — Design
 
 ## Spec-Derived Architecture

@@ -1,3 +1,14 @@
++++
+id = "11a78bb3-3e63-4d1c-b521-c7487345d8c6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust workspace layout — crate organization for the agent loop and feature crates
 
 ## Intent

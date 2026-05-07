@@ -1,3 +1,14 @@
++++
+id = "13598706-bf83-4dbd-ac10-2f2dd5c8c873"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # effort-tiers — Tasks
 
 ## 1. Tier configuration returns correct EffortConfig for each level

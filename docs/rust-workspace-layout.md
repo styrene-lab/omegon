@@ -1,10 +1,13 @@
----
-id: rust-workspace-layout
-title: Rust workspace layout — crate organization for the agent loop and feature crates
-status: implemented
-parent: rust-agent-loop
-open_questions: []
----
++++
+id = "cdc35830-0459-4a25-ba68-ad26b07122f4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rust workspace layout — crate organization for the agent loop and feature crates
 

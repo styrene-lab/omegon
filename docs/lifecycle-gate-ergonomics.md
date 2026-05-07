@@ -1,11 +1,13 @@
----
-id: lifecycle-gate-ergonomics
-title: Lifecycle gate ergonomics — guardrails not brick walls
-status: implemented
-parent: directive-branch-lifecycle
-tags: [ux, lifecycle, design-tree, openspec, gates, ergonomics]
-open_questions: []
----
++++
+id = "63e5b9e1-a9c2-49a4-ba34-31ca86d668bd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Lifecycle gate ergonomics — guardrails not brick walls
 

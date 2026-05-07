@@ -1,15 +1,13 @@
----
-id: dashboard-component-overhaul
-title: Raised dashboard component overhaul — model topology clarity and horizontal layout
-status: implemented
-parent: unified-dashboard
-tags: [dashboard, tui, ux, models, layout]
-open_questions: []
-branches: []
-openspec_change: dashboard-component-overhaul
-issue_type: feature
-priority: 2
----
++++
+id = "cf22b09d-71ac-433c-b199-c76487e6aaa5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Raised dashboard component overhaul — model topology clarity and horizontal layout
 

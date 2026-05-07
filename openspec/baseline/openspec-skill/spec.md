@@ -1,3 +1,14 @@
++++
+id = "ef60dde6-0fe2-449f-88b9-3d62c765e893"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # OpenSpec Skill Task Generation Spec
 
 ### Requirement: Scenario-first grouping guidance in skill

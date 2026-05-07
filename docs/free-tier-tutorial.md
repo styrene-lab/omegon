@@ -1,14 +1,13 @@
----
-id: free-tier-tutorial
-title: Free-tier tutorial — onboarding without a Pro subscription or API key
-status: exploring
-parent: tutorial-system
-dependencies: [startup-systems-check]
-tags: [tutorial, free-tier, accessibility, local-inference, onboarding, 0.15.1]
-open_questions: []
-jj_change_id: kvywttuknzuoxmkzorsyqmsrwqvwpnku
-priority: 2
----
++++
+id = "b1d25624-e0eb-467d-b643-fcde04cfe8b0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Free-tier tutorial — onboarding without a Pro subscription or API key
 

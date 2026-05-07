@@ -1,3 +1,14 @@
++++
+id = "0548fb03-5795-4a7c-b912-168679d1999c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # bridge-all-slash-commands — Design
 
 ## Spec-Derived Architecture

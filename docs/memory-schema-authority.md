@@ -1,12 +1,13 @@
----
-id: memory-schema-authority
-title: Memory schema authority — Rust owns the schema, TS adapts non-destructively
-status: implemented
-tags: [architecture, memory, schema, rust, typescript, migration, persona]
-open_questions: []
-issue_type: task
-priority: 1
----
++++
+id = "dad32203-2408-4c83-967f-e1cbee44b623"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Memory schema authority — Rust owns the schema, TS adapts non-destructively
 

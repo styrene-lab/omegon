@@ -1,3 +1,14 @@
++++
+id = "9c355a5d-4fdc-40ee-b87a-891077061acd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # omegon-extension
 
 Safe, versioned SDK for building [Omegon](https://github.com/styrene-lab/omegon) extensions.

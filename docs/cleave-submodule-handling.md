@@ -1,11 +1,13 @@
----
-id: cleave-submodule-handling
-title: Cleave submodule-aware commit and merge
-status: implemented
-parent: cleave-child-dispatch-quality
-open_questions: []
-priority: 2
----
++++
+id = "05d83c3d-cd0e-41d0-9d03-1a023b8811ef"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave submodule-aware commit and merge
 

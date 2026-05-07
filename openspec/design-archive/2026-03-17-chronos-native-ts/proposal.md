@@ -1,3 +1,14 @@
++++
+id = "97a696b6-582a-4e86-b4bf-3ad2b341452f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rewrite chronos as pure TypeScript — eliminate BSD/GNU date dependency
 
 ## Intent

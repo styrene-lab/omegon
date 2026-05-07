@@ -1,9 +1,13 @@
----
-id: secrets-engine
-title: Secrets Engine — encrypted storage, dynamic resolution, and output redaction
-status: implemented
-tags: [secrets, security, vault, keyring, redaction, guards]
----
++++
+id = "e126186f-5db3-410e-980a-3cf57010b1a7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Secrets Engine
 

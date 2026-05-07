@@ -1,3 +1,14 @@
++++
+id = "352b915e-ea21-4e43-910c-7067d487872a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Squash-merge policy for feature branches — Design Spec (extracted)
 
 > Auto-extracted from docs/squash-merge-policy.md at decide-time.

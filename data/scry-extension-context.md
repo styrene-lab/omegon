@@ -1,3 +1,14 @@
++++
+id = "daecd2b2-8805-483b-9976-91829022e343"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Scry Image Generation Extension
 
 The scry extension gives you local image generation capabilities using diffusion models (FLUX, Stable Diffusion, SDXL). Images are generated on the user's machine — no external API calls.

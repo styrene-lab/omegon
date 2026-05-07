@@ -1,3 +1,14 @@
++++
+id = "df004405-4394-4f2e-aded-437541e5fba3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Lifecycle Reconciliation — Ambient Sync from Implementation Reality back to Design Tree + OpenSpec — Tasks
 
 Dependencies:

@@ -1,3 +1,14 @@
++++
+id = "927620d9-f8fd-42cd-b1ef-53d695d8f38b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # update-lifecycle
 
 ### Requirement: /update performs the singular-package lifecycle

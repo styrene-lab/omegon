@@ -1,3 +1,14 @@
++++
+id = "7da60e67-9650-450c-a1e1-5f960db37898"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omega WorkspaceBackend — local worktree vs. k8s pod storage
 
 ## Intent

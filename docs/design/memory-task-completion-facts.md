@@ -1,12 +1,13 @@
----
-id: memory-task-completion-facts
-title: "Memory: Task-Completion Facts — Mid-term what-was-done layer with fast decay"
-status: implemented
-parent: memory-system-overhaul
-open_questions: []
-branches: ["feature/memory-task-completion-facts"]
-openspec_change: memory-task-completion-facts
----
++++
+id = "c2101ff9-ecba-4b86-9487-cd598b210757"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Memory: Task-Completion Facts — Mid-term \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"what was done\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\" layer with fast decay
 

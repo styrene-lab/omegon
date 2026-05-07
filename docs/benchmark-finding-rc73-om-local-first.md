@@ -1,9 +1,13 @@
----
-title: Benchmark finding — rc.73 om local-first doctrine
-status: active
-tags: [benchmark, rc73, om, omegon, controller, discipline]
-date: 2026-04-11
----
++++
+id = "ef9a7319-d6d5-4d83-8ecb-55b86abdaff9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Benchmark finding — rc.73 om local-first doctrine
 

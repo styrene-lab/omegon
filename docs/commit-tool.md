@@ -1,11 +1,13 @@
----
-id: commit-tool
-title: Structured commit tool — replaces bash git commit
-status: implemented
-parent: git-harness-integration
-tags: [rust, git, tools]
-open_questions: []
----
++++
+id = "c31b154d-28c3-478a-82a2-f542cfe06be1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Structured commit tool — replaces bash git commit
 

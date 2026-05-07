@@ -1,3 +1,14 @@
++++
+id = "25ff004c-2538-4efb-b960-090fe9731ca7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Native SVG diagram backend MVP
 
 ## Intent

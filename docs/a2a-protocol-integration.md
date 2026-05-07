@@ -1,16 +1,13 @@
----
-id: a2a-protocol-integration
-title: A2A Protocol Integration — Agent-to-Agent interoperability for Omegon
-status: deferred
-related: [omega, multi-instance-coordination]
-tags: [architecture, a2a, interoperability, multi-agent, protocol, strategic]
-open_questions:
-  - Should A2A be adopted incrementally (server-only first, then client) or as a full bidirectional protocol from the start?
-  - Should A2A replace the cleave child task-file protocol, or run alongside it as an optional transport?
-  - What is the security model for an A2A endpoint on a coding agent that handles repo secrets — localhost-only? mTLS? OAuth with what identity provider?
-  - Does A2A subsume the Omega HTTP API design question, or are they separate concerns (A2A for external interop, bespoke RPC for internal Omega↔Omegon)?
-issue_type: feature
----
++++
+id = "f6c26bb2-a49a-436f-808d-7f77cdbf9f3d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # A2A Protocol Integration — Agent-to-Agent interoperability for Omegon
 

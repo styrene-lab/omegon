@@ -1,11 +1,13 @@
----
-id: provider-api-drift
-title: Provider API drift detection — daily live verification against reviewed expectations
-status: implemented
-parent: core-distribution
-tags: [ci, providers, api-drift, upstream, rust, testing]
-open_questions: []
----
++++
+id = "f1cba9f2-a8e8-4794-8aa4-861f162c87df"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Provider API drift detection — daily live verification against reviewed expectations
 

@@ -1,3 +1,14 @@
++++
+id = "36a3de46-2210-469b-b086-071bbc7540e1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Fractal status surface — multi-dimensional state visualization via generative fractal rendering — Design Spec (extracted)
 
 > Auto-extracted from docs/fractal-status-surface.md at decide-time.

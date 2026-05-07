@@ -1,3 +1,14 @@
++++
+id = "7dca696e-66a5-481d-aba7-2ac30f0278ad"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Raised Dashboard: Horizontal Split Layout — Design
 
 ## Architecture Decisions

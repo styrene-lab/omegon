@@ -1,3 +1,14 @@
++++
+id = "9bd19927-891d-4492-a9f9-e32d254ea4b1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Anthropic subscription ToS compliance
 
 Anthropic's consumer subscription is treated by Omegon as an **interactive-only** credential class. Claude.ai / Anthropic subscription credentials are permitted for human-operated TUI sessions, but Omegon now **hard-blocks** headless and unattended automation paths when that is the only Anthropic credential available.

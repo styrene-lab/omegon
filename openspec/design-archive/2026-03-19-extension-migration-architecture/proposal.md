@@ -1,3 +1,14 @@
++++
+id = "de8befe4-104f-49d5-9566-4c4507144a64"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Extension migration architecture — TS extensions → Rust integrated features
 
 ## Intent

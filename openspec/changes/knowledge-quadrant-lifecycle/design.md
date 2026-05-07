@@ -1,3 +1,14 @@
++++
+id = "5012e9b8-58a0-445e-a095-fbf3e7014c56"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Knowledge quadrant lifecycle — guide design progression through the Rumsfeld Matrix — Design
 
 ## Architecture Decisions

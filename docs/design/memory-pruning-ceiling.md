@@ -1,10 +1,13 @@
----
-id: memory-pruning-ceiling
-title: "Memory: Structural Pruning Ceiling — DB-level decay enforcement and section caps"
-status: implemented
-parent: memory-system-overhaul
-open_questions: []
----
++++
+id = "bd051654-97fc-474b-aa8f-b7c1952ee0e2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Memory: Structural Pruning Ceiling — DB-level decay enforcement and section caps
 

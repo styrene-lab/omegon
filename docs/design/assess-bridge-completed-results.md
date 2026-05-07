@@ -1,13 +1,13 @@
----
-id: assess-bridge-completed-results
-title: Assess bridge returns completed structured results
-status: implemented
-parent: lifecycle-hygiene-verification-substates
-tags: [cleave, assess, openspec, lifecycle, bridge]
-open_questions: []
-branches: ["feature/assess-bridge-completed-results"]
-openspec_change: assess-bridge-completed-results
----
++++
+id = "864d805b-f2e8-489e-b6bb-34cac3d89293"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Assess bridge returns completed structured results
 

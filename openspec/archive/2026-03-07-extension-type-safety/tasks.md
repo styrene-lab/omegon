@@ -1,3 +1,14 @@
++++
+id = "f87d7bff-5b78-4165-84b6-8bdc4f2d54cd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Extension Type Safety — Tasks
 
 ## 1. Infrastructure — tsconfig + scripts + package.json

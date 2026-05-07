@@ -1,11 +1,13 @@
----
-id: squash-merge-policy
-title: Squash-merge policy for feature branches
-status: implemented
-parent: git-harness-integration
-tags: [git, cleave, policy]
-open_questions: []
----
++++
+id = "ba478aa3-cda1-4886-885e-b27a81fa7350"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Squash-merge policy for feature branches
 

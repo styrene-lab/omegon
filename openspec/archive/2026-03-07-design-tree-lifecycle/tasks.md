@@ -1,3 +1,14 @@
++++
+id = "2531d9fd-47f1-473c-b2df-a94603143716"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # design-tree-lifecycle — Tasks
 
 ## 1. Types and Frontmatter

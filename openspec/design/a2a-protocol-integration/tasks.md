@@ -1,3 +1,14 @@
++++
+id = "d4516d21-30fd-4265-8bec-382c954fb0e8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # A2A Protocol Integration — Agent-to-Agent interoperability for Omegon — Design Tasks
 
 ## 1. Open Questions

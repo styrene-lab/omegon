@@ -1,9 +1,13 @@
----
-title: Signal Classes and Retention Policy
-status: exploring
-tags: [benchmarking, signal-shaping, history, retention]
-date: 2026-04-09
----
++++
+id = "35fe55ce-24d9-40a4-b9ac-302509463f63"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Signal Classes and Retention Policy
 

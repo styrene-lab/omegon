@@ -1,3 +1,14 @@
++++
+id = "1d61ccdd-5d16-42fc-af41-bef38117ebfd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Remotion native support via render extension — Tasks
 
 ## 1. Composition runner (extensions/render/composition/)

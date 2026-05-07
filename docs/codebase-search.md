@@ -1,14 +1,13 @@
----
-id: codebase-search
-title: codebase_search — AST-aware code retrieval with memory seeding
-status: implemented
-related: [lsp-integration]
-tags: [architecture, tools, code-intelligence, memory, lsp, retrieval]
-open_questions: []
-issue_type: feature
-priority: 1
-jj_change_id: xutzpkqvuomsqvzqkmttqyvltonzxvyw
----
++++
+id = "47774561-f997-4bcc-a1d4-d270bade54ad"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # codebase_search — AST-aware code retrieval with memory seeding
 

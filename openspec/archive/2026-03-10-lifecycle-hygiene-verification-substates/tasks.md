@@ -1,3 +1,14 @@
++++
+id = "f69ba504-959f-4c78-8588-bb2ad7667b2e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # lifecycle-hygiene-verification-substates — Tasks
 
 ## 1. Task-complete changes expose concrete verification substates

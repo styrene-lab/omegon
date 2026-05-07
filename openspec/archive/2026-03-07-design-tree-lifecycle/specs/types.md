@@ -1,3 +1,14 @@
++++
+id = "c2b62575-4b1f-4e03-949f-d77c2875410a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Types — Design Tree Lifecycle Extension
 
 ## Requirements

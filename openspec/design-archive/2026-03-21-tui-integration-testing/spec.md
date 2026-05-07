@@ -1,3 +1,14 @@
++++
+id = "040aded1-50f2-4ad3-a03c-bec5c1ea39b9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # TUI integration testing — snapshot tests, PTY harness, and interactive verification — Design Spec (extracted)
 
 > Auto-extracted from docs/tui-integration-testing.md at decide-time.

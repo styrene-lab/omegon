@@ -1,13 +1,13 @@
----
-id: cleave-dirty-tree-checkpointing
-title: Cleave dirty-tree checkpointing
-status: implemented
-parent: null
-tags: [cleave, git, openspec, workflow, preflight]
-open_questions: []
-branches: ["feature/assess-bridge-completed-results"]
-openspec_change: cleave-dirty-tree-checkpointing
----
++++
+id = "a1930ef3-d00a-474f-ac36-662ac4ecb578"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave dirty-tree checkpointing
 

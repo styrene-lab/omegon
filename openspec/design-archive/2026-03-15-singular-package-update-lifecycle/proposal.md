@@ -1,3 +1,14 @@
++++
+id = "637158e4-b050-461c-8a4a-f185a01dac9c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Singular package integration and full-lifecycle update parity
 
 ## Intent

@@ -1,15 +1,13 @@
----
-id: cleave-process-tree
-title: Cleave Process Tree — bidirectional parent↔child coordination
-status: implemented
-related: [multi-instance-coordination, cleave-child-observability]
-tags: [architecture, cleave, subprocess, ipc, coordination, strategic]
-open_questions: []
-branches: []
-openspec_change: cleave-process-tree
-issue_type: feature
-priority: 2
----
++++
+id = "710b84ef-63fd-4679-bdc8-e42afb5664d7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave Process Tree — bidirectional parent↔child coordination
 

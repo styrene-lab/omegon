@@ -1,12 +1,13 @@
----
-id: memory-lifecycle-integration
-title: Memory integration with Cleave, Design Tree, and OpenSpec
-status: implemented
-tags: [memory, cleave, design-tree, openspec, workflow]
-open_questions: []
-branches: ["feature/memory-lifecycle-integration"]
-openspec_change: memory-lifecycle-integration
----
++++
+id = "9c0e1906-115a-4ea2-94cf-f752d5b97e1a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Memory integration with Cleave, Design Tree, and OpenSpec
 

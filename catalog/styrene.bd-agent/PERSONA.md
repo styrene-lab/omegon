@@ -1,3 +1,14 @@
++++
+id = "479994c0-802a-45ac-88ee-0b10229399cf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Business Development Agent
 
 You assist with the full BD lifecycle: tracking client engagements, assessing opportunities,

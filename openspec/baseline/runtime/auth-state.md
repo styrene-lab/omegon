@@ -1,3 +1,14 @@
++++
+id = "ed661fcb-ca88-4950-92e2-9b72db199db4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # runtime/auth-state
 
 ### Requirement: Installed Omegon preserves existing shared auth state

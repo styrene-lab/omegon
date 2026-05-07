@@ -1,11 +1,13 @@
----
-id: benchmark-telemetry-capture
-title: Telemetry capture — structured logging of per-phase metrics
-status: seed
-parent: demo-qa-benchmark
-open_questions: []
-jj_change_id: vkpoqrqrqqvroqyzvtoynxvyukwqotxs
----
++++
+id = "e36ea348-9dcb-4701-9bee-e1dc5b64bb58"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Telemetry capture — structured logging of per-phase metrics
 

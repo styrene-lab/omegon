@@ -1,14 +1,13 @@
----
-id: cross-provider-session-telemetry-schema
-title: Cross-provider session telemetry schema for replay and inspection
-status: exploring
-parent: sovereign-multi-repo-project-management
-tags: [telemetry, observability, sessions, providers, dashboard]
-open_questions: []
-jj_change_id: zvvzqkmprokmkwnvwzmmknvptqrnwlqp
-issue_type: feature
-priority: 1
----
++++
+id = "5dbdeea6-a1c4-48e2-b3eb-de35aa94806c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cross-provider session telemetry schema for replay and inspection
 

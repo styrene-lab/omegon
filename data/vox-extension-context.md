@@ -1,3 +1,14 @@
++++
+id = "52e71bf9-e0a5-4306-8a42-6d0ed13149a8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Vox Communication Extension
 
 The vox extension connects you to external communication channels (Discord, Slack, Signal, email, etc.). Messages from these channels arrive as prompts with embedded routing context.

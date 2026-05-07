@@ -1,3 +1,14 @@
++++
+id = "ec0841f3-407a-4095-846c-97373844ca0d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Sovereign multi-repo project management on top of omegon-design
 
 ## Intent

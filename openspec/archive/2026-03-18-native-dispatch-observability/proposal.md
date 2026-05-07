@@ -1,3 +1,14 @@
++++
+id = "325954c6-d703-4818-b6c6-cdbeee13761e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Native dispatch observability — surface Rust child progress to dashboard
 
 ## Intent

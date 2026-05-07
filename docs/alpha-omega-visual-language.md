@@ -1,10 +1,13 @@
----
-id: alpha-omega-visual-language
-title: α→ω Visual Language — Lifecycle Symbol System
-status: implemented
-tags: [theming, ux, symbols, lifecycle, 40k, dashboard, design-tree, openspec]
-open_questions: []
----
++++
+id = "25ebded0-ee37-4a87-816a-c3ca41d00f35"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # α→ω Visual Language — Lifecycle Symbol System
 

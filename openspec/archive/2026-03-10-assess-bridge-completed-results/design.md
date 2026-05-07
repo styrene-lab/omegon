@@ -1,3 +1,14 @@
++++
+id = "8b6a4fec-ac3a-4177-81eb-2e8ccecf74b1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Assess bridge returns completed structured results — Design
 
 ## Architecture Decisions

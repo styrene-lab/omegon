@@ -1,12 +1,13 @@
----
-id: dual-lifecycle-openspec
-title: Dual-Lifecycle OpenSpec — Design Layer + Implementation Layer
-status: implemented
-tags: [architecture, design-tree, openspec, lifecycle, dx]
-open_questions: []
-branches: []
-openspec_change: dual-lifecycle-openspec
----
++++
+id = "725f0a98-c8fa-42d9-8e59-74fae376f77a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Dual-Lifecycle OpenSpec — Design Layer + Implementation Layer
 

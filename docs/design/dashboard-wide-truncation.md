@@ -1,11 +1,13 @@
----
-id: dashboard-wide-truncation
-title: Dashboard wide layout and intelligent truncation
-status: implemented
-parent: unified-dashboard
-tags: [dashboard, ux, truncation, overlay]
-open_questions: []
----
++++
+id = "abc04d4e-1d82-48be-9419-1dba44e3bd8d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Dashboard wide layout and intelligent truncation
 

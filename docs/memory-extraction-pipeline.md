@@ -1,12 +1,13 @@
----
-id: memory-extraction-pipeline
-title: "Memory extraction pipeline — TS reference implementation for Rust port"
-status: decided
-parent: omega-memory-rust-port
-tags: [memory, extraction, edges, rust-port, reference]
-issue_type: feature
-priority: 2
----
++++
+id = "365ecb4b-1868-4381-95d7-fa93e57f9373"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Memory extraction pipeline — TS reference implementation for Rust port
 

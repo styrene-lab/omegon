@@ -1,15 +1,13 @@
----
-id: self-restart-exec
-title: Self-restart via exec() — agent rebuilds and hot-replaces its own binary
-status: deferred
-parent: rust-agent-loop
-tags: [rust, self-update, exec, autonomy, lifecycle]
-open_questions:
-  - How do we handle exec() on non-Unix (Windows)? OpenCrabs just errors — is that acceptable or do we need a spawn-and-exit fallback?
-  - "Should /evolve pull from GitHub Releases or cargo install? We already have a release pipeline (brutus) — downloading the binary and swapping is faster than compiling from source."
-issue_type: feature
-priority: 2
----
++++
+id = "00bd8fc3-edb7-463c-8c7c-0e0fb1c7af0c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Self-restart via exec() — agent rebuilds and hot-replaces its own binary
 

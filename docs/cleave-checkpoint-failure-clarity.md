@@ -1,11 +1,13 @@
----
-id: cleave-checkpoint-failure-clarity
-title: Cleave checkpoint execution reliability and failure clarity
-status: implemented
-parent: cleave-dirty-tree-checkpointing
-tags: [cleave, git, checkpoint, workflow, ux]
-open_questions: []
----
++++
+id = "490765ad-0712-4fac-a89f-0e3588eac0fd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave checkpoint execution reliability and failure clarity
 

@@ -1,3 +1,14 @@
++++
+id = "db32d091-635b-45ce-847d-6c7d6bd99cf1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Design Tree Lifecycle: Implementation Tracking + Branch Binding
 
 ## Intent

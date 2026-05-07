@@ -1,11 +1,13 @@
----
-id: lifecycle-artifact-versioning
-title: Lifecycle Artifact Versioning Policy
-status: implemented
-parent: post-assess-reconciliation
-tags: [design-tree, openspec, cleave, git, documentation]
-open_questions: []
----
++++
+id = "dc06254d-65ee-4a23-b204-d5605c5debb3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Lifecycle Artifact Versioning Policy
 

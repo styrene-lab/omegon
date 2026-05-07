@@ -1,14 +1,13 @@
----
-id: terminal-responsive-degradation
-title: Terminal responsive degradation — graceful layout collapse on resize
-status: implemented
-parent: rust-agent-loop
-tags: [tui, layout, responsive, ux, 0.15.0]
-open_questions: []
-jj_change_id: zwpyutkzknmqptxxutqpkzvwuotkuywu
-issue_type: feature
-priority: 2
----
++++
+id = "1928e2ef-6948-482b-a370-85e9f5e5f5be"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Terminal responsive degradation — graceful layout collapse on resize
 

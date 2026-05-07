@@ -1,11 +1,13 @@
----
-id: cleave-child-observability
-title: Cleave Child Observability — Live insight into running children
-status: implemented
-related: [cleave-process-tree]
-tags: [cleave, ux, observability, dashboard, debugging]
-open_questions: []
----
++++
+id = "cc9ce76d-916e-4789-83b2-312c1fb0ebf9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave Child Observability — Live insight into running children
 

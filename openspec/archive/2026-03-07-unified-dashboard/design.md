@@ -1,3 +1,14 @@
++++
+id = "59a95e51-7ec2-41ba-a977-067da5cb04c6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Unified Live Dashboard for Cleave + Design Tree + OpenSpec — Design
 
 ## Architecture Decisions

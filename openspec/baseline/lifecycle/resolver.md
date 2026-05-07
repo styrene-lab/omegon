@@ -1,3 +1,14 @@
++++
+id = "aec9ebb4-5532-4f61-87bd-f9606f41cf7d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # lifecycle/resolver
 
 ### Requirement: Canonical lifecycle resolver produces shared change summaries

@@ -1,13 +1,13 @@
----
-id: runtime-profile-status-contract
-title: "Runtime profile and autonomy status contract"
-status: seed
-parent: omega-daemon-runtime
-tags: []
-open_questions: []
-dependencies: []
-related: []
----
++++
+id = "0055b228-f1f9-405d-a719-30288d8f5116"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Runtime profile and autonomy status contract
 

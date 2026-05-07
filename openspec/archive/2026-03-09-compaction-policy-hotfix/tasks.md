@@ -1,3 +1,14 @@
++++
+id = "6d7ae211-07cb-4245-84a3-15dda16f2a80"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # compaction-policy-hotfix — Tasks
 
 ## 1. Normal compaction must not silently prefer heavy local inference

@@ -1,3 +1,14 @@
++++
+id = "16ea11a1-37d7-4740-bb4e-937d94ec795e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # memory-branch-aware-facts-transport-impl — Tasks
 
 ## 1. startup import still seeds live memory from tracked transport

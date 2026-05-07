@@ -1,3 +1,14 @@
++++
+id = "4339979a-0cd0-4c83-9268-47b630127229"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # State Emitters
 
 Each producer extension (design-tree, openspec, cleave) must emit its state to sharedState and fire a dashboard update event via pi.events.

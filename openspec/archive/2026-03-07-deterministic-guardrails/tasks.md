@@ -1,3 +1,14 @@
++++
+id = "a0196f51-d241-4811-ad33-cbe33c253126"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Deterministic Guardrail Integration — Tasks
 
 ## 1. Core guardrail engine

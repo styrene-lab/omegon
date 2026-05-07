@@ -1,3 +1,14 @@
++++
+id = "a8ea2a10-d113-40b2-99eb-aad998159203"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Runtime Subprocess Entrypoint
 
 ### Requirement: Internal subprocesses re-enter the Omegon-owned executable boundary

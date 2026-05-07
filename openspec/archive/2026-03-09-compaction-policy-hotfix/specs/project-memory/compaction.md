@@ -1,3 +1,14 @@
++++
+id = "c5280089-78d7-4ccc-9493-a23783d99596"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # project-memory/compaction — Delta Spec
 
 ## ADDED Requirements

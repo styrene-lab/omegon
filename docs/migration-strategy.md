@@ -1,8 +1,13 @@
----
-title: Omegon migration strategy — lean entry, explicit escalation
-status: implemented
-tags: [strategy, migration, slim-mode, ux, autonomy]
----
++++
+id = "2a2fcff2-7b03-4de2-809a-8bb0c2382206"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Omegon migration strategy — lean entry, explicit escalation
 

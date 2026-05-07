@@ -1,9 +1,13 @@
----
-title: Evidence-Driven Signal Shaping
-status: exploring
-tags: [benchmarking, signal-shaping, slim-mode, methodology]
-date: 2026-04-09
----
++++
+id = "80e173a7-edb7-47de-83db-2856066dbc9b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Evidence-Driven Signal Shaping
 

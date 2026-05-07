@@ -1,3 +1,14 @@
++++
+id = "fc92290c-cbde-4aef-ba2a-325d48a73bb0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Interactive /tutorial system — Design
 
 ## Architecture Decisions

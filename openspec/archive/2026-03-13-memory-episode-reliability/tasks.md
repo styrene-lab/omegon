@@ -1,3 +1,14 @@
++++
+id = "71ff7c57-3ab2-42e5-93c3-5be45c35e8eb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory: Episode Generation Reliability — Cloud fallback and guaranteed per-session narrative — Tasks
 
 ## 1. extensions/project-memory/extraction-v2.ts (modified)

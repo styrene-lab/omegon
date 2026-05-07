@@ -1,10 +1,13 @@
----
-id: alpharius-terminal-themes
-title: Alpharius Terminal Theme Export — Kitty and ANSI palette alignment
-status: implemented
-parent: alpharius-theme
-open_questions: []
----
++++
+id = "71b51e5a-6ec4-4003-9e0f-b7e257ad795c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Alpharius Terminal Theme Export — Kitty and ANSI palette alignment
 

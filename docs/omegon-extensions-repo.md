@@ -1,13 +1,13 @@
----
-id: omegon-extensions-repo
-title: "omegon-extensions Repository"
-status: seed
-parent: extension-registry-system
-tags: [registry, repo, curated-list]
-open_questions: []
-dependencies: []
-related: []
----
++++
+id = "fbbd6cc3-0934-471b-a29e-397a70468dc7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # omegon-extensions Repository
 

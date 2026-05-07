@@ -1,3 +1,14 @@
++++
+id = "32b10993-784c-49a5-94fa-94a929c475f1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # web-ui/dashboard
 
 ### Requirement: Dashboard cleanup metadata is available to backend and web UI consumers

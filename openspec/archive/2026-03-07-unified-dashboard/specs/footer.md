@@ -1,3 +1,14 @@
++++
+id = "2e5b6e62-18e6-4ec4-b3d0-04b0c9e8530f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Custom Footer Component
 
 The dashboard renders a custom footer via setFooter() that operates in two modes: compact (Layer 0) and raised (Layer 1). It must reimplement all built-in footer data.

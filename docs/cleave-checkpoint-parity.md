@@ -1,11 +1,13 @@
----
-id: cleave-checkpoint-parity
-title: Cleave checkpoint parity and volatile memory hygiene
-status: implemented
-parent: repo-consolidation-hardening
-tags: [cleave, git, memory, workflow, bugfix]
-open_questions: []
----
++++
+id = "9e2d4b2c-0707-48e8-b097-b2603d0f2a0e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave checkpoint parity and volatile memory hygiene
 

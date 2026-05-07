@@ -1,3 +1,14 @@
++++
+id = "3728396a-5633-4a5a-9e14-84dc2de2489c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # cleave-checkpoint-parity — Design
 
 ## Spec-Derived Architecture

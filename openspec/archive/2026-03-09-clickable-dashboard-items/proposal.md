@@ -1,3 +1,14 @@
++++
+id = "523d1a91-1093-461f-8eb0-9887b878a4ad"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Clickable dashboard items via context-aware URI routing
 
 ## Intent

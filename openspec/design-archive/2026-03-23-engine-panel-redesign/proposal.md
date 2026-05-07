@@ -1,3 +1,14 @@
++++
+id = "146e3eb8-e2c8-45e6-a0bf-40a43eb7e8ba"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Engine panel redesign — visual hierarchy and information density
 
 ## Intent

@@ -1,3 +1,14 @@
++++
+id = "2bb6c6c4-3842-4d12-a48c-e99ffadfea5d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Lifecycle gate ergonomics — guardrails not brick walls — Design Spec (extracted)
 
 > Auto-extracted from docs/lifecycle-gate-ergonomics.md at decide-time.

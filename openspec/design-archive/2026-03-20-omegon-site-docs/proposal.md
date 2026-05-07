@@ -1,3 +1,14 @@
++++
+id = "8a631114-b43f-40fe-a5fe-206ef390bad2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # omegon.styrene.dev/docs — documentation and architecture sub-site
 
 ## Intent

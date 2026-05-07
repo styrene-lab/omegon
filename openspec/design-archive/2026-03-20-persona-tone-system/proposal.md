@@ -1,3 +1,14 @@
++++
+id = "1e826b67-dba0-4d12-9b04-749226c35c18"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Tone system — conversational voice layer independent of persona expertise
 
 ## Intent

@@ -1,3 +1,14 @@
++++
+id = "be138546-b54d-4bec-b1f0-a31630ae8059"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Raised dashboard layout reorganization — design-dominant workspace and contextual implementation rail — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

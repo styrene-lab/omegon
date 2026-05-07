@@ -1,3 +1,14 @@
++++
+id = "4d5b61bd-b5b4-4f3e-b983-f7d1b38fed1f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Implement branch-aware memory transport for facts.jsonl
 
 ## Intent

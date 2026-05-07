@@ -1,3 +1,14 @@
++++
+id = "8b788599-2250-4ff2-b679-715368d07961"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave dirty-tree checkpointing and lifecycle commit policy — Design
 
 ## Architecture Decisions

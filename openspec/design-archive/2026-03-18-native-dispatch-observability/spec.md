@@ -1,3 +1,14 @@
++++
+id = "8593abbd-c258-447e-abbf-e7c0273c7f03"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Native dispatch observability — surface Rust child progress to dashboard — Design Spec (extracted)
 
 > Auto-extracted from docs/native-dispatch-observability.md at decide-time.

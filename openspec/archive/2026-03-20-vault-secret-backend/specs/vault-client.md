@@ -1,3 +1,14 @@
++++
+id = "5370d80f-e3ff-4a21-8ad7-5d8dbdb5d144"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # vault-client — Delta Spec
 
 ## ADDED Requirements

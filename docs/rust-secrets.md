@@ -1,10 +1,13 @@
----
-id: rust-secrets
-title: Port secrets system to Rust (redaction, recipes, tool guards)
-status: implemented
-parent: ts-to-rust-migration
-open_questions: []
----
++++
+id = "309bbef7-6a98-423d-a2c7-873b8a6d24de"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Port secrets system to Rust (redaction, recipes, tool guards)
 

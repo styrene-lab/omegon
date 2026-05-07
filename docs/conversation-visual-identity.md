@@ -1,10 +1,13 @@
----
-id: conversation-visual-identity
-title: Conversation visual identity — differentiate operator, agent, thinking, tools
-status: implemented
-open_questions: []
-jj_change_id: prwwvoymtkxvymnknrllvvrmxlvkopkk
----
++++
+id = "ba125215-f3db-4dc4-81b9-c87a8867e2d4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Conversation visual identity — differentiate operator, agent, thinking, tools
 

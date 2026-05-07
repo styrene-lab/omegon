@@ -1,12 +1,13 @@
----
-id: runtime-task-spawn-policy
-title: Runtime task spawn policy
-status: decided
-tags: [runtime, tokio, background-tasks, resilience, observability]
-open_questions: []
-issue_type: feature
-priority: 1
----
++++
+id = "27e28628-688b-43df-88ad-a5b56a714f7c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Runtime task spawn policy
 

@@ -1,12 +1,13 @@
----
-id: openai-codex-responses-client
-title: OpenAI Codex Responses API client — native Rust client for ChatGPT OAuth JWT tokens
-status: implemented
-parent: bridge-provider-routing
-tags: [providers, openai-codex, oauth, rust, sse, responses-api, 0.15.1]
-open_questions: []
-jj_change_id: mmmmlostyoqwkvrxnorxvkuysmymqtxs
----
++++
+id = "0f4610cf-380b-4673-a66e-e731c6ea7c30"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # OpenAI Codex Responses API client — native Rust client for ChatGPT OAuth JWT tokens
 

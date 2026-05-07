@@ -1,3 +1,14 @@
++++
+id = "f7dd8345-d4ff-473b-93b1-1bf4d9372c44"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # RepoModel — git state tracking in Rust core — Design
 
 ## Architecture Decisions

@@ -1,3 +1,14 @@
++++
+id = "115cb556-9b4f-463d-8f37-8c2876d9e064"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # A2A Protocol Integration — Agent-to-Agent interoperability for Omegon — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

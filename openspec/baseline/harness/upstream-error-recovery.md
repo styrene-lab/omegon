@@ -1,3 +1,14 @@
++++
+id = "ab4c236e-6c9f-4f3e-a91f-80a9cbbe5ff0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # harness/upstream-error-recovery
 
 ### Requirement: Upstream driver failures are surfaced as structured recovery events

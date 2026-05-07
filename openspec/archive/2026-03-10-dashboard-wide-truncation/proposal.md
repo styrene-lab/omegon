@@ -1,3 +1,14 @@
++++
+id = "e6f37b2d-14ed-4638-98e4-6d62def432e9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dashboard wide layout and intelligent truncation
 
 ## Intent

@@ -1,3 +1,14 @@
++++
+id = "eaaf265a-cc49-4d5a-a545-8d362a912b23"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust workspace layout — crate organization for the agent loop and feature crates — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

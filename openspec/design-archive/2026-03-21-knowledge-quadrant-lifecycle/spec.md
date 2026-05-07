@@ -1,3 +1,14 @@
++++
+id = "0e72764d-42ff-4d67-826d-428eecc60231"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Knowledge quadrant lifecycle — guide design progression through the Rumsfeld Matrix — Design Spec (extracted)
 
 > Auto-extracted from docs/knowledge-quadrant-lifecycle.md at decide-time.

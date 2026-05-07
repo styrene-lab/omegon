@@ -1,12 +1,13 @@
----
-id: v0152-tui-fixes
-title: "v0.15.2 TUI fixes — borders, expansion, tool formatting"
-status: implemented
-tags: [tui, ux, release]
-open_questions: []
-dependencies: []
-related: []
----
++++
+id = "2fb58256-23ac-4714-9932-e58e1b15128c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # v0.15.2 TUI fixes — borders, expansion, tool formatting
 

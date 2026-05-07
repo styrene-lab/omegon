@@ -1,3 +1,14 @@
++++
+id = "84e239b4-cf3c-4831-ae01-c7c99d01600e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Unified auth surface — single /login command, agent-callable, all backends — Design Spec (extracted)
 
 > Auto-extracted from docs/unified-auth-surface.md at decide-time.

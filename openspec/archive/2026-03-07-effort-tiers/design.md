@@ -1,3 +1,14 @@
++++
+id = "1018163d-461d-4dcd-b521-a491fd465179"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # effort-tiers — Design
 
 ## Spec-Derived Architecture

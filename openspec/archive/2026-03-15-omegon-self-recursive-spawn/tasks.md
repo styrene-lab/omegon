@@ -1,3 +1,14 @@
++++
+id = "7b398d3f-7c69-4f9e-af82-914ca7108734"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Recursive subprocesses must invoke Omegon-owned entrypoint, not bare `pi` — Tasks
 
 ## 1. extensions/lib/omegon-subprocess.ts (new)

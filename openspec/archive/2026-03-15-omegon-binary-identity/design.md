@@ -1,3 +1,14 @@
++++
+id = "2ca485ae-aa7b-460e-8357-a2a2bfd4bef7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon binary identity — eliminate direct product exposure as `pi` — Design
 
 ## Architecture Decisions

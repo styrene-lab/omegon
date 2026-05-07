@@ -1,3 +1,14 @@
++++
+id = "299dc95e-27de-4477-bfe1-003cdc9796c3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Native local inference — Rust-native LLM execution without external runtime (Ollama/llama.cpp)
 
 ## Intent

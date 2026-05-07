@@ -1,3 +1,14 @@
++++
+id = "b7c6dec2-d4c2-448a-b048-2067952eee0c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust versioning system — semver, changelog, --version, release workflow
 
 ## Intent

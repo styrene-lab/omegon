@@ -1,3 +1,14 @@
++++
+id = "2a23dbe2-0a2e-42af-b580-a6a5000763db"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory: Session Continuity — Proactive startup injection and recency window — Design
 
 ## Architecture Decisions

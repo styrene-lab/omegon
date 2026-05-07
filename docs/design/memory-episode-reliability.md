@@ -1,12 +1,13 @@
----
-id: memory-episode-reliability
-title: "Memory: Episode Generation Reliability — Cloud fallback and guaranteed per-session narrative"
-status: implemented
-parent: memory-system-overhaul
-open_questions: []
-branches: ["feature/memory-episode-reliability"]
-openspec_change: memory-episode-reliability
----
++++
+id = "210283f7-6fa5-4a3b-8691-6150d2dbea7c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Memory: Episode Generation Reliability — Cloud fallback and guaranteed per-session narrative
 

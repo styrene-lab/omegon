@@ -1,14 +1,13 @@
----
-id: tutorial-provider-setup
-title: Tutorial provider setup widget — 4-path guided onboarding for unconfigured users
-status: exploring
-parent: free-tier-tutorial
-dependencies: [openrouter-provider, startup-systems-check]
-tags: [tutorial, onboarding, providers, ux, 0.15.1]
-open_questions: []
-jj_change_id: woxolrmlskyyypxkwllltztnnwmzznxo
-priority: 1
----
++++
+id = "866f95d3-7e7f-4865-a5af-965bb0b3d789"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Tutorial provider setup widget — 4-path guided onboarding for unconfigured users
 

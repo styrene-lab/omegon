@@ -1,3 +1,14 @@
++++
+id = "16a37f19-75b6-4e01-bb27-1db962860825"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # HarnessStatus contract — unified status surface for TUI, web dashboard, and bootstrap
 
 ## Intent

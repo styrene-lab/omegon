@@ -1,11 +1,13 @@
----
-id: benchmark-demo-customization
-title: Demo customization framework — teams fork and adapt for their codebase
-status: seed
-parent: demo-qa-benchmark
-open_questions: []
-jj_change_id: vkpoqrqrqqvroqyzvtoynxvyukwqotxs
----
++++
+id = "04e9c3d1-da83-4b4c-ae9e-42257d798127"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Demo customization framework — teams fork and adapt for their codebase
 

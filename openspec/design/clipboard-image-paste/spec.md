@@ -1,3 +1,14 @@
++++
+id = "7ebe76c7-b855-4fb5-b520-59e5be413ecb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Clipboard image paste into chat/messages — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

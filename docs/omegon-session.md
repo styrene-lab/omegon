@@ -1,16 +1,13 @@
----
-id: omegon-session
-title: "Omegon Session — provider-agnostic session identity and resumption"
-status: implemented
-tags: [architecture, orchestration, session, core]
-open_questions: []
-dependencies: []
-related:
-  - omega
-  - model-degradation
-issue_type: feature
-priority: 2
----
++++
+id = "23f4daf0-dab4-4516-b3fa-cfcbdf15fad1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Omegon Session — provider-agnostic session identity and resumption
 

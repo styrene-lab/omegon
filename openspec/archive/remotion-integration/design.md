@@ -1,3 +1,14 @@
++++
+id = "08796283-b021-4cbf-be02-3783c2d81b77"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Remotion native support via render extension — Design
 
 ## Architecture Decisions

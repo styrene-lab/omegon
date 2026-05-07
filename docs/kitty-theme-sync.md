@@ -1,11 +1,13 @@
----
-id: kitty-theme-sync
-title: Kitty theme sync — gentle alpharius.conf propagation
-status: implemented
-parent: alpharius-theme
-tags: [defaults, kitty, theme, ux]
-open_questions: []
----
++++
+id = "b430f509-6c9d-408e-817f-6057416dc21a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Kitty theme sync — gentle alpharius.conf propagation
 

@@ -1,11 +1,13 @@
----
-id: cheap-gpt-memory-models
-title: Use cheap GPT models for memory extraction and embeddings
-status: implemented
-tags: [memory, models, cost, embeddings, routing]
-open_questions: []
-openspec_change: cheap-gpt-memory-models
----
++++
+id = "e25d09d6-e95c-42ae-b71d-63ea77ef4d74"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Use cheap GPT models for memory extraction and embeddings
 

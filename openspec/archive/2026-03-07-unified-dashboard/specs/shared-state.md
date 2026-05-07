@@ -1,3 +1,14 @@
++++
+id = "6a359bac-d019-4c2a-bdc9-5bae50f3522c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Shared State Data Contract
 
 The dashboard relies on a well-defined shared state interface that each producer extension writes to and the dashboard extension reads from.

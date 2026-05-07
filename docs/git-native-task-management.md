@@ -1,15 +1,13 @@
----
-id: git-native-task-management
-title: "Git-native task management — extend design tree into a full in-repo issue/task system"
-status: decided
-tags: [architecture, task-management, git, design-tree, workflow, strategic]
-open_questions: []
-dependencies:
-  - design-tree-task-fields-and-filters
-related: []
-issue_type: epic
-priority: 2
----
++++
+id = "f328d126-1f15-4303-9b93-36cc6f089a7d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Git-native task management — extend design tree into a full in-repo issue/task system
 

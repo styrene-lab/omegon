@@ -1,6 +1,14 @@
----
-description: Session orientation — load project state and show what's active
----
++++
+id = "a5a92bdf-00b2-43c0-9a46-b95d47a71618"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Status Check
 
 Quick session orientation. Load state from all subsystems and present a dashboard-style summary.

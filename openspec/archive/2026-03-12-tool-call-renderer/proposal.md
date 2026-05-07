@@ -1,3 +1,14 @@
++++
+id = "80bf8766-19fc-44f6-b7a0-a1640c95a821"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Enriched Tool Call Rendering
 
 ## Intent

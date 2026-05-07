@@ -1,3 +1,14 @@
++++
+id = "bcb423fc-d5e0-438e-b81b-6063f949e8a2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # dashboard/footer
 
 ### Requirement: Raised dashboard pins operator metadata at the bottom

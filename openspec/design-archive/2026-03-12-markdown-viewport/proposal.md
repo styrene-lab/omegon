@@ -1,3 +1,14 @@
++++
+id = "b612a1ef-c435-436e-9297-8d99821966d8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon Rendering Engine — Lifecycle Visualization & Project Intelligence Layer
 
 ## Intent

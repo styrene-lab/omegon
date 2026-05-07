@@ -1,3 +1,14 @@
++++
+id = "753ce1e3-8fa6-48ea-a76e-d1119952daff"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Splash screen systems check visualization — real loading behind the animation
 
 ## Intent

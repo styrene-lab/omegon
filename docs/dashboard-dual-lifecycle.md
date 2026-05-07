@@ -1,12 +1,13 @@
----
-id: dashboard-dual-lifecycle
-title: "Dashboard: Surface Dual-Lifecycle State"
-status: implemented
-tags: [dashboard, openspec, design-tree, web-ui]
-open_questions: []
-branches: []
-openspec_change: dashboard-dual-lifecycle
----
++++
+id = "01f6c5f1-440b-4baa-9948-3531bb606e46"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Dashboard: Surface Dual-Lifecycle State
 

@@ -1,11 +1,13 @@
----
-id: rust-cleave-orchestrator
-title: Rust cleave orchestrator — move child dispatch, worktree, and merge out of TypeScript
-status: implemented
-parent: rust-agent-loop
-tags: [rust, cleave, orchestration, jiti-kill]
-open_questions: []
----
++++
+id = "6e39b96c-aa29-42c0-a441-9f4338a0dd13"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rust cleave orchestrator — move child dispatch, worktree, and merge out of TypeScript
 

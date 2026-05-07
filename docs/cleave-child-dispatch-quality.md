@@ -1,11 +1,13 @@
----
-id: cleave-child-dispatch-quality
-title: Cleave child dispatch quality — progress visibility, prerequisite prompting, and submodule awareness
-status: implemented
-tags: [cleave, dx, submodules]
-open_questions: []
-issue_type: epic
----
++++
+id = "517db4ff-1340-4a11-8532-36b9a463d199"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Cleave child dispatch quality — progress visibility, prerequisite prompting, and submodule awareness
 

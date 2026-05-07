@@ -1,11 +1,13 @@
----
-id: tui-git-tree-widget
-title: Git branch tree widget — interactive, color-coded, scrollable
-status: exploring
-parent: tui-hud-redesign
-open_questions: []
-jj_change_id: zroxvpvwoqkmpnxsqluvxxpktmnplror
----
++++
+id = "f9798293-4dc6-4fcc-8da6-ccbecc38f0fc"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Git branch tree widget — interactive, color-coded, scrollable
 

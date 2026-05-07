@@ -1,3 +1,14 @@
++++
+id = "e33a094b-d0a1-418d-995d-76d863505e5e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Design: Scenario-First Task Generation
 
 ## Architecture Decisions

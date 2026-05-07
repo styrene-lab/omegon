@@ -1,3 +1,14 @@
++++
+id = "62d97a01-b95a-48bf-bd9d-85af03f630d8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Embedded web dashboard — lightweight localhost UI served from the omegon binary
 
 ## Intent

@@ -1,10 +1,13 @@
----
-id: spec-edge-case-format
-title: Spec edge case format and authoring conventions
-status: implemented
-parent: testing-directives-pipeline
-open_questions: []
----
++++
+id = "84351109-7bbb-48fd-b09c-c3a152ac250f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Spec edge case format and authoring conventions
 

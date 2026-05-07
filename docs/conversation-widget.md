@@ -1,10 +1,13 @@
----
-id: conversation-widget
-title: Conversation widget — structured rendering for all message types
-status: implemented
-tags: [tui, architecture, conversation, widget]
-open_questions: []
----
++++
+id = "4f2e9cd8-15a9-48a6-9a51-e0da4062f332"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Conversation widget — structured rendering for all message types
 

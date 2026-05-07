@@ -1,3 +1,14 @@
++++
+id = "0a76705c-865f-40a6-b149-1f73d7c11d9a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Functional plugins — code-backed skills with tools, endpoints, and runtime logic — Design Spec (extracted)
 
 > Auto-extracted from docs/functional-plugins.md at decide-time.

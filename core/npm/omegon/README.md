@@ -1,3 +1,14 @@
++++
+id = "0bd04b82-4497-44ab-b1dc-cd5c7cc9f8d6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # omegon
 
 Rust-native AI coding agent — lifecycle engine, memory, tool execution.

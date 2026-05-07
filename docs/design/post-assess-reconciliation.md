@@ -1,13 +1,13 @@
----
-id: post-assess-reconciliation
-title: "Post-Assess Reconciliation — Update OpenSpec and Design Tree after Review/Fix Cycles"
-status: implemented
-parent: lifecycle-reconciliation
-tags: [openspec, design-tree, cleave, assessment, lifecycle]
-open_questions: []
-branches: ["feature/post-assess-reconciliation"]
-openspec_change: post-assess-reconciliation
----
++++
+id = "1184e039-8cb2-4f97-a601-308e54d4a22b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Post-Assess Reconciliation — Update OpenSpec and Design Tree after Review/Fix Cycles
 

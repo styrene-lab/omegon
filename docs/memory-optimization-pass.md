@@ -1,10 +1,13 @@
----
-id: memory-optimization-pass
-title: Project Memory System Optimization
-status: deferred
-tags: [performance, memory, subprocess]
-open_questions: []
----
++++
+id = "7f412398-58c6-43b5-bbee-d294912155a3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Project Memory System Optimization
 

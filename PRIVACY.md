@@ -1,3 +1,14 @@
++++
+id = "8d3b36a7-9957-4f69-8e20-6f242bdfd2fe"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Privacy Policy
 
 **Effective date:** March 2026  

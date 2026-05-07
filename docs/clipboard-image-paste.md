@@ -1,14 +1,13 @@
----
-id: clipboard-image-paste
-title: "Clipboard image paste into chat/messages"
-status: implemented
-parent: conversation-rendering-engine
-tags: [ux, clipboard, images, attachments, chat]
-open_questions: []
-issue_type: bug
-priority: 2
-jj_change_id: syrxywznxmmylkqwzqrpzrxlqzlvrqlm
----
++++
+id = "e967b260-87f1-46e8-bdeb-04802ef00443"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Clipboard image paste into chat/messages
 

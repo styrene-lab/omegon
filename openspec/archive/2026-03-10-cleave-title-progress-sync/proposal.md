@@ -1,3 +1,14 @@
++++
+id = "791bb007-77e7-46ac-a48d-b82f7c0832ea"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Keep terminal title cleave progress in sync
 
 ## Intent

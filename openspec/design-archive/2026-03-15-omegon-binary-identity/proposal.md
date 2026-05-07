@@ -1,3 +1,14 @@
++++
+id = "da2b7aae-52f6-4d63-b792-bb665cbafedf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon binary identity — eliminate direct product exposure as `pi`
 
 ## Intent

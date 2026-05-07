@@ -1,13 +1,13 @@
----
-id: ts-rust-cleave-split
-title: "TS/Rust cleave split — experimental Rust backend, open-sourced TS harness, clean migration boundary"
-status: implemented
-parent: rust-agent-loop
-tags: [architecture, migration, cleave, open-source, strategic]
-open_questions: []
-issue_type: epic
-priority: 1
----
++++
+id = "f1c79d97-4e68-47ac-8d82-06ba1575e4dd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # TS/Rust cleave split — experimental Rust backend, open-sourced TS harness, clean migration boundary
 

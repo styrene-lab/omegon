@@ -1,3 +1,14 @@
++++
+id = "753311c2-fe64-4eea-a408-5d4469f0bfcf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # vault-security
 
 ### Requirement: Client-side path allowlist enforcement (CHANGED — fail-closed)

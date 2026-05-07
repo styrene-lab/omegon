@@ -1,13 +1,13 @@
----
-id: update-check-restart
-title: Signed update check with in-app restart
-status: exploring
-tags: [release, ux, lifecycle]
-open_questions:
-  - Where do we check for updates — GitHub Releases API, a custom endpoint, or both?
-  - How do we verify the downloaded binary — cosign signature, minisign, or ad-hoc codesign?
-jj_change_id: lszorvvykkkmktrvtsnkvtmzoruzmmss
----
++++
+id = "ebfd2a0a-8208-445a-81e1-5b86ccc3a203"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Signed update check with in-app restart
 

@@ -1,8 +1,13 @@
----
-title: Omegon daemon child supervisor control surface
-status: draft
-tags: [omegon, daemon, cleave, supervisor, control-plane, schema]
----
++++
+id = "99993dcb-535b-4717-a6e2-f379d5c89ee1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Omegon daemon child supervisor control surface
 

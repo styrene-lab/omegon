@@ -1,13 +1,13 @@
----
-id: bridge-provider-routing
-title: Bridge-provider routing — dynamic provider switching without restart
-status: implemented
-parent: blattman-pattern-harvest
-related: [perpetual-rolling-context]
-tags: [architecture, providers, routing, bridge, hot-swap]
-open_questions: []
-jj_change_id: ulryuzrsrlwyxtyysnklyxxtuuqqyxzy
----
++++
+id = "6d225b1b-8e6e-4f1b-8a05-dbc906a8f05e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Bridge-provider routing — dynamic provider switching without restart
 

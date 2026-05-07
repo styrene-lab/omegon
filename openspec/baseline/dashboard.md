@@ -1,3 +1,14 @@
++++
+id = "8ffb1078-1bb6-4f55-8eba-39bffa7a1151"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dashboard — Implementing/Implemented Rendering
 
 ### Requirement: Clickable Design Tree dashboard items

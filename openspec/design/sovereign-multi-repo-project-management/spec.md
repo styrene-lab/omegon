@@ -1,3 +1,14 @@
++++
+id = "675daf86-a5e4-484d-9372-ff36d05a75d8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Sovereign multi-repo project management on top of omegon-design — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

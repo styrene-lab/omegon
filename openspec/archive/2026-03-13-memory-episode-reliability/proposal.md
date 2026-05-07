@@ -1,3 +1,14 @@
++++
+id = "cf659f6e-d076-4196-8b01-58fc48b1761c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory: Episode Generation Reliability — Cloud fallback and guaranteed per-session narrative
 
 ## Intent

@@ -1,3 +1,14 @@
++++
+id = "24c127d8-f0e8-4a43-bafd-d026d3d7f870"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Extension Type Safety — Preventing API Hallucinations
 
 ## Intent

@@ -1,3 +1,14 @@
++++
+id = "fc71931f-38c6-490b-a6bd-0161c0d8f570"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Fractal status surface — multi-dimensional state visualization via generative fractal rendering
 
 ## Intent

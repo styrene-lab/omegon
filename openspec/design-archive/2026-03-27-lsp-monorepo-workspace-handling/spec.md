@@ -1,3 +1,14 @@
++++
+id = "63549317-7437-4fe1-a00c-073bf0e71e50"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # LSP workspace root strategy for monorepos — Design Spec (extracted)
 
 > Auto-extracted from docs/lsp-monorepo-workspace-handling.md at decide-time.

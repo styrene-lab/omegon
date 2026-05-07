@@ -1,8 +1,13 @@
----
-title: Auspex ↔ Omegon daemon launch contract
-status: decided
-tags: [auspex, daemon, launch, contract, control-plane]
----
++++
+id = "1b4f8655-9e98-4063-a5f3-5d4becf66d26"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Auspex ↔ Omegon daemon launch contract
 

@@ -1,11 +1,13 @@
----
-id: cleave-title-progress-sync
-title: Keep terminal title cleave progress in sync
-status: implemented
-parent: harness-upstream-error-recovery
-tags: [cleave, dashboard, terminal-title, ux]
-open_questions: []
----
++++
+id = "0089b71c-c5ea-4d46-a08a-fa91c0375708"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Keep terminal title cleave progress in sync
 

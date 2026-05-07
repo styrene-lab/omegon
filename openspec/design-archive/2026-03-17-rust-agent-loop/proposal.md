@@ -1,3 +1,14 @@
++++
+id = "ddb26880-5868-4b94-b3b0-4113912713e7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust-native agent loop — middle-out replacement of pi's orchestration core
 
 ## Intent

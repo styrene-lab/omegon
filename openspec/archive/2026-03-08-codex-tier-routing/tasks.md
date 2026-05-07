@@ -1,3 +1,14 @@
++++
+id = "511ce7ab-3ea1-4170-a72b-2556eed649c5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Codex Tier Routing — Provider-aware model selection for Cleave and tooling — Tasks
 
 ## 1. Shared provider-aware resolver

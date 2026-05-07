@@ -1,3 +1,14 @@
++++
+id = "cf0e6a6f-37c4-4837-95f3-a880952fb25e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # runtime/auth-state — Delta Spec
 
 ## ADDED Requirements

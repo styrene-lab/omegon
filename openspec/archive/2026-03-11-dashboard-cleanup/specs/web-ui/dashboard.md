@@ -1,3 +1,14 @@
++++
+id = "3d4e90a8-2027-4797-94b1-b7b182647a17"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # web-ui/dashboard — Delta Spec
 
 ## ADDED Requirements

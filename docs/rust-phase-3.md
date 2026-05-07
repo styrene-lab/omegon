@@ -1,11 +1,13 @@
----
-id: rust-phase-3
-title: "Phase 3 — Native LLM providers: reqwest-based Anthropic/OpenAI, Node.js fully optional"
-status: deferred
-parent: rust-agent-loop
-tags: [rust, phase-3, providers, reqwest, standalone]
-open_questions: []
----
++++
+id = "9527c348-3d07-4a02-93d6-2e5e1ccf8e7f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Phase 3 — Native LLM providers: reqwest-based Anthropic/OpenAI, Node.js fully optional
 

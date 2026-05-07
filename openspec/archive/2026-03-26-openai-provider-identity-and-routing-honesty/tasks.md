@@ -1,3 +1,14 @@
++++
+id = "b612a524-8dc9-4310-8bac-536b5230c776"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # OpenAI provider identity and routing honesty — Tasks
 
 ## 1. Auth and provider resolution core

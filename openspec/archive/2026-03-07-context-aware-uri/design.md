@@ -1,3 +1,14 @@
++++
+id = "c81dff72-e890-4884-ab2e-16f0ed433599"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # context-aware-uri — Design
 
 ## Spec-Derived Architecture

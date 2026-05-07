@@ -1,3 +1,14 @@
++++
+id = "cc53dc99-8e83-489b-9d88-6fc2f47b5107"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # web-ui
 
 ### Requirement: Start a localhost-only web UI server

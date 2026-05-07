@@ -1,3 +1,14 @@
++++
+id = "b7ee9a39-92be-47d8-940e-75bf73ce0937"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Mouse text selection — EnableMouseCapture blocks native terminal selection
 
 ## Intent

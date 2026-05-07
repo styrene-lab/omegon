@@ -1,3 +1,14 @@
++++
+id = "bec58bbf-8ed2-4fb7-8339-caf04228d9bb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Footer redesign — engine display + linked minds — Design
 
 ## Architecture Decisions

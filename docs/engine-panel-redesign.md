@@ -1,11 +1,13 @@
----
-id: engine-panel-redesign
-title: Engine panel redesign — visual hierarchy and information density
-status: implemented
-parent: footer-idle-state
-open_questions: []
-jj_change_id: rlstoyvxnouqrkxzmsqxmtlvlwxukxzv
----
++++
+id = "d99120a7-3be1-4ceb-9bd3-a1720f6f5a61"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Engine panel redesign — visual hierarchy and information density
 

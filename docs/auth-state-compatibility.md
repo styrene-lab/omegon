@@ -1,15 +1,13 @@
----
-id: auth-state-compatibility
-title: "Auth state compatibility — preserve existing pi/Claude Code logins in Omegon"
-status: implemented
-parent: omegon-binary-identity
-tags: [auth, state, migration, runtime, compatibility, ux]
-open_questions: []
-branches: []
-openspec_change: auth-state-compatibility
-issue_type: bug
-priority: 1
----
++++
+id = "a1580c6b-23cc-4590-8b1a-0e99537e443e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Auth state compatibility — preserve existing pi/Claude Code logins in Omegon
 

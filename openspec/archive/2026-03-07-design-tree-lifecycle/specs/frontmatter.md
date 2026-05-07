@@ -1,3 +1,14 @@
++++
+id = "c2ee82ce-50e8-41f1-92ec-ab3a99b61bf7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Frontmatter — Branch and OpenSpec Fields
 
 ## Requirements

@@ -1,3 +1,14 @@
++++
+id = "b2980b8e-9d73-4538-aff9-fd80b0082ed3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # TUI integration testing — snapshot tests, PTY harness, and interactive verification
 
 ## Intent

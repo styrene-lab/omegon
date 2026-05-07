@@ -1,3 +1,14 @@
++++
+id = "004f156d-28b6-4193-962b-db718352afff"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # LSP integration — language server protocol for code-aware navigation and diagnostics — Design Spec (extracted)
 
 > Auto-extracted from docs/lsp-integration.md at decide-time.

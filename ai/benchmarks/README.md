@@ -1,3 +1,14 @@
++++
+id = "b9fb7fdc-07b9-4136-af47-4d3d5ecef8f4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Benchmarks
 
 This directory contains the **active local benchmark program** for Omegon.

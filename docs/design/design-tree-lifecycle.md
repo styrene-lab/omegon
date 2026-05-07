@@ -1,10 +1,13 @@
----
-id: design-tree-lifecycle
-title: "Design Tree Lifecycle: Implementation Tracking + Branch Binding"
-status: implemented
-tags: [design-tree, lifecycle, git, dashboard]
-open_questions: []
----
++++
+id = "34a84a95-babc-4e9f-87c1-ec4bf96e5f38"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Design Tree Lifecycle: Implementation Tracking + Branch Binding
 

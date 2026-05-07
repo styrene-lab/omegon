@@ -1,3 +1,14 @@
++++
+id = "84b7ac97-9b70-4205-812e-7cb1e7a29c8c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory crate interface boundary — MemoryBackend trait + integration with agent loop traits
 
 ## Intent

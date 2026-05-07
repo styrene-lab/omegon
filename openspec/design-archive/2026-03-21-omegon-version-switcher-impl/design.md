@@ -1,3 +1,14 @@
++++
+id = "41642e57-89c1-40b3-a97b-690df4d224b7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Version switcher — tfswitch-style binary management for Omegon — Design
 
 ## Architecture Decisions

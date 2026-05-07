@@ -1,3 +1,14 @@
++++
+id = "2aaec9d0-162a-4a0a-b7e7-666fd2e8d568"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Mouse text selection — EnableMouseCapture blocks native terminal selection — Design Spec (extracted)
 
 > Auto-extracted from docs/mouse-text-selection.md at decide-time.

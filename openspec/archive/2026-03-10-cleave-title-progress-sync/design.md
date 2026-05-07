@@ -1,3 +1,14 @@
++++
+id = "57fbdd3d-d0fb-42f0-99ff-ccd0f702b7cc"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # cleave-title-progress-sync — Design
 
 ## Spec-Derived Architecture

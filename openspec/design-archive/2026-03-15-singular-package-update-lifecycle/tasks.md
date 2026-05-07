@@ -1,3 +1,14 @@
++++
+id = "9baec458-8e82-4154-8d57-5a4eddd326cc"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Singular package integration and full-lifecycle update parity — Design Tasks
 
 ## 1. Design exploration

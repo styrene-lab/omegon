@@ -1,3 +1,14 @@
++++
+id = "54e9c42f-bd83-4fd9-a53c-eb93bec520bc"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Design: Skill-Aware Child Dispatch
 
 ## Architecture Decisions

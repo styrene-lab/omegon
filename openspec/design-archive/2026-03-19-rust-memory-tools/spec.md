@@ -1,3 +1,14 @@
++++
+id = "910e68d1-64b8-43bd-800a-5912adda97ae"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Register memory_* agent-callable tools in Rust — Design Spec (extracted)
 
 > Auto-extracted from docs/rust-memory-tools.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "d487d209-7358-47a1-9cfd-1ab2f561ff0b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # chronos-native-ts — Design
 
 ## Spec-Derived Architecture

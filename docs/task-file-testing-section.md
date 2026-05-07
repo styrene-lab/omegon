@@ -1,10 +1,13 @@
----
-id: task-file-testing-section
-title: Task file Testing Requirements section — structure and injection
-status: implemented
-parent: testing-directives-pipeline
-open_questions: []
----
++++
+id = "0a148341-f47f-4aff-85b9-3b1c4f67ee37"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Task file Testing Requirements section — structure and injection
 

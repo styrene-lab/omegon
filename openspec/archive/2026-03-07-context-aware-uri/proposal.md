@@ -1,3 +1,14 @@
++++
+id = "bff349a7-edb9-4821-92f3-f2473c647186"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Context-Aware OSC 8 URIs — Smart File Links in Terminal Output
 
 ## Intent

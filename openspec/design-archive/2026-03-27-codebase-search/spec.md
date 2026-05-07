@@ -1,3 +1,14 @@
++++
+id = "7f2179eb-8aa8-4e07-b7ab-38b91da45d5e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # codebase_search — AST-aware code retrieval with memory seeding — Design Spec (extracted)
 
 > Auto-extracted from docs/codebase-search.md at decide-time.

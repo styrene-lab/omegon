@@ -1,12 +1,13 @@
----
-id: omega-memory-backend
-title: Omega memory backend — Rust-native fact store and retrieval engine
-status: implemented
-parent: omega
-related: [rust-agent-loop]
-tags: [rust, memory, sqlite, embeddings, architecture]
-open_questions: []
----
++++
+id = "f8e4f697-c1e3-4b0f-a069-b7fdea286c1a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Omega memory backend — Rust-native fact store and retrieval engine
 

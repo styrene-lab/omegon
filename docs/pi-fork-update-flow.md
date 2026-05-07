@@ -1,10 +1,13 @@
----
-id: pi-fork-update-flow
-title: "Pi Fork Update & Deploy Flow"
-status: implemented
-tags: [dx, tooling, pi-mono, workflow]
-open_questions: []
----
++++
+id = "e8b02f1b-6e1a-46e9-893d-6dfc85bf332c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Pi Fork Update & Deploy Flow
 

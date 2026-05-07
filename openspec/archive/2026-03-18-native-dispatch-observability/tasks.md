@@ -1,3 +1,14 @@
++++
+id = "8df0185c-b779-4d5f-b999-d02f424d45c5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # native-dispatch-observability — Tasks
 
 ## 1. Rust progress module + orchestrator integration

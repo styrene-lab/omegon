@@ -1,11 +1,13 @@
----
-id: bridge-all-slash-commands
-title: Bridge all Omegon slash commands through SlashCommandBridge
-status: implemented
-parent: agent-assess-tooling-access
-tags: [harness, slash-commands, bridge, openspec, agent-callable]
-open_questions: []
----
++++
+id = "3a53da15-d8ed-4a47-8b0f-d3d4da1e2229"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Bridge all Omegon slash commands through SlashCommandBridge
 

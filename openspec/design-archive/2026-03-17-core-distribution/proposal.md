@@ -1,3 +1,14 @@
++++
+id = "5bd9a450-558a-417b-b50e-697c1cf580f9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Core binary distribution — shipping Rust alongside and eventually instead of TypeScript
 
 ## Intent

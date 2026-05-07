@@ -1,3 +1,14 @@
++++
+id = "ba2e566b-dbc8-4406-86e3-53c92f9fd117"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Version switcher — tfswitch-style binary management for Omegon
 
 ## Intent

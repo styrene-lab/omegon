@@ -1,3 +1,14 @@
++++
+id = "fc2c3478-4f21-40d8-82aa-80731533d499"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Conversation scroll strategy — tui-scrollview vs custom virtual scroll — Design Spec (extracted)
 
 > Auto-extracted from docs/conv-scroll-strategy.md at decide-time.

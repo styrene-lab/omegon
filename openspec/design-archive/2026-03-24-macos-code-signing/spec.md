@@ -1,3 +1,14 @@
++++
+id = "c5a7796b-e158-4e2e-b3d1-0637e6ee3301"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # macOS code signing — stable identity for keychain ACL persistence and Gatekeeper — Design Spec (extracted)
 
 > Auto-extracted from docs/macos-code-signing.md at decide-time.

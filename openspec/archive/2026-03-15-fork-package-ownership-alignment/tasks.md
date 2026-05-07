@@ -1,3 +1,14 @@
++++
+id = "3e557812-bde3-4d1f-9809-e6f895ae9f96"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Fork package ownership alignment — move `@cwilson613/pi-*` publishing under styrene-lab control — Tasks
 
 ## 1. Rename fork runtime package identities <!-- specs: runtime/package-ownership -->

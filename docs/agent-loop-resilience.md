@@ -1,12 +1,13 @@
----
-id: agent-loop-resilience
-title: Agent loop resilience — what the hermit crab wants in its shell
-status: implemented
-parent: rust-agent-loop
-related: [perpetual-rolling-context]
-tags: [rust, agent-loop, resilience, self-awareness, introspective]
-open_questions: []
----
++++
+id = "fbdc559f-77b5-4f6e-bd9f-576ce228f8e4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Agent loop resilience — what the hermit crab wants in its shell
 

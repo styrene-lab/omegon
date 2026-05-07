@@ -1,3 +1,14 @@
++++
+id = "6f753fb4-766d-4f69-bdee-09a76f40506e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omega memory backend — Rust-native fact store and retrieval engine
 
 ## Intent

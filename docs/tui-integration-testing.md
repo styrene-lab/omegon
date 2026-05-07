@@ -1,13 +1,13 @@
----
-id: tui-integration-testing
-title: TUI integration testing — snapshot tests, PTY harness, and interactive verification
-status: implemented
-parent: tui-visual-system
-tags: [testing, tui, ratatui, snapshot, pty, insta, ci, quality]
-open_questions: []
-issue_type: feature
-priority: 2
----
++++
+id = "2f563cf9-adc5-42dd-b721-3134e32a9767"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # TUI integration testing — snapshot tests, PTY harness, and interactive verification
 

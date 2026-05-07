@@ -1,3 +1,14 @@
++++
+id = "b29fc496-dab1-4f37-82f2-bcf6f2f939af"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Plugin loader — TOML manifest discovery, HTTP-backed tools and context
 
 ## Intent

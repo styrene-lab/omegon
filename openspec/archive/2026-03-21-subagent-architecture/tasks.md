@@ -1,3 +1,14 @@
++++
+id = "0d35a730-3bdc-4487-9cc2-bce802b0926d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Subagent architecture — Tasks
 
 ## 1. Delegate engine + feature (features/delegate.rs)

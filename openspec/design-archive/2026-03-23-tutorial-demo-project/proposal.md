@@ -1,3 +1,14 @@
++++
+id = "4eb74dce-62b8-4213-82f2-516234d47e6d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Tutorial demo project — self-seeded repo with live cleave demonstration
 
 ## Intent

@@ -1,3 +1,14 @@
++++
+id = "76ea697e-78da-4ea7-8ec9-a35eedc27045"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dashboard: Surface Dual-Lifecycle State — Tasks
 
 ## 1. Type definitions + data emission

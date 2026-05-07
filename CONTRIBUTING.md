@@ -1,3 +1,14 @@
++++
+id = "960efacc-4a8b-41c4-a379-d1cefbec0876"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Contributing to Omegon
 
 Guidelines for branching, merging, and collaborating on this repository.

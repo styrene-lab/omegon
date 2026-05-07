@@ -1,3 +1,14 @@
++++
+id = "87b35452-53ac-4dd8-bcc7-28b45e947f16"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust compaction — context decay + LLM-driven summarization
 
 ## Intent

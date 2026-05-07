@@ -1,3 +1,14 @@
++++
+id = "bbe4da6a-b093-4e80-9c4c-d4e925311e6c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory: Task-Completion Facts — Mid-term \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"what was done\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\" layer with fast decay — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

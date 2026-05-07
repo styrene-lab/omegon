@@ -1,9 +1,13 @@
----
-id: provider-credential-map
-title: Provider credential map — auth method, storage, and resolution for every supported service
-status: implemented
-tags: [auth, secrets, providers, credentials, reference]
----
++++
+id = "8e641402-3344-4a0e-8a6f-25a16f47fe1d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Provider Credential Map
 

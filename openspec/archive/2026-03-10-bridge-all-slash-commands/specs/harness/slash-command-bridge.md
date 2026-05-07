@@ -1,3 +1,14 @@
++++
+id = "8f2edc1f-a48d-4f22-af0b-b31ba885fdd8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # harness/slash-command-bridge — Delta Spec
 
 ## ADDED Requirements

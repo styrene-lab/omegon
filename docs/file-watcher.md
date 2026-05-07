@@ -1,12 +1,13 @@
----
-id: file-watcher
-title: File watcher — detect external changes during session
-status: seed
-tags: [ux, filesystem, ide-integration, competitive]
-open_questions: []
-issue_type: feature
-priority: 2
----
++++
+id = "e255a65f-37a5-4f63-b526-2c859e715bd7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # File watcher — detect external changes during session
 

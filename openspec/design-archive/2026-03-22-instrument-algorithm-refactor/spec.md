@@ -1,3 +1,14 @@
++++
+id = "c5f29cad-5563-4b8f-ac83-e4450de741ac"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Instrument algorithm refactor — thinking as glitch, memory as sine strings — Design Spec (extracted)
 
 > Auto-extracted from docs/instrument-algorithm-refactor.md at decide-time.

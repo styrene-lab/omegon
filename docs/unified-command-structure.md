@@ -1,12 +1,13 @@
----
-id: unified-command-structure
-title: "Unified command structure"
-status: exploring
-tags: [ux, commands, tui, operator]
-open_questions: []
-dependencies: []
-related: []
----
++++
+id = "d52c94d9-cd1c-4c3f-8caf-0433e3d2f133"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Unified command structure
 

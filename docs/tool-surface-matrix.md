@@ -1,3 +1,14 @@
++++
+id = "dde770f0-0459-4902-a680-e0cc49561c4c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Tool Surface Matrix — External Binary Dependencies
 
 Every external binary that omegon shells out to at runtime, organized by crate and module.

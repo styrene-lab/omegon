@@ -1,3 +1,14 @@
++++
+id = "190015ab-d6a6-4b3b-baba-296d555e9a71"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Fork package ownership alignment — move `@cwilson613/pi-*` publishing under styrene-lab control — Design
 
 ## Architecture Decisions

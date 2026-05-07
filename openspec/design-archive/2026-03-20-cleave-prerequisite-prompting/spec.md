@@ -1,3 +1,14 @@
++++
+id = "b34947e5-0faa-441b-a292-567318eed8b2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave prerequisite prompting — project context and finalization instructions — Design Spec (extracted)
 
 > Auto-extracted from docs/cleave-prerequisite-prompting.md at decide-time.

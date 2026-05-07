@@ -1,3 +1,14 @@
++++
+id = "4a7eb669-a009-4210-8a07-5c69a7498838"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Git-native task management — extend design tree into a full in-repo issue/task system
 
 ## Intent

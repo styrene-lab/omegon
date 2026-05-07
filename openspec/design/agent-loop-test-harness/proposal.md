@@ -1,3 +1,14 @@
++++
+id = "5142cfe4-1535-43dd-a80d-26b7a6ccf1d2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Agent loop test harness — mock LlmBridge and deterministic state machine testing
 
 ## Intent

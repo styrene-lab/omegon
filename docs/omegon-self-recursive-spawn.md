@@ -1,15 +1,13 @@
----
-id: omegon-self-recursive-spawn
-title: "Recursive subprocesses must invoke Omegon-owned entrypoint, not bare `pi`"
-status: implemented
-parent: omegon-binary-identity
-tags: [runtime, cleave, subprocess, binary, bug, self-containment]
-open_questions: []
-branches: []
-openspec_change: omegon-self-recursive-spawn
-issue_type: bug
-priority: 1
----
++++
+id = "982c4e4a-c81c-491b-a491-f83a756a9436"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Recursive subprocesses must invoke Omegon-owned entrypoint, not bare `pi`
 

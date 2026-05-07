@@ -1,3 +1,14 @@
++++
+id = "9084d005-ef0a-4ae8-845c-06f337f51a57"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Telemetry Code Survey
 
 ## Scope checked

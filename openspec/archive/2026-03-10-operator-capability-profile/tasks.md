@@ -1,3 +1,14 @@
++++
+id = "ae2108e7-6283-4f42-9a90-918b286e83d3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # operator-capability-profile — Tasks
 
 Dependencies:

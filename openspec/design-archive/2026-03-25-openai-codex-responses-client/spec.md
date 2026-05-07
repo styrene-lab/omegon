@@ -1,3 +1,14 @@
++++
+id = "52a10498-6091-47bb-8eb0-e575c8d00a80"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # OpenAI Codex Responses API client — native Rust client for ChatGPT OAuth JWT tokens — Design Spec (extracted)
 
 > Auto-extracted from docs/openai-codex-responses-client.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "077fa2ec-95a3-4b72-b08e-416ed90abbf3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Orchestratable Provider Model — Tasks
 
 ## 1. ProviderInventory + BridgeFactory (routing.rs — new)

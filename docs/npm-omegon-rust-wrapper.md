@@ -1,10 +1,13 @@
----
-id: npm-omegon-rust-wrapper
-title: "Repurpose `omegon` npm package as Rust binary platform wrapper"
-status: decided
-tags: [npm, distribution, rust]
-open_questions: []
----
++++
+id = "d80b2248-ea8b-4831-8074-b60596c4cdd1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Repurpose `omegon` npm package as Rust binary platform wrapper
 

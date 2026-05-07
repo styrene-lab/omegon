@@ -1,3 +1,14 @@
++++
+id = "844699b8-06b5-4737-a614-eb5caa0fa334"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # FIXME — incomplete work, hand this to another agent
 
 ## 1. FYDS: make transient upstream retries cancel-bounded, not attempt-bounded

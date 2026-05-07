@@ -1,3 +1,14 @@
++++
+id = "ce3e54f7-b823-44ea-a0c9-a851db495ad9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Recursive subprocesses must invoke Omegon-owned entrypoint, not bare `pi` — Design
 
 ## Architecture Decisions

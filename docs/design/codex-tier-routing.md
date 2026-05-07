@@ -1,13 +1,13 @@
----
-id: codex-tier-routing
-title: Codex Tier Routing — Provider-aware model selection for Cleave and tooling
-status: implemented
-related: [context-class-taxonomy-and-routing-policy]
-tags: [models, provider, cleave, effort, architecture]
-open_questions: []
-branches: ["feature/codex-tier-routing"]
-openspec_change: codex-tier-routing
----
++++
+id = "71cab07c-c2f9-48b1-9338-5b16f56853b2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Codex Tier Routing — Provider-aware model selection for Cleave and tooling
 

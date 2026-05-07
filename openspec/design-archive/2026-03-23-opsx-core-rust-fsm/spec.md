@@ -1,3 +1,14 @@
++++
+id = "1333f0b1-4031-4e0b-a800-a46acc164a55"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # opsx-core — Rust-backed lifecycle FSM for OpenSpec enforcement — Design Spec (extracted)
 
 > Auto-extracted from docs/opsx-core-rust-fsm.md at decide-time.

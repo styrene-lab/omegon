@@ -1,3 +1,14 @@
++++
+id = "fcce176e-705b-40ca-a462-f1f8982bbec0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Implement whoami tool in Rust — Design Spec (extracted)
 
 > Auto-extracted from docs/rust-whoami.md at decide-time.

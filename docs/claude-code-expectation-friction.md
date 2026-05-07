@@ -1,8 +1,13 @@
----
-title: Claude Code expectation friction in Omegon
-status: implemented
-tags: [ux, claude-code, friction, omegon]
----
++++
+id = "68220563-be84-4d36-8366-48cd431919f1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Claude Code expectation friction in Omegon
 

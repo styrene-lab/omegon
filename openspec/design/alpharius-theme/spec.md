@@ -1,3 +1,14 @@
++++
+id = "081619ca-f7c6-4a19-9f82-60ef4f8bcd64"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Alpharius Theme — Alpha Legion visual identity — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

@@ -1,11 +1,13 @@
----
-id: bootstrap
-title: Pi-kit Bootstrap — First-time setup and dependency management
-status: implemented
-related: [operator-capability-profile]
-tags: [bootstrap, ux, onboarding, dependencies]
-open_questions: []
----
++++
+id = "3b307a17-0db7-42ff-a138-3eb06458ae1c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Pi-kit Bootstrap — First-time setup and dependency management
 

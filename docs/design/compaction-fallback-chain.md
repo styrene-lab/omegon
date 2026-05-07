@@ -1,10 +1,13 @@
----
-id: compaction-fallback-chain
-title: Intelligent Compaction Fallback Chain — Local → GPT-5.3 → Haiku
-status: implemented
-tags: [compaction, fallback, quality, architecture, provider-routing]
-open_questions: []
----
++++
+id = "d50906c8-b75e-4872-9e8b-10a02675c43c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Intelligent Compaction Fallback Chain — Local → GPT-5.3 → Haiku
 

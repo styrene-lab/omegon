@@ -1,12 +1,13 @@
----
-id: harness-honest-assessment
-title: Honest assessment — what the harness actually feels like from inside, March 2026
-status: deferred
-parent: rust-agent-loop
-tags: [introspective, assessment, harness, ux, agent-experience]
-open_questions:
-  - "Should ambient lifecycle capture use a cheap LLM extraction pass on every response, or pattern-match on natural language heuristically, or keep the omg: tags and invest in training/prompting to get consistent production?"
----
++++
+id = "e1be1caf-999e-4f9f-b8a7-466c62b1bc68"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Honest assessment — what the harness actually feels like from inside, March 2026
 

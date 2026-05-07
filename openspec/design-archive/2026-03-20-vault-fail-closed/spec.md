@@ -1,3 +1,14 @@
++++
+id = "1bfdb661-c1ad-4506-b2ea-086a1a075080"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Vault client fail-closed security hardening — Design Spec (extracted)
 
 > Auto-extracted from docs/vault-fail-closed.md at decide-time.

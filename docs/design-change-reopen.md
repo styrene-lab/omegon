@@ -1,10 +1,13 @@
----
-id: design-change-reopen
-title: Design Change Re-open — revisiting an archived design decision
-status: implemented
-parent: dual-lifecycle-openspec
-open_questions: []
----
++++
+id = "21d3ca09-2b32-463c-b2c3-9b5c207d9c58"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Design Change Re-open — revisiting an archived design decision
 

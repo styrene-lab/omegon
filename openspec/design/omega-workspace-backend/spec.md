@@ -1,3 +1,14 @@
++++
+id = "a2dff7a3-bff8-42b9-9021-837eb7e59caf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omega WorkspaceBackend — local worktree vs. k8s pod storage — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

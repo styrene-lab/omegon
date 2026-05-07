@@ -1,3 +1,14 @@
++++
+id = "85ec964e-a501-4759-b998-c2428619cf81"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Embedded web dashboard — lightweight localhost UI served from the omegon binary — Design Spec (extracted)
 
 > Auto-extracted from docs/embedded-web-dashboard.md at decide-time.

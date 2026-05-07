@@ -1,3 +1,14 @@
++++
+id = "35618975-3fcc-4c79-a726-ce03cb80e5e0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cross-provider session telemetry schema for replay and inspection — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

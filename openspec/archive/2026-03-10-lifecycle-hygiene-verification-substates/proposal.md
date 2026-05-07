@@ -1,3 +1,14 @@
++++
+id = "5806f582-5ec9-42ca-ba15-ea52776b0d9c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Lifecycle hygiene — verification substates and binding normalization
 
 ## Intent

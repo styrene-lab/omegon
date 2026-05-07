@@ -1,3 +1,14 @@
++++
+id = "6c1f0bbd-01f5-44da-b817-2caee890b245"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Spec edge case format and authoring conventions — Design Spec (extracted)
 
 > Auto-extracted from docs/spec-edge-case-format.md at decide-time.

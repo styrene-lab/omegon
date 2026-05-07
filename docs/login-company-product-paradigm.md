@@ -1,13 +1,13 @@
----
-id: login-company-product-paradigm
-title: "Login UX: company=api-key / product=subscription paradigm"
-status: seed
-parent: unified-auth-surface
-tags: [auth, ux, login, oauth, providers, 0.15.5]
-open_questions: []
-dependencies: []
-related: []
----
++++
+id = "bb48ebe9-2ead-4896-9606-459ee77687de"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Login UX: company=api-key / product=subscription paradigm
 

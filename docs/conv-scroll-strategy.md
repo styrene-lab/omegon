@@ -1,10 +1,13 @@
----
-id: conv-scroll-strategy
-title: Conversation scroll strategy — tui-scrollview vs custom virtual scroll
-status: implemented
-parent: conversation-widget
-open_questions: []
----
++++
+id = "8b023f00-b00e-4998-9b36-fbd62ec37a54"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Conversation scroll strategy — tui-scrollview vs custom virtual scroll
 

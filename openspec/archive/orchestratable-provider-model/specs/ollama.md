@@ -1,3 +1,14 @@
++++
+id = "041c4ad1-eebd-4e8d-81b8-ac329b8b44f5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Ollama Model Management Spec
 
 ## OllamaManager

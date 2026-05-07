@@ -1,3 +1,14 @@
++++
+id = "7c813353-8bf0-4b85-a75b-6c647ade12e2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust compaction — context decay + LLM-driven summarization — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

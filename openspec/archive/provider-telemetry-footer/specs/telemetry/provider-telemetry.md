@@ -1,3 +1,14 @@
++++
+id = "695f28b9-71b9-47a3-b5cd-89566cb8912d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # telemetry/provider-telemetry — Delta Spec
 
 ## ADDED Requirements

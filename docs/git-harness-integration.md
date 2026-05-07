@@ -1,12 +1,13 @@
----
-id: git-harness-integration
-title: Git as first-class harness citizen — commit hygiene and repo-aware lifecycle
-status: implemented
-tags: [architecture, git, harness, lifecycle]
-open_questions: []
-issue_type: epic
-priority: 2
----
++++
+id = "f13d6a1b-e93c-4a09-a099-b3718a40783d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Git as first-class harness citizen — commit hygiene and repo-aware lifecycle
 

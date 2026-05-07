@@ -1,9 +1,13 @@
----
-title: Posture Spectrum — Explorator, Fabricator, Architect, Devastator
-status: active
-tags: [posture, om, omegon, autonomy, benchmark, runtime]
-date: 2026-04-11
----
++++
+id = "7bd48424-019a-498c-98d7-67abca7f2a5a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Posture Spectrum — Explorator, Fabricator, Architect, Devastator
 

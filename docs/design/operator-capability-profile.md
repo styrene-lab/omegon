@@ -1,13 +1,13 @@
----
-id: operator-capability-profile
-title: Operator capability profile — provider login + local hardware assessment
-status: implemented
-related: [bootstrap, provider-neutral-model-controls, guardrail-capability-probe, cost-reduction]
-tags: [models, provider, bootstrap, ux, capabilities, onboarding]
-open_questions: []
-branches: ["feature/operator-capability-profile", "feature/operator-capability-profile-startup"]
-openspec_change: operator-capability-profile
----
++++
+id = "57851038-af1c-4e2e-b177-c7c0600f4f29"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Operator capability profile — provider login + local hardware assessment
 

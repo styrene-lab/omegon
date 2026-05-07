@@ -1,10 +1,13 @@
----
-id: alpharius-theme
-title: Alpharius Theme — Alpha Legion visual identity
-status: implemented
-tags: [theme, design, alpha-legion, warhammer]
-open_questions: []
----
++++
+id = "cd76db50-b028-45c5-ada1-567905dfff9d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Alpharius Theme — Alpha Legion visual identity
 

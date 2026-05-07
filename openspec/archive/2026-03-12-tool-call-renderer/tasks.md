@@ -1,3 +1,14 @@
++++
+id = "b74424ff-93e8-4f55-be10-aa40f67cf9e9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Enriched Tool Call Rendering — Tasks
 
 ## 1. design_tree + design_tree_update renderers

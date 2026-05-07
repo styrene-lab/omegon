@@ -1,12 +1,13 @@
----
-id: dash-raised-layout
-title: "Raised Dashboard: Horizontal Split Layout"
-status: implemented
-related: [dashboard-cleanup]
-tags: [dashboard, tui, layout]
-open_questions: []
-openspec_change: dash-raised-layout
----
++++
+id = "926e21f7-9e1b-447d-99c6-33f91e2a4e6a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Raised Dashboard: Horizontal Split Layout
 

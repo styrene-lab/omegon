@@ -1,16 +1,13 @@
----
-id: update-lifecycle-parity
-title: "Update lifecycle parity and restart boundary"
-status: archived
-parent: singular-package-update-lifecycle
-tags: []
-open_questions: []
-dependencies: []
-related: []
-archive_reason: "obsolete"
-superseded_by: "rust-agent-loop"
-archived_at: "1775246679"
----
++++
+id = "4d08f54f-a133-4b07-adb6-9f068ab8fc16"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Update lifecycle parity and restart boundary
 

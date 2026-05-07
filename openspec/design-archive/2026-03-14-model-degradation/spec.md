@@ -1,3 +1,14 @@
++++
+id = "c815c3d5-645e-4320-af93-95036581804d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Graceful Model Degradation & Provider Resilience — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

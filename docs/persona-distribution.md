@@ -1,11 +1,13 @@
----
-id: persona-distribution
-title: Persona distribution — repos, manifests, and URI addressing
-status: implemented
-parent: persona-system
-open_questions: []
-issue_type: feature
----
++++
+id = "7aa7707d-4835-4b1d-b1de-eb4cd516af45"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Persona distribution — repos, manifests, and URI addressing
 

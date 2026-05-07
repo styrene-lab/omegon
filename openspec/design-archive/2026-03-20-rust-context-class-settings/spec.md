@@ -1,3 +1,14 @@
++++
+id = "d8876857-fd4e-4341-95bc-ce61ffdc4afa"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust settings integration — context class, provider preference, and downgrade overrides — Design Spec (extracted)
 
 > Auto-extracted from docs/rust-context-class-settings.md at decide-time.

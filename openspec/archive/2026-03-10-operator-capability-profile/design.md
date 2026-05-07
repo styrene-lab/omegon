@@ -1,3 +1,14 @@
++++
+id = "86e44ac5-3e03-4808-9a6c-e1240fb3e96d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Operator capability profile — Design
 
 ## Architecture Decisions

@@ -1,20 +1,13 @@
----
-subsystem: openspec
-design_docs:
-  - design/openspec-assess-lifecycle-integration.md
-  - design/lifecycle-hygiene-verification-substates.md
-  - design/assess-bridge-completed-results.md
-  - design/lifecycle-reconciliation.md
-  - design/post-assess-reconciliation.md
-  - design/lifecycle-artifact-versioning.md
-openspec_baselines:
-  - openspec/assessment-lifecycle.md
-  - openspec/lifecycle-status.md
-  - lifecycle/post-assess.md
-  - lifecycle/reconciliation.md
-  - lifecycle/versioning.md
-last_updated: 2026-03-10
----
++++
+id = "621ac91b-033b-4cf9-bab9-5498a1a9c19f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Implementation Layer (OpenSpec)
 

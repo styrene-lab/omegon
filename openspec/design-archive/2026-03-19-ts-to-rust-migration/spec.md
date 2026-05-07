@@ -1,3 +1,14 @@
++++
+id = "5ecabe99-3f6e-4c01-abd3-5441ca4d80f0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # TS→Rust Migration: Make omegon repo Rust-primary — Design Spec (extracted)
 
 > Auto-extracted from docs/ts-to-rust-migration.md at decide-time.

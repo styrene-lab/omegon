@@ -1,11 +1,13 @@
----
-id: memory-branch-aware-facts-transport
-title: Memory branch-aware facts transport — isolate tracked facts.jsonl intent from branch-local runtime drift
-status: implemented
-parent: memory-system-overhaul
-tags: [memory, git, jsonl, branches, workflow, stability]
-open_questions: []
----
++++
+id = "6a6dd391-c93c-42e0-bd56-cfc989f56b8d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Memory branch-aware facts transport — isolate tracked facts.jsonl intent from branch-local runtime drift
 

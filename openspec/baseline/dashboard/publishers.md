@@ -1,3 +1,14 @@
++++
+id = "e3c90842-72b5-405e-9ae3-06bc51de291d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # dashboard/publishers
 
 ### Requirement: OpenSpec dashboard publication uses shared refresh helpers

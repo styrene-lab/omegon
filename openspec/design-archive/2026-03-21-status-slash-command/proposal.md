@@ -1,3 +1,14 @@
++++
+id = "339c1d1b-bfb4-44cb-9da7-8229348ab6ba"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # /status slash command — re-display bootstrap panel mid-session
 
 ## Intent

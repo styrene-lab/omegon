@@ -1,3 +1,14 @@
++++
+id = "1500ed89-97be-44b8-bfcb-470b8b96feb3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Post-Assess Reconciliation — Update OpenSpec and Design Tree after Review/Fix Cycles — Tasks
 
 Dependencies:

@@ -1,3 +1,14 @@
++++
+id = "b8641356-e413-4e5b-b9b0-aa0a043adc7a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Lifecycle Reconciliation — Ambient Sync from Implementation Reality back to Design Tree + OpenSpec
 
 ## Intent

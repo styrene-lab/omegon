@@ -1,3 +1,14 @@
++++
+id = "758bdb57-e6be-4ecb-85e6-4a0469793137"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Lifecycle state normalization — Tasks
 
 ## 1. Define the canonical lifecycle resolver

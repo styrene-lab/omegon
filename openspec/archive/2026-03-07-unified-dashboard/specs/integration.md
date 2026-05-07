@@ -1,3 +1,14 @@
++++
+id = "2b8a267c-546d-487e-90b3-97bc6f711cc2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dashboard Integration
 
 Wiring: keyboard shortcut, /dashboard command, session state persistence, extension lifecycle, and the removal of status-bar.ts.

@@ -1,3 +1,14 @@
++++
+id = "f0e45c1c-9fc3-42a5-a3b6-c0428f764716"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Register memory_* agent-callable tools in Rust
 
 ## Intent

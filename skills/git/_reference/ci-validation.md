@@ -1,3 +1,14 @@
++++
+id = "5fd0ef05-d85c-4de3-a317-804cc461b6df"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Git CI Validation Templates
 
 Workflow templates for enforcing git conventions in CI. Based on patterns from cleave.

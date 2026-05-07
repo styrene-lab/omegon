@@ -1,3 +1,14 @@
++++
+id = "50897274-d6c8-45d0-a35b-791136bc5850"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # RepoModel — git state tracking in Rust core — Tasks
 
 ## 1. omegon-git crate foundation

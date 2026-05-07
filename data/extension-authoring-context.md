@@ -1,3 +1,14 @@
++++
+id = "5c9a03ed-99d1-47ad-80f9-09e3b58a073e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon Extension Authoring Reference
 
 ## Quick Start

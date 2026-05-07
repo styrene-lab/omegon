@@ -1,12 +1,13 @@
----
-id: update-channels
-title: "Update channels and in-TUI self-update — stable/rc/nightly channels with /update command"
-status: decided
-parent: release-candidate-system
-tags: [release, distribution, self-update, channels, tui, ux]
-open_questions: []
-jj_change_id: kktlvrpolzutvrlsuzvkwtwxqzkqoxtl
----
++++
+id = "17e9680e-21f2-4d3c-a418-bf5025b8a81c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Update channels and in-TUI self-update — stable/rc/nightly channels with /update command
 

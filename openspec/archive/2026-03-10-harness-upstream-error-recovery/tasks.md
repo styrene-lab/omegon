@@ -1,3 +1,14 @@
++++
+id = "51907651-b669-4fea-bb82-145d6a8eb977"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # harness-upstream-error-recovery — Tasks
 
 ## 1. Failure classification and recovery-plan primitives

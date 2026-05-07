@@ -1,3 +1,14 @@
++++
+id = "db3067a8-cbf8-4053-b7ca-f2bf927cd1db"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Subagent architecture — map cleave onto the subagent mental model with Omegon-native advantages
 
 ## Intent

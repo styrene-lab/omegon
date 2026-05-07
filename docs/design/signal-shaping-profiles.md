@@ -1,9 +1,13 @@
----
-title: Signal Shaping Profiles
-status: exploring
-tags: [benchmarking, prompt, context, slim-mode, profiles]
-date: 2026-04-09
----
++++
+id = "5924bafd-02f9-4a13-a5f8-3262dec0f46c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Signal Shaping Profiles
 

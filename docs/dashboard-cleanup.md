@@ -1,13 +1,13 @@
----
-id: dashboard-cleanup
-title: Dashboard cleanup and footer coherence
-status: implemented
-related: [dash-raised-layout, unified-dashboard]
-tags: [dashboard, footer, ux, layout, cleanup]
-open_questions: []
-branches: []
-openspec_change: dashboard-cleanup
----
++++
+id = "9315b4c3-ebea-43b3-a8cf-3219e3d452fe"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Dashboard cleanup and footer coherence
 

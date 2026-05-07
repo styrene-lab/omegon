@@ -1,3 +1,14 @@
++++
+id = "4bca4924-0e2a-4f64-895b-9f50be02c236"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # facts.jsonl stability — durable transport without runtime churn — Design
 
 ## Architecture Decisions

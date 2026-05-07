@@ -1,13 +1,13 @@
----
-id: agent-assess-tooling-access
-title: "Agent harness access to /assess tooling"
-status: implemented
-parent: cleave-dirty-tree-checkpointing
-tags: [harness, assess, tooling, openspec, workflow]
-open_questions: []
-branches: ["feature/agent-assess-tooling-access"]
-openspec_change: agent-assess-tooling-access
----
++++
+id = "d6379bdb-594c-43c6-b583-5e011961efe1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Agent harness access to /assess tooling
 

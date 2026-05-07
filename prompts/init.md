@@ -1,6 +1,14 @@
----
-description: First-session environment check — orient to a new project directory
----
++++
+id = "9d43af85-05b0-4f56-b21b-8ab39302eb1d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Project Init
 
 You are orienting to a project directory for the first time. Perform each step, then present a concise summary.

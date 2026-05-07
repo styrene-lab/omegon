@@ -1,3 +1,14 @@
++++
+id = "b8abcce1-1d3d-45c1-b1fe-02403301a37e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory: Task-Completion Facts — Mid-term \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"what was done\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\" layer with fast decay — Design
 
 ## Architecture Decisions

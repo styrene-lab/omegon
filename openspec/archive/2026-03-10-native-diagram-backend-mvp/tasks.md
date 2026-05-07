@@ -1,3 +1,14 @@
++++
+id = "8cc0eddb-f9cc-4150-b68f-58db5037249b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Native SVG diagram backend MVP — Tasks
 
 ## 1. Native diagram pipeline in `extensions/render/native-diagrams/` <!-- specs: render/native-diagrams -->

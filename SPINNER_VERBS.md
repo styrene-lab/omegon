@@ -1,3 +1,14 @@
++++
+id = "a9b71e0d-6aae-4592-8822-f64c574a910a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Spinner Verbs — Contribution Guide
 
 The spinner verbs are the rotating action phrases displayed while omegon is

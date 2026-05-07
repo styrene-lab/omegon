@@ -1,3 +1,14 @@
++++
+id = "f73dc2f4-fb0c-46f7-89e5-6bba9feb3976"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Codex Tier Routing — Provider-aware model selection for Cleave and tooling — Design
 
 ## Summary

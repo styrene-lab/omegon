@@ -1,3 +1,14 @@
++++
+id = "e504cdce-c803-432a-b1fe-7929f67e4590"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Use cheap GPT models for memory extraction and embeddings
 
 ## Intent

@@ -1,3 +1,14 @@
++++
+id = "a10483f3-dc2e-4fb9-95a2-c8e9cd6d0388"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Vault client fail-closed security hardening
 
 ## Intent

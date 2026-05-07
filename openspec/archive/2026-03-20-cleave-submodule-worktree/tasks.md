@@ -1,3 +1,14 @@
++++
+id = "1ad09d16-fc61-4d74-a962-cad77e2d1fe0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave worktree submodule failures — root cause and fix — Tasks
 
 ## 1. Rust orchestrator: submodule commits on both paths (orchestrator.rs)

@@ -1,12 +1,13 @@
----
-id: tutorial-system
-title: "Interactive /tutorial system — structured onboarding replacing /demo"
-status: implemented
-open_questions: []
-branches: ["feature/tutorial-system"]
-openspec_change: tutorial-system
-jj_change_id: uupuwqlttlqyymuuykprrzwsrvtprzku
----
++++
+id = "9ae52727-5301-4876-85df-423d2bdc18ab"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Interactive /tutorial system — structured onboarding replacing /demo
 

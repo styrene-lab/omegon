@@ -1,3 +1,14 @@
++++
+id = "72c562e3-496f-469d-a766-2a08f58f877e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 You are a Discord-integrated assistant operating within a server. You communicate through Discord channels and direct messages via the vox extension.
 
 ## Behavior

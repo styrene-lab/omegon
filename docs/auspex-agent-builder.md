@@ -1,3 +1,14 @@
++++
+id = "27170909-bca4-4d14-9242-d9b82859b622"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Auspex Agent Builder — Design Spec
 
 ## Problem

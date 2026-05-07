@@ -1,3 +1,14 @@
++++
+id = "a539253a-6b7e-4df4-97b1-498ed0ef5ebf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # localhost-web-ui-mvp — Design
 
 ## Spec-Derived Architecture

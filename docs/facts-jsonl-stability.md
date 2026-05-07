@@ -1,15 +1,13 @@
----
-id: facts-jsonl-stability
-title: facts.jsonl stability — durable transport without runtime churn
-status: implemented
-parent: memory-system-overhaul
-tags: [memory, git, jsonl, workflow, stability]
-open_questions: []
-branches: []
-openspec_change: facts-jsonl-stability
-issue_type: bug
-priority: 1
----
++++
+id = "602376d3-2fe7-477d-b424-09e74d73b361"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # facts.jsonl stability — durable transport without runtime churn
 

@@ -1,3 +1,14 @@
++++
+id = "02d4c3a9-1d97-419f-865f-580133e918e0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Vault as first-class secret backend — operator-controlled secret storage with unseal lifecycle
 
 ## Intent

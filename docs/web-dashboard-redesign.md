@@ -1,13 +1,13 @@
----
-id: web-dashboard-redesign
-title: Web dashboard redesign — align with refined internal design tree model
-status: seed
-parent: embedded-web-dashboard
-tags: [web, dashboard, design-tree, openspec, 0.16.0]
-open_questions: []
-jj_change_id: xwnrqnuystrovmssnxktvlkuqoxwymxu
-issue_type: feature
----
++++
+id = "bc75913a-d63d-401d-94cb-17091e49d986"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Web dashboard redesign — align with refined internal design tree model
 

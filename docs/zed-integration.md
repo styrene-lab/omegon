@@ -1,3 +1,14 @@
++++
+id = "0571cf78-6ba8-461b-9aa6-805d0cb05162"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Zed Integration
 
 Omegon integrates with Zed via the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/).

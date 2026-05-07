@@ -1,13 +1,13 @@
----
-id: dashboard-lifecycle-publisher-consolidation
-title: Dashboard and lifecycle publisher consolidation
-status: implemented
-parent: repo-consolidation-hardening
-tags: [dashboard, lifecycle, publishers, consolidation, shared-state]
-open_questions: []
-branches: []
-openspec_change: dashboard-lifecycle-publisher-consolidation
----
++++
+id = "9a5ae752-0a1a-4aba-906f-913235c1f8b7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Dashboard and lifecycle publisher consolidation
 

@@ -1,3 +1,14 @@
++++
+id = "775149c4-002e-4f59-9959-7a50de61a774"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Raised dashboard component overhaul — model topology clarity and horizontal layout
 
 ## Intent

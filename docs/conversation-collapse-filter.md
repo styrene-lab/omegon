@@ -1,16 +1,13 @@
----
-id: conversation-collapse-filter
-title: Conversation collapse and filter — tree-style fold with view modes
-status: exploring
-parent: conversation-widget
-tags: [tui, ux, conversation, filter, collapse, 0.15.1]
-open_questions:
-  - "Should filter modes cycle (Full→Dialogue→Tools→Compact→Full) or use explicit selection via a popup selector like /model?"
-  - Should the filter persist across turns (agent response adds new segments in the current filter mode) or reset to Full when the agent starts a new turn?
-jj_change_id: ksrwowtzylywqlwtozmpvvxuoqoyvptm
-issue_type: feature
-priority: 2
----
++++
+id = "8d3b5ed1-a4c7-4be4-bd80-33c25adeb89b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Conversation collapse and filter — tree-style fold with view modes
 

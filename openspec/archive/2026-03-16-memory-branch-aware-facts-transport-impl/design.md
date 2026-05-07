@@ -1,3 +1,14 @@
++++
+id = "d42e9552-5f23-47ad-b716-3e96f4bd54a9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # memory-branch-aware-facts-transport-impl — Design
 
 ## Spec-Derived Architecture

@@ -1,3 +1,14 @@
++++
+id = "1e67a540-eac2-45e1-98d3-fb3b33f0f9cd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # lifecycle-artifact-versioning — Tasks
 
 ## 1. Durable lifecycle artifacts are version controlled

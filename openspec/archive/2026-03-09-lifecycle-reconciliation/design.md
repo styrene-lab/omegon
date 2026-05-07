@@ -1,3 +1,14 @@
++++
+id = "d0eb3588-c5ac-49af-bcf1-1fc9e1dd9f7b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Lifecycle Reconciliation — Ambient Sync from Implementation Reality back to Design Tree + OpenSpec — Design
 
 ## Architecture Decisions

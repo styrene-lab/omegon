@@ -1,3 +1,14 @@
++++
+id = "680ac06d-484c-40cb-8839-b34719371c49"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory: Structural Pruning Ceiling — DB-level decay enforcement and section caps — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

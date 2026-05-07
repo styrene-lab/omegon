@@ -1,3 +1,14 @@
++++
+id = "57743c42-9274-4edf-be09-2c5564f51abe"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust lifecycle crates — design-tree + openspec as native Rust modules — Design Spec (extracted)
 
 > Auto-extracted from docs/rust-lifecycle-crates.md at decide-time.

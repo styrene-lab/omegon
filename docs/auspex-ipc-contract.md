@@ -1,12 +1,13 @@
----
-id: auspex-ipc-contract
-title: Auspex native IPC contract — Omegon-side v1
-status: decided
-tags: [auspex, ipc, msgpack, unix-socket, contract]
-open_questions: []
-issue_type: feature
-priority: 1
----
++++
+id = "f7bd8ab4-3747-4ffa-b8dd-de54e36b62ca"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Auspex native IPC contract — Omegon-side v1
 

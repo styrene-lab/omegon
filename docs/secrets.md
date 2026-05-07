@@ -1,9 +1,13 @@
----
-subsystem: secrets
-design_docs: []
-openspec_baselines: []
-last_updated: 2026-04-12
----
++++
+id = "9f9e782e-06e7-403c-9f55-1933a9973d50"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Secrets
 

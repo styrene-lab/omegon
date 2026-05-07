@@ -1,11 +1,13 @@
----
-id: ai-directory-convention
-title: "ai/ directory convention — unified agent artifact home"
-status: implemented
-tags: [architecture, conventions, migration]
-open_questions: []
-jj_change_id: nxzyokxomxzopsyqotkzylwlvmtossmu
----
++++
+id = "cfbcdef5-8055-4f04-b672-d90a0109e4f2"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # ai/ directory convention — unified agent artifact home
 

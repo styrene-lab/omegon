@@ -1,3 +1,14 @@
++++
+id = "1c799460-bd13-4586-a607-45e4eab2f77e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Conversation widget — structured rendering for all message types — Design Spec (extracted)
 
 > Auto-extracted from docs/conversation-widget.md at decide-time.

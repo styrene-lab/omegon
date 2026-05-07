@@ -1,3 +1,14 @@
++++
+id = "245736c4-f493-4209-9ab0-2e54f3e362a0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # bridge-all-slash-commands — Tasks
 
 ## 1. Bridge OpenSpec commands

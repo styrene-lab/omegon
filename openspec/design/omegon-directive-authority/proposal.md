@@ -1,3 +1,14 @@
++++
+id = "1865197e-db5b-4420-bddd-0ae27839a94c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon directive authority — code-level opinions over filesystem discovery
 
 ## Intent

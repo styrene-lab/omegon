@@ -1,3 +1,14 @@
++++
+id = "b40a9be0-a887-4e65-bce2-932012359e58"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave child timeout and idle detection — Design Spec (extracted)
 
 > Auto-extracted from docs/cleave-child-timeout.md at decide-time.

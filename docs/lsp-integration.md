@@ -1,16 +1,13 @@
----
-id: lsp-integration
-title: "LSP integration — language server protocol for code-aware navigation and diagnostics"
-status: decided
-tags: [architecture, lsp, code-intelligence, tools, navigation]
-open_questions: []
-dependencies:
-  - lsp-monorepo-workspace-handling
-related:
-  - codebase-search
-issue_type: feature
-priority: 1
----
++++
+id = "8e460d25-2f08-4a86-badf-abd490e1054f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # LSP integration — language server protocol for code-aware navigation and diagnostics
 

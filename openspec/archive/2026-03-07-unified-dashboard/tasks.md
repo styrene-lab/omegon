@@ -1,3 +1,14 @@
++++
+id = "6d3da099-9a02-4da4-b027-79eba449d87c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # unified-dashboard — Tasks
 
 ## 1. Shared State Types & Emitter Infrastructure

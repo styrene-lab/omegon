@@ -1,13 +1,13 @@
----
-id: serve-tool
-title: serve tool — long-lived background process management
-status: exploring
-tags: [tools, ux, webdev]
-open_questions:
-  - "Should MCP server discovery be automatic (detect stdio/http MCP protocol on start) or explicit (--mcp flag)?"
-  - "TUI visualization: activity light per service in the instrument panel, or a dedicated services row in the footer, or both?"
-jj_change_id: zosuwkpvpspkxktroknoupulskymmxvk
----
++++
+id = "7aeae816-2dff-4585-8c7b-002e8c0303b0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # serve tool — long-lived background process management
 

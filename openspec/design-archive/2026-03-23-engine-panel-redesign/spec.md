@@ -1,3 +1,14 @@
++++
+id = "0df422cf-64b5-4634-bea3-db2d32f51708"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Engine panel redesign — visual hierarchy and information density — Design Spec (extracted)
 
 > Auto-extracted from docs/engine-panel-redesign.md at decide-time.

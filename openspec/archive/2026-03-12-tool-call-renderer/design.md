@@ -1,3 +1,14 @@
++++
+id = "a232dc3f-d9e8-43ef-ac02-21303c6c6eef"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Enriched Tool Call Rendering — Design
 
 ## Architecture Decisions

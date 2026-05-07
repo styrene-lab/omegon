@@ -1,3 +1,14 @@
++++
+id = "4557e2dc-119d-4248-a7fb-221f76091853"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Operator capability profile — provider login + local hardware assessment
 
 ## Intent

@@ -1,12 +1,13 @@
----
-id: persona-tone-system
-title: Tone system — conversational voice layer independent of persona expertise
-status: implemented
-parent: persona-system
-tags: [persona, tone, voice, creative, ux, design-mode]
-open_questions: []
-issue_type: feature
----
++++
+id = "a4d07db5-5c94-4997-a7c3-026e0e03c292"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Tone system — conversational voice layer independent of persona expertise
 

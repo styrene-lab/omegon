@@ -1,3 +1,14 @@
++++
+id = "8a537efa-0f8f-4116-8702-61d84b5b6f5f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Subprocess safety hardening — Design
 
 ## Spec-Derived Architecture

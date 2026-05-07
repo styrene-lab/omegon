@@ -1,10 +1,13 @@
----
-id: context-aware-uri
-title: Context-Aware OSC 8 URIs — Smart File Links in Terminal Output
-status: implemented
-tags: [ux, view, uri, terminal, osc8]
-open_questions: []
----
++++
+id = "dfc1acb8-8304-446e-9a85-987ea5115b81"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Context-Aware OSC 8 URIs — Smart File Links in Terminal Output
 

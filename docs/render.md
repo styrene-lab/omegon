@@ -1,11 +1,13 @@
----
-subsystem: render
-design_docs:
-  - design/native-diagram-backend-mvp.md
-openspec_baselines:
-  - render/native-diagrams.md
-last_updated: 2026-03-10
----
++++
+id = "b0e2f112-0055-440d-b761-85678b8094ee"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Render
 

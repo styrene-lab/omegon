@@ -1,3 +1,14 @@
++++
+id = "51884cd4-a911-4ee2-b77b-8db5eefb83ce"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # ai/ directory convention — unified agent artifact home
 
 ## Intent

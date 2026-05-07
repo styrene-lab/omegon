@@ -1,13 +1,13 @@
----
-subsystem: operator-profile
-design_docs:
-  - design/operator-capability-profile.md
-  - design/guardrail-capability-probe.md
-  - design/bootstrap.md
-openspec_baselines:
-  - models/profile.md
-last_updated: 2026-03-10
----
++++
+id = "2545fe5c-8872-4ad3-ac23-225914843203"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Operator Profile
 

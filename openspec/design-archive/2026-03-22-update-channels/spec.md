@@ -1,3 +1,14 @@
++++
+id = "72e93d8f-0c05-467e-aeb3-54322cf978bf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Update channels and in-TUI self-update — stable/rc/nightly channels with /update command — Design Spec (extracted)
 
 > Auto-extracted from docs/update-channels.md at decide-time.

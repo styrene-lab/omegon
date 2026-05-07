@@ -1,3 +1,14 @@
++++
+id = "e5090174-c6ea-453c-8035-4b8dc36fe698"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Agent loop test harness — mock LlmBridge and deterministic state machine testing — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

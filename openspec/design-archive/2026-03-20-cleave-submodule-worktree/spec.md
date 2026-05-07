@@ -1,3 +1,14 @@
++++
+id = "7a912571-c8c0-484b-91da-d807067eeb7b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave worktree submodule failures — root cause and fix — Design Spec (extracted)
 
 > Auto-extracted from docs/cleave-submodule-worktree.md at decide-time.

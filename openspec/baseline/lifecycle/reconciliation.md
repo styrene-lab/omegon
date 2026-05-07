@@ -1,3 +1,14 @@
++++
+id = "9706a3ca-9fed-471a-b994-5b08d7d69c99"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # lifecycle/reconciliation
 
 ### Requirement: Cleave reconciles OpenSpec task state after successful merge

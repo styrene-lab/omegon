@@ -1,3 +1,14 @@
++++
+id = "c3ca5765-2835-4336-90ef-47991264447d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cross-provider session telemetry schema for replay and inspection — Design Tasks
 
 ## 1. Open Questions

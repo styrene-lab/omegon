@@ -1,3 +1,14 @@
++++
+id = "cb190045-35c8-4251-84d7-d19fd40973d8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # cleave-checkpoint-failure-clarity — Design
 
 ## Spec-Derived Architecture

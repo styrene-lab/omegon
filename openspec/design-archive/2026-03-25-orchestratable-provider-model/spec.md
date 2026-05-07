@@ -1,3 +1,14 @@
++++
+id = "50d76db4-e782-466d-b281-d2852f93392b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Orchestratable provider model — treat providers as assignable resources, not user preferences — Design Spec (extracted)
 
 > Auto-extracted from docs/orchestratable-provider-model.md at decide-time.

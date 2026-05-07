@@ -1,3 +1,14 @@
++++
+id = "7e27e73b-4754-4023-ad42-113e43807970"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # omegon.styrene.dev/docs — documentation and architecture sub-site — Design Spec (extracted)
 
 > Auto-extracted from docs/omegon-site-docs.md at decide-time.

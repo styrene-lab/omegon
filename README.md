@@ -1,3 +1,14 @@
++++
+id = "30b48db5-e615-4544-a4a9-634872a27a77"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon
 
 **The AI agent harness with enough nerve to act like an operating system for software work.**

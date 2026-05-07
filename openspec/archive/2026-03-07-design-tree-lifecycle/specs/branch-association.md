@@ -1,3 +1,14 @@
++++
+id = "0005cc60-387f-4582-bc71-ffd4e4867c1b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Branch Association — Convention-based Auto-detection
 
 ## Requirements

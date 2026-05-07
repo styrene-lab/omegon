@@ -1,9 +1,13 @@
----
-title: RC.64 Benchmark Finding — Shadow Context Harness Comparison (Cache-Aware)
-status: active
-tags: [benchmark, release-candidate, rc64, token-efficiency, performance, cache-accounting]
-date: 2026-04-10
----
++++
+id = "ae9fe9da-b3b0-44f5-a4df-12dbd060d605"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # RC.64 Benchmark Finding — Shadow Context Harness Comparison (Cache-Aware)
 

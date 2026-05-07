@@ -1,11 +1,13 @@
----
-id: omegon-install-site
-title: omegon.styrene.dev — installation landing page + install.sh hosting
-status: implemented
-parent: core-distribution
-tags: [infrastructure, distribution, web]
-open_questions: []
----
++++
+id = "40fec531-de5d-41fb-aca5-da1b0df37ebe"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # omegon.styrene.dev — installation landing page + install.sh hosting
 

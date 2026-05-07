@@ -1,3 +1,14 @@
++++
+id = "42ccf8eb-9f3d-47cf-80e3-8382a8f8e596"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Spec
 
 ### Requirement: OpenSpec persists latest structured assessment state per change

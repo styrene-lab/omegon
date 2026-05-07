@@ -1,3 +1,14 @@
++++
+id = "7916a56c-3848-4946-bd6e-77cb2ef7fe51"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Lifecycle gate ergonomics — guardrails not brick walls
 
 ## Intent

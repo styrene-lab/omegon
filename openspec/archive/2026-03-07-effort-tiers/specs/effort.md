@@ -1,3 +1,14 @@
++++
+id = "633e0f77-7c47-4fea-a9df-8b12d7900e25"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # effort — Delta Spec
 
 ## ADDED Requirements

@@ -1,3 +1,14 @@
++++
+id = "6f379872-875e-4de9-83ca-0e4b64343205"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 ## ADDED Requirements
 
 ### Requirement: Allowlisted slash commands are invokable by the harness

@@ -1,3 +1,14 @@
++++
+id = "33a030e6-3a9f-484f-aa7a-79304850d6ae"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # codebase_search — AST-aware code retrieval with memory seeding
 
 ## Intent

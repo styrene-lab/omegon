@@ -1,3 +1,14 @@
++++
+id = "057e6453-995d-47ab-81fa-f168ad12fa70"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Research Brief — Subscription Route Verification Dossier
 
 Replace the earlier broad provider matrix with a focused verification pass on the disputed subscription-backed and hosted routes.

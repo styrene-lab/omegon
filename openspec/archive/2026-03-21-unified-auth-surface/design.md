@@ -1,3 +1,14 @@
++++
+id = "6bde6f1a-4f9e-483d-880d-0178138390b0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Unified auth surface — single /login command, agent-callable, all backends — Design
 
 ## Architecture Decisions

@@ -1,3 +1,14 @@
++++
+id = "bb7b151d-4b33-41a8-bc6b-7e81b7d6270f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave worktree submodule failures — root cause and fix — Design
 
 ## Architecture Decisions

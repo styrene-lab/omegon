@@ -1,3 +1,14 @@
++++
+id = "c3c87b00-d3e5-451b-a324-3a328e9f9fc3"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Singular package integration and full-lifecycle update parity — Tasks
 
 ## 1. pi-mono local fork worktree reconciliation

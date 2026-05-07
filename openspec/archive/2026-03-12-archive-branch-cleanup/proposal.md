@@ -1,3 +1,14 @@
++++
+id = "0a523d5d-d531-496a-8476-4f47d35c1e65"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Auto-delete merged feature branches on OpenSpec archive
 
 ## Intent

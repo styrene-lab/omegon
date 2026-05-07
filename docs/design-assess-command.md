@@ -1,10 +1,13 @@
----
-id: design-assess-command
-title: "Design Assessment Command — /assess design integration"
-status: implemented
-parent: dual-lifecycle-openspec
-open_questions: []
----
++++
+id = "84bc3792-444e-4752-8320-c05f1353ea46"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Design Assessment Command — /assess design integration
 

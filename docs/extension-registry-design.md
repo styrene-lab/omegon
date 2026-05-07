@@ -1,3 +1,14 @@
++++
+id = "caed3bbb-e58d-4053-8423-12c7ec36dec6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Extension Registry Design
 
 ## Overview

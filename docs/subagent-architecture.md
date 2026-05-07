@@ -1,14 +1,13 @@
----
-id: subagent-architecture
-title: Subagent architecture — map cleave onto the subagent mental model with Omegon-native advantages
-status: implemented
-tags: [architecture, cleave, subagents, delegation, multi-agent, ux, competitive, strategic]
-open_questions: []
-branches: ["feature/subagent-architecture"]
-openspec_change: subagent-architecture
-issue_type: epic
-priority: 1
----
++++
+id = "f2fc6ac5-671b-4590-95f2-ce36b45ff8cf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Subagent architecture — map cleave onto the subagent mental model with Omegon-native advantages
 

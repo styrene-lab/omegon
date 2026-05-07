@@ -1,3 +1,14 @@
++++
+id = "5cb0f947-ea24-47a8-968c-00b22e968521"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Documentation site architecture — omegon.styrene.dev scope and structure — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

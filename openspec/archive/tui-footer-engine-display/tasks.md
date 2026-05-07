@@ -1,3 +1,14 @@
++++
+id = "fe668a56-8e8a-4f3b-a14f-a29f89faf93e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Footer redesign — engine display + linked minds — Tasks
 
 ## 1. instruments.rs — rendering core (new file, no deps)

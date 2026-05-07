@@ -1,3 +1,14 @@
++++
+id = "5da37531-88ca-44b0-bce1-778d0dcdaa2c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Structured RPC/event transport for cleave child execution — Design Spec (extracted)
 
 > Auto-extracted from docs/structured-cleave-child-rpc.md at decide-time.

@@ -1,11 +1,13 @@
----
-id: guardrail-capability-probe
-title: Guardrails as Capability Probes — Omegon runtime dependency checks
-status: implemented
-related: [operator-capability-profile]
-tags: [guardrails, dx, ux, capabilities]
-open_questions: []
----
++++
+id = "797f4b85-666a-4e18-b89b-9c8697685084"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Guardrails as Capability Probes — Omegon runtime dependency checks
 

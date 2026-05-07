@@ -1,3 +1,14 @@
++++
+id = "dcb88b5e-bf15-4363-9c8a-818b196b05c1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Version-control lifecycle artifacts by default
 
 ## Intent

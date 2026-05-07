@@ -1,18 +1,13 @@
----
-id: subscription-first-provider-access-architecture
-title: "Subscription-first provider access architecture"
-status: exploring
-tags: []
-open_questions:
-  - "What are the canonical entities in the routing model: model family, entitlement, auth mechanism, execution backend, or some other split?"
-  - "How should Omegon rank routes when multiple paths can reach the same model family: existing subscription entitlement, API key, local runtime, hosted third-party compatibility layer, or explicit operator override?"
-  - "How do we represent the distinction between operator-facing entitlement names (Google AI Pro, ChatGPT Plus/Pro, Claude Pro/Max) and concrete runtime backends (Gemini API, Codex backend, Anthropic API, app-backed OAuth endpoint) without lying in the UI?"
-  - "[assumption] Most operators prefer the cheapest already-paid access path for a model family over setting up new per-token billing, provided the route is officially supported enough for regular use."
-  - "How should automation policy be attached to routes: by entitlement, by auth mechanism, by backend, or by an explicit capability profile on each execution route?"
-  - "What minimum evidence threshold is required before Omegon treats a subscription-backed route as a supported happy path rather than an experimental/operator-owned integration?"
-dependencies: []
-related: []
----
++++
+id = "609a5f56-1901-4da7-b513-092872bb028f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Subscription-first provider access architecture
 

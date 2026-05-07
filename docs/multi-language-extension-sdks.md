@@ -1,12 +1,13 @@
----
-id: multi-language-extension-sdks
-title: "Multi-Language Extension SDKs"
-status: seed
-tags: [extensions, sdks, python, go, typescript]
-open_questions: []
-dependencies: []
-related: []
----
++++
+id = "36e93817-95b7-4960-8c17-36664e7bb48a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Multi-Language Extension SDKs
 

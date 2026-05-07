@@ -1,3 +1,14 @@
++++
+id = "28a19735-2ce2-4ae0-905c-ad67f93c2f6b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # provider-neutral-model-controls — Tasks
 
 ## 1. Operator-facing model controls describe capability tiers, not Anthropic-only products

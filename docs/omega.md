@@ -1,19 +1,13 @@
----
-id: omega
-title: "Omega — Rust execution engine and project intelligence daemon"
-status: exploring
-tags: [rust, architecture, cleave, lifecycle, dioxus, execution-engine, strategic]
-open_questions:
-  - "What is the exact HTTP API surface between Omega and the auspex bridge — REST with typed request/response envelopes, or a more structured RPC protocol like JSON-RPC or Cap'n Proto?"
-  - "How does Omega push cleave child progress back to Omegon's TUI dashboard in real time — WebSocket from Omega that the auspex bridge subscribes to and relays via pi.events, or does the bridge poll /api/cleave/status?"
-  - "For Ollama VRAM coordination across instances — cooperative catalog-based scheduling (each instance reads catalog before dispatching local children) vs. delegating all local inference to a single designated \\\"Ollama owner\\\" instance? Cooperative is simpler but relies on instances respecting the catalog; delegation is authoritative but asymmetric."
-dependencies: []
-related:
-  - markdown-viewport
-  - conversation-rendering-engine
-  - pikit-auspex-extension
-  - a2a-protocol-integration
----
++++
+id = "8532e123-93a5-4c45-ae45-549218b30628"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Omega — Rust execution engine and project intelligence daemon
 

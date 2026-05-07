@@ -1,3 +1,14 @@
++++
+id = "afbc25ef-f6f1-4c37-996f-7cfb7f808f89"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # dashboard/layout
 
 ## Requirement: Wide raised mode uses a full-width workspace header

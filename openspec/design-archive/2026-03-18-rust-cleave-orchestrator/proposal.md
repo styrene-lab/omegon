@@ -1,3 +1,14 @@
++++
+id = "f4c2db13-06d3-4e34-87ed-d57f0a7886fc"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust cleave orchestrator — move child dispatch, worktree, and merge out of TypeScript
 
 ## Intent

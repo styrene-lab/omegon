@@ -1,3 +1,14 @@
++++
+id = "cc71c538-b6d8-4693-a8f9-8cb4b664b348"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust crate consolidation and ecosystem leverage — Design Spec (extracted)
 
 > Auto-extracted from docs/rust-crate-consolidation.md at decide-time.

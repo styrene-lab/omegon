@@ -1,10 +1,13 @@
----
-id: design-tasks-memory-sync
-title: Design Tasks + Memory Sync — Open Questions, tasks.md, and memory integration
-status: implemented
-parent: dual-lifecycle-openspec
-open_questions: []
----
++++
+id = "426fc68b-0b33-47e1-ad10-2d711a0e5d49"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Design Tasks + Memory Sync — Open Questions, tasks.md, and memory integration
 

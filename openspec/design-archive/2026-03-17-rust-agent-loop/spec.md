@@ -1,3 +1,14 @@
++++
+id = "9b230407-a3c4-48b9-ab10-707bad744b11"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust-native agent loop — middle-out replacement of pi's orchestration core — Design Spec (extracted)
 
 > Auto-extracted from docs/rust-agent-loop.md at decide-time.

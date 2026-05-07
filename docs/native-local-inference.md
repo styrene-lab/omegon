@@ -1,13 +1,13 @@
----
-id: native-local-inference
-title: "Native local inference — Rust-native LLM execution without external runtime (Ollama/llama.cpp)"
-status: decided
-dependencies: [rust-phase-3]
-tags: [architecture, inference, local, rust, burn, candle, ggml, performance]
-open_questions: []
-issue_type: feature
-priority: 2
----
++++
+id = "64922132-b381-4813-ada6-ff749c740617"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Native local inference — Rust-native LLM execution without external runtime (Ollama/llama.cpp)
 

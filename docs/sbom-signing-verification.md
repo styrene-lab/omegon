@@ -1,11 +1,13 @@
----
-id: sbom-signing-verification
-title: Full SBOM signing and verification pipeline
-status: seed
-tags: [security, supply-chain, release]
-open_questions: []
-jj_change_id: yuxytpvrovzlulsvutxolyzltyrzproz
----
++++
+id = "9d477099-d8ee-4a11-b660-e17b4229cd17"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Full SBOM signing and verification pipeline
 

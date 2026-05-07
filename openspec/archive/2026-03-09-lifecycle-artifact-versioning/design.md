@@ -1,3 +1,14 @@
++++
+id = "7c0f9acd-9788-4e53-b709-aaab6295783c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # lifecycle-artifact-versioning — Design
 
 ## Spec-Derived Architecture

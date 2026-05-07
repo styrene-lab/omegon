@@ -1,3 +1,14 @@
++++
+id = "caa57633-6245-4da1-8e5f-21d29581dda6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Vault client fail-closed security hardening — Design
 
 ## Architecture Decisions

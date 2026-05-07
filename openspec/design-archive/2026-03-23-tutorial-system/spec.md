@@ -1,3 +1,14 @@
++++
+id = "71512603-b8db-4c85-943f-27b34bb1638a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Interactive /tutorial system — structured onboarding replacing /demo — Design Spec (extracted)
 
 > Auto-extracted from docs/tutorial-system.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "7daf20bb-8502-48f7-814b-d7a5f413a9e1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # dashboard-wide-truncation — Design
 
 ## Spec-Derived Architecture

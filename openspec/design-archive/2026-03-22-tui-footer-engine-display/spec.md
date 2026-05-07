@@ -1,3 +1,14 @@
++++
+id = "14461faf-7b82-4556-ad8f-8510fd98aa57"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Footer redesign — engine display + linked minds — Design Spec (extracted)
 
 > Auto-extracted from docs/tui-footer-engine-display.md at decide-time.

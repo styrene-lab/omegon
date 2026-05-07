@@ -1,11 +1,13 @@
----
-id: tui-conversation-tabs
-title: Conversation area multi-tab — chat, design tree, scratchpad, issues
-status: exploring
-parent: tui-hud-redesign
-open_questions: []
-jj_change_id: zroxvpvwoqkmpnxsqluvxxpktmnplror
----
++++
+id = "3caf06cc-bab4-4ba3-a0ba-e04704cbf5c0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Conversation area multi-tab — chat, design tree, scratchpad, issues
 

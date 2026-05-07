@@ -1,12 +1,13 @@
----
-id: persona-system
-title: Persona System — domain-expert identities with dedicated mind stores
-status: implemented
-tags: [architecture, persona, memory, skills, domain-expertise, strategic]
-open_questions: []
-issue_type: epic
-priority: 2
----
++++
+id = "010b242a-6594-4ace-815f-e0fd9bb0305f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Persona System — domain-expert identities with dedicated mind stores
 

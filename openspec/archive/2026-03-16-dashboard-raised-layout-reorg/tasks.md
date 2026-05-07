@@ -1,3 +1,14 @@
++++
+id = "2029a565-7216-4562-ab8c-155fd4567f51"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Raised dashboard layout reorganization — design-dominant workspace and contextual implementation rail — Tasks
 
 ## 1. extensions/dashboard/footer.ts (modified)

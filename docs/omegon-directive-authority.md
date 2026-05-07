@@ -1,11 +1,13 @@
----
-id: omegon-directive-authority
-title: Omegon directive authority — code-level opinions over filesystem discovery
-status: implemented
-parent: test-coverage-directive-gap
-tags: [architecture, directives, system-prompt, opinions, authority]
-open_questions: []
----
++++
+id = "9faf9ed4-4157-4c2a-bc82-5f65c079496e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Omegon directive authority — code-level opinions over filesystem discovery
 

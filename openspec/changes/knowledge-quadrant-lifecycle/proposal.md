@@ -1,3 +1,14 @@
++++
+id = "3cc272b1-0e52-4955-bec4-5ae6a92e75c0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Knowledge quadrant lifecycle — guide design progression through the Rumsfeld Matrix
 
 ## Intent

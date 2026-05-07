@@ -1,14 +1,13 @@
----
-id: tutorial-demo-project
-title: Tutorial demo project — self-seeded repo with live cleave demonstration
-status: implemented
-parent: tutorial-system
-tags: [tutorial, demo, cleave, onboarding, 0.15.0]
-open_questions: []
-jj_change_id: uumumslvnzlntqvqmvymxykyqqsunlkx
-issue_type: feature
-priority: 2
----
++++
+id = "78e8b48b-a93f-417c-91b4-2b4f31998e20"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Tutorial demo project — self-seeded repo with live cleave demonstration
 

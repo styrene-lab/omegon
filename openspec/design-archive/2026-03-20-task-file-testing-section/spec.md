@@ -1,3 +1,14 @@
++++
+id = "d1a06b38-5d3f-40d1-ad1e-c02b69c547f8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Task file Testing Requirements section — structure and injection — Design Spec (extracted)
 
 > Auto-extracted from docs/task-file-testing-section.md at decide-time.

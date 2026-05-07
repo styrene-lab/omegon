@@ -1,16 +1,13 @@
----
-id: Omegon-standalone
-title: "Make Omegon Standalone — Subsume the pi Harness"
-status: archived
-tags: [architecture, fork, standalone, strategic]
-open_questions: []
-dependencies: []
-related:
-  - rust-agent-loop
-archive_reason: "superseded"
-superseded_by: "ts-to-rust-migration"
-archived_at: "1775246517"
----
++++
+id = "c425d5a7-47a2-4a9c-991b-ddc83da056f4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Make Omegon Standalone — Subsume the pi Harness
 

@@ -1,3 +1,14 @@
++++
+id = "7e22425f-083c-4746-ae84-9a309eed2a08"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # opsx-core — Rust-backed lifecycle FSM for OpenSpec enforcement
 
 ## Intent

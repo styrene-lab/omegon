@@ -1,15 +1,13 @@
----
-id: tui-surface-pass
-title: TUI surface pass — expose new subsystems in dashboard, footer, selectors, and commands
-status: implemented
-parent: tui-visual-system
-tags: [tui, ux, dashboard, footer, commands, persona, mcp, auth, secrets, inference]
-open_questions: []
-branches: ["feature/tui-surface-pass"]
-openspec_change: tui-surface-pass
-issue_type: epic
-priority: 1
----
++++
+id = "62cf7bb7-42ca-402b-a150-40df291296bb"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # TUI surface pass — expose new subsystems in dashboard, footer, selectors, and commands
 

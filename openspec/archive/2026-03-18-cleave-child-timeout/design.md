@@ -1,3 +1,14 @@
++++
+id = "6aa4e7b5-e528-445f-8ed8-c2cf0f93d893"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave child timeout and idle detection — Design
 
 ## Architecture Decisions

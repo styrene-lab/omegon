@@ -1,3 +1,14 @@
++++
+id = "c838f2df-ce9c-4ac4-8a09-90962c22f9d1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dashboard and lifecycle publisher consolidation — Tasks
 
 ## 1. Consolidate OpenSpec dashboard refresh plumbing

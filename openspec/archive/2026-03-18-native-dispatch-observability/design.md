@@ -1,3 +1,14 @@
++++
+id = "560f9a15-ecfe-4d2e-b8da-a93ba44db46f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # native-dispatch-observability — Design
 
 ## Spec-Derived Architecture

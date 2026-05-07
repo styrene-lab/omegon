@@ -1,3 +1,14 @@
++++
+id = "97181927-6a03-44b2-8a27-f71b49ff27e7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # compaction-policy-hotfix — Design
 
 ## Spec-Derived Architecture

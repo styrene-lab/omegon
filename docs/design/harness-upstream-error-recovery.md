@@ -1,13 +1,13 @@
----
-id: harness-upstream-error-recovery
-title: Harness upstream error recovery and fallback signaling
-status: implemented
-parent: assess-bridge-completed-results
-tags: [harness, errors, retry, fallback, providers]
-open_questions: []
-branches: ["feature/harness-upstream-error-recovery"]
-openspec_change: harness-upstream-error-recovery
----
++++
+id = "b2d219a7-b43b-43ee-bf2e-47ad23f17b67"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Harness upstream error recovery and fallback signaling
 

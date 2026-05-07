@@ -1,3 +1,14 @@
++++
+id = "3a831f26-a50c-4492-9989-c3c998d4bbf0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # TS/Rust cleave split — experimental Rust backend, open-sourced TS harness, clean migration boundary — Design Spec (extracted)
 
 > Auto-extracted from docs/ts-rust-cleave-split.md at decide-time.

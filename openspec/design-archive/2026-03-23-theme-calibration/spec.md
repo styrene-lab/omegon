@@ -1,3 +1,14 @@
++++
+id = "7185070d-cc87-4791-8285-17b6ed97d334"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Theme calibration — /calibrate command, gamma/sat/hue slider, tweakcn-style theme export — Design Spec (extracted)
 
 > Auto-extracted from docs/theme-calibration.md at decide-time.

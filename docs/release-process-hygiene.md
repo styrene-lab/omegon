@@ -1,13 +1,13 @@
----
-id: release-process-hygiene
-title: Release process hygiene — close the gaps between version bumps, git tags, and CI releases
-status: implemented
-tags: [release, git, ci, versioning, process, 0.15.1]
-open_questions: []
-jj_change_id: xomkzkwmotwrlzyowltnxuxukkmtknkz
-issue_type: chore
-priority: 1
----
++++
+id = "f7e7cbad-864c-4dc5-8d4e-48c6b0c21339"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Release process hygiene — close the gaps between version bumps, git tags, and CI releases
 

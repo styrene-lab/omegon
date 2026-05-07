@@ -1,3 +1,14 @@
++++
+id = "7f512fc4-904d-4a9c-86de-359ddafc79e8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Phase 2 — Native TUI: Dioxus/ratatui replaces pi-tui bridge subprocess — Design Spec (extracted)
 
 > Auto-extracted from docs/rust-phase-2.md at decide-time.

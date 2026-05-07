@@ -1,3 +1,14 @@
++++
+id = "8c55b965-88dc-4d91-aa2e-5355ddc6ac35"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Interactive /tutorial system — structured onboarding replacing /demo — Design Spec
 
 > This spec defines acceptance criteria for the design phase.

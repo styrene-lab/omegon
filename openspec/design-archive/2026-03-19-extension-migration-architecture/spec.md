@@ -1,3 +1,14 @@
++++
+id = "17629e1f-0e09-42b1-bc47-c31c19da14c9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Extension migration architecture — TS extensions → Rust integrated features — Design Spec (extracted)
 
 > Auto-extracted from docs/extension-migration-architecture.md at decide-time.

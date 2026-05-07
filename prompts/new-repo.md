@@ -1,6 +1,14 @@
----
-description: Guided repository creation with identity awareness and org placement
----
++++
+id = "83069f20-6eb8-4486-a8c6-abfb7403ea0f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # New Repository
 
 Guide through creating a new repository with proper identity awareness and placement.

@@ -1,3 +1,14 @@
++++
+id = "0dfcbfbc-a402-414a-b5a7-ac8ea8238637"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Unified Live Dashboard for Cleave + Design Tree + OpenSpec
 
 ## Intent

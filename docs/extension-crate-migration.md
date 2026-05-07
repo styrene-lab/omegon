@@ -1,13 +1,13 @@
----
-id: extension-crate-migration
-title: Extension-to-crate migration — how each Omegon extension maps to the Rust architecture
-status: implemented
-parent: rust-agent-loop
-tags: [rust, architecture, extensions, migration, crates]
-open_questions: []
-issue_type: feature
-priority: 2
----
++++
+id = "0008f637-7f03-4c2a-9ac4-b36b40132b2b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Extension-to-crate migration — how each Omegon extension maps to the Rust architecture
 

@@ -1,11 +1,13 @@
----
-id: compaction-policy-hotfix
-title: Compaction policy hotfix — avoid heavy local default and redact clipboard temp paths
-status: implemented
-parent: operator-capability-profile
-tags: [compaction, memory, local-inference, ux, hotfix]
-open_questions: []
----
++++
+id = "9f5a615f-36de-4da7-b5a2-0634b0c35623"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Compaction policy hotfix — avoid heavy local default and redact clipboard temp paths
 

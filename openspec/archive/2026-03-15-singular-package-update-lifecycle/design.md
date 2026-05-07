@@ -1,3 +1,14 @@
++++
+id = "a6c820f1-dbde-400b-9b64-ecd1c0f2848b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Singular package integration and full-lifecycle update parity — Design
 
 ## Architecture Decisions

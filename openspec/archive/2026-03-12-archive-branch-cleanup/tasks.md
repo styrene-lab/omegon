@@ -1,3 +1,14 @@
++++
+id = "61b82419-a083-472b-a8b7-b04f391f3542"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Auto-delete merged feature branches on OpenSpec archive — Tasks
 
 ## 1. extensions/openspec/index.ts (modified)

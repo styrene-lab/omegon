@@ -1,3 +1,14 @@
++++
+id = "bcbd228f-70ad-405b-9657-99316137e49a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # update-lifecycle — Delta Spec
 
 ## ADDED Requirements

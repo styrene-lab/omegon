@@ -1,12 +1,13 @@
----
-id: tutorial-demo-web-ui
-title: Tutorial demo project — sprint board web UI with visible bugs
-status: implemented
-parent: tutorial-demo-project
-tags: [tutorial, demo, web-ui, 0.15.1]
-open_questions: []
-jj_change_id: ulryuzrsrlwyxtyysnklyxxtuuqqyxzy
----
++++
+id = "574f5c0d-794f-4917-aec9-dc4950150ed6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Tutorial demo project — sprint board web UI with visible bugs
 

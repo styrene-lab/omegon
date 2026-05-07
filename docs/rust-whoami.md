@@ -1,10 +1,13 @@
----
-id: rust-whoami
-title: Implement whoami tool in Rust
-status: implemented
-parent: ts-to-rust-migration
-open_questions: []
----
++++
+id = "0cedf892-a6b8-444d-9041-fb3d0c531d28"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Implement whoami tool in Rust
 

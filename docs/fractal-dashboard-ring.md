@@ -1,12 +1,13 @@
----
-id: fractal-dashboard-ring
-title: Fractal dashboard ring — living AI state visualization in the dashboard header
-status: implemented
-parent: fractal-status-surface
-tags: [tui, fractal, dashboard, visualization, ux, branding]
-open_questions: []
-jj_change_id: wrwwywopzwstqrnnlovxwkntyryvytno
----
++++
+id = "dae8cdfa-3716-420e-9d98-0beae88206d7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Fractal dashboard ring — living AI state visualization in the dashboard header
 

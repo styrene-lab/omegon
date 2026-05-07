@@ -1,3 +1,14 @@
++++
+id = "cc6c1fe3-1113-4eec-bc0a-3d6564622e78"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Scribe × Omegon integration — wrapper harness vs bolt-on extension — Design Spec (extracted)
 
 > Auto-extracted from docs/scribe-omegon-integration.md at decide-time.

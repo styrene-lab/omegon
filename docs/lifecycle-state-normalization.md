@@ -1,13 +1,13 @@
----
-id: lifecycle-state-normalization
-title: Lifecycle state normalization
-status: implemented
-parent: repo-consolidation-hardening
-tags: [lifecycle, design-tree, openspec, dashboard, shared-state]
-open_questions: []
-branches: []
-openspec_change: lifecycle-state-normalization
----
++++
+id = "50b9f9bf-1961-4043-9280-faa92c7f4fb7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Lifecycle state normalization
 

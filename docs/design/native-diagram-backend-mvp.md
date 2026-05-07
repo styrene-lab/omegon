@@ -1,12 +1,13 @@
----
-id: native-diagram-backend-mvp
-title: Native SVG diagram backend MVP
-status: implemented
-tags: [render, svg, native-diagrams, mvp]
-open_questions: []
-branches: ["feature/native-diagram-backend-mvp"]
-openspec_change: native-diagram-backend-mvp
----
++++
+id = "e1624b1e-8e5d-4f67-b971-84c861bad263"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Native SVG diagram backend MVP
 

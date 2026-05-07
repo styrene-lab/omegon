@@ -1,3 +1,14 @@
++++
+id = "959bf61a-e6a0-42ea-b136-d026a160e471"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Unified auth surface — single /login command, agent-callable, all backends — Tasks
 
 ## 1. core/crates/omegon/src/features/auth.rs (new)

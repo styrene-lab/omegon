@@ -1,13 +1,13 @@
----
-id: stability-step-0-6-9
-title: 0.6.9 stability step — runaway resource use, lingering pi processes, and usability hardening
-status: implemented
-parent: pi-fork-update-flow
-tags: [release, stability, usability, processes, resource-usage, runtime, clipboard]
-open_questions: []
-issue_type: bug
-priority: 1
----
++++
+id = "39e5741d-c1ac-414d-90d2-6f412a15e2a9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # 0.6.9 stability step — runaway resource use, lingering pi processes, and usability hardening
 

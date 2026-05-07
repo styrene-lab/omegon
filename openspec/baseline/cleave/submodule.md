@@ -1,3 +1,14 @@
++++
+id = "bbdeac69-c97d-4244-94d5-ebcb06707f25"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # cleave/submodule
 
 ### Requirement: Submodule commits on both success and failure paths

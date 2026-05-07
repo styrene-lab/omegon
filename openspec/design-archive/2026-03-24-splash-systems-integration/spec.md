@@ -1,3 +1,14 @@
++++
+id = "31ef9144-b8f1-4cfd-8160-1d336b383fd9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Splash screen systems check visualization — real loading behind the animation — Design Spec (extracted)
 
 > Auto-extracted from docs/splash-systems-integration.md at decide-time.

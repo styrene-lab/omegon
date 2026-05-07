@@ -1,3 +1,14 @@
++++
+id = "079d2778-488c-4961-9753-fc638a9046b1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # uri-resolver
 
 ### Requirement: URI resolution routes by file type and available handlers

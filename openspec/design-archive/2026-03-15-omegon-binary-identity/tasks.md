@@ -1,3 +1,14 @@
++++
+id = "0a71c90b-a4d8-4ca0-97da-8f1bb0f2962f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Omegon binary identity — eliminate direct product exposure as `pi` — Design Tasks
 
 ## 1. Design exploration

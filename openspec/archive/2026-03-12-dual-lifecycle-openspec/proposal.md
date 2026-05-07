@@ -1,3 +1,14 @@
++++
+id = "ad64b327-7d7d-4d70-a481-d0d6a3178834"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dual-Lifecycle OpenSpec — Design Layer + Implementation Layer
 
 ## Intent

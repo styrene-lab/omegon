@@ -1,3 +1,14 @@
++++
+id = "f8ef2806-bb0a-4457-93e1-5418c2de28c8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Rust session persistence — save/load conversation state, session resume — Design Spec (extracted)
 
 > Auto-extracted from docs/rust-session-persistence.md at decide-time.

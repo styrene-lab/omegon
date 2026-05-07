@@ -1,3 +1,14 @@
++++
+id = "46cbfffc-0167-4810-983e-4a36a1029283"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # ai/ directory convention — unified agent artifact home — Design Spec (extracted)
 
 > Auto-extracted from docs/ai-directory-convention.md at decide-time.

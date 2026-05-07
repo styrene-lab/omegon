@@ -1,3 +1,14 @@
++++
+id = "4352e052-0ea7-48a1-bd2e-3f9a3ba2ff31"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Inline image rendering — ratatui-image integration and clipboard paste — Design Spec (extracted)
 
 > Auto-extracted from docs/inline-image-rendering.md at decide-time.

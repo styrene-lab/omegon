@@ -1,3 +1,14 @@
++++
+id = "9be41e7a-768a-4d4f-bc61-25fc5065052b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dashboard and lifecycle publisher consolidation — Design
 
 ## Spec-Derived Architecture

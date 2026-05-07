@@ -1,3 +1,14 @@
++++
+id = "2a890af2-7d4d-46d9-b783-e9dd0ac7937b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # clickable-dashboard-items — Tasks
 
 ## 1. Clickable Design Tree dashboard items

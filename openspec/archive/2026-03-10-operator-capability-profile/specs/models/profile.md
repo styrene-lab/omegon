@@ -1,3 +1,14 @@
++++
+id = "cf27598d-fe5a-4720-ba1e-bcaf5b498b35"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # models/profile — Delta Spec
 
 ## ADDED Requirements

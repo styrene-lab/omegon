@@ -1,3 +1,14 @@
++++
+id = "3bc44b24-334f-431a-9f9e-664b90a0ec35"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Mutation–Eval Bridge: Impact Attribution Spec
 
 ## Status

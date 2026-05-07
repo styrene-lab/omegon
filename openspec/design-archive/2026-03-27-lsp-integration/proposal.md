@@ -1,3 +1,14 @@
++++
+id = "24800a1a-12d7-4579-9c80-5a3b313f992e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # LSP integration — language server protocol for code-aware navigation and diagnostics
 
 ## Intent

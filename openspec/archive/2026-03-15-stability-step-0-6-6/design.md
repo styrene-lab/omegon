@@ -1,3 +1,14 @@
++++
+id = "4186e3ae-a0d0-4f2c-b007-adeac713d2dd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # 0.6.6 stability step — subprocess boundary hardening and memory search resilience follow-up — Design
 
 ## Architecture Decisions

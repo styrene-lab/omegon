@@ -1,3 +1,14 @@
++++
+id = "e3909f61-c093-4548-b76f-4c7caf7c9d1d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # chronos
 
 ### Requirement: Week subcommand returns current and previous week boundaries

@@ -1,3 +1,14 @@
++++
+id = "ef2ac3c5-8615-490b-9163-c327be73fa9a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Extension Mind Query Pipeline Integration
 
 ## Overview

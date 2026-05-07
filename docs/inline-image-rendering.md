@@ -1,10 +1,13 @@
----
-id: inline-image-rendering
-title: Inline image rendering — ratatui-image integration and clipboard paste
-status: implemented
-parent: conversation-widget
-open_questions: []
----
++++
+id = "358d87f3-5fbc-4c5f-bb2c-d7c731dca117"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Inline image rendering — ratatui-image integration and clipboard paste
 

@@ -1,3 +1,14 @@
++++
+id = "41217a12-d17d-4468-a528-bd2ad80337bd"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # RepoModel — git state tracking in Rust core
 
 ## Intent

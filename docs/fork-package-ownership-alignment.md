@@ -1,13 +1,13 @@
----
-id: fork-package-ownership-alignment
-title: "Fork package ownership alignment — move `@cwilson613/pi-*` publishing under styrene-lab control"
-status: implemented
-parent: omegon-binary-identity
-tags: [npm, publishing, ownership, distribution, forks]
-open_questions: []
-branches: []
-openspec_change: fork-package-ownership-alignment
----
++++
+id = "bf256138-ac9d-4062-b108-7885ab116ec8"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Fork package ownership alignment — move `@cwilson613/pi-*` publishing under styrene-lab control
 

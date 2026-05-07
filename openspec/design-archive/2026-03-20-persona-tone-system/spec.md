@@ -1,3 +1,14 @@
++++
+id = "15b8f42b-94b8-49ff-9721-b839cf4d351e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Tone system — conversational voice layer independent of persona expertise — Design Spec (extracted)
 
 > Auto-extracted from docs/persona-tone-system.md at decide-time.

@@ -1,3 +1,14 @@
++++
+id = "845284d1-6dde-410d-b0b8-8a2208f78fb0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Native SVG diagram backend MVP — Design
 
 ## Architecture Decisions

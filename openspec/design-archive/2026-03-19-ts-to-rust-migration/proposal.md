@@ -1,3 +1,14 @@
++++
+id = "db9a788f-0803-4b33-aef9-07610443b326"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # TS→Rust Migration: Make omegon repo Rust-primary
 
 ## Intent

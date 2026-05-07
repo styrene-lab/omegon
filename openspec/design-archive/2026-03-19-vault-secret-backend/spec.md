@@ -1,3 +1,14 @@
++++
+id = "7dfebf77-f07c-440b-b65a-44a9656b03b4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Vault as first-class secret backend — operator-controlled secret storage with unseal lifecycle — Design Spec (extracted)
 
 > Auto-extracted from docs/vault-secret-backend.md at decide-time.

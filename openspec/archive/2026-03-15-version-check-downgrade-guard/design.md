@@ -1,3 +1,14 @@
++++
+id = "70d45610-159b-4d6c-a57d-bdd3a6d259f1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Version check downgrade guard — suppress false update prompts from older registry versions — Design
 
 ## Approach

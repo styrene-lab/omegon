@@ -1,3 +1,14 @@
++++
+id = "ffb6b51d-e24d-4189-906b-deab01d5f033"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Assess bridge returns completed structured results
 
 ## Intent

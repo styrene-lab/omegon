@@ -1,19 +1,13 @@
----
-subsystem: model-routing
-design_docs:
-  - design/codex-tier-routing.md
-  - design/effort-tiers.md
-  - design/provider-neutral-model-controls.md
-  - design/compaction-fallback-chain.md
-  - design/compaction-policy-hotfix.md
-  - design/cost-reduction.md
-openspec_baselines:
-  - effort.md
-  - routing.md
-  - routing/spec.md
-  - models/profile.md
-last_updated: 2026-03-10
----
++++
+id = "340427d5-b3d7-482f-bf17-9a824a3945b9"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Model Routing
 

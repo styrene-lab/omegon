@@ -1,3 +1,14 @@
++++
+id = "3851faef-0cf2-4f92-8ee9-1c09d6821f87"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave test-architect phase and post-implementation coverage review — Design Spec (extracted)
 
 > Auto-extracted from docs/cleave-test-architect.md at decide-time.

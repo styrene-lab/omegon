@@ -1,3 +1,14 @@
++++
+id = "e465be70-a4d0-491b-a615-73f837b0382e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # dashboard/terminal-title — Delta Spec
 
 ## ADDED Requirements

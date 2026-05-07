@@ -1,3 +1,14 @@
++++
+id = "cd7565ff-8c37-45b6-af2c-0146d920ec4b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Extension BYOM System Design
 
 ## Overview

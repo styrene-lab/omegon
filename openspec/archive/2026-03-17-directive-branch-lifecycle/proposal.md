@@ -1,3 +1,14 @@
++++
+id = "432bd6f1-33ec-4e23-b214-9370ed39e889"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Directive-Branch Lifecycle — Mode C implementation
 
 ## Intent

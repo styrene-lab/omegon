@@ -1,3 +1,14 @@
++++
+id = "bf3de358-efcf-4f02-8738-c80ae2a2a181"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Cleave Process Tree — bidirectional parent↔child coordination — Design Spec (extracted)
 
 > Auto-extracted from docs/cleave-process-tree.md at decide-time.

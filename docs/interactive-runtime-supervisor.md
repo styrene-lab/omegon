@@ -1,8 +1,13 @@
----
-title: Interactive runtime supervisor
-status: decided
-tags: [omegon, runtime, supervisor, queueing, auspex, tui, ipc]
----
++++
+id = "91a54f45-b04e-47c4-a9e6-d2fe6cfe28c7"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Interactive runtime supervisor
 

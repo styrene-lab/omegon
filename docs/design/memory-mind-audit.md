@@ -1,11 +1,13 @@
----
-id: memory-mind-audit
-title: "Memory / Mind System Audit — Context Injection, Accuracy, and Optimization"
-status: implemented
-tags: [memory, mind, context, dashboard, optimization, audit]
-open_questions: []
-openspec_change: memory-mind-audit-instrumentation
----
++++
+id = "e4f08270-e39e-4903-9e0d-02d09b1e7b65"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Memory / Mind System Audit — Context Injection, Accuracy, and Optimization
 

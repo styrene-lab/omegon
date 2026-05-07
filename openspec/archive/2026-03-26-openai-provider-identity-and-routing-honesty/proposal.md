@@ -1,3 +1,14 @@
++++
+id = "f61466e8-54ad-46ce-9837-580396d16f3e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # OpenAI provider identity and routing honesty — separate API vs ChatGPT/Codex auth, route GPT models correctly, and surface the active engine truthfully
 
 ## Intent

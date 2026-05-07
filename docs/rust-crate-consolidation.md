@@ -1,10 +1,13 @@
----
-id: rust-crate-consolidation
-title: Rust crate consolidation and ecosystem leverage
-status: implemented
-parent: ts-to-rust-migration
-open_questions: []
----
++++
+id = "6d8677d5-e8cb-4ac7-8cb7-0dee8437c953"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rust crate consolidation and ecosystem leverage
 

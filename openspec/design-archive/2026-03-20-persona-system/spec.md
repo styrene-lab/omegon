@@ -1,3 +1,14 @@
++++
+id = "cc291f8d-90b7-47e5-b597-7b07b624d43b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Persona System — domain-expert identities with dedicated mind stores — Design Spec (extracted)
 
 > Auto-extracted from docs/persona-system.md at decide-time.

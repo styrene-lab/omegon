@@ -1,3 +1,14 @@
++++
+id = "7addb56b-fcfb-4794-9a4b-d8146826ffef"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Clipboard image paste into chat/messages
 
 ## Intent

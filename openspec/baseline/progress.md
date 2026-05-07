@@ -1,3 +1,14 @@
++++
+id = "6568afaf-435e-433a-a172-d031ccb6aad0"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # progress
 
 ### Requirement: Rust orchestrator emits NDJSON progress events on stdout

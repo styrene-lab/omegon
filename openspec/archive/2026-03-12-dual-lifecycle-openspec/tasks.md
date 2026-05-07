@@ -1,3 +1,14 @@
++++
+id = "abe7c840-aa15-4d6f-9562-74b0084f6f5d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dual-Lifecycle OpenSpec — Design Layer + Implementation Layer — Tasks
 
 ## 1. Acceptance Criteria document model

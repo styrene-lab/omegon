@@ -1,3 +1,14 @@
++++
+id = "211b881c-f3b5-425f-9f13-8c7fcf147658"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # omegon.styrene.dev — installation landing page + install.sh hosting
 
 ## Intent

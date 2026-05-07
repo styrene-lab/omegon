@@ -1,13 +1,13 @@
----
-id: git-url-extension-installation
-title: "Git URL-based Extension Installation"
-status: seed
-parent: extension-registry-system
-tags: [registry, git, installation, cli]
-open_questions: []
-dependencies: []
-related: []
----
++++
+id = "400c1b78-219a-459c-a226-74e1eb9b5007"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Git URL-based Extension Installation
 

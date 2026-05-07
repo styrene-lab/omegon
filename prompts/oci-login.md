@@ -1,6 +1,14 @@
----
-description: Authenticate podman with OCI registries (ghcr.io, ECR, Docker Hub)
----
++++
+id = "bea103e2-0584-4304-a119-bd518207d2ca"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # OCI Registry Login
 
 Authenticate with OCI registries for container image operations.

@@ -1,10 +1,13 @@
----
-id: design-node-acceptance-criteria
-title: Design Node Acceptance Criteria — format, storage, and evaluation
-status: implemented
-parent: dual-lifecycle-openspec
-open_questions: []
----
++++
+id = "3d698594-f583-4d3d-bfa5-83d5a486b1c6"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Design Node Acceptance Criteria — format, storage, and evaluation
 

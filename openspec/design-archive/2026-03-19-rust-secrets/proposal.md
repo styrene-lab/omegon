@@ -1,3 +1,14 @@
++++
+id = "edaaefa9-75db-4488-8d39-4a6272b3e9f1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Port secrets system to Rust (redaction, recipes, tool guards)
 
 ## Intent

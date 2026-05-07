@@ -1,3 +1,14 @@
++++
+id = "06c376bf-26ed-40dc-b403-b625485d715e"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Dashboard cleanup and footer coherence — Design
 
 ## Spec-Derived Architecture

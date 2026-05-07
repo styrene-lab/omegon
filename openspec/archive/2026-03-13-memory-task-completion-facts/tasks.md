@@ -1,3 +1,14 @@
++++
+id = "60ba6365-2378-486c-be98-db038122af2b"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Memory: Task-Completion Facts — Mid-term "what was done" layer with fast decay — Tasks
 
 ## 1. Task-completion facts triggered by write/edit tool calls, not LLM discretion

@@ -1,3 +1,14 @@
++++
+id = "07d84be3-0776-407d-8d44-9be8d9d898d1"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Agent harness access to /assess tooling — Design
 
 ## Architecture Decisions

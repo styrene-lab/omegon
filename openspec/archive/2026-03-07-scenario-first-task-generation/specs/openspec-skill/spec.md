@@ -1,3 +1,14 @@
++++
+id = "c5d449dc-b253-4c6a-b425-13dbcd5feb2a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # OpenSpec Skill Task Generation Spec
 
 ## MODIFIED Requirements

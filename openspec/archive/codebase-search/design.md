@@ -1,3 +1,14 @@
++++
+id = "c87b9a9b-abb0-4d07-9aeb-0c4a9ce2ee78"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # codebase_search — Design
 
 ## Architecture Decisions

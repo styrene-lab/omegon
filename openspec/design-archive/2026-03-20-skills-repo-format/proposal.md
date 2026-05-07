@@ -1,3 +1,14 @@
++++
+id = "98adc6f6-5dd2-4374-a755-9f7391abf53f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Simple skills repo addition — open format for community skill packages
 
 ## Intent
