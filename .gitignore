@@ -18,6 +18,11 @@ __pycache__/
 # OS
 .DS_Store
 
+# Flynt vault local state
+.flynt-local/
+.flynt/config.toml
+.flynt/operator-settings.json
+
 # Claude Code
 .claude/
 

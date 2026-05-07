@@ -110,6 +110,10 @@ async fn worker_loop(
     event_tx: tokio::sync::broadcast::Sender<WorkerEvent>,
     secrets_tx: tokio::sync::oneshot::Sender<std::sync::Arc<omegon_secrets::SecretsManager>>,
 ) {
+    // Set the canonical project root env var so extensions can locate the workspace
+    // without depending on embedder-specific names (FLYNT_VAULT, CODEX_VAULT).
+    unsafe { std::env::set_var("OMEGON_PROJECT_ROOT", &cwd) };
+
     // Apply profile + initial model to the shared settings provided by spawn_worker.
     // Worker mutates these on SetModel/SetThinking/SetPosture; the ACP transport
     // thread reads them when rebuilding ConfigOption lists.

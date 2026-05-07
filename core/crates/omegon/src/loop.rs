@@ -877,14 +877,14 @@ pub async fn run(
                     continue;
                 }
                 let msg = if dead_mouse_nudges == 2 {
-                    "[System: You output content as text instead of using tools. \
-                     Use the write tool to save generated content to a file. \
-                     Do NOT write acknowledgment notes, warning logs, or compliance \
-                     markers — use tools to complete the actual task.]"
+                    "[System: You responded with text but did not advance the task. \
+                     If the user asked for a file change, use the appropriate tool. \
+                     If the user asked a question, your text answer may be sufficient — \
+                     but make sure it actually answers what they asked.]"
                 } else {
-                    "[System: You must use tools to complete the task. Write task \
-                     output files with the write tool. Do not create notes about \
-                     this warning. This is your final warning before the session ends.]"
+                    "[System: Multiple turns without task progress. Either answer the \
+                     user's question completely, or use tools to make the changes they \
+                     requested. Do not invent file-writing work the user did not ask for.]"
                 };
                 tracing::info!(
                     nudge = dead_mouse_nudges,
@@ -5049,8 +5049,9 @@ mod tests {
                 "tier {tier}: must not block delegation"
             );
             assert!(
-                msg.contains("produce") || msg.contains("Produce"),
-                "tier {tier}: must say 'produce' — task-neutral framing"
+                msg.contains("produce") || msg.contains("Produce")
+                    || msg.contains("answer") || msg.contains("Answer"),
+                "tier {tier}: must use task-neutral framing (produce/answer)"
             );
         }
     }

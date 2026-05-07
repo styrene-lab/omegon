@@ -153,6 +153,9 @@ impl AgentSetup {
         settings: Option<crate::settings::SharedSettings>,
     ) -> anyhow::Result<Self> {
         let cwd = std::fs::canonicalize(cwd)?;
+        // Canonical project root — extensions read this instead of
+        // embedder-specific env vars (FLYNT_VAULT, CODEX_VAULT).
+        unsafe { std::env::set_var("OMEGON_PROJECT_ROOT", &cwd) };
         let is_child = std::env::var("OMEGON_CHILD").is_ok();
 
         // ─── Secrets manager ────────────────────────────────────────────
