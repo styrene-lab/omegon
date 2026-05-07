@@ -863,7 +863,12 @@ impl OmegonAcpAgent {
             | "control/runtime_mode"
             | "control/secrets_view"
             | "control/vault_status"
-            | "control/auth_status" => {
+            | "control/auth_status"
+            | "control/note_add"
+            | "control/notes_view"
+            | "control/notes_clear"
+            | "control/workspace_status"
+            | "control/workspace_list" => {
                 let control_cmd = method.strip_prefix("control/").unwrap_or(method);
                 let arg = params.get("args").and_then(|v| v.as_str()).unwrap_or("");
                 let full_cmd = if arg.is_empty() {

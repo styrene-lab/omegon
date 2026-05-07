@@ -467,6 +467,82 @@ fn handle_control_request(
             }
         }
 
+        // ── Notes ──────────────────────────────────────────
+
+        "note_add" => {
+            if args.is_empty() {
+                "Usage: note_add <text>".into()
+            } else {
+                let notes_path = cwd.join(".omegon/notes.md");
+                if let Some(parent) = notes_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
+                let entry = format!("- [{timestamp}] {args}\n");
+                match std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&notes_path)
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()))
+                {
+                    Ok(()) => format!("Noted."),
+                    Err(e) => format!("Failed to save note: {e}"),
+                }
+            }
+        }
+
+        "notes_view" => {
+            let notes_path = cwd.join(".omegon/notes.md");
+            match std::fs::read_to_string(&notes_path) {
+                Ok(content) if !content.trim().is_empty() => {
+                    let count = content.lines().filter(|l| l.starts_with("- [")).count();
+                    format!("Notes ({count}):\n\n{content}")
+                }
+                _ => "No notes.".into(),
+            }
+        }
+
+        "notes_clear" => {
+            let notes_path = cwd.join(".omegon/notes.md");
+            let _ = std::fs::remove_file(&notes_path);
+            "Notes cleared.".into()
+        }
+
+        // ── Workspace ────────────────────────────────────
+
+        "workspace_status" => {
+            use crate::workspace::runtime::{read_workspace_lease, read_workspace_registry};
+            match read_workspace_lease(cwd).ok().flatten() {
+                Some(lease) => {
+                    let occupancy = read_workspace_registry(cwd)
+                        .ok().flatten()
+                        .map(|r| r.workspaces.len())
+                        .unwrap_or(1);
+                    format!(
+                        "Workspace\n  ID: {}\n  Label: {}\n  Path: {}\n  Backend: {}\n  Branch: {}\n  Role: {:?}\n  Kind: {:?}\n  Mutability: {:?}\n  Local views: {}",
+                        lease.workspace_id, lease.label, lease.path,
+                        lease.backend_kind.as_str(), lease.branch,
+                        lease.role, lease.workspace_kind, lease.mutability, occupancy,
+                    )
+                }
+                None => "Workspace: no local runtime metadata yet.".into(),
+            }
+        }
+
+        "workspace_list" => {
+            use crate::workspace::runtime::read_workspace_registry;
+            match read_workspace_registry(cwd).ok().flatten() {
+                Some(registry) => {
+                    let mut out = format!("Workspaces ({}):\n", registry.workspaces.len());
+                    for ws in &registry.workspaces {
+                        out.push_str(&format!("  {} — {} ({:?})\n", ws.workspace_id, ws.label, ws.role));
+                    }
+                    out
+                }
+                None => "No workspace registry found.".into(),
+            }
+        }
+
         "vault_status" => {
             "Vault status requires interactive terminal. Use `omegon vault status` in a shell.".into()
         }
