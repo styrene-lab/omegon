@@ -1,3 +1,14 @@
++++
+id = "d0736564-a981-46b4-808f-8a792c7a804c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Design Tree
 
 Structured design exploration documents for Omegon.

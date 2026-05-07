@@ -1,13 +1,13 @@
----
-id: mdserve-dioxus-frontend
-title: "mdserve: Dioxus WASM frontend — lifecycle/intelligence views"
-status: seed
-parent: markdown-viewport
-dependencies: [mdserve-lifecycle-backend]
-tags: [rendering, dioxus, wasm, frontend, lifecycle]
-open_questions: []
-issue_type: feature
----
++++
+id = "011ef9e9-a339-4f89-b349-72fd949af27d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # mdserve: Dioxus WASM frontend — lifecycle/intelligence views
 

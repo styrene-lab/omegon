@@ -1,13 +1,13 @@
----
-id: mdserve-lifecycle-backend
-title: "mdserve: Lifecycle data model + /api/ backend"
-status: seed
-parent: markdown-viewport
-open_questions:
-  - What is the right decomposition into implementation child nodes?
-issue_type: feature
-priority: 1
----
++++
+id = "830b4533-ad35-449c-89f7-a248daecaf26"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # mdserve: Lifecycle data model + /api/ backend
 

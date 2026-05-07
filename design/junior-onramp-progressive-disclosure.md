@@ -1,19 +1,13 @@
----
-id: junior-onramp-progressive-disclosure
-title: Junior on-ramp — progressive disclosure aligned with the CVT gearing system
-status: exploring
-parent: null
-tags: [ux, onboarding, progressive-disclosure, first-run, tutorial, posture, slim-mode, effort-tiers, cvt]
-related: [effort-tiers]
-open_questions:
-  - "Should experience_level be stored in profile.json or inferred from effort tier choice?"
-  - "How aggressively should slim mode suppress harness concepts — silent discard vs. collapsed hints?"
-  - "Should the tutorial auto-launch on first session, or remain opt-in with a stronger nudge?"
-  - "What is the right threshold for cleave guardrails — file count, diff size, or something else?"
-  - "Should /effort auto-downshift trigger after N low-usage turns, or only hint?"
-issue_type: epic
-priority: 2
----
++++
+id = "bba5c619-2b12-4eb9-9cd8-b9ec6d13e5a4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Junior on-ramp — progressive disclosure aligned with the CVT gearing system
 

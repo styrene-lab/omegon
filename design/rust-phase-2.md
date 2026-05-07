@@ -1,12 +1,13 @@
----
-id: rust-phase-2
-title: "Phase 2 — Native TUI: Dioxus/ratatui replaces pi-tui bridge subprocess"
-status: implementing
-parent: rust-agent-loop
-tags: [rust, phase-2, tui, dioxus, ratatui]
-open_questions: []
-priority: 1
----
++++
+id = "13f017d6-0a75-4d2d-b9f7-ce26f81578fa"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Phase 2 — Native TUI: Dioxus/ratatui replaces pi-tui bridge subprocess
 

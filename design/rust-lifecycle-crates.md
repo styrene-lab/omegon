@@ -1,12 +1,13 @@
----
-id: rust-lifecycle-crates
-title: Rust lifecycle crates — design-tree + openspec as native Rust modules
-status: implementing
-parent: rust-phase-1
-tags: [rust, lifecycle, design-tree, openspec, crates]
-open_questions: []
-priority: 2
----
++++
+id = "b13d38a0-1a22-45e7-bcc9-c8177024190c"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rust lifecycle crates — design-tree + openspec as native Rust modules
 

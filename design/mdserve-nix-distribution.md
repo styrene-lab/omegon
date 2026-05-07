@@ -1,13 +1,13 @@
----
-id: mdserve-nix-distribution
-title: "mdserve: Nix flake + packaging"
-status: seed
-parent: markdown-viewport
-dependencies: [mdserve-dioxus-frontend]
-tags: [nix, distribution, packaging, rust]
-open_questions: []
-issue_type: chore
----
++++
+id = "a5f6ec37-df0f-4034-b14a-7233aa1975e4"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # mdserve: Nix flake + packaging
 

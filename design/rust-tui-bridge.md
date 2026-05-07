@@ -1,12 +1,13 @@
----
-id: rust-tui-bridge
-title: TUI bridge — Node.js subprocess receives AgentEvents and drives pi-tui terminal rendering
-status: deferred
-parent: rust-phase-1
-tags: [rust, tui, bridge, subprocess, rendering]
-open_questions: []
-priority: 1
----
++++
+id = "c114151e-9b71-4931-a029-f665d71fd7e5"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # TUI bridge — Node.js subprocess receives AgentEvents and drives pi-tui terminal rendering
 

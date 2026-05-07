@@ -1,13 +1,13 @@
----
-id: nex-profiles
-title: Nex profiles — deterministic sandbox isolation for Omegon agents
-status: implementing
-parent: null
-tags: [security, isolation, containers, identity, nix]
-open_questions: []
-issue_type: feature
-priority: 2
----
++++
+id = "c2b8826a-e156-4255-9fd9-7da772af67cf"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Nex Profiles
 

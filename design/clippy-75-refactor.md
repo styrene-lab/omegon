@@ -1,13 +1,13 @@
----
-id: clippy-75-refactor
-title: Remaining 75 clippy warnings — structured refactoring plan
-status: decided
-parent: null
-tags: [code-quality, clippy, refactoring, performance]
-open_questions: []
-issue_type: tech-debt
-priority: 3
----
++++
+id = "524cd4bd-2536-46ee-9a57-77724a2b0725"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Remaining 75 clippy warnings — structured refactoring plan
 

@@ -1,14 +1,13 @@
----
-id: fuse-aware-design
-title: Defense-in-Depth with Sacrificial Fuse Points
-status: exploring
-tags: [security, architecture, resilience, cleave, openspec]
-dependencies: []
-open_questions:
-  - "Should this become two nodes — one for the general 'fuse-aware design' philosophy (applicable to cleave, openspec, styrened, all systems) and one for the concrete web security implementation (the first application of the pattern)?"
-  - "What does a fuse declaration look like in practice? A section in OpenSpec specs ('Fuse Points')? An annotation in cleave plans? A first-class primitive in the design tree?"
-  - "How does fuse-aware design interact with cleave_assess? Should complexity scoring account for whether failure modes at system boundaries are defined vs. undefined? An undefined fuse point is hidden complexity."
----
++++
+id = "38f1f0d4-ca4e-4e91-8df6-0113d2623d3d"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Defense-in-Depth with Sacrificial Fuse Points
 

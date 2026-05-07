@@ -1,3 +1,14 @@
++++
+id = "748ca5a1-a8c6-49d9-ad9c-ad82d38eb536"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
 # Auspex Enterprise Export — MQTT to SIEM / Kafka / OTLP
 
 Status: exploring

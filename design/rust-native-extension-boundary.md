@@ -1,11 +1,13 @@
----
-id: rust-native-extension-boundary
-title: Rust-Native Extension Boundary — Sidecar Protocol and Migration Path
-status: decided
-tags: [rust, architecture, extensions, ipc, protocol]
-dependencies: []
-open_questions: []
----
++++
+id = "2e89146a-ccbb-48b4-93d9-e8a038d7239a"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rust-Native Extension Boundary — Sidecar Protocol and Migration Path
 

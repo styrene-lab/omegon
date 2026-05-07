@@ -1,12 +1,13 @@
----
-id: rust-session-persistence
-title: "Rust session persistence — save/load conversation state, session resume"
-status: implemented
-parent: rust-phase-1
-tags: [rust, session, persistence, resume]
-open_questions: []
-priority: 2
----
++++
+id = "5c6c6081-9498-42a2-b354-71b639cde2fe"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rust session persistence — save/load conversation state, session resume
 

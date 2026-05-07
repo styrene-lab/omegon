@@ -1,9 +1,13 @@
----
-status: implemented
-tags: [cleave, openspec, task-generation]
-dependencies: []
-open_questions: []
----
++++
+id = "56100c98-30dd-4f8c-9b61-b86234d8a733"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Scenario-First Task Generation
 

@@ -1,12 +1,13 @@
----
-id: rust-compaction
-title: Rust compaction — context decay + LLM-driven summarization
-status: implementing
-parent: rust-phase-1
-tags: [rust, compaction, context, decay]
-open_questions: []
-priority: 1
----
++++
+id = "b74cbc1b-49db-47bd-bca3-2f4f73b9c20f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Rust compaction — context decay + LLM-driven summarization
 

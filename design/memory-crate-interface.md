@@ -1,11 +1,13 @@
----
-id: memory-crate-interface
-title: Memory crate interface boundary — MemoryBackend trait + integration with agent loop traits
-status: implemented
-parent: omega-memory-backend
-tags: [rust, memory, traits, interface, architecture]
-open_questions: []
----
++++
+id = "d3405642-a1ea-476d-803d-57162dd6b86f"
+tags = []
+aliases = []
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
 
 # Memory crate interface boundary — MemoryBackend trait + integration with agent loop traits
 
