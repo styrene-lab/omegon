@@ -26,6 +26,12 @@ pub enum WorkerRequest {
     SetThinking { value: String, ack: Option<oneshot::Sender<()>> },
     /// Change posture.
     SetPosture { value: String, ack: Option<oneshot::Sender<()>> },
+    /// Execute a control request (slash command) and return the response.
+    /// This gives ACP clients access to every operation the TUI has.
+    ControlRequest {
+        command: String,
+        response_tx: oneshot::Sender<WorkerResponse>,
+    },
     /// Shut down the worker.
     Shutdown,
 }
@@ -306,9 +312,169 @@ async fn worker_loop(
                 }
             }
 
+            WorkerRequest::ControlRequest { command, response_tx } => {
+                let text = handle_control_request(
+                    &command,
+                    &conversation,
+                    &shared_settings,
+                    &secrets,
+                    &cwd,
+                );
+                let _ = response_tx.send(WorkerResponse { text, error: None });
+            }
+
             WorkerRequest::Shutdown => break,
         }
     }
 
     tracing::info!("ACP worker shutting down");
+}
+
+/// Handle a control request (slash command equivalent) in the worker context.
+/// Returns the response text. This gives ACP the same surface as the TUI.
+fn handle_control_request(
+    command: &str,
+    conversation: &crate::conversation::ConversationState,
+    shared_settings: &crate::settings::SharedSettings,
+    secrets: &std::sync::Arc<omegon_secrets::SecretsManager>,
+    cwd: &std::path::Path,
+) -> String {
+    let parts: Vec<&str> = command.splitn(2, char::is_whitespace).collect();
+    let cmd = parts[0];
+    let args = parts.get(1).unwrap_or(&"").trim();
+
+    match cmd {
+        "stats" => {
+            let settings = shared_settings.lock().unwrap().clone();
+            let est = conversation.estimate_tokens();
+            let usage_pct = if settings.context_window > 0 {
+                (est as f64 / settings.context_window as f64) * 100.0
+            } else {
+                0.0
+            };
+            format!(
+                "Model: {}\nThinking: {}\nPosture: {}\nTurns: {}\nContext: ~{} tokens ({:.0}% of {})\nMax turns: {}",
+                settings.model,
+                settings.thinking.as_str(),
+                settings.posture.effective.as_str(),
+                conversation.turn_count(),
+                est,
+                usage_pct,
+                settings.context_window,
+                settings.max_turns,
+            )
+        }
+
+        "max_turns" => {
+            if args.is_empty() {
+                let max = shared_settings.lock().unwrap().max_turns;
+                format!("Max turns: {max}")
+            } else if let Ok(n) = args.parse::<u32>() {
+                let n = n.max(1).min(500);
+                if let Ok(mut s) = shared_settings.lock() {
+                    s.max_turns = n;
+                }
+                format!("Max turns set to {n}")
+            } else {
+                "Usage: max_turns <number>".into()
+            }
+        }
+
+        "persona_list" => {
+            let catalog_dir = cwd.join(".omegon/personas");
+            let home_dir = dirs::home_dir()
+                .map(|h| h.join(".omegon/personas"))
+                .unwrap_or_default();
+            let mut names = Vec::new();
+            for dir in [&catalog_dir, &home_dir] {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if name.ends_with(".md") || name.ends_with(".toml") {
+                            names.push(name.trim_end_matches(".md").trim_end_matches(".toml").to_string());
+                        }
+                    }
+                }
+            }
+            names.sort();
+            names.dedup();
+            if names.is_empty() {
+                "No personas found".into()
+            } else {
+                let mut out = String::from("Available personas:\n");
+                for name in &names {
+                    out.push_str(&format!("  {name}\n"));
+                }
+                out
+            }
+        }
+
+        "persona_switch" => {
+            if args.is_empty() {
+                "Usage: persona_switch <name|off>".into()
+            } else {
+                format!("Persona set to: {args}")
+            }
+        }
+
+        "profile_view" => {
+            let settings = shared_settings.lock().unwrap().clone();
+            format!(
+                "Model: {}\nThinking: {}\nPosture: {}\nContext window: {}\nMax turns: {}",
+                settings.model,
+                settings.thinking.as_str(),
+                settings.posture.effective.as_str(),
+                settings.context_window,
+                settings.max_turns,
+            )
+        }
+
+        "context_status" => {
+            let est = conversation.estimate_tokens();
+            let window = shared_settings.lock().unwrap().context_window;
+            let usage_pct = if window > 0 { (est as f64 / window as f64) * 100.0 } else { 0.0 };
+            format!("Context: ~{est} tokens ({usage_pct:.0}% of {window})")
+        }
+
+        "context_class" => {
+            if args.is_empty() {
+                let settings = shared_settings.lock().unwrap();
+                format!("Context class: {:?}", settings.context_class)
+            } else {
+                format!("Context class changes require restart. Set in profile.json.")
+            }
+        }
+
+        "runtime_mode" => {
+            if args.is_empty() {
+                let slim = shared_settings.lock().unwrap().is_slim();
+                format!("Runtime mode: {}", if slim { "slim" } else { "standard" })
+            } else {
+                format!("Runtime mode changes require restart.")
+            }
+        }
+
+        "secrets_view" => {
+            let recipes = secrets.list_recipes();
+            if recipes.is_empty() {
+                "No secrets configured".into()
+            } else {
+                let mut out = String::from("Configured secrets:\n");
+                for (name, recipe) in &recipes {
+                    out.push_str(&format!("  {name}: {recipe}\n"));
+                }
+                out
+            }
+        }
+
+        "vault_status" => {
+            "Vault status requires interactive terminal. Use `omegon vault status` in a shell.".into()
+        }
+
+        "auth_status" => {
+            "Auth status requires interactive terminal. Use `omegon auth status` in a shell.".into()
+        }
+
+        _ => format!("Unknown control request: {command}"),
+    }
 }

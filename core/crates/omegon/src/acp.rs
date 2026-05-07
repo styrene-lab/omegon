@@ -618,7 +618,7 @@ impl Agent for OmegonAcpAgent {
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
         let params: serde_json::Value = serde_json::from_str(args.params.get())
             .unwrap_or(serde_json::Value::Null);
-        let result = self.handle_ext_method(&args.method, params);
+        let result = self.handle_ext_method(&args.method, params).await;
         let raw = serde_json::value::RawValue::from_string(
             serde_json::to_string(&result.unwrap_or(serde_json::json!({"error": "internal error"})))?,
         )?;
@@ -627,7 +627,7 @@ impl Agent for OmegonAcpAgent {
 }
 
 impl OmegonAcpAgent {
-    fn handle_ext_method(
+    async fn handle_ext_method(
         &self,
         method: &str,
         params: serde_json::Value,
@@ -826,6 +826,52 @@ impl OmegonAcpAgent {
             "skills/install" => {
                 crate::skills::cmd_install()?;
                 Ok(serde_json::json!({ "ok": true }))
+            }
+
+            // ── Control requests (TUI parity) ────────────────────
+            // Route through the worker thread which has access to
+            // conversation state, settings, and secrets.
+
+            "control/stats"
+            | "control/max_turns"
+            | "control/persona_list"
+            | "control/persona_switch"
+            | "control/profile_view"
+            | "control/context_status"
+            | "control/context_class"
+            | "control/runtime_mode"
+            | "control/secrets_view"
+            | "control/vault_status"
+            | "control/auth_status" => {
+                let control_cmd = method.strip_prefix("control/").unwrap_or(method);
+                let arg = params.get("args").and_then(|v| v.as_str()).unwrap_or("");
+                let full_cmd = if arg.is_empty() {
+                    control_cmd.to_string()
+                } else {
+                    format!("{control_cmd} {arg}")
+                };
+
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let worker_tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
+                if let Some(wtx) = worker_tx {
+                    let _ = wtx.send(WorkerRequest::ControlRequest {
+                        command: full_cmd,
+                        response_tx: tx,
+                    }).await;
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        rx,
+                    ).await {
+                        Ok(Ok(resp)) => Ok(serde_json::json!({
+                            "text": resp.text,
+                            "error": resp.error,
+                        })),
+                        Ok(Err(_)) => anyhow::bail!("worker dropped response"),
+                        Err(_) => anyhow::bail!("control request timed out"),
+                    }
+                } else {
+                    anyhow::bail!("agent not initialized")
+                }
             }
 
             _ => anyhow::bail!("unknown extension method: {method}"),
