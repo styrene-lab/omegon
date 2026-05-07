@@ -313,7 +313,7 @@ async fn worker_loop(
             }
 
             WorkerRequest::ControlRequest { command, response_tx } => {
-                let text = handle_control_request(
+                let mut text = handle_control_request(
                     &command,
                     &conversation,
                     &shared_settings,
@@ -321,6 +321,21 @@ async fn worker_loop(
                     &cwd,
                     &mut bus,
                 );
+                // Persona switch needs async bus.execute_tool — handle the marker
+                if let Some(name) = text.strip_prefix("__async_persona_switch:") {
+                    let name = name.to_string();
+                    let cancel = CancellationToken::new();
+                    let args = serde_json::json!({ "name": name });
+                    match bus.execute_tool("switch_persona", "ctrl", args, cancel).await {
+                        Ok(result) => {
+                            text = result.content.iter()
+                                .filter_map(|b| if let omegon_traits::ContentBlock::Text { text } = b { Some(text.as_str()) } else { None })
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                        }
+                        Err(e) => text = format!("Persona switch failed: {e}"),
+                    }
+                }
                 let _ = response_tx.send(WorkerResponse { text, error: None });
             }
 
@@ -408,31 +423,8 @@ fn handle_control_request(
             if args.is_empty() {
                 "Usage: persona_switch <name|off>".into()
             } else {
-                let (personas, _) = crate::plugins::persona_loader::scan_available();
-                if args == "off" {
-                    let profile_path = cwd.join(".omegon/profile.json");
-                    if let Ok(raw) = std::fs::read_to_string(&profile_path) {
-                        if let Ok(mut profile) = serde_json::from_str::<serde_json::Value>(&raw) {
-                            profile["activePersona"] = serde_json::Value::String("off".into());
-                            let _ = std::fs::write(&profile_path, serde_json::to_string_pretty(&profile).unwrap_or_default());
-                        }
-                    }
-                    "Persona deactivated. Takes effect on next session.".into()
-                } else {
-                    match personas.iter().find(|p| p.id == args || p.name.eq_ignore_ascii_case(args)) {
-                        Some(p) => {
-                            let profile_path = cwd.join(".omegon/profile.json");
-                            if let Ok(raw) = std::fs::read_to_string(&profile_path) {
-                                if let Ok(mut profile) = serde_json::from_str::<serde_json::Value>(&raw) {
-                                    profile["activePersona"] = serde_json::Value::String(p.id.clone());
-                                    let _ = std::fs::write(&profile_path, serde_json::to_string_pretty(&profile).unwrap_or_default());
-                                }
-                            }
-                            format!("Persona set to: {}. Takes effect on next session.", p.name)
-                        }
-                        None => format!("Persona '{}' not found. Use persona_list to see available.", args),
-                    }
-                }
+                // Handled async in the worker loop — return marker
+                format!("__async_persona_switch:{args}")
             }
         }
 
