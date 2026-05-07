@@ -564,6 +564,43 @@ fn handle_control_request(
             }
         }
 
+        "provider_status" => {
+            let rt = tokio::runtime::Handle::current();
+            let providers = ["anthropic", "openai", "ollama"];
+            let mut lines = Vec::new();
+            for p in &providers {
+                let info = rt.block_on(crate::auth::resolve_with_refresh(p));
+                let (status, detail) = match info {
+                    Some((_, is_oauth)) => {
+                        let src = if is_oauth { "oauth" } else { "api_key" };
+                        ("authenticated", src.to_string())
+                    }
+                    None => {
+                        let creds = crate::auth::read_credentials(
+                            crate::auth::auth_json_key(p),
+                        );
+                        match creds {
+                            Some(c) if c.is_expired() => ("expired", "token expired — /login to refresh".into()),
+                            Some(_) => ("error", "credentials found but resolution failed".into()),
+                            None => ("missing", "not configured".into()),
+                        }
+                    }
+                };
+                lines.push(format!("{p}:{status}:{detail}"));
+            }
+            // Check Ollama separately
+            let ollama_ok = std::net::TcpStream::connect_timeout(
+                &"127.0.0.1:11434".parse().unwrap(),
+                std::time::Duration::from_millis(500),
+            ).is_ok();
+            if ollama_ok {
+                lines.push("ollama:running:localhost:11434".into());
+            } else {
+                lines.push("ollama:unavailable:not running".into());
+            }
+            lines.join("\n")
+        }
+
         "vault_status" => {
             "Vault status requires interactive terminal. Use `omegon vault status` in a shell.".into()
         }
