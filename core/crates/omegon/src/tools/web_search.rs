@@ -13,20 +13,25 @@ use tokio_util::sync::CancellationToken;
 /// Web search tool provider.
 pub struct WebSearchProvider {
     client: reqwest::Client,
+    web: omegon_web::WebClient,
     secrets: Option<std::sync::Arc<omegon_secrets::SecretsManager>>,
 }
 
 impl WebSearchProvider {
     pub fn new() -> Self {
+        let client = omegon_web::http::build_client();
         Self {
-            client: reqwest::Client::new(),
+            web: omegon_web::WebClient::from_client(client.clone()),
+            client,
             secrets: None,
         }
     }
 
     pub fn with_secrets(secrets: std::sync::Arc<omegon_secrets::SecretsManager>) -> Self {
+        let client = omegon_web::http::build_client();
         Self {
-            client: reqwest::Client::new(),
+            web: omegon_web::WebClient::from_client(client.clone()),
+            client,
             secrets: Some(secrets),
         }
     }
@@ -137,94 +142,7 @@ impl WebSearchProvider {
             anyhow::bail!("Response too large: {} bytes (max 1MB)", bytes.len());
         }
         let body = String::from_utf8_lossy(&bytes);
-        let extracted = omegon_web::extract_content(&body);
-        Ok(crate::util::truncate(&extracted, 50_000))
-    }
-
-    /// DuckDuckGo HTML search — zero-config, no API key.
-    /// Scrapes the lite HTML endpoint and extracts result links + snippets.
-    async fn search_ddg(
-        &self,
-        query: &str,
-        max_results: usize,
-    ) -> anyhow::Result<Vec<SearchResult>> {
-        let mut url = reqwest::Url::parse("https://html.duckduckgo.com/html/")?;
-        url.query_pairs_mut().append_pair("q", query);
-        let resp = self
-            .client
-            .get(url)
-            .header("User-Agent", "Mozilla/5.0 (compatible; omegon/0.15)")
-            .send()
-            .await?
-            .error_for_status()?
-            .text()
-            .await?;
-
-        let mut results = Vec::new();
-        // DuckDuckGo HTML results follow a consistent pattern:
-        //   <a class="result__a" href="...">Title</a>
-        //   <a class="result__snippet">Snippet text</a>
-        // We parse with simple string scanning — no HTML parser dep needed.
-        for chunk in resp.split("class=\"result__a\"").skip(1) {
-            if results.len() >= max_results {
-                break;
-            }
-            // Extract href
-            let raw_url = chunk
-                .split("href=\"")
-                .nth(1)
-                .and_then(|s| s.split('"').next())
-                .unwrap_or("");
-            if raw_url.is_empty() {
-                continue;
-            }
-            // Decode DDG redirect URL (//duckduckgo.com/l/?uddg=<encoded>&...)
-            let url = if raw_url.contains("uddg=") {
-                raw_url
-                    .split("uddg=")
-                    .nth(1)
-                    .and_then(|s| s.split('&').next())
-                    .map(|s| {
-                        percent_encoding::percent_decode_str(s)
-                            .decode_utf8_lossy()
-                            .into_owned()
-                    })
-                    .unwrap_or_default()
-            } else if raw_url.starts_with("//") || raw_url.contains("duckduckgo.com") {
-                continue; // internal DDG link without redirect target
-            } else {
-                raw_url.to_string()
-            };
-            if url.is_empty() {
-                continue;
-            }
-            // Extract title (text between > and </a>)
-            let title = chunk
-                .split('>')
-                .nth(1)
-                .and_then(|s| s.split("</a>").next())
-                .map(strip_html_tags)
-                .unwrap_or_default();
-            // Extract snippet from result__snippet class
-            let snippet = chunk
-                .split("class=\"result__snippet\"")
-                .nth(1)
-                .and_then(|s| s.split('>').nth(1))
-                .and_then(|s| s.split("</").next())
-                .map(strip_html_tags)
-                .unwrap_or_default();
-
-            if !title.is_empty() {
-                results.push(SearchResult {
-                    title,
-                    url,
-                    snippet,
-                    content: None,
-                    provider: "ddg".into(),
-                });
-            }
-        }
-        Ok(results)
+        Ok(crate::util::truncate(&omegon_web::extract_content(&body), 50_000))
     }
 
     async fn search_brave(
@@ -377,11 +295,12 @@ impl WebSearchProvider {
                     "bing" => omegon_web::Engine::Bing,
                     _ => omegon_web::Engine::DuckDuckGo,
                 };
-                let results = omegon_web::search(query, &omegon_web::SearchOptions {
+                let results = self.web.search(query, &omegon_web::SearchOptions {
                     max_results,
                     engines: vec![engine],
-                    aggregate: false,
-                }).await?;
+                    topic: topic.to_string(),
+                    ..Default::default()
+                }).await.map_err(|e| anyhow::anyhow!("{e}"))?;
                 Ok(results.into_iter().map(|r| SearchResult {
                     title: r.title,
                     url: r.url,

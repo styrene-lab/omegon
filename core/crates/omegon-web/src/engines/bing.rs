@@ -1,39 +1,55 @@
 //! Bing HTML search scraper.
-//!
-//! Scrapes bing.com/search with CSS selectors. No API key.
-//! Uses a random CVID to avoid session tracking.
-//! Reference: metasearch2 (CC0 licensed).
 
 use scraper::{ElementRef, Html, Selector};
 use url::Url;
 
 use super::SearchResult;
+use crate::SearchOptions;
 
 pub async fn search(
     client: &reqwest::Client,
     query: &str,
-    max_results: usize,
+    opts: &SearchOptions,
 ) -> anyhow::Result<Vec<SearchResult>> {
     let cvid = generate_cvid();
-    let url = Url::parse_with_params(
-        "https://www.bing.com/search",
-        &[
-            ("q", query),
-            ("cvid", &cvid),
-            ("FORM", "PERE"),
-        ],
+    let mut params = vec![
+        ("q", query.to_string()),
+        ("cvid", cvid.clone()),
+        ("FORM", "PERE".into()),
+    ];
+    if opts.topic == "news" {
+        params.push(("qft", "sortbydate".into()));
+        params.push(("form", "QBNH".into()));
+    }
+    if !opts.region.is_empty() {
+        params.push(("cc", opts.region.clone()));
+    }
+    if !opts.language.is_empty() {
+        params.push(("setlang", opts.language.clone()));
+    }
+
+    let url = Url::parse_with_params("https://www.bing.com/search",
+        &params.iter().map(|(k, v)| (*k, v.as_str())).collect::<Vec<_>>()
     )?;
 
-    let body = client
+    let resp = client
         .get(url)
-        .header("Cookie", format!("SRCHHPGUSR=IG={cvid}"))
+        .header("Cookie", format!("SRCHHPGUSR=IG={cvid}; _EDGE_V=1"))
         .send()
-        .await?
-        .error_for_status()?
-        .text()
         .await?;
 
-    parse_results(&body, max_results)
+    if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        anyhow::bail!("rate limited by Bing (429)");
+    }
+
+    let body = resp.error_for_status()?.text().await?;
+
+    // Detect consent wall
+    if body.contains("bnp_container") || body.contains("consent.bing.com") || body.contains("Before you continue") {
+        anyhow::bail!("bot detection / consent wall by Bing");
+    }
+
+    parse_results(&body, opts.max_results)
 }
 
 fn generate_cvid() -> String {

@@ -1,13 +1,11 @@
 //! Search engine implementations — Google, Bing, DuckDuckGo.
-//!
-//! Each engine scrapes the HTML search results page with CSS selectors.
-//! No API keys. No accounts. Just HTTP + HTML parsing.
 
 mod google;
 mod bing;
 mod duckduckgo;
 
-/// A search engine.
+use crate::SearchOptions;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Engine {
     Google,
@@ -28,21 +26,58 @@ impl Engine {
         &self,
         client: &reqwest::Client,
         query: &str,
-        max_results: usize,
-    ) -> anyhow::Result<Vec<SearchResult>> {
-        match self {
-            Self::Google => google::search(client, query, max_results).await,
-            Self::Bing => bing::search(client, query, max_results).await,
-            Self::DuckDuckGo => duckduckgo::search(client, query, max_results).await,
-        }
+        opts: &SearchOptions,
+    ) -> Result<Vec<SearchResult>, SearchError> {
+        let result = match self {
+            Self::Google => google::search(client, query, opts).await,
+            Self::Bing => bing::search(client, query, opts).await,
+            Self::DuckDuckGo => duckduckgo::search(client, query, opts).await,
+        };
+        result.map_err(|e| classify_error(self.name(), e))
     }
 }
 
-/// A single search result.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SearchResult {
     pub title: String,
     pub url: String,
     pub snippet: String,
     pub engine: &'static str,
+}
+
+/// Structured error for search failures.
+#[derive(Debug)]
+pub enum SearchError {
+    BotDetected { engine: String, detail: String },
+    RateLimited { engine: String },
+    ParseFailed { engine: String },
+    AllEnginesFailed(String),
+    Http { engine: String, source: String },
+}
+
+impl std::fmt::Display for SearchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BotDetected { engine, detail } => write!(f, "bot detection by {engine}: {detail}"),
+            Self::RateLimited { engine } => write!(f, "rate limited by {engine}"),
+            Self::ParseFailed { engine } => write!(f, "no results parsed from {engine} (possible markup change)"),
+            Self::AllEnginesFailed(msg) => write!(f, "{msg}"),
+            Self::Http { engine, source } => write!(f, "{engine}: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for SearchError {}
+
+fn classify_error(engine: &str, err: anyhow::Error) -> SearchError {
+    let msg = err.to_string();
+    if msg.contains("bot detection") || msg.contains("consent") || msg.contains("CAPTCHA") {
+        SearchError::BotDetected { engine: engine.into(), detail: msg }
+    } else if msg.contains("429") || msg.contains("rate limit") {
+        SearchError::RateLimited { engine: engine.into() }
+    } else if msg.contains("no results parsed") {
+        SearchError::ParseFailed { engine: engine.into() }
+    } else {
+        SearchError::Http { engine: engine.into(), source: msg }
+    }
 }

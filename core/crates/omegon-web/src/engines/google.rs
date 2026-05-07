@@ -7,43 +7,69 @@ use scraper::{Html, Selector};
 use url::Url;
 
 use super::SearchResult;
+use crate::SearchOptions;
 
 pub async fn search(
     client: &reqwest::Client,
     query: &str,
-    max_results: usize,
+    opts: &SearchOptions,
 ) -> anyhow::Result<Vec<SearchResult>> {
-    let url = Url::parse_with_params(
-        "https://www.google.com/search",
-        &[("q", query), ("nfpr", "1"), ("num", &max_results.to_string())],
+    let mut params = vec![
+        ("q", query.to_string()),
+        ("nfpr", "1".into()),
+        ("num", opts.max_results.to_string()),
+    ];
+    if opts.topic == "news" {
+        params.push(("tbm", "nws".into()));
+    }
+    if !opts.language.is_empty() {
+        params.push(("hl", opts.language.clone()));
+    }
+    if !opts.region.is_empty() {
+        params.push(("gl", opts.region.clone()));
+    }
+
+    let url = Url::parse_with_params("https://www.google.com/search",
+        &params.iter().map(|(k, v)| (*k, v.as_str())).collect::<Vec<_>>()
     )?;
 
-    let body = client
-        .get(url)
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?;
+    let resp = client.get(url).send().await?;
 
-    parse_results(&body, max_results)
+    if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        anyhow::bail!("rate limited by Google (429). Try again in 60 seconds.");
+    }
+
+    let body = resp.error_for_status()?.text().await?;
+
+    // Detect bot walls
+    if body.contains("detected unusual traffic") || body.contains("/sorry/") || body.contains("CAPTCHA") {
+        anyhow::bail!("bot detection by Google — CAPTCHA or abuse page served");
+    }
+
+    parse_results(&body, opts.max_results)
 }
 
 fn parse_results(body: &str, max_results: usize) -> anyhow::Result<Vec<SearchResult>> {
     let dom = Html::parse_document(body);
     let mut results = Vec::new();
 
-    // Primary selector: Google's standard result containers
-    let result_sel = Selector::parse("[jscontroller=SC7lYd]")
-        .or_else(|_| Selector::parse("div.g"))
-        .unwrap();
+    // Try primary selector first, fall back to div.g if it matches nothing
+    let primary = Selector::parse("[jscontroller=SC7lYd]").unwrap();
+    let fallback = Selector::parse("div.g").unwrap();
     let title_sel = Selector::parse("h3").unwrap();
     let link_sel = Selector::parse("a[href]").unwrap();
     let desc_sel = Selector::parse(
-        "div[data-sncf='2'], div[data-sncf='1,2'], div[style='-webkit-line-clamp:2'], span.st"
+        "div[data-sncf='2'], div[data-sncf='1,2'], div[style='-webkit-line-clamp:2'], span.st, div.VwiC3b"
     ).unwrap();
 
-    for result_el in dom.select(&result_sel) {
+    let result_els: Vec<_> = dom.select(&primary).collect();
+    let result_els = if result_els.is_empty() {
+        dom.select(&fallback).collect()
+    } else {
+        result_els
+    };
+
+    for result_el in result_els {
         if results.len() >= max_results {
             break;
         }
@@ -83,7 +109,7 @@ fn parse_results(body: &str, max_results: usize) -> anyhow::Result<Vec<SearchRes
     }
 
     if results.is_empty() {
-        anyhow::bail!("google: no results parsed (possible bot detection or markup change)");
+        anyhow::bail!("google: no results parsed (possible markup change or bot detection)");
     }
 
     Ok(results)

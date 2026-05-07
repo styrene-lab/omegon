@@ -1,27 +1,40 @@
 //! DuckDuckGo HTML search scraper.
-//!
-//! Scrapes html.duckduckgo.com/html/ with CSS selectors.
-//! No API key. More robust than the previous string-scanning approach.
 
 use scraper::{Html, Selector};
 
 use super::SearchResult;
+use crate::SearchOptions;
 
 pub async fn search(
     client: &reqwest::Client,
     query: &str,
-    max_results: usize,
+    opts: &SearchOptions,
 ) -> anyhow::Result<Vec<SearchResult>> {
+    let effective_query = if opts.topic == "news" {
+        format!("{query} !news")
+    } else {
+        query.to_string()
+    };
+
     let resp = client
         .post("https://html.duckduckgo.com/html/")
-        .form(&[("q", query)])
+        .form(&[("q", effective_query.as_str())])
         .send()
-        .await?
-        .error_for_status()?
-        .text()
         .await?;
 
-    parse_results(&resp, max_results)
+    if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || resp.status() == reqwest::StatusCode::FORBIDDEN
+    {
+        anyhow::bail!("rate limited by DuckDuckGo ({})", resp.status());
+    }
+
+    let body = resp.error_for_status()?.text().await?;
+
+    if body.contains("blocked") && body.contains("automated") {
+        anyhow::bail!("bot detection by DuckDuckGo");
+    }
+
+    parse_results(&body, opts.max_results)
 }
 
 fn parse_results(body: &str, max_results: usize) -> anyhow::Result<Vec<SearchResult>> {
@@ -46,10 +59,7 @@ fn parse_results(body: &str, max_results: usize) -> anyhow::Result<Vec<SearchRes
         let raw_url = title_el.value().attr("href").unwrap_or_default();
         let url = decode_ddg_url(raw_url);
 
-        if url.is_empty() || title.is_empty() {
-            continue;
-        }
-        if url.contains("duckduckgo.com") {
+        if url.is_empty() || title.is_empty() || url.contains("duckduckgo.com") {
             continue;
         }
 
@@ -75,7 +85,6 @@ fn parse_results(body: &str, max_results: usize) -> anyhow::Result<Vec<SearchRes
 }
 
 fn decode_ddg_url(raw: &str) -> String {
-    // DDG redirects through //duckduckgo.com/l/?uddg=<encoded>&...
     if raw.contains("uddg=") {
         if let Some(encoded) = raw.split("uddg=").nth(1).and_then(|s| s.split('&').next()) {
             return percent_encoding::percent_decode_str(encoded)
@@ -101,13 +110,11 @@ mod tests {
 
     #[test]
     fn decode_direct_url() {
-        let raw = "https://example.com/page";
-        assert_eq!(decode_ddg_url(raw), raw);
+        assert_eq!(decode_ddg_url("https://example.com"), "https://example.com");
     }
 
     #[test]
-    fn skip_internal_ddg_link() {
-        let raw = "//duckduckgo.com/some-internal";
-        assert_eq!(decode_ddg_url(raw), "");
+    fn skip_internal() {
+        assert_eq!(decode_ddg_url("//duckduckgo.com/foo"), "");
     }
 }
