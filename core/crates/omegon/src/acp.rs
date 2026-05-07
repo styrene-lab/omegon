@@ -618,9 +618,12 @@ impl Agent for OmegonAcpAgent {
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
         let params: serde_json::Value = serde_json::from_str(args.params.get())
             .unwrap_or(serde_json::Value::Null);
-        let result = self.handle_ext_method(&args.method, params).await;
+        let response_value = match self.handle_ext_method(&args.method, params).await {
+            Ok(v) => v,
+            Err(e) => serde_json::json!({ "error": e.to_string() }),
+        };
         let raw = serde_json::value::RawValue::from_string(
-            serde_json::to_string(&result.unwrap_or(serde_json::json!({"error": "internal error"})))?,
+            serde_json::to_string(&response_value)?,
         )?;
         Ok(ExtResponse::new(raw.into()))
     }
@@ -731,7 +734,14 @@ impl OmegonAcpAgent {
                     anyhow::bail!("extension '{ext_name}' not found");
                 }
                 let manifest = ExtensionManifest::from_extension_dir(&ext_dir)?;
-                if let Some(field) = manifest.config.get(key) {
+                if !manifest.config.is_empty() {
+                    let field = manifest.config.get(key).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "unknown config key '{key}' for extension '{ext_name}'. \
+                             Declared keys: {:?}",
+                            manifest.config.keys().collect::<Vec<_>>()
+                        )
+                    })?;
                     config_store::validate_field(field, value)?;
                 }
                 config_store::write_config_value(&ext_dir, key, value)?;
@@ -748,6 +758,17 @@ impl OmegonAcpAgent {
                 let ext_dir = extensions_dir.join(ext_name);
                 if !ext_dir.exists() {
                     anyhow::bail!("extension '{ext_name}' not found");
+                }
+                let manifest = ExtensionManifest::from_extension_dir(&ext_dir)?;
+                let all_secrets: Vec<&str> = manifest.secrets.required.iter()
+                    .chain(manifest.secrets.optional.iter())
+                    .map(|s| s.as_str())
+                    .collect();
+                if !all_secrets.is_empty() && !all_secrets.contains(&name) {
+                    anyhow::bail!(
+                        "secret '{name}' is not declared by extension '{ext_name}'. \
+                         Declared secrets: {:?}", all_secrets
+                    );
                 }
                 if let Some(ref mgr) = *self.secrets.borrow() {
                     mgr.set_keyring_secret(name, value)?;

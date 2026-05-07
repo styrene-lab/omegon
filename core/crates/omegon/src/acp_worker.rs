@@ -345,7 +345,7 @@ fn handle_control_request(
 
     match cmd {
         "stats" => {
-            let settings = shared_settings.lock().unwrap().clone();
+            let settings = shared_settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
             let est = conversation.estimate_tokens();
             let usage_pct = if settings.context_window > 0 {
                 (est as f64 / settings.context_window as f64) * 100.0
@@ -367,7 +367,7 @@ fn handle_control_request(
 
         "max_turns" => {
             if args.is_empty() {
-                let max = shared_settings.lock().unwrap().max_turns;
+                let max = shared_settings.lock().unwrap_or_else(|e| e.into_inner()).max_turns;
                 format!("Max turns: {max}")
             } else if let Ok(n) = args.parse::<u32>() {
                 let n = n.max(1).min(500);
@@ -418,7 +418,7 @@ fn handle_control_request(
         }
 
         "profile_view" => {
-            let settings = shared_settings.lock().unwrap().clone();
+            let settings = shared_settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
             format!(
                 "Model: {}\nThinking: {}\nPosture: {}\nContext window: {}\nMax turns: {}",
                 settings.model,
@@ -431,14 +431,14 @@ fn handle_control_request(
 
         "context_status" => {
             let est = conversation.estimate_tokens();
-            let window = shared_settings.lock().unwrap().context_window;
+            let window = shared_settings.lock().unwrap_or_else(|e| e.into_inner()).context_window;
             let usage_pct = if window > 0 { (est as f64 / window as f64) * 100.0 } else { 0.0 };
             format!("Context: ~{est} tokens ({usage_pct:.0}% of {window})")
         }
 
         "context_class" => {
             if args.is_empty() {
-                let settings = shared_settings.lock().unwrap();
+                let settings = shared_settings.lock().unwrap_or_else(|e| e.into_inner());
                 format!("Context class: {:?}", settings.context_class)
             } else {
                 format!("Context class changes require restart. Set in profile.json.")
@@ -447,7 +447,7 @@ fn handle_control_request(
 
         "runtime_mode" => {
             if args.is_empty() {
-                let slim = shared_settings.lock().unwrap().is_slim();
+                let slim = shared_settings.lock().unwrap_or_else(|e| e.into_inner()).is_slim();
                 format!("Runtime mode: {}", if slim { "slim" } else { "standard" })
             } else {
                 format!("Runtime mode changes require restart.")

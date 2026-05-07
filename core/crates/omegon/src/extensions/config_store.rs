@@ -73,9 +73,14 @@ pub fn validate_field(
         }
         ConfigFieldType::String | ConfigFieldType::Text => {
             if let Some(ref pattern) = field.pattern {
-                if let Ok(re) = regex_lite::Regex::new(pattern) {
-                    if !re.is_match(value) {
-                        anyhow::bail!("value does not match pattern: {pattern}");
+                match regex_lite::Regex::new(pattern) {
+                    Ok(re) => {
+                        if !re.is_match(value) {
+                            anyhow::bail!("value does not match pattern: {pattern}");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(pattern, error = %e, "invalid regex in config field — skipping validation");
                     }
                 }
             }
