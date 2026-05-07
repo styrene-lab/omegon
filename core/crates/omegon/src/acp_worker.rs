@@ -319,6 +319,7 @@ async fn worker_loop(
                     &shared_settings,
                     &secrets,
                     &cwd,
+                    &mut bus,
                 );
                 let _ = response_tx.send(WorkerResponse { text, error: None });
             }
@@ -338,6 +339,7 @@ fn handle_control_request(
     shared_settings: &crate::settings::SharedSettings,
     secrets: &std::sync::Arc<omegon_secrets::SecretsManager>,
     cwd: &std::path::Path,
+    bus: &mut crate::bus::EventBus,
 ) -> String {
     let parts: Vec<&str> = command.splitn(2, char::is_whitespace).collect();
     let cmd = parts[0];
@@ -381,39 +383,56 @@ fn handle_control_request(
         }
 
         "persona_list" => {
-            let catalog_dir = cwd.join(".omegon/personas");
-            let home_dir = dirs::home_dir()
-                .map(|h| h.join(".omegon/personas"))
-                .unwrap_or_default();
-            let mut names = Vec::new();
-            for dir in [&catalog_dir, &home_dir] {
-                if let Ok(entries) = std::fs::read_dir(dir) {
-                    for entry in entries.flatten() {
-                        let name = entry.file_name().to_string_lossy().to_string();
-                        if name.ends_with(".md") || name.ends_with(".toml") {
-                            names.push(name.trim_end_matches(".md").trim_end_matches(".toml").to_string());
-                        }
+            let (personas, tones) = crate::plugins::persona_loader::scan_available();
+            let mut out = String::new();
+            if personas.is_empty() && tones.is_empty() {
+                out.push_str("No personas or tones found.");
+            } else {
+                if !personas.is_empty() {
+                    out.push_str(&format!("Personas ({}):\n", personas.len()));
+                    for p in &personas {
+                        out.push_str(&format!("  {} — {}\n", p.name, p.description));
+                    }
+                }
+                if !tones.is_empty() {
+                    out.push_str(&format!("\nTones ({}):\n", tones.len()));
+                    for t in &tones {
+                        out.push_str(&format!("  {} — {}\n", t.name, t.description));
                     }
                 }
             }
-            names.sort();
-            names.dedup();
-            if names.is_empty() {
-                "No personas found".into()
-            } else {
-                let mut out = String::from("Available personas:\n");
-                for name in &names {
-                    out.push_str(&format!("  {name}\n"));
-                }
-                out
-            }
+            out
         }
 
         "persona_switch" => {
             if args.is_empty() {
                 "Usage: persona_switch <name|off>".into()
             } else {
-                format!("Persona set to: {args}")
+                let (personas, _) = crate::plugins::persona_loader::scan_available();
+                if args == "off" {
+                    let profile_path = cwd.join(".omegon/profile.json");
+                    if let Ok(raw) = std::fs::read_to_string(&profile_path) {
+                        if let Ok(mut profile) = serde_json::from_str::<serde_json::Value>(&raw) {
+                            profile["activePersona"] = serde_json::Value::String("off".into());
+                            let _ = std::fs::write(&profile_path, serde_json::to_string_pretty(&profile).unwrap_or_default());
+                        }
+                    }
+                    "Persona deactivated. Takes effect on next session.".into()
+                } else {
+                    match personas.iter().find(|p| p.id == args || p.name.eq_ignore_ascii_case(args)) {
+                        Some(p) => {
+                            let profile_path = cwd.join(".omegon/profile.json");
+                            if let Ok(raw) = std::fs::read_to_string(&profile_path) {
+                                if let Ok(mut profile) = serde_json::from_str::<serde_json::Value>(&raw) {
+                                    profile["activePersona"] = serde_json::Value::String(p.id.clone());
+                                    let _ = std::fs::write(&profile_path, serde_json::to_string_pretty(&profile).unwrap_or_default());
+                                }
+                            }
+                            format!("Persona set to: {}. Takes effect on next session.", p.name)
+                        }
+                        None => format!("Persona '{}' not found. Use persona_list to see available.", args),
+                    }
+                }
             }
         }
 
@@ -540,6 +559,16 @@ fn handle_control_request(
                     out
                 }
                 None => "No workspace registry found.".into(),
+            }
+        }
+
+        // ── Design tree ────────────────────────────────
+
+        "tree_view" => {
+            match bus.dispatch_command("design", args) {
+                omegon_traits::CommandResult::Display(msg) => msg,
+                omegon_traits::CommandResult::Handled => "Design tree command handled.".into(),
+                omegon_traits::CommandResult::NotHandled => "Design tree not available.".into(),
             }
         }
 

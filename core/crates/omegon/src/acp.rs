@@ -868,7 +868,8 @@ impl OmegonAcpAgent {
             | "control/notes_view"
             | "control/notes_clear"
             | "control/workspace_status"
-            | "control/workspace_list" => {
+            | "control/workspace_list"
+            | "control/tree_view" => {
                 let control_cmd = method.strip_prefix("control/").unwrap_or(method);
                 let arg = params.get("args").and_then(|v| v.as_str()).unwrap_or("");
                 let full_cmd = if arg.is_empty() {
