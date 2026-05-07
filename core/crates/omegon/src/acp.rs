@@ -668,25 +668,31 @@ impl OmegonAcpAgent {
 
                         let secret_status = |names: &[String]| -> Vec<serde_json::Value> {
                             names.iter().map(|name| {
-                                let (resolved, source) = if let Some(ref mgr) = *self.secrets.borrow() {
-                                    let has_value = mgr.resolve(name).is_some();
+                                // Check recipe existence only — don't call resolve()
+                                // which can trigger keychain prompts or shell execution.
+                                let (has_recipe, source) = if let Some(ref mgr) = *self.secrets.borrow() {
                                     let recipes = mgr.list_recipes();
-                                    let src = recipes.iter()
-                                        .find(|(n, _)| n == name)
-                                        .map(|(_, r)| {
-                                            if r.starts_with("keyring:") { "keyring" }
-                                            else if r.starts_with("env:") { "env" }
-                                            else if r.starts_with("vault:") { "vault" }
-                                            else if r.starts_with("cmd:") { "cmd" }
-                                            else { "recipe" }
-                                        });
-                                    (has_value, src.map(String::from))
+                                    match recipes.iter().find(|(n, _)| n == name) {
+                                        Some((_, r)) => {
+                                            let src = if r.starts_with("keyring:") { "keyring" }
+                                                else if r.starts_with("env:") { "env" }
+                                                else if r.starts_with("vault:") { "vault" }
+                                                else if r.starts_with("cmd:") { "cmd" }
+                                                else { "recipe" };
+                                            (true, Some(String::from(src)))
+                                        }
+                                        None => {
+                                            // Fallback: check env var existence (cheap)
+                                            let in_env = std::env::var(name).is_ok();
+                                            (in_env, if in_env { Some("env".into()) } else { None })
+                                        }
+                                    }
                                 } else {
                                     (false, None)
                                 };
                                 serde_json::json!({
                                     "name": name,
-                                    "resolved": resolved,
+                                    "resolved": has_recipe,
                                     "source": source,
                                 })
                             }).collect()
@@ -916,35 +922,52 @@ impl OmegonAcpAgent {
                     .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                     .unwrap_or_default();
 
-                let slug = name.to_lowercase().replace(' ', "-")
-                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>();
+                let slug: String = name.to_lowercase().replace(' ', "-")
+                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+                if slug.is_empty() || slug.contains("..") {
+                    anyhow::bail!("invalid persona name — must contain alphanumeric characters");
+                }
                 let home = crate::paths::omegon_home()?;
                 let persona_dir = home.join("armory/personas").join(&slug);
                 std::fs::create_dir_all(&persona_dir)?;
 
                 let id = format!("user.{slug}");
-                let plugin_toml = format!(
-                    r#"[plugin]
-type = "persona"
-id = "{id}"
-name = "{name}"
-version = "1.0.0"
-description = "{description}"
 
-[persona.identity]
-directive = "PERSONA.md"
+                // Build plugin.toml via toml serialization to prevent injection
+                let mut plugin = toml::Table::new();
+                let mut plugin_section = toml::Table::new();
+                plugin_section.insert("type".into(), "persona".into());
+                plugin_section.insert("id".into(), id.clone().into());
+                plugin_section.insert("name".into(), name.into());
+                plugin_section.insert("version".into(), "1.0.0".into());
+                plugin_section.insert("description".into(), description.into());
+                plugin.insert("plugin".into(), toml::Value::Table(plugin_section));
 
-[persona.tools]
-disable = {disabled_tools:?}
+                let mut persona = toml::Table::new();
+                let mut identity = toml::Table::new();
+                identity.insert("directive".into(), "PERSONA.md".into());
+                persona.insert("identity".into(), toml::Value::Table(identity));
 
-[persona.style]
-{badge_line}
-"#,
-                    disabled_tools = disabled_tools,
-                    badge_line = badge.map(|b| format!("badge = \"{b}\"")).unwrap_or_default(),
-                );
+                if !disabled_tools.is_empty() {
+                    let mut tools = toml::Table::new();
+                    tools.insert("disable".into(), toml::Value::Array(
+                        disabled_tools.iter().map(|s| toml::Value::String(s.clone())).collect()
+                    ));
+                    persona.insert("tools".into(), toml::Value::Table(tools));
+                }
 
-                std::fs::write(persona_dir.join("plugin.toml"), plugin_toml)?;
+                if let Some(b) = badge {
+                    let mut style = toml::Table::new();
+                    style.insert("badge".into(), b.into());
+                    persona.insert("style".into(), toml::Value::Table(style));
+                }
+
+                plugin.insert("persona".into(), toml::Value::Table(persona));
+
+                std::fs::write(
+                    persona_dir.join("plugin.toml"),
+                    toml::to_string_pretty(&plugin)?,
+                )?;
                 std::fs::write(persona_dir.join("PERSONA.md"), directive)?;
 
                 Ok(serde_json::json!({
@@ -986,8 +1009,11 @@ disable = {disabled_tools:?}
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
                 let content = params["content"].as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'content' field (SKILL.md body)"))?;
-                let slug = name.to_lowercase().replace(' ', "-")
-                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>();
+                let slug: String = name.to_lowercase().replace(' ', "-")
+                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+                if slug.is_empty() || slug.contains("..") {
+                    anyhow::bail!("invalid skill name");
+                }
                 let home = crate::paths::omegon_home()?;
                 let skill_dir = home.join("skills").join(&slug);
                 std::fs::create_dir_all(&skill_dir)?;
@@ -1001,6 +1027,9 @@ disable = {disabled_tools:?}
             "skills/delete" => {
                 let name = params["name"].as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
+                    anyhow::bail!("invalid skill name: path traversal rejected");
+                }
                 let home = crate::paths::omegon_home()?;
                 let skill_dir = home.join("skills").join(name);
                 if skill_dir.exists() {
