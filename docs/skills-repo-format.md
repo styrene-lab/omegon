@@ -1,12 +1,20 @@
 +++
 id = "208081b6-a285-4323-8a38-1cb0a0d84e29"
-tags = []
-aliases = []
+kind = "document"
+title = "Simple skills repo addition — open format for community skill packages"
+status = "implemented"
+tags = ["skills", "distribution", "open-format", "community", "extensions"]
+aliases = ["skills-repo-format"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "persona-system"
 +++
 
 # Simple skills repo addition — open format for community skill packages

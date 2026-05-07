@@ -1,12 +1,22 @@
 +++
 id = "b6d46ccd-7e5d-4a30-a2b9-29eacb8d7bb7"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Omega memory Rust port — rusqlite + Axum handlers satisfying api-types.ts"
+status = "deferred"
+tags = ["rust", "memory", "sqlite", "axum", "port"]
+aliases = ["omega-memory-rust-port"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = ["omega-memory-backend"]
+issue_type = "feature"
+open_questions = []
+parent = "omega-memory-backend"
+priority = "3"
 +++
 
 # Omega memory Rust port — rusqlite + Axum handlers satisfying api-types.ts

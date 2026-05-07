@@ -1,12 +1,18 @@
 +++
 id = "ebd74178-6739-49a4-8a2d-7e753fb00ee6"
-tags = []
-aliases = []
+kind = "document"
+title = "Release milestone and feature freeze system"
+status = "implemented"
+tags = ["meta", "process"]
+aliases = ["release-milestone-system"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Release milestone and feature freeze system

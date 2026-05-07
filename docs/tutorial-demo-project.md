@@ -1,12 +1,21 @@
 +++
 id = "78e8b48b-a93f-417c-91b4-2b4f31998e20"
-tags = []
-aliases = []
+kind = "document"
+title = "Tutorial demo project — self-seeded repo with live cleave demonstration"
+status = "implemented"
+tags = ["tutorial", "demo", "cleave", "onboarding", "0.15.0"]
+aliases = ["tutorial-demo-project"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "tutorial-system"
+priority = "2"
 +++
 
 # Tutorial demo project — self-seeded repo with live cleave demonstration

@@ -1,12 +1,19 @@
 +++
 id = "6c0dc46a-2c06-4e73-9cae-7773b6f62afd"
+kind = "document"
+title = "Brutus release pipeline"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["brutus-release-pipeline"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-versioning"
 +++
 
 # Brutus release pipeline

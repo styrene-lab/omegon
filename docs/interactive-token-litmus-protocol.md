@@ -1,12 +1,19 @@
 +++
 id = "e9c7f78d-4ee5-4cc8-b5c5-26bb50445b77"
-tags = []
+kind = "document"
+title = "Interactive Token Litmus Protocol"
+status = "active"
+tags = ["benchmark", "interactive", "token-efficiency", "release", "litmus"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+author = "omegon"
+date = "2026-04-11"
 +++
 
 # Interactive Token Litmus Protocol

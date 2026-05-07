@@ -1,12 +1,24 @@
 +++
 id = "3e1daff1-a754-448d-8ff0-1f6a564291e2"
+kind = "document"
+title = "Singular package runtime boundary and ownership"
+status = "archived"
 tags = []
-aliases = []
+aliases = ["singular-package-runtime-boundary"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+archive_reason = "obsolete"
+archived_at = "1775246679"
+dependencies = []
+open_questions = []
+parent = "singular-package-update-lifecycle"
+related = []
+superseded_by = "rust-agent-loop"
 +++
 
 # Singular package runtime boundary and ownership

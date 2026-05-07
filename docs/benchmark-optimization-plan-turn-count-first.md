@@ -1,12 +1,18 @@
 +++
 id = "440a1ec9-73b8-4008-977d-df75b2ba8cd3"
-tags = []
+kind = "document"
+title = "Benchmark Optimization Plan — Turn Count First, Prompt Mass Second"
+status = "active"
+tags = ["benchmark", "optimization", "token-efficiency", "turn-count", "prompt-mass", "rc65"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+date = "2026-04-10"
 +++
 
 # Benchmark Optimization Plan — Turn Count First, Prompt Mass Second

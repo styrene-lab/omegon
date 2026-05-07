@@ -1,12 +1,18 @@
 +++
 id = "d7bc3b28-9dc0-448a-828b-6b1ec23f6159"
-tags = []
-aliases = []
+kind = "document"
+title = "Assessment — Harvestable patterns from claudeblattman.com"
+status = "implemented"
+tags = ["assessment", "patterns", "skills", "context-management", "ux"]
+aliases = ["blattman-pattern-harvest"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Assessment — Harvestable patterns from claudeblattman.com

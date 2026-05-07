@@ -1,12 +1,23 @@
 +++
 id = "67a1babd-6c4d-40ed-ae06-1b272e74ed1d"
+kind = "document"
+title = "Footer redesign — engine display + linked minds"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["tui-footer-engine-display"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = ["feature/tui-footer-engine-display"]
+dependencies = []
+open_questions = []
+openspec_change = "tui-footer-engine-display"
+parent = "tui-hud-redesign"
+related = []
 +++
 
 # Footer redesign — engine display + linked minds

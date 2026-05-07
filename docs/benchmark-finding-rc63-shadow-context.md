@@ -1,12 +1,18 @@
 +++
 id = "c3340cf5-42ec-4b4f-b470-f0e7c62a699a"
-tags = []
+kind = "document"
+title = "RC.63 Benchmark Finding — Shadow Context Harness Comparison"
+status = "active"
+tags = ["benchmark", "release-candidate", "rc63", "rc64", "token-efficiency", "performance"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+date = "2026-04-10"
 +++
 
 # RC.63 Benchmark Finding — Shadow Context Harness Comparison

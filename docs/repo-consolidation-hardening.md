@@ -1,12 +1,18 @@
 +++
 id = "6fdb47c6-5b0e-491a-a2f8-e33d7da44494"
-tags = []
-aliases = []
+kind = "document"
+title = "Repo Consolidation, Security Hardening, and Lifecycle Normalization"
+status = "implemented"
+tags = ["architecture", "security", "lifecycle", "consolidation", "Omegon"]
+aliases = ["repo-consolidation-hardening"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Repo Consolidation, Security Hardening, and Lifecycle Normalization

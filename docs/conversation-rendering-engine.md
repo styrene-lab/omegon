@@ -1,12 +1,20 @@
 +++
 id = "b4c3d54e-8da8-44c8-90bf-5ddb756199bc"
-tags = []
-aliases = []
+kind = "document"
+title = "Conversation Rendering Engine"
+status = "exploring"
+tags = ["tui", "rendering", "conversation", "artifacts"]
+aliases = ["conversation-rendering-engine"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+related = ["conversation-widget", "inline-image-rendering", "display-tool-artifacts", "embedded-web-dashboard", "native-plan-mode"]
 +++
 
 # Conversation Rendering Engine

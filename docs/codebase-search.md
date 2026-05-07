@@ -1,12 +1,21 @@
 +++
 id = "47774561-f997-4bcc-a1d4-d270bade54ad"
-tags = []
-aliases = []
+kind = "document"
+title = "codebase_search — AST-aware code retrieval with memory seeding"
+status = "implemented"
+tags = ["architecture", "tools", "code-intelligence", "memory", "lsp", "retrieval"]
+aliases = ["codebase-search"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+priority = "1"
+related = ["lsp-integration"]
 +++
 
 # codebase_search — AST-aware code retrieval with memory seeding

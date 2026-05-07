@@ -1,12 +1,19 @@
 +++
 id = "9e2d4b2c-0707-48e8-b097-b2603d0f2a0e"
-tags = []
-aliases = []
+kind = "document"
+title = "Cleave checkpoint parity and volatile memory hygiene"
+status = "implemented"
+tags = ["cleave", "git", "memory", "workflow", "bugfix"]
+aliases = ["cleave-checkpoint-parity"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "repo-consolidation-hardening"
 +++
 
 # Cleave checkpoint parity and volatile memory hygiene

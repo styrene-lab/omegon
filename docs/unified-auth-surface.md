@@ -1,12 +1,22 @@
 +++
 id = "41d82fde-6b0c-490a-bf0c-d6d821dbd7b6"
-tags = []
-aliases = []
+kind = "document"
+title = "Unified auth surface — single /login command, agent-callable, all backends"
+status = "implemented"
+tags = ["auth", "ux", "oauth", "providers", "mcp", "vault", "secrets", "unification"]
+aliases = ["unified-auth-surface"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = ["feature/unified-auth-surface"]
+issue_type = "feature"
+open_questions = []
+openspec_change = "unified-auth-surface"
+priority = "2"
 +++
 
 # Unified auth surface — single /login command, agent-callable, all backends

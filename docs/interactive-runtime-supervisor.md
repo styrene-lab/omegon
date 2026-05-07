@@ -1,6 +1,9 @@
 +++
 id = "91a54f45-b04e-47c4-a9e6-d2fe6cfe28c7"
-tags = []
+kind = "document"
+title = "Interactive runtime supervisor"
+status = "decided"
+tags = ["omegon", "runtime", "supervisor", "queueing", "auspex", "tui", "ipc"]
 aliases = []
 imported_reference = false
 

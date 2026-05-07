@@ -1,12 +1,19 @@
 +++
 id = "574f5c0d-794f-4917-aec9-dc4950150ed6"
-tags = []
-aliases = []
+kind = "document"
+title = "Tutorial demo project — sprint board web UI with visible bugs"
+status = "implemented"
+tags = ["tutorial", "demo", "web-ui", "0.15.1"]
+aliases = ["tutorial-demo-web-ui"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "tutorial-demo-project"
 +++
 
 # Tutorial demo project — sprint board web UI with visible bugs

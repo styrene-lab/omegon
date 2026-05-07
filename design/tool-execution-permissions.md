@@ -1,12 +1,21 @@
 +++
 id = "ed3494a2-6c88-4983-b92c-30f809780c3d"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Tool execution permissions — configurable approval for sensitive operations"
+status = "exploring"
+tags = ["permissions", "security", "tools", "ux", "configuration"]
+aliases = ["tool-execution-permissions"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = ["Should bash commands get per-command approval or per-session blanket approval?", "Should permissions be per-project (.omegon/profile.json) or global (~/.omegon/profile.json)?", "How do child workers (cleave/delegate) inherit permission state?"]
+parent = "junior-onramp-progressive-disclosure"
+priority = "2"
 +++
 
 # Tool execution permissions — configurable approval for sensitive operations

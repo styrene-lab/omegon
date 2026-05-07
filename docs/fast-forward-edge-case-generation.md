@@ -1,12 +1,19 @@
 +++
 id = "94f14f05-54ad-499f-b924-6e6a3635fdf2"
+kind = "document"
+title = "Fast-forward edge case generation and task enrichment"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["fast-forward-edge-case-generation"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "testing-directives-pipeline"
 +++
 
 # Fast-forward edge case generation and task enrichment

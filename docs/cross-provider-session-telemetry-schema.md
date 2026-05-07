@@ -1,12 +1,21 @@
 +++
 id = "5dbdeea6-a1c4-48e2-b3eb-de35aa94806c"
-tags = []
-aliases = []
+kind = "document"
+title = "Cross-provider session telemetry schema for replay and inspection"
+status = "exploring"
+tags = ["telemetry", "observability", "sessions", "providers", "dashboard"]
+aliases = ["cross-provider-session-telemetry-schema"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "sovereign-multi-repo-project-management"
+priority = "1"
 +++
 
 # Cross-provider session telemetry schema for replay and inspection

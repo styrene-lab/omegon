@@ -1,12 +1,19 @@
 +++
 id = "ed22bb53-172d-47f5-8f0e-3fd2c835a49b"
-tags = []
-aliases = []
+kind = "document"
+title = "Memory crate interface boundary — MemoryBackend trait + integration with agent loop traits"
+status = "implemented"
+tags = ["rust", "memory", "traits", "interface", "architecture"]
+aliases = ["memory-crate-interface"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "omega-memory-backend"
 +++
 
 # Memory crate interface boundary — MemoryBackend trait + integration with agent loop traits

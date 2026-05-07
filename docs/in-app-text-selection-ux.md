@@ -1,12 +1,19 @@
 +++
 id = "90f756b5-e3c9-40c0-9471-e707d7517ed4"
+kind = "document"
+title = "In-app text selection UX — click+drag highlight and OSC 52 clipboard write"
+status = "seed"
 tags = []
-aliases = []
+aliases = ["in-app-text-selection-ux"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = ["What is the right in-app selection UX — click+drag highlights cells in the conversation widget, release copies to system clipboard via OSC 52?"]
+parent = "mouse-text-selection"
 +++
 
 # In-app text selection UX — click+drag highlight and OSC 52 clipboard write

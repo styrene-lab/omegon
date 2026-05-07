@@ -1,12 +1,21 @@
 +++
 id = "2260cc89-04d3-4e73-aee7-2e9899b59fab"
-tags = []
-aliases = []
+kind = "document"
+title = "Release candidate system — identifiable pre-release builds with deployment verification"
+status = "implemented"
+tags = ["release", "distribution", "versioning", "ci", "diagnostics"]
+aliases = ["release-candidate-system"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+parent = "core-distribution"
+related = []
 +++
 
 # Release candidate system — identifiable pre-release builds with deployment verification

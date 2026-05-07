@@ -1,12 +1,19 @@
 +++
 id = "8471f8bd-d2f0-4545-8363-5cf9b65f6fe6"
-tags = []
-aliases = []
+kind = "document"
+title = "Embedded web dashboard — Omegon-local browser compatibility surface served from the binary"
+status = "implemented"
+tags = ["dashboard", "web", "axum", "ratatui", "architecture"]
+aliases = ["embedded-web-dashboard"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "markdown-viewport"
 +++
 
 # Embedded web dashboard — Omegon-local browser compatibility surface served from the binary

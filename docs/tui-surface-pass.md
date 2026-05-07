@@ -1,12 +1,23 @@
 +++
 id = "62cf7bb7-42ca-402b-a150-40df291296bb"
-tags = []
-aliases = []
+kind = "document"
+title = "TUI surface pass — expose new subsystems in dashboard, footer, selectors, and commands"
+status = "implemented"
+tags = ["tui", "ux", "dashboard", "footer", "commands", "persona", "mcp", "auth", "secrets", "inference"]
+aliases = ["tui-surface-pass"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = ["feature/tui-surface-pass"]
+issue_type = "epic"
+open_questions = []
+openspec_change = "tui-surface-pass"
+parent = "tui-visual-system"
+priority = "1"
 +++
 
 # TUI surface pass — expose new subsystems in dashboard, footer, selectors, and commands

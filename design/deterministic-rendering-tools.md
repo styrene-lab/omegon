@@ -1,12 +1,21 @@
 +++
 id = "7c67e04d-7170-453b-bd54-c2e785c1ccbf"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Deterministic rendering tools — diagrams, documents, and visualizations without AI"
+status = "exploring"
+tags = ["rendering", "diagrams", "d2", "mermaid", "pdf", "visualization", "tools"]
+aliases = ["deterministic-rendering-tools"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = ["Should these be core tools or an extension? Core means always available; extension means optional install but process-isolated.", "Should we auto-detect installed CLI tools (d2, mmdc, pandoc) at session start and only expose tools that have backends?", "Should rendered output go to a file, return as data URI in tool result, or both?"]
+parent = "null"
+priority = "3"
 +++
 
 # Deterministic rendering tools — diagrams, documents, and visualizations without AI

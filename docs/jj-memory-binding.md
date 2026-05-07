@@ -1,12 +1,19 @@
 +++
 id = "dae1f83c-a78c-4052-9184-78420382c719"
-tags = []
-aliases = []
+kind = "document"
+title = "Bind memory facts and episodes to jj change IDs"
+status = "implemented"
+tags = ["architecture", "memory", "jj", "knowledge-graph"]
+aliases = ["jj-memory-binding"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "git-harness-integration"
 +++
 
 # Bind memory facts and episodes to jj change IDs

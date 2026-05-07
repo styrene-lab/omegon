@@ -1,12 +1,20 @@
 +++
 id = "f13d6a1b-e93c-4a09-a099-b3718a40783d"
-tags = []
-aliases = []
+kind = "document"
+title = "Git as first-class harness citizen — commit hygiene and repo-aware lifecycle"
+status = "implemented"
+tags = ["architecture", "git", "harness", "lifecycle"]
+aliases = ["git-harness-integration"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "epic"
+open_questions = []
+priority = "2"
 +++
 
 # Git as first-class harness citizen — commit hygiene and repo-aware lifecycle

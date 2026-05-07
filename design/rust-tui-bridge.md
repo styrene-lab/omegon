@@ -1,12 +1,20 @@
 +++
 id = "c114151e-9b71-4931-a029-f665d71fd7e5"
-tags = []
-aliases = []
+kind = "design_node"
+title = "TUI bridge — Node.js subprocess receives AgentEvents and drives pi-tui terminal rendering"
+status = "deferred"
+tags = ["rust", "tui", "bridge", "subprocess", "rendering"]
+aliases = ["rust-tui-bridge"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-phase-1"
+priority = "1"
 +++
 
 # TUI bridge — Node.js subprocess receives AgentEvents and drives pi-tui terminal rendering

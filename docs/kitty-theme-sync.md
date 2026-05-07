@@ -1,12 +1,19 @@
 +++
 id = "b430f509-6c9d-408e-817f-6057416dc21a"
-tags = []
-aliases = []
+kind = "document"
+title = "Kitty theme sync — gentle alpharius.conf propagation"
+status = "implemented"
+tags = ["defaults", "kitty", "theme", "ux"]
+aliases = ["kitty-theme-sync"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "alpharius-theme"
 +++
 
 # Kitty theme sync — gentle alpharius.conf propagation

@@ -1,12 +1,21 @@
 +++
 id = "bb48ebe9-2ead-4896-9606-459ee77687de"
-tags = []
-aliases = []
+kind = "document"
+title = "Login UX: company=api-key / product=subscription paradigm"
+status = "seed"
+tags = ["auth", "ux", "login", "oauth", "providers", "0.15.5"]
+aliases = ["login-company-product-paradigm"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+parent = "unified-auth-surface"
+related = []
 +++
 
 # Login UX: company=api-key / product=subscription paradigm

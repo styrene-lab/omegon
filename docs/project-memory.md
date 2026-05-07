@@ -1,5 +1,6 @@
 +++
 id = "de89557f-6ba2-4597-9140-7a13098c810a"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/memory-lifecycle-integration.md", "design/memory-mind-audit.md", "design/cheap-gpt-memory-models.md", "memory-system-overhaul.md", "memory-session-continuity.md", "memory-episode-reliability.md", "memory-task-completion-facts.md", "memory-pruning-ceiling.md"]
+last_updated = "2026-03-17"
+openspec_baselines = ["memory.md", "memory/lifecycle.md", "memory/models.md", "project-memory/compaction.md"]
+subsystem = "project-memory"
 +++
 
 # Project Memory

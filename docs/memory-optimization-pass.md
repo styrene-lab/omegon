@@ -1,12 +1,18 @@
 +++
 id = "7f412398-58c6-43b5-bbee-d294912155a3"
-tags = []
-aliases = []
+kind = "document"
+title = "Project Memory System Optimization"
+status = "deferred"
+tags = ["performance", "memory", "subprocess"]
+aliases = ["memory-optimization-pass"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Project Memory System Optimization

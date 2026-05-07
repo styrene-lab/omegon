@@ -1,12 +1,20 @@
 +++
 id = "f7e7cbad-864c-4dc5-8d4e-48c6b0c21339"
-tags = []
-aliases = []
+kind = "document"
+title = "Release process hygiene — close the gaps between version bumps, git tags, and CI releases"
+status = "implemented"
+tags = ["release", "git", "ci", "versioning", "process", "0.15.1"]
+aliases = ["release-process-hygiene"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "chore"
+open_questions = []
+priority = "1"
 +++
 
 # Release process hygiene — close the gaps between version bumps, git tags, and CI releases

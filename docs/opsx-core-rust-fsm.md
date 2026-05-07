@@ -1,12 +1,19 @@
 +++
 id = "f1e580a2-e313-4c2b-bbd3-384404702bda"
-tags = []
-aliases = []
+kind = "document"
+title = "opsx-core — Rust-backed lifecycle FSM for OpenSpec enforcement"
+status = "implemented"
+tags = ["omega", "architecture", "future"]
+aliases = ["opsx-core-rust-fsm"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "release-milestone-system"
 +++
 
 # opsx-core — Rust-backed lifecycle FSM for OpenSpec enforcement

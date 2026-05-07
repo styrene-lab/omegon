@@ -1,12 +1,21 @@
 +++
 id = "866f95d3-7e7f-4865-a5af-965bb0b3d789"
-tags = []
-aliases = []
+kind = "document"
+title = "Tutorial provider setup widget — 4-path guided onboarding for unconfigured users"
+status = "exploring"
+tags = ["tutorial", "onboarding", "providers", "ux", "0.15.1"]
+aliases = ["tutorial-provider-setup"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = ["openrouter-provider", "startup-systems-check"]
+open_questions = []
+parent = "free-tier-tutorial"
+priority = "1"
 +++
 
 # Tutorial provider setup widget — 4-path guided onboarding for unconfigured users

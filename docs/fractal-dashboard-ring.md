@@ -1,12 +1,19 @@
 +++
 id = "dae8cdfa-3716-420e-9d98-0beae88206d7"
-tags = []
-aliases = []
+kind = "document"
+title = "Fractal dashboard ring — living AI state visualization in the dashboard header"
+status = "implemented"
+tags = ["tui", "fractal", "dashboard", "visualization", "ux", "branding"]
+aliases = ["fractal-dashboard-ring"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "fractal-status-surface"
 +++
 
 # Fractal dashboard ring — living AI state visualization in the dashboard header

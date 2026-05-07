@@ -1,12 +1,20 @@
 +++
 id = "56cc3327-69d8-4f11-9873-1c5a0579d9b9"
+kind = "document"
+title = "Cleave prerequisite prompting — project context and finalization instructions"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["cleave-prerequisite-prompting"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "cleave-child-dispatch-quality"
+priority = "2"
 +++
 
 # Cleave prerequisite prompting — project context and finalization instructions

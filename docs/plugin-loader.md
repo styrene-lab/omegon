@@ -1,12 +1,19 @@
 +++
 id = "e1bc293d-482a-4ed6-81fe-e12a6e3596a1"
-tags = []
-aliases = []
+kind = "document"
+title = "Plugin loader — TOML manifest discovery, HTTP-backed tools and context"
+status = "implemented"
+tags = ["architecture", "extension", "plugin"]
+aliases = ["plugin-loader"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "scribe-omegon-integration"
 +++
 
 # Plugin loader — TOML manifest discovery, HTTP-backed tools and context

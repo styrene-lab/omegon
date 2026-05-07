@@ -1,5 +1,6 @@
 +++
 id = "06462e8d-f35a-4e3b-bf0a-384915e91136"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/deterministic-guardrails.md", "design/extension-type-safety.md"]
+last_updated = "2026-03-10"
+openspec_baselines = []
+subsystem = "quality-guardrails"
 +++
 
 # Quality & Guardrails

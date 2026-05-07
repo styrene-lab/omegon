@@ -1,12 +1,18 @@
 +++
 id = "f03ee676-1959-4590-b5b9-23f73ffd793e"
-tags = []
-aliases = []
+kind = "document"
+title = "Branded splash/loading screen for Omegon startup"
+status = "implemented"
+tags = ["ux", "tui", "startup"]
+aliases = ["splash-screen"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Branded splash/loading screen for Omegon startup

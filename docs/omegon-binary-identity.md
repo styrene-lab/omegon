@@ -1,12 +1,23 @@
 +++
 id = "818c7abf-d0c1-4bb8-90c8-f8dd0bddcd1b"
-tags = []
-aliases = []
+kind = "document"
+title = "Omegon binary identity — eliminate direct product exposure as `pi`"
+status = "implemented"
+tags = ["branding", "runtime", "packaging", "binary", "ux"]
+aliases = ["omegon-binary-identity"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+issue_type = "feature"
+open_questions = []
+openspec_change = "omegon-binary-identity"
+parent = "singular-package-update-lifecycle"
+priority = "1"
 +++
 
 # Omegon binary identity — eliminate direct product exposure as `pi`

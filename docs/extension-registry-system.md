@@ -1,12 +1,20 @@
 +++
 id = "e820353d-8bf5-4831-b049-7024d0b17a0c"
-tags = []
-aliases = []
+kind = "document"
+title = "Extension Registry System"
+status = "seed"
+tags = ["extensions", "registry", "discovery"]
+aliases = ["extension-registry-system"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+related = []
 +++
 
 # Extension Registry System

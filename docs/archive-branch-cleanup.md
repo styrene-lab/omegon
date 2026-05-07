@@ -1,12 +1,20 @@
 +++
 id = "36881f1a-d86e-432a-a1a2-8146dddab67a"
-tags = []
-aliases = []
+kind = "document"
+title = "Auto-delete merged feature branches on OpenSpec archive"
+status = "implemented"
+tags = ["openspec", "git", "lifecycle", "cleanup"]
+aliases = ["archive-branch-cleanup"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+open_questions = []
+openspec_change = "archive-branch-cleanup"
 +++
 
 # Auto-delete merged feature branches on OpenSpec archive

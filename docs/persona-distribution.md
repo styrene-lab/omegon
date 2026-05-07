@@ -1,12 +1,20 @@
 +++
 id = "7aa7707d-4835-4b1d-b1de-eb4cd516af45"
+kind = "document"
+title = "Persona distribution — repos, manifests, and URI addressing"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["persona-distribution"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "persona-system"
 +++
 
 # Persona distribution — repos, manifests, and URI addressing

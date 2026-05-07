@@ -1,12 +1,19 @@
 +++
 id = "d36a5245-cfa2-493e-b618-ffc8146a551c"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Rust cleave orchestrator — move child dispatch, worktree, and merge out of TypeScript"
+status = "implemented"
+tags = ["rust", "cleave", "orchestration", "jiti-kill"]
+aliases = ["rust-cleave-orchestrator"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-agent-loop"
 +++
 
 # Rust cleave orchestrator — move child dispatch, worktree, and merge out of TypeScript

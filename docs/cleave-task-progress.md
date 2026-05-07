@@ -1,12 +1,20 @@
 +++
 id = "eecf30b3-1c6e-4d00-985b-b1337afb80b6"
+kind = "document"
+title = "Cleave task-level progress tracking and operator display"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["cleave-task-progress"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "cleave-child-dispatch-quality"
+priority = "3"
 +++
 
 # Cleave task-level progress tracking and operator display

@@ -1,12 +1,19 @@
 +++
 id = "cb612eb3-be81-4868-8e2f-0d5686fa9a2f"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Phase 0 — Headless Rust agent loop as cleave child executor"
+status = "implemented"
+tags = ["rust", "phase-0", "cleave", "headless"]
+aliases = ["rust-phase-0"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-agent-loop"
 +++
 
 # Phase 0 — Headless Rust agent loop as cleave child executor

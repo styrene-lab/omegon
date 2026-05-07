@@ -1,12 +1,19 @@
 +++
 id = "358d87f3-5fbc-4c5f-bb2c-d7c731dca117"
+kind = "document"
+title = "Inline image rendering — ratatui-image integration and clipboard paste"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["inline-image-rendering"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "conversation-widget"
 +++
 
 # Inline image rendering — ratatui-image integration and clipboard paste

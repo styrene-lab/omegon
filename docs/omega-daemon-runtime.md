@@ -1,12 +1,21 @@
 +++
 id = "006c7e38-3ca0-439b-953c-49e886a3f5de"
+kind = "document"
+title = "Omega daemon runtime — persistent agent instances and event ingress"
+status = "resolved"
 tags = []
-aliases = []
+aliases = ["omega-daemon-runtime"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = ["What is the minimum daemon v1 process model: single long-lived server with one active session, or a server managing multiple named agent instances from day one?", "What is the canonical control plane for local daemon instances in v1: native IPC only, or IPC plus a minimal localhost HTTP surface for health/event ingress?", "What is the minimum typed event-ingress contract for v1: a generic event envelope plus one local/manual injection path, or immediate first-class webhook endpoints and connector polling?", "[assumption] Auspex-managed long-running Omegon instances and standalone headless agent deployments can share the same daemon runtime shape, differing only in owner/control metadata rather than process architecture."]
+parent = "omega"
+related = ["auspex-attach-handoff", "omega-coordinator", "harness-diagnostics"]
 +++
 
 # Omega daemon runtime — persistent agent instances and event ingress

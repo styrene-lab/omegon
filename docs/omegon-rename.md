@@ -1,12 +1,18 @@
 +++
 id = "a57b8359-15cd-4e82-9458-07aaa2894329"
-tags = []
-aliases = []
+kind = "document"
+title = "Rename pi-kit → Omegon"
+status = "implemented"
+tags = ["rename", "identity", "branding", "package", "breaking-change"]
+aliases = ["omegon-rename"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Rename pi-kit → Omegon

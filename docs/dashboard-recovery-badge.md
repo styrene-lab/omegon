@@ -1,12 +1,19 @@
 +++
 id = "6e9e5b57-4548-471b-9e5a-d2d555e7c9e2"
-tags = []
-aliases = []
+kind = "document"
+title = "Dashboard Recovery Badge — Actionability"
+status = "implemented"
+tags = ["dashboard", "recovery", "ux"]
+aliases = ["dashboard-recovery-badge"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "unified-dashboard"
 +++
 
 # Dashboard Recovery Badge — Actionability

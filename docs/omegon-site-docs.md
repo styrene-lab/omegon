@@ -1,12 +1,19 @@
 +++
 id = "075ec0ea-6b90-4fb1-a5f1-7d822e2ca789"
-tags = []
-aliases = []
+kind = "document"
+title = "omegon.styrene.dev/docs — documentation and architecture sub-site"
+status = "implemented"
+tags = ["docs", "site", "architecture", "marketing", "astro"]
+aliases = ["omegon-site-docs"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "omegon-install-site"
 +++
 
 # omegon.styrene.dev/docs — documentation and architecture sub-site

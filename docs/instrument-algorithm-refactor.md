@@ -1,12 +1,19 @@
 +++
 id = "5ffef512-964f-4483-b19d-8347e37ae7d5"
-tags = []
-aliases = []
+kind = "document"
+title = "Instrument algorithm refactor — thinking as glitch, memory as sine strings"
+status = "decided"
+tags = ["tui", "instruments", "visual"]
+aliases = ["instrument-algorithm-refactor"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = ["How should cleave child processes be represented? Options: (a) temporary sine strings that appear/disappear per child, (b) the tools panel shows child-prefixed tool names, (c) a dedicated cleave section between context and memory, (d) the context bar splits into segments per child"]
+parent = "tui-hud-redesign"
 +++
 
 # Instrument algorithm refactor — thinking as glitch, memory as sine strings

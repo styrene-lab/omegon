@@ -1,12 +1,20 @@
 +++
 id = "b74cbc1b-49db-47bd-bca3-2f4f73b9c20f"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Rust compaction — context decay + LLM-driven summarization"
+status = "implementing"
+tags = ["rust", "compaction", "context", "decay"]
+aliases = ["rust-compaction"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-phase-1"
+priority = "1"
 +++
 
 # Rust compaction — context decay + LLM-driven summarization

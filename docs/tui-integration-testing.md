@@ -1,12 +1,21 @@
 +++
 id = "2f563cf9-adc5-42dd-b721-3134e32a9767"
-tags = []
-aliases = []
+kind = "document"
+title = "TUI integration testing — snapshot tests, PTY harness, and interactive verification"
+status = "implemented"
+tags = ["testing", "tui", "ratatui", "snapshot", "pty", "insta", "ci", "quality"]
+aliases = ["tui-integration-testing"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "tui-visual-system"
+priority = "2"
 +++
 
 # TUI integration testing — snapshot tests, PTY harness, and interactive verification

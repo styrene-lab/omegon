@@ -1,12 +1,20 @@
 +++
 id = "bc0e8f5b-1a17-4a40-aaf3-227b1f704c66"
+kind = "document"
+title = "Workspace ownership model — one mutable agent per workspace"
+status = "exploring"
 tags = []
-aliases = []
+aliases = ["workspace-ownership-model"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = ["What local runtime artifact should be the source of truth for mutable workspace ownership: per-workspace lease file only, a project-level local registry, or both?", "How should a second mutable agent attach behave by default: refuse, offer read-only attach, or auto-create a sibling worktree/workspace?", "How are release and benchmark authority isolated so RC cuts and release-candidate benchmarks cannot silently target post-tag HEAD state?", "How should workspace kind be inferred vs explicitly declared so Omegon supports code repos, Obsidian vaults, spec repositories, and generic plaintext workspaces without assuming 'directory with files' means 'code project'?", "What is the minimum sovereignty contract for workspace backends so local filesystem, bare git, self-hosted Forgejo/Gitea/GitLab, GitHub Enterprise, and Azure DevOps all behave as equivalent git transports rather than product-specific workspace types?"]
+related = []
 +++
 
 # Workspace ownership model — one mutable agent per workspace

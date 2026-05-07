@@ -1,12 +1,19 @@
 +++
 id = "40cc0a8d-639d-49a7-a1f1-7b24b7e0ea18"
-tags = []
-aliases = []
+kind = "document"
+title = "Phase 0 — Headless Rust agent loop as cleave child executor"
+status = "implemented"
+tags = ["rust", "phase-0", "cleave", "headless"]
+aliases = ["rust-phase-0"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-agent-loop"
 +++
 
 # Phase 0 — Headless Rust agent loop as cleave child executor

@@ -1,12 +1,21 @@
 +++
 id = "a5f6ec37-df0f-4034-b14a-7233aa1975e4"
-tags = []
-aliases = []
+kind = "design_node"
+title = "mdserve: Nix flake + packaging"
+status = "seed"
+tags = ["nix", "distribution", "packaging", "rust"]
+aliases = ["mdserve-nix-distribution"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = ["mdserve-dioxus-frontend"]
+issue_type = "chore"
+open_questions = []
+parent = "markdown-viewport"
 +++
 
 # mdserve: Nix flake + packaging

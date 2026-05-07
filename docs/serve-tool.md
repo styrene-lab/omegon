@@ -1,12 +1,18 @@
 +++
 id = "7aeae816-2dff-4585-8c7b-002e8c0303b0"
-tags = []
-aliases = []
+kind = "document"
+title = "serve tool — long-lived background process management"
+status = "exploring"
+tags = ["tools", "ux", "webdev"]
+aliases = ["serve-tool"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = ["Should MCP server discovery be automatic (detect stdio/http MCP protocol on start) or explicit (--mcp flag)?", "TUI visualization: activity light per service in the instrument panel, or a dedicated services row in the footer, or both?"]
 +++
 
 # serve tool — long-lived background process management

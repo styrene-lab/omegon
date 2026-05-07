@@ -1,12 +1,20 @@
 +++
 id = "c67034cf-7236-471b-9e03-0798d456fed8"
+kind = "document"
+title = "Core system directives — always-on behavioral axioms beneath all personas"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["core-directives"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "persona-system"
 +++
 
 # Core system directives — always-on behavioral axioms beneath all personas

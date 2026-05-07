@@ -1,12 +1,22 @@
 +++
 id = "2e5cbdcd-a064-463c-b99f-858492ec861a"
-tags = []
-aliases = []
+kind = "document"
+title = "0.6.7 stability step — memory injection budget discipline and Node runtime compatibility"
+status = "implemented"
+tags = ["release", "stability", "memory", "context", "node", "runtime", "unicode"]
+aliases = ["stability-step-0-6-7"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+issue_type = "bug"
+open_questions = []
+parent = "pi-fork-update-flow"
+priority = "1"
 +++
 
 # 0.6.7 stability step — memory injection budget discipline and Node runtime compatibility

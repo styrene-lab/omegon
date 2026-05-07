@@ -1,12 +1,21 @@
 +++
 id = "a2ca6066-d87d-4058-8d24-b8d86e092303"
-tags = []
-aliases = []
+kind = "document"
+title = "Vault client fail-closed security hardening"
+status = "implemented"
+tags = ["security", "vault"]
+aliases = ["vault-fail-closed"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+open_questions = []
+openspec_change = "vault-fail-closed"
+parent = "vault-secret-backend"
 +++
 
 # Vault client fail-closed security hardening

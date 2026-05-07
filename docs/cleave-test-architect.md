@@ -1,12 +1,21 @@
 +++
 id = "54731f65-4212-449b-b131-0c3a7a8d7ce4"
+kind = "document"
+title = "Cleave test-architect phase and post-implementation coverage review"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["cleave-test-architect"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = ["spec-edge-case-format", "task-file-testing-section"]
+open_questions = []
+parent = "testing-directives-pipeline"
+priority = "2"
 +++
 
 # Cleave test-architect phase and post-implementation coverage review

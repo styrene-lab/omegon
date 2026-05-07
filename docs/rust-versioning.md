@@ -1,12 +1,19 @@
 +++
 id = "17c4dfa4-a6af-4239-9946-5dd93a923ce0"
-tags = []
-aliases = []
+kind = "document"
+title = "Rust versioning system — semver, changelog, --version, release workflow"
+status = "implemented"
+tags = ["versioning", "release", "ci", "rust", "semver"]
+aliases = ["rust-versioning"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "core-distribution"
 +++
 
 # Rust versioning system — semver, changelog, --version, release workflow

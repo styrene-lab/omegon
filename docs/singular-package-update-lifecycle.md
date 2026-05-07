@@ -1,12 +1,24 @@
 +++
 id = "1656f4c7-4098-4373-98d5-28d31c137243"
-tags = []
-aliases = []
+kind = "document"
+title = "Singular package integration and full-lifecycle update parity"
+status = "implemented"
+tags = ["pi-mono", "packaging", "update", "integration", "architecture"]
+aliases = ["singular-package-update-lifecycle"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+dependencies = ["pi-fork-worktree-reconciliation", "singular-package-runtime-boundary", "update-lifecycle-parity"]
+issue_type = "feature"
+open_questions = []
+openspec_change = "singular-package-update-lifecycle"
+parent = "pi-fork-update-flow"
+priority = "1"
 +++
 
 # Singular package integration and full-lifecycle update parity

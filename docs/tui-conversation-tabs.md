@@ -1,12 +1,19 @@
 +++
 id = "3caf06cc-bab4-4ba3-a0ba-e04704cbf5c0"
+kind = "document"
+title = "Conversation area multi-tab — chat, design tree, scratchpad, issues"
+status = "exploring"
 tags = []
-aliases = []
+aliases = ["tui-conversation-tabs"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "tui-hud-redesign"
 +++
 
 # Conversation area multi-tab — chat, design tree, scratchpad, issues

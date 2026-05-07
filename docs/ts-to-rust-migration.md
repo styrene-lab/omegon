@@ -1,12 +1,18 @@
 +++
 id = "90fb2568-8803-4731-89c5-1b0d39ca8099"
-tags = []
-aliases = []
+kind = "document"
+title = "TS→Rust Migration: Make omegon repo Rust-primary"
+status = "implemented"
+tags = ["migration", "architecture", "rust"]
+aliases = ["ts-to-rust-migration"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # TS→Rust Migration: Make omegon repo Rust-primary

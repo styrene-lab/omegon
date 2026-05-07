@@ -1,12 +1,21 @@
 +++
 id = "62605a33-a15d-4500-b287-cc4d391d57ed"
-tags = []
-aliases = []
+kind = "document"
+title = "Native dispatch observability — surface Rust child progress to dashboard"
+status = "implemented"
+tags = ["cleave", "dashboard", "observability"]
+aliases = ["native-dispatch-observability"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+open_questions = []
+openspec_change = "native-dispatch-observability"
+parent = "cleave-child-timeout"
 +++
 
 # Native dispatch observability — surface Rust child progress to dashboard

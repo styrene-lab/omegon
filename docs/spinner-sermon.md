@@ -1,12 +1,18 @@
 +++
 id = "ea886989-7da9-4852-bba4-c930f999bc19"
-tags = []
-aliases = []
+kind = "document"
+title = "Spinner Sermon — Crawler-style scrawling text during long operations"
+status = "deferred"
+tags = ["ux", "spinner", "annihilation"]
+aliases = ["spinner-sermon"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = ["What is the right scrawl speed — characters per second? Should it vary (faster bursts, pauses at punctuation)?", "Should the sermon text be a single continuous passage or drawn from fragments? Does it loop or terminate?"]
 +++
 
 # Spinner Sermon — Crawler-style scrawling text during long operations

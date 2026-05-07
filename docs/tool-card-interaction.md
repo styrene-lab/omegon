@@ -1,12 +1,21 @@
 +++
 id = "40f9ed4f-4449-4a4a-84cc-906a63cbe009"
-tags = []
-aliases = []
+kind = "document"
+title = "Tool card selection, hover, and expand — keyboard + mouse navigation"
+status = "exploring"
+tags = ["tui", "ux"]
+aliases = ["tool-card-interaction"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+parent = "tui-hud-redesign"
+related = []
 +++
 
 # Tool card selection, hover, and expand — keyboard + mouse navigation

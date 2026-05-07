@@ -1,12 +1,24 @@
 +++
 id = "18c00b62-f3cc-40ca-b315-b40589429012"
-tags = []
-aliases = []
+kind = "document"
+title = "Automatic documentation generation — design tree and implementation drive site content"
+status = "archived"
+tags = ["docs", "site", "automation", "design-tree", "openspec", "changelog", "astro"]
+aliases = ["auto-doc-generation"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+archive_reason = "superseded"
+archived_at = "1775247150"
+dependencies = []
+open_questions = []
+parent = "markdown-viewport"
+related = []
+superseded_by = "omegon-site-docs"
 +++
 
 # Automatic documentation generation — design tree and implementation drive site content

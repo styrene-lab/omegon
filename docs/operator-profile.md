@@ -1,5 +1,6 @@
 +++
 id = "2545fe5c-8872-4ad3-ac23-225914843203"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/operator-capability-profile.md", "design/guardrail-capability-probe.md", "design/bootstrap.md"]
+last_updated = "2026-03-10"
+openspec_baselines = ["models/profile.md"]
+subsystem = "operator-profile"
 +++
 
 # Operator Profile

@@ -1,12 +1,20 @@
 +++
 id = "ef0a49c5-166b-4c86-b053-d4c84d5d9025"
+kind = "document"
+title = "Cleave steer throttling policy — scope-aware sibling update injection"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["cleave-steer-throttling"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "cleave-process-tree"
 +++
 
 # Cleave steer throttling policy — scope-aware sibling update injection

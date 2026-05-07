@@ -1,12 +1,18 @@
 +++
 id = "5f83a73e-d20a-4e43-b22a-d6bac7c98f82"
-tags = []
+kind = "document"
+title = "Runtime Identity, Authorization, Persona, Posture, and Resource Envelope Stack"
+status = "active"
+tags = ["architecture", "identity", "rbac", "persona", "posture", "runtime"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+date = "2026-04-11"
 +++
 
 # Runtime Identity, Authorization, Persona, Posture, and Resource Envelope Stack

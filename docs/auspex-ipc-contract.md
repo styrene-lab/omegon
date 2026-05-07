@@ -1,12 +1,20 @@
 +++
 id = "f7bd8ab4-3747-4ffa-b8dd-de54e36b62ca"
-tags = []
-aliases = []
+kind = "document"
+title = "Auspex native IPC contract — Omegon-side v1"
+status = "decided"
+tags = ["auspex", "ipc", "msgpack", "unix-socket", "contract"]
+aliases = ["auspex-ipc-contract"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+priority = "1"
 +++
 
 # Auspex native IPC contract — Omegon-side v1

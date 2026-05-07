@@ -1,12 +1,20 @@
 +++
 id = "b3e1788a-3d84-45cd-81fd-6b9f715e8286"
-tags = []
-aliases = []
+kind = "document"
+title = "Extension migration architecture — TS extensions → Rust integrated features"
+status = "implemented"
+tags = ["architecture", "migration", "extensions", "event-bus"]
+aliases = ["extension-migration-architecture"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "epic"
+open_questions = []
+priority = "1"
 +++
 
 # Extension migration architecture — TS extensions → Rust integrated features

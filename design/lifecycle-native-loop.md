@@ -1,12 +1,21 @@
 +++
 id = "d20bbc23-6da8-4296-ae86-95f5dec3e606"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Lifecycle-native agent loop — design, spec, decomposition as cognitive modes, not external tools"
+status = "resolved"
+tags = ["rust", "architecture", "lifecycle", "design-tree", "openspec", "cleave", "cognitive-modes", "strategic"]
+aliases = ["lifecycle-native-loop"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "epic"
+open_questions = []
+parent = "rust-agent-loop"
+priority = "1"
 +++
 
 # Lifecycle-native agent loop — design, spec, decomposition as cognitive modes, not external tools

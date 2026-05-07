@@ -1,12 +1,18 @@
 +++
 id = "cfbcdef5-8055-4f04-b672-d90a0109e4f2"
-tags = []
-aliases = []
+kind = "document"
+title = "ai/ directory convention — unified agent artifact home"
+status = "implemented"
+tags = ["architecture", "conventions", "migration"]
+aliases = ["ai-directory-convention"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # ai/ directory convention — unified agent artifact home

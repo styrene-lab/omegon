@@ -1,12 +1,19 @@
 +++
 id = "4214d219-6a99-4c96-9440-1ceb49ef7aa8"
+kind = "document"
+title = "LSP workspace root strategy for monorepos"
+status = "decided"
 tags = []
-aliases = []
+aliases = ["lsp-monorepo-workspace-handling"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "lsp-integration"
 +++
 
 # LSP workspace root strategy for monorepos

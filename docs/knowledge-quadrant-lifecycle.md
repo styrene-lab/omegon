@@ -1,12 +1,22 @@
 +++
 id = "db683823-61c0-4b1a-b9a2-eb59017a8546"
-tags = []
-aliases = []
+kind = "document"
+title = "Knowledge quadrant lifecycle — guide design progression through the Rumsfeld Matrix"
+status = "implemented"
+tags = ["architecture", "design-tree", "epistemology", "lifecycle", "process", "strategic", "knowledge-management"]
+aliases = ["knowledge-quadrant-lifecycle"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = ["feature/knowledge-quadrant-lifecycle"]
+issue_type = "feature"
+open_questions = []
+openspec_change = "knowledge-quadrant-lifecycle"
+priority = "1"
 +++
 
 # Knowledge quadrant lifecycle — guide design progression through the Rumsfeld Matrix

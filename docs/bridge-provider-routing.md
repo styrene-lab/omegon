@@ -1,12 +1,20 @@
 +++
 id = "6d225b1b-8e6e-4f1b-8a05-dbc906a8f05e"
-tags = []
-aliases = []
+kind = "document"
+title = "Bridge-provider routing — dynamic provider switching without restart"
+status = "implemented"
+tags = ["architecture", "providers", "routing", "bridge", "hot-swap"]
+aliases = ["bridge-provider-routing"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "blattman-pattern-harvest"
+related = ["perpetual-rolling-context"]
 +++
 
 # Bridge-provider routing — dynamic provider switching without restart

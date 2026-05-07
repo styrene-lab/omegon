@@ -1,12 +1,19 @@
 +++
 id = "0cedf892-a6b8-444d-9041-fb3d0c531d28"
+kind = "document"
+title = "Implement whoami tool in Rust"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["rust-whoami"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "ts-to-rust-migration"
 +++
 
 # Implement whoami tool in Rust

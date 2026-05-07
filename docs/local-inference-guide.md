@@ -1,12 +1,20 @@
 +++
 id = "be410247-1b00-416d-bb02-5708e7ea1529"
-tags = []
-aliases = []
+kind = "document"
+title = "Local inference setup guide — tutorial-style Ollama onboarding"
+status = "seed"
+tags = ["tutorial", "local-inference", "ollama", "onboarding", "0.16.0"]
+aliases = ["local-inference-guide"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "tutorial-system"
 +++
 
 # Local inference setup guide — tutorial-style Ollama onboarding

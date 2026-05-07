@@ -1,12 +1,21 @@
 +++
 id = "e967b260-87f1-46e8-bdeb-04802ef00443"
-tags = []
-aliases = []
+kind = "document"
+title = "Clipboard image paste into chat/messages"
+status = "implemented"
+tags = ["ux", "clipboard", "images", "attachments", "chat"]
+aliases = ["clipboard-image-paste"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "bug"
+open_questions = []
+parent = "conversation-rendering-engine"
+priority = "2"
 +++
 
 # Clipboard image paste into chat/messages

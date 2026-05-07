@@ -1,12 +1,23 @@
 +++
 id = "602376d3-2fe7-477d-b424-09e74d73b361"
-tags = []
-aliases = []
+kind = "document"
+title = "facts.jsonl stability — durable transport without runtime churn"
+status = "implemented"
+tags = ["memory", "git", "jsonl", "workflow", "stability"]
+aliases = ["facts-jsonl-stability"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+issue_type = "bug"
+open_questions = []
+openspec_change = "facts-jsonl-stability"
+parent = "memory-system-overhaul"
+priority = "1"
 +++
 
 # facts.jsonl stability — durable transport without runtime churn

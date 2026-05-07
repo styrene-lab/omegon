@@ -1,12 +1,19 @@
 +++
 id = "5071bae2-e5f5-4798-85e4-6423427af454"
+kind = "document"
+title = "Omega WorkspaceBackend — local worktree vs. k8s pod storage"
+status = "exploring"
 tags = []
-aliases = []
+aliases = ["omega-workspace-backend"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = ["For k8s pod workspaces, which storage backend is the v1 default: shared PVC (simpler, local k8s friendly) or branch clone (works on any cluster, requires a git remote)? The answer determines whether Omega needs a git remote configured in its k8s backend, or just a PVC claim name."]
+parent = "omega"
 +++
 
 # Omega WorkspaceBackend — local worktree vs. k8s pod storage

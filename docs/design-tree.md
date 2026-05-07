@@ -1,5 +1,6 @@
 +++
 id = "1fe4c9f9-4bd7-4bd7-8b3a-f2ae076645af"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/design-tree-lifecycle.md"]
+last_updated = "2026-03-12"
+openspec_baselines = []
+subsystem = "design-tree"
 +++
 
 # Design Tree

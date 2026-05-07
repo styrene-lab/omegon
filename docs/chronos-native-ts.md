@@ -1,12 +1,25 @@
 +++
 id = "a73dac9c-ad4a-4f0e-a4e0-605be45f597c"
-tags = []
-aliases = []
+kind = "document"
+title = "Rewrite chronos as pure TypeScript — eliminate BSD/GNU date dependency"
+status = "archived"
+tags = ["chronos", "portability", "typescript", "tools"]
+aliases = ["chronos-native-ts"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+archive_reason = "superseded"
+archived_at = "1775246517"
+dependencies = []
+open_questions = []
+openspec_change = "chronos-native-ts"
+parent = "lifecycle-gate-ergonomics"
+related = []
+superseded_by = "rust-agent-loop"
 +++
 
 # Rewrite chronos as pure TypeScript — eliminate BSD/GNU date dependency

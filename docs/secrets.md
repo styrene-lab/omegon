@@ -1,5 +1,6 @@
 +++
 id = "9f9e782e-06e7-403c-9f55-1933a9973d50"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = []
+last_updated = "2026-04-12"
+openspec_baselines = []
+subsystem = "secrets"
 +++
 
 # Secrets

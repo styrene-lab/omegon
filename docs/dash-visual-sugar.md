@@ -1,12 +1,19 @@
 +++
 id = "2830e61e-c6c2-4327-a63f-d4d7be4fa5ef"
+kind = "document"
+title = "Raised Dashboard Visual Polish — Box Layout + Memory Consolidation"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["dash-visual-sugar"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "unified-dashboard"
 +++
 
 # Raised Dashboard Visual Polish — Box Layout + Memory Consolidation

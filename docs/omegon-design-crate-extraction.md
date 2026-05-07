@@ -1,12 +1,23 @@
 +++
 id = "6b79b41b-a8a8-4882-8000-b141bbd44470"
-tags = []
-aliases = []
+kind = "document"
+title = "Extract design tree core into omegon-design crate"
+status = "exploring"
+tags = ["architecture", "crate", "design-tree", "task-management"]
+aliases = ["omegon-design-crate-extraction"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+issue_type = "feature"
+open_questions = ["What is the stable crate boundary: markdown/frontmatter parsing plus node graph model only, or also query/filter/history operations and mutation helpers? Extracting too early will freeze the wrong API.", "Which dependencies are acceptable in the extracted crate: serde only, or also chrono/git helpers/frontmatter parsing utilities currently embedded in omegon? The portability goal is underspecified.", "What compatibility contract must the crate preserve for sovereign multi-repo PM: file-layout conventions only, or also tool schemas and lifecycle semantics? Without this, extraction can succeed mechanically but fail the downstream reuse goal."]
+parent = "git-native-task-management"
+priority = "1"
+related = []
 +++
 
 # Extract design tree core into omegon-design crate

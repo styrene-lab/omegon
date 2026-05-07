@@ -1,12 +1,20 @@
 +++
 id = "926e21f7-9e1b-447d-99c6-33f91e2a4e6a"
-tags = []
-aliases = []
+kind = "document"
+title = "Raised Dashboard: Horizontal Split Layout"
+status = "implemented"
+tags = ["dashboard", "tui", "layout"]
+aliases = ["dash-raised-layout"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+openspec_change = "dash-raised-layout"
+related = ["dashboard-cleanup"]
 +++
 
 # Raised Dashboard: Horizontal Split Layout

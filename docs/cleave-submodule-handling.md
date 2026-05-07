@@ -1,12 +1,20 @@
 +++
 id = "05d83c3d-cd0e-41d0-9d03-1a023b8811ef"
+kind = "document"
+title = "Cleave submodule-aware commit and merge"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["cleave-submodule-handling"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "cleave-child-dispatch-quality"
+priority = "2"
 +++
 
 # Cleave submodule-aware commit and merge

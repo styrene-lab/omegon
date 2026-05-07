@@ -1,12 +1,20 @@
 +++
 id = "010b242a-6594-4ace-815f-e0fd9bb0305f"
-tags = []
-aliases = []
+kind = "document"
+title = "Persona System — domain-expert identities with dedicated mind stores"
+status = "implemented"
+tags = ["architecture", "persona", "memory", "skills", "domain-expertise", "strategic"]
+aliases = ["persona-system"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "epic"
+open_questions = []
+priority = "2"
 +++
 
 # Persona System — domain-expert identities with dedicated mind stores

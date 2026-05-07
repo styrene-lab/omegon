@@ -1,12 +1,22 @@
 +++
 id = "a12ee5a7-d244-4b57-b284-41fd280d5556"
-tags = []
-aliases = []
+kind = "document"
+title = "mdserve: Nix flake + packaging"
+status = "exploring"
+tags = ["nix", "distribution", "packaging", "rust"]
+aliases = ["mdserve-nix-distribution"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = ["mdserve-dioxus-frontend"]
+issue_type = "chore"
+open_questions = ["What is the actual packaging goal for v1: reproducible developer install for the mdserve/Auspex daemon only, or end-user distribution with browser assets and runtime dependencies fully bundled? Those are different problems.", "How should frontend assets be packaged in Nix builds once the portal stack is chosen: compiled into the Rust binary, installed alongside it in the store, or generated as a separate derivation consumed by the binary?", "What operator entrypoint should Omegon/Auspex assume for starting the daemon: PATH-discoverable binary, `nix run`, or dev-shell-only workflow? The bridge UX depends on this contract."]
+parent = "markdown-viewport"
+related = []
 +++
 
 # mdserve: Nix flake + packaging

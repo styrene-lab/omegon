@@ -1,12 +1,19 @@
 +++
 id = "17e9680e-21f2-4d3c-a418-bf5025b8a81c"
-tags = []
-aliases = []
+kind = "document"
+title = "Update channels and in-TUI self-update — stable/rc/nightly channels with /update command"
+status = "decided"
+tags = ["release", "distribution", "self-update", "channels", "tui", "ux"]
+aliases = ["update-channels"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "release-candidate-system"
 +++
 
 # Update channels and in-TUI self-update — stable/rc/nightly channels with /update command

@@ -1,12 +1,21 @@
 +++
 id = "f6abba38-a050-4168-a97c-1a268d7684ef"
-tags = []
-aliases = []
+kind = "document"
+title = "Rust compaction — context decay + LLM-driven summarization"
+status = "implemented"
+tags = ["rust", "compaction", "context", "decay"]
+aliases = ["rust-compaction"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-phase-1"
+priority = "1"
+related = ["perpetual-rolling-context"]
 +++
 
 # Rust compaction — context decay + LLM-driven summarization

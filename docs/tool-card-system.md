@@ -1,12 +1,18 @@
 +++
 id = "eab0bc9b-e98a-4d0e-811d-47e50e56f2ce"
-tags = []
-aliases = []
+kind = "document"
+title = "Tool Card Visual System — Omegon-owned card rendering with borders, state colors, and glyphs"
+status = "implemented"
+tags = ["ux", "tui", "tools", "rendering"]
+aliases = ["tool-card-system"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Tool Card Visual System — Omegon-owned card rendering with borders, state colors, and glyphs

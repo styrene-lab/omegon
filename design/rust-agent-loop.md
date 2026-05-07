@@ -1,12 +1,22 @@
 +++
 id = "75114b53-8147-4d0e-8a12-e70d3e1977a7"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Rust-native agent loop — middle-out replacement of pi's orchestration core"
+status = "implementing"
+tags = ["rust", "architecture", "agent-loop", "pi-mono", "strategic", "middle-out"]
+aliases = ["rust-agent-loop"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "epic"
+open_questions = []
+parent = "omega"
+priority = "1"
+related = ["Omegon-standalone", "omega-memory-backend"]
 +++
 
 # Rust-native agent loop — middle-out replacement of pi's orchestration core

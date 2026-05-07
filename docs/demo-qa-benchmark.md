@@ -1,12 +1,20 @@
 +++
 id = "70752968-e52b-4faa-a308-2ebb7563299c"
-tags = []
-aliases = []
+kind = "document"
+title = "Demo project as QA benchmark — automated validation and capability matrix testing"
+status = "exploring"
+tags = ["qa", "benchmark", "testing", "demo"]
+aliases = ["demo-qa-benchmark"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "epic"
+open_questions = ["Should matrix runs be orchestrated by omegon itself (a /benchmark command that iterates permutations) or by an external script/CI that launches omegon N times with different flags?", "How do we define pass/fail for each phase? Some phases (thinking analysis, design decisions) have subjective quality — do we need an LLM-as-judge evaluator, or are structural checks sufficient (file created, fact stored, node exists)?", "What's the baseline for emergent property detection? We need a control run (no persona, default tools, medium thinking) that subsequent runs are compared against. How many runs constitute a statistically meaningful sample?", "Can instrument telemetry be captured in headless mode? The CIC instruments produce intensity values each frame — logging peak/mean intensity per phase per instrument would give us a quantitative signal for how each subsystem was exercised."]
+priority = "2"
 +++
 
 # Demo project as QA benchmark — automated validation and capability matrix testing

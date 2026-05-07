@@ -1,12 +1,23 @@
 +++
 id = "31e63b59-1487-443c-b1cf-455e1ddf2b46"
-tags = []
-aliases = []
+kind = "document"
+title = "Orchestratable provider model — treat providers as assignable resources, not user preferences"
+status = "implemented"
+tags = ["architecture", "providers", "orchestration", "cleave", "local-inference", "routing", "strategic", "epic"]
+aliases = ["orchestratable-provider-model"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = ["feature/orchestratable-provider-model"]
+issue_type = "epic"
+open_questions = []
+openspec_change = "orchestratable-provider-model"
+parent = "bridge-provider-routing"
+priority = "1"
 +++
 
 # Orchestratable provider model — treat providers as assignable resources, not user preferences

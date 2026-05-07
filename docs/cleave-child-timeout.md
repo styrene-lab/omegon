@@ -1,12 +1,18 @@
 +++
 id = "9881f84b-5af9-4363-9d72-6e331c20f500"
-tags = []
-aliases = []
+kind = "document"
+title = "Cleave child timeout and idle detection"
+status = "implemented"
+tags = ["cleave", "reliability", "timeout"]
+aliases = ["cleave-child-timeout"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Cleave child timeout and idle detection

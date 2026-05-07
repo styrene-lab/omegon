@@ -1,12 +1,18 @@
 +++
 id = "25ebded0-ee37-4a87-816a-c3ca41d00f35"
-tags = []
-aliases = []
+kind = "document"
+title = "α→ω Visual Language — Lifecycle Symbol System"
+status = "implemented"
+tags = ["theming", "ux", "symbols", "lifecycle", "40k", "dashboard", "design-tree", "openspec"]
+aliases = ["alpha-omega-visual-language"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # α→ω Visual Language — Lifecycle Symbol System

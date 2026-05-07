@@ -1,12 +1,19 @@
 +++
 id = "b214d3b3-a063-47e8-93b3-796dcc47a70e"
+kind = "document"
+title = "Dashboard design tree — actual tree rendering with expand/collapse"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["tui-design-tree-widget"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "tui-hud-redesign"
 +++
 
 # Dashboard design tree — actual tree rendering with expand/collapse

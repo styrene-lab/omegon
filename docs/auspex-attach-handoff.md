@@ -1,12 +1,21 @@
 +++
 id = "29cd2725-d9b6-4361-9467-d55a68af73b9"
+kind = "document"
+title = "TUI → Auspex attach handoff"
+status = "exploring"
 tags = []
-aliases = []
+aliases = ["auspex-attach-handoff"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = ["Should the initial attach-to-running-instance path use a custom URL scheme, an Auspex single-instance control socket, or both?", "How should Windows be handled before native IPC parity exists there?"]
+parent = "auspex-ipc-contract"
+related = []
 +++
 
 # TUI → Auspex attach handoff

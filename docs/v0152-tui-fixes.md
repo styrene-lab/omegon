@@ -1,12 +1,20 @@
 +++
 id = "2fb58256-23ac-4714-9932-e58e1b15128c"
-tags = []
-aliases = []
+kind = "document"
+title = "v0.15.2 TUI fixes — borders, expansion, tool formatting"
+status = "implemented"
+tags = ["tui", "ux", "release"]
+aliases = ["v0152-tui-fixes"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+related = []
 +++
 
 # v0.15.2 TUI fixes — borders, expansion, tool formatting

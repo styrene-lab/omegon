@@ -1,12 +1,19 @@
 +++
 id = "704bf110-83bd-4879-b4c3-bfa3f4377a7b"
-tags = []
-aliases = []
+kind = "document"
+title = "TUI visual system — conversation view, event cards, widget primitives"
+status = "implemented"
+tags = ["tui", "ratatui", "visual", "conversation"]
+aliases = ["tui-visual-system"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "harness-honest-assessment"
 +++
 
 # TUI visual system — conversation view, event cards, widget primitives

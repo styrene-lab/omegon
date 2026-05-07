@@ -1,12 +1,21 @@
 +++
 id = "928f1686-3dda-46a8-9190-dfdcb229e938"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Internal performance metrics — wall-clock timing across the agent loop"
+status = "exploring"
+tags = ["performance", "metrics", "timing", "observability", "agent-loop", "internal"]
+aliases = ["internal-perf-metrics"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = ["Should timing fields be added to existing TurnEnd events or emitted as separate PerfEvent?", "Is tracing::Span timing sufficient, or do we need explicit Instant-based fields on events?", "Should /bench show per-turn breakdown or just session aggregates?"]
+parent = "null"
+priority = "3"
 +++
 
 # Internal performance metrics — wall-clock timing across the agent loop

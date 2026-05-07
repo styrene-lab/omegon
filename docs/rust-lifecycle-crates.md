@@ -1,12 +1,20 @@
 +++
 id = "4c20d9ec-c85e-4074-9b6e-d8094084f278"
-tags = []
-aliases = []
+kind = "document"
+title = "Rust lifecycle crates — design-tree + openspec as native Rust modules"
+status = "implemented"
+tags = ["rust", "lifecycle", "design-tree", "openspec", "crates"]
+aliases = ["rust-lifecycle-crates"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-phase-1"
+priority = "2"
 +++
 
 # Rust lifecycle crates — design-tree + openspec as native Rust modules

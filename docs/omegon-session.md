@@ -1,12 +1,22 @@
 +++
 id = "23f4daf0-dab4-4516-b3fa-cfcbdf15fad1"
-tags = []
-aliases = []
+kind = "document"
+title = "Omegon Session — provider-agnostic session identity and resumption"
+status = "implemented"
+tags = ["architecture", "orchestration", "session", "core"]
+aliases = ["omegon-session"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+issue_type = "feature"
+open_questions = []
+priority = "2"
+related = ["omega", "model-degradation"]
 +++
 
 # Omegon Session — provider-agnostic session identity and resumption

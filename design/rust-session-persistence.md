@@ -1,12 +1,20 @@
 +++
 id = "5c6c6081-9498-42a2-b354-71b639cde2fe"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Rust session persistence — save/load conversation state, session resume"
+status = "implemented"
+tags = ["rust", "session", "persistence", "resume"]
+aliases = ["rust-session-persistence"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-phase-1"
+priority = "2"
 +++
 
 # Rust session persistence — save/load conversation state, session resume

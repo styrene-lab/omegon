@@ -1,6 +1,9 @@
 +++
 id = "a9a39c66-636d-46b3-93e3-4bc872ffd20f"
-tags = []
+kind = "document"
+title = "Auspex Non-Interactive Supervision Boundary"
+status = "decided"
+tags = ["architecture", "auspex", "supervision", "cleave"]
 aliases = []
 imported_reference = false
 

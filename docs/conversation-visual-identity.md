@@ -1,12 +1,18 @@
 +++
 id = "ba125215-f3db-4dc4-81b9-c87a8867e2d4"
+kind = "document"
+title = "Conversation visual identity — differentiate operator, agent, thinking, tools"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["conversation-visual-identity"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Conversation visual identity — differentiate operator, agent, thinking, tools

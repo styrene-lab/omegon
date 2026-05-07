@@ -1,12 +1,21 @@
 +++
 id = "d0a9f1a1-76d4-4d82-a64a-f2d5adf4a6ff"
-tags = []
-aliases = []
+kind = "document"
+title = "/status slash command — re-display bootstrap panel mid-session"
+status = "implemented"
+tags = ["ux", "tui", "commands", "bootstrap", "status"]
+aliases = ["status-slash-command"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "task"
+open_questions = []
+parent = "harness-status-contract"
+priority = "4"
 +++
 
 # /status slash command — re-display bootstrap panel mid-session

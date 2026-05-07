@@ -1,12 +1,20 @@
 +++
 id = "fbc5d29e-d8a6-473f-a18f-7f18549534a2"
-tags = []
-aliases = []
+kind = "document"
+title = "Anthropic Subscription — Interactive vs Automated Use Boundary"
+status = "decided"
+tags = ["anthropic", "tos", "auth", "subscription", "automated-use", "compliance"]
+aliases = ["anthropic-subscription-interactive-boundary"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = ["Where exactly is the \\\\\\\\\\\\\\\\\"interactive\\\\\\\\\\\\\\\\\" line? Human types a prompt → agent runs 100 tool calls over 10 minutes unattended → human reads the result. Is that one interaction interactive or automated? The bot/script framing suggests the trigger matters more than the autonomy of the loop.", "What Omegon entry points fire against the Anthropic subscription token? Full inventory needed: TUI foreground, --background flag, daemon/service mode, cleave child workers, cron/scheduled invocations, CI runner invocations. Each needs a clear allow/warn/block decision.", "[assumption] A human watching the TUI while a long agentic task runs (many tool calls, minutes of autonomous work) counts as \\\\\\\\\\\\\\"interactive/non-automated\\\\\\\\\\\\\\" under Anthropic's ToS because the human initiated it and is present. This assumption needs validation — it's the most common Omegon use pattern and must be defensible.", "Should --initial-prompt (queues a prompt but TUI stays open, human is watching) be allowed with subscription credentials? The human is present but the trigger was scripted. Conservative read: allow it — TUI is open, human can intervene. Permissive read: allow it freely. No read blocks it — it's not --prompt (headless)."]
+related = []
 +++
 
 # Anthropic Subscription — Interactive vs Automated Use Boundary

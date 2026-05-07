@@ -1,12 +1,18 @@
 +++
 id = "56100c98-30dd-4f8c-9b61-b86234d8a733"
-tags = []
+kind = "design_node"
+status = "implemented"
+tags = ["cleave", "openspec", "task-generation"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
 +++
 
 # Scenario-First Task Generation

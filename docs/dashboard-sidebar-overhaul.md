@@ -1,12 +1,19 @@
 +++
 id = "92349aa1-ce06-4964-894b-7c74460ea265"
-tags = []
-aliases = []
+kind = "document"
+title = "Dashboard sidebar overhaul — rich tree widget with lifecycle state"
+status = "implemented"
+tags = ["tui", "dashboard", "tree-widget", "eid"]
+aliases = ["dashboard-sidebar-overhaul"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-agent-loop"
 +++
 
 # Dashboard sidebar overhaul — rich tree widget with lifecycle state

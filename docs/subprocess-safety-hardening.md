@@ -1,12 +1,21 @@
 +++
 id = "11fde41e-21f6-44c0-84d4-2f171078bb30"
-tags = []
-aliases = []
+kind = "document"
+title = "Subprocess safety hardening"
+status = "implemented"
+tags = ["security", "process", "subprocess", "hardening"]
+aliases = ["subprocess-safety-hardening"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+open_questions = []
+openspec_change = "subprocess-safety-hardening"
+parent = "repo-consolidation-hardening"
 +++
 
 # Subprocess safety hardening

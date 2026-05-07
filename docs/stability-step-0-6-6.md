@@ -1,12 +1,23 @@
 +++
 id = "949e3d36-157b-44cb-a7d9-dc1fcb8ff3f6"
-tags = []
-aliases = []
+kind = "document"
+title = "0.6.6 stability step — subprocess boundary hardening and memory search resilience follow-up"
+status = "implemented"
+tags = ["release", "stability", "subprocess", "memory", "fts", "review-followup"]
+aliases = ["stability-step-0-6-6"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+issue_type = "bug"
+open_questions = []
+openspec_change = "stability-step-0-6-6"
+parent = "pi-fork-update-flow"
+priority = "1"
 +++
 
 # 0.6.6 stability step — subprocess boundary hardening and memory search resilience follow-up

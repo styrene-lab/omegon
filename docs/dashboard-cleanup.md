@@ -1,12 +1,21 @@
 +++
 id = "9315b4c3-ebea-43b3-a8cf-3219e3d452fe"
-tags = []
-aliases = []
+kind = "document"
+title = "Dashboard cleanup and footer coherence"
+status = "implemented"
+tags = ["dashboard", "footer", "ux", "layout", "cleanup"]
+aliases = ["dashboard-cleanup"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+open_questions = []
+openspec_change = "dashboard-cleanup"
+related = ["dash-raised-layout", "unified-dashboard"]
 +++
 
 # Dashboard cleanup and footer coherence

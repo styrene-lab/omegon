@@ -1,6 +1,9 @@
 +++
 id = "2a2fcff2-7b03-4de2-809a-8bb0c2382206"
-tags = []
+kind = "document"
+title = "Omegon migration strategy — lean entry, explicit escalation"
+status = "implemented"
+tags = ["strategy", "migration", "slim-mode", "ux", "autonomy"]
 aliases = []
 imported_reference = false
 

@@ -1,12 +1,19 @@
 +++
 id = "28d0df9f-09ce-407d-9d30-d77b0452e2ed"
-tags = []
-aliases = []
+kind = "document"
+title = "Opt-in bwrap sandbox for benchmark adapter invocations"
+status = "seed"
+tags = ["benchmark", "harness", "sandbox", "isolation", "bwrap"]
+aliases = ["benchmark-bwrap-sandbox"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = ["Network policy: keep network on (LLM APIs work, sandbox only protects host fs) or unshare-net (sandbox is real but adapters cannot reach providers)?", "Toolchain bind-mount detection: rust toolchain may live under ~/.rustup, /usr/local/cargo, linuxbrew, or system. How does the wrapper discover the right paths without hardcoding?", "Adapter HOME exposure: claude / pi adapters read config from ~/.claude and ~/.pi. Bind read-only? Bind read-write? Skip and force --no-config flags?", "macOS fallback: bwrap is Linux-only. Should sandbox: bwrap on macOS hard-fail, soft-fail (warn and continue unsandboxed), or be a parse-time validation error on the task spec?", "Test surface: how does CI exercise the sandboxed path on hosts without bwrap installed?"]
+parent = "benchmark-redesign-task-and-eval-spec"
 +++
 
 # Opt-in bwrap sandbox for benchmark adapter invocations

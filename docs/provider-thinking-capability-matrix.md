@@ -1,12 +1,18 @@
 +++
 id = "accac304-8c26-4b58-a735-07a42b21ec7b"
-tags = []
+kind = "document"
+title = "Provider thinking capability matrix"
+status = "implemented"
+tags = ["providers", "reasoning", "thinking", "matrix"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+date = "2026-04-08"
 +++
 
 # Provider thinking capability matrix

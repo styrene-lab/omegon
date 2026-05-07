@@ -1,12 +1,21 @@
 +++
 id = "1928e2ef-6948-482b-a370-85e9f5e5f5be"
-tags = []
-aliases = []
+kind = "document"
+title = "Terminal responsive degradation — graceful layout collapse on resize"
+status = "implemented"
+tags = ["tui", "layout", "responsive", "ux", "0.15.0"]
+aliases = ["terminal-responsive-degradation"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "rust-agent-loop"
+priority = "2"
 +++
 
 # Terminal responsive degradation — graceful layout collapse on resize

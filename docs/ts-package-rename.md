@@ -1,12 +1,18 @@
 +++
 id = "3709cc9e-ca3e-4570-b5b9-3c4b16da8aa4"
-tags = []
-aliases = []
+kind = "document"
+title = "Rename TS Omegon npm package from `omegon` to `omegon-pi`"
+status = "implemented"
+tags = ["npm", "breaking-change", "distribution"]
+aliases = ["ts-package-rename"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Rename TS Omegon npm package from `omegon` to `omegon-pi`

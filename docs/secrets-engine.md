@@ -1,7 +1,10 @@
 +++
 id = "e126186f-5db3-410e-980a-3cf57010b1a7"
-tags = []
-aliases = []
+kind = "document"
+title = "Secrets Engine — encrypted storage, dynamic resolution, and output redaction"
+status = "implemented"
+tags = ["secrets", "security", "vault", "keyring", "redaction", "guards"]
+aliases = ["secrets-engine"]
 imported_reference = false
 
 [publication]

@@ -1,12 +1,21 @@
 +++
 id = "01d9c6e2-67ee-48be-91f2-88e7a206bb15"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Omegon: auspex extension — visualization daemon bridge"
+status = "seed"
+tags = ["Omegon", "extension", "auspex", "bridge"]
+aliases = ["pikit-auspex-extension"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "markdown-viewport"
+related = ["omega"]
 +++
 
 # Omegon: auspex extension — visualization daemon bridge

@@ -1,12 +1,23 @@
 +++
 id = "f3950491-1729-47a4-a1c3-c7248a2cc2b0"
-tags = []
-aliases = []
+kind = "document"
+title = "Sovereign multi-repo project management on top of omegon-design"
+status = "exploring"
+tags = ["forgejo", "multi-repo", "sovereign", "project-management", "web"]
+aliases = ["sovereign-multi-repo-project-management"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+issue_type = "epic"
+open_questions = []
+parent = "git-native-task-management"
+priority = "3"
+related = []
 +++
 
 # Sovereign multi-repo project management on top of omegon-design

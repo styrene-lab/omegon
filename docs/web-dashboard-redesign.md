@@ -1,12 +1,20 @@
 +++
 id = "bc75913a-d63d-401d-94cb-17091e49d986"
-tags = []
-aliases = []
+kind = "document"
+title = "Web dashboard redesign — align with refined internal design tree model"
+status = "seed"
+tags = ["web", "dashboard", "design-tree", "openspec", "0.16.0"]
+aliases = ["web-dashboard-redesign"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "embedded-web-dashboard"
 +++
 
 # Web dashboard redesign — align with refined internal design tree model

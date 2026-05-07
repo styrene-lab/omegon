@@ -1,12 +1,18 @@
 +++
 id = "7bd48424-019a-498c-98d7-67abca7f2a5a"
-tags = []
+kind = "document"
+title = "Posture Spectrum — Explorator, Fabricator, Architect, Devastator"
+status = "active"
+tags = ["posture", "om", "omegon", "autonomy", "benchmark", "runtime"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+date = "2026-04-11"
 +++
 
 # Posture Spectrum — Explorator, Fabricator, Architect, Devastator

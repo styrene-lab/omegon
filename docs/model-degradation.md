@@ -1,12 +1,21 @@
 +++
 id = "cce08eed-1da7-4ac6-a573-d95dc86196f9"
-tags = []
-aliases = []
+kind = "document"
+title = "Graceful Model Degradation & Provider Resilience"
+status = "implemented"
+tags = ["routing", "resilience", "architecture"]
+aliases = ["model-degradation"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+priority = "1"
+related = ["context-class-taxonomy-and-routing-policy"]
 +++
 
 # Graceful Model Degradation & Provider Resilience

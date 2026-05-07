@@ -1,12 +1,19 @@
 +++
 id = "d99120a7-3be1-4ceb-9bd3-a1720f6f5a61"
+kind = "document"
+title = "Engine panel redesign — visual hierarchy and information density"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["engine-panel-redesign"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "footer-idle-state"
 +++
 
 # Engine panel redesign — visual hierarchy and information density

@@ -1,12 +1,20 @@
 +++
 id = "654438b1-a39a-4fa8-8d92-0dd6d1f3ee7d"
-tags = []
-aliases = []
+kind = "document"
+title = "Mouse text selection — EnableMouseCapture blocks native terminal selection"
+status = "implemented"
+tags = ["tui", "ux", "mouse", "clipboard", "accessibility"]
+aliases = ["mouse-text-selection"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "bug"
+open_questions = []
+priority = "1"
 +++
 
 # Mouse text selection — EnableMouseCapture blocks native terminal selection

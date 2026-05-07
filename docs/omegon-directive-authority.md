@@ -1,12 +1,19 @@
 +++
 id = "9faf9ed4-4157-4c2a-bc82-5f65c079496e"
-tags = []
-aliases = []
+kind = "document"
+title = "Omegon directive authority — code-level opinions over filesystem discovery"
+status = "implemented"
+tags = ["architecture", "directives", "system-prompt", "opinions", "authority"]
+aliases = ["omegon-directive-authority"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "test-coverage-directive-gap"
 +++
 
 # Omegon directive authority — code-level opinions over filesystem discovery

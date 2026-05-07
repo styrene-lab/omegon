@@ -1,5 +1,6 @@
 +++
 id = "8d79d172-92c2-4635-9a3d-6ffa4dd924be"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/cleave-dirty-tree-checkpointing.md", "design/cleave-title-progress-sync.md"]
+last_updated = "2026-03-10"
+openspec_baselines = ["cleave/preflight.md", "cleave/spec.md"]
+subsystem = "cleave"
 +++
 
 # Cleave

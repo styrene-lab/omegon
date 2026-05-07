@@ -1,12 +1,19 @@
 +++
 id = "ba478aa3-cda1-4886-885e-b27a81fa7350"
-tags = []
-aliases = []
+kind = "document"
+title = "Squash-merge policy for feature branches"
+status = "implemented"
+tags = ["git", "cleave", "policy"]
+aliases = ["squash-merge-policy"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "git-harness-integration"
 +++
 
 # Squash-merge policy for feature branches

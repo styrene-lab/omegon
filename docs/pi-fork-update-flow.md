@@ -1,12 +1,18 @@
 +++
 id = "e8b02f1b-6e1a-46e9-893d-6dfc85bf332c"
-tags = []
-aliases = []
+kind = "document"
+title = "Pi Fork Update & Deploy Flow"
+status = "implemented"
+tags = ["dx", "tooling", "pi-mono", "workflow"]
+aliases = ["pi-fork-update-flow"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Pi Fork Update & Deploy Flow

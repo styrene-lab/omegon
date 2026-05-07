@@ -1,12 +1,21 @@
 +++
 id = "b1d25624-e0eb-467d-b643-fcde04cfe8b0"
-tags = []
-aliases = []
+kind = "document"
+title = "Free-tier tutorial — onboarding without a Pro subscription or API key"
+status = "exploring"
+tags = ["tutorial", "free-tier", "accessibility", "local-inference", "onboarding", "0.15.1"]
+aliases = ["free-tier-tutorial"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = ["startup-systems-check"]
+open_questions = []
+parent = "tutorial-system"
+priority = "2"
 +++
 
 # Free-tier tutorial — onboarding without a Pro subscription or API key

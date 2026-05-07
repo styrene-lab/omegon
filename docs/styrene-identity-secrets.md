@@ -1,12 +1,23 @@
 +++
 id = "0b02ae51-d530-4d25-bc8d-596291457dc0"
-tags = []
-aliases = []
+kind = "document"
+title = "Styrene Identity as operator credential root — RNS identity for secret unlocking and trust"
+status = "decided"
+tags = ["architecture", "security", "identity", "styrene", "secrets", "vault", "keyring", "trust"]
+aliases = ["styrene-identity-secrets"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = ["feature/styrene-identity-secrets"]
+issue_type = "feature"
+open_questions = []
+openspec_change = "styrene-identity-secrets"
+priority = "2"
+related = ["styrene-ipc-mcp-transport"]
 +++
 
 # Styrene Identity as operator credential root — RNS identity for secret unlocking and trust

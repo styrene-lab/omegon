@@ -1,12 +1,20 @@
 +++
 id = "d52c94d9-cd1c-4c3f-8caf-0433e3d2f133"
-tags = []
-aliases = []
+kind = "document"
+title = "Unified command structure"
+status = "exploring"
+tags = ["ux", "commands", "tui", "operator"]
+aliases = ["unified-command-structure"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+related = []
 +++
 
 # Unified command structure

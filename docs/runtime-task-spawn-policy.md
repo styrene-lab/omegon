@@ -1,12 +1,20 @@
 +++
 id = "27e28628-688b-43df-88ad-a5b56a714f7c"
-tags = []
-aliases = []
+kind = "document"
+title = "Runtime task spawn policy"
+status = "decided"
+tags = ["runtime", "tokio", "background-tasks", "resilience", "observability"]
+aliases = ["runtime-task-spawn-policy"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+priority = "1"
 +++
 
 # Runtime task spawn policy

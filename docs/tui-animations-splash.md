@@ -1,12 +1,19 @@
 +++
 id = "5e7a759c-c639-45ec-9041-3eab7b8a94e9"
-tags = []
-aliases = []
+kind = "document"
+title = "TUI animations and splash screen — tachyonfx + Omegon branding"
+status = "implemented"
+tags = ["tui", "ratatui", "animation", "visual", "branding"]
+aliases = ["tui-animations-splash"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "tui-visual-system"
 +++
 
 # TUI animations and splash screen — tachyonfx + Omegon branding

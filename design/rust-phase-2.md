@@ -1,12 +1,20 @@
 +++
 id = "13f017d6-0a75-4d2d-b9f7-ce26f81578fa"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Phase 2 — Native TUI: Dioxus/ratatui replaces pi-tui bridge subprocess"
+status = "implementing"
+tags = ["rust", "phase-2", "tui", "dioxus", "ratatui"]
+aliases = ["rust-phase-2"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-agent-loop"
+priority = "1"
 +++
 
 # Phase 2 — Native TUI: Dioxus/ratatui replaces pi-tui bridge subprocess

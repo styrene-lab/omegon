@@ -1,12 +1,21 @@
 +++
 id = "47db0ef7-b434-42be-8155-6ac07b798f28"
-tags = []
-aliases = []
+kind = "document"
+title = "Model selector UX — browse and pick, don't memorize"
+status = "seed"
+tags = ["ux", "tui", "models", "discovery", "onboarding"]
+aliases = ["model-selector-ux"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+parent = "tui-surface-pass"
+related = []
 +++
 
 # Model selector UX — browse and pick, don't memorize

@@ -1,12 +1,19 @@
 +++
 id = "cdc35830-0459-4a25-ba68-ad26b07122f4"
+kind = "document"
+title = "Rust workspace layout — crate organization for the agent loop and feature crates"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["rust-workspace-layout"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-agent-loop"
 +++
 
 # Rust workspace layout — crate organization for the agent loop and feature crates

@@ -1,12 +1,18 @@
 +++
 id = "5479a0cb-d8f7-4d03-ac68-b3ef23eb7d76"
-tags = []
+kind = "document"
+title = "Controller Tuning Protocol — Deterministic Loop Tuning Under Model Variance"
+status = "active"
+tags = ["controller", "benchmark", "tuning", "determinism", "loop", "rc67"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+date = "2026-04-11"
 +++
 
 # Controller Tuning Protocol — Deterministic Loop Tuning Under Model Variance

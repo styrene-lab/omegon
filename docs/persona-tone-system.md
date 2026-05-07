@@ -1,12 +1,20 @@
 +++
 id = "a4d07db5-5c94-4997-a7c3-026e0e03c292"
-tags = []
-aliases = []
+kind = "document"
+title = "Tone system — conversational voice layer independent of persona expertise"
+status = "implemented"
+tags = ["persona", "tone", "voice", "creative", "ux", "design-mode"]
+aliases = ["persona-tone-system"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "persona-system"
 +++
 
 # Tone system — conversational voice layer independent of persona expertise

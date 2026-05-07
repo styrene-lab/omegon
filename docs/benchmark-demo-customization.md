@@ -1,12 +1,19 @@
 +++
 id = "04e9c3d1-da83-4b4c-ae9e-42257d798127"
+kind = "document"
+title = "Demo customization framework — teams fork and adapt for their codebase"
+status = "seed"
 tags = []
-aliases = []
+aliases = ["benchmark-demo-customization"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "demo-qa-benchmark"
 +++
 
 # Demo customization framework — teams fork and adapt for their codebase

@@ -1,12 +1,21 @@
 +++
 id = "cbef778d-9c73-431c-b840-d62c6edfaef8"
+kind = "document"
+title = "Auspex agent context bridge — pass active portal view and selection with prompt submissions"
+status = "seed"
 tags = []
-aliases = []
+aliases = ["auspex-agent-context-bridge"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = ["What is the minimal safe context envelope for browser-originated prompts: route/tab only, or also visible node IDs, selected entity IDs, viewport filters, and graph focus state?", "How is browser view context transported into the agent loop: appended hidden prompt metadata, a structured side-channel field on the WebSocket/HTTP prompt command, or a session-scoped shared-state lookup keyed by dashboard client?", "What redaction/privacy boundary applies to browser-originated context so the portal does not dump excessive UI state into every prompt?"]
+parent = "pikit-auspex-extension"
+related = []
 +++
 
 # Auspex agent context bridge — pass active portal view and selection with prompt submissions

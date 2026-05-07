@@ -1,12 +1,21 @@
 +++
 id = "bb8c114b-8f1f-4454-9749-43f41664e8e4"
-tags = []
-aliases = []
+kind = "document"
+title = "Core binary distribution — shipping Rust alongside and eventually instead of TypeScript"
+status = "implemented"
+tags = ["distribution", "packaging", "npm", "rust", "ci", "versioning", "cross-platform"]
+aliases = ["core-distribution"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "rust-agent-loop"
+priority = "1"
 +++
 
 # Core binary distribution — shipping Rust alongside and eventually instead of TypeScript

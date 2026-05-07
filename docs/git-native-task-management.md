@@ -1,12 +1,22 @@
 +++
 id = "f328d126-1f15-4303-9b93-36cc6f089a7d"
-tags = []
-aliases = []
+kind = "document"
+title = "Git-native task management — extend design tree into a full in-repo issue/task system"
+status = "decided"
+tags = ["architecture", "task-management", "git", "design-tree", "workflow", "strategic"]
+aliases = ["git-native-task-management"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = ["design-tree-task-fields-and-filters"]
+issue_type = "epic"
+open_questions = []
+priority = "2"
+related = []
 +++
 
 # Git-native task management — extend design tree into a full in-repo issue/task system

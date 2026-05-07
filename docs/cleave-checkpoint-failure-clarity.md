@@ -1,12 +1,19 @@
 +++
 id = "490765ad-0712-4fac-a89f-0e3588eac0fd"
-tags = []
-aliases = []
+kind = "document"
+title = "Cleave checkpoint execution reliability and failure clarity"
+status = "implemented"
+tags = ["cleave", "git", "checkpoint", "workflow", "ux"]
+aliases = ["cleave-checkpoint-failure-clarity"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "cleave-dirty-tree-checkpointing"
 +++
 
 # Cleave checkpoint execution reliability and failure clarity

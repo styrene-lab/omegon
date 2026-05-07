@@ -1,12 +1,21 @@
 +++
 id = "691d29e2-e293-4d51-b80a-24a4b4905d94"
-tags = []
-aliases = []
+kind = "document"
+title = "HuggingFace dynamic model browser with API caching"
+status = "seed"
+tags = ["models", "huggingface", "provider", "discovery", "0.16.0"]
+aliases = ["huggingface-dynamic-model-browser"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = ["Should we require HUGGING_FACE_TOKEN for browsing, or make public models accessible without auth?"]
+parent = "model-selector-ux"
+related = []
 +++
 
 # HuggingFace dynamic model browser with API caching

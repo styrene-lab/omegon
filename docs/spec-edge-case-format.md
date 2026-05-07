@@ -1,12 +1,19 @@
 +++
 id = "84351109-7bbb-48fd-b09c-c3a152ac250f"
+kind = "document"
+title = "Spec edge case format and authoring conventions"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["spec-edge-case-format"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "testing-directives-pipeline"
 +++
 
 # Spec edge case format and authoring conventions

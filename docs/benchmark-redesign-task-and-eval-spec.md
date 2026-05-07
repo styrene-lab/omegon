@@ -1,12 +1,18 @@
 +++
 id = "29ed7d34-e849-4e2a-bcf2-1244aa429535"
-tags = []
+kind = "document"
+title = "Benchmark Redesign — Task, Acceptance, Process, and Efficiency Spec"
+status = "active"
+tags = ["benchmark", "evals", "harness", "task-design", "provider-matrix"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+date = "2026-04-10"
 +++
 
 # Benchmark Redesign — Task, Acceptance, Process, and Efficiency Spec

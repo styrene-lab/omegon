@@ -1,12 +1,19 @@
 +++
 id = "c18df529-4dc0-42ac-90ed-2468b98c05ba"
+kind = "document"
+title = "Register memory_* agent-callable tools in Rust"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["rust-memory-tools"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "ts-to-rust-migration"
 +++
 
 # Register memory_* agent-callable tools in Rust

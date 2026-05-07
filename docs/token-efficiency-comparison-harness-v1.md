@@ -1,12 +1,18 @@
 +++
 id = "77fb01a7-f553-4928-af73-cd0daf63e95e"
-tags = []
+kind = "document"
+title = "Token efficiency comparison harness v1"
+status = "exploring"
+tags = ["testing", "benchmarking", "token-efficiency", "anthropic", "harness"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+date = "2026-04-09"
 +++
 
 # Token efficiency comparison harness v1

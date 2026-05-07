@@ -1,12 +1,20 @@
 +++
 id = "20557716-04db-49ab-a9d7-8b7e6d1d2981"
-tags = []
-aliases = []
+kind = "document"
+title = "Directive-Branch Lifecycle — git branch as the unified task boundary"
+status = "implemented"
+tags = ["architecture", "lifecycle", "git", "workflow", "design-tree", "openspec", "cleave"]
+aliases = ["directive-branch-lifecycle"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+priority = "1"
 +++
 
 # Directive-Branch Lifecycle — git branch as the unified task boundary

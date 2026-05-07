@@ -1,12 +1,21 @@
 +++
 id = "2b03c0d4-6afe-4ec3-847e-e67354b7e592"
-tags = []
-aliases = []
+kind = "document"
+title = "macOS local auth refinements for keychain secret UX"
+status = "seed"
+tags = ["macos", "security", "ux", "secrets"]
+aliases = ["macos-local-auth-keychain-ux"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+parent = "rust-native-sigstore-update-verification"
+related = []
 +++
 
 # macOS local auth refinements for keychain secret UX

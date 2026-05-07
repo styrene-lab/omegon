@@ -1,12 +1,19 @@
 +++
 id = "cc9ce76d-916e-4789-83b2-312c1fb0ebf9"
-tags = []
-aliases = []
+kind = "document"
+title = "Cleave Child Observability — Live insight into running children"
+status = "implemented"
+tags = ["cleave", "ux", "observability", "dashboard", "debugging"]
+aliases = ["cleave-child-observability"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+related = ["cleave-process-tree"]
 +++
 
 # Cleave Child Observability — Live insight into running children

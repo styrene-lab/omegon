@@ -1,12 +1,19 @@
 +++
 id = "2e89146a-ccbb-48b4-93d9-e8a038d7239a"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Rust-Native Extension Boundary — Sidecar Protocol and Migration Path"
+status = "decided"
+tags = ["rust", "architecture", "extensions", "ipc", "protocol"]
+aliases = ["rust-native-extension-boundary"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
 +++
 
 # Rust-Native Extension Boundary — Sidecar Protocol and Migration Path

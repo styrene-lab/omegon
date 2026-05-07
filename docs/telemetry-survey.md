@@ -1,12 +1,18 @@
 +++
 id = "459f777e-343f-45e6-b73f-dfe24a98c9f1"
-tags = []
+kind = "document"
+title = "Telemetry survey"
+status = "implemented"
+tags = ["telemetry", "observability", "survey", "opentelemetry"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+date = "2026-04-06"
 +++
 
 # Telemetry survey

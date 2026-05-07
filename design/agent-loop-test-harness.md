@@ -1,12 +1,19 @@
 +++
 id = "e4ce1f26-8e77-4c5d-ae97-b30ced3a0b37"
+kind = "design_node"
+title = "Agent loop test harness — mock LlmBridge and deterministic state machine testing"
+status = "resolved"
 tags = []
-aliases = []
+aliases = ["agent-loop-test-harness"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-agent-loop"
 +++
 
 # Agent loop test harness — mock LlmBridge and deterministic state machine testing

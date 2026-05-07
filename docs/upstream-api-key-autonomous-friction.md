@@ -1,6 +1,9 @@
 +++
 id = "a5451fe9-e6fd-48b9-bbb9-0624071f28c2"
-tags = []
+kind = "document"
+title = "Upstream API-key autonomous mode — friction points and mitigations"
+status = "implemented"
+tags = ["autonomy", "providers", "api-keys", "routing", "engineering-note"]
 aliases = []
 imported_reference = false
 

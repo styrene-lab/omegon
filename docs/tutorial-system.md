@@ -1,12 +1,20 @@
 +++
 id = "9ae52727-5301-4876-85df-423d2bdc18ab"
+kind = "document"
+title = "Interactive /tutorial system — structured onboarding replacing /demo"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["tutorial-system"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = ["feature/tutorial-system"]
+open_questions = []
+openspec_change = "tutorial-system"
 +++
 
 # Interactive /tutorial system — structured onboarding replacing /demo

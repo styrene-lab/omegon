@@ -1,6 +1,9 @@
 +++
 id = "72159983-23a7-4960-ba61-68cd6c75a13f"
-tags = []
+kind = "document"
+title = "Auspex startup version handoff requirement"
+status = "implementing"
+tags = ["auspex", "startup", "compatibility", "control-plane"]
 aliases = []
 imported_reference = false
 

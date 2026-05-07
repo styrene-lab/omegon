@@ -1,12 +1,21 @@
 +++
 id = "50b9f9bf-1961-4043-9280-faa92c7f4fb7"
-tags = []
-aliases = []
+kind = "document"
+title = "Lifecycle state normalization"
+status = "implemented"
+tags = ["lifecycle", "design-tree", "openspec", "dashboard", "shared-state"]
+aliases = ["lifecycle-state-normalization"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+open_questions = []
+openspec_change = "lifecycle-state-normalization"
+parent = "repo-consolidation-hardening"
 +++
 
 # Lifecycle state normalization

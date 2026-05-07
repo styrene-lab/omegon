@@ -1,12 +1,19 @@
 +++
 id = "b445f38e-ebc3-43e0-af9d-a3001af70317"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Honest assessment — what the harness actually feels like from inside, March 2026"
+status = "resolved"
+tags = ["introspective", "assessment", "harness", "ux", "agent-experience"]
+aliases = ["harness-honest-assessment"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = ["Should ambient lifecycle capture use a cheap LLM extraction pass on every response, or pattern-match on natural language heuristically, or keep the omg: tags and invest in training/prompting to get consistent production?"]
+parent = "rust-agent-loop"
 +++
 
 # Honest assessment — what the harness actually feels like from inside, March 2026

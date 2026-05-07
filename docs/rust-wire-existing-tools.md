@@ -1,12 +1,19 @@
 +++
 id = "7ab3e330-1167-4f26-bc7c-8b4d7c941ad7"
+kind = "document"
+title = "Wire existing Rust tool implementations as registered tools"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["rust-wire-existing-tools"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "ts-to-rust-migration"
 +++
 
 # Wire existing Rust tool implementations as registered tools

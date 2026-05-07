@@ -1,12 +1,20 @@
 +++
 id = "fbdc559f-77b5-4f6e-bd9f-576ce228f8e4"
-tags = []
-aliases = []
+kind = "document"
+title = "Agent loop resilience — what the hermit crab wants in its shell"
+status = "implemented"
+tags = ["rust", "agent-loop", "resilience", "self-awareness", "introspective"]
+aliases = ["agent-loop-resilience"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-agent-loop"
+related = ["perpetual-rolling-context"]
 +++
 
 # Agent loop resilience — what the hermit crab wants in its shell

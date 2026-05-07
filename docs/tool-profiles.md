@@ -1,5 +1,6 @@
 +++
 id = "d391161a-f374-4f6f-a7a9-e5b1d6f9efd2"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/smart-tool-profiles.md"]
+last_updated = "2026-03-10"
+openspec_baselines = []
+subsystem = "tool-profiles"
 +++
 
 # Tool Profiles

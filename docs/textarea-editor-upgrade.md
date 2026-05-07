@@ -1,12 +1,21 @@
 +++
 id = "ae06a374-530e-4111-9dbf-ad7bc689a6ef"
-tags = []
-aliases = []
+kind = "document"
+title = "Replace custom Editor with ratatui-textarea — multi-line input with clipboard paste"
+status = "implemented"
+tags = ["tui", "editor", "input", "clipboard", "ux"]
+aliases = ["textarea-editor-upgrade"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "rust-phase-2"
+priority = "2"
 +++
 
 # Replace custom Editor with ratatui-textarea — multi-line input with clipboard paste

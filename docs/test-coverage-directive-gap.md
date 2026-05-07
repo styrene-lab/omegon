@@ -1,12 +1,19 @@
 +++
 id = "16277f6c-ba14-45ce-89a1-1bdef059a7f3"
-tags = []
-aliases = []
+kind = "document"
+title = "Test coverage directive gap — agents consistently omit tests unless explicitly forced"
+status = "implemented"
+tags = ["testing", "directives", "system-prompt", "cleave", "quality", "agents"]
+aliases = ["test-coverage-directive-gap"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "lifecycle-gate-ergonomics"
 +++
 
 # Test coverage directive gap — agents consistently omit tests unless explicitly forced

@@ -1,12 +1,20 @@
 +++
 id = "5c2236a5-fa49-484c-a8da-12323920de14"
-tags = []
-aliases = []
+kind = "document"
+title = "Work decomposition model — beyond the cleave/execute dichotomy"
+status = "exploring"
+tags = ["architecture", "cleave", "core"]
+aliases = ["work-decomposition-model"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "epic"
+open_questions = ["[assumption] The three-mode model (Decompose/Delegate/Hydra) is sufficient — there's no need for a fourth mode between Delegate (single child) and Decompose (planned batch). Is this true, or do developers want an ad-hoc multi-child mode without upfront planning?"]
+priority = "1"
 +++
 
 # Work decomposition model — beyond the cleave/execute dichotomy

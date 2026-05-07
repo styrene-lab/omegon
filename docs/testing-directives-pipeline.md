@@ -1,12 +1,20 @@
 +++
 id = "bde10289-ed03-4bd3-bedf-7fb816eb2fa2"
-tags = []
-aliases = []
+kind = "document"
+title = "Testing directives pipeline — falsifiable testing paths from design through implementation"
+status = "implemented"
+tags = ["testing", "cleave", "openspec", "dx"]
+aliases = ["testing-directives-pipeline"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "epic"
+open_questions = []
+priority = "2"
 +++
 
 # Testing directives pipeline — falsifiable testing paths from design through implementation

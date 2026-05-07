@@ -1,12 +1,20 @@
 +++
 id = "1ddb274b-9f71-4ee2-9993-0559c65e49c1"
-tags = []
-aliases = []
+kind = "document"
+title = "Merge safety improvements — prevent squash-merge regressions and lost work"
+status = "decided"
+tags = ["architecture", "git", "workflow", "process", "quality", "strategic"]
+aliases = ["merge-safety-improvements"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "epic"
+open_questions = []
+priority = "1"
 +++
 
 # Merge safety improvements — prevent squash-merge regressions and lost work

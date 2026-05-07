@@ -1,12 +1,18 @@
 +++
 id = "8a8acb70-e5bf-44d5-9602-a091b866af52"
-tags = []
+kind = "document"
+title = "OpenTelemetry fit assessment"
+status = "decided"
+tags = ["telemetry", "observability", "opentelemetry", "research"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+date = "2026-04-06"
 +++
 
 # OpenTelemetry fit assessment

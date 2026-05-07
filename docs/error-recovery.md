@@ -1,5 +1,6 @@
 +++
 id = "2edde31a-96fa-4154-b1f0-c3eb8c192d64"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/harness-upstream-error-recovery.md"]
+last_updated = "2026-03-10"
+openspec_baselines = ["harness/upstream-error-recovery.md"]
+subsystem = "error-recovery"
 +++
 
 # Error Recovery

@@ -1,12 +1,20 @@
 +++
 id = "6f3e40ab-5e42-4303-83cb-f6d65ebe1461"
-tags = []
-aliases = []
+kind = "document"
+title = "HarnessStatus contract — unified status surface for TUI, web dashboard, and bootstrap"
+status = "implemented"
+tags = ["architecture", "ui", "tui", "dashboard", "bootstrap", "contract", "persona", "mcp", "secrets", "inference"]
+aliases = ["harness-status-contract"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+priority = "1"
 +++
 
 # HarnessStatus contract — unified status surface for TUI, web dashboard, and bootstrap

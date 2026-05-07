@@ -1,12 +1,20 @@
 +++
 id = "39e89189-5745-47fa-80ce-37a60f7ab1cc"
+kind = "document"
+title = "Multi-instance Omegon coordination — parallel work streams on the same repo"
+status = "decided"
 tags = []
-aliases = []
+aliases = ["multi-instance-coordination"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "directive-branch-lifecycle"
+related = ["a2a-protocol-integration", "cleave-process-tree"]
 +++
 
 # Multi-instance Omegon coordination — parallel work streams on the same repo

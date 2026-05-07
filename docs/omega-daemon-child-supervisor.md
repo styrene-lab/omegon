@@ -1,12 +1,21 @@
 +++
 id = "83f5c332-5f8a-4125-bbef-40d7d45d105a"
+kind = "document"
+title = "Omega daemon child supervisor — reattachable cleave subprocess ownership across restarts"
+status = "exploring"
 tags = []
-aliases = []
+aliases = ["omega-daemon-child-supervisor"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = ["What is the durable child-registry source of truth after daemon restart: `state.json` only, a separate supervisor journal/checkpoint file, or an embedded local store that tracks child command, pid, start time, worktree, and last-seen progress?", "What qualifies a live subprocess as safely reattachable to the new daemon process: matching PID only, or PID plus command fingerprint/worktree/prompt path/start timestamp validation to avoid adopting unrelated reused PIDs?", "How should monitor continuity work after restart: rebuild a fresh stderr/stdout monitor from inherited file descriptors (impossible today), switch children to log-file-backed monitoring, or accept that restarted daemons can only supervise termination/status and not reconstruct full live activity streams?", "What is the authoritative post-restart cancel/reap contract: PID-signal fallback only, or a true adopted child handle managed by a persistent worker/supervisor subprocess that outlives daemon replacements?", "What black-box proof is required before this can be called done: must an integration test demonstrate live child survival across daemon restart, successful reattachment/adoption, continued status visibility, and successful cancel or completion from the restarted daemon?", "[assumption] The current degraded recovery model (persisted PID + status reconstruction + PID-based cancel fallback) is insufficient for daemon-grade supervision because it cannot recreate monitor tasks or stream continuity after restart; this assumption should be validated against the actual operator requirements before overbuilding a persistent supervisor tier.", "At what point does the child-supervisor control plane require Styrene Identity mTLS: can daemon v1 use same-host process ownership and local trust only, or does any cross-process/cross-host adoption of child ownership require mutual-authenticated workload identity from the start?"]
+parent = "omega-daemon-runtime"
+related = []
 +++
 
 # Omega daemon child supervisor — reattachable cleave subprocess ownership across restarts

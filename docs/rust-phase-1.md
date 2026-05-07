@@ -1,12 +1,20 @@
 +++
 id = "bc8e2163-8bf3-4743-a039-8ca20556d612"
-tags = []
-aliases = []
+kind = "document"
+title = "Phase 1 — Process inversion: Rust binary becomes the process owner, TS becomes subprocess"
+status = "implemented"
+tags = ["rust", "phase-1", "process-inversion", "tui-bridge", "strategic"]
+aliases = ["rust-phase-1"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-agent-loop"
+priority = "1"
 +++
 
 # Phase 1 — Process inversion: Rust binary becomes the process owner, TS becomes subprocess

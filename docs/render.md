@@ -1,5 +1,6 @@
 +++
 id = "b0e2f112-0055-440d-b761-85678b8094ee"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/native-diagram-backend-mvp.md"]
+last_updated = "2026-03-10"
+openspec_baselines = ["render/native-diagrams.md"]
+subsystem = "render"
 +++
 
 # Render

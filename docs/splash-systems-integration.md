@@ -1,12 +1,22 @@
 +++
 id = "81b67b5f-81fd-4e69-9750-7cd6a9120bea"
-tags = []
-aliases = []
+kind = "document"
+title = "Splash screen systems check visualization — real loading behind the animation"
+status = "implemented"
+tags = ["tui", "splash", "startup", "systems-check", "ux", "0.15.1"]
+aliases = ["splash-systems-integration"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = ["feature/splash-systems-integration"]
+open_questions = []
+openspec_change = "splash-systems-integration"
+parent = "startup-systems-check"
+priority = "2"
 +++
 
 # Splash screen systems check visualization — real loading behind the animation

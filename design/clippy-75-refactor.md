@@ -1,12 +1,21 @@
 +++
 id = "524cd4bd-2536-46ee-9a57-77724a2b0725"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Remaining 75 clippy warnings — structured refactoring plan"
+status = "decided"
+tags = ["code-quality", "clippy", "refactoring", "performance"]
+aliases = ["clippy-75-refactor"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "tech-debt"
+open_questions = []
+parent = "null"
+priority = "3"
 +++
 
 # Remaining 75 clippy warnings — structured refactoring plan

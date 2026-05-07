@@ -1,12 +1,20 @@
 +++
 id = "5da96a20-12e3-445b-bb20-5e6ba25f9403"
+kind = "document"
+title = "Omegon self-hosted web UI"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["pikit-web-ui-hosting"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+openspec_change = "localhost-web-ui-mvp"
+parent = "repo-consolidation-hardening"
 +++
 
 # Omegon self-hosted web UI

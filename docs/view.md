@@ -1,5 +1,6 @@
 +++
 id = "79a19ea8-3bee-4dba-8f1a-27f90716ff8e"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/context-aware-uri.md"]
+last_updated = "2026-03-10"
+openspec_baselines = ["uri-resolver.md"]
+subsystem = "view"
 +++
 
 # View & URI

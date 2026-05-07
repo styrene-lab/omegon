@@ -1,12 +1,20 @@
 +++
 id = "725f0a98-c8fa-42d9-8e59-74fae376f77a"
-tags = []
-aliases = []
+kind = "document"
+title = "Dual-Lifecycle OpenSpec — Design Layer + Implementation Layer"
+status = "implemented"
+tags = ["architecture", "design-tree", "openspec", "lifecycle", "dx"]
+aliases = ["dual-lifecycle-openspec"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+open_questions = []
+openspec_change = "dual-lifecycle-openspec"
 +++
 
 # Dual-Lifecycle OpenSpec — Design Layer + Implementation Layer

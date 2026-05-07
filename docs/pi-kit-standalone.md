@@ -1,12 +1,23 @@
 +++
 id = "c425d5a7-47a2-4a9c-991b-ddc83da056f4"
-tags = []
-aliases = []
+kind = "document"
+title = "Make Omegon Standalone — Subsume the pi Harness"
+status = "archived"
+tags = ["architecture", "fork", "standalone", "strategic"]
+aliases = ["Omegon-standalone"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+archive_reason = "superseded"
+archived_at = "1775246517"
+dependencies = []
+open_questions = []
+related = ["rust-agent-loop"]
+superseded_by = "ts-to-rust-migration"
 +++
 
 # Make Omegon Standalone — Subsume the pi Harness

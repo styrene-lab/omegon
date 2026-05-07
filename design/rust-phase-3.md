@@ -1,12 +1,19 @@
 +++
 id = "67f8dba5-d430-4b9b-ae2e-e54de79fee53"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Phase 3 — Native LLM providers: reqwest-based Anthropic/OpenAI, Node.js fully optional"
+status = "seed"
+tags = ["rust", "phase-3", "providers", "reqwest", "standalone"]
+aliases = ["rust-phase-3"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-agent-loop"
 +++
 
 # Phase 3 — Native LLM providers: reqwest-based Anthropic/OpenAI, Node.js fully optional

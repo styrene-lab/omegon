@@ -1,12 +1,19 @@
 +++
 id = "21d3ca09-2b32-463c-b2c3-9b5c207d9c58"
+kind = "document"
+title = "Design Change Re-open — revisiting an archived design decision"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["design-change-reopen"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "dual-lifecycle-openspec"
 +++
 
 # Design Change Re-open — revisiting an archived design decision

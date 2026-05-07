@@ -1,12 +1,22 @@
 +++
 id = "0a35b105-3a1a-42d7-889b-4f5ea4244866"
-tags = []
-aliases = []
+kind = "document"
+title = "Perpetual rolling context — provider-agnostic conversation buffer with projection-based LLM requests"
+status = "exploring"
+tags = ["architecture", "context", "providers", "strategic", "conversation"]
+aliases = ["perpetual-rolling-context"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "epic"
+open_questions = []
+parent = "rust-agent-loop"
+priority = "1"
+related = ["rust-compaction", "bridge-provider-routing", "agent-loop-resilience", "context-class-taxonomy-and-routing-policy"]
 +++
 
 # Perpetual rolling context — provider-agnostic conversation buffer with projection-based LLM requests

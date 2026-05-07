@@ -1,12 +1,21 @@
 +++
 id = "0055b228-f1f9-405d-a719-30288d8f5116"
+kind = "document"
+title = "Runtime profile and autonomy status contract"
+status = "seed"
 tags = []
-aliases = []
+aliases = ["runtime-profile-status-contract"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+parent = "omega-daemon-runtime"
+related = []
 +++
 
 # Runtime profile and autonomy status contract

@@ -1,12 +1,20 @@
 +++
 id = "6f83d628-0d4e-4b7d-9761-a7f12bc5eec6"
-tags = []
-aliases = []
+kind = "document"
+title = "Granular tool permissions — per-tool, per-path allow/deny/prompt policies"
+status = "exploring"
+tags = ["security", "permissions", "tools", "ux", "policy"]
+aliases = ["granular-permissions"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = ["What is the permission config format — TOML file in .omegon/permissions.toml, inline in opencode.json-style config, or both?"]
+priority = "1"
 +++
 
 # Granular tool permissions — per-tool, per-path allow/deny/prompt policies

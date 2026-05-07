@@ -1,5 +1,6 @@
 +++
 id = "ddd73e71-6d5a-4a15-87b6-40ec0639d30c"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = []
+last_updated = "2026-03-10"
+openspec_baselines = []
+subsystem = "local-inference"
 +++
 
 # Local Inference

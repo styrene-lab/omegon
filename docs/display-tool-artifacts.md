@@ -1,12 +1,21 @@
 +++
 id = "42dcd703-7512-4117-89ef-66dadb941eaa"
+kind = "document"
+title = "Display tool — agent-driven visual artifacts in the conversation"
+status = "resolved"
 tags = []
-aliases = []
+aliases = ["display-tool-artifacts"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+parent = "conversation-rendering-engine"
+related = ["conversation-widget", "embedded-web-dashboard", "inline-image-rendering"]
 +++
 
 # Display tool — agent-driven visual artifacts in the conversation

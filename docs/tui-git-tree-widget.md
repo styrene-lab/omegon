@@ -1,12 +1,19 @@
 +++
 id = "f9798293-4dc6-4fcc-8da6-ccbecc38f0fc"
+kind = "document"
+title = "Git branch tree widget — interactive, color-coded, scrollable"
+status = "exploring"
 tags = []
-aliases = []
+aliases = ["tui-git-tree-widget"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "tui-hud-redesign"
 +++
 
 # Git branch tree widget — interactive, color-coded, scrollable

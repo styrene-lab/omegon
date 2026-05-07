@@ -1,5 +1,6 @@
 +++
 id = "26ed668d-2ea6-46a8-a345-2a17606e20fa"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/agent-assess-tooling-access.md", "design/bridge-all-slash-commands.md"]
+last_updated = "2026-03-10"
+openspec_baselines = ["harness/slash-command-bridge.md", "harness/slash-commands.md"]
+subsystem = "slash-command-bridge"
 +++
 
 # Slash Command Bridge

@@ -1,12 +1,21 @@
 +++
 id = "011ef9e9-a339-4f89-b349-72fd949af27d"
-tags = []
-aliases = []
+kind = "design_node"
+title = "mdserve: Dioxus WASM frontend — lifecycle/intelligence views"
+status = "seed"
+tags = ["rendering", "dioxus", "wasm", "frontend", "lifecycle"]
+aliases = ["mdserve-dioxus-frontend"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = ["mdserve-lifecycle-backend"]
+issue_type = "feature"
+open_questions = []
+parent = "markdown-viewport"
 +++
 
 # mdserve: Dioxus WASM frontend — lifecycle/intelligence views

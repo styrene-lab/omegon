@@ -1,12 +1,18 @@
 +++
 id = "0e5685f9-3cae-4575-80ef-adcb3f98426b"
-tags = []
-aliases = []
+kind = "document"
+title = "Omegon Installation & Distribution"
+status = "implemented"
+tags = ["distribution", "dx", "packaging"]
+aliases = ["omegon-install"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Omegon Installation & Distribution

@@ -1,12 +1,19 @@
 +++
 id = "0f4610cf-380b-4673-a66e-e731c6ea7c30"
-tags = []
-aliases = []
+kind = "document"
+title = "OpenAI Codex Responses API client — native Rust client for ChatGPT OAuth JWT tokens"
+status = "implemented"
+tags = ["providers", "openai-codex", "oauth", "rust", "sse", "responses-api", "0.15.1"]
+aliases = ["openai-codex-responses-client"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "bridge-provider-routing"
 +++
 
 # OpenAI Codex Responses API client — native Rust client for ChatGPT OAuth JWT tokens

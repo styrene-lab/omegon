@@ -1,12 +1,21 @@
 +++
 id = "9a5ae752-0a1a-4aba-906f-913235c1f8b7"
-tags = []
-aliases = []
+kind = "document"
+title = "Dashboard and lifecycle publisher consolidation"
+status = "implemented"
+tags = ["dashboard", "lifecycle", "publishers", "consolidation", "shared-state"]
+aliases = ["dashboard-lifecycle-publisher-consolidation"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+open_questions = []
+openspec_change = "dashboard-lifecycle-publisher-consolidation"
+parent = "repo-consolidation-hardening"
 +++
 
 # Dashboard and lifecycle publisher consolidation

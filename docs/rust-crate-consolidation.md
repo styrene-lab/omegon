@@ -1,12 +1,19 @@
 +++
 id = "6d8677d5-e8cb-4ac7-8cb7-0dee8437c953"
+kind = "document"
+title = "Rust crate consolidation and ecosystem leverage"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["rust-crate-consolidation"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "ts-to-rust-migration"
 +++
 
 # Rust crate consolidation and ecosystem leverage

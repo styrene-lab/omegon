@@ -1,12 +1,20 @@
 +++
 id = "96b343fd-055c-4706-8bc4-1e79147fde2f"
-tags = []
-aliases = []
+kind = "document"
+title = "Cleave worker self-verification — PR-CoT repair loop before merge"
+status = "exploring"
+tags = ["architecture", "cleave", "verification", "quality", "self-repair"]
+aliases = ["cleave-worker-self-verification"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = ["Should OpenSpec scenarios be the primary verification oracle (when present) with self-generated tests as fallback, or always both?", "What is the right max repair round budget before declaring failure? ATLAS uses 3 — is that appropriate for Omegon's task surface?", "Does self-verification add enough latency to warrant a config flag to disable it for fast/simple tasks?"]
+priority = "1"
 +++
 
 # Cleave worker self-verification — PR-CoT repair loop before merge

@@ -1,12 +1,20 @@
 +++
 id = "25fa767d-b8c5-4c40-8f9a-1996f78acb6a"
-tags = []
-aliases = []
+kind = "document"
+title = "Idea Layer — Pre-Design Capture Primitive"
+status = "resolved"
+tags = ["architecture", "lifecycle", "auspex"]
+aliases = ["idea-layer"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = []
+related = []
 +++
 
 # Idea Layer — Pre-Design Capture Primitive

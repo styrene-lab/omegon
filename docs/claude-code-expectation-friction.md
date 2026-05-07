@@ -1,6 +1,9 @@
 +++
 id = "68220563-be84-4d36-8366-48cd431919f1"
-tags = []
+kind = "document"
+title = "Claude Code expectation friction in Omegon"
+status = "implemented"
+tags = ["ux", "claude-code", "friction", "omegon"]
 aliases = []
 imported_reference = false
 

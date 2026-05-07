@@ -1,12 +1,19 @@
 +++
 id = "ca4395ac-7f2c-4a52-9f94-fe7bfaa6e28c"
-tags = []
-aliases = []
+kind = "document"
+title = "Provider landscape assessment — gap analysis against upstream and strategic positioning"
+status = "implemented"
+tags = ["providers", "architecture", "assessment", "strategy", "local-inference", "google", "huggingface"]
+aliases = ["provider-landscape-assessment"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "bridge-provider-routing"
 +++
 
 # Provider landscape assessment — gap analysis against upstream and strategic positioning

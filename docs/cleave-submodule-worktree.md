@@ -1,12 +1,20 @@
 +++
 id = "8d9faddc-a1a9-419b-8fd9-8f92359733e2"
-tags = []
-aliases = []
+kind = "document"
+title = "Cleave worktree submodule failures — root cause and fix"
+status = "implemented"
+tags = ["cleave", "git", "submodule", "reliability"]
+aliases = ["cleave-submodule-worktree"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+open_questions = []
+openspec_change = "cleave-submodule-worktree"
 +++
 
 # Cleave worktree submodule failures — root cause and fix

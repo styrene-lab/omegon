@@ -1,12 +1,22 @@
 +++
 id = "1ee1aef1-32d3-4c36-9f1e-ddfcdb9c7c37"
+kind = "document"
+title = "Design-tree harness tooling"
+status = "resolved"
 tags = []
-aliases = []
+aliases = ["design-tree-harness-tooling"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+issue_type = "feature"
+open_questions = []
+priority = "1"
+related = ["design-tree-lifecycle", "directive-branch-lifecycle", "knowledge-quadrant-lifecycle"]
 +++
 
 # Design-tree harness tooling

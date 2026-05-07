@@ -1,12 +1,19 @@
 +++
 id = "0a148341-f47f-4aff-85b9-3b1c4f67ee37"
+kind = "document"
+title = "Task file Testing Requirements section — structure and injection"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["task-file-testing-section"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "testing-directives-pipeline"
 +++
 
 # Task file Testing Requirements section — structure and injection

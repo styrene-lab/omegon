@@ -1,12 +1,19 @@
 +++
 id = "1f062777-2e08-42f7-a54d-ef1cd0909809"
+kind = "document"
+title = "Structured RPC/event transport for cleave child execution"
+status = "decided"
 tags = []
-aliases = []
+aliases = ["structured-cleave-child-rpc"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "cross-provider-session-telemetry-schema"
 +++
 
 # Structured RPC/event transport for cleave child execution

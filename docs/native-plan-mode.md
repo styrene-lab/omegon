@@ -1,12 +1,23 @@
 +++
 id = "f7b1cac7-7dbf-42a4-a7f9-8d497a9654b8"
-tags = []
-aliases = []
+kind = "document"
+title = "Native plan mode — structured task decomposition with TUI widget and Auspex/browser integration"
+status = "exploring"
+tags = ["rust", "tui", "planning", "auspex", "openspec", "design-tree"]
+aliases = ["native-plan-mode"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = ["embedded-web-dashboard"]
+issue_type = "epic"
+open_questions = ["Should the plan TUI widget live in the dashboard panel, the conversation stream, or both? Dashboard gives persistent visibility; conversation keeps context inline.", "The local `/dash` compatibility surface currently serves basic HTML via the embedded axum server. What's the frontend stack for the enriched plan/lifecycle view in Auspex and, where still needed, the local browser fallback — raw HTML+JS, HTMX, or full Dioxus WASM (mdserve-dioxus-frontend is already a seed node)?"]
+parent = "conversation-rendering-engine"
+priority = "2"
+related = ["mdserve-dioxus-frontend"]
 +++
 
 # Native plan mode — structured task decomposition with TUI widget and Auspex/browser integration

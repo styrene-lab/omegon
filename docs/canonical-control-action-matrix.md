@@ -1,12 +1,21 @@
 +++
 id = "0ccfcec6-ae11-4e47-bb12-f527ba3a65f2"
-tags = []
-aliases = []
+kind = "document"
+title = "Canonical control action matrix"
+status = "exploring"
+tags = ["control-plane", "commands", "rbac", "ipc", "web", "cli", "slash"]
+aliases = ["canonical-control-action-matrix"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = ["Which slash actions remain TUI-only by design versus becoming remote-safe?", "Should IPC grow explicit session.new and graph/state mutation methods, or continue to route many mutations through run_slash_command?", "Which model-change intents split into edit versus admin (same-provider set vs provider switch) in the first enforcement pass?"]
+parent = "runtime-profile-status-contract"
+related = []
 +++
 
 # Canonical control action matrix

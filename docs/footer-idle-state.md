@@ -1,12 +1,18 @@
 +++
 id = "8276aa92-6c22-4a85-8267-fc8123a89010"
+kind = "document"
+title = "Footer idle state — engine border, useful content in empty panels before first turn"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["footer-idle-state"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
 +++
 
 # Footer idle state — engine border, useful content in empty panels before first turn

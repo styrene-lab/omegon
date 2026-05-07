@@ -1,12 +1,21 @@
 +++
 id = "511e4bfc-fa8e-48b5-814e-5be40c036ecb"
-tags = []
-aliases = []
+kind = "document"
+title = "Session secret cache and startup preflight"
+status = "exploring"
+tags = ["security", "secrets", "ux", "runtime"]
+aliases = ["session-secret-cache-preflight"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = ["What is the minimal required secret set to preflight for an interactive TUI session (active model provider, configured web search providers, update channel artifacts, etc.)?", "What is the safest transport for resolved secrets into child Omegon processes: inherited env vars, ephemeral snapshot file with strict permissions, or another IPC mechanism?"]
+parent = "macos-local-auth-keychain-ux"
+related = []
 +++
 
 # Session secret cache and startup preflight

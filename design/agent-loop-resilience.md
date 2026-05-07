@@ -1,12 +1,19 @@
 +++
 id = "116a773f-8786-4959-98ad-f37d2aa33f86"
-tags = []
-aliases = []
+kind = "design_node"
+title = "Agent loop resilience — what the hermit crab wants in its shell"
+status = "resolved"
+tags = ["rust", "agent-loop", "resilience", "self-awareness", "introspective"]
+aliases = ["agent-loop-resilience"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "rust-agent-loop"
 +++
 
 # Agent loop resilience — what the hermit crab wants in its shell

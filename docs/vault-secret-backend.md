@@ -1,12 +1,23 @@
 +++
 id = "11aa919a-dcc3-4961-a9af-41cd794392a9"
-tags = []
-aliases = []
+kind = "document"
+title = "Vault as first-class secret backend — operator-controlled secret storage with unseal lifecycle"
+status = "implemented"
+tags = ["vault", "secrets", "infrastructure", "operator", "ux"]
+aliases = ["vault-secret-backend"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+issue_type = "feature"
+open_questions = []
+openspec_change = "vault-secret-backend"
+parent = "rust-agent-loop"
+priority = "2"
 +++
 
 # Vault as first-class secret backend — operator-controlled secret storage with unseal lifecycle

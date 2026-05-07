@@ -1,12 +1,18 @@
 +++
 id = "ebfd2a0a-8208-445a-81e1-5b86ccc3a203"
-tags = []
-aliases = []
+kind = "document"
+title = "Signed update check with in-app restart"
+status = "exploring"
+tags = ["release", "ux", "lifecycle"]
+aliases = ["update-check-restart"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = ["Where do we check for updates — GitHub Releases API, a custom endpoint, or both?", "How do we verify the downloaded binary — cosign signature, minisign, or ad-hoc codesign?"]
 +++
 
 # Signed update check with in-app restart

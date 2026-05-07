@@ -1,12 +1,19 @@
 +++
 id = "39ae8896-b7e3-42ac-876c-08b6393702ea"
+kind = "document"
+title = "Benchmark analysis — comparison, regression detection, emergent signal"
+status = "seed"
 tags = []
-aliases = []
+aliases = ["benchmark-analysis"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "demo-qa-benchmark"
 +++
 
 # Benchmark analysis — comparison, regression detection, emergent signal

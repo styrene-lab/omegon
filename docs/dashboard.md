@@ -1,5 +1,6 @@
 +++
 id = "dd17cf33-952e-4700-b4cd-25783438fdc3"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/unified-dashboard.md", "design/dashboard-wide-truncation.md", "design/non-capturing-dashboard.md", "design/clickable-dashboard.md", "design/cleave-title-progress-sync.md"]
+last_updated = "2026-03-10"
+openspec_baselines = ["dashboard.md", "dashboard/terminal-title.md"]
+subsystem = "dashboard"
 +++
 
 # Dashboard

@@ -1,12 +1,20 @@
 +++
 id = "7f1eb37f-5a38-4f4d-a989-eae58e6b33b9"
-tags = []
-aliases = []
+kind = "document"
+title = "Enriched Tool Call Rendering"
+status = "implemented"
+tags = ["dashboard", "tui", "ux", "cleave", "design-tree"]
+aliases = ["tool-call-renderer"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+open_questions = []
+openspec_change = "tool-call-renderer"
 +++
 
 # Enriched Tool Call Rendering

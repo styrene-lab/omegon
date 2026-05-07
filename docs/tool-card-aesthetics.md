@@ -1,12 +1,19 @@
 +++
 id = "76849451-dc26-4e32-a85e-01375585f25a"
-tags = []
-aliases = []
+kind = "document"
+title = "Tool Card Aesthetic Overhaul"
+status = "implemented"
+tags = ["tui", "ux", "theme", "pi-mono"]
+aliases = ["tool-card-aesthetics"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "tool-call-renderer"
 +++
 
 # Tool Card Aesthetic Overhaul

@@ -1,12 +1,19 @@
 +++
 id = "40fec531-de5d-41fb-aca5-da1b0df37ebe"
-tags = []
-aliases = []
+kind = "document"
+title = "omegon.styrene.dev — installation landing page + install.sh hosting"
+status = "implemented"
+tags = ["infrastructure", "distribution", "web"]
+aliases = ["omegon-install-site"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "core-distribution"
 +++
 
 # omegon.styrene.dev — installation landing page + install.sh hosting

@@ -1,12 +1,19 @@
 +++
 id = "3d698594-f583-4d3d-bfa5-83d5a486b1c6"
+kind = "document"
+title = "Design Node Acceptance Criteria — format, storage, and evaluation"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["design-node-acceptance-criteria"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "dual-lifecycle-openspec"
 +++
 
 # Design Node Acceptance Criteria — format, storage, and evaluation

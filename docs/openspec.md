@@ -1,5 +1,6 @@
 +++
 id = "621ac91b-033b-4cf9-bab9-5498a1a9c19f"
+kind = "document"
 tags = []
 aliases = []
 imported_reference = false
@@ -7,6 +8,12 @@ imported_reference = false
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+design_docs = ["design/openspec-assess-lifecycle-integration.md", "design/lifecycle-hygiene-verification-substates.md", "design/assess-bridge-completed-results.md", "design/lifecycle-reconciliation.md", "design/post-assess-reconciliation.md", "design/lifecycle-artifact-versioning.md"]
+last_updated = "2026-03-10"
+openspec_baselines = ["openspec/assessment-lifecycle.md", "openspec/lifecycle-status.md", "lifecycle/post-assess.md", "lifecycle/reconciliation.md", "lifecycle/versioning.md"]
+subsystem = "openspec"
 +++
 
 # Implementation Layer (OpenSpec)

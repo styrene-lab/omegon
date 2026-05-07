@@ -1,12 +1,21 @@
 +++
 id = "13705307-3f46-4fdf-a398-2b1bfb28a7ea"
+kind = "document"
+title = "Omega persona inference — automatic domain detection and persona activation"
+status = "exploring"
 tags = []
-aliases = []
+aliases = ["omega-persona-inference"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = ["persona-distribution"]
+issue_type = "feature"
+open_questions = ["How does omega self-injection work — when the harness internalizes its own identity, does it auto-select/adapt persona based on project context?"]
+parent = "persona-system"
 +++
 
 # Omega persona inference — automatic domain detection and persona activation

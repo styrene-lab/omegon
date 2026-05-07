@@ -1,12 +1,18 @@
 +++
 id = "ae9fe9da-b3b0-44f5-a4df-12dbd060d605"
-tags = []
+kind = "document"
+title = "RC.64 Benchmark Finding — Shadow Context Harness Comparison (Cache-Aware)"
+status = "active"
+tags = ["benchmark", "release-candidate", "rc64", "token-efficiency", "performance", "cache-accounting"]
 aliases = []
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+date = "2026-04-10"
 +++
 
 # RC.64 Benchmark Finding — Shadow Context Harness Comparison (Cache-Aware)

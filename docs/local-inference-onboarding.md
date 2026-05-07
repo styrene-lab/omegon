@@ -1,12 +1,21 @@
 +++
 id = "04d2aa8f-b07e-41dd-90fc-1d63f8235baa"
-tags = []
-aliases = []
+kind = "document"
+title = "Local inference onboarding — smooth Ollama experience via /tutorial"
+status = "exploring"
+tags = ["local-inference", "ollama", "onboarding", "tutorial", "ux", "0.15.1"]
+aliases = ["local-inference-onboarding"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = ["startup-systems-check"]
+open_questions = ["What is the minimum model that can meaningfully drive a tutorial — can a 4B model do single-tool-call steps, or do we need 14B+ for reliable tool use?"]
+parent = "tutorial-system"
+priority = "2"
 +++
 
 # Local inference onboarding — smooth Ollama experience via /tutorial

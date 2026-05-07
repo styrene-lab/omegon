@@ -1,12 +1,20 @@
 +++
 id = "78c0d399-3b41-4d28-a6cf-44f03aa7b707"
-tags = []
-aliases = []
+kind = "document"
+title = "Supply chain security — code signing, SBOM generation, and release provenance for Rust binary"
+status = "implemented"
+tags = ["security", "distribution", "signing", "sbom", "sigstore", "ci", "release", "supply-chain"]
+aliases = ["supply-chain-security"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+priority = "1"
 +++
 
 # Supply chain security — code signing, SBOM generation, and release provenance for Rust binary

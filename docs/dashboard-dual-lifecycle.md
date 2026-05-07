@@ -1,12 +1,20 @@
 +++
 id = "01f6c5f1-440b-4baa-9948-3531bb606e46"
-tags = []
-aliases = []
+kind = "document"
+title = "Dashboard: Surface Dual-Lifecycle State"
+status = "implemented"
+tags = ["dashboard", "openspec", "design-tree", "web-ui"]
+aliases = ["dashboard-dual-lifecycle"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+branches = []
+open_questions = []
+openspec_change = "dashboard-dual-lifecycle"
 +++
 
 # Dashboard: Surface Dual-Lifecycle State

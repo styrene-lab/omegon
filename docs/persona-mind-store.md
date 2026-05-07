@@ -1,12 +1,20 @@
 +++
 id = "a97a4a09-aab7-48a7-991c-44a7f5b4ec72"
+kind = "document"
+title = "Persona mind stores — dedicated memory layers per persona identity"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["persona-mind-store"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "persona-system"
 +++
 
 # Persona mind stores — dedicated memory layers per persona identity

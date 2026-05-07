@@ -1,12 +1,21 @@
 +++
 id = "91a1b48d-8156-4e33-b90e-64e83f831b41"
-tags = []
-aliases = []
+kind = "document"
+title = "Functional plugins — code-backed skills with tools, endpoints, and runtime logic"
+status = "implemented"
+tags = ["plugins", "architecture", "extensions", "tools", "mcp", "code"]
+aliases = ["functional-plugins"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+issue_type = "feature"
+open_questions = []
+parent = "persona-system"
+priority = "2"
 +++
 
 # Functional plugins — code-backed skills with tools, endpoints, and runtime logic

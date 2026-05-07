@@ -1,12 +1,21 @@
 +++
 id = "2746808c-c36c-4b93-9b8e-7d2304770eff"
-tags = []
-aliases = []
+kind = "document"
+title = "Workspace ownership first pass — local lease registry and startup enforcement"
+status = "exploring"
+tags = ["workspace", "lease", "runtime", "cleave", "release", "benchmark", "startup"]
+aliases = ["workspace-ownership-first-pass"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+dependencies = []
+open_questions = ["Where in the startup path should mutable-workspace admission be enforced first: TUI bootstrap/session start, daemon attach, or a shared workspace-admission layer used by both?", "What is the minimum release/benchmark authority check in first pass: warn-only, hard refusal outside `release`/`benchmark` roles, or explicit override with operator confirmation?"]
+parent = "workspace-ownership-model"
+related = ["workspace-ownership-model"]
 +++
 
 # Workspace ownership first pass — local lease registry and startup enforcement

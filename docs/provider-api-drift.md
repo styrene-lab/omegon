@@ -1,12 +1,19 @@
 +++
 id = "f1cba9f2-a8e8-4794-8aa4-861f162c87df"
-tags = []
-aliases = []
+kind = "document"
+title = "Provider API drift detection — daily live verification against reviewed expectations"
+status = "implemented"
+tags = ["ci", "providers", "api-drift", "upstream", "rust", "testing"]
+aliases = ["provider-api-drift"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "core-distribution"
 +++
 
 # Provider API drift detection — daily live verification against reviewed expectations

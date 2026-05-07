@@ -1,12 +1,19 @@
 +++
 id = "132b6cdc-68f7-4cfe-9937-a1ad23c46807"
-tags = []
-aliases = []
+kind = "document"
+title = "macOS code signing — stable identity for keychain ACL persistence and Gatekeeper"
+status = "implemented"
+tags = ["security", "macos", "signing", "keychain", "distribution", "apple-developer"]
+aliases = ["macos-code-signing"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "supply-chain-security"
 +++
 
 # macOS code signing — stable identity for keychain ACL persistence and Gatekeeper

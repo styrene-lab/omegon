@@ -1,6 +1,9 @@
 +++
 id = "c161fc34-d2cf-4cd9-9159-80602ba2b002"
-tags = []
+kind = "document"
+title = "Release line correction for 0.15.10"
+status = "decided"
+tags = ["release", "rc", "versioning", "correction", "0.15.10"]
 aliases = []
 imported_reference = false
 

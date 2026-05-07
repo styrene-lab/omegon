@@ -1,12 +1,19 @@
 +++
 id = "84bc3792-444e-4752-8320-c05f1353ea46"
+kind = "document"
+title = "Design Assessment Command — /assess design integration"
+status = "implemented"
 tags = []
-aliases = []
+aliases = ["design-assess-command"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = []
+parent = "dual-lifecycle-openspec"
 +++
 
 # Design Assessment Command — /assess design integration

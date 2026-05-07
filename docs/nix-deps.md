@@ -1,12 +1,18 @@
 +++
 id = "41f1a315-a0b3-46b2-9410-8be43254d6ed"
-tags = []
-aliases = []
+kind = "document"
+title = "Nix as Unified Dependency Manager"
+status = "deferred"
+tags = ["infra", "bootstrap", "cross-platform"]
+aliases = ["nix-deps"]
 imported_reference = false
 
 [publication]
 enabled = false
 visibility = "private"
+
+[data]
+open_questions = ["Should Nix be the only install path, or a preferred-first with brew/apt fallback?", "Flake-based (nix develop) vs nix-env/nix profile install for end users — which UX model?", "How does bootstrap detect and offer Nix installation if Nix itself isn't present?", "Can Nix manage ollama (daemon/service) or only CLI tools? What about GPU-dependent deps?", "Does Nix work well on macOS (Apple Silicon) for all our deps — d2, pandoc, gh, poppler, librsvg?"]
 +++
 
 # Nix as Unified Dependency Manager
