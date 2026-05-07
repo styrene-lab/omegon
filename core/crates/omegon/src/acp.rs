@@ -837,6 +837,71 @@ impl OmegonAcpAgent {
                 Ok(serde_json::json!({ "ok": true }))
             }
 
+            // ── Discovery (armory + catalog) ──────────────────────
+
+            "extensions/search" => {
+                let query = params.get("query").and_then(|v| v.as_str());
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(15))
+                    .user_agent("omegon")
+                    .build()?;
+                let registry = crate::extension_registry::fetch_registry(&client).await
+                    .map_err(|e| anyhow::anyhow!("Could not reach armory: {e}"))?;
+
+                let installed: std::collections::HashSet<String> = if extensions_dir.exists() {
+                    std::fs::read_dir(&extensions_dir)?
+                        .filter_map(|e| e.ok())
+                        .filter(|e| e.path().is_dir() || e.path().is_symlink())
+                        .filter_map(|e| e.file_name().into_string().ok())
+                        .collect()
+                } else {
+                    std::collections::HashSet::new()
+                };
+
+                let mut entries: Vec<serde_json::Value> = registry.iter()
+                    .filter(|(name, entry)| {
+                        query.map(|q| {
+                            let q = q.to_lowercase();
+                            name.to_lowercase().contains(&q)
+                                || entry.description.to_lowercase().contains(&q)
+                                || entry.category.to_lowercase().contains(&q)
+                        }).unwrap_or(true)
+                    })
+                    .map(|(name, entry)| {
+                        serde_json::json!({
+                            "name": name,
+                            "description": entry.description,
+                            "category": entry.category,
+                            "repo": entry.repo,
+                            "installed": installed.contains(name.as_str()),
+                        })
+                    })
+                    .collect();
+                entries.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+                Ok(serde_json::json!({ "extensions": entries }))
+            }
+
+            "catalog/list" => {
+                let home = crate::paths::omegon_home()?;
+                let entries: Vec<serde_json::Value> = crate::catalog::list(&home)
+                    .into_iter()
+                    .map(|e| serde_json::json!({
+                        "id": e.id,
+                        "name": e.name,
+                        "version": e.version,
+                        "description": e.description,
+                        "domain": e.domain,
+                    }))
+                    .collect();
+                Ok(serde_json::json!({ "agents": entries }))
+            }
+
+            "catalog/install" => {
+                let offline = params.get("offline").and_then(|v| v.as_bool()).unwrap_or(false);
+                crate::catalog::cmd_install(offline).await?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+
             // ── Skills ────────────────────────────────────────────
 
             "skills/list" => {

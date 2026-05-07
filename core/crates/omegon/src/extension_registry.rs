@@ -22,18 +22,18 @@ const ARMORY_BASE: &str = "https://raw.githubusercontent.com/styrene-lab/omegon-
 
 /// Parsed entry from armory `registry.toml`.
 #[derive(serde::Deserialize)]
-struct RegistryEntry {
-    repo: String,
-    description: String,
-    category: String,
+pub(crate) struct RegistryEntry {
+    pub repo: String,
+    pub description: String,
+    pub category: String,
     #[allow(dead_code)]
-    maintainer: String,
+    pub maintainer: String,
     #[allow(dead_code)]
-    license: String,
+    pub license: String,
     #[allow(dead_code)]
-    min_sdk: Option<String>,
+    pub min_sdk: Option<String>,
     /// Prefix for release asset filenames (defaults to extension name).
-    asset_prefix: Option<String>,
+    pub asset_prefix: Option<String>,
 }
 
 impl RegistryEntry {
@@ -46,7 +46,7 @@ impl RegistryEntry {
 }
 
 /// Fetch the extension registry from the armory.
-async fn fetch_registry(
+pub(crate) async fn fetch_registry(
     client: &reqwest::Client,
 ) -> anyhow::Result<HashMap<String, RegistryEntry>> {
     let url = format!("{ARMORY_BASE}/registry.toml");
