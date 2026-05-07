@@ -48,6 +48,10 @@ pub struct ExtensionManifest {
     /// See [`McpConfig`] for transport hierarchy and connection mode resolution.
     #[serde(default)]
     pub mcp: Option<McpConfig>,
+    /// Typed configuration fields declared by the extension.
+    /// Parsed from `[config.<field_name>]` tables in manifest.toml.
+    #[serde(default)]
+    pub config: std::collections::HashMap<String, omegon_extension::ConfigField>,
 }
 
 /// Extension metadata.

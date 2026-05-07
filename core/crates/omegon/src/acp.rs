@@ -614,9 +614,190 @@ impl Agent for OmegonAcpAgent {
             .collect();
         Ok(ListSessionsResponse::new(sessions))
     }
+
+    async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
+        let params: serde_json::Value = serde_json::from_str(args.params.get())
+            .unwrap_or(serde_json::Value::Null);
+        let result = self.handle_ext_method(&args.method, params);
+        let raw = serde_json::value::RawValue::from_string(
+            serde_json::to_string(&result.unwrap_or(serde_json::json!({"error": "internal error"})))?,
+        )?;
+        Ok(ExtResponse::new(raw.into()))
+    }
 }
 
 impl OmegonAcpAgent {
+    fn handle_ext_method(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        use crate::extensions::{config_store, ExtensionManifest, ExtensionState};
+
+        let extensions_dir = crate::extension_cli::extensions_dir()?;
+
+        match method {
+            "extensions/list" => {
+                let mut extensions = Vec::new();
+                if extensions_dir.exists() {
+                    for entry in std::fs::read_dir(&extensions_dir)?.flatten() {
+                        let dir = entry.path();
+                        if !dir.is_dir() { continue; }
+                        let manifest_path = dir.join("manifest.toml");
+                        if !manifest_path.exists() { continue; }
+                        let Ok(manifest) = ExtensionManifest::from_extension_dir(&dir) else { continue };
+                        let state = ExtensionState::load(&dir).unwrap_or_default();
+                        let config_values = config_store::read_config(&dir).unwrap_or_default();
+
+                        let config_schema: serde_json::Map<String, serde_json::Value> = manifest
+                            .config
+                            .iter()
+                            .map(|(name, field)| {
+                                let mut entry = serde_json::to_value(field).unwrap_or_default();
+                                if let Some(obj) = entry.as_object_mut() {
+                                    if let Some(val) = config_values.get(name) {
+                                        obj.insert("current_value".into(), serde_json::Value::String(val.clone()));
+                                    }
+                                }
+                                (name.clone(), entry)
+                            })
+                            .collect();
+
+                        let secret_status = |names: &[String]| -> Vec<serde_json::Value> {
+                            names.iter().map(|name| {
+                                let (resolved, source) = if let Some(ref mgr) = *self.secrets.borrow() {
+                                    let has_value = mgr.resolve(name).is_some();
+                                    let recipes = mgr.list_recipes();
+                                    let src = recipes.iter()
+                                        .find(|(n, _)| n == name)
+                                        .map(|(_, r)| {
+                                            if r.starts_with("keyring:") { "keyring" }
+                                            else if r.starts_with("env:") { "env" }
+                                            else if r.starts_with("vault:") { "vault" }
+                                            else if r.starts_with("cmd:") { "cmd" }
+                                            else { "recipe" }
+                                        });
+                                    (has_value, src.map(String::from))
+                                } else {
+                                    (false, None)
+                                };
+                                serde_json::json!({
+                                    "name": name,
+                                    "resolved": resolved,
+                                    "source": source,
+                                })
+                            }).collect()
+                        };
+
+                        extensions.push(serde_json::json!({
+                            "name": manifest.extension.name,
+                            "version": manifest.extension.version,
+                            "description": manifest.extension.description,
+                            "enabled": state.enabled,
+                            "config_schema": config_schema,
+                            "secrets": {
+                                "required": secret_status(&manifest.secrets.required),
+                                "optional": secret_status(&manifest.secrets.optional),
+                            },
+                        }));
+                    }
+                }
+                extensions.sort_by(|a, b| {
+                    a["name"].as_str().cmp(&b["name"].as_str())
+                });
+                Ok(serde_json::json!({ "extensions": extensions }))
+            }
+
+            "extensions/config_get" => {
+                let ext_name = params["extension"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
+                let ext_dir = extensions_dir.join(ext_name);
+                if !ext_dir.exists() {
+                    anyhow::bail!("extension '{ext_name}' not found");
+                }
+                let config = config_store::read_config(&ext_dir)?;
+                Ok(serde_json::json!({ "config": config }))
+            }
+
+            "extensions/config_set" => {
+                let ext_name = params["extension"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
+                let key = params["key"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'key' field"))?;
+                let value = params["value"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'value' field"))?;
+                let ext_dir = extensions_dir.join(ext_name);
+                if !ext_dir.exists() {
+                    anyhow::bail!("extension '{ext_name}' not found");
+                }
+                let manifest = ExtensionManifest::from_extension_dir(&ext_dir)?;
+                if let Some(field) = manifest.config.get(key) {
+                    config_store::validate_field(field, value)?;
+                }
+                config_store::write_config_value(&ext_dir, key, value)?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+
+            "extensions/secret_set" => {
+                let ext_name = params["extension"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
+                let name = params["name"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let value = params["value"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'value' field"))?;
+                let ext_dir = extensions_dir.join(ext_name);
+                if !ext_dir.exists() {
+                    anyhow::bail!("extension '{ext_name}' not found");
+                }
+                if let Some(ref mgr) = *self.secrets.borrow() {
+                    mgr.set_keyring_secret(name, value)?;
+                    Ok(serde_json::json!({ "ok": true, "source": "keyring" }))
+                } else {
+                    anyhow::bail!("secrets manager not available — agent still initializing")
+                }
+            }
+
+            "extensions/secret_delete" => {
+                let name = params["name"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                if let Some(ref mgr) = *self.secrets.borrow() {
+                    mgr.delete_recipe(name)?;
+                    Ok(serde_json::json!({ "ok": true }))
+                } else {
+                    anyhow::bail!("secrets manager not available")
+                }
+            }
+
+            "extensions/enable" => {
+                let ext_name = params["extension"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
+                let ext_dir = extensions_dir.join(ext_name);
+                if !ext_dir.exists() {
+                    anyhow::bail!("extension '{ext_name}' not found");
+                }
+                let mut state = ExtensionState::load(&ext_dir).unwrap_or_default();
+                state.mark_enabled();
+                state.save(&ext_dir)?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+
+            "extensions/disable" => {
+                let ext_name = params["extension"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
+                let ext_dir = extensions_dir.join(ext_name);
+                if !ext_dir.exists() {
+                    anyhow::bail!("extension '{ext_name}' not found");
+                }
+                let mut state = ExtensionState::load(&ext_dir).unwrap_or_default();
+                state.mark_disabled();
+                state.save(&ext_dir)?;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+
+            _ => anyhow::bail!("unknown extension method: {method}"),
+        }
+    }
+
     fn handle_slash_command(&self, input: &str) -> String {
         let trimmed = input.trim();
         let (cmd, args) = trimmed
