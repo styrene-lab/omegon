@@ -902,6 +902,73 @@ impl OmegonAcpAgent {
                 Ok(serde_json::json!({ "ok": true }))
             }
 
+            // ── Personas ──────────────────────────────────────────
+
+            "personas/create" => {
+                let name = params["name"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let directive = params["directive"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'directive' field"))?;
+                let description = params.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                let badge = params.get("badge").and_then(|v| v.as_str());
+                let disabled_tools: Vec<String> = params.get("disabled_tools")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+
+                let slug = name.to_lowercase().replace(' ', "-")
+                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>();
+                let home = crate::paths::omegon_home()?;
+                let persona_dir = home.join("armory/personas").join(&slug);
+                std::fs::create_dir_all(&persona_dir)?;
+
+                let id = format!("user.{slug}");
+                let plugin_toml = format!(
+                    r#"[plugin]
+type = "persona"
+id = "{id}"
+name = "{name}"
+version = "1.0.0"
+description = "{description}"
+
+[persona.identity]
+directive = "PERSONA.md"
+
+[persona.tools]
+disable = {disabled_tools:?}
+
+[persona.style]
+{badge_line}
+"#,
+                    disabled_tools = disabled_tools,
+                    badge_line = badge.map(|b| format!("badge = \"{b}\"")).unwrap_or_default(),
+                );
+
+                std::fs::write(persona_dir.join("plugin.toml"), plugin_toml)?;
+                std::fs::write(persona_dir.join("PERSONA.md"), directive)?;
+
+                Ok(serde_json::json!({
+                    "ok": true,
+                    "id": id,
+                    "path": persona_dir.display().to_string(),
+                }))
+            }
+
+            "personas/delete" => {
+                let id = params["id"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'id' field"))?;
+                let (personas, _) = crate::plugins::persona_loader::scan_available();
+                match personas.iter().find(|p| p.id == id) {
+                    Some(p) => {
+                        if p.path.exists() {
+                            std::fs::remove_dir_all(&p.path)?;
+                        }
+                        Ok(serde_json::json!({ "ok": true }))
+                    }
+                    None => anyhow::bail!("persona '{id}' not found"),
+                }
+            }
+
             // ── Skills ────────────────────────────────────────────
 
             "skills/list" => {
@@ -912,6 +979,36 @@ impl OmegonAcpAgent {
             "skills/install" => {
                 crate::skills::cmd_install()?;
                 Ok(serde_json::json!({ "ok": true }))
+            }
+
+            "skills/create" => {
+                let name = params["name"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let content = params["content"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'content' field (SKILL.md body)"))?;
+                let slug = name.to_lowercase().replace(' ', "-")
+                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>();
+                let home = crate::paths::omegon_home()?;
+                let skill_dir = home.join("skills").join(&slug);
+                std::fs::create_dir_all(&skill_dir)?;
+                std::fs::write(skill_dir.join("SKILL.md"), content)?;
+                Ok(serde_json::json!({
+                    "ok": true,
+                    "path": skill_dir.display().to_string(),
+                }))
+            }
+
+            "skills/delete" => {
+                let name = params["name"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let home = crate::paths::omegon_home()?;
+                let skill_dir = home.join("skills").join(name);
+                if skill_dir.exists() {
+                    std::fs::remove_dir_all(&skill_dir)?;
+                    Ok(serde_json::json!({ "ok": true }))
+                } else {
+                    anyhow::bail!("skill '{name}' not found")
+                }
             }
 
             // ── Control requests (TUI parity) ────────────────────
