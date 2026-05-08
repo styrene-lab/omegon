@@ -53,6 +53,9 @@ dist/
 *.snap.new
 .omegon/agent-journal.md
 .omegon/profile.json
+# Advisory lock files (concurrent instance coordination)
+*.json.lock
+*.toml.lock
 .tmp/
 target/
 .codex/
