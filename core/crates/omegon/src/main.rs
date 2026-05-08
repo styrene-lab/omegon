@@ -25,6 +25,8 @@ use tracing_subscriber::util::SubscriberInitExt;
 mod acp;
 mod acp_worker;
 mod auth;
+mod host_context;
+pub(crate) mod filelock;
 mod behavior;
 mod bootstrap;
 mod bridge;
@@ -512,6 +514,12 @@ enum Commands {
         action: CatalogAction,
     },
 
+    /// Manage personas — list, create, and delete agent personas.
+    Persona {
+        #[command(subcommand)]
+        action: PersonaAction,
+    },
+
     /// Hidden benchmark-oriented commands used by the local comparison harness.
     #[command(hide = true)]
     Bench {
@@ -560,10 +568,31 @@ enum NexAction {
 
 #[derive(Subcommand)]
 enum SkillsAction {
-    /// List bundled skills and their installation status.
+    /// List skills — bundled, user-installed, and project-local.
     List,
     /// Install all bundled skills to ~/.omegon/skills/.
     Install,
+    /// Show details of a specific skill.
+    Get {
+        /// Skill name (e.g., "rust", "security").
+        name: String,
+    },
+    /// Create a new skill from a SKILL.md file.
+    Create {
+        /// Skill name (kebab-case).
+        name: String,
+        /// Path to SKILL.md content file.
+        #[arg(long)]
+        content: std::path::PathBuf,
+        /// Install as project-local skill (in .omegon/skills/) instead of user-global.
+        #[arg(long)]
+        project_local: bool,
+    },
+    /// Delete a skill by name.
+    Delete {
+        /// Skill name to delete.
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -576,6 +605,36 @@ enum CatalogAction {
         /// Use this on airgapped systems or when you don't want network access.
         #[arg(long)]
         offline: bool,
+    },
+    /// Remove a catalog agent by ID.
+    Remove {
+        /// Agent ID (e.g., "styrene.coding-agent").
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum PersonaAction {
+    /// List available personas and tones.
+    List,
+    /// Create a new persona from a directive file.
+    Create {
+        /// Persona name.
+        name: String,
+        /// Path to PERSONA.md directive file.
+        #[arg(long)]
+        directive: std::path::PathBuf,
+        /// One-line description.
+        #[arg(long, default_value = "")]
+        description: String,
+        /// Badge emoji.
+        #[arg(long)]
+        badge: Option<String>,
+    },
+    /// Delete a persona by ID.
+    Delete {
+        /// Persona ID (e.g., "user.my-persona").
+        id: String,
     },
 }
 
@@ -1080,10 +1139,162 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Skills { ref action }) => match action {
             SkillsAction::List => skills::cmd_list(),
             SkillsAction::Install => skills::cmd_install(),
+            SkillsAction::Get { name } => {
+                match skills::get_skill(name) {
+                    Ok((manifest, body, path)) => {
+                        println!("Skill: {}", manifest.name);
+                        if !manifest.description.is_empty() {
+                            println!("Description: {}", manifest.description);
+                        }
+                        if let Some(ref v) = manifest.version {
+                            println!("Version: {v}");
+                        }
+                        if !manifest.tags.is_empty() {
+                            println!("Tags: {}", manifest.tags.join(", "));
+                        }
+                        if !manifest.triggers.is_empty() {
+                            println!("Triggers: {}", manifest.triggers.join(", "));
+                        }
+                        if let Some(ref p) = manifest.posture {
+                            println!("Posture: {p}");
+                        }
+                        println!("Path: {}", path.display());
+                        println!("\n{body}");
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            SkillsAction::Create { name, content, project_local } => {
+                let slug: String = name.to_lowercase().replace(' ', "-")
+                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+                if slug.is_empty() {
+                    anyhow::bail!("invalid skill name");
+                }
+                let body = std::fs::read_to_string(content)?;
+                let skill_dir = if *project_local {
+                    std::env::current_dir()?.join(".omegon/skills").join(&slug)
+                } else {
+                    paths::omegon_home()?.join("skills").join(&slug)
+                };
+                std::fs::create_dir_all(&skill_dir)?;
+                std::fs::write(skill_dir.join("SKILL.md"), &body)?;
+                println!("Created skill '{slug}' at {}", skill_dir.display());
+                Ok(())
+            }
+            SkillsAction::Delete { name } => {
+                if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
+                    anyhow::bail!("invalid skill name: path traversal rejected");
+                }
+                let cwd = std::env::current_dir()?;
+                let project_dir = cwd.join(".omegon/skills").join(name);
+                let user_dir = paths::omegon_home()?.join("skills").join(name);
+                if project_dir.exists() {
+                    std::fs::remove_dir_all(&project_dir)?;
+                    println!("Deleted project-local skill '{name}'");
+                } else if user_dir.exists() {
+                    std::fs::remove_dir_all(&user_dir)?;
+                    println!("Deleted skill '{name}'");
+                } else {
+                    anyhow::bail!("skill '{name}' not found");
+                }
+                Ok(())
+            }
         },
         Some(Commands::Catalog { ref action }) => match action {
             CatalogAction::List => catalog::cmd_list(),
             CatalogAction::Install { offline } => catalog::cmd_install(*offline).await,
+            CatalogAction::Remove { id } => {
+                if id.contains('/') || id.contains('\\') || id.contains("..") || id.contains('\0') {
+                    anyhow::bail!("invalid agent ID: path traversal rejected");
+                }
+                let home = paths::omegon_home()?;
+                let catalog_dir = home.join("catalog");
+                let entries = catalog::list(&home);
+                let entry = entries.iter().find(|e| e.id == *id)
+                    .ok_or_else(|| anyhow::anyhow!("catalog agent '{id}' not found"))?;
+                if !entry.bundle_dir.starts_with(&catalog_dir) {
+                    anyhow::bail!("refusing to remove agent outside catalog directory");
+                }
+                std::fs::remove_dir_all(&entry.bundle_dir)?;
+                println!("Removed catalog agent '{id}'");
+                Ok(())
+            }
+        },
+        Some(Commands::Persona { ref action }) => match action {
+            PersonaAction::List => {
+                let (personas, tones) = plugins::persona_loader::scan_available();
+                if personas.is_empty() && tones.is_empty() {
+                    println!("No personas or tones installed.");
+                    return Ok(());
+                }
+                if !personas.is_empty() {
+                    println!("Personas ({}):\n", personas.len());
+                    for p in &personas {
+                        println!("  {:<32} {}", p.id, p.description);
+                    }
+                }
+                if !tones.is_empty() {
+                    println!("\nTones ({}):\n", tones.len());
+                    for t in &tones {
+                        println!("  {:<32} {}", t.id, t.description);
+                    }
+                }
+                Ok(())
+            }
+            PersonaAction::Create { name, directive, description, badge } => {
+                let directive_content = std::fs::read_to_string(directive)?;
+                let slug: String = name.to_lowercase().replace(' ', "-")
+                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+                if slug.is_empty() {
+                    anyhow::bail!("invalid persona name");
+                }
+                let home = paths::omegon_home()?;
+                let persona_dir = home.join("armory/personas").join(&slug);
+                std::fs::create_dir_all(&persona_dir)?;
+
+                let id = format!("user.{slug}");
+                let mut plugin = toml::Table::new();
+                let mut plugin_section = toml::Table::new();
+                plugin_section.insert("type".into(), "persona".into());
+                plugin_section.insert("id".into(), id.clone().into());
+                plugin_section.insert("name".into(), name.as_str().into());
+                plugin_section.insert("version".into(), "1.0.0".into());
+                plugin_section.insert("description".into(), description.as_str().into());
+                plugin.insert("plugin".into(), toml::Value::Table(plugin_section));
+
+                let mut persona = toml::Table::new();
+                let mut identity = toml::Table::new();
+                identity.insert("directive".into(), "PERSONA.md".into());
+                persona.insert("identity".into(), toml::Value::Table(identity));
+                if let Some(b) = badge {
+                    let mut style = toml::Table::new();
+                    style.insert("badge".into(), b.as_str().into());
+                    persona.insert("style".into(), toml::Value::Table(style));
+                }
+                plugin.insert("persona".into(), toml::Value::Table(persona));
+
+                std::fs::write(
+                    persona_dir.join("plugin.toml"),
+                    toml::to_string_pretty(&plugin)?,
+                )?;
+                std::fs::write(persona_dir.join("PERSONA.md"), &directive_content)?;
+                println!("Created persona '{id}' at {}", persona_dir.display());
+                Ok(())
+            }
+            PersonaAction::Delete { id } => {
+                let (personas, _) = plugins::persona_loader::scan_available();
+                match personas.iter().find(|p| p.id == *id) {
+                    Some(p) => {
+                        if p.path.exists() {
+                            std::fs::remove_dir_all(&p.path)?;
+                        }
+                        println!("Deleted persona '{id}'");
+                        Ok(())
+                    }
+                    None => anyhow::bail!("persona '{id}' not found"),
+                }
+            }
         },
         Some(Commands::Nex { ref action }) => {
             nex_cli(action);
@@ -1466,6 +1677,7 @@ async fn run_embedded_command(
     };
 
     let mut agent = setup::AgentSetup::new(&cwd, None, Some(shared_settings.clone())).await?;
+    agent.instance_id = paths::instance_id("embedded");
     bootstrap::apply_runtime_posture(
         &mut agent,
         omegon_traits::OmegonRuntimeProfile::LongRunningDaemon,
@@ -2303,7 +2515,8 @@ async fn run_cleave_command(
 
     // Resolve self binary path for spawning children
     let agent_binary = std::env::current_exe()?;
-    let agent_setup = setup::AgentSetup::new(&repo_path, None, None).await?;
+    let mut agent_setup = setup::AgentSetup::new(&repo_path, None, None).await?;
+    agent_setup.instance_id = paths::instance_id("cleave");
 
     let config = cleave::orchestrator::CleaveConfig {
         agent_binary,
@@ -2812,6 +3025,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     // means "most recent" and --fresh forces a clean start.
     let resume = interactive_resume_mode(cli);
     let mut agent = setup::AgentSetup::new(&cli.cwd, resume, Some(shared_settings.clone())).await?;
+    agent.instance_id = paths::instance_id("tui");
     bootstrap::apply_runtime_posture(
         &mut agent,
         omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
@@ -4517,6 +4731,7 @@ pub(crate) struct InteractiveAgentState {
 
 pub(crate) struct InteractiveAgentHost {
     pub(crate) session_id: String,
+    pub(crate) instance_id: String,
     pub(crate) context_metrics:
         std::sync::Arc<std::sync::Mutex<crate::features::context::SharedContextMetrics>>,
     pub(crate) cwd: PathBuf,
@@ -4545,6 +4760,7 @@ fn split_interactive_agent(
 ) -> (InteractiveAgentHost, InteractiveAgentState) {
     let host = InteractiveAgentHost {
         session_id: agent.session_id,
+        instance_id: agent.instance_id,
         context_metrics: agent.context_metrics,
         cwd: agent.cwd,
         secrets: agent.secrets,
@@ -5065,6 +5281,7 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
 
     let resume = cli.resume.as_ref().map(|r| r.as_deref());
     let mut agent = setup::AgentSetup::new(&cli.cwd, resume, Some(shared_settings.clone())).await?;
+    agent.instance_id = paths::instance_id("run");
     bootstrap::apply_runtime_posture(
         &mut agent,
         omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,
@@ -5346,7 +5563,8 @@ async fn maybe_run_injected_cleave_smoke_child(
                     s.set_requested_context_class(class);
                 }
             }
-            let agent = setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await?;
+            let mut agent = setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await?;
+            agent.instance_id = paths::instance_id("cleave");
             let status = agent.initial_harness_status.clone();
             let tool_names: Vec<String> = agent
                 .bus
@@ -5740,6 +5958,7 @@ async fn run_bounded_task(
     }
 
     let mut agent = setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await?;
+    agent.instance_id = paths::instance_id("run");
     bootstrap::apply_runtime_posture(
         &mut agent,
         omegon_traits::OmegonRuntimeProfile::PrimaryInteractive,

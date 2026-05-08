@@ -490,6 +490,20 @@ pub(crate) enum CanonicalSlashCommand {
     SkillsView,
     SkillsInstall,
     SkillCreate,
+    SkillGet(String),
+    SkillDelete(String),
+    ExtensionView,
+    ExtensionGet(String),
+    ExtensionInstall(String),
+    ExtensionRemove(String),
+    ExtensionUpdate(Option<String>),
+    ExtensionEnable(String),
+    ExtensionDisable(String),
+    ExtensionSearch(Option<String>),
+    PersonaList,
+    CatalogView,
+    CatalogInstall,
+    CatalogRemove(String),
     PluginView,
     PluginInstall(String),
     PluginRemove(String),
@@ -620,11 +634,76 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         },
         "login" if !args.is_empty() => Some(CanonicalSlashCommand::AuthLogin(args.to_string())),
         "logout" if !args.is_empty() => Some(CanonicalSlashCommand::AuthLogout(args.to_string())),
-        "skills" | "skill" => match args {
-            "" | "list" => Some(CanonicalSlashCommand::SkillsView),
-            "install" => Some(CanonicalSlashCommand::SkillsInstall),
-            "create" | "new" => Some(CanonicalSlashCommand::SkillCreate),
-            _ => None,
+        "skills" | "skill" => {
+            if args.is_empty() || args == "list" {
+                Some(CanonicalSlashCommand::SkillsView)
+            } else if args == "install" {
+                Some(CanonicalSlashCommand::SkillsInstall)
+            } else if args == "create" || args == "new" {
+                Some(CanonicalSlashCommand::SkillCreate)
+            } else if let Some(name) = args.strip_prefix("get ") {
+                let name = name.trim();
+                (!name.is_empty()).then(|| CanonicalSlashCommand::SkillGet(name.to_string()))
+            } else if let Some(name) = args.strip_prefix("delete ") {
+                let name = name.trim();
+                (!name.is_empty()).then(|| CanonicalSlashCommand::SkillDelete(name.to_string()))
+            } else {
+                None
+            }
+        },
+        "extension" | "ext" => {
+            if args.is_empty() || args == "list" {
+                Some(CanonicalSlashCommand::ExtensionView)
+            } else if let Some(name) = args.strip_prefix("get ") {
+                let name = name.trim();
+                (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionGet(name.to_string()))
+            } else if let Some(uri) = args.strip_prefix("install ") {
+                let uri = uri.trim();
+                (!uri.is_empty()).then(|| CanonicalSlashCommand::ExtensionInstall(uri.to_string()))
+            } else if let Some(name) = args.strip_prefix("remove ") {
+                let name = name.trim();
+                (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionRemove(name.to_string()))
+            } else if args == "update" {
+                Some(CanonicalSlashCommand::ExtensionUpdate(None))
+            } else if let Some(name) = args.strip_prefix("update ") {
+                let name = name.trim();
+                (!name.is_empty())
+                    .then(|| CanonicalSlashCommand::ExtensionUpdate(Some(name.to_string())))
+            } else if let Some(name) = args.strip_prefix("enable ") {
+                let name = name.trim();
+                (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionEnable(name.to_string()))
+            } else if let Some(name) = args.strip_prefix("disable ") {
+                let name = name.trim();
+                (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionDisable(name.to_string()))
+            } else if args == "search" {
+                Some(CanonicalSlashCommand::ExtensionSearch(None))
+            } else if let Some(query) = args.strip_prefix("search ") {
+                let query = query.trim();
+                Some(CanonicalSlashCommand::ExtensionSearch(
+                    if query.is_empty() { None } else { Some(query.to_string()) }
+                ))
+            } else {
+                None
+            }
+        },
+        "persona" => {
+            if args == "list" {
+                Some(CanonicalSlashCommand::PersonaList)
+            } else {
+                None // "off" and <name> are handled directly in TUI handler
+            }
+        },
+        "catalog" => {
+            if args.is_empty() || args == "list" {
+                Some(CanonicalSlashCommand::CatalogView)
+            } else if args == "install" {
+                Some(CanonicalSlashCommand::CatalogInstall)
+            } else if let Some(id) = args.strip_prefix("remove ") {
+                let id = id.trim();
+                (!id.is_empty()).then(|| CanonicalSlashCommand::CatalogRemove(id.to_string()))
+            } else {
+                None
+            }
         },
         "plugin" => {
             if args.is_empty() || args == "list" {
@@ -4275,13 +4354,28 @@ impl App {
         ("memory", "memory stats", &[]),
         (
             "skills",
-            "list or install bundled skills",
-            &["list", "install"],
+            "manage skills (bundled, user, project-local)",
+            &["list", "install", "create", "get", "delete"],
+        ),
+        (
+            "extension",
+            "manage extensions (install, remove, enable, disable)",
+            &["list", "get", "install", "remove", "update", "enable", "disable", "search"],
+        ),
+        (
+            "ext",
+            "alias for /extension",
+            &["list", "get", "install", "remove", "update", "enable", "disable", "search"],
         ),
         (
             "plugin",
-            "manage installed plugins",
+            "manage armory plugins (personas, tones, tools)",
             &["list", "install", "remove", "update"],
+        ),
+        (
+            "catalog",
+            "browse and manage agent catalog",
+            &["list", "install", "remove"],
         ),
         (
             "cleave",
@@ -4367,8 +4461,8 @@ impl App {
         ),
         (
             "persona",
-            "switch persona (or 'off' to deactivate)",
-            &["off"],
+            "switch persona, list, create, or deactivate",
+            &["list", "create", "off"],
         ),
         ("tone", "switch tone (or 'off' to deactivate)", &["off"]),
         ("delegate", "delegate task management", &["status"]),
@@ -4565,10 +4659,52 @@ impl App {
                         });
                         SlashResult::Handled
                     } else {
-                        SlashResult::Display("Usage: /skill [list|install|create]".into())
+                        SlashResult::Display("Usage: /skills [list|install|create|get <name>|delete <name>]".into())
                     }
                 } else {
-                    SlashResult::Display("Usage: /skill [list|install|create]".into())
+                    SlashResult::Display("Usage: /skills [list|install|create|get <name>|delete <name>]".into())
+                }
+            }
+
+            "extension" | "ext" => {
+                if let Some(command) = canonical_slash_command("extension", args) {
+                    if let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
+                    {
+                        let _ = tx.try_send(TuiCommand::ExecuteControl {
+                            request,
+                            respond_to: None,
+                        });
+                        SlashResult::Handled
+                    } else {
+                        SlashResult::Display(
+                            "Usage: /extension [list|get <name>|install <uri>|remove <name>|update [name]|enable <name>|disable <name>|search [query]]"
+                                .into(),
+                        )
+                    }
+                } else {
+                    SlashResult::Display(
+                        "Usage: /extension [list|get <name>|install <uri>|remove <name>|update [name]|enable <name>|disable <name>|search [query]]"
+                            .into(),
+                    )
+                }
+            }
+
+            "catalog" => {
+                if let Some(command) = canonical_slash_command("catalog", args) {
+                    if let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
+                    {
+                        let _ = tx.try_send(TuiCommand::ExecuteControl {
+                            request,
+                            respond_to: None,
+                        });
+                        SlashResult::Handled
+                    } else {
+                        SlashResult::Display("Usage: /catalog [list|install|remove <id>]".into())
+                    }
+                } else {
+                    SlashResult::Display("Usage: /catalog [list|install|remove <id>]".into())
                 }
             }
 
@@ -4753,7 +4889,25 @@ impl App {
             }
 
             "persona" => {
-                if args == "off" {
+                if args == "create" || args == "new" {
+                    let builder_prompt = crate::plugins::persona_loader::persona_builder_prompt();
+                    self.queued_prompts.push_back((builder_prompt, Vec::new()));
+                    self.queue_mode = PromptQueueMode::InterruptAfterTurn;
+                    self.conversation.push_system("Starting persona builder...");
+                    return SlashResult::Handled;
+                } else if args == "list" {
+                    if let Some(command) = canonical_slash_command("persona", args)
+                        && let Some(request) =
+                            crate::control_runtime::control_request_from_slash(&command)
+                    {
+                        let _ = tx.try_send(TuiCommand::ExecuteControl {
+                            request,
+                            respond_to: None,
+                        });
+                        return SlashResult::Handled;
+                    }
+                    SlashResult::Display("Usage: /persona [list|create|off|<name>]".into())
+                } else if args == "off" {
                     if let Some(ref mut registry) = self.plugin_registry {
                         let result = registry.deactivate_persona();
                         match result.removed_id {
@@ -4792,7 +4946,7 @@ impl App {
                             }
                         }
                         None => SlashResult::Display(format!(
-                            "Persona '{args}' not found. Run /persona to list available."
+                            "Persona '{args}' not found. Run /persona list to see available, or /persona create to build one."
                         )),
                     }
                 }
@@ -8332,5 +8486,234 @@ mod auspex_copy_tests {
         assert!(auspex.1.contains("primary"));
         assert!(auspex.1.contains("Auspex"));
         assert!(auspex.1.contains("open"));
+    }
+}
+
+#[cfg(test)]
+mod slash_command_parsing_tests {
+    use super::canonical_slash_command;
+    use super::CanonicalSlashCommand;
+    use super::App;
+
+    // ── Skills ────────────────────────────────────────────
+
+    #[test]
+    fn skills_list() {
+        assert!(matches!(canonical_slash_command("skills", ""), Some(CanonicalSlashCommand::SkillsView)));
+        assert!(matches!(canonical_slash_command("skills", "list"), Some(CanonicalSlashCommand::SkillsView)));
+        assert!(matches!(canonical_slash_command("skill", "list"), Some(CanonicalSlashCommand::SkillsView)));
+    }
+
+    #[test]
+    fn skills_install() {
+        assert!(matches!(canonical_slash_command("skills", "install"), Some(CanonicalSlashCommand::SkillsInstall)));
+    }
+
+    #[test]
+    fn skills_create() {
+        assert!(matches!(canonical_slash_command("skills", "create"), Some(CanonicalSlashCommand::SkillCreate)));
+        assert!(matches!(canonical_slash_command("skills", "new"), Some(CanonicalSlashCommand::SkillCreate)));
+    }
+
+    #[test]
+    fn skills_get() {
+        match canonical_slash_command("skills", "get rust") {
+            Some(CanonicalSlashCommand::SkillGet(name)) => assert_eq!(name, "rust"),
+            other => panic!("expected SkillGet, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn skills_get_empty_rejected() {
+        assert!(canonical_slash_command("skills", "get ").is_none());
+        assert!(canonical_slash_command("skills", "get").is_none());
+    }
+
+    #[test]
+    fn skills_delete() {
+        match canonical_slash_command("skills", "delete my-skill") {
+            Some(CanonicalSlashCommand::SkillDelete(name)) => assert_eq!(name, "my-skill"),
+            other => panic!("expected SkillDelete, got {other:?}"),
+        }
+    }
+
+    // ── Extensions ────────────────────────────────────────
+
+    #[test]
+    fn extension_list() {
+        assert!(matches!(canonical_slash_command("extension", ""), Some(CanonicalSlashCommand::ExtensionView)));
+        assert!(matches!(canonical_slash_command("extension", "list"), Some(CanonicalSlashCommand::ExtensionView)));
+        assert!(matches!(canonical_slash_command("ext", "list"), Some(CanonicalSlashCommand::ExtensionView)));
+    }
+
+    #[test]
+    fn extension_get() {
+        match canonical_slash_command("extension", "get scribe") {
+            Some(CanonicalSlashCommand::ExtensionGet(name)) => assert_eq!(name, "scribe"),
+            other => panic!("expected ExtensionGet, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extension_install() {
+        match canonical_slash_command("extension", "install https://github.com/ex/foo") {
+            Some(CanonicalSlashCommand::ExtensionInstall(uri)) => {
+                assert_eq!(uri, "https://github.com/ex/foo");
+            }
+            other => panic!("expected ExtensionInstall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extension_remove() {
+        match canonical_slash_command("extension", "remove scribe") {
+            Some(CanonicalSlashCommand::ExtensionRemove(name)) => assert_eq!(name, "scribe"),
+            other => panic!("expected ExtensionRemove, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extension_update_all() {
+        assert!(matches!(
+            canonical_slash_command("extension", "update"),
+            Some(CanonicalSlashCommand::ExtensionUpdate(None))
+        ));
+    }
+
+    #[test]
+    fn extension_update_named() {
+        match canonical_slash_command("extension", "update scribe") {
+            Some(CanonicalSlashCommand::ExtensionUpdate(Some(name))) => assert_eq!(name, "scribe"),
+            other => panic!("expected ExtensionUpdate(Some), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extension_enable() {
+        match canonical_slash_command("extension", "enable scribe") {
+            Some(CanonicalSlashCommand::ExtensionEnable(name)) => assert_eq!(name, "scribe"),
+            other => panic!("expected ExtensionEnable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extension_disable() {
+        match canonical_slash_command("extension", "disable scribe") {
+            Some(CanonicalSlashCommand::ExtensionDisable(name)) => assert_eq!(name, "scribe"),
+            other => panic!("expected ExtensionDisable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extension_search_no_query() {
+        assert!(matches!(
+            canonical_slash_command("extension", "search"),
+            Some(CanonicalSlashCommand::ExtensionSearch(None))
+        ));
+    }
+
+    #[test]
+    fn extension_search_with_query() {
+        match canonical_slash_command("extension", "search analytics") {
+            Some(CanonicalSlashCommand::ExtensionSearch(Some(q))) => assert_eq!(q, "analytics"),
+            other => panic!("expected ExtensionSearch(Some), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ext_alias_works() {
+        assert!(matches!(canonical_slash_command("ext", ""), Some(CanonicalSlashCommand::ExtensionView)));
+        match canonical_slash_command("ext", "install foo") {
+            Some(CanonicalSlashCommand::ExtensionInstall(uri)) => assert_eq!(uri, "foo"),
+            other => panic!("expected ExtensionInstall via 'ext', got {other:?}"),
+        }
+    }
+
+    // ── Personas ──────────────────────────────────────────
+
+    #[test]
+    fn persona_list() {
+        assert!(matches!(
+            canonical_slash_command("persona", "list"),
+            Some(CanonicalSlashCommand::PersonaList)
+        ));
+    }
+
+    #[test]
+    fn persona_off_handled_by_tui() {
+        // "off" is NOT routed through canonical — TUI handles it directly
+        assert!(canonical_slash_command("persona", "off").is_none());
+    }
+
+    #[test]
+    fn persona_name_handled_by_tui() {
+        // Arbitrary persona names are NOT routed through canonical — TUI handles directly
+        assert!(canonical_slash_command("persona", "my-persona").is_none());
+    }
+
+    // ── Catalog ───────────────────────────────────────────
+
+    #[test]
+    fn catalog_list() {
+        assert!(matches!(canonical_slash_command("catalog", ""), Some(CanonicalSlashCommand::CatalogView)));
+        assert!(matches!(canonical_slash_command("catalog", "list"), Some(CanonicalSlashCommand::CatalogView)));
+    }
+
+    #[test]
+    fn catalog_install() {
+        assert!(matches!(canonical_slash_command("catalog", "install"), Some(CanonicalSlashCommand::CatalogInstall)));
+    }
+
+    #[test]
+    fn catalog_remove() {
+        match canonical_slash_command("catalog", "remove styrene.coding-agent") {
+            Some(CanonicalSlashCommand::CatalogRemove(id)) => assert_eq!(id, "styrene.coding-agent"),
+            other => panic!("expected CatalogRemove, got {other:?}"),
+        }
+    }
+
+    // ── COMMANDS array coverage ───────────────────────────
+
+    #[test]
+    fn commands_array_includes_extension() {
+        let ext = App::COMMANDS
+            .iter()
+            .find(|(name, _, _)| *name == "extension")
+            .expect("/extension command must be in COMMANDS array");
+        assert!(ext.2.contains(&"install"));
+        assert!(ext.2.contains(&"remove"));
+        assert!(ext.2.contains(&"enable"));
+        assert!(ext.2.contains(&"search"));
+    }
+
+    #[test]
+    fn commands_array_includes_catalog() {
+        let cat = App::COMMANDS
+            .iter()
+            .find(|(name, _, _)| *name == "catalog")
+            .expect("/catalog command must be in COMMANDS array");
+        assert!(cat.2.contains(&"install"));
+        assert!(cat.2.contains(&"remove"));
+    }
+
+    #[test]
+    fn commands_array_skills_includes_delete() {
+        let skills = App::COMMANDS
+            .iter()
+            .find(|(name, _, _)| *name == "skills")
+            .expect("/skills must be in COMMANDS");
+        assert!(skills.2.contains(&"create"));
+        assert!(skills.2.contains(&"delete"));
+        assert!(skills.2.contains(&"get"));
+    }
+
+    #[test]
+    fn commands_array_persona_includes_list_and_create() {
+        let persona = App::COMMANDS
+            .iter()
+            .find(|(name, _, _)| *name == "persona")
+            .expect("/persona must be in COMMANDS");
+        assert!(persona.2.contains(&"list"));
+        assert!(persona.2.contains(&"create"));
     }
 }

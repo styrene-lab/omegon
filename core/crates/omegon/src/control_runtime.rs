@@ -104,6 +104,19 @@ pub enum ControlRequest {
     },
     SkillsView,
     SkillsInstall,
+    SkillGet { name: String },
+    SkillDelete { name: String },
+    ExtensionView,
+    ExtensionGet { name: String },
+    ExtensionInstall { uri: String },
+    ExtensionRemove { name: String },
+    ExtensionUpdate { name: Option<String> },
+    ExtensionEnable { name: String },
+    ExtensionDisable { name: String },
+    ExtensionSearch { query: Option<String> },
+    CatalogView,
+    CatalogInstall,
+    CatalogRemove { id: String },
     PluginView,
     PluginInstall {
         uri: String,
@@ -236,6 +249,40 @@ pub fn control_request_from_slash(
         // SkillCreate is handled directly in the TUI (queues a prompt) —
         // it never reaches control_runtime. Return None to signal this.
         crate::tui::CanonicalSlashCommand::SkillCreate => return None,
+        crate::tui::CanonicalSlashCommand::SkillGet(name) => ControlRequest::SkillGet {
+            name: name.clone(),
+        },
+        crate::tui::CanonicalSlashCommand::SkillDelete(name) => ControlRequest::SkillDelete {
+            name: name.clone(),
+        },
+        crate::tui::CanonicalSlashCommand::ExtensionView => ControlRequest::ExtensionView,
+        crate::tui::CanonicalSlashCommand::ExtensionGet(name) => ControlRequest::ExtensionGet {
+            name: name.clone(),
+        },
+        crate::tui::CanonicalSlashCommand::ExtensionInstall(uri) => {
+            ControlRequest::ExtensionInstall { uri: uri.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::ExtensionRemove(name) => {
+            ControlRequest::ExtensionRemove { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::ExtensionUpdate(name) => {
+            ControlRequest::ExtensionUpdate { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::ExtensionEnable(name) => {
+            ControlRequest::ExtensionEnable { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::ExtensionDisable(name) => {
+            ControlRequest::ExtensionDisable { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::ExtensionSearch(query) => {
+            ControlRequest::ExtensionSearch { query: query.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::PersonaList => ControlRequest::PersonaList,
+        crate::tui::CanonicalSlashCommand::CatalogView => ControlRequest::CatalogView,
+        crate::tui::CanonicalSlashCommand::CatalogInstall => ControlRequest::CatalogInstall,
+        crate::tui::CanonicalSlashCommand::CatalogRemove(id) => ControlRequest::CatalogRemove {
+            id: id.clone(),
+        },
         crate::tui::CanonicalSlashCommand::PluginView => ControlRequest::PluginView,
         crate::tui::CanonicalSlashCommand::PluginInstall(uri) => {
             ControlRequest::PluginInstall { uri: uri.clone() }
@@ -297,6 +344,19 @@ async fn try_stateless_control(
         }
         ControlRequest::SkillsView => skills_view_response().await,
         ControlRequest::SkillsInstall => skills_install_response().await,
+        ControlRequest::SkillGet { name } => skill_get_response(name).await,
+        ControlRequest::SkillDelete { name } => skill_delete_response(name).await,
+        ControlRequest::ExtensionView => extension_view_response().await,
+        ControlRequest::ExtensionGet { name } => extension_get_response(name).await,
+        ControlRequest::ExtensionInstall { uri } => extension_install_response(uri).await,
+        ControlRequest::ExtensionRemove { name } => extension_remove_response(name).await,
+        ControlRequest::ExtensionUpdate { name } => extension_update_response(name.as_deref()).await,
+        ControlRequest::ExtensionEnable { name } => extension_enable_response(name).await,
+        ControlRequest::ExtensionDisable { name } => extension_disable_response(name).await,
+        ControlRequest::ExtensionSearch { query } => extension_search_response(query.as_deref()).await,
+        ControlRequest::CatalogView => catalog_view_response().await,
+        ControlRequest::CatalogInstall => catalog_install_response().await,
+        ControlRequest::CatalogRemove { id } => catalog_remove_response(id).await,
         ControlRequest::PluginView => plugin_view_response().await,
         ControlRequest::PluginInstall { uri } => plugin_install_response(uri).await,
         ControlRequest::PluginRemove { name } => plugin_remove_response(name).await,
@@ -1074,7 +1134,7 @@ pub async fn workspace_role_set_response(
         }
     };
     lease.role = role;
-    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&agent.cwd, &lease) {
+    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease) {
         return SlashCommandResponse {
             accepted: false,
             output: Some(format!("Failed to update workspace lease: {err}")),
@@ -1113,7 +1173,7 @@ pub async fn workspace_role_clear_response(agent: &InteractiveAgentHost) -> Slas
         }
     };
     lease.role = crate::workspace::types::WorkspaceRole::Primary;
-    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&agent.cwd, &lease) {
+    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease) {
         return SlashCommandResponse {
             accepted: false,
             output: Some(format!("Failed to update workspace lease: {err}")),
@@ -1351,7 +1411,7 @@ pub async fn workspace_adopt_response(agent: &InteractiveAgentHost) -> SlashComm
     lease.owner_session_id = Some(agent.session_id.clone());
     lease.owner_agent_id = Some("omegon-local".into());
     lease.last_heartbeat = crate::workspace::runtime::current_timestamp();
-    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&agent.cwd, &lease) {
+    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease) {
         return SlashCommandResponse {
             accepted: false,
             output: Some(format!("Failed to adopt workspace lease: {err}")),
@@ -1390,7 +1450,7 @@ where
         .map_err(|err| format!("Failed to read workspace lease: {err}"))?
         .ok_or_else(|| "Workspace metadata does not exist yet.".to_string())?;
     mutator(&mut lease);
-    crate::workspace::runtime::write_workspace_lease(&agent.cwd, &lease)
+    crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
         .map_err(|err| format!("Failed to update workspace lease: {err}"))?;
     if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
         .map_err(|err| format!("Failed to read workspace registry: {err}"))?
@@ -1682,7 +1742,7 @@ pub async fn workspace_new_response(
         parent_workspace_id: Some(parent.workspace_id.clone()),
         source: "operator".into(),
     };
-    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&workspace_path, &new_lease)
+    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&workspace_path, &agent.instance_id, &new_lease)
     {
         return SlashCommandResponse {
             accepted: false,
@@ -1820,7 +1880,7 @@ pub async fn workspace_kind_set_response(
         }
     };
     lease.workspace_kind = kind;
-    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&agent.cwd, &lease) {
+    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease) {
         return SlashCommandResponse {
             accepted: false,
             output: Some(format!("Failed to update workspace lease: {err}")),
@@ -1860,7 +1920,7 @@ pub async fn workspace_kind_clear_response(agent: &InteractiveAgentHost) -> Slas
     };
     let inferred = crate::workspace::infer::infer_workspace_kind(&agent.cwd);
     lease.workspace_kind = inferred;
-    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&agent.cwd, &lease) {
+    if let Err(err) = crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease) {
         return SlashCommandResponse {
             accepted: false,
             output: Some(format!("Failed to update workspace lease: {err}")),
@@ -2946,11 +3006,47 @@ pub async fn persona_switch_response(name: &str) -> SlashCommandResponse {
 }
 
 pub async fn skills_view_response() -> SlashCommandResponse {
-    match crate::skills::list_summary() {
-        Ok(output) => SlashCommandResponse {
-            accepted: true,
-            output: Some(output),
-        },
+    match crate::skills::list_structured() {
+        Ok(entries) => {
+            if entries.is_empty() {
+                return SlashCommandResponse {
+                    accepted: true,
+                    output: Some("No skills found. Run /skills install to install bundled skills.".into()),
+                };
+            }
+
+            let bundled: Vec<&crate::skills::SkillEntry> = entries.iter().filter(|e| e.bundled).collect();
+            let user: Vec<&crate::skills::SkillEntry> = entries.iter().filter(|e| !e.bundled && !e.project_local).collect();
+            let project: Vec<&crate::skills::SkillEntry> = entries.iter().filter(|e| e.project_local).collect();
+
+            let mut out = String::new();
+            if !bundled.is_empty() {
+                out.push_str(&format!("Bundled skills ({}):\n\n", bundled.len()));
+                for s in &bundled {
+                    let status = if s.installed { "+" } else { "o" };
+                    out.push_str(&format!("  {status} {:<14} {}\n", s.name, s.description));
+                }
+                out.push('\n');
+            }
+            if !user.is_empty() {
+                out.push_str(&format!("User skills ({}):\n\n", user.len()));
+                for s in &user {
+                    out.push_str(&format!("  + {:<14} {}\n", s.name, s.description));
+                }
+                out.push('\n');
+            }
+            if !project.is_empty() {
+                out.push_str(&format!("Project-local skills ({}):\n\n", project.len()));
+                for s in &project {
+                    out.push_str(&format!("  * {:<14} {}\n", s.name, s.description));
+                }
+                out.push('\n');
+            }
+            out.push_str("  + = installed    o = not installed    * = project-local\n");
+            out.push_str("Run /skills install to install bundled skills.\n");
+            out.push_str("Run /skills get <name> for details.");
+            SlashCommandResponse { accepted: true, output: Some(out) }
+        }
         Err(err) => SlashCommandResponse {
             accepted: false,
             output: Some(format!("/skills list failed: {err}")),
@@ -3025,6 +3121,368 @@ pub async fn plugin_update_response(name: Option<&str>) -> SlashCommandResponse 
         Err(err) => SlashCommandResponse {
             accepted: false,
             output: Some(format!("/plugin update failed: {err}")),
+        },
+    }
+}
+
+// ── Skill response handlers ──────────────────────────────────────
+
+pub async fn skill_get_response(name: &str) -> SlashCommandResponse {
+    match crate::skills::get_skill(name) {
+        Ok((manifest, body, path)) => {
+            let mut out = format!("Skill: {}\n", manifest.name);
+            if !manifest.description.is_empty() {
+                out.push_str(&format!("Description: {}\n", manifest.description));
+            }
+            if let Some(ref version) = manifest.version {
+                out.push_str(&format!("Version: {version}\n"));
+            }
+            if !manifest.tags.is_empty() {
+                out.push_str(&format!("Tags: {}\n", manifest.tags.join(", ")));
+            }
+            if !manifest.aliases.is_empty() {
+                out.push_str(&format!("Aliases: {}\n", manifest.aliases.join(", ")));
+            }
+            if !manifest.triggers.is_empty() {
+                out.push_str(&format!("Triggers: {}\n", manifest.triggers.join(", ")));
+            }
+            if let Some(ref posture) = manifest.posture {
+                out.push_str(&format!("Posture: {posture}\n"));
+            }
+            if let Some(turns) = manifest.max_turns {
+                out.push_str(&format!("Max turns: {turns}\n"));
+            }
+            out.push_str(&format!("Path: {}\n", path.display()));
+            let preview = if body.len() > 500 { &body[..500] } else { &body };
+            out.push_str(&format!("\n{preview}"));
+            if body.len() > 500 {
+                out.push_str("...");
+            }
+            SlashCommandResponse { accepted: true, output: Some(out) }
+        }
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/skills get failed: {err}")),
+        },
+    }
+}
+
+pub async fn skill_delete_response(name: &str) -> SlashCommandResponse {
+    if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some("Invalid skill name: path traversal rejected".into()),
+        };
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_dir = cwd.join(".omegon/skills").join(name);
+    let home = match crate::paths::omegon_home() {
+        Ok(h) => h,
+        Err(e) => return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Cannot determine home: {e}")),
+        },
+    };
+    let user_dir = home.join("skills").join(name);
+
+    if project_dir.exists() {
+        match std::fs::remove_dir_all(&project_dir) {
+            Ok(()) => SlashCommandResponse {
+                accepted: true,
+                output: Some(format!("Deleted project-local skill '{name}'")),
+            },
+            Err(e) => SlashCommandResponse {
+                accepted: false,
+                output: Some(format!("Failed to delete skill: {e}")),
+            },
+        }
+    } else if user_dir.exists() {
+        match std::fs::remove_dir_all(&user_dir) {
+            Ok(()) => SlashCommandResponse {
+                accepted: true,
+                output: Some(format!("Deleted skill '{name}'")),
+            },
+            Err(e) => SlashCommandResponse {
+                accepted: false,
+                output: Some(format!("Failed to delete skill: {e}")),
+            },
+        }
+    } else {
+        SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Skill '{name}' not found")),
+        }
+    }
+}
+
+// ── Extension response handlers ─────────────────────────────────
+
+pub async fn extension_view_response() -> SlashCommandResponse {
+    match crate::extension_cli::list_summary() {
+        Ok(output) => SlashCommandResponse {
+            accepted: true,
+            output: Some(output),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/extension list failed: {err}")),
+        },
+    }
+}
+
+pub async fn extension_get_response(name: &str) -> SlashCommandResponse {
+    let extensions_dir = match crate::extension_cli::extensions_dir() {
+        Ok(d) => d,
+        Err(e) => return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Cannot determine extensions directory: {e}")),
+        },
+    };
+    let ext_dir = extensions_dir.join(name);
+    if !ext_dir.exists() {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Extension '{name}' not found")),
+        };
+    }
+    match crate::extensions::ExtensionManifest::from_extension_dir(&ext_dir) {
+        Ok(manifest) => {
+            let state = crate::extensions::ExtensionState::load(&ext_dir).unwrap_or_default();
+            let config = crate::extensions::config_store::read_config(&ext_dir).unwrap_or_default();
+            let mut out = format!(
+                "Extension: {}\nVersion: {}\nDescription: {}\nEnabled: {}\n",
+                manifest.extension.name,
+                manifest.extension.version,
+                manifest.extension.description,
+                state.enabled,
+            );
+            if !manifest.config.is_empty() {
+                out.push_str("\nConfiguration:\n");
+                for (key, field) in &manifest.config {
+                    let current = config.get(key).map(|v| v.as_str()).unwrap_or("(unset)");
+                    out.push_str(&format!("  {key}: {current}  ({})\n", field.label));
+                }
+            }
+            if !manifest.secrets.required.is_empty() {
+                out.push_str(&format!(
+                    "\nRequired secrets: {}\n",
+                    manifest.secrets.required.join(", ")
+                ));
+            }
+            out.push_str(&format!("Path: {}\n", ext_dir.display()));
+            SlashCommandResponse { accepted: true, output: Some(out) }
+        }
+        Err(e) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Failed to load manifest: {e}")),
+        },
+    }
+}
+
+pub async fn extension_install_response(uri: &str) -> SlashCommandResponse {
+    match crate::extension_cli::install(uri.trim()) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!("Installed extension from {}", uri.trim())),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/extension install failed: {err}")),
+        },
+    }
+}
+
+pub async fn extension_remove_response(name: &str) -> SlashCommandResponse {
+    match crate::extension_cli::remove(name.trim()) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!("Removed extension {}", name.trim())),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/extension remove failed: {err}")),
+        },
+    }
+}
+
+pub async fn extension_update_response(name: Option<&str>) -> SlashCommandResponse {
+    match crate::extension_cli::update(name.map(str::trim)) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(match name.map(str::trim).filter(|s| !s.is_empty()) {
+                Some(name) => format!("Updated extension {name}"),
+                None => "Updated installed extensions.".to_string(),
+            }),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/extension update failed: {err}")),
+        },
+    }
+}
+
+pub async fn extension_enable_response(name: &str) -> SlashCommandResponse {
+    match crate::extension_cli::enable(name.trim()) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!("Enabled extension {}", name.trim())),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/extension enable failed: {err}")),
+        },
+    }
+}
+
+pub async fn extension_disable_response(name: &str) -> SlashCommandResponse {
+    match crate::extension_cli::disable(name.trim()) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(format!("Disabled extension {}", name.trim())),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/extension disable failed: {err}")),
+        },
+    }
+}
+
+pub async fn extension_search_response(query: Option<&str>) -> SlashCommandResponse {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent("omegon")
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("HTTP client error: {e}")),
+        },
+    };
+
+    match crate::extension_registry::fetch_registry(&client).await {
+        Ok(registry) => {
+            let mut entries: Vec<(&String, &crate::extension_registry::RegistryEntry)> = registry
+                .iter()
+                .filter(|(name, entry)| {
+                    query.map(|q| {
+                        let q = q.to_lowercase();
+                        name.to_lowercase().contains(&q)
+                            || entry.description.to_lowercase().contains(&q)
+                            || entry.category.to_lowercase().contains(&q)
+                    }).unwrap_or(true)
+                })
+                .collect();
+            entries.sort_by(|a, b| a.0.cmp(b.0));
+
+            if entries.is_empty() {
+                return SlashCommandResponse {
+                    accepted: true,
+                    output: Some(match query {
+                        Some(q) => format!("No extensions found matching '{q}'"),
+                        None => "No extensions found in registry.".into(),
+                    }),
+                };
+            }
+
+            let mut out = format!("Available extensions ({}):\n\n", entries.len());
+            for (name, entry) in &entries {
+                out.push_str(&format!(
+                    "  {name:<28} {}\n    {}\n\n",
+                    entry.category, entry.description
+                ));
+            }
+            out.push_str("Install: /extension install <name>");
+            SlashCommandResponse { accepted: true, output: Some(out) }
+        }
+        Err(e) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Could not reach armory: {e}")),
+        },
+    }
+}
+
+// ── Catalog response handler ────────────────────────────────────
+
+pub async fn catalog_view_response() -> SlashCommandResponse {
+    let home = match crate::paths::omegon_home() {
+        Ok(h) => h,
+        Err(e) => return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Cannot determine home: {e}")),
+        },
+    };
+    let entries = crate::catalog::list(&home);
+    if entries.is_empty() {
+        return SlashCommandResponse {
+            accepted: true,
+            output: Some(
+                "No catalog agents installed.\nRun `omegon catalog install` to install bundled agents.".into()
+            ),
+        };
+    }
+    let mut out = format!("Catalog agents ({}):\n\n", entries.len());
+    for entry in &entries {
+        out.push_str(&format!(
+            "  {:<32} {}\n    {}\n\n",
+            entry.id, entry.domain, entry.description
+        ));
+    }
+    SlashCommandResponse { accepted: true, output: Some(out) }
+}
+
+pub async fn catalog_install_response() -> SlashCommandResponse {
+    match crate::catalog::cmd_install(false).await {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some("Catalog agents installed.".into()),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/catalog install failed: {err}")),
+        },
+    }
+}
+
+pub async fn catalog_remove_response(id: &str) -> SlashCommandResponse {
+    if id.contains('/') || id.contains('\\') || id.contains("..") || id.contains('\0') {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some("Invalid agent ID: path traversal rejected".into()),
+        };
+    }
+    let home = match crate::paths::omegon_home() {
+        Ok(h) => h,
+        Err(e) => return SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Cannot determine home: {e}")),
+        },
+    };
+    let catalog_dir = home.join("catalog");
+    let entries = crate::catalog::list(&home);
+    match entries.iter().find(|e| e.id == id) {
+        Some(entry) => {
+            if !entry.bundle_dir.starts_with(&catalog_dir) {
+                return SlashCommandResponse {
+                    accepted: false,
+                    output: Some("Refusing to remove agent outside catalog directory".into()),
+                };
+            }
+            match std::fs::remove_dir_all(&entry.bundle_dir) {
+                Ok(()) => SlashCommandResponse {
+                    accepted: true,
+                    output: Some(format!("Removed catalog agent '{id}'")),
+                },
+                Err(e) => SlashCommandResponse {
+                    accepted: false,
+                    output: Some(format!("Failed to remove: {e}")),
+                },
+            }
+        }
+        None => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Catalog agent '{id}' not found")),
         },
     }
 }

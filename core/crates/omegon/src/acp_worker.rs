@@ -6,8 +6,24 @@
 //! responsive (streaming, cancel, notifications).
 
 use std::path::PathBuf;
+use omegon_traits::Feature;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
+
+/// A single plan entry for decomposition/phased progress.
+#[derive(Debug, Clone)]
+pub struct PlanEntryData {
+    pub content: String,
+    pub status: PlanEntryState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanEntryState {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
 
 /// Request from the ACP thread to the worker.
 pub enum WorkerRequest {
@@ -31,6 +47,10 @@ pub enum WorkerRequest {
     ControlRequest {
         command: String,
         response_tx: oneshot::Sender<WorkerResponse>,
+    },
+    /// Connect MCP servers forwarded by the ACP client.
+    ConnectMcpServers {
+        servers: Vec<(String, crate::plugins::mcp::McpServerConfig)>,
     },
     /// Shut down the worker.
     Shutdown,
@@ -58,6 +78,17 @@ pub enum WorkerEvent {
         id: String,
         success: bool,
     },
+    /// Partial tool output for streaming to the client.
+    ToolOutput {
+        id: String,
+        text: String,
+    },
+    /// Execution plan update (decomposition children, phased work).
+    PlanUpdate {
+        entries: Vec<PlanEntryData>,
+    },
+    /// Session title derived from the first prompt or active skill.
+    SessionTitle(String),
     /// Status update from the agent loop (e.g., "Loading model into memory…")
     StatusUpdate(String),
     TurnComplete,
@@ -78,7 +109,11 @@ pub struct WorkerHandle {
 }
 
 /// Spawn the worker thread. Returns a handle for communication.
-pub fn spawn_worker(model: String, cwd: PathBuf) -> WorkerHandle {
+pub fn spawn_worker(
+    model: String,
+    cwd: PathBuf,
+    host_ctx: Option<crate::host_context::HostContext>,
+) -> WorkerHandle {
     let (request_tx, request_rx) = mpsc::channel::<WorkerRequest>(16);
     let (event_tx, event_rx) = tokio::sync::broadcast::channel::<WorkerEvent>(256);
     let (secrets_tx, secrets_rx) = tokio::sync::oneshot::channel();
@@ -95,7 +130,7 @@ pub fn spawn_worker(model: String, cwd: PathBuf) -> WorkerHandle {
                 .expect("worker runtime");
 
             let local = tokio::task::LocalSet::new();
-            local.block_on(&rt, worker_loop(model, cwd, worker_settings, request_rx, event_tx, secrets_tx));
+            local.block_on(&rt, worker_loop(model, cwd, worker_settings, request_rx, event_tx, secrets_tx, host_ctx));
         })
         .expect("failed to spawn worker thread");
 
@@ -115,6 +150,7 @@ async fn worker_loop(
     mut request_rx: mpsc::Receiver<WorkerRequest>,
     event_tx: tokio::sync::broadcast::Sender<WorkerEvent>,
     secrets_tx: tokio::sync::oneshot::Sender<std::sync::Arc<omegon_secrets::SecretsManager>>,
+    host_ctx: Option<crate::host_context::HostContext>,
 ) {
     // Set the canonical project root env var so extensions can locate the workspace
     // without depending on embedder-specific names (FLYNT_VAULT, CODEX_VAULT).
@@ -131,7 +167,10 @@ async fn worker_loop(
 
     let agent_setup =
         match crate::setup::AgentSetup::new(&cwd, None, Some(shared_settings.clone())).await {
-            Ok(setup) => setup,
+            Ok(mut setup) => {
+                setup.instance_id = crate::paths::instance_id("acp");
+                setup
+            }
             Err(e) => {
                 tracing::error!(error = %e, "worker setup failed");
                 return;
@@ -145,12 +184,22 @@ async fn worker_loop(
     let mut cancel = CancellationToken::new();
 
     let _ = secrets_tx.send(secrets.clone());
+    let host_ctx_arc = host_ctx.map(std::sync::Arc::new);
     tracing::info!(model = %model, "ACP worker ready");
+    let mut first_prompt = true;
 
     // Process requests
     while let Some(req) = request_rx.recv().await {
         match req {
             WorkerRequest::Prompt { text, response_tx } => {
+                if first_prompt {
+                    first_prompt = false;
+                    let title: String = text.chars().take(80).collect::<String>().trim().to_string();
+                    let title = title.lines().next().unwrap_or(&title).trim().to_string();
+                    if !title.is_empty() {
+                        let _ = event_tx.send(WorkerEvent::SessionTitle(title));
+                    }
+                }
                 conversation.push_user(text);
 
                 // Resolve the model from settings (may have been changed via SetModel)
@@ -202,6 +251,33 @@ async fn worker_loop(
                                     success: !is_error,
                                 })
                             }
+                            omegon_traits::AgentEvent::ToolUpdate { id, partial } => {
+                                if partial.tail.is_empty() {
+                                    None
+                                } else {
+                                    Some(WorkerEvent::ToolOutput { id, text: partial.tail })
+                                }
+                            }
+                            omegon_traits::AgentEvent::DecompositionStarted { children } => {
+                                let entries = children.iter().map(|label| PlanEntryData {
+                                    content: label.clone(),
+                                    status: PlanEntryState::Pending,
+                                }).collect();
+                                Some(WorkerEvent::PlanUpdate { entries })
+                            }
+                            omegon_traits::AgentEvent::DecompositionChildCompleted { label, success } => {
+                                // Emit a single-entry update; the ACP forwarder
+                                // merges it into the running plan state.
+                                let status = if success { PlanEntryState::Completed } else { PlanEntryState::Failed };
+                                Some(WorkerEvent::PlanUpdate {
+                                    entries: vec![PlanEntryData { content: label, status }],
+                                })
+                            }
+                            omegon_traits::AgentEvent::DecompositionCompleted { .. } => {
+                                // Final plan — all entries completed. The ACP
+                                // forwarder will emit the full snapshot.
+                                None
+                            }
                             omegon_traits::AgentEvent::SystemNotification { message } => {
                                 Some(WorkerEvent::StatusUpdate(message))
                             }
@@ -238,6 +314,7 @@ async fn worker_loop(
                     enforce_first_turn_execution_bias: false,
                     ollama_manager: None,
                     skill_phases: Vec::new(),
+                    host_context: host_ctx_arc.clone(),
                 };
 
                 let result = crate::r#loop::run(
@@ -343,6 +420,36 @@ async fn worker_loop(
                     }
                 }
                 let _ = response_tx.send(WorkerResponse { text, error: None });
+            }
+
+            WorkerRequest::ConnectMcpServers { servers } => {
+                let server_map: std::collections::HashMap<String, crate::plugins::mcp::McpServerConfig> =
+                    servers.into_iter().collect();
+                if !server_map.is_empty() {
+                    match crate::plugins::mcp::McpFeature::connect(
+                        "acp-client",
+                        &server_map,
+                        Some(secrets.as_ref()),
+                    ).await {
+                        Ok(mcp_feature) => {
+                            let tool_count = mcp_feature.tools().len();
+                            if tool_count > 0 {
+                                bus.register(Box::new(mcp_feature));
+                                bus.finalize();
+                                tracing::info!(tools = tool_count, "ACP client MCP servers connected");
+                                let _ = event_tx.send(WorkerEvent::StatusUpdate(
+                                    format!("Connected {tool_count} tools from client MCP servers")
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "Failed to connect client MCP servers");
+                            let _ = event_tx.send(WorkerEvent::StatusUpdate(
+                                format!("MCP server connection failed: {e}")
+                            ));
+                        }
+                    }
+                }
             }
 
             WorkerRequest::Shutdown => break,

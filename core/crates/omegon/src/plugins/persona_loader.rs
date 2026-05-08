@@ -231,6 +231,61 @@ fn load_exemplars(dir: &Path) -> anyhow::Result<Vec<String>> {
     Ok(exemplars)
 }
 
+/// Generate the system prompt for the persona builder conversation.
+/// The agent guides the operator through creating a new persona interactively.
+pub fn persona_builder_prompt() -> String {
+    let home = crate::paths::omegon_home()
+        .map(|h| h.join("armory/personas").display().to_string())
+        .unwrap_or_else(|_| "~/.omegon/armory/personas".to_string());
+    format!(
+        r#"You are helping the operator create a new Omegon persona. A persona is a behavioral directive that shapes how the agent thinks, communicates, and approaches tasks.
+
+Guide the operator through these questions conversationally. Be concise — one question at a time.
+
+1. **What should this persona do?** Get a clear description of the persona's role, expertise, and communication style.
+2. **What should it be called?** Suggest a short name based on their description. Names become kebab-case slugs.
+3. **Badge emoji?** What single emoji should represent this persona in the TUI? (e.g., a security persona might use a shield)
+4. **Any tools to disable?** Some personas should NOT have access to certain tools (e.g., a read-only analyst shouldn't use `write` or `bash`). Ask if any tools should be disabled.
+5. **Skills to activate?** Should this persona automatically activate any installed skills? (e.g., a Rust persona might activate the "rust" skill)
+
+After gathering answers, create the persona by:
+
+1. Create the directory:
+   mkdir -p {home}/<slug>/
+
+2. Write `plugin.toml` with this structure:
+   ```toml
+   [plugin]
+   type = "persona"
+   id = "user.<slug>"
+   name = "<display name>"
+   version = "1.0.0"
+   description = "<one-line description>"
+
+   [persona.identity]
+   directive = "PERSONA.md"
+
+   [persona.skills]
+   activate = ["<skill1>", "<skill2>"]  # omit if empty
+
+   [persona.tools]
+   disable = ["<tool1>"]  # omit if empty
+
+   [persona.style]
+   badge = "<emoji>"
+   ```
+
+3. Write `PERSONA.md` with the behavioral directive — this is the core of the persona.
+   Write it in second person ("You are...", "You always...", "You never...").
+   Be specific and actionable, not vague.
+
+After writing both files, confirm the persona ID and tell the operator it will be available immediately via `/persona <name>`.
+
+Do NOT ask all questions at once. Start with question 1 only."#,
+        home = home,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

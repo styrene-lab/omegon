@@ -499,6 +499,206 @@ pub fn collect_phase_info(skills: &[String]) -> Vec<SkillPhaseInfo> {
     skills.iter().filter_map(|s| extract_phase_info(s)).collect()
 }
 
+/// A skill entry with structured metadata for the ACP settings surface.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SkillEntry {
+    pub name: String,
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    pub tags: Vec<String>,
+    pub aliases: Vec<String>,
+    pub triggers: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub posture: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
+    pub installed: bool,
+    pub bundled: bool,
+    pub project_local: bool,
+    pub path: String,
+}
+
+/// Parse a SKILL.md into its manifest and body text.
+pub fn parse_skill_file(content: &str) -> (SkillManifest, String) {
+    let (fm_str, body) = split_frontmatter(content);
+    let manifest = if let Some(fm) = fm_str {
+        toml::from_str::<SkillManifest>(&fm).unwrap_or_default()
+    } else {
+        SkillManifest::default()
+    };
+    (manifest, body.to_string())
+}
+
+fn split_frontmatter(content: &str) -> (Option<String>, &str) {
+    let (rest, delimiter) = if let Some(b) = content.strip_prefix("+++\n") {
+        (b, "\n+++")
+    } else if let Some(b) = content.strip_prefix("---\n") {
+        (b, "\n---")
+    } else {
+        return (None, content);
+    };
+    match rest.find(delimiter) {
+        Some(end) => {
+            let fm = &rest[..end];
+            let body = &rest[end + delimiter.len()..];
+            let body = body.strip_prefix('\n').unwrap_or(body);
+            (Some(fm.to_string()), body)
+        }
+        None => (None, content),
+    }
+}
+
+/// List all skills as structured entries for the ACP settings surface.
+///
+/// Returns bundled skills (with installation status), user-installed skills,
+/// and project-local skills in a single sorted list.
+pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
+    let home_skills = skills_dir();
+    let cwd = std::env::current_dir()?;
+    let project_skills = cwd.join(".omegon").join("skills");
+    let mut entries = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // Bundled skills — always present, may or may not be installed
+    for (name, content) in BUNDLED {
+        let (manifest, _body) = parse_skill_file(content);
+        let installed = home_skills
+            .as_ref()
+            .is_some_and(|d| d.join(name).join("SKILL.md").exists());
+        let path = home_skills
+            .as_ref()
+            .map(|d| d.join(name).display().to_string())
+            .unwrap_or_default();
+        entries.push(SkillEntry {
+            name: name.to_string(),
+            description: manifest.description.clone(),
+            id: manifest.id.clone(),
+            version: manifest.version.clone(),
+            tags: manifest.tags.clone(),
+            aliases: manifest.aliases.clone(),
+            triggers: manifest.triggers.clone(),
+            posture: manifest.posture.clone(),
+            max_turns: manifest.max_turns,
+            installed,
+            bundled: true,
+            project_local: false,
+            path,
+        });
+        seen.insert(name.to_string());
+    }
+
+    // User-installed skills (non-bundled)
+    if let Some(ref dir) = home_skills {
+        if dir.is_dir() {
+            let mut user_skills: Vec<_> = std::fs::read_dir(dir)?
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().join("SKILL.md").exists())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .filter(|name| !seen.contains(name))
+                .collect();
+            user_skills.sort();
+            for name in user_skills {
+                let skill_path = dir.join(&name).join("SKILL.md");
+                let content = std::fs::read_to_string(&skill_path).unwrap_or_default();
+                let (manifest, _body) = parse_skill_file(&content);
+                entries.push(SkillEntry {
+                    name: name.clone(),
+                    description: manifest.description.clone(),
+                    id: manifest.id.clone(),
+                    version: manifest.version.clone(),
+                    tags: manifest.tags.clone(),
+                    aliases: manifest.aliases.clone(),
+                    triggers: manifest.triggers.clone(),
+                    posture: manifest.posture.clone(),
+                    max_turns: manifest.max_turns,
+                    installed: true,
+                    bundled: false,
+                    project_local: false,
+                    path: dir.join(&name).display().to_string(),
+                });
+                seen.insert(name);
+            }
+        }
+    }
+
+    // Project-local skills
+    if project_skills.is_dir() {
+        let mut local: Vec<_> = std::fs::read_dir(&project_skills)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().join("SKILL.md").exists())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        local.sort();
+        for name in local {
+            let skill_path = project_skills.join(&name).join("SKILL.md");
+            let content = std::fs::read_to_string(&skill_path).unwrap_or_default();
+            let (manifest, _body) = parse_skill_file(&content);
+            let already_seen = seen.contains(&name);
+            if !already_seen {
+                entries.push(SkillEntry {
+                    name: name.clone(),
+                    description: manifest.description.clone(),
+                    id: manifest.id.clone(),
+                    version: manifest.version.clone(),
+                    tags: manifest.tags.clone(),
+                    aliases: manifest.aliases.clone(),
+                    triggers: manifest.triggers.clone(),
+                    posture: manifest.posture.clone(),
+                    max_turns: manifest.max_turns,
+                    installed: true,
+                    bundled: false,
+                    project_local: true,
+                    path: project_skills.join(&name).display().to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(entries)
+}
+
+/// Read a single skill's manifest and body content.
+pub fn get_skill(name: &str) -> anyhow::Result<(SkillManifest, String, std::path::PathBuf)> {
+    if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
+        anyhow::bail!("invalid skill name: path traversal rejected");
+    }
+
+    // Project-local takes precedence
+    let cwd = std::env::current_dir()?;
+    let project_path = cwd.join(".omegon/skills").join(name).join("SKILL.md");
+    if project_path.exists() {
+        let content = std::fs::read_to_string(&project_path)?;
+        let (manifest, body) = parse_skill_file(&content);
+        return Ok((manifest, body, project_path.parent().unwrap().to_path_buf()));
+    }
+
+    // User-installed / bundled
+    if let Some(dir) = skills_dir() {
+        let skill_path = dir.join(name).join("SKILL.md");
+        if skill_path.exists() {
+            let content = std::fs::read_to_string(&skill_path)?;
+            let (manifest, body) = parse_skill_file(&content);
+            return Ok((manifest, body, skill_path.parent().unwrap().to_path_buf()));
+        }
+    }
+
+    // Check if it's a known bundled skill (not yet installed)
+    for (bname, content) in BUNDLED {
+        if *bname == name {
+            let (manifest, body) = parse_skill_file(content);
+            let path = skills_dir()
+                .map(|d| d.join(name))
+                .unwrap_or_default();
+            return Ok((manifest, body, path));
+        }
+    }
+
+    anyhow::bail!("skill '{name}' not found")
+}
+
 /// Extract the `description` field from YAML frontmatter.
 fn extract_description(content: &str) -> Option<&str> {
     // Support both YAML (---) and TOML (+++) frontmatter delimiters.
@@ -716,5 +916,78 @@ mod tests {
         let summary = list_summary().unwrap();
         assert!(summary.contains("Bundled skills"));
         assert!(summary.contains("Run `omegon skills install`"));
+    }
+
+    #[test]
+    fn parse_skill_file_toml() {
+        let content = "+++\nname = \"test\"\ndescription = \"A test\"\nversion = \"1.0.0\"\n+++\n\n# Body\n\nDo things.\n";
+        let (manifest, body) = parse_skill_file(content);
+        assert_eq!(manifest.name, "test");
+        assert_eq!(manifest.description, "A test");
+        assert_eq!(manifest.version, Some("1.0.0".into()));
+        assert!(body.contains("# Body"));
+        assert!(body.contains("Do things."));
+    }
+
+    #[test]
+    fn parse_skill_file_no_frontmatter() {
+        let content = "# Just markdown\n\nNo frontmatter here.\n";
+        let (manifest, body) = parse_skill_file(content);
+        assert_eq!(manifest.name, "");
+        assert!(body.contains("Just markdown"));
+    }
+
+    #[test]
+    fn split_frontmatter_toml() {
+        let content = "+++\nname = \"test\"\n+++\n\nBody here.\n";
+        let (fm, body) = split_frontmatter(content);
+        assert!(fm.is_some());
+        assert!(fm.unwrap().contains("name = \"test\""));
+        assert!(body.contains("Body here."));
+    }
+
+    #[test]
+    fn split_frontmatter_yaml() {
+        let content = "---\nname: test\n---\n\nBody here.\n";
+        let (fm, body) = split_frontmatter(content);
+        assert!(fm.is_some());
+        assert!(fm.unwrap().contains("name: test"));
+        assert!(body.contains("Body here."));
+    }
+
+    #[test]
+    fn split_frontmatter_none() {
+        let content = "No delimiters here.\n";
+        let (fm, body) = split_frontmatter(content);
+        assert!(fm.is_none());
+        assert_eq!(body, content);
+    }
+
+    #[test]
+    fn list_structured_includes_bundled() {
+        let entries = list_structured().unwrap();
+        assert!(entries.iter().any(|e| e.name == "rust" && e.bundled));
+        assert!(entries.iter().any(|e| e.name == "git" && e.bundled));
+        assert!(entries.iter().any(|e| e.name == "security" && e.bundled));
+    }
+
+    #[test]
+    fn get_skill_bundled() {
+        let (manifest, body, _path) = get_skill("rust").unwrap();
+        assert!(!manifest.description.is_empty());
+        assert!(!body.is_empty());
+    }
+
+    #[test]
+    fn get_skill_not_found() {
+        let result = get_skill("nonexistent-skill-xyz");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_skill_traversal_rejected() {
+        let result = get_skill("../../../etc/passwd");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("traversal"));
     }
 }

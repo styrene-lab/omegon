@@ -13,6 +13,7 @@ use agent_client_protocol::*;
 use anyhow::Context;
 
 use crate::acp_worker::{self, WorkerEvent, WorkerHandle, WorkerRequest};
+use crate::host_context::{self, HostCapabilities, HostContext, HostProxySender};
 
 pub struct OmegonAcpAgent {
     model: String,
@@ -20,6 +21,7 @@ pub struct OmegonAcpAgent {
     conn: Rc<RefCell<Option<AgentSideConnection>>>,
     session_id: RefCell<Option<SessionId>>,
     secrets: RefCell<Option<std::sync::Arc<omegon_secrets::SecretsManager>>>,
+    host_caps: RefCell<HostCapabilities>,
 }
 
 impl OmegonAcpAgent {
@@ -30,6 +32,7 @@ impl OmegonAcpAgent {
             conn: Rc::new(RefCell::new(None)),
             session_id: RefCell::new(None),
             secrets: RefCell::new(None),
+            host_caps: RefCell::new(HostCapabilities::default()),
         }
     }
 
@@ -172,7 +175,32 @@ impl OmegonAcpAgent {
 
     fn ensure_worker(&self, cwd: &std::path::Path) {
         if self.worker.borrow().is_none() {
-            let mut handle = acp_worker::spawn_worker(self.model.clone(), cwd.to_path_buf());
+            // Build HostContext if the client advertised any delegatable capabilities.
+            let host_ctx = if self.host_caps.borrow().has_any_delegation() {
+                let (proxy_tx, proxy_rx) = tokio::sync::mpsc::channel(64);
+                let caps = std::sync::Arc::new(self.host_caps.borrow().clone());
+                let session_id_str = self.session_id.borrow().as_ref()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                let ctx = HostContext {
+                    caps,
+                    proxy: HostProxySender::new(proxy_tx),
+                    session_id: session_id_str.clone(),
+                };
+                // Spawn the ACP-thread pump that services proxy requests.
+                let sid = self.session_id.borrow().clone()
+                    .unwrap_or_else(|| SessionId::new("omegon-pending"));
+                host_context::spawn_proxy_pump(proxy_rx, self.conn.clone(), sid);
+                Some(ctx)
+            } else {
+                None
+            };
+
+            let mut handle = acp_worker::spawn_worker(
+                self.model.clone(),
+                cwd.to_path_buf(),
+                host_ctx,
+            );
             // Drain the secrets channel asynchronously — the worker sends it
             // after AgentSetup completes. Store in self.secrets for redaction.
             let secrets_cell = self.secrets.clone();
@@ -234,10 +262,31 @@ impl OmegonAcpAgent {
 #[async_trait::async_trait(?Send)]
 impl Agent for OmegonAcpAgent {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
+        *self.host_caps.borrow_mut() = HostCapabilities::from_client(&args.client_capabilities);
+
+        let caps = self.host_caps.borrow();
+        tracing::info!(
+            fs_read = caps.fs_read,
+            fs_write = caps.fs_write,
+            terminal = caps.terminal,
+            "ACP client capabilities captured"
+        );
+        drop(caps);
+
         let mut response = InitializeResponse::new(args.protocol_version);
         response.agent_info =
             Some(Implementation::new("omegon", env!("CARGO_PKG_VERSION")).title("Omegon Agent"));
-        response.agent_capabilities = AgentCapabilities::default().load_session(true);
+        response.agent_capabilities = AgentCapabilities::default()
+            .load_session(true)
+            .prompt_capabilities(
+                PromptCapabilities::new()
+                    .image(true),
+            )
+            .session_capabilities(
+                SessionCapabilities::new()
+                    .list(SessionListCapabilities::new())
+                    .close(SessionCloseCapabilities::new()),
+            );
         response.auth_methods = vec![AuthMethod::Agent(
             AuthMethodAgent::new("omegon-auth", "Omegon Authentication")
                 .description("Run `omegon auth login` in a terminal or set API keys."),
@@ -251,8 +300,9 @@ impl Agent for OmegonAcpAgent {
 
     async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
         let cwd = args.cwd;
-        self.ensure_worker(&cwd);
 
+        // Create session ID *before* ensure_worker so the proxy pump
+        // receives the correct session ID for host RPC calls.
         let sid = SessionId::new(format!(
             "omegon-{}",
             std::time::SystemTime::now()
@@ -261,6 +311,26 @@ impl Agent for OmegonAcpAgent {
                 .as_millis()
         ));
         *self.session_id.borrow_mut() = Some(sid.clone());
+
+        self.ensure_worker(&cwd);
+
+        // Forward client-provided MCP servers to the worker.
+        if !args.mcp_servers.is_empty() {
+            let servers: Vec<(String, crate::plugins::mcp::McpServerConfig)> = args
+                .mcp_servers
+                .into_iter()
+                .filter_map(|server| convert_acp_mcp_server(server))
+                .collect();
+            if !servers.is_empty() {
+                tracing::info!(count = servers.len(), "Forwarding client MCP servers to worker");
+                if let Some(w) = self.worker.borrow().as_ref() {
+                    let tx = w.request_tx.clone();
+                    tokio::task::spawn_local(async move {
+                        let _ = tx.send(WorkerRequest::ConnectMcpServers { servers }).await;
+                    });
+                }
+            }
+        }
 
         let mut response = NewSessionResponse::new(sid.clone());
         response.modes = Some(Self::modes());
@@ -288,8 +358,10 @@ impl Agent for OmegonAcpAgent {
                             AvailableCommand::new("model", "List or switch LLM model"),
                             AvailableCommand::new("thinking", "Show or set thinking level"),
                             AvailableCommand::new("posture", "Show or set behavioral posture"),
-                            AvailableCommand::new("compact", "Compact context window"),
-                            AvailableCommand::new("clear", "Clear conversation"),
+                            AvailableCommand::new("skills", "Manage skills (list, get, create, delete)"),
+                            AvailableCommand::new("extension", "Manage extensions (list, install, enable, search)"),
+                            AvailableCommand::new("persona", "Manage personas (list, create, switch)"),
+                            AvailableCommand::new("catalog", "Browse agent catalog (list, install, remove)"),
                             AvailableCommand::new("secrets", "Show configured secrets (no values)"),
                             AvailableCommand::new("status", "Session status"),
                             AvailableCommand::new("login", "Authentication help"),
@@ -379,6 +451,7 @@ impl Agent for OmegonAcpAgent {
                         text.to_string()
                     }
                 };
+                let mut plan_state: Vec<acp_worker::PlanEntryData> = Vec::new();
                 loop {
                     match event_rx.recv().await {
                         Ok(WorkerEvent::TextChunk(text)) => {
@@ -458,6 +531,77 @@ impl Agent for OmegonAcpAgent {
                                     .await;
                             }
                         }
+                        Ok(WorkerEvent::ToolOutput { id, text }) => {
+                            let text = redact(&text);
+                            if let Some(c) = conn.borrow().as_ref() {
+                                let content = ToolCallContent::Content(
+                                    agent_client_protocol::Content::new(
+                                        ContentBlock::Text(TextContent::new(text)),
+                                    ),
+                                );
+                                let fields = ToolCallUpdateFields::new().content(vec![content]);
+                                let _ = c
+                                    .session_notification(SessionNotification::new(
+                                        stream_sid.clone(),
+                                        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                                            ToolCallId::new(id),
+                                            fields,
+                                        )),
+                                    ))
+                                    .await;
+                            }
+                        }
+                        Ok(WorkerEvent::PlanUpdate { entries }) => {
+                            if let Some(c) = conn.borrow().as_ref() {
+                                // Merge into running plan state.
+                                // DecompositionStarted sends the full initial set;
+                                // subsequent updates send single-entry patches.
+                                // We maintain the full plan and re-emit it.
+                                if !entries.is_empty() {
+                                    if entries.len() > 1 {
+                                        // Multi-entry = fresh decomposition plan
+                                        plan_state = entries.clone();
+                                    } else if plan_state.is_empty() {
+                                        // Single entry, no existing plan — initialize
+                                        plan_state = entries.clone();
+                                    } else {
+                                        // Single entry status update — merge into existing
+                                        for update in &entries {
+                                            if let Some(existing) = plan_state.iter_mut().find(|e| e.content == update.content) {
+                                                existing.status = update.status;
+                                            }
+                                        }
+                                    }
+                                }
+                                let plan_entries: Vec<PlanEntry> = plan_state.iter().map(|e| {
+                                    let status = match e.status {
+                                        acp_worker::PlanEntryState::Pending => PlanEntryStatus::Pending,
+                                        acp_worker::PlanEntryState::InProgress => PlanEntryStatus::InProgress,
+                                        acp_worker::PlanEntryState::Completed => PlanEntryStatus::Completed,
+                                        acp_worker::PlanEntryState::Failed => PlanEntryStatus::Completed,
+                                    };
+                                    PlanEntry::new(&e.content, PlanEntryPriority::Medium, status)
+                                }).collect();
+                                let _ = c
+                                    .session_notification(SessionNotification::new(
+                                        stream_sid.clone(),
+                                        SessionUpdate::Plan(Plan::new(plan_entries)),
+                                    ))
+                                    .await;
+                            }
+                        }
+                        Ok(WorkerEvent::SessionTitle(title)) => {
+                            if let Some(c) = conn.borrow().as_ref() {
+                                let _ = c
+                                    .session_notification(SessionNotification::new(
+                                        stream_sid.clone(),
+                                        SessionUpdate::SessionInfoUpdate(
+                                            SessionInfoUpdate::new().title(title),
+                                        ),
+                                    ))
+                                    .await;
+                            }
+                        }
                         Ok(WorkerEvent::TurnComplete) => break,
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
@@ -518,6 +662,23 @@ impl Agent for OmegonAcpAgent {
             ack: None,
         })
         .await;
+
+        // Notify the client that the mode changed.
+        let mode_id = args.mode_id.clone();
+        if let Some(sid) = self.session_id.borrow().clone() {
+            let conn = self.conn.clone();
+            tokio::task::spawn_local(async move {
+                if let Some(c) = conn.borrow().as_ref() {
+                    let _ = c
+                        .session_notification(SessionNotification::new(
+                            sid,
+                            SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(mode_id)),
+                        ))
+                        .await;
+                }
+            });
+        }
+
         Ok(SetSessionModeResponse::new())
     }
 
@@ -613,6 +774,15 @@ impl Agent for OmegonAcpAgent {
             })
             .collect();
         Ok(ListSessionsResponse::new(sessions))
+    }
+
+    async fn close_session(&self, _args: CloseSessionRequest) -> Result<CloseSessionResponse> {
+        self.send_to_worker(WorkerRequest::Cancel).await;
+        self.send_to_worker(WorkerRequest::Shutdown).await;
+        *self.worker.borrow_mut() = None;
+        *self.session_id.borrow_mut() = None;
+        tracing::info!("ACP session closed");
+        Ok(CloseSessionResponse::new())
     }
 
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
@@ -715,6 +885,87 @@ impl OmegonAcpAgent {
                     a["name"].as_str().cmp(&b["name"].as_str())
                 });
                 Ok(serde_json::json!({ "extensions": extensions }))
+            }
+
+            "extensions/get" => {
+                let ext_name = params["extension"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
+                let ext_dir = extensions_dir.join(ext_name);
+                if !ext_dir.exists() {
+                    anyhow::bail!("extension '{ext_name}' not found");
+                }
+                let manifest = ExtensionManifest::from_extension_dir(&ext_dir)?;
+                let state = ExtensionState::load(&ext_dir).unwrap_or_default();
+                let config_values = config_store::read_config(&ext_dir).unwrap_or_default();
+
+                let config_schema: serde_json::Map<String, serde_json::Value> = manifest
+                    .config
+                    .iter()
+                    .map(|(name, field)| {
+                        let mut entry = serde_json::to_value(field).unwrap_or_default();
+                        if let Some(obj) = entry.as_object_mut() {
+                            if let Some(val) = config_values.get(name) {
+                                obj.insert("current_value".into(), serde_json::Value::String(val.clone()));
+                            }
+                        }
+                        (name.clone(), entry)
+                    })
+                    .collect();
+
+                let secret_status = |names: &[String]| -> Vec<serde_json::Value> {
+                    names.iter().map(|name| {
+                        let (has_recipe, source) = if let Some(ref mgr) = *self.secrets.borrow() {
+                            let recipes = mgr.list_recipes();
+                            match recipes.iter().find(|(n, _)| n == name) {
+                                Some((_, r)) => {
+                                    let src = if r.starts_with("keyring:") { "keyring" }
+                                        else if r.starts_with("env:") { "env" }
+                                        else if r.starts_with("vault:") { "vault" }
+                                        else if r.starts_with("cmd:") { "cmd" }
+                                        else { "recipe" };
+                                    (true, Some(String::from(src)))
+                                }
+                                None => {
+                                    let in_env = std::env::var(name).is_ok();
+                                    (in_env, if in_env { Some("env".into()) } else { None })
+                                }
+                            }
+                        } else {
+                            (false, None)
+                        };
+                        serde_json::json!({
+                            "name": name,
+                            "resolved": has_recipe,
+                            "source": source,
+                        })
+                    }).collect()
+                };
+
+                let runtime_type = match &manifest.runtime {
+                    crate::extensions::manifest::RuntimeConfig::Native { .. } => "native",
+                    crate::extensions::manifest::RuntimeConfig::Oci { .. } => "oci",
+                };
+
+                Ok(serde_json::json!({
+                    "name": manifest.extension.name,
+                    "version": manifest.extension.version,
+                    "description": manifest.extension.description,
+                    "runtime": runtime_type,
+                    "enabled": state.enabled,
+                    "stability": {
+                        "crashes_this_session": state.stability.crashes_this_session,
+                        "health_check_failures": state.stability.health_check_failures,
+                        "last_error": state.stability.last_error,
+                        "auto_disabled": state.stability.auto_disabled,
+                    },
+                    "config_schema": config_schema,
+                    "config_values": config_values,
+                    "secrets": {
+                        "required": secret_status(&manifest.secrets.required),
+                        "optional": secret_status(&manifest.secrets.optional),
+                    },
+                    "path": ext_dir.display().to_string(),
+                }))
             }
 
             "extensions/config_get" => {
@@ -902,13 +1153,153 @@ impl OmegonAcpAgent {
                 Ok(serde_json::json!({ "agents": entries }))
             }
 
+            "catalog/get" => {
+                let agent_id = params["id"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'id' field"))?;
+                let home = crate::paths::omegon_home()?;
+                let resolved = crate::catalog::resolve(&home, agent_id)?;
+                let m = &resolved.manifest;
+                let mut result = serde_json::json!({
+                    "id": m.agent.id,
+                    "name": m.agent.name,
+                    "version": m.agent.version,
+                    "description": m.agent.description,
+                    "domain": m.agent.domain,
+                    "path": resolved.bundle_dir.display().to_string(),
+                });
+                let obj = result.as_object_mut().unwrap();
+                if let Some(ref persona) = m.persona {
+                    obj.insert("persona".into(), serde_json::json!({
+                        "badge": persona.badge,
+                        "activated_skills": persona.activated_skills,
+                        "disabled_tools": persona.disabled_tools,
+                        "has_directive": resolved.persona_directive.is_some(),
+                        "has_mind_facts": resolved.mind_facts_content.is_some(),
+                    }));
+                }
+                if let Some(ref settings) = m.settings {
+                    obj.insert("settings".into(), serde_json::json!({
+                        "model": settings.model,
+                        "thinking_level": settings.thinking_level,
+                        "context_class": settings.context_class,
+                        "max_turns": settings.max_turns,
+                    }));
+                }
+                if let Some(ref extensions) = m.extensions {
+                    let ext_list: Vec<serde_json::Value> = extensions.iter().map(|e| {
+                        serde_json::json!({ "name": e.name, "version": e.version })
+                    }).collect();
+                    obj.insert("extensions".into(), serde_json::json!(ext_list));
+                }
+                if let Some(ref workflow) = m.workflow {
+                    let phases: Vec<String> = workflow.phases.as_ref()
+                        .map(|p| p.keys().cloned().collect())
+                        .unwrap_or_default();
+                    obj.insert("workflow".into(), serde_json::json!({
+                        "name": workflow.name,
+                        "phases": phases,
+                    }));
+                }
+                Ok(result)
+            }
+
             "catalog/install" => {
                 let offline = params.get("offline").and_then(|v| v.as_bool()).unwrap_or(false);
                 crate::catalog::cmd_install(offline).await?;
                 Ok(serde_json::json!({ "ok": true }))
             }
 
+            "catalog/remove" => {
+                let agent_id = params["id"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'id' field"))?;
+                if agent_id.contains('/') || agent_id.contains('\\') || agent_id.contains("..") || agent_id.contains('\0') {
+                    anyhow::bail!("invalid agent ID: path traversal rejected");
+                }
+                let home = crate::paths::omegon_home()?;
+                let catalog_dir = home.join("catalog");
+                // Find by directory name or by agent.id in manifests
+                let entries = crate::catalog::list(&home);
+                let entry = entries.iter().find(|e| e.id == agent_id)
+                    .ok_or_else(|| anyhow::anyhow!("catalog agent '{agent_id}' not found"))?;
+                if entry.bundle_dir.exists() {
+                    // Safety: ensure we're only removing from within catalog/
+                    if !entry.bundle_dir.starts_with(&catalog_dir) {
+                        anyhow::bail!("refusing to remove agent outside catalog directory");
+                    }
+                    std::fs::remove_dir_all(&entry.bundle_dir)?;
+                }
+                Ok(serde_json::json!({ "ok": true }))
+            }
+
             // ── Personas ──────────────────────────────────────────
+
+            "personas/list" => {
+                let (personas, tones) = crate::plugins::persona_loader::scan_available();
+                let persona_entries: Vec<serde_json::Value> = personas.iter().map(|p| {
+                    let directive = std::fs::read_to_string(p.path.join("PERSONA.md")).unwrap_or_default();
+                    serde_json::json!({
+                        "id": p.id,
+                        "name": p.name,
+                        "description": p.description,
+                        "directive_preview": if directive.len() > 500 {
+                            format!("{}...", &directive[..500])
+                        } else {
+                            directive
+                        },
+                        "path": p.path.display().to_string(),
+                    })
+                }).collect();
+                let tone_entries: Vec<serde_json::Value> = tones.iter().map(|t| {
+                    serde_json::json!({
+                        "id": t.id,
+                        "name": t.name,
+                        "description": t.description,
+                        "path": t.path.display().to_string(),
+                    })
+                }).collect();
+                Ok(serde_json::json!({
+                    "personas": persona_entries,
+                    "tones": tone_entries,
+                }))
+            }
+
+            "personas/get" => {
+                let id = params["id"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'id' field"))?;
+                let (personas, _) = crate::plugins::persona_loader::scan_available();
+                let p = personas.iter().find(|p| p.id == id)
+                    .ok_or_else(|| anyhow::anyhow!("persona '{id}' not found"))?;
+                let directive = std::fs::read_to_string(p.path.join("PERSONA.md")).unwrap_or_default();
+                let manifest_content = std::fs::read_to_string(p.path.join("plugin.toml")).unwrap_or_default();
+
+                // Parse disabled_tools and badge from manifest
+                let manifest = crate::plugins::armory::ArmoryManifest::parse(&manifest_content).ok();
+                let disabled_tools: Vec<String> = manifest.as_ref()
+                    .and_then(|m| m.persona.as_ref())
+                    .and_then(|p| p.tools.as_ref())
+                    .map(|t| t.disable.clone())
+                    .unwrap_or_default();
+                let activated_skills: Vec<String> = manifest.as_ref()
+                    .and_then(|m| m.persona.as_ref())
+                    .and_then(|p| p.skills.as_ref())
+                    .map(|s| s.activate.clone())
+                    .unwrap_or_default();
+                let badge = manifest.as_ref()
+                    .and_then(|m| m.persona.as_ref())
+                    .and_then(|p| p.style.as_ref())
+                    .and_then(|s| s.badge.clone());
+
+                Ok(serde_json::json!({
+                    "id": p.id,
+                    "name": p.name,
+                    "description": p.description,
+                    "directive": directive,
+                    "disabled_tools": disabled_tools,
+                    "activated_skills": activated_skills,
+                    "badge": badge,
+                    "path": p.path.display().to_string(),
+                }))
+            }
 
             "personas/create" => {
                 let name = params["name"].as_str()
@@ -992,11 +1383,105 @@ impl OmegonAcpAgent {
                 }
             }
 
+            "personas/update" => {
+                let id = params["id"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'id' field"))?;
+                let (personas, _) = crate::plugins::persona_loader::scan_available();
+                let p = personas.iter().find(|p| p.id == id)
+                    .ok_or_else(|| anyhow::anyhow!("persona '{id}' not found"))?;
+                if !p.path.exists() {
+                    anyhow::bail!("persona directory not found at {}", p.path.display());
+                }
+
+                // Update directive if provided
+                if let Some(directive) = params.get("directive").and_then(|v| v.as_str()) {
+                    std::fs::write(p.path.join("PERSONA.md"), directive)?;
+                }
+
+                // Update manifest fields if any are provided
+                let manifest_path = p.path.join("plugin.toml");
+                let manifest_content = std::fs::read_to_string(&manifest_path)?;
+                let mut manifest: toml::Table = toml::from_str(&manifest_content)?;
+
+                if let Some(name) = params.get("name").and_then(|v| v.as_str()) {
+                    if let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut()) {
+                        plugin.insert("name".into(), name.into());
+                    }
+                }
+                if let Some(desc) = params.get("description").and_then(|v| v.as_str()) {
+                    if let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut()) {
+                        plugin.insert("description".into(), desc.into());
+                    }
+                }
+                if let Some(badge) = params.get("badge").and_then(|v| v.as_str()) {
+                    let persona = manifest.entry("persona")
+                        .or_insert(toml::Value::Table(toml::Table::new()))
+                        .as_table_mut().unwrap();
+                    let style = persona.entry("style")
+                        .or_insert(toml::Value::Table(toml::Table::new()))
+                        .as_table_mut().unwrap();
+                    style.insert("badge".into(), badge.into());
+                }
+                if let Some(disabled_tools) = params.get("disabled_tools").and_then(|v| v.as_array()) {
+                    let tools_arr: Vec<toml::Value> = disabled_tools.iter()
+                        .filter_map(|v| v.as_str().map(|s| toml::Value::String(s.to_string())))
+                        .collect();
+                    let persona = manifest.entry("persona")
+                        .or_insert(toml::Value::Table(toml::Table::new()))
+                        .as_table_mut().unwrap();
+                    let tools = persona.entry("tools")
+                        .or_insert(toml::Value::Table(toml::Table::new()))
+                        .as_table_mut().unwrap();
+                    tools.insert("disable".into(), toml::Value::Array(tools_arr));
+                }
+                if let Some(activated_skills) = params.get("activated_skills").and_then(|v| v.as_array()) {
+                    let skills_arr: Vec<toml::Value> = activated_skills.iter()
+                        .filter_map(|v| v.as_str().map(|s| toml::Value::String(s.to_string())))
+                        .collect();
+                    let persona = manifest.entry("persona")
+                        .or_insert(toml::Value::Table(toml::Table::new()))
+                        .as_table_mut().unwrap();
+                    let skills = persona.entry("skills")
+                        .or_insert(toml::Value::Table(toml::Table::new()))
+                        .as_table_mut().unwrap();
+                    skills.insert("activate".into(), toml::Value::Array(skills_arr));
+                }
+
+                std::fs::write(&manifest_path, toml::to_string_pretty(&manifest)?)?;
+
+                Ok(serde_json::json!({
+                    "ok": true,
+                    "path": p.path.display().to_string(),
+                }))
+            }
+
             // ── Skills ────────────────────────────────────────────
 
             "skills/list" => {
-                let summary = crate::skills::list_summary()?;
-                Ok(serde_json::json!({ "summary": summary }))
+                let entries = crate::skills::list_structured()?;
+                Ok(serde_json::json!({ "skills": entries }))
+            }
+
+            "skills/get" => {
+                let name = params["name"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let (manifest, body, path) = crate::skills::get_skill(name)?;
+                Ok(serde_json::json!({
+                    "name": manifest.name,
+                    "description": manifest.description,
+                    "id": manifest.id,
+                    "version": manifest.version,
+                    "tags": manifest.tags,
+                    "aliases": manifest.aliases,
+                    "triggers": manifest.triggers,
+                    "trusted_paths": manifest.trusted_paths,
+                    "output_path": manifest.output_path,
+                    "output_format": manifest.output_format,
+                    "max_turns": manifest.max_turns,
+                    "posture": manifest.posture,
+                    "body": body,
+                    "path": path.display().to_string(),
+                }))
             }
 
             "skills/install" => {
@@ -1009,18 +1494,86 @@ impl OmegonAcpAgent {
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
                 let content = params["content"].as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'content' field (SKILL.md body)"))?;
+                let project_local = params.get("project_local")
+                    .and_then(|v| v.as_bool()).unwrap_or(false);
+
                 let slug: String = name.to_lowercase().replace(' ', "-")
                     .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
                 if slug.is_empty() || slug.contains("..") {
                     anyhow::bail!("invalid skill name");
                 }
-                let home = crate::paths::omegon_home()?;
-                let skill_dir = home.join("skills").join(&slug);
+
+                let skill_dir = if project_local {
+                    let cwd = std::env::current_dir()?;
+                    cwd.join(".omegon/skills").join(&slug)
+                } else {
+                    let home = crate::paths::omegon_home()?;
+                    home.join("skills").join(&slug)
+                };
                 std::fs::create_dir_all(&skill_dir)?;
                 std::fs::write(skill_dir.join("SKILL.md"), content)?;
                 Ok(serde_json::json!({
                     "ok": true,
                     "path": skill_dir.display().to_string(),
+                }))
+            }
+
+            "skills/update" => {
+                let name = params["name"].as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
+                    anyhow::bail!("invalid skill name: path traversal rejected");
+                }
+
+                // Find the skill — project-local first, then user-installed
+                let cwd = std::env::current_dir()?;
+                let project_path = cwd.join(".omegon/skills").join(name).join("SKILL.md");
+                let home = crate::paths::omegon_home()?;
+                let user_path = home.join("skills").join(name).join("SKILL.md");
+
+                let skill_file = if project_path.exists() {
+                    project_path
+                } else if user_path.exists() {
+                    user_path
+                } else {
+                    anyhow::bail!("skill '{name}' not found");
+                };
+
+                if let Some(content) = params.get("content").and_then(|v| v.as_str()) {
+                    std::fs::write(&skill_file, content)?;
+                } else {
+                    // Partial update: merge provided manifest fields with existing content
+                    let existing = std::fs::read_to_string(&skill_file)?;
+                    let (mut manifest, body) = crate::skills::parse_skill_file(&existing);
+
+                    if let Some(desc) = params.get("description").and_then(|v| v.as_str()) {
+                        manifest.description = desc.to_string();
+                    }
+                    if let Some(tags) = params.get("tags").and_then(|v| v.as_array()) {
+                        manifest.tags = tags.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+                    }
+                    if let Some(aliases) = params.get("aliases").and_then(|v| v.as_array()) {
+                        manifest.aliases = aliases.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+                    }
+                    if let Some(triggers) = params.get("triggers").and_then(|v| v.as_array()) {
+                        manifest.triggers = triggers.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+                    }
+                    if let Some(posture) = params.get("posture").and_then(|v| v.as_str()) {
+                        manifest.posture = Some(posture.to_string());
+                    }
+                    if let Some(turns) = params.get("max_turns").and_then(|v| v.as_u64()) {
+                        manifest.max_turns = Some(turns as u32);
+                    }
+                    if let Some(body_update) = params.get("body").and_then(|v| v.as_str()) {
+                        std::fs::write(&skill_file, manifest.to_skill_file(body_update))?;
+                    } else {
+                        std::fs::write(&skill_file, manifest.to_skill_file(&body))?;
+                    }
+                }
+
+                Ok(serde_json::json!({
+                    "ok": true,
+                    "path": skill_file.display().to_string(),
                 }))
             }
 
@@ -1030,11 +1583,19 @@ impl OmegonAcpAgent {
                 if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
                     anyhow::bail!("invalid skill name: path traversal rejected");
                 }
+
+                // Check project-local first, then user-installed
+                let cwd = std::env::current_dir()?;
+                let project_dir = cwd.join(".omegon/skills").join(name);
                 let home = crate::paths::omegon_home()?;
-                let skill_dir = home.join("skills").join(name);
-                if skill_dir.exists() {
-                    std::fs::remove_dir_all(&skill_dir)?;
-                    Ok(serde_json::json!({ "ok": true }))
+                let user_dir = home.join("skills").join(name);
+
+                if project_dir.exists() {
+                    std::fs::remove_dir_all(&project_dir)?;
+                    Ok(serde_json::json!({ "ok": true, "scope": "project" }))
+                } else if user_dir.exists() {
+                    std::fs::remove_dir_all(&user_dir)?;
+                    Ok(serde_json::json!({ "ok": true, "scope": "user" }))
                 } else {
                     anyhow::bail!("skill '{name}' not found")
                 }
@@ -1187,9 +1748,79 @@ impl OmegonAcpAgent {
                 lines.join("\n")
             }
             "/login" => "Omegon manages authentication independently.\nRun `omegon auth login` in a terminal or set API keys.".into(),
-            "/help" => "Commands: /model /thinking /posture /secrets /status /version /login /help\nUse the dropdowns at the bottom to switch model, thinking, and posture.".into(),
+            "/skills" => {
+                let args = args.trim();
+                match args {
+                    "" | "list" => "Use the **skills/list** RPC to get structured skill data, or type `/skills list` to see a summary.\nAvailable: list, get <name>, create, delete <name>, install".into(),
+                    "install" => "Use the **skills/install** RPC to install bundled skills.".into(),
+                    _ => format!("Skills subcommand: {args}. Use the **skills/{args}** RPC for structured operations."),
+                }
+            }
+            "/extension" | "/ext" => {
+                let args = args.trim();
+                match args {
+                    "" | "list" => "Use the **extensions/list** RPC for structured extension data.\nAvailable: list, get <name>, install <uri>, remove <name>, update [name], enable <name>, disable <name>, search [query]".into(),
+                    _ => format!("Extension subcommand: {args}. Use the **extensions/{args}** RPC for structured operations."),
+                }
+            }
+            "/persona" => {
+                let args = args.trim();
+                match args {
+                    "" | "list" => "Use the **personas/list** RPC for structured persona data.\nAvailable: list, get <id>, create, update <id>, delete <id>".into(),
+                    _ => format!("Persona subcommand: {args}. Use the **personas/{args}** RPC for structured operations."),
+                }
+            }
+            "/catalog" => {
+                let args = args.trim();
+                match args {
+                    "" | "list" => "Use the **catalog/list** RPC for structured catalog data.\nAvailable: list, get <id>, install, remove <id>".into(),
+                    _ => format!("Catalog subcommand: {args}. Use the **catalog/{args}** RPC for structured operations."),
+                }
+            }
+            "/help" => "Commands: /model /thinking /posture /skills /extension /persona /catalog /secrets /status /login /help\n\nFull CRUD is available via RPC ext_methods (skills/*, extensions/*, personas/*, catalog/*).".into(),
             _ => format!("Unknown: {cmd}. Type /help"),
         }
+    }
+}
+
+// ── ACP → internal MCP server conversion ──────────────────────────────
+
+fn mcp_config(
+    command: Option<String>,
+    url: Option<String>,
+    args: Vec<String>,
+    env: std::collections::HashMap<String, String>,
+) -> crate::plugins::mcp::McpServerConfig {
+    crate::plugins::mcp::McpServerConfig {
+        url,
+        command,
+        args,
+        env,
+        image: None,
+        mount_cwd: false,
+        network: true,
+        docker_mcp: None,
+        styrene_dest: None,
+        timeout_secs: 30,
+    }
+}
+
+fn convert_acp_mcp_server(server: McpServer) -> Option<(String, crate::plugins::mcp::McpServerConfig)> {
+    match server {
+        McpServer::Stdio(s) => {
+            let env: std::collections::HashMap<String, String> = s.env
+                .into_iter()
+                .map(|e| (e.name, e.value))
+                .collect();
+            Some((s.name, mcp_config(Some(s.command.to_string_lossy().to_string()), None, s.args, env)))
+        }
+        McpServer::Http(s) => {
+            Some((s.name, mcp_config(None, Some(s.url), Vec::new(), std::collections::HashMap::new())))
+        }
+        McpServer::Sse(s) => {
+            Some((s.name, mcp_config(None, Some(s.url), Vec::new(), std::collections::HashMap::new())))
+        }
+        _ => None,
     }
 }
 
@@ -1222,4 +1853,264 @@ pub async fn run(
     io_task.await.context("ACP IO task ended")?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn convert_stdio_mcp_server() {
+        let server = McpServer::Stdio(McpServerStdio::new(
+            "test-server",
+            std::path::PathBuf::from("/usr/bin/test-mcp"),
+        ).args(vec!["--port".into(), "3000".into()]));
+
+        let (name, config) = convert_acp_mcp_server(server).expect("should convert");
+        assert_eq!(name, "test-server");
+        assert_eq!(config.command.as_deref(), Some("/usr/bin/test-mcp"));
+        assert_eq!(config.args, vec!["--port", "3000"]);
+        assert!(config.url.is_none());
+    }
+
+    #[test]
+    fn convert_http_mcp_server() {
+        let server = McpServer::Http(McpServerHttp::new(
+            "remote-server",
+            "https://mcp.example.com/v1",
+        ));
+
+        let (name, config) = convert_acp_mcp_server(server).expect("should convert");
+        assert_eq!(name, "remote-server");
+        assert_eq!(config.url.as_deref(), Some("https://mcp.example.com/v1"));
+        assert!(config.command.is_none());
+    }
+
+    #[test]
+    fn convert_sse_mcp_server() {
+        let server = McpServer::Sse(McpServerSse::new(
+            "sse-server",
+            "https://mcp.example.com/sse",
+        ));
+
+        let (name, config) = convert_acp_mcp_server(server).expect("should convert");
+        assert_eq!(name, "sse-server");
+        assert_eq!(config.url.as_deref(), Some("https://mcp.example.com/sse"));
+    }
+
+    #[test]
+    fn plan_entry_state_mapping() {
+        use crate::acp_worker::{PlanEntryData, PlanEntryState};
+
+        let entries = vec![
+            PlanEntryData { content: "Step 1".into(), status: PlanEntryState::Completed },
+            PlanEntryData { content: "Step 2".into(), status: PlanEntryState::InProgress },
+            PlanEntryData { content: "Step 3".into(), status: PlanEntryState::Pending },
+        ];
+
+        let plan_entries: Vec<PlanEntry> = entries.iter().map(|e| {
+            let status = match e.status {
+                PlanEntryState::Pending => PlanEntryStatus::Pending,
+                PlanEntryState::InProgress => PlanEntryStatus::InProgress,
+                PlanEntryState::Completed => PlanEntryStatus::Completed,
+                PlanEntryState::Failed => PlanEntryStatus::Completed,
+            };
+            PlanEntry::new(&e.content, PlanEntryPriority::Medium, status)
+        }).collect();
+
+        assert_eq!(plan_entries.len(), 3);
+        assert_eq!(plan_entries[0].status, PlanEntryStatus::Completed);
+        assert_eq!(plan_entries[1].status, PlanEntryStatus::InProgress);
+        assert_eq!(plan_entries[2].status, PlanEntryStatus::Pending);
+    }
+
+    #[test]
+    fn mcp_config_defaults() {
+        let config = mcp_config(
+            Some("test-cmd".into()),
+            None,
+            vec!["arg1".into()],
+            std::collections::HashMap::new(),
+        );
+        assert_eq!(config.command.as_deref(), Some("test-cmd"));
+        assert!(config.url.is_none());
+        assert_eq!(config.args, vec!["arg1"]);
+        assert!(config.network);
+        assert_eq!(config.timeout_secs, 30);
+    }
+
+    #[test]
+    fn plan_merge_multi_entry_replaces_state() {
+        use crate::acp_worker::{PlanEntryData, PlanEntryState};
+
+        let mut plan_state: Vec<PlanEntryData> = Vec::new();
+
+        // Multi-entry = fresh plan
+        let entries = vec![
+            PlanEntryData { content: "A".into(), status: PlanEntryState::Pending },
+            PlanEntryData { content: "B".into(), status: PlanEntryState::Pending },
+            PlanEntryData { content: "C".into(), status: PlanEntryState::Pending },
+        ];
+        if entries.len() > 1 {
+            plan_state = entries.clone();
+        }
+        assert_eq!(plan_state.len(), 3);
+
+        // Single entry update merges
+        let update = vec![PlanEntryData { content: "B".into(), status: PlanEntryState::Completed }];
+        for u in &update {
+            if let Some(existing) = plan_state.iter_mut().find(|e| e.content == u.content) {
+                existing.status = u.status;
+            }
+        }
+        assert_eq!(plan_state[0].status, PlanEntryState::Pending);
+        assert_eq!(plan_state[1].status, PlanEntryState::Completed);
+        assert_eq!(plan_state[2].status, PlanEntryState::Pending);
+    }
+
+    #[test]
+    fn plan_merge_single_entry_initializes_empty() {
+        use crate::acp_worker::{PlanEntryData, PlanEntryState};
+
+        let mut plan_state: Vec<PlanEntryData> = Vec::new();
+
+        // Single entry with empty plan → should initialize
+        let entries = vec![PlanEntryData { content: "Solo".into(), status: PlanEntryState::Pending }];
+        if entries.len() > 1 {
+            plan_state = entries.clone();
+        } else if plan_state.is_empty() {
+            plan_state = entries.clone();
+        }
+        assert_eq!(plan_state.len(), 1);
+        assert_eq!(plan_state[0].content, "Solo");
+    }
+
+    #[test]
+    fn plan_merge_second_fresh_replaces_first() {
+        use crate::acp_worker::{PlanEntryData, PlanEntryState};
+
+        let mut plan_state = vec![
+            PlanEntryData { content: "Old A".into(), status: PlanEntryState::Completed },
+            PlanEntryData { content: "Old B".into(), status: PlanEntryState::Pending },
+        ];
+
+        // New multi-entry plan replaces old
+        let new_entries = vec![
+            PlanEntryData { content: "New X".into(), status: PlanEntryState::Pending },
+            PlanEntryData { content: "New Y".into(), status: PlanEntryState::Pending },
+        ];
+        if new_entries.len() > 1 {
+            plan_state = new_entries.clone();
+        }
+        assert_eq!(plan_state.len(), 2);
+        assert_eq!(plan_state[0].content, "New X");
+    }
+
+    #[test]
+    fn extension_state_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Default state
+        let state = crate::extensions::ExtensionState::load(dir.path()).unwrap_or_default();
+        assert!(state.enabled);
+
+        // Disable and save
+        let mut state = state;
+        state.mark_disabled();
+        state.save(dir.path()).unwrap();
+
+        // Reload and verify
+        let reloaded = crate::extensions::ExtensionState::load(dir.path()).unwrap();
+        assert!(!reloaded.enabled);
+        assert!(reloaded.last_disabled_at.is_some());
+
+        // Re-enable and save
+        let mut state = reloaded;
+        state.mark_enabled();
+        state.save(dir.path()).unwrap();
+
+        let reloaded = crate::extensions::ExtensionState::load(dir.path()).unwrap();
+        assert!(reloaded.enabled);
+        assert!(reloaded.last_enabled_at.is_some());
+    }
+
+    #[test]
+    fn skills_create_and_update_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("test-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        // Create
+        let content = "+++\nname = \"test-skill\"\ndescription = \"A test\"\ntags = [\"testing\"]\n+++\n\n# Test Skill\n\nDo testing things.\n";
+        std::fs::write(skill_dir.join("SKILL.md"), content).unwrap();
+
+        // Read back
+        let raw = std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
+        let (manifest, body) = crate::skills::parse_skill_file(&raw);
+        assert_eq!(manifest.name, "test-skill");
+        assert_eq!(manifest.description, "A test");
+        assert_eq!(manifest.tags, vec!["testing"]);
+        assert!(body.contains("Do testing things."));
+
+        // Update manifest fields
+        let mut manifest = manifest;
+        manifest.description = "Updated description".to_string();
+        manifest.tags = vec!["testing".into(), "updated".into()];
+        std::fs::write(skill_dir.join("SKILL.md"), manifest.to_skill_file(&body)).unwrap();
+
+        // Verify update
+        let raw = std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
+        let (manifest, body) = crate::skills::parse_skill_file(&raw);
+        assert_eq!(manifest.description, "Updated description");
+        assert_eq!(manifest.tags, vec!["testing", "updated"]);
+        assert!(body.contains("Do testing things."));
+    }
+
+    #[test]
+    fn persona_create_and_read_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let persona_dir = dir.path().join("test-persona");
+        std::fs::create_dir_all(&persona_dir).unwrap();
+
+        // Build plugin.toml
+        let mut plugin = toml::Table::new();
+        let mut plugin_section = toml::Table::new();
+        plugin_section.insert("type".into(), "persona".into());
+        plugin_section.insert("id".into(), "user.test-persona".into());
+        plugin_section.insert("name".into(), "Test Persona".into());
+        plugin_section.insert("version".into(), "1.0.0".into());
+        plugin_section.insert("description".into(), "A test persona".into());
+        plugin.insert("plugin".into(), toml::Value::Table(plugin_section));
+
+        let mut persona = toml::Table::new();
+        let mut identity = toml::Table::new();
+        identity.insert("directive".into(), "PERSONA.md".into());
+        persona.insert("identity".into(), toml::Value::Table(identity));
+        let mut style = toml::Table::new();
+        style.insert("badge".into(), "T".into());
+        persona.insert("style".into(), toml::Value::Table(style));
+        plugin.insert("persona".into(), toml::Value::Table(persona));
+
+        std::fs::write(persona_dir.join("plugin.toml"), toml::to_string_pretty(&plugin).unwrap()).unwrap();
+        std::fs::write(persona_dir.join("PERSONA.md"), "You are a test persona.\n").unwrap();
+
+        // Load via persona_loader
+        let loaded = crate::plugins::persona_loader::load_persona(&persona_dir).unwrap();
+        assert_eq!(loaded.id, "user.test-persona");
+        assert_eq!(loaded.name, "Test Persona");
+        assert!(loaded.directive.contains("test persona"));
+        assert_eq!(loaded.badge, Some("T".into()));
+
+        // Update plugin.toml
+        let manifest_content = std::fs::read_to_string(persona_dir.join("plugin.toml")).unwrap();
+        let mut manifest: toml::Table = toml::from_str(&manifest_content).unwrap();
+        if let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut()) {
+            plugin.insert("description".into(), "Updated description".into());
+        }
+        std::fs::write(persona_dir.join("plugin.toml"), toml::to_string_pretty(&manifest).unwrap()).unwrap();
+
+        // Reload and verify
+        let reloaded = crate::plugins::persona_loader::load_persona(&persona_dir).unwrap();
+        assert_eq!(reloaded.id, "user.test-persona");
+    }
 }
