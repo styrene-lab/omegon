@@ -187,10 +187,56 @@ pub fn omegon_home() -> anyhow::Result<PathBuf> {
     })
 }
 
+/// Compute a stable instance identifier from launch mode and PID.
+///
+/// Format: `{mode}-{pid}` — e.g., `tui-12345`, `acp-67890`.
+/// Used to namespace per-instance runtime state so concurrent instances
+/// (ACP in Flynt + TUI in terminal) don't collide.
+pub fn instance_id(mode: &str) -> String {
+    format!("{mode}-{}", std::process::id())
+}
+
+/// Per-instance runtime directory: `.omegon/runtime/{instance_id}/`.
+///
+/// Workspace leases go here so each instance has its own heartbeat file.
+pub fn runtime_instance_dir(cwd: &Path, instance_id: &str) -> PathBuf {
+    config_dir(cwd).join("runtime").join(instance_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn instance_id_format() {
+        let id = instance_id("tui");
+        assert!(id.starts_with("tui-"));
+        let pid_part = &id["tui-".len()..];
+        assert!(pid_part.parse::<u32>().is_ok());
+    }
+
+    #[test]
+    fn instance_id_mode_prefix() {
+        assert!(instance_id("acp").starts_with("acp-"));
+        assert!(instance_id("daemon").starts_with("daemon-"));
+        assert!(instance_id("run").starts_with("run-"));
+    }
+
+    #[test]
+    fn runtime_instance_dir_path() {
+        let tmp = TempDir::new().unwrap();
+        let dir = runtime_instance_dir(tmp.path(), "tui-999");
+        assert_eq!(dir, tmp.path().join(".omegon/runtime/tui-999"));
+    }
+
+    #[test]
+    fn runtime_instance_dir_isolates_instances() {
+        let tmp = TempDir::new().unwrap();
+        let a = runtime_instance_dir(tmp.path(), "tui-111");
+        let b = runtime_instance_dir(tmp.path(), "acp-222");
+        assert_ne!(a, b);
+    }
 
     #[test]
     fn design_docs_prefers_ai() {

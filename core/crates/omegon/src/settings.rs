@@ -1051,7 +1051,7 @@ impl Profile {
             let _ = std::fs::create_dir_all(parent);
         }
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, json)?;
+        crate::filelock::atomic_write_locked(&path, json.as_bytes())?;
         tracing::debug!(path = %path.display(), "project profile saved");
         Ok(())
     }
@@ -1062,7 +1062,7 @@ impl Profile {
             .ok_or_else(|| anyhow::anyhow!("Cannot determine config directory"))?;
         let _ = std::fs::create_dir_all(path.parent().unwrap());
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, json)?;
+        crate::filelock::atomic_write_locked(&path, json.as_bytes())?;
         tracing::debug!(path = %path.display(), "global profile saved");
         Ok(())
     }

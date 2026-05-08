@@ -82,7 +82,7 @@ impl ExtensionState {
 
         let state_path = state_dir.join("state.toml");
         let content = toml::to_string_pretty(self)?;
-        std::fs::write(&state_path, content)?;
+        crate::filelock::atomic_write_locked(&state_path, content.as_bytes())?;
         Ok(())
     }
 

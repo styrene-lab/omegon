@@ -99,8 +99,11 @@ impl StateStore for JsonFileStore {
         let json = serde_json::to_string_pretty(state)
             .map_err(|e| OpsxError::StoreError(format!("serialize: {e}")))?;
 
-        // Atomic write: write to temp file, then rename.
-        // rename() is atomic on POSIX — no partial writes on crash.
+        // Advisory lock + atomic write: prevents concurrent read-modify-write
+        // data loss when two omegon instances operate on the same repo.
+        let _guard = flock_exclusive(&self.path)
+            .map_err(|e| OpsxError::StoreError(format!("lock {}: {e}", self.path.display())))?;
+
         let tmp_path = self.path.with_extension("json.tmp");
         std::fs::write(&tmp_path, &json)
             .map_err(|e| OpsxError::StoreError(format!("write {}: {e}", tmp_path.display())))?;
@@ -127,6 +130,51 @@ impl StateStore for MemoryStore {
         *self.state.lock().unwrap() = state.clone();
         Ok(())
     }
+}
+
+// ── Advisory file lock (inline, self-contained) ─────────────────────
+
+#[cfg(unix)]
+struct FlockGuard {
+    fd: std::os::unix::io::RawFd,
+}
+
+#[cfg(unix)]
+impl Drop for FlockGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::flock(self.fd, libc::LOCK_UN);
+            libc::close(self.fd);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn flock_exclusive(path: &Path) -> Result<FlockGuard, std::io::Error> {
+    use std::os::unix::io::IntoRawFd;
+    let mut lock_path = path.as_os_str().to_os_string();
+    lock_path.push(".lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(PathBuf::from(&lock_path))?;
+    let fd = file.into_raw_fd();
+    let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
+    if ret != 0 {
+        let err = std::io::Error::last_os_error();
+        unsafe { libc::close(fd); }
+        return Err(err);
+    }
+    Ok(FlockGuard { fd })
+}
+
+#[cfg(not(unix))]
+struct FlockGuard;
+
+#[cfg(not(unix))]
+fn flock_exclusive(_path: &Path) -> Result<FlockGuard, std::io::Error> {
+    Ok(FlockGuard)
 }
 
 #[cfg(test)]

@@ -26,6 +26,12 @@ pub fn runtime_dir(cwd: &Path) -> PathBuf {
     workspace_root(cwd).join(".omegon").join("runtime")
 }
 
+/// Per-instance lease path: `.omegon/runtime/{instance_id}/workspace.json`.
+pub fn instance_lease_path(cwd: &Path, instance_id: &str) -> PathBuf {
+    crate::paths::runtime_instance_dir(cwd, instance_id).join("workspace.json")
+}
+
+/// Legacy shared lease path (pre-isolation). Used as read fallback.
 pub fn workspace_lease_path(cwd: &Path) -> PathBuf {
     runtime_dir(cwd).join("workspace.json")
 }
@@ -40,7 +46,22 @@ pub fn ensure_runtime_dir(cwd: &Path) -> anyhow::Result<PathBuf> {
     Ok(dir)
 }
 
+fn ensure_instance_dir(cwd: &Path, instance_id: &str) -> anyhow::Result<PathBuf> {
+    let dir = crate::paths::runtime_instance_dir(cwd, instance_id);
+    std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Read a workspace lease — checks instance-specific paths first, then legacy.
+///
+/// Returns the first active (non-stale) lease found, or any lease if all are stale.
 pub fn read_workspace_lease(cwd: &Path) -> anyhow::Result<Option<WorkspaceLease>> {
+    // Try instance-specific leases first
+    let active = read_all_active_leases(cwd);
+    if let Some((_id, lease)) = active.into_iter().next() {
+        return Ok(Some(lease));
+    }
+    // Fallback to legacy shared path
     let path = workspace_lease_path(cwd);
     if !path.exists() {
         return Ok(None);
@@ -51,12 +72,55 @@ pub fn read_workspace_lease(cwd: &Path) -> anyhow::Result<Option<WorkspaceLease>
     Ok(Some(lease))
 }
 
-pub fn write_workspace_lease(cwd: &Path, lease: &WorkspaceLease) -> anyhow::Result<()> {
-    ensure_runtime_dir(cwd)?;
-    let path = workspace_lease_path(cwd);
+/// Write workspace lease to the instance-specific path.
+pub fn write_workspace_lease(cwd: &Path, instance_id: &str, lease: &WorkspaceLease) -> anyhow::Result<()> {
+    ensure_instance_dir(cwd, instance_id)?;
+    let path = instance_lease_path(cwd, instance_id);
     let json = serde_json::to_string_pretty(lease)?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
+    crate::filelock::atomic_write(&path, json.as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
+}
+
+/// Read all active (non-stale) instance leases.
+pub fn read_all_active_leases(cwd: &Path) -> Vec<(String, WorkspaceLease)> {
+    let rt_dir = runtime_dir(cwd);
+    let now = Utc::now().timestamp();
+    let mut leases = Vec::new();
+
+    let entries = match std::fs::read_dir(&rt_dir) {
+        Ok(e) => e,
+        Err(_) => return leases,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let dir_name = match entry.file_name().into_string() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        // Must match {mode}-{pid} pattern
+        if !dir_name.contains('-') {
+            continue;
+        }
+        let lease_file = path.join("workspace.json");
+        if !lease_file.exists() {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&lease_file) else { continue };
+        let Ok(lease) = serde_json::from_str::<WorkspaceLease>(&text) else { continue };
+
+        if let Some(epoch) = heartbeat_epoch_secs(&lease.last_heartbeat) {
+            if !heartbeat_is_stale(now, epoch) {
+                leases.push((dir_name, lease));
+            }
+        }
+    }
+
+    leases
 }
 
 pub fn read_workspace_registry(cwd: &Path) -> anyhow::Result<Option<WorkspaceRegistry>> {
@@ -75,8 +139,87 @@ pub fn write_workspace_registry(cwd: &Path, registry: &WorkspaceRegistry) -> any
     ensure_runtime_dir(cwd)?;
     let path = workspace_registry_path(cwd);
     let json = serde_json::to_string_pretty(registry)?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
+    crate::filelock::atomic_write_locked(&path, json.as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
+}
+
+/// Remove this instance's runtime directory on clean shutdown.
+pub fn cleanup_instance(cwd: &Path, instance_id: &str) {
+    let dir = crate::paths::runtime_instance_dir(cwd, instance_id);
+    if dir.is_dir() {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Prune stale instance directories (heartbeat older than 5 minutes AND PID dead).
+pub fn prune_stale_instances(cwd: &Path) -> Vec<String> {
+    let rt_dir = runtime_dir(cwd);
+    let now = Utc::now().timestamp();
+    let mut pruned = Vec::new();
+
+    let entries = match std::fs::read_dir(&rt_dir) {
+        Ok(e) => e,
+        Err(_) => return pruned,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let dir_name = match entry.file_name().into_string() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        if !dir_name.contains('-') {
+            continue;
+        }
+        let lease_file = path.join("workspace.json");
+        if !lease_file.exists() {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&lease_file) else { continue };
+        let Ok(lease) = serde_json::from_str::<WorkspaceLease>(&text) else { continue };
+
+        let stale = heartbeat_epoch_secs(&lease.last_heartbeat)
+            .map(|epoch| heartbeat_is_stale(now, epoch))
+            .unwrap_or(true);
+
+        if !stale {
+            continue;
+        }
+
+        // Check if the PID is still alive
+        let pid_alive = dir_name
+            .rsplit_once('-')
+            .and_then(|(_, pid_str)| pid_str.parse::<i32>().ok())
+            .map(|pid| unsafe { libc::kill(pid, 0) } == 0)
+            .unwrap_or(false);
+
+        if !pid_alive {
+            let _ = std::fs::remove_dir_all(&path);
+            pruned.push(dir_name);
+        }
+    }
+
+    // Also clean up legacy workspace.json if stale
+    let legacy_path = workspace_lease_path(cwd);
+    if legacy_path.exists() {
+        if let Ok(text) = std::fs::read_to_string(&legacy_path) {
+            if let Ok(lease) = serde_json::from_str::<WorkspaceLease>(&text) {
+                let stale = heartbeat_epoch_secs(&lease.last_heartbeat)
+                    .map(|epoch| heartbeat_is_stale(now, epoch))
+                    .unwrap_or(true);
+                if stale {
+                    let _ = std::fs::remove_file(&legacy_path);
+                    pruned.push("legacy".to_string());
+                }
+            }
+        }
+    }
+
+    pruned
 }
 
 pub fn current_timestamp() -> String {
@@ -186,5 +329,126 @@ mod tests {
         write_workspace_registry(dir.path(), &registry).unwrap();
         let loaded = read_workspace_registry(dir.path()).unwrap().unwrap();
         assert_eq!(loaded, registry);
+    }
+
+    fn make_lease(path: &str, heartbeat: &str) -> WorkspaceLease {
+        WorkspaceLease {
+            project_id: "test-project".into(),
+            workspace_id: "ws".into(),
+            label: "test".into(),
+            path: path.into(),
+            backend_kind: WorkspaceBackendKind::LocalDir,
+            vcs_ref: None,
+            bindings: crate::workspace::types::WorkspaceBindings::default(),
+            branch: "main".into(),
+            role: WorkspaceRole::Primary,
+            workspace_kind: WorkspaceKind::Mixed,
+            mutability: Mutability::Mutable,
+            owner_session_id: Some("s1".into()),
+            owner_agent_id: None,
+            created_at: current_timestamp(),
+            last_heartbeat: heartbeat.into(),
+            source: "test".into(),
+            archived: false,
+            archived_at: None,
+            archive_reason: None,
+            parent_workspace_id: None,
+        }
+    }
+
+    #[test]
+    fn instance_lease_path_is_namespaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = instance_lease_path(dir.path(), "tui-123");
+        assert!(path.to_string_lossy().contains("tui-123"));
+        assert!(path.to_string_lossy().ends_with("workspace.json"));
+    }
+
+    #[test]
+    fn two_instances_write_separate_leases() {
+        let dir = tempfile::tempdir().unwrap();
+        let lease_a = make_lease("/a", &current_timestamp());
+        let lease_b = make_lease("/b", &current_timestamp());
+
+        write_workspace_lease(dir.path(), "tui-111", &lease_a).unwrap();
+        write_workspace_lease(dir.path(), "acp-222", &lease_b).unwrap();
+
+        let path_a = instance_lease_path(dir.path(), "tui-111");
+        let path_b = instance_lease_path(dir.path(), "acp-222");
+        assert!(path_a.exists());
+        assert!(path_b.exists());
+        assert_ne!(path_a, path_b);
+    }
+
+    #[test]
+    fn read_all_active_leases_finds_both() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = current_timestamp();
+        let lease_a = make_lease("/a", &now);
+        let lease_b = make_lease("/b", &now);
+
+        write_workspace_lease(dir.path(), "tui-111", &lease_a).unwrap();
+        write_workspace_lease(dir.path(), "acp-222", &lease_b).unwrap();
+
+        let active = read_all_active_leases(dir.path());
+        assert_eq!(active.len(), 2);
+        let ids: Vec<&str> = active.iter().map(|(id, _)| id.as_str()).collect();
+        assert!(ids.contains(&"tui-111"));
+        assert!(ids.contains(&"acp-222"));
+    }
+
+    #[test]
+    fn cleanup_instance_removes_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let lease = make_lease("/x", &current_timestamp());
+        write_workspace_lease(dir.path(), "tui-999", &lease).unwrap();
+
+        let inst_dir = crate::paths::runtime_instance_dir(dir.path(), "tui-999");
+        assert!(inst_dir.is_dir());
+
+        cleanup_instance(dir.path(), "tui-999");
+        assert!(!inst_dir.exists());
+    }
+
+    #[test]
+    fn prune_stale_removes_old_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create a lease with a very old heartbeat (stale)
+        let stale_lease = make_lease("/old", "2020-01-01T00:00:00Z");
+        // pid 99999999 is almost certainly not running
+        let inst_dir = crate::paths::runtime_instance_dir(dir.path(), "tui-99999999");
+        std::fs::create_dir_all(&inst_dir).unwrap();
+        let json = serde_json::to_string_pretty(&stale_lease).unwrap();
+        std::fs::write(inst_dir.join("workspace.json"), json).unwrap();
+
+        let pruned = prune_stale_instances(dir.path());
+        assert!(pruned.contains(&"tui-99999999".to_string()));
+        assert!(!inst_dir.exists());
+    }
+
+    #[test]
+    fn read_workspace_lease_reads_instance_leases() {
+        let dir = tempfile::tempdir().unwrap();
+        let lease = make_lease("/test", &current_timestamp());
+        write_workspace_lease(dir.path(), "tui-111", &lease).unwrap();
+
+        let loaded = read_workspace_lease(dir.path()).unwrap();
+        assert!(loaded.is_some());
+        assert_eq!(loaded.unwrap().path, "/test");
+    }
+
+    #[test]
+    fn read_workspace_lease_falls_back_to_legacy() {
+        let dir = tempfile::tempdir().unwrap();
+        // Write to legacy path directly
+        let rt = runtime_dir(dir.path());
+        std::fs::create_dir_all(&rt).unwrap();
+        let lease = make_lease("/legacy", &current_timestamp());
+        let json = serde_json::to_string_pretty(&lease).unwrap();
+        std::fs::write(rt.join("workspace.json"), json).unwrap();
+
+        let loaded = read_workspace_lease(dir.path()).unwrap();
+        assert!(loaded.is_some());
+        assert_eq!(loaded.unwrap().path, "/legacy");
     }
 }

@@ -41,6 +41,8 @@ pub struct AgentSetup {
     /// Stable session id for the current live conversation. Fresh sessions
     /// get a generated id at startup; resumed sessions reuse their saved id.
     pub session_id: String,
+    /// Instance identifier for runtime state isolation (`tui-{pid}`, `acp-{pid}`, etc.).
+    pub instance_id: String,
     /// Shared context metrics — updated each turn, read by ContextProvider
     pub context_metrics:
         std::sync::Arc<std::sync::Mutex<crate::features::context::SharedContextMetrics>>,
@@ -152,6 +154,7 @@ impl AgentSetup {
         resume: Option<Option<&str>>,
         settings: Option<crate::settings::SharedSettings>,
     ) -> anyhow::Result<Self> {
+        let instance_id = crate::paths::instance_id("agent");
         let cwd = std::fs::canonicalize(cwd)?;
         // Canonical project root — extensions read this instead of
         // embedder-specific env vars (FLYNT_VAULT, CODEX_VAULT).
@@ -1017,7 +1020,12 @@ impl AgentSetup {
             .workspaces
             .retain(|workspace| workspace.path != workspace_lease.path);
         workspace_registry.workspaces.push(workspace_summary);
-        let _ = crate::workspace::runtime::write_workspace_lease(&cwd, &workspace_lease);
+        // Prune stale instance directories from previous runs before claiming ours.
+        let pruned = crate::workspace::runtime::prune_stale_instances(&cwd);
+        if !pruned.is_empty() {
+            tracing::debug!(?pruned, "pruned stale instance directories");
+        }
+        let _ = crate::workspace::runtime::write_workspace_lease(&cwd, &instance_id, &workspace_lease);
         let _ = crate::workspace::runtime::write_workspace_registry(&cwd, &workspace_registry);
         let workspace_state = WorkspaceStartupState {
             lease: workspace_lease,
@@ -1039,6 +1047,7 @@ impl AgentSetup {
         Ok(Self {
             bus,
             session_id,
+            instance_id,
             context_metrics,
             command_tx,
             context_manager,
