@@ -403,7 +403,7 @@ async fn worker_loop(
                     &secrets,
                     &cwd,
                     &mut bus,
-                );
+                ).await;
                 // Persona switch needs async bus.execute_tool — handle the marker
                 if let Some(name) = text.strip_prefix("__async_persona_switch:") {
                     let name = name.to_string();
@@ -461,7 +461,7 @@ async fn worker_loop(
 
 /// Handle a control request (slash command equivalent) in the worker context.
 /// Returns the response text. This gives ACP the same surface as the TUI.
-fn handle_control_request(
+async fn handle_control_request(
     command: &str,
     conversation: &crate::conversation::ConversationState,
     shared_settings: &crate::settings::SharedSettings,
@@ -678,11 +678,10 @@ fn handle_control_request(
         }
 
         "provider_status" => {
-            let rt = tokio::runtime::Handle::current();
             let providers = ["anthropic", "openai", "ollama"];
             let mut lines = Vec::new();
             for p in &providers {
-                let info = rt.block_on(crate::auth::resolve_with_refresh(p));
+                let info = crate::auth::resolve_with_refresh(p).await;
                 let (status, detail) = match info {
                     Some((_, is_oauth)) => {
                         let src = if is_oauth { "oauth" } else { "api_key" };

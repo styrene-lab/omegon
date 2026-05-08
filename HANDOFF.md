@@ -9,7 +9,7 @@ enabled = false
 visibility = "private"
 +++
 
-# Omegon Handoff — 2026-05-06
+# Omegon Handoff — 2026-05-06 (updated 2026-05-08)
 
 ## Where you're picking up
 
@@ -82,3 +82,78 @@ ACP runs on **two threads**. Easy to forget.
 - Flynt's ACP client: `~/workspace/styrene-labs/flynt/crates/flynt-app/src/acp.rs`. Useful when reasoning about what messages clients actually consume vs. discard.
 - ACP schema: `~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/agent-client-protocol-schema-0.11.4/`.
 - Trace flag for live debugging from a Flynt run: `RUST_LOG=info open dist/Flynt.app --stderr /tmp/flynt-trace.log` from the flynt repo, then `tail -f /tmp/flynt-trace.log | grep omegon`. Faster than instrumenting a unit test.
+
+---
+
+# Addendum 2026-05-08 — 0.19.1 ships a regression
+
+## Bug: 0.19.1 panics on first prompt — runtime-nesting in `provider_status`
+
+**Symptom from the embedder side:** ACP session connects, status reads "ready", then the very first `prompt` returns `Internal error: "connection closed before request could be sent"`. The omegon child process has died. Affects any embedder that ships `0.19.1` as the resolved binary.
+
+**Trace** (with `RUST_BACKTRACE=1`):
+```
+thread 'omegon-acp-worker' panicked at core/crates/omegon/src/acp_worker.rs:572:31:
+Cannot start a runtime from within a runtime. This happens because a function
+(like `block_on`) attempted to block the current thread while the thread is
+being used to drive asynchronous tasks.
+```
+
+**Source-traced root cause** (commit `a12cca6`, the same commit that introduced `provider_status`):
+
+```rust
+// core/crates/omegon/src/acp_worker.rs
+fn handle_control_request(...) -> String {            // <-- sync fn
+    match command {
+        // …
+        "provider_status" => {
+            let rt = tokio::runtime::Handle::current();
+            let providers = ["anthropic", "openai", "ollama"];
+            let mut lines = Vec::new();
+            for p in &providers {
+                let info = rt.block_on(crate::auth::resolve_with_refresh(p));   // line 572:31, panics
+                // …
+            }
+        }
+    }
+}
+```
+
+`handle_control_request` is sync but is called from `worker_loop` (async, line ~316) which already runs inside the tokio LocalSet. Calling `rt.block_on(...)` from a thread that's currently driving async tasks is a hard panic in tokio — has been since `tokio 1.x`.
+
+**Affected versions:** 0.19.1 only. 0.18.x and 0.19.0 don't have `provider_status` and are unaffected; the embedder can pin to 0.19.0 (`OMEGON_BIN=$HOME/.omegon/versions/0.19.0/omegon`) as a workaround until this is fixed.
+
+**Fix (recommended):** make `handle_control_request` async. Two-site change.
+
+1. Convert the function:
+   ```rust
+   async fn handle_control_request(...) -> String { ... }   // was: fn
+   ```
+   Inside, replace `rt.block_on(crate::auth::resolve_with_refresh(p))` with `crate::auth::resolve_with_refresh(p).await` and drop the `rt` binding entirely.
+
+2. Update the call site (`worker_loop`, line ~316):
+   ```rust
+   let mut text = handle_control_request(
+       &command,
+       &conversation,
+       &shared_settings,
+       &secrets,
+       &cwd,
+       &mut bus,
+   ).await;   // <-- add .await
+   ```
+
+That's it. Compile + test the `provider_status` path (any prompt to a fresh worker triggers it) and the rest of `handle_control_request`'s arms (none of which currently use async, so the conversion is mechanically safe).
+
+**Alternative if you don't want to convert the function**: replace `rt.block_on(...)` with `tokio::task::block_in_place(|| Handle::current().block_on(...))`. This works because `block_in_place` is the tokio-blessed way to bridge sync→async on a multi-threaded runtime. **But** the worker's runtime is `current_thread`, where `block_in_place` itself panics. So this alternative isn't actually viable — async-ifying the function is the only clean path.
+
+**How I diagnosed:** `RUST_BACKTRACE=1` from the Flynt-side launcher captured the panic message via inherited stderr. Each installed binary self-reports its build commit via `omegon --version`:
+- `0.18.5/omegon` → reports `0.18.6 (1c077b7-dirty)` — pre-`provider_status`
+- `0.19.0/omegon` → reports `0.19.0 (8eb497d-dirty)` — pre-`provider_status`
+- `0.19.1/omegon` → reports `0.19.1 (a12cca6-dirty)` — has `provider_status`, panics
+
+This naming/source mismatch made it hard to be sure which commit was actually compiled. The dir-name vs build-commit drift is the same hazard called out in section 2 above; worth a separate hardening pass on the install/release tooling.
+
+**Reproduction**: trivial. Any `omegon acp` invocation against a 0.19.1 binary; send any prompt. First turn panics.
+
+**Out of scope for this handoff**: I haven't fixed it. The embedder workaround (pin to 0.19.0) is in place. Pick this up when you're back in the omegon repo.
