@@ -65,6 +65,9 @@ pub struct LoopConfig {
     /// phases, the loop checks if the agent completed the final phase
     /// before declaring "done." Prevents premature completion.
     pub skill_phases: Vec<crate::skills::SkillPhaseInfo>,
+    /// Host context for ACP client delegation (file I/O, terminal, permissions).
+    /// None when running under Flynt or the TUI (local execution only).
+    pub host_context: Option<std::sync::Arc<crate::host_context::HostContext>>,
 }
 
 impl Default for LoopConfig {
@@ -84,6 +87,7 @@ impl Default for LoopConfig {
             enforce_first_turn_execution_bias: false,
             ollama_manager: None,
             skill_phases: Vec::new(),
+            host_context: None,
         }
     }
 }
@@ -991,6 +995,7 @@ pub async fn run(
             cancel.clone(),
             &config.cwd,
             config.secrets.as_deref(),
+            config.host_context.as_ref().map(|c| c.as_ref()),
         )
         .await;
         let results = dispatch.results;
@@ -1900,6 +1905,7 @@ async fn dispatch_tools(
     cancel: CancellationToken,
     cwd: &std::path::Path,
     secrets: Option<&omegon_secrets::SecretsManager>,
+    host_context: Option<&crate::host_context::HostContext>,
 ) -> DispatchResult {
     let tool_catalog = ToolCapabilityCatalog::from_tool_defs(&bus.all_tool_definitions());
     let mut permission_decisions: Vec<PermissionRecord> = Vec::new();
@@ -1967,7 +1973,7 @@ async fn dispatch_tools(
                 // Parallel calls are read-only — no permission prompts expected.
                 let mut perm_log = Vec::new();
                 let result =
-                    dispatch_single_tool(bus, &call, &events, cancel, None, &mut perm_log).await;
+                    dispatch_single_tool(bus, &call, &events, cancel, None, host_context, &mut perm_log).await;
                 (idx, result)
             }
         }))
@@ -2041,6 +2047,7 @@ async fn dispatch_tools(
             events,
             cancel.clone(),
             secrets,
+            host_context,
             &mut permission_decisions,
         )
         .await;
@@ -2138,6 +2145,7 @@ async fn dispatch_single_tool(
     events: &broadcast::Sender<AgentEvent>,
     cancel: CancellationToken,
     secrets: Option<&omegon_secrets::SecretsManager>,
+    host_context: Option<&crate::host_context::HostContext>,
     permission_log: &mut Vec<PermissionRecord>,
 ) -> ToolResultEntry {
     let (result, is_error) = execute_tool_invocation(
@@ -2152,6 +2160,7 @@ async fn dispatch_single_tool(
         secrets,
         permission_log,
         true,
+        host_context,
     )
     .await;
 
@@ -2176,6 +2185,7 @@ async fn execute_tool_invocation(
     secrets: Option<&omegon_secrets::SecretsManager>,
     permission_log: &mut Vec<PermissionRecord>,
     emit_agent_events: bool,
+    host_context: Option<&crate::host_context::HostContext>,
 ) -> (omegon_traits::ToolResult, bool) {
     if let Some(sm) = secrets
         && let Some(decision) = sm.check_guard(visible_tool_name, visible_args)
@@ -2225,6 +2235,35 @@ async fn execute_tool_invocation(
         });
     });
 
+    // Try host delegation before local execution.
+    if let Some(ctx) = host_context {
+        if let Some(result) = crate::host_context::try_delegate_to_host(
+            ctx,
+            execution_tool_name,
+            &execution_args,
+        ).await {
+            let (tool_result, is_error) = match result {
+                Ok(r) => (r, false),
+                Err(e) => (
+                    omegon_traits::ToolResult {
+                        content: vec![ContentBlock::Text { text: e.to_string() }],
+                        details: Value::Null,
+                    },
+                    true,
+                ),
+            };
+            if emit_agent_events {
+                let _ = events.send(AgentEvent::ToolEnd {
+                    id: visible_call_id.to_string(),
+                    name: visible_tool_name.to_string(),
+                    result: tool_result.clone(),
+                    is_error,
+                });
+            }
+            return (tool_result, is_error);
+        }
+    }
+
     let execute = |cancel: CancellationToken, sink: omegon_traits::ToolProgressSink| {
         bus.execute_tool_with_sink(
             execution_tool_name,
@@ -2245,7 +2284,8 @@ async fn execute_tool_invocation(
     )
     .await;
 
-    // Intercept PathPermissionError — show interactive TUI prompt
+    // Intercept PathPermissionError — route through ACP permission mediation
+    // when a host context is present, or fall back to the TUI blocking prompt.
     let (result, is_error) = match first_result {
         Ok(result) => (result, false),
         Err(e)
@@ -2253,23 +2293,47 @@ async fn execute_tool_invocation(
                 .is_some() =>
         {
             let perm_err = e.downcast::<crate::tools::PathPermissionError>().unwrap();
-            let (tx, rx) = std::sync::mpsc::channel();
-            let respond = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
 
-            let _ = events.send(AgentEvent::PermissionRequest {
-                tool_name: visible_tool_name.to_string(),
-                path: perm_err.requested_path.clone(),
-                respond,
-            });
+            let response = if let Some(ctx) = host_context {
+                // ACP path: delegate to the host's permission UI.
+                match ctx.proxy.request_permission(
+                    visible_call_id.to_string(),
+                    visible_tool_name.to_string(),
+                    perm_err.requested_path.clone(),
+                ).await {
+                    Ok(outcome) => match outcome {
+                        agent_client_protocol::RequestPermissionOutcome::Selected(sel) => {
+                            match sel.option_id.0.as_ref() {
+                                "allow_always" => omegon_traits::PermissionResponse::AlwaysAllow,
+                                "allow_once" => omegon_traits::PermissionResponse::Allow,
+                                _ => omegon_traits::PermissionResponse::Deny,
+                            }
+                        }
+                        agent_client_protocol::RequestPermissionOutcome::Cancelled => {
+                            omegon_traits::PermissionResponse::Deny
+                        }
+                        _ => omegon_traits::PermissionResponse::Deny,
+                    },
+                    Err(_) => omegon_traits::PermissionResponse::Deny,
+                }
+            } else {
+                // TUI path: blocking channel prompt.
+                let (tx, rx) = std::sync::mpsc::channel();
+                let respond = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
 
-            // Wait for TUI response (blocks tool execution until user responds).
-            // Use spawn_blocking to avoid blocking the tokio runtime.
-            let response = tokio::task::spawn_blocking(move || {
-                rx.recv_timeout(std::time::Duration::from_secs(120))
-                    .unwrap_or(omegon_traits::PermissionResponse::Deny)
-            })
-            .await
-            .unwrap_or(omegon_traits::PermissionResponse::Deny);
+                let _ = events.send(AgentEvent::PermissionRequest {
+                    tool_name: visible_tool_name.to_string(),
+                    path: perm_err.requested_path.clone(),
+                    respond,
+                });
+
+                tokio::task::spawn_blocking(move || {
+                    rx.recv_timeout(std::time::Duration::from_secs(120))
+                        .unwrap_or(omegon_traits::PermissionResponse::Deny)
+                })
+                .await
+                .unwrap_or(omegon_traits::PermissionResponse::Deny)
+            };
 
             match response {
                 omegon_traits::PermissionResponse::Allow => {
@@ -2478,6 +2542,7 @@ async fn dispatch_edit_batch(
         None,
         permission_log,
         false,
+        None, // batch changes always run locally
     )
     .await;
 
@@ -3449,7 +3514,7 @@ mod tests {
             },
         ];
 
-        let dispatch = dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None).await;
+        let dispatch = dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
         let results = dispatch.results;
 
         // The second edit should have failed
@@ -3521,7 +3586,7 @@ mod tests {
             arguments: serde_json::json!({"path": "/tmp/fake.rs", "oldText": "a", "newText": "b"}),
         }];
 
-        let dispatch = dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None).await;
+        let dispatch = dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
         assert!(!dispatch.results[0].is_error);
         let text = dispatch.results[0].content[0].as_text().unwrap();
         assert!(
@@ -3597,7 +3662,7 @@ mod tests {
         ];
 
         let start = Instant::now();
-        let dispatch = dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None).await;
+        let dispatch = dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
         let elapsed = start.elapsed();
 
         assert_eq!(dispatch.results.len(), 2);
@@ -3628,6 +3693,7 @@ mod tests {
             enforce_first_turn_execution_bias: false,
             ollama_manager: None,
             skill_phases: Vec::new(),
+            host_context: None,
         };
         // soft_limit_turns=0 → loop should compute 2/3 of max_turns (40)
         assert_eq!(config.soft_limit_turns, 0, "0 = auto-calculate in run()");

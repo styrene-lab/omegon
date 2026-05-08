@@ -217,6 +217,7 @@ pub fn build_loop_config(
         enforce_first_turn_execution_bias: overrides.enforce_first_turn_execution_bias,
         ollama_manager: overrides.ollama_manager,
         skill_phases: Vec::new(), // populated by caller after skill loading
+        host_context: None,
     }
 }
 

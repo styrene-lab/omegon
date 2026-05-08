@@ -1,0 +1,515 @@
+//! Host-aware capability layer for ACP clients.
+//!
+//! When omegon runs under an ACP host (Zed, JetBrains, etc.) the host may
+//! advertise capabilities for file I/O, terminal execution, and permission
+//! mediation. This module captures those capabilities and provides a
+//! channel-based proxy so the worker thread can call host methods without
+//! holding a reference to the !Send `AgentSideConnection`.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use agent_client_protocol::*;
+use omegon_traits::{ContentBlock, ToolResult};
+use serde_json::Value;
+use tokio::sync::{mpsc, oneshot};
+
+// ---------------------------------------------------------------------------
+// Capabilities snapshot
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct HostCapabilities {
+    pub fs_read: bool,
+    pub fs_write: bool,
+    pub terminal: bool,
+}
+
+impl Default for HostCapabilities {
+    fn default() -> Self {
+        Self { fs_read: false, fs_write: false, terminal: false }
+    }
+}
+
+impl HostCapabilities {
+    pub fn from_client(caps: &ClientCapabilities) -> Self {
+        Self {
+            fs_read: caps.fs.read_text_file,
+            fs_write: caps.fs.write_text_file,
+            terminal: caps.terminal,
+        }
+    }
+
+    pub fn has_any_delegation(&self) -> bool {
+        self.fs_read || self.fs_write || self.terminal
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Proxy request/response types
+// ---------------------------------------------------------------------------
+
+pub enum HostProxyRequest {
+    ReadTextFile {
+        path: PathBuf,
+        reply: oneshot::Sender<anyhow::Result<String>>,
+    },
+    WriteTextFile {
+        path: PathBuf,
+        content: String,
+        reply: oneshot::Sender<anyhow::Result<()>>,
+    },
+    CreateTerminal {
+        command: String,
+        args: Vec<String>,
+        cwd: Option<PathBuf>,
+        output_byte_limit: Option<u64>,
+        reply: oneshot::Sender<anyhow::Result<TerminalId>>,
+    },
+    TerminalOutput {
+        terminal_id: TerminalId,
+        reply: oneshot::Sender<anyhow::Result<TerminalOutputResponse>>,
+    },
+    WaitForTerminalExit {
+        terminal_id: TerminalId,
+        reply: oneshot::Sender<anyhow::Result<WaitForTerminalExitResponse>>,
+    },
+    KillTerminal {
+        terminal_id: TerminalId,
+        reply: oneshot::Sender<anyhow::Result<()>>,
+    },
+    ReleaseTerminal {
+        terminal_id: TerminalId,
+        reply: oneshot::Sender<anyhow::Result<()>>,
+    },
+    RequestPermission {
+        tool_call_id: String,
+        tool_name: String,
+        path: String,
+        reply: oneshot::Sender<anyhow::Result<RequestPermissionOutcome>>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Worker-side sender handle
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct HostProxySender {
+    tx: mpsc::Sender<HostProxyRequest>,
+}
+
+impl HostProxySender {
+    pub fn new(tx: mpsc::Sender<HostProxyRequest>) -> Self {
+        Self { tx }
+    }
+
+    pub async fn read_text_file(&self, path: PathBuf) -> anyhow::Result<String> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(HostProxyRequest::ReadTextFile { path, reply })
+            .await
+            .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
+        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+    }
+
+    pub async fn write_text_file(&self, path: PathBuf, content: String) -> anyhow::Result<()> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(HostProxyRequest::WriteTextFile { path, content, reply })
+            .await
+            .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
+        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+    }
+
+    pub async fn create_terminal(
+        &self,
+        command: String,
+        args: Vec<String>,
+        cwd: Option<PathBuf>,
+        output_byte_limit: Option<u64>,
+    ) -> anyhow::Result<TerminalId> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(HostProxyRequest::CreateTerminal { command, args, cwd, output_byte_limit, reply })
+            .await
+            .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
+        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+    }
+
+    pub async fn terminal_output(
+        &self,
+        terminal_id: TerminalId,
+    ) -> anyhow::Result<TerminalOutputResponse> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(HostProxyRequest::TerminalOutput { terminal_id, reply })
+            .await
+            .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
+        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+    }
+
+    pub async fn wait_for_terminal_exit(
+        &self,
+        terminal_id: TerminalId,
+    ) -> anyhow::Result<WaitForTerminalExitResponse> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(HostProxyRequest::WaitForTerminalExit { terminal_id, reply })
+            .await
+            .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
+        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+    }
+
+    pub async fn kill_terminal(&self, terminal_id: TerminalId) -> anyhow::Result<()> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(HostProxyRequest::KillTerminal { terminal_id, reply })
+            .await
+            .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
+        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+    }
+
+    pub async fn release_terminal(&self, terminal_id: TerminalId) -> anyhow::Result<()> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(HostProxyRequest::ReleaseTerminal { terminal_id, reply })
+            .await
+            .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
+        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+    }
+
+    pub async fn request_permission(
+        &self,
+        tool_call_id: String,
+        tool_name: String,
+        path: String,
+    ) -> anyhow::Result<RequestPermissionOutcome> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(HostProxyRequest::RequestPermission { tool_call_id, tool_name, path, reply })
+            .await
+            .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
+        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Composite context passed to the worker
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct HostContext {
+    pub caps: Arc<HostCapabilities>,
+    pub proxy: HostProxySender,
+    pub session_id: String,
+}
+
+// ---------------------------------------------------------------------------
+// ACP-thread pump — receives HostProxyRequests and executes them on the
+// AgentSideConnection (which implements Client).
+//
+// The pump borrows conn across .await just like the existing event
+// forwarder in acp.rs (which has #[allow(clippy::await_holding_refcell_ref)]
+// on the module). Both run on the same single-threaded LocalSet.
+// The event forwarder's borrows are non-blocking channel sends that
+// complete in-line without yielding, so they never overlap with the
+// pump's longer-lived borrows during RPC round-trips.
+// ---------------------------------------------------------------------------
+
+#[allow(clippy::await_holding_refcell_ref)]
+pub fn spawn_proxy_pump(
+    mut rx: mpsc::Receiver<HostProxyRequest>,
+    conn: std::rc::Rc<std::cell::RefCell<Option<AgentSideConnection>>>,
+    session_id: SessionId,
+) {
+    tokio::task::spawn_local(async move {
+        while let Some(req) = rx.recv().await {
+            let guard = conn.borrow();
+            let Some(client) = guard.as_ref() else {
+                drop(guard);
+                macro_rules! no_conn { () => { Err(anyhow::anyhow!("no ACP connection")) }; }
+                match req {
+                    HostProxyRequest::ReadTextFile { reply, .. } => { let _ = reply.send(no_conn!()); }
+                    HostProxyRequest::WriteTextFile { reply, .. } => { let _ = reply.send(no_conn!()); }
+                    HostProxyRequest::CreateTerminal { reply, .. } => { let _ = reply.send(no_conn!()); }
+                    HostProxyRequest::TerminalOutput { reply, .. } => { let _ = reply.send(no_conn!()); }
+                    HostProxyRequest::WaitForTerminalExit { reply, .. } => { let _ = reply.send(no_conn!()); }
+                    HostProxyRequest::KillTerminal { reply, .. } => { let _ = reply.send(no_conn!()); }
+                    HostProxyRequest::ReleaseTerminal { reply, .. } => { let _ = reply.send(no_conn!()); }
+                    HostProxyRequest::RequestPermission { reply, .. } => { let _ = reply.send(no_conn!()); }
+                }
+                continue;
+            };
+
+            match req {
+                HostProxyRequest::ReadTextFile { path, reply } => {
+                    let r = ReadTextFileRequest::new(session_id.clone(), path);
+                    let result = client.read_text_file(r).await;
+                    let _ = reply.send(match result {
+                        Ok(resp) => Ok(resp.content),
+                        Err(e) => Err(anyhow::anyhow!("host read_text_file: {}", e.message)),
+                    });
+                }
+                HostProxyRequest::WriteTextFile { path, content, reply } => {
+                    let r = WriteTextFileRequest::new(session_id.clone(), path, content);
+                    let result = client.write_text_file(r).await;
+                    let _ = reply.send(match result {
+                        Ok(_) => Ok(()),
+                        Err(e) => Err(anyhow::anyhow!("host write_text_file: {}", e.message)),
+                    });
+                }
+                HostProxyRequest::CreateTerminal { command, args, cwd, output_byte_limit, reply } => {
+                    let mut r = CreateTerminalRequest::new(session_id.clone(), command);
+                    if !args.is_empty() { r = r.args(args); }
+                    if let Some(d) = cwd { r = r.cwd(d); }
+                    if let Some(l) = output_byte_limit { r = r.output_byte_limit(l); }
+                    let result = client.create_terminal(r).await;
+                    let _ = reply.send(match result {
+                        Ok(resp) => Ok(resp.terminal_id),
+                        Err(e) => Err(anyhow::anyhow!("host create_terminal: {}", e.message)),
+                    });
+                }
+                HostProxyRequest::TerminalOutput { terminal_id, reply } => {
+                    let r = TerminalOutputRequest::new(session_id.clone(), terminal_id);
+                    let result = client.terminal_output(r).await;
+                    let _ = reply.send(match result {
+                        Ok(resp) => Ok(resp),
+                        Err(e) => Err(anyhow::anyhow!("host terminal_output: {}", e.message)),
+                    });
+                }
+                HostProxyRequest::WaitForTerminalExit { terminal_id, reply } => {
+                    let r = WaitForTerminalExitRequest::new(session_id.clone(), terminal_id);
+                    let result = client.wait_for_terminal_exit(r).await;
+                    let _ = reply.send(match result {
+                        Ok(resp) => Ok(resp),
+                        Err(e) => Err(anyhow::anyhow!("host wait_for_terminal_exit: {}", e.message)),
+                    });
+                }
+                HostProxyRequest::KillTerminal { terminal_id, reply } => {
+                    let r = KillTerminalRequest::new(session_id.clone(), terminal_id);
+                    let result = client.kill_terminal(r).await;
+                    let _ = reply.send(match result {
+                        Ok(_) => Ok(()),
+                        Err(e) => Err(anyhow::anyhow!("host kill_terminal: {}", e.message)),
+                    });
+                }
+                HostProxyRequest::ReleaseTerminal { terminal_id, reply } => {
+                    let r = ReleaseTerminalRequest::new(session_id.clone(), terminal_id);
+                    let result = client.release_terminal(r).await;
+                    let _ = reply.send(match result {
+                        Ok(_) => Ok(()),
+                        Err(e) => Err(anyhow::anyhow!("host release_terminal: {}", e.message)),
+                    });
+                }
+                HostProxyRequest::RequestPermission { tool_call_id, tool_name, path, reply } => {
+                    let tool_call = ToolCallUpdate::new(
+                        tool_call_id,
+                        ToolCallUpdateFields::new()
+                            .status(ToolCallStatus::InProgress)
+                            .title(tool_name)
+                            .raw_input(Value::String(format!("Access path: {path}"))),
+                    );
+                    let options = vec![
+                        PermissionOption::new("allow_once", "Allow once", PermissionOptionKind::AllowOnce),
+                        PermissionOption::new("allow_always", "Allow always", PermissionOptionKind::AllowAlways),
+                        PermissionOption::new("reject_once", "Reject", PermissionOptionKind::RejectOnce),
+                    ];
+                    let r = RequestPermissionRequest::new(session_id.clone(), tool_call, options);
+                    let result = client.request_permission(r).await;
+                    let _ = reply.send(match result {
+                        Ok(resp) => Ok(resp.outcome),
+                        Err(e) => Err(anyhow::anyhow!("host request_permission: {}", e.message)),
+                    });
+                }
+            }
+            drop(guard);
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Tool delegation — intercepts tool calls that can be served by the host.
+// Returns None if the tool should execute locally.
+// ---------------------------------------------------------------------------
+
+const READ_MAX_LINES: usize = 2000;
+const READ_MAX_BYTES: usize = 50 * 1024;
+
+fn validate_delegation_path(path_str: &str) -> anyhow::Result<PathBuf> {
+    let path = PathBuf::from(path_str);
+    if !path.is_absolute() {
+        anyhow::bail!("delegation requires absolute path, got: {path_str}");
+    }
+    if path.components().any(|c| c == std::path::Component::ParentDir) {
+        anyhow::bail!("path traversal rejected: {path_str}");
+    }
+    Ok(path)
+}
+
+pub async fn try_delegate_to_host(
+    ctx: &HostContext,
+    tool_name: &str,
+    args: &Value,
+) -> Option<anyhow::Result<ToolResult>> {
+    match tool_name {
+        "read" if ctx.caps.fs_read => {
+            let path_str = args.get("path").and_then(|v| v.as_str())?;
+            let offset = args.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize);
+            let limit = args.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
+            let path = match validate_delegation_path(path_str) {
+                Ok(p) => p,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(delegate_read(ctx, path, path_str, offset, limit).await)
+        }
+        "write" if ctx.caps.fs_write => {
+            let path_str = args.get("path").and_then(|v| v.as_str())?;
+            let content = args.get("content").and_then(|v| v.as_str())?;
+            let path = match validate_delegation_path(path_str) {
+                Ok(p) => p,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(delegate_write(ctx, path, path_str, content).await)
+        }
+        "bash" if ctx.caps.terminal => {
+            let command = args.get("command").and_then(|v| v.as_str())?;
+            let timeout_ms = args.get("timeout").and_then(|v| v.as_u64());
+            Some(delegate_bash(ctx, command, timeout_ms).await)
+        }
+        _ => None,
+    }
+}
+
+async fn delegate_read(
+    ctx: &HostContext,
+    path: PathBuf,
+    path_str: &str,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> anyhow::Result<ToolResult> {
+    // Read the entire file from the host — we do all slicing locally to
+    // match the exact output format the local read tool produces.
+    let content = ctx.proxy.read_text_file(path).await?;
+    let lines: Vec<&str> = content.lines().collect();
+    let total_lines = lines.len();
+
+    let start = offset.unwrap_or(1).saturating_sub(1);
+    let max = limit.unwrap_or(READ_MAX_LINES).min(READ_MAX_LINES);
+
+    let selected: Vec<&str> = lines.iter().skip(start).take(max).copied().collect();
+    let mut text = selected.join("\n");
+
+    if text.len() > READ_MAX_BYTES {
+        text.truncate(READ_MAX_BYTES);
+        if let Some(last_newline) = text.rfind('\n') {
+            text.truncate(last_newline);
+        }
+    }
+
+    let shown_lines = text.lines().count();
+    let remaining = total_lines.saturating_sub(start + shown_lines);
+
+    if remaining > 0 {
+        text.push_str(&format!(
+            "\n\n[{remaining} more lines in file. Use offset={} to continue.]",
+            start + shown_lines + 1
+        ));
+    }
+
+    Ok(ToolResult {
+        content: vec![ContentBlock::Text { text }],
+        details: serde_json::json!({
+            "path": path_str,
+            "totalLines": total_lines,
+            "shownLines": shown_lines,
+            "offset": start + 1,
+            "delegated": true,
+        }),
+    })
+}
+
+async fn delegate_write(
+    ctx: &HostContext,
+    path: PathBuf,
+    path_str: &str,
+    content: &str,
+) -> anyhow::Result<ToolResult> {
+    ctx.proxy.write_text_file(path, content.to_string()).await?;
+
+    let line_count = content.lines().count();
+    let byte_count = content.len();
+    let result_text = format!("Wrote {path_str} ({line_count} lines, {byte_count} bytes)");
+
+    Ok(ToolResult {
+        content: vec![ContentBlock::Text { text: result_text }],
+        details: serde_json::json!({
+            "path": path_str,
+            "lines": line_count,
+            "bytes": byte_count,
+            "delegated": true,
+        }),
+    })
+}
+
+async fn delegate_bash(
+    ctx: &HostContext,
+    command: &str,
+    timeout_ms: Option<u64>,
+) -> anyhow::Result<ToolResult> {
+    let output_byte_limit = Some(50 * 1024u64);
+    let terminal_id = ctx.proxy.create_terminal(
+        "bash".into(),
+        vec!["-c".into(), command.into()],
+        None,
+        output_byte_limit,
+    ).await?;
+
+    let timeout_dur = timeout_ms.map(std::time::Duration::from_millis)
+        .unwrap_or(std::time::Duration::from_secs(600));
+
+    // Use wait_for_terminal_exit instead of polling — the host blocks until
+    // the command finishes, which is both faster and cheaper than polling.
+    let exit_result = tokio::time::timeout(timeout_dur, async {
+        ctx.proxy.wait_for_terminal_exit(terminal_id.clone()).await
+    }).await;
+
+    let (output, exit_code, timed_out) = match exit_result {
+        Ok(Ok(_exit_resp)) => {
+            let out = ctx.proxy.terminal_output(terminal_id.clone()).await;
+            let _ = ctx.proxy.release_terminal(terminal_id).await;
+            let resp = out.unwrap_or_else(|_| TerminalOutputResponse::new("", false));
+            let code = resp.exit_status.as_ref().and_then(|s| s.exit_code);
+            (resp.output, code, false)
+        }
+        Ok(Err(e)) => {
+            let _ = ctx.proxy.release_terminal(terminal_id).await;
+            return Err(e);
+        }
+        Err(_elapsed) => {
+            let _ = ctx.proxy.kill_terminal(terminal_id.clone()).await;
+            let out = ctx.proxy.terminal_output(terminal_id.clone()).await;
+            let _ = ctx.proxy.release_terminal(terminal_id).await;
+            let text = out.map(|r| r.output).unwrap_or_default();
+            (text, None, true)
+        }
+    };
+
+    let mut text = output;
+    if timed_out {
+        text.push_str(&format!("\n[timed out after {}ms]", timeout_ms.unwrap_or(600_000)));
+    } else if let Some(code) = exit_code {
+        if code != 0 {
+            text.push_str(&format!("\n[exit code: {code}]"));
+        }
+    }
+
+    Ok(ToolResult {
+        content: vec![ContentBlock::Text { text }],
+        details: serde_json::json!({
+            "exit_code": exit_code,
+            "timed_out": timed_out,
+            "delegated": true,
+        }),
+    })
+}

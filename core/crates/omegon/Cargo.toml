@@ -15,7 +15,7 @@ omegon-traits = { path = "../omegon-traits" }
 omegon-git = { path = "../omegon-git" }
 git2 = { version = "0.20", features = ["vendored-libgit2", "vendored-openssl"] }
 shlex = "1.3"
-agent-client-protocol = "0.10"
+agent-client-protocol = { version = "0.10", features = ["unstable_session_close"] }
 ignore = "0.4"
 grep-regex = "0.1"
 grep-matcher = "0.1"
