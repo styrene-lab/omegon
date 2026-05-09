@@ -90,8 +90,10 @@ pub async fn run_sentry_loop(
     cancel: CancellationToken,
     model: String,
     cwd: PathBuf,
+    max_concurrent: usize,
 ) {
     let in_flight = Arc::new(InFlight::new());
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent.max(1)));
 
     tracing::info!("sentry loop started — consuming trigger events");
 
@@ -108,6 +110,7 @@ pub async fn run_sentry_loop(
                     &state_db,
                     &budget_limits,
                     &in_flight,
+                    &semaphore,
                     &cancel,
                     &model,
                     &cwd,
@@ -130,6 +133,7 @@ async fn handle_trigger_event(
     state_db: &Arc<StateDb>,
     budget_limits: &Arc<BudgetLimits>,
     in_flight: &Arc<InFlight>,
+    semaphore: &Arc<tokio::sync::Semaphore>,
     cancel: &CancellationToken,
     model: &str,
     cwd: &Path,
@@ -150,7 +154,7 @@ async fn handle_trigger_event(
                 if matches {
                     spawn_task_execution(
                         board.clone(), state_db.clone(), budget_limits.clone(),
-                        in_flight.clone(), cancel.clone(),
+                        in_flight.clone(), semaphore.clone(), cancel.clone(),
                         task.id.clone(), model.to_string(), cwd.to_path_buf(),
                     );
                 }
@@ -169,7 +173,7 @@ async fn handle_trigger_event(
                 if matches {
                     spawn_task_execution(
                         board.clone(), state_db.clone(), budget_limits.clone(),
-                        in_flight.clone(), cancel.clone(),
+                        in_flight.clone(), semaphore.clone(), cancel.clone(),
                         task.id.clone(), model.to_string(), cwd.to_path_buf(),
                     );
                 }
@@ -186,7 +190,7 @@ async fn handle_trigger_event(
                 if matches {
                     spawn_task_execution(
                         board.clone(), state_db.clone(), budget_limits.clone(),
-                        in_flight.clone(), cancel.clone(),
+                        in_flight.clone(), semaphore.clone(), cancel.clone(),
                         task.id.clone(), model.to_string(), cwd.to_path_buf(),
                     );
                 }
@@ -203,7 +207,7 @@ async fn handle_trigger_event(
                 if matches {
                     spawn_task_execution(
                         board.clone(), state_db.clone(), budget_limits.clone(),
-                        in_flight.clone(), cancel.clone(),
+                        in_flight.clone(), semaphore.clone(), cancel.clone(),
                         task.id.clone(), model.to_string(), cwd.to_path_buf(),
                     );
                 }
@@ -213,7 +217,7 @@ async fn handle_trigger_event(
             tracing::info!(task = %task_id, "force-run requested");
             spawn_task_execution(
                 board.clone(), state_db.clone(), budget_limits.clone(),
-                in_flight.clone(), cancel.clone(),
+                in_flight.clone(), semaphore.clone(), cancel.clone(),
                 task_id, model.to_string(), cwd.to_path_buf(),
             );
         }
@@ -225,6 +229,7 @@ fn spawn_task_execution(
     state_db: Arc<StateDb>,
     budget_limits: Arc<BudgetLimits>,
     in_flight: Arc<InFlight>,
+    semaphore: Arc<tokio::sync::Semaphore>,
     cancel: CancellationToken,
     task_id: String,
     model: String,
@@ -239,6 +244,13 @@ fn spawn_task_execution(
     let task_id_cleanup = task_id.clone();
 
     tokio::spawn(async move {
+        let _permit = match semaphore.acquire().await {
+            Ok(p) => p,
+            Err(_) => {
+                in_flight_cleanup.remove(&task_id_cleanup);
+                return;
+            }
+        };
         execute_task_with_retry(
             &board, &state_db, &budget_limits,
             &task_id, &model, &cwd, &cancel,

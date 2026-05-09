@@ -6278,6 +6278,7 @@ async fn run_sentry_command(
         global_cancel.clone(),
         model,
         cwd,
+        config.sentry.max_concurrent,
     ).await;
 
     // Release any claimed tasks on shutdown

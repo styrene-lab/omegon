@@ -4651,7 +4651,7 @@ dependencies = [
 
 [[package]]
 name = "omegon"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "agent-client-protocol",
  "ansi-to-tui",
@@ -4731,7 +4731,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-codescan"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "anyhow",
  "git2",
@@ -4755,7 +4755,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-extension"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4771,7 +4771,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-git"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -4784,7 +4784,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-memory"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4815,7 +4815,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-secrets"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -4845,7 +4845,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-traits"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4858,7 +4858,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-web"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

@@ -540,9 +540,13 @@ fn start_file_watcher(
     for c in configs {
         let paths: Vec<std::path::PathBuf> = c.trigger.file_watch.as_ref()?
             .iter()
-            .map(|p| {
-                let path = std::path::Path::new(p);
-                if path.is_absolute() { path.to_path_buf() } else { cwd.join(p) }
+            .filter_map(|p| {
+                let path = if std::path::Path::new(p).is_absolute() {
+                    std::path::PathBuf::from(p)
+                } else {
+                    cwd.join(p)
+                };
+                std::fs::canonicalize(&path).ok().or(Some(path))
             })
             .collect();
         let debounce = c.trigger.debounce.as_ref()
@@ -555,11 +559,11 @@ fn start_file_watcher(
         });
     }
 
-    let (raw_tx, mut raw_rx) = tokio::sync::mpsc::channel::<notify::Event>(512);
+    let (raw_tx, raw_rx) = std::sync::mpsc::channel::<notify::Event>();
 
     let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res {
-            let _ = raw_tx.blocking_send(event);
+            let _ = raw_tx.send(event);
         }
     }) {
         Ok(w) => w,
@@ -571,13 +575,18 @@ fn start_file_watcher(
 
     for entry in &entries {
         for path in &entry.paths {
-            if let Err(e) = watcher.watch(path, RecursiveMode::Recursive) {
-                tracing::warn!(
-                    trigger = %entry.trigger_name,
-                    path = %path.display(),
-                    error = %e,
-                    "failed to watch path"
-                );
+            match watcher.watch(path, RecursiveMode::Recursive) {
+                Ok(()) => {
+                    tracing::info!(trigger = %entry.trigger_name, path = %path.display(), "watching path");
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        trigger = %entry.trigger_name,
+                        path = %path.display(),
+                        error = %e,
+                        "failed to watch path"
+                    );
+                }
             }
         }
     }
@@ -587,23 +596,26 @@ fn start_file_watcher(
 
         let mut pending: std::collections::HashMap<String, Instant> =
             std::collections::HashMap::new();
-        let mut check = tokio::time::interval(Duration::from_secs(1));
+        let mut check = tokio::time::interval(Duration::from_millis(500));
         check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => break,
-                Some(event) = raw_rx.recv() => {
-                    for entry in &entries {
-                        let matches = event.paths.iter().any(|ep| {
-                            entry.paths.iter().any(|wp| ep.starts_with(wp))
-                        });
-                        if matches {
-                            pending.insert(entry.trigger_name.clone(), Instant::now());
+                _ = check.tick() => {
+                    // Drain all pending raw events from the std channel
+                    while let Ok(event) = raw_rx.try_recv() {
+                        for entry in &entries {
+                            let matches = event.paths.iter().any(|ep| {
+                                entry.paths.iter().any(|wp| ep.starts_with(wp))
+                            });
+                            if matches {
+                                pending.insert(entry.trigger_name.clone(), Instant::now());
+                            }
                         }
                     }
-                }
-                _ = check.tick() => {
+
+                    // Fire triggers whose debounce window has elapsed
                     let now = Instant::now();
                     let mut fired = Vec::new();
                     for (name, last_event) in &pending {
@@ -1056,5 +1068,252 @@ session {
             config.session.unwrap().caller_key.as_deref(),
             Some("trigger:gh-webhook")
         );
+    }
+
+    #[test]
+    fn cron_schedule_fires_on_poll() {
+        let config = TriggerConfig {
+            trigger: TriggerMeta {
+                name: "cron-test".into(),
+                enabled: true,
+                cron: Some("* * * * * *".into()), // every second
+                ..Default::default()
+            },
+            filter: None,
+            prompt: PromptTemplate { template: "Do cron work".into() },
+            session: None,
+        };
+
+        let mut state = ScheduleState::from_configs(&[config]);
+        assert_eq!(state.len(), 1);
+
+        // First poll fires immediately (never-run task)
+        let due = state.poll_due();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].trigger.name, "cron-test");
+
+        // Immediately again should NOT fire
+        let due = state.poll_due();
+        assert!(due.is_empty());
+    }
+
+    #[test]
+    fn cron_invalid_expression_excluded() {
+        let config = TriggerConfig {
+            trigger: TriggerMeta {
+                name: "bad-cron".into(),
+                enabled: true,
+                cron: Some("not a cron".into()),
+                ..Default::default()
+            },
+            filter: None,
+            prompt: PromptTemplate { template: "nope".into() },
+            session: None,
+        };
+
+        let state = ScheduleState::from_configs(&[config]);
+        assert_eq!(state.len(), 0);
+    }
+
+    #[test]
+    fn git_poll_state_snapshot_and_diff() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+
+        // Initial commit so HEAD exists
+        {
+            let mut index = repo.index().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let sig = git2::Signature::now("test", "test@test.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[]).unwrap();
+        }
+
+        let s1 = GitPollState::snapshot(dir.path());
+        assert!(s1.head_sha.is_some());
+
+        // Make a new commit
+        {
+            let path = dir.path().join("file.txt");
+            std::fs::write(&path, "hello").unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new("file.txt")).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let sig = git2::Signature::now("test", "test@test.com").unwrap();
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&head]).unwrap();
+        }
+
+        let s2 = GitPollState::snapshot(dir.path());
+        assert_ne!(s1.head_sha, s2.head_sha);
+
+        let changes = s1.diff(&s2);
+        assert!(!changes.is_empty());
+        assert!(changes.iter().any(|(k, _)| *k == GitEventKind::NewCommit));
+    }
+
+    #[test]
+    fn git_poll_state_detects_new_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+
+        // Initial commit
+        {
+            let mut index = repo.index().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let sig = git2::Signature::now("test", "test@test.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[]).unwrap();
+        }
+
+        let s1 = GitPollState::snapshot(dir.path());
+
+        // Create a branch
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature-x", &head, false).unwrap();
+
+        let s2 = GitPollState::snapshot(dir.path());
+        let changes = s1.diff(&s2);
+        assert!(changes.iter().any(|(k, detail)| *k == GitEventKind::NewBranch && detail == "feature-x"));
+    }
+
+    #[test]
+    fn git_poll_state_detects_new_tag() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+
+        // Initial commit
+        {
+            let mut index = repo.index().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let sig = git2::Signature::now("test", "test@test.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[]).unwrap();
+        }
+
+        let s1 = GitPollState::snapshot(dir.path());
+
+        // Create a lightweight tag
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.tag_lightweight("v1.0.0", head.as_object(), false).unwrap();
+
+        let s2 = GitPollState::snapshot(dir.path());
+        let changes = s1.diff(&s2);
+        assert!(changes.iter().any(|(k, detail)| *k == GitEventKind::NewTag && detail == "v1.0.0"));
+    }
+
+    #[test]
+    fn git_poll_no_repo_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = GitPollState::snapshot(dir.path());
+        assert!(state.head_sha.is_none());
+        assert!(state.branches.is_empty());
+        assert!(state.tags.is_empty());
+    }
+
+    #[tokio::test]
+    async fn trigger_runtime_fires_interval() {
+        let config = TriggerConfig {
+            trigger: TriggerMeta {
+                name: "fast-interval".into(),
+                enabled: true,
+                interval: Some("1s".into()),
+                ..Default::default()
+            },
+            filter: None,
+            prompt: PromptTemplate { template: "interval work".into() },
+            session: None,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        let (mut runtime, _tx) = TriggerRuntimeBuilder::new(
+            vec![config],
+            dir.path().to_path_buf(),
+        ).build(cancel.clone());
+
+        // First event should fire within ~1s (interval triggers fire immediately on first tick)
+        let event = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            runtime.event_rx.recv(),
+        ).await;
+
+        assert!(event.is_ok(), "should receive event within timeout");
+        let event = event.unwrap().unwrap();
+        assert!(matches!(event, TriggerEvent::Scheduled(c) if c.trigger.name == "fast-interval"));
+
+        cancel.cancel();
+    }
+
+    #[tokio::test]
+    async fn trigger_runtime_file_watch() {
+        let dir = tempfile::tempdir().unwrap();
+        let watch_dir = dir.path().join("watched");
+        std::fs::create_dir_all(&watch_dir).unwrap();
+        let watch_dir = std::fs::canonicalize(&watch_dir).unwrap();
+
+        let config = TriggerConfig {
+            trigger: TriggerMeta {
+                name: "file-watcher".into(),
+                enabled: true,
+                file_watch: Some(vec![watch_dir.display().to_string()]),
+                debounce: Some("1s".into()),
+                ..Default::default()
+            },
+            filter: None,
+            prompt: PromptTemplate { template: "file changed".into() },
+            session: None,
+        };
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        let (mut runtime, _tx) = TriggerRuntimeBuilder::new(
+            vec![config],
+            dir.path().to_path_buf(),
+        ).build(cancel.clone());
+
+        // Give watcher time to register (FSEvents on macOS needs settling time)
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Write a file to trigger the watch
+        std::fs::write(watch_dir.join("test.txt"), "hello").unwrap();
+        // Write again after a beat to ensure the event is delivered
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        std::fs::write(watch_dir.join("test.txt"), "hello world").unwrap();
+
+        // Wait for debounced event (1s debounce + 1s check interval + buffer)
+        let event = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            runtime.event_rx.recv(),
+        ).await;
+
+        // The first event might be the schedule poll (empty), so drain until FileChanged
+        // or timeout. For a minimal config with only file_watch, no scheduled triggers exist.
+        if let Ok(Some(ev)) = event {
+            match ev {
+                TriggerEvent::FileChanged { trigger_name, .. } => {
+                    assert_eq!(trigger_name, "file-watcher");
+                }
+                other => {
+                    // Could be a stale scheduled event from the tick. Keep draining.
+                    let event2 = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        runtime.event_rx.recv(),
+                    ).await;
+                    if let Ok(Some(TriggerEvent::FileChanged { trigger_name, .. })) = event2 {
+                        assert_eq!(trigger_name, "file-watcher");
+                    } else {
+                        panic!("expected FileChanged event, got {other:?} then timeout");
+                    }
+                }
+            }
+        } else {
+            panic!("timed out waiting for file watch trigger");
+        }
+
+        cancel.cancel();
     }
 }
