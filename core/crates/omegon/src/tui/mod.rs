@@ -7128,7 +7128,7 @@ fn handle_editor_command(args: &str) -> String {
         }
         "vscode" => "VS Code Integration\n\n\
              1. Install the vscode-acp extension:\n\
-                https://github.com/nicolo-ribaudo/vscode-acp\n\n\
+                https://github.com/formulahendry/vscode-acp\n\n\
              2. Add to VS Code settings.json:\n\n\
              {\n  \
                \"acp.agents\": [\n    \
