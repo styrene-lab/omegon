@@ -1884,7 +1884,7 @@ pub async fn run_server(
         model: model.to_string(),
         cwd: std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()),
         agent_id: agent_id.map(String::from),
-        connection_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        active_connections: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         shutdown: shutdown.clone(),
     };
 
@@ -1917,7 +1917,7 @@ pub async fn run_server(
 
     tracing::info!(
         addr = %bound,
-        "ACP WebSocket server listening — ws://{bound}/acp?token={token}"
+        "ACP WebSocket server listening — ws://{bound}/acp"
     );
 
     // Signal handlers: Ctrl-C + SIGTERM

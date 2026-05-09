@@ -312,13 +312,22 @@ pub async fn start_server(
     state: WebState,
     preferred_port: u16,
 ) -> anyhow::Result<(WebStartupInfo, mpsc::Receiver<WebCommand>)> {
-    start_server_with_options(state, preferred_port, false).await
+    let acp_state = acp_ws::AcpWebState {
+        web_auth: state.web_auth.clone(),
+        model: String::new(),
+        cwd: std::env::current_dir().unwrap_or_default(),
+        agent_id: None,
+        active_connections: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        shutdown: tokio_util::sync::CancellationToken::new(),
+    };
+    start_server_with_options(state, preferred_port, false, acp_state).await
 }
 
 pub async fn start_server_with_options(
     mut state: WebState,
     preferred_port: u16,
     strict_port: bool,
+    acp_state: acp_ws::AcpWebState,
 ) -> anyhow::Result<(WebStartupInfo, mpsc::Receiver<WebCommand>)> {
     // Create the command channel — caller gets the receiver
     let (cmd_tx, cmd_rx) = mpsc::channel(32);
@@ -351,14 +360,7 @@ pub async fn start_server_with_options(
         .merge(
             Router::new()
                 .route("/acp", axum::routing::get(acp_ws::acp_ws_handler))
-                .with_state(acp_ws::AcpWebState {
-                    web_auth: state.web_auth.clone(),
-                    model: "anthropic:claude-sonnet-4-6".into(),
-                    cwd: std::env::current_dir().unwrap_or_default(),
-                    agent_id: None,
-                    connection_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-                    shutdown: tokio_util::sync::CancellationToken::new(),
-                }),
+                .with_state(acp_state.clone()),
         )
         .layer(
             tower_http::cors::CorsLayer::new()

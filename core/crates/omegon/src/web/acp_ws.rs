@@ -3,12 +3,7 @@
 //! Each WebSocket connection to `/acp` gets its own `OmegonAcpAgent` running
 //! on a dedicated OS thread with a `LocalSet` (same isolation pattern as
 //! `acp_worker::spawn_worker`). The WebSocket frames are bridged to the
-//! ACP thread via `mpsc` channels.
-//!
-//! This enables:
-//! - Remote agent access (k8s pods, cloud servers)
-//! - Multiple concurrent editor connections
-//! - The same ACP protocol as stdin/stdout mode
+//! ACP thread via unbounded `mpsc` channels.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,6 +18,11 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+const MAX_WS_MESSAGE_BYTES: usize = 2 * 1024 * 1024; // 2MB per frame
+const MAX_CONCURRENT_CONNECTIONS: u64 = 64;
+const DUPLEX_BUFFER_BYTES: usize = 1024 * 1024; // 1MB
+const THREAD_JOIN_TIMEOUT_SECS: u64 = 30;
+
 /// State for the ACP WebSocket endpoint.
 #[derive(Clone)]
 pub struct AcpWebState {
@@ -30,7 +30,7 @@ pub struct AcpWebState {
     pub model: String,
     pub cwd: PathBuf,
     pub agent_id: Option<String>,
-    pub connection_counter: Arc<AtomicU64>,
+    pub active_connections: Arc<AtomicU64>,
     pub shutdown: CancellationToken,
 }
 
@@ -39,7 +39,7 @@ pub struct AcpQuery {
     token: Option<String>,
 }
 
-/// Axum handler — authenticates, upgrades to WebSocket, spawns ACP session.
+/// Axum handler — authenticates, enforces connection limit, upgrades to WebSocket.
 pub async fn acp_ws_handler(
     ws: WebSocketUpgrade,
     Query(query): Query<AcpQuery>,
@@ -48,21 +48,37 @@ pub async fn acp_ws_handler(
     if !state.web_auth.verify_query_token(query.token.as_deref()) {
         return axum::http::StatusCode::UNAUTHORIZED.into_response();
     }
-    ws.on_upgrade(move |socket| handle_acp_socket(socket, state))
+
+    let active = state.active_connections.load(Ordering::Relaxed);
+    if active >= MAX_CONCURRENT_CONNECTIONS {
+        tracing::warn!(active, max = MAX_CONCURRENT_CONNECTIONS, "ACP connection limit reached");
+        return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+
+    ws.max_message_size(MAX_WS_MESSAGE_BYTES)
+        .on_upgrade(move |socket| handle_acp_socket(socket, state))
         .into_response()
 }
 
 async fn handle_acp_socket(socket: WebSocket, state: AcpWebState) {
-    let conn_id = state.connection_counter.fetch_add(1, Ordering::Relaxed);
-    tracing::info!(conn_id, "ACP WebSocket client connected");
+    let active = state.active_connections.fetch_add(1, Ordering::Relaxed) + 1;
+    let conn_id = active;
+    tracing::info!(conn_id, active, "ACP WebSocket client connected");
+
+    // Guard: decrement active connections on drop (disconnect, panic, any exit path)
+    struct ConnGuard(Arc<AtomicU64>);
+    impl Drop for ConnGuard {
+        fn drop(&mut self) { self.0.fetch_sub(1, Ordering::Relaxed); }
+    }
+    let _conn_guard = ConnGuard(state.active_connections.clone());
 
     let (mut ws_sink, mut ws_stream) = socket.split();
 
-    // Channels bridging the axum runtime ↔ ACP thread.
-    // Inbound: WebSocket frames → ACP agent
-    // Outbound: ACP agent → WebSocket frames
-    let (inbound_tx, inbound_rx) = mpsc::channel::<String>(64);
-    let (outbound_tx, mut outbound_rx) = mpsc::channel::<String>(64);
+    // Unbounded channels to prevent deadlock from slow consumers.
+    // Backpressure is handled by the WebSocket itself (TCP flow control)
+    // and the max_message_size limit above.
+    let (inbound_tx, inbound_rx) = mpsc::unbounded_channel::<String>();
+    let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<String>();
 
     let shutdown = state.shutdown.clone();
 
@@ -74,7 +90,7 @@ async fn handle_acp_socket(socket: WebSocket, state: AcpWebState) {
                 frame = ws_stream.next() => {
                     match frame {
                         Some(Ok(Message::Text(text))) => {
-                            if inbound_tx.send(text.to_string()).await.is_err() {
+                            if inbound_tx.send(text.to_string()).is_err() {
                                 break;
                             }
                         }
@@ -83,13 +99,12 @@ async fn handle_acp_socket(socket: WebSocket, state: AcpWebState) {
                             tracing::debug!(error = %e, "ACP WS recv error");
                             break;
                         }
-                        _ => continue, // skip binary/ping/pong
+                        _ => continue,
                     }
                 }
                 _ = recv_shutdown.cancelled() => break,
             }
         }
-        drop(inbound_tx);
     });
 
     // Pump: outbound channel → WS text frames
@@ -115,7 +130,6 @@ async fn handle_acp_socket(socket: WebSocket, state: AcpWebState) {
         }
     });
 
-    // Spawn the ACP agent on a dedicated thread
     let model = state.model.clone();
     let cwd = state.cwd.clone();
     let agent_id = state.agent_id.clone();
@@ -123,19 +137,47 @@ async fn handle_acp_socket(socket: WebSocket, state: AcpWebState) {
     let handle = std::thread::Builder::new()
         .name(format!("acp-ws-{conn_id}"))
         .spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("ACP WS runtime");
-
-            let local = tokio::task::LocalSet::new();
-            local.block_on(&rt, run_acp_session(model, cwd, agent_id, inbound_rx, outbound_tx));
+            // Catch panics so the handler thread doesn't silently die
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to create ACP WS runtime");
+                        return;
+                    }
+                };
+                let local = tokio::task::LocalSet::new();
+                local.block_on(&rt, run_acp_session(model, cwd, agent_id, inbound_rx, outbound_tx));
+            }));
+            if let Err(e) = result {
+                let msg = e.downcast_ref::<&str>().copied()
+                    .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+                    .unwrap_or("unknown panic");
+                tracing::error!(error = msg, "ACP WS thread panicked");
+            }
         });
 
     match handle {
         Ok(h) => {
-            // Wait for the thread to finish (connection closed or shutdown)
-            let _ = tokio::task::spawn_blocking(move || { let _ = h.join(); }).await;
+            let join_result = tokio::task::spawn_blocking(move || h.join());
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(THREAD_JOIN_TIMEOUT_SECS),
+                join_result,
+            ).await {
+                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Err(_panic))) => {
+                    tracing::error!(conn_id, "ACP WS thread panicked during join");
+                }
+                Ok(Err(e)) => {
+                    tracing::error!(conn_id, error = %e, "ACP WS join task failed");
+                }
+                Err(_) => {
+                    tracing::error!(conn_id, "ACP WS thread join timed out after {THREAD_JOIN_TIMEOUT_SECS}s");
+                }
+            }
         }
         Err(e) => {
             tracing::error!(error = %e, "failed to spawn ACP WS thread");
@@ -150,13 +192,12 @@ async fn run_acp_session(
     model: String,
     cwd: PathBuf,
     agent_id: Option<String>,
-    mut inbound_rx: mpsc::Receiver<String>,
-    outbound_tx: mpsc::Sender<String>,
+    mut inbound_rx: mpsc::UnboundedReceiver<String>,
+    outbound_tx: mpsc::UnboundedSender<String>,
 ) {
     use std::rc::Rc;
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-    // Apply agent manifest if specified
     if let Some(ref id) = agent_id {
         let shared_settings = crate::settings::shared(&model);
         if let Err(e) = crate::apply_agent_manifest_pre_setup(id, &cwd, &shared_settings) {
@@ -166,11 +207,8 @@ async fn run_acp_session(
 
     let agent = Rc::new(crate::acp::OmegonAcpAgent::new(&model));
 
-    // Create DuplexStream pair for the ACP connection.
-    // Read side: inbound_rx → DuplexStream → AgentSideConnection
-    // Write side: AgentSideConnection → DuplexStream → outbound_tx
-    let (read_client, mut read_server) = tokio::io::duplex(64 * 1024);
-    let (write_client, write_server) = tokio::io::duplex(64 * 1024);
+    let (read_client, mut read_server) = tokio::io::duplex(DUPLEX_BUFFER_BYTES);
+    let (write_client, write_server) = tokio::io::duplex(DUPLEX_BUFFER_BYTES);
 
     // Pump: inbound channel → DuplexStream (read side for ACP)
     tokio::task::spawn_local(async move {
@@ -197,7 +235,7 @@ async fn run_acp_session(
                 Ok(0) => break,
                 Ok(_) => {
                     let trimmed = line.trim_end().to_string();
-                    if !trimmed.is_empty() && outbound_tx.send(trimmed).await.is_err() {
+                    if !trimmed.is_empty() && outbound_tx.send(trimmed).is_err() {
                         break;
                     }
                 }
@@ -206,7 +244,6 @@ async fn run_acp_session(
         }
     });
 
-    // Create the ACP connection using the DuplexStream halves
     let agent_clone = agent.clone();
     let (conn, io_task) = agent_client_protocol::AgentSideConnection::new(
         agent_clone,
@@ -216,7 +253,6 @@ async fn run_acp_session(
     );
     agent.set_client(conn);
 
-    // Run until the connection closes
     if let Err(e) = io_task.await {
         tracing::debug!(error = %e, "ACP WS session ended");
     }
@@ -228,8 +264,18 @@ mod tests {
 
     #[test]
     fn acp_web_state_is_clone() {
-        // Ensure AcpWebState can be cloned (required by axum State extractor)
         fn assert_clone<T: Clone>() {}
         assert_clone::<AcpWebState>();
+    }
+
+    #[test]
+    fn max_message_size_is_reasonable() {
+        assert!(MAX_WS_MESSAGE_BYTES >= 1024 * 1024); // at least 1MB
+        assert!(MAX_WS_MESSAGE_BYTES <= 16 * 1024 * 1024); // at most 16MB
+    }
+
+    #[test]
+    fn duplex_buffer_larger_than_typical_message() {
+        assert!(DUPLEX_BUFFER_BYTES >= 256 * 1024);
     }
 }

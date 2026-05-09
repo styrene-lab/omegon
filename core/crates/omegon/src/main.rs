@@ -1752,8 +1752,19 @@ async fn run_embedded_command(
     // ─── Web control plane ──────────────────────────────────────────────
     let state = web::WebState::new(agent.dashboard_handles.clone(), events_tx.clone());
     let vox_daemon_events = state.daemon_events.clone();
+    // ─── Cancellation (Ctrl-C + SIGTERM) ──────────────────────────────────
+    let global_cancel = CancellationToken::new();
+
+    let acp_state = web::acp_ws::AcpWebState {
+        web_auth: state.web_auth.clone(),
+        model: model.to_string(),
+        cwd: cwd.clone(),
+        agent_id: agent_id.map(String::from),
+        active_connections: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        shutdown: global_cancel.clone(),
+    };
     let (startup, mut cmd_rx) =
-        web::start_server_with_options(state, control_port, strict_port).await?;
+        web::start_server_with_options(state, control_port, strict_port, acp_state).await?;
 
     let event = EmbeddedStartupEvent {
         event_type: "omegon.startup",
@@ -1769,8 +1780,6 @@ async fn run_embedded_command(
     };
     println!("{}", serde_json::to_string(&event)?);
 
-    // ─── Cancellation (Ctrl-C) ──────────────────────────────────────────
-    let global_cancel = CancellationToken::new();
     let cancel_ctrl_c = global_cancel.clone();
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.ok();
