@@ -11,6 +11,7 @@
 //! The WebSocket protocol is the **full agent interface** — any web UI can
 //! connect and drive the agent as a black box.
 
+pub mod acp_ws;
 pub mod api;
 pub mod auth;
 pub mod ws;
@@ -73,6 +74,7 @@ pub struct WebStartupInfo {
     pub health_url: String,
     pub ready_url: String,
     pub ws_url: String,
+    pub acp_url: Option<String>,
     pub token: String,
     pub auth_mode: String,
     pub auth_source: String,
@@ -346,6 +348,18 @@ pub async fn start_server_with_options(
         .route("/ws", axum::routing::get(ws::ws_handler))
         .route("/evals", axum::routing::get(serve_eval_dashboard))
         .route("/", axum::routing::get(serve_dashboard))
+        .merge(
+            Router::new()
+                .route("/acp", axum::routing::get(acp_ws::acp_ws_handler))
+                .with_state(acp_ws::AcpWebState {
+                    web_auth: state.web_auth.clone(),
+                    model: "anthropic:claude-sonnet-4-6".into(),
+                    cwd: std::env::current_dir().unwrap_or_default(),
+                    agent_id: None,
+                    connection_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                    shutdown: tokio_util::sync::CancellationToken::new(),
+                }),
+        )
         .layer(
             tower_http::cors::CorsLayer::new()
                 // Allow any origin — the server is localhost-only (bound to 127.0.0.1)
@@ -375,6 +389,7 @@ pub async fn start_server_with_options(
         health_url: format!("http://{bound}/api/healthz"),
         ready_url: format!("http://{bound}/api/readyz"),
         ws_url: format!("ws://{bound}/ws?token={token}"),
+        acp_url: Some(format!("ws://{bound}/acp?token={token}")),
         token,
         auth_mode: auth_mode.to_string(),
         auth_source,
@@ -665,7 +680,7 @@ async fn bind_with_fallback(preferred: u16) -> anyhow::Result<tokio::net::TcpLis
 }
 
 /// Generate a random auth token for the web server.
-fn generate_token() -> String {
+pub(crate) fn generate_token() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -721,6 +736,7 @@ mod tests {
             health_url: "http://127.0.0.1:7842/api/healthz".into(),
             ready_url: "http://127.0.0.1:7842/api/readyz".into(),
             ws_url: "ws://127.0.0.1:7842/ws?token=token-123".into(),
+            acp_url: None,
             token: state.web_auth.issue_query_token(),
             auth_mode: state.web_auth.mode_name().into(),
             auth_source: state.web_auth.source_name().into(),
@@ -796,6 +812,7 @@ mod tests {
             health_url: "http://127.0.0.1:7842/api/healthz".into(),
             ready_url: "http://127.0.0.1:7842/api/readyz".into(),
             ws_url: "ws://127.0.0.1:7842/ws?token=test".into(),
+            acp_url: None,
             token: "test".into(),
             auth_mode: "ephemeral-bearer".into(),
             auth_source: "generated".into(),
@@ -1015,6 +1032,7 @@ mod tests {
             health_url: "http://127.0.0.1:7842/api/healthz".into(),
             ready_url: "http://127.0.0.1:7842/api/readyz".into(),
             ws_url: "ws://127.0.0.1:7842/ws?token=test".into(),
+            acp_url: None,
             token: "test".into(),
             auth_mode: "ephemeral-bearer".into(),
             auth_source: "generated".into(),

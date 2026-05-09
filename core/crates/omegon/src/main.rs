@@ -490,12 +490,18 @@ enum Commands {
         action: OllamaAction,
     },
 
-    /// Run as an ACP (Agent Client Protocol) agent server over stdio.
-    /// Used by editors like Zed, VS Code, and Emacs to embed omegon as a coding agent.
+    /// Run as an ACP (Agent Client Protocol) agent server.
+    /// Default: stdio transport (for editor subprocess spawning).
+    /// With --listen: WebSocket transport (for remote/k8s deployment).
     Acp {
         /// Agent manifest to load from catalog (id or path to bundle dir).
         #[arg(long)]
         agent: Option<String>,
+        /// Listen on a network address instead of stdio.
+        /// Starts a WebSocket server at ws://<addr>/acp with health probes.
+        /// Example: --listen 0.0.0.0:7842
+        #[arg(long)]
+        listen: Option<String>,
     },
 
     /// Audit design-tree state for suspicious lifecycle drift.
@@ -1054,9 +1060,13 @@ async fn main() -> anyhow::Result<()> {
                 switch::interactive_picker().await
             }
         }
-        Some(Commands::Acp { ref agent }) => {
-            let local = tokio::task::LocalSet::new();
-            local.run_until(acp::run(&cli.model, agent.as_deref(), &cli.cwd)).await
+        Some(Commands::Acp { ref agent, ref listen }) => {
+            if let Some(addr) = listen {
+                acp::run_server(addr, &cli.model, agent.as_deref(), &cli.cwd).await
+            } else {
+                let local = tokio::task::LocalSet::new();
+                local.run_until(acp::run(&cli.model, agent.as_deref(), &cli.cwd)).await
+            }
         }
         Some(Commands::Run {
             ref task_spec,
@@ -1761,11 +1771,22 @@ async fn run_embedded_command(
 
     // ─── Cancellation (Ctrl-C) ──────────────────────────────────────────
     let global_cancel = CancellationToken::new();
-    let cancel_clone = global_cancel.clone();
+    let cancel_ctrl_c = global_cancel.clone();
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.ok();
-        cancel_clone.cancel();
+        cancel_ctrl_c.cancel();
     });
+    #[cfg(unix)]
+    {
+        let cancel_sigterm = global_cancel.clone();
+        tokio::spawn(async move {
+            let mut sig = tokio::signal::unix::signal(
+                tokio::signal::unix::SignalKind::terminate(),
+            ).expect("SIGTERM handler");
+            sig.recv().await;
+            cancel_sigterm.cancel();
+        });
+    }
 
     // ─── IPC server (native Auspex/host control plane) ────────────────
     let ipc_cancel = tokio_util::sync::CancellationToken::new();

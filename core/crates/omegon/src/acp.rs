@@ -1855,6 +1855,97 @@ pub async fn run(
     Ok(())
 }
 
+/// Run ACP over WebSocket — standalone network server mode.
+///
+/// Starts a minimal HTTP server with:
+/// - `GET /acp` — WebSocket ACP endpoint (authenticated)
+/// - `GET /api/healthz` — liveness probe
+/// - `GET /api/readyz` — readiness probe
+pub async fn run_server(
+    addr: &str,
+    model: &str,
+    agent_id: Option<&str>,
+    cwd: &std::path::Path,
+) -> anyhow::Result<()> {
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
+
+    let bind_addr: std::net::SocketAddr = addr.parse()
+        .map_err(|e| anyhow::anyhow!("invalid listen address '{addr}': {e}"))?;
+
+    let web_auth = Arc::new(crate::web::WebAuthState::ephemeral_generated(
+        crate::web::generate_token(),
+    ));
+    let token = web_auth.issue_query_token();
+    let shutdown = CancellationToken::new();
+
+    let acp_state = crate::web::acp_ws::AcpWebState {
+        web_auth: web_auth.clone(),
+        model: model.to_string(),
+        cwd: std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()),
+        agent_id: agent_id.map(String::from),
+        connection_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        shutdown: shutdown.clone(),
+    };
+
+    // Health probe handler (inline — no WebState needed)
+    async fn healthz() -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({"ok": true, "state": "ready"}))
+    }
+
+    let app = axum::Router::new()
+        .route("/acp", axum::routing::get(crate::web::acp_ws::acp_ws_handler))
+        .route("/api/healthz", axum::routing::get(healthz))
+        .route("/api/readyz", axum::routing::get(healthz))
+        .with_state(acp_state);
+
+    let listener = tokio::net::TcpListener::bind(bind_addr).await
+        .map_err(|e| anyhow::anyhow!("failed to bind {bind_addr}: {e}"))?;
+    let bound = listener.local_addr()?;
+
+    // Emit startup JSON for orchestrator discovery
+    let startup = serde_json::json!({
+        "type": "omegon.startup",
+        "schema_version": 3,
+        "pid": std::process::id(),
+        "acp_url": format!("ws://{bound}/acp?token={token}"),
+        "health_url": format!("http://{bound}/api/healthz"),
+        "ready_url": format!("http://{bound}/api/readyz"),
+        "auth_mode": web_auth.mode_name(),
+    });
+    println!("{startup}");
+
+    tracing::info!(
+        addr = %bound,
+        "ACP WebSocket server listening — ws://{bound}/acp?token={token}"
+    );
+
+    // Signal handlers: Ctrl-C + SIGTERM
+    let cancel_ctrl_c = shutdown.clone();
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        cancel_ctrl_c.cancel();
+    });
+    #[cfg(unix)]
+    {
+        let cancel_sigterm = shutdown.clone();
+        tokio::spawn(async move {
+            let mut sig = tokio::signal::unix::signal(
+                tokio::signal::unix::SignalKind::terminate(),
+            ).expect("SIGTERM handler");
+            sig.recv().await;
+            cancel_sigterm.cancel();
+        });
+    }
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown.cancelled_owned())
+        .await?;
+
+    tracing::info!("ACP server shut down");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

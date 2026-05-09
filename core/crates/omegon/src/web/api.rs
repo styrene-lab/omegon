@@ -690,6 +690,7 @@ mod tests {
                 health_url: "http://127.0.0.1:7842/api/healthz".into(),
                 ready_url: "http://127.0.0.1:7842/api/readyz".into(),
                 ws_url: "ws://127.0.0.1:7842/ws?token=test".into(),
+                acp_url: None,
                 token: "test".into(),
                 auth_mode: "ephemeral-bearer".into(),
                 auth_source: "generated".into(),
