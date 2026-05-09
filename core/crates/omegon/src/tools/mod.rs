@@ -533,6 +533,36 @@ impl ToolProvider for CoreTools {
                 ],
             },
             ToolDefinition {
+                name: reg::PLAN.into(),
+                label: reg::PLAN.into(),
+                description: "Manage the session work plan — a lightweight checklist for \
+                    tracking progress on the current request. Use 'set' to establish a plan \
+                    at the start of multi-step work, 'advance' to mark progress, 'complete' \
+                    to mark a specific item done, and 'skip' to skip an item."
+                    .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["set", "advance", "complete", "skip", "status"],
+                            "description": "Action to perform"
+                        },
+                        "items": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Work items (required for 'set')"
+                        },
+                        "index": {
+                            "type": "number",
+                            "description": "Item index, 0-based (for 'complete')"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+                capabilities: vec![omegon_traits::ToolCapability::Orientation],
+            },
+            ToolDefinition {
                 name: reg::WHOAMI.into(),
                 label: reg::WHOAMI.into(),
                 description: "Check authentication status across development tools \
@@ -886,6 +916,38 @@ impl ToolProvider for CoreTools {
                     }),
                 })
             }
+            reg::PLAN => {
+                let action = args["action"].as_str().unwrap_or("status");
+                let text = match action {
+                    "set" => {
+                        let items: Vec<String> = args["items"]
+                            .as_array()
+                            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                            .unwrap_or_default();
+                        if items.is_empty() {
+                            "Error: 'items' array required for 'set' action".into()
+                        } else {
+                            let summary: Vec<String> = items.iter()
+                                .enumerate()
+                                .map(|(i, s)| format!("{}. {s}", i + 1))
+                                .collect();
+                            format!("Work plan set ({} items):\n{}", items.len(), summary.join("\n"))
+                        }
+                    }
+                    "advance" => "Advanced to next work item.".into(),
+                    "complete" => {
+                        let index = args["index"].as_u64().unwrap_or(0) as usize;
+                        format!("Marked item {index} complete.")
+                    }
+                    "skip" => "Skipped current work item.".into(),
+                    "status" => "Work plan status rendered in context.".into(),
+                    other => format!("Unknown plan action: {other}"),
+                };
+                Ok(ToolResult {
+                    content: vec![omegon_traits::ContentBlock::Text { text }],
+                    details: Value::Null,
+                })
+            }
             reg::WHOAMI => whoami::execute().await,
             reg::CHRONOS => {
                 let sub = args["subcommand"].as_str().unwrap_or("week");
@@ -1143,13 +1205,13 @@ mod tests {
         assert!(!tool_names.contains("list_local_models"));
         assert!(!tool_names.contains("manage_ollama"));
 
-        // 10 registered core tools. trust_directory is internal-only and not in
+        // 11 registered core tools. trust_directory is internal-only and not in
         // tool_defs; change is registered for harness batching but hidden from
         // the model-facing tool surface by EventBus filtering.
         assert_eq!(
             tool_names.len(),
-            10,
-            "Expected 10 registered core tools, got {}",
+            11,
+            "Expected 11 registered core tools, got {}",
             tool_names.len()
         );
     }

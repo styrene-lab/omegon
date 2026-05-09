@@ -76,12 +76,14 @@ mod prompt;
 mod providers;
 pub mod routing;
 mod secret_cli;
+mod sentry;
 mod session;
 mod session_router;
 pub mod settings;
 mod setup;
 mod startup;
 pub mod status;
+mod task_tree;
 pub mod tool_registry;
 mod tools;
 mod triggers;
@@ -504,6 +506,22 @@ enum Commands {
         listen: Option<String>,
     },
 
+    /// Run the sentry autonomous task executor — long-running process that
+    /// evaluates triggers, claims tasks from a board, and executes them.
+    Sentry {
+        /// Path to sentry.toml config file.
+        #[arg(long, default_value = "sentry.toml")]
+        config: std::path::PathBuf,
+
+        /// Control plane HTTP port.
+        #[arg(long, default_value = "7842")]
+        control_port: u16,
+
+        /// Require the exact control port instead of auto-falling back.
+        #[arg(long)]
+        strict_port: bool,
+    },
+
     /// Audit design-tree state for suspicious lifecycle drift.
     #[command(hide = true)]
     Doctor,
@@ -531,6 +549,12 @@ enum Commands {
     Bench {
         #[command(subcommand)]
         action: BenchAction,
+    },
+
+    /// Manage project tasks — list, create, update, and delete tasks.
+    Task {
+        #[command(subcommand)]
+        action: TaskAction,
     },
 
     /// Manage Nex sandbox profiles — init, list, inspect.
@@ -640,6 +664,52 @@ enum PersonaAction {
     /// Delete a persona by ID.
     Delete {
         /// Persona ID (e.g., "user.my-persona").
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum TaskAction {
+    /// List all project tasks.
+    List,
+    /// Show a specific task.
+    Get {
+        /// Task ID (slug).
+        id: String,
+    },
+    /// Create a new task.
+    Create {
+        /// Task title.
+        title: String,
+        /// Task body (prompt/description). If omitted, reads from stdin.
+        #[arg(long)]
+        body: Option<String>,
+        /// Priority: low, medium, high, critical.
+        #[arg(long, default_value = "medium")]
+        priority: String,
+        /// Link to a design node.
+        #[arg(long)]
+        design_node: Option<String>,
+        /// Link to an openspec change.
+        #[arg(long)]
+        openspec: Option<String>,
+        /// Comma-separated tags.
+        #[arg(long)]
+        tags: Option<String>,
+        /// Comma-separated dependency task IDs.
+        #[arg(long)]
+        depends_on: Option<String>,
+    },
+    /// Update a task's status.
+    Status {
+        /// Task ID (slug).
+        id: String,
+        /// New status: todo, in_progress, done, blocked, failed.
+        status: String,
+    },
+    /// Delete a task.
+    Delete {
+        /// Task ID (slug).
         id: String,
     },
 }
@@ -1145,6 +1215,9 @@ async fn main() -> anyhow::Result<()> {
             .await
         }
         Some(Commands::Ollama { ref action }) => run_ollama_command(action).await,
+        Some(Commands::Sentry { ref config, control_port, strict_port }) => {
+            run_sentry_command(config, control_port, strict_port, &cli).await
+        }
         Some(Commands::Doctor) => run_doctor_command(&cli).await,
         Some(Commands::Skills { ref action }) => match action {
             SkillsAction::List => skills::cmd_list(),
@@ -1306,6 +1379,76 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         },
+        Some(Commands::Task { ref action }) => {
+            let cwd = std::fs::canonicalize(&cli.cwd)?;
+            match action {
+                TaskAction::List => task_tree::cmd_list(&cwd),
+                TaskAction::Get { id } => {
+                    let task = task_tree::get_task(&cwd, id)?;
+                    println!("{} {} [{}] — {}", task.meta.status.icon(), task.meta.id,
+                        task.meta.status.as_str(), task.meta.title);
+                    if !task.meta.depends_on.is_empty() {
+                        println!("  depends: {}", task.meta.depends_on.join(", "));
+                    }
+                    if let Some(ref node) = task.meta.design_node_id {
+                        println!("  design node: {node}");
+                    }
+                    if let Some(ref change) = task.meta.openspec_change {
+                        println!("  openspec: {change}");
+                    }
+                    if !task.body.is_empty() {
+                        println!("\n{}", task.body);
+                    }
+                    Ok(())
+                }
+                TaskAction::Create { title, body, priority, design_node, openspec, tags, depends_on } => {
+                    let body_text = body.as_deref().unwrap_or("");
+                    let mut task = task_tree::create_task(&cwd, title, body_text)?;
+
+                    let mut modified = false;
+                    if let Some(p) = task_tree::Priority::parse(priority) {
+                        if p != task_tree::Priority::Medium {
+                            task.meta.priority = p;
+                            modified = true;
+                        }
+                    }
+                    if let Some(node) = design_node {
+                        task.meta.design_node_id = Some(node.clone());
+                        modified = true;
+                    }
+                    if let Some(change) = openspec {
+                        task.meta.openspec_change = Some(change.clone());
+                        modified = true;
+                    }
+                    if let Some(tag_str) = tags {
+                        task.meta.tags = tag_str.split(',').map(|s| s.trim().to_string()).collect();
+                        modified = true;
+                    }
+                    if let Some(dep_str) = depends_on {
+                        task.meta.depends_on = dep_str.split(',').map(|s| s.trim().to_string()).collect();
+                        modified = true;
+                    }
+                    if modified {
+                        task_tree::save_task(&cwd, &task)?;
+                    }
+
+                    println!("Created task '{}' at {}", task.meta.id, task.file_path.display());
+                    Ok(())
+                }
+                TaskAction::Status { id, status } => {
+                    let s = task_tree::TaskStatus::parse(status)
+                        .ok_or_else(|| anyhow::anyhow!("invalid status: {status}"))?;
+                    let task = task_tree::update_status(&cwd, id, s)?;
+                    println!("{} {} — {}", task.meta.status.icon(), task.meta.id, task.meta.title);
+                    Ok(())
+                }
+                TaskAction::Delete { id } => {
+                    task_tree::delete_task(&cwd, id)?;
+                    println!("Deleted task '{id}'");
+                    Ok(())
+                }
+            }
+        }
         Some(Commands::Nex { ref action }) => {
             nex_cli(action);
             std::process::exit(0);
@@ -1596,6 +1739,11 @@ pub(crate) fn apply_agent_manifest_pre_setup(
                     enabled: true,
                     schedule: t.schedule.clone(),
                     interval: t.interval.clone(),
+                    cron: None,
+                    file_watch: None,
+                    debounce: None,
+                    git_events: None,
+                    git_poll_interval: None,
                 },
                 filter: None,
                 prompt: triggers::PromptTemplate {
@@ -1867,17 +2015,13 @@ async fn run_embedded_command(
         conversation: agent.conversation,
     })));
 
-    // ─── Load trigger configs ─────────────────────────────────────────
+    // ─── Load trigger configs + start runtime ──────────────────────────
     let trigger_configs = triggers::load_trigger_configs(&cwd);
-    let mut trigger_schedule = triggers::ScheduleState::from_configs(&trigger_configs);
     let trigger_events = triggers::EventTriggers::from_configs(&trigger_configs);
-    if trigger_schedule.len() > 0 || trigger_events.len() > 0 {
-        tracing::info!(
-            scheduled = trigger_schedule.len(),
-            event = trigger_events.len(),
-            "loaded trigger configs"
-        );
-    }
+    let (mut trigger_runtime, _trigger_tx) = triggers::TriggerRuntimeBuilder::new(
+        trigger_configs,
+        cwd.clone(),
+    ).build(global_cancel.clone());
 
     // Track in-flight triggers to prevent re-entrant execution.
     let triggers_in_flight: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>> =
@@ -2244,78 +2388,96 @@ async fn run_embedded_command(
                     }
                 }
             }
+            Some(trigger_event) = trigger_runtime.event_rx.recv() => {
+                // ─── Unified trigger events (cron, file watch, git poll) ──
+                let trigger_name = match &trigger_event {
+                    triggers::TriggerEvent::Scheduled(c) => c.trigger.name.clone(),
+                    triggers::TriggerEvent::FileChanged { trigger_name, .. } => trigger_name.clone(),
+                    triggers::TriggerEvent::GitChanged { trigger_name, .. } => trigger_name.clone(),
+                    triggers::TriggerEvent::Webhook { name, .. } => name.clone(),
+                    triggers::TriggerEvent::ForceRun { task_id } => task_id.clone(),
+                };
+
+                let prompt = match &trigger_event {
+                    triggers::TriggerEvent::Scheduled(c) => c.prompt.template.clone(),
+                    triggers::TriggerEvent::FileChanged { trigger_name, paths } => {
+                        format!("File change detected in trigger '{trigger_name}': {paths:?}")
+                    }
+                    triggers::TriggerEvent::GitChanged { kind, detail, .. } => {
+                        format!("Git event: {kind} — {detail}")
+                    }
+                    triggers::TriggerEvent::Webhook { name, payload } => {
+                        format!("Webhook '{name}' fired with payload: {payload}")
+                    }
+                    triggers::TriggerEvent::ForceRun { task_id } => {
+                        format!("Force-run task: {task_id}")
+                    }
+                };
+
+                if prompt.is_empty() {
+                    continue;
+                }
+
+                {
+                    let in_flight = triggers_in_flight.lock().unwrap_or_else(|e| e.into_inner());
+                    if in_flight.contains(&trigger_name) {
+                        tracing::debug!(trigger = %trigger_name, "trigger still in-flight, skipping");
+                        continue;
+                    }
+                }
+                {
+                    let mut in_flight = triggers_in_flight.lock().unwrap_or_else(|e| e.into_inner());
+                    in_flight.insert(trigger_name.clone());
+                }
+
+                tracing::info!(trigger = %trigger_name, "daemon: firing trigger");
+
+                let session = default_session.clone();
+                let events_tx = events_tx.clone();
+                let shared_settings = shared_settings.clone();
+                let model = model.clone();
+                let cwd = agent_cwd.clone();
+                let secrets = agent_secrets.clone();
+                let semaphore = router.semaphore().clone();
+                let in_flight = triggers_in_flight.clone();
+                let trigger_name_for_cleanup = trigger_name.clone();
+
+                task_spawn::spawn_best_effort_result(
+                    "daemon-turn-trigger",
+                    async move {
+                        let _permit = semaphore.acquire().await
+                            .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
+
+                        let loop_config = bootstrap::build_loop_config(
+                            &shared_settings, &cwd, &model,
+                            bootstrap::LoopConfigOverrides {
+                                secrets: Some(secrets),
+                                ..Default::default()
+                            },
+                        );
+
+                        if let Err(e) = run_daemon_turn(
+                            &session, &shared_settings, &model, &events_tx, loop_config,
+                            |state| { state.conversation.push_user(prompt); },
+                        ).await {
+                            tracing::error!(
+                                trigger = %trigger_name,
+                                error = %e,
+                                "daemon: trigger loop error"
+                            );
+                        }
+                        if let Ok(mut set) = in_flight.lock() {
+                            set.remove(&trigger_name_for_cleanup);
+                        }
+                        Ok(())
+                    },
+                );
+            }
             _ = idle_tick.tick() => {
                 // ─── Evict idle per-user sessions ────────────────────────
                 let parked = router.park_idle_sessions().await;
                 for key in &parked {
                     tracing::info!(caller = %key, "daemon: parked idle session");
-                }
-
-                // ─── Poll scheduled triggers ──────────────────────────────
-                for trigger_config in trigger_schedule.poll_due() {
-                    let trigger_name = trigger_config.trigger.name.clone();
-
-                    // Skip if this trigger is already executing.
-                    {
-                        let in_flight = triggers_in_flight.lock().unwrap_or_else(|e| e.into_inner());
-                        if in_flight.contains(&trigger_name) {
-                            tracing::debug!(trigger = %trigger_name, "trigger still in-flight, skipping");
-                            continue;
-                        }
-                    }
-                    {
-                        let mut in_flight = triggers_in_flight.lock().unwrap_or_else(|e| e.into_inner());
-                        in_flight.insert(trigger_name.clone());
-                    }
-
-                    let prompt = trigger_config.prompt.template.clone();
-                    tracing::info!(
-                        trigger = %trigger_name,
-                        "daemon: firing scheduled trigger"
-                    );
-
-                    let session = default_session.clone();
-
-                    let events_tx = events_tx.clone();
-                    let shared_settings = shared_settings.clone();
-                    let model = model.clone();
-                    let cwd = agent_cwd.clone();
-                    let secrets = agent_secrets.clone();
-                    let semaphore = router.semaphore().clone();
-                    let in_flight = triggers_in_flight.clone();
-                    let trigger_name_for_cleanup = trigger_name.clone();
-
-                    task_spawn::spawn_best_effort_result(
-                        "daemon-turn-trigger",
-                        async move {
-                            let _permit = semaphore.acquire().await
-                                .map_err(|_| anyhow::anyhow!("session semaphore closed"))?;
-
-                            let loop_config = bootstrap::build_loop_config(
-                                &shared_settings, &cwd, &model,
-                                bootstrap::LoopConfigOverrides {
-                                    secrets: Some(secrets),
-                                    ..Default::default()
-                                },
-                            );
-
-                            if let Err(e) = run_daemon_turn(
-                                &session, &shared_settings, &model, &events_tx, loop_config,
-                                |state| { state.conversation.push_user(prompt); },
-                            ).await {
-                                tracing::error!(
-                                    trigger = %trigger_name,
-                                    error = %e,
-                                    "daemon: scheduled trigger loop error"
-                                );
-                            }
-                            // Clear in-flight flag so the trigger can fire again.
-                            if let Ok(mut set) = in_flight.lock() {
-                                set.remove(&trigger_name_for_cleanup);
-                            }
-                            Ok(())
-                        },
-                    );
                 }
 
                 // ─── Autonomous idle tick: poll design tree for ready nodes ──
@@ -5915,6 +6077,218 @@ fn default_max_turns() -> u32 {
 }
 fn default_timeout() -> u64 {
     600
+}
+
+async fn run_sentry_command(
+    config_path: &Path,
+    control_port: u16,
+    strict_port: bool,
+    _cli: &Cli,
+) -> anyhow::Result<()> {
+    let cwd = std::fs::canonicalize(std::env::current_dir()?)?;
+    let state_dir = cwd.join(".omegon").join("sentry");
+    std::fs::create_dir_all(&state_dir)?;
+    let state_db = std::sync::Arc::new(
+        sentry::state_db::StateDb::open(&state_dir.join("state.db"))?,
+    );
+
+    let instance_id = paths::instance_id("sentry");
+
+    // Auto-detect board: task tree takes precedence, then sentry.toml
+    let task_tree_dir = task_tree::tasks_dir(&cwd);
+    let has_task_tree = task_tree_dir.exists()
+        && std::fs::read_dir(&task_tree_dir)
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false);
+
+    let config_path = if config_path.is_absolute() {
+        config_path.to_path_buf()
+    } else {
+        cwd.join(config_path)
+    };
+    let has_config = config_path.exists();
+
+    let (board, config): (std::sync::Arc<dyn sentry::TaskBoard>, sentry::SentryConfig) =
+        if has_task_tree {
+            if has_config {
+                tracing::warn!(
+                    "both .omegon/tasks/ and sentry.toml exist — using task tree, sentry.toml tasks ignored"
+                );
+            }
+            tracing::info!(path = %task_tree_dir.display(), "using task tree board");
+            let board = std::sync::Arc::new(sentry::tree_board::TaskTreeBoard::new(
+                cwd.clone(),
+                state_db.clone(),
+                instance_id.clone(),
+            ));
+            let config = if has_config {
+                sentry::load_config(&config_path)?
+            } else {
+                sentry::SentryConfig {
+                    sentry: sentry::SentryGlobal {
+                        max_concurrent: 1,
+                        log_retention_days: 30,
+                    },
+                    tasks: Vec::new(),
+                }
+            };
+            (board, config)
+        } else if has_config {
+            let config = sentry::load_config(&config_path)?;
+            let config_dir = config_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+            tracing::info!(
+                tasks = config.tasks.len(),
+                "using file board from {}",
+                config_path.display()
+            );
+            let board = std::sync::Arc::new(sentry::FileTaskBoard::new(
+                config.clone(),
+                state_db.clone(),
+                instance_id.clone(),
+                config_dir,
+            ));
+            (board, config)
+        } else {
+            anyhow::bail!(
+                "no task source found — create .omegon/tasks/ or sentry.toml"
+            );
+        };
+
+    // Build trigger runtime from .omegon/triggers/ configs + sentry.toml schedules
+    let mut trigger_configs = triggers::load_trigger_configs(&cwd);
+
+    // Convert sentry.toml task triggers into TriggerConfigs so they flow through
+    // the unified trigger system
+    for task_cfg in &config.tasks {
+        if let Some(ref trig) = task_cfg.trigger {
+            let mut meta = triggers::TriggerMeta {
+                name: format!("sentry:{}", task_cfg.name),
+                enabled: true,
+                ..Default::default()
+            };
+            if let Some(ref cron) = trig.cron {
+                meta.cron = Some(cron.schedule.clone());
+            }
+            if let Some(ref wh) = trig.webhook {
+                meta.name = wh.name.clone();
+            }
+            trigger_configs.push(triggers::TriggerConfig {
+                trigger: meta,
+                filter: None,
+                prompt: triggers::PromptTemplate { template: String::new() },
+                session: None,
+            });
+        }
+    }
+
+    let global_cancel = CancellationToken::new();
+
+    let (trigger_runtime, event_tx) = triggers::TriggerRuntimeBuilder::new(
+        trigger_configs,
+        cwd.clone(),
+    ).build(global_cancel.clone());
+
+    let sentry_state = sentry::routes::SentryState {
+        board: board.clone(),
+        state_db: state_db.clone(),
+        event_tx: event_tx.clone(),
+    };
+    let sentry_routes = sentry::routes::sentry_router(sentry_state);
+
+    let global_cancel = CancellationToken::new();
+
+    // SIGTERM + Ctrl-C
+    let cancel_sig = global_cancel.clone();
+    tokio::spawn(async move {
+        let ctrl_c = tokio::signal::ctrl_c();
+        #[cfg(unix)]
+        {
+            let mut sigterm = tokio::signal::unix::signal(
+                tokio::signal::unix::SignalKind::terminate(),
+            ).expect("failed to register SIGTERM handler");
+            tokio::select! {
+                _ = ctrl_c => { tracing::info!("Ctrl-C received — shutting down sentry"); }
+                _ = sigterm.recv() => { tracing::info!("SIGTERM received — shutting down sentry"); }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = ctrl_c.await;
+            tracing::info!("Ctrl-C received — shutting down sentry");
+        }
+        cancel_sig.cancel();
+    });
+
+    // Prune old run records on startup
+    if let Ok(pruned) = state_db.prune_old_runs(config.sentry.log_retention_days) {
+        if pruned > 0 {
+            tracing::info!(pruned, "pruned old sentry run records");
+        }
+    }
+
+    let model = _cli.model.clone();
+
+    // Start control plane
+    let bind_addr = format!("127.0.0.1:{control_port}");
+    let health_router = axum::Router::new()
+        .route("/api/healthz", axum::routing::get(|| async { "ok" }))
+        .route("/api/readyz", axum::routing::get(|| async { "ok" }));
+    let app = health_router.merge(sentry_routes);
+
+    let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
+        Ok(l) => l,
+        Err(e) if !strict_port => {
+            tracing::warn!(port = control_port, error = %e, "port unavailable — trying ephemeral");
+            tokio::net::TcpListener::bind("127.0.0.1:0").await?
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let bound = listener.local_addr()?;
+
+    let startup = serde_json::json!({
+        "mode": "sentry",
+        "control_url": format!("http://{bound}"),
+        "health_url": format!("http://{bound}/api/healthz"),
+        "ready_url": format!("http://{bound}/api/readyz"),
+        "tasks_url": format!("http://{bound}/api/sentry/tasks"),
+        "tasks": config.tasks.iter().map(|t| &t.name).collect::<Vec<_>>(),
+    });
+    println!("{}", serde_json::to_string(&startup)?);
+
+    let server_cancel = global_cancel.clone();
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(listener, app)
+            .with_graceful_shutdown(server_cancel.cancelled_owned())
+            .await
+        {
+            tracing::error!(error = %e, "sentry control plane error");
+        }
+    });
+
+    let budget_limits = std::sync::Arc::new(
+        sentry::executor::BudgetLimits::from_config(&config),
+    );
+
+    // Run the sentry loop — consumes TriggerEvent from the unified runtime
+    sentry::executor::run_sentry_loop(
+        board,
+        state_db.clone(),
+        budget_limits,
+        trigger_runtime.event_rx,
+        global_cancel.clone(),
+        model,
+        cwd,
+    ).await;
+
+    // Release any claimed tasks on shutdown
+    if let Ok(released) = state_db.release_all(&instance_id) {
+        if !released.is_empty() {
+            tracing::info!(count = released.len(), "released claimed tasks on shutdown");
+        }
+    }
+
+    tracing::info!("sentry shutdown complete");
+    Ok(())
 }
 
 fn load_task_spec(path: &Path) -> anyhow::Result<TaskSpec> {

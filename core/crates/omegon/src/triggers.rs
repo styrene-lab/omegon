@@ -50,8 +50,9 @@ pub struct TriggerConfig {
     pub session: Option<SessionConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct TriggerMeta {
+    #[serde(default)]
     pub name: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -59,6 +60,21 @@ pub struct TriggerMeta {
     pub schedule: Option<String>,
     /// Interval duration: "30s", "5m", "1h", "6h"
     pub interval: Option<String>,
+    /// Full cron expression: "0 */4 * * *"
+    #[serde(default)]
+    pub cron: Option<String>,
+    /// File paths to watch for changes
+    #[serde(default)]
+    pub file_watch: Option<Vec<String>>,
+    /// Debounce duration for file watch: "5s", "30s"
+    #[serde(default)]
+    pub debounce: Option<String>,
+    /// Git events to watch: ["new_commit", "new_tag", "new_branch"]
+    #[serde(default)]
+    pub git_events: Option<Vec<String>>,
+    /// Git poll interval: "60s", "5m"
+    #[serde(default)]
+    pub git_poll_interval: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -94,11 +110,14 @@ struct ScheduleEntry {
     last_fired: Option<Instant>,
     /// Wall-clock hour/minute of last daily/weekly fire (to avoid double-fire).
     last_fired_wall: Option<(u32, u32)>,
+    /// UTC timestamp of last fire (for cron evaluation).
+    last_fired_utc: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 enum ScheduleKind {
     Interval(Duration),
     Preset(Preset),
+    Cron(cron::Schedule),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -116,7 +135,20 @@ impl ScheduleState {
             .iter()
             .filter(|c| c.trigger.enabled)
             .filter_map(|c| {
-                let kind = if let Some(ref interval) = c.trigger.interval {
+                let kind = if let Some(ref cron_expr) = c.trigger.cron {
+                    match cron_expr.parse::<cron::Schedule>() {
+                        Ok(schedule) => Some(ScheduleKind::Cron(schedule)),
+                        Err(e) => {
+                            tracing::warn!(
+                                trigger = %c.trigger.name,
+                                cron = %cron_expr,
+                                error = %e,
+                                "invalid cron expression — trigger will not fire"
+                            );
+                            None
+                        }
+                    }
+                } else if let Some(ref interval) = c.trigger.interval {
                     Some(ScheduleKind::Interval(parse_duration(interval)?))
                 } else if let Some(ref schedule) = c.trigger.schedule {
                     Some(ScheduleKind::Preset(parse_preset(schedule)?))
@@ -128,6 +160,7 @@ impl ScheduleState {
                     kind: k,
                     last_fired: None,
                     last_fired_wall: None,
+                    last_fired_utc: None,
                 })
             })
             .collect();
@@ -139,22 +172,30 @@ impl ScheduleState {
     pub fn poll_due(&mut self) -> Vec<TriggerConfig> {
         let now = Instant::now();
         let wall = Local::now();
+        let utc_now = chrono::Utc::now();
         let mut due = Vec::new();
 
         for entry in &mut self.entries {
             let should_fire = match &entry.kind {
                 ScheduleKind::Interval(d) => match entry.last_fired {
                     Some(last) => now.duration_since(last) >= *d,
-                    None => true, // first tick fires immediately
+                    None => true,
                 },
                 ScheduleKind::Preset(preset) => {
                     preset_is_due(*preset, &wall, entry.last_fired_wall)
+                }
+                ScheduleKind::Cron(schedule) => {
+                    let since = entry.last_fired_utc.unwrap_or(
+                        utc_now - chrono::Duration::days(365),
+                    );
+                    schedule.after(&since).take_while(|t| *t <= utc_now).next().is_some()
                 }
             };
 
             if should_fire {
                 entry.last_fired = Some(now);
                 entry.last_fired_wall = Some((wall.hour(), wall.minute()));
+                entry.last_fired_utc = Some(utc_now);
                 due.push(entry.config.clone());
             }
         }
@@ -255,6 +296,340 @@ pub struct MatchedTrigger {
     pub name: String,
     pub prompt: String,
     pub caller_key: String,
+}
+
+// ── Trigger events ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum TriggerEvent {
+    Scheduled(TriggerConfig),
+    FileChanged { trigger_name: String, paths: Vec<std::path::PathBuf> },
+    GitChanged { trigger_name: String, kind: String, detail: String },
+    Webhook { name: String, payload: serde_json::Value },
+    ForceRun { task_id: String },
+}
+
+// ── Git event kinds (for trigger config) ────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitEventKind {
+    NewCommit,
+    NewTag,
+    NewBranch,
+}
+
+impl GitEventKind {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "new_commit" => Some(Self::NewCommit),
+            "new_tag" => Some(Self::NewTag),
+            "new_branch" => Some(Self::NewBranch),
+            _ => None,
+        }
+    }
+}
+
+// ── Git poll state ──────────────────────────────────────────────────────
+
+pub struct GitPollState {
+    pub head_sha: Option<String>,
+    pub branches: std::collections::HashSet<String>,
+    pub tags: std::collections::HashSet<String>,
+}
+
+impl GitPollState {
+    pub fn snapshot(cwd: &std::path::Path) -> Self {
+        let repo = match git2::Repository::discover(cwd) {
+            Ok(r) => r,
+            Err(_) => return Self {
+                head_sha: None,
+                branches: Default::default(),
+                tags: Default::default(),
+            },
+        };
+
+        let head_sha = repo.head().ok()
+            .and_then(|h| h.target())
+            .map(|oid| oid.to_string());
+
+        let mut branches = std::collections::HashSet::new();
+        if let Ok(refs) = repo.branches(Some(git2::BranchType::Local)) {
+            for branch in refs.flatten() {
+                if let Ok(name) = std::str::from_utf8(branch.0.name_bytes().unwrap_or(b"")) {
+                    branches.insert(name.to_string());
+                }
+            }
+        }
+
+        let mut tags = std::collections::HashSet::new();
+        let _ = repo.tag_foreach(|_oid, name| {
+            if let Ok(name_str) = std::str::from_utf8(name) {
+                let short = name_str.strip_prefix("refs/tags/").unwrap_or(name_str);
+                tags.insert(short.to_string());
+            }
+            true
+        });
+
+        Self { head_sha, branches, tags }
+    }
+
+    pub fn diff(&self, newer: &GitPollState) -> Vec<(GitEventKind, String)> {
+        let mut changes = Vec::new();
+
+        if self.head_sha != newer.head_sha {
+            if let Some(ref sha) = newer.head_sha {
+                changes.push((GitEventKind::NewCommit, sha.clone()));
+            }
+        }
+
+        for branch in &newer.branches {
+            if !self.branches.contains(branch) {
+                changes.push((GitEventKind::NewBranch, branch.clone()));
+            }
+        }
+
+        for tag in &newer.tags {
+            if !self.tags.contains(tag) {
+                changes.push((GitEventKind::NewTag, tag.clone()));
+            }
+        }
+
+        changes
+    }
+}
+
+// ── Trigger runtime ─────────────────────────────────────────────────────
+
+pub struct TriggerRuntime {
+    pub event_rx: tokio::sync::mpsc::Receiver<TriggerEvent>,
+    _handles: Vec<tokio::task::JoinHandle<()>>,
+}
+
+pub struct TriggerRuntimeBuilder {
+    configs: Vec<TriggerConfig>,
+    cwd: std::path::PathBuf,
+}
+
+impl TriggerRuntimeBuilder {
+    pub fn new(configs: Vec<TriggerConfig>, cwd: std::path::PathBuf) -> Self {
+        Self { configs, cwd }
+    }
+
+    pub fn build(
+        self,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> (TriggerRuntime, tokio::sync::mpsc::Sender<TriggerEvent>) {
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(256);
+        let mut handles = Vec::new();
+
+        // Schedule poller
+        let mut schedule = ScheduleState::from_configs(&self.configs);
+        let sched_tx = event_tx.clone();
+        let sched_cancel = cancel.clone();
+        handles.push(tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(10));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = sched_cancel.cancelled() => break,
+                    _ = tick.tick() => {
+                        for config in schedule.poll_due() {
+                            if sched_tx.send(TriggerEvent::Scheduled(config)).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }));
+
+        // Git pollers
+        let git_configs: Vec<_> = self.configs.iter()
+            .filter(|c| c.trigger.enabled && c.trigger.git_events.is_some())
+            .collect();
+
+        if !git_configs.is_empty() {
+            let interval = git_configs.iter()
+                .filter_map(|c| c.trigger.git_poll_interval.as_ref())
+                .filter_map(|s| parse_duration(s))
+                .min()
+                .unwrap_or(Duration::from_secs(60));
+
+            let git_trigger_names: Vec<String> = git_configs.iter()
+                .map(|c| c.trigger.name.clone())
+                .collect();
+            let git_event_kinds: Vec<Vec<String>> = git_configs.iter()
+                .map(|c| c.trigger.git_events.clone().unwrap_or_default())
+                .collect();
+
+            let git_tx = event_tx.clone();
+            let git_cancel = cancel.clone();
+            let git_cwd = self.cwd.clone();
+
+            handles.push(tokio::spawn(async move {
+                let mut state = GitPollState::snapshot(&git_cwd);
+                let mut tick = tokio::time::interval(interval);
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                tick.tick().await;
+
+                loop {
+                    tokio::select! {
+                        _ = git_cancel.cancelled() => break,
+                        _ = tick.tick() => {
+                            let new_state = GitPollState::snapshot(&git_cwd);
+                            let changes = state.diff(&new_state);
+                            for (kind, detail) in &changes {
+                                let kind_str = match kind {
+                                    GitEventKind::NewCommit => "new_commit",
+                                    GitEventKind::NewTag => "new_tag",
+                                    GitEventKind::NewBranch => "new_branch",
+                                };
+                                for (i, trigger_name) in git_trigger_names.iter().enumerate() {
+                                    if git_event_kinds[i].iter().any(|k| k == kind_str) {
+                                        let _ = git_tx.send(TriggerEvent::GitChanged {
+                                            trigger_name: trigger_name.clone(),
+                                            kind: kind_str.to_string(),
+                                            detail: detail.clone(),
+                                        }).await;
+                                    }
+                                }
+                            }
+                            state = new_state;
+                        }
+                    }
+                }
+            }));
+        }
+
+        // File watchers
+        let file_watch_configs: Vec<_> = self.configs.iter()
+            .filter(|c| c.trigger.enabled && c.trigger.file_watch.is_some())
+            .collect();
+        if !file_watch_configs.is_empty() {
+            if let Some(handle) = start_file_watcher(
+                &file_watch_configs,
+                &self.cwd,
+                event_tx.clone(),
+                cancel.clone(),
+            ) {
+                handles.push(handle);
+            }
+        }
+
+        let runtime = TriggerRuntime { event_rx, _handles: handles };
+        (runtime, event_tx)
+    }
+}
+
+fn start_file_watcher(
+    configs: &[&TriggerConfig],
+    cwd: &std::path::Path,
+    event_tx: tokio::sync::mpsc::Sender<TriggerEvent>,
+    cancel: tokio_util::sync::CancellationToken,
+) -> Option<tokio::task::JoinHandle<()>> {
+    use notify::{RecursiveMode, Watcher};
+
+    struct WatchEntry {
+        trigger_name: String,
+        paths: Vec<std::path::PathBuf>,
+        debounce: Duration,
+    }
+
+    let mut entries = Vec::new();
+    for c in configs {
+        let paths: Vec<std::path::PathBuf> = c.trigger.file_watch.as_ref()?
+            .iter()
+            .map(|p| {
+                let path = std::path::Path::new(p);
+                if path.is_absolute() { path.to_path_buf() } else { cwd.join(p) }
+            })
+            .collect();
+        let debounce = c.trigger.debounce.as_ref()
+            .and_then(|s| parse_duration(s))
+            .unwrap_or(Duration::from_secs(5));
+        entries.push(WatchEntry {
+            trigger_name: c.trigger.name.clone(),
+            paths,
+            debounce,
+        });
+    }
+
+    let (raw_tx, mut raw_rx) = tokio::sync::mpsc::channel::<notify::Event>(512);
+
+    let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        if let Ok(event) = res {
+            let _ = raw_tx.blocking_send(event);
+        }
+    }) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to create file watcher");
+            return None;
+        }
+    };
+
+    for entry in &entries {
+        for path in &entry.paths {
+            if let Err(e) = watcher.watch(path, RecursiveMode::Recursive) {
+                tracing::warn!(
+                    trigger = %entry.trigger_name,
+                    path = %path.display(),
+                    error = %e,
+                    "failed to watch path"
+                );
+            }
+        }
+    }
+
+    Some(tokio::spawn(async move {
+        let _watcher = watcher; // keep alive
+
+        let mut pending: std::collections::HashMap<String, Instant> =
+            std::collections::HashMap::new();
+        let mut check = tokio::time::interval(Duration::from_secs(1));
+        check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => break,
+                Some(event) = raw_rx.recv() => {
+                    for entry in &entries {
+                        let matches = event.paths.iter().any(|ep| {
+                            entry.paths.iter().any(|wp| ep.starts_with(wp))
+                        });
+                        if matches {
+                            pending.insert(entry.trigger_name.clone(), Instant::now());
+                        }
+                    }
+                }
+                _ = check.tick() => {
+                    let now = Instant::now();
+                    let mut fired = Vec::new();
+                    for (name, last_event) in &pending {
+                        let debounce = entries.iter()
+                            .find(|e| e.trigger_name == *name)
+                            .map(|e| e.debounce)
+                            .unwrap_or(Duration::from_secs(5));
+                        if now.duration_since(*last_event) >= debounce {
+                            let paths: Vec<std::path::PathBuf> = entries.iter()
+                                .find(|e| e.trigger_name == *name)
+                                .map(|e| e.paths.clone())
+                                .unwrap_or_default();
+                            let _ = event_tx.send(TriggerEvent::FileChanged {
+                                trigger_name: name.clone(),
+                                paths,
+                            }).await;
+                            fired.push(name.clone());
+                        }
+                    }
+                    for name in fired {
+                        pending.remove(&name);
+                    }
+                }
+            }
+        }
+    }))
 }
 
 // ── Prompt template rendering ────────────────────────────────────────────
@@ -472,6 +847,7 @@ mod tests {
                 enabled: true,
                 schedule: None,
                 interval: None,
+                ..Default::default()
             },
             filter: Some(TriggerFilter {
                 source: Some("github".into()),
@@ -501,6 +877,7 @@ mod tests {
                 enabled: true,
                 schedule: None,
                 interval: None,
+                ..Default::default()
             },
             filter: Some(TriggerFilter {
                 source: Some("github".into()),
@@ -531,6 +908,7 @@ mod tests {
                 enabled: true,
                 schedule: None,
                 interval: Some("1s".into()),
+                ..Default::default()
             },
             filter: None,
             prompt: PromptTemplate {
@@ -585,6 +963,7 @@ caller_key = "trigger:daily-review"
                 enabled: false,
                 schedule: Some("hourly".into()),
                 interval: None,
+                ..Default::default()
             },
             filter: None,
             prompt: PromptTemplate {

@@ -138,11 +138,41 @@ pub struct IntentDocument {
     #[serde(default)]
     pub obfuscation_detected: bool,
 
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub work_plan: Vec<WorkItem>,
+
     pub constraints_discovered: Vec<String>,
     pub failed_approaches: Vec<FailedApproach>,
     pub open_questions: Vec<String>,
 
     pub stats: SessionStatsAccumulator,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkItem {
+    pub description: String,
+    pub status: WorkItemStatus,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkItemStatus {
+    #[default]
+    Pending,
+    Active,
+    Done,
+    Skipped,
+}
+
+impl WorkItemStatus {
+    pub fn icon(&self) -> &'static str {
+        match self {
+            Self::Pending => "○",
+            Self::Active => "◐",
+            Self::Done => "●",
+            Self::Skipped => "⊘",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -194,9 +224,31 @@ impl IntentDocument {
                     self.files_modified.clear();
                     self.commit_nudged = false;
                 }
-                // bash: can't reliably track which files are modified by arbitrary commands.
-                // File tracking for bash is inherently best-effort — the agent should use
-                // edit/write for trackable mutations. bash is for commands, not file writes.
+                "plan" => {
+                    let action = call.arguments.get("action")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("status");
+                    match action {
+                        "set" => {
+                            let items: Vec<String> = call.arguments.get("items")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                                .unwrap_or_default();
+                            if !items.is_empty() {
+                                self.set_work_plan(items);
+                            }
+                        }
+                        "advance" => self.advance_work_plan(),
+                        "complete" => {
+                            let idx = call.arguments.get("index")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0) as usize;
+                            self.complete_work_item(idx);
+                        }
+                        "skip" => self.skip_work_item(),
+                        _ => {}
+                    }
+                }
                 _ => {}
             }
         }
@@ -246,6 +298,71 @@ impl IntentDocument {
         if !normalized.is_empty() && !self.open_questions.iter().any(|q| q == normalized) {
             self.open_questions.push(normalized.to_string());
         }
+    }
+
+    /// Set the work plan, replacing any existing plan.
+    pub fn set_work_plan(&mut self, items: Vec<String>) {
+        self.work_plan = items.into_iter().map(|desc| WorkItem {
+            description: desc,
+            status: WorkItemStatus::Pending,
+        }).collect();
+        if let Some(first) = self.work_plan.first_mut() {
+            first.status = WorkItemStatus::Active;
+        }
+    }
+
+    /// Advance the work plan: mark the current active item done and activate the next.
+    pub fn advance_work_plan(&mut self) {
+        let active_idx = self.work_plan.iter().position(|w| w.status == WorkItemStatus::Active);
+        if let Some(idx) = active_idx {
+            self.work_plan[idx].status = WorkItemStatus::Done;
+            if let Some(next) = self.work_plan.get_mut(idx + 1) {
+                if next.status == WorkItemStatus::Pending {
+                    next.status = WorkItemStatus::Active;
+                }
+            }
+        }
+    }
+
+    /// Mark a specific work item by index as done.
+    pub fn complete_work_item(&mut self, index: usize) {
+        if let Some(item) = self.work_plan.get_mut(index) {
+            item.status = WorkItemStatus::Done;
+        }
+        // If no active item remains, activate the first pending
+        if !self.work_plan.iter().any(|w| w.status == WorkItemStatus::Active) {
+            if let Some(next) = self.work_plan.iter_mut().find(|w| w.status == WorkItemStatus::Pending) {
+                next.status = WorkItemStatus::Active;
+            }
+        }
+    }
+
+    /// Skip the current active item and activate the next.
+    pub fn skip_work_item(&mut self) {
+        let active_idx = self.work_plan.iter().position(|w| w.status == WorkItemStatus::Active);
+        if let Some(idx) = active_idx {
+            self.work_plan[idx].status = WorkItemStatus::Skipped;
+            if let Some(next) = self.work_plan.get_mut(idx + 1) {
+                if next.status == WorkItemStatus::Pending {
+                    next.status = WorkItemStatus::Active;
+                }
+            }
+        }
+    }
+
+    /// True when all work items are terminal (done or skipped).
+    pub fn work_plan_complete(&self) -> bool {
+        !self.work_plan.is_empty()
+            && self.work_plan.iter().all(|w| matches!(w.status, WorkItemStatus::Done | WorkItemStatus::Skipped))
+    }
+
+    /// Render the work plan as a compact one-line summary.
+    pub fn work_plan_summary(&self) -> Option<String> {
+        if self.work_plan.is_empty() { return None; }
+        let parts: Vec<String> = self.work_plan.iter()
+            .map(|w| format!("{} {}", w.status.icon(), w.description))
+            .collect();
+        Some(parts.join("  "))
     }
 }
 
@@ -482,6 +599,18 @@ impl ConversationState {
                 "Constraints: {}",
                 intent.constraints_discovered.join("; ")
             ));
+        }
+        if !intent.work_plan.is_empty() {
+            let items: Vec<String> = intent.work_plan.iter()
+                .map(|w| format!("{} {}", w.status.icon(), w.description))
+                .collect();
+            let done = intent.work_plan.iter()
+                .filter(|w| matches!(w.status, WorkItemStatus::Done))
+                .count();
+            lines.push(format!("Plan ({done}/{}):", intent.work_plan.len()));
+            for item in &items {
+                lines.push(format!("  {item}"));
+            }
         }
         if !intent.failed_approaches.is_empty() {
             lines.push("Failed approaches:".to_string());
@@ -3008,5 +3137,101 @@ mod tests {
         // Should not end mid-word before the truncation notice
         let before_notice = result.split("[Input truncated").next().unwrap();
         assert!(before_notice.ends_with(' ') || before_notice.ends_with('\n'));
+    }
+
+    #[test]
+    fn work_plan_set_and_advance() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Read code".into(), "Design".into(), "Implement".into()]);
+
+        assert_eq!(intent.work_plan.len(), 3);
+        assert_eq!(intent.work_plan[0].status, WorkItemStatus::Active);
+        assert_eq!(intent.work_plan[1].status, WorkItemStatus::Pending);
+        assert!(!intent.work_plan_complete());
+
+        intent.advance_work_plan();
+        assert_eq!(intent.work_plan[0].status, WorkItemStatus::Done);
+        assert_eq!(intent.work_plan[1].status, WorkItemStatus::Active);
+
+        intent.advance_work_plan();
+        intent.advance_work_plan();
+        assert!(intent.work_plan_complete());
+    }
+
+    #[test]
+    fn work_plan_complete_by_index() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["A".into(), "B".into(), "C".into()]);
+
+        intent.complete_work_item(1);
+        assert_eq!(intent.work_plan[0].status, WorkItemStatus::Active);
+        assert_eq!(intent.work_plan[1].status, WorkItemStatus::Done);
+        assert_eq!(intent.work_plan[2].status, WorkItemStatus::Pending);
+
+        intent.complete_work_item(0);
+        assert_eq!(intent.work_plan[0].status, WorkItemStatus::Done);
+        assert_eq!(intent.work_plan[2].status, WorkItemStatus::Active);
+    }
+
+    #[test]
+    fn work_plan_skip() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["A".into(), "B".into()]);
+
+        intent.skip_work_item();
+        assert_eq!(intent.work_plan[0].status, WorkItemStatus::Skipped);
+        assert_eq!(intent.work_plan[1].status, WorkItemStatus::Active);
+        assert!(intent.work_plan[0].status != WorkItemStatus::Done);
+
+        intent.advance_work_plan();
+        assert!(intent.work_plan_complete());
+    }
+
+    #[test]
+    fn work_plan_renders_in_intent() {
+        let mut conv = ConversationState::new();
+        conv.intent.set_work_plan(vec!["Read".into(), "Write".into()]);
+
+        let rendered = conv.render_intent_for_injection();
+        assert!(rendered.contains("Plan (0/2):"));
+        assert!(rendered.contains("◐ Read"));
+        assert!(rendered.contains("○ Write"));
+
+        conv.intent.advance_work_plan();
+        let rendered = conv.render_intent_for_injection();
+        assert!(rendered.contains("Plan (1/2):"));
+        assert!(rendered.contains("● Read"));
+        assert!(rendered.contains("◐ Write"));
+    }
+
+    #[test]
+    fn work_plan_summary() {
+        let mut intent = IntentDocument::default();
+        assert!(intent.work_plan_summary().is_none());
+
+        intent.set_work_plan(vec!["A".into(), "B".into()]);
+        let summary = intent.work_plan_summary().unwrap();
+        assert!(summary.contains("◐ A"));
+        assert!(summary.contains("○ B"));
+    }
+
+    #[test]
+    fn work_plan_survives_serialization() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Step 1".into(), "Step 2".into()]);
+        intent.advance_work_plan();
+
+        let json = serde_json::to_string(&intent).unwrap();
+        let loaded: IntentDocument = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(loaded.work_plan.len(), 2);
+        assert_eq!(loaded.work_plan[0].status, WorkItemStatus::Done);
+        assert_eq!(loaded.work_plan[1].status, WorkItemStatus::Active);
+    }
+
+    #[test]
+    fn empty_work_plan_not_complete() {
+        let intent = IntentDocument::default();
+        assert!(!intent.work_plan_complete());
     }
 }

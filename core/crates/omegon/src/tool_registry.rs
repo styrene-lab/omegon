@@ -29,6 +29,7 @@ pub mod core {
     pub const CHRONOS: &str = "chronos";
     pub const SERVE: &str = "serve";
     pub const TRUST_DIRECTORY: &str = "trust_directory";
+    pub const PLAN: &str = "plan";
 }
 
 /// View tool — owned by `tools::view::ViewProvider`
@@ -164,7 +165,7 @@ pub mod mutation {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 62;
+pub const TOOL_COUNT: usize = 63;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
@@ -180,6 +181,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         core::CHRONOS,
         core::SERVE,
         core::TRUST_DIRECTORY,
+        core::PLAN,
         // view (1)
         view::VIEW,
         // render (1)

@@ -80,6 +80,8 @@ rpassword = "7"
 rpkl = "0.8"
 percent-encoding = "2"
 styrene-mqtt = "0.1.0"
+cron = "0.16"
+notify = "8.0"
 
 [features]
 default = []
