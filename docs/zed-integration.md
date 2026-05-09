@@ -11,7 +11,7 @@ visibility = "private"
 
 # Zed Integration
 
-Omegon integrates with Zed via the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/).
+Omegon integrates with Zed via the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/). Zed's agent panel acts as the ACP client; omegon runs as the ACP server.
 
 ## Setup
 
@@ -36,7 +36,9 @@ If omegon is not on your PATH, use the full path:
 "command": "/Users/you/.local/bin/omegon"
 ```
 
-> **Tip:** Run `/editor zed` in omegon's TUI to get the config snippet with your exact binary path.
+> **Tip:** Run `/editor zed` in omegon's TUI to auto-generate this config with your exact binary path.
+
+Then open Zed, click the **+** button in the Agent Panel, and select **Omegon**.
 
 ## Modes
 
@@ -49,21 +51,85 @@ Omegon exposes four modes in Zed's Agent Panel:
 | **Ask** | Explorator | Read-only exploration, lean |
 | **Agent** | Devastator | Maximum force, deep reasoning |
 
-Switch modes in Zed's Agent Panel mode selector.
+Switch modes via the mode selector in Zed's Agent Panel.
 
-## Model Configuration
+## Configuration Dropdowns
 
-By default, omegon uses the model from your profile (`~/.omegon/profile.json`).
-Override with:
+Three config dropdowns appear at the bottom of the Agent Panel:
+
+- **Model** — LLM provider and model. Auto-detects local Ollama models alongside Anthropic, OpenAI, and OpenRouter options.
+- **Thinking Level** — off, minimal, low, medium, high. Controls extended thinking budget.
+- **Posture** — fabricator, architect, explorator, devastator. Controls resource allocation and behavioral profile.
+
+## Host Delegation
+
+When Zed advertises file system and terminal capabilities (which it does by default), omegon delegates operations to Zed instead of executing locally:
+
+- **File reads/writes** appear in Zed's diff view with checkpoint/restore
+- **Terminal commands** run in Zed's terminal panel
+- **Permission prompts** appear in Zed's approval dialog
+
+If Zed does not advertise a capability, omegon falls back to direct local execution.
+
+## Slash Commands
+
+Type these in the Zed chat input:
+
+| Command | Description |
+|---------|-------------|
+| `/model <provider:model>` | Switch LLM model |
+| `/thinking <level>` | Set thinking level |
+| `/posture <name>` | Set behavioral posture |
+| `/skills` | Manage skills (list, get, create, delete) |
+| `/extension` | Manage extensions (list, install, enable, search) |
+| `/persona` | Manage personas (list, create, switch) |
+| `/catalog` | Browse agent catalog (list, install, remove) |
+| `/secrets` | View configured secrets |
+| `/status` | Session status |
+| `/help` | List all commands |
+
+## Settings Management (RPC)
+
+Full CRUD is available via ACP ext_method RPC calls (prefix with `_`):
+
+- `skills/list`, `skills/get`, `skills/create`, `skills/update`, `skills/delete`
+- `extensions/list`, `extensions/get`, `extensions/install`, `extensions/remove`, `extensions/enable`, `extensions/disable`, `extensions/search`
+- `personas/list`, `personas/get`, `personas/create`, `personas/update`, `personas/delete`
+- `catalog/list`, `catalog/get`, `catalog/install`, `catalog/remove`
+
+## MCP Server Forwarding
+
+Zed can provide MCP servers via the `mcp_servers` field in the session request. Omegon connects them to its tool bus, making their tools available alongside built-in tools.
+
+## Concurrent Use
+
+Running omegon in Zed while also running it in the TUI (or another editor) in the same repository is safe. Each instance gets its own workspace lease under `.omegon/runtime/{mode}-{pid}/`. Shared config (profile, extension state) uses advisory file locking.
+
+## Model Override
+
+Override the default model at launch:
 
 ```json
 "args": ["acp", "--model", "ollama:qwen3:32b"]
 ```
 
+## Debugging
+
+Enable debug logging:
+
+```json
+"args": ["acp", "--log-file", "/tmp/omegon-zed.log", "--log-level", "debug"]
+```
+
+Then `tail -f /tmp/omegon-zed.log` in a terminal.
+
 ## How It Works
 
 1. Zed spawns `omegon acp` as a subprocess
-2. Communication happens via JSON-RPC over stdin/stdout
-3. Omegon runs its full agent loop (tools, memory, lifecycle) 
-4. File reads/writes and shell commands execute directly on the filesystem
-5. Sessions persist across editor restarts
+2. ACP handshake via JSON-RPC over stdin/stdout
+3. Omegon advertises capabilities (image support, session list/close)
+4. Zed creates a session — omegon spins up a worker thread with full agent loop
+5. File I/O and terminal delegated to Zed when capabilities are advertised
+6. Plan updates stream as decomposition progresses
+7. Tool output streams progressively during execution
+8. Session title derived from first prompt
