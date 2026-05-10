@@ -7,6 +7,9 @@ pub mod state_db;
 pub mod tree_board;
 pub mod types;
 
+#[cfg(test)]
+mod integration_tests;
+
 use std::collections::HashMap;
 use std::path::Path;
 
