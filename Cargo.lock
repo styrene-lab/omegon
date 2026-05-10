@@ -1946,6 +1946,8 @@ dependencies = [
 [[package]]
 name = "flynt-models"
 version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "841280e21b1e07dc228db970c0a4b67847ef8401bc73ca997425ca0f2af8b882"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4663,7 +4665,7 @@ dependencies = [
 
 [[package]]
 name = "omegon"
-version = "0.19.4"
+version = "0.19.0-nightly.20260510"
 dependencies = [
  "agent-client-protocol",
  "ansi-to-tui",
@@ -4745,7 +4747,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-codescan"
-version = "0.19.4"
+version = "0.19.0-nightly.20260510"
 dependencies = [
  "anyhow",
  "git2",
@@ -4769,7 +4771,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-extension"
-version = "0.19.4"
+version = "0.19.0-nightly.20260510"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4785,7 +4787,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-git"
-version = "0.19.4"
+version = "0.19.0-nightly.20260510"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -4798,7 +4800,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-memory"
-version = "0.19.4"
+version = "0.19.0-nightly.20260510"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4829,7 +4831,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-secrets"
-version = "0.19.4"
+version = "0.19.0-nightly.20260510"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -4859,7 +4861,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-traits"
-version = "0.19.4"
+version = "0.19.0-nightly.20260510"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4872,7 +4874,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-web"
-version = "0.19.4"
+version = "0.19.0-nightly.20260510"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7197,6 +7199,8 @@ dependencies = [
 [[package]]
 name = "styrene-forge"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cf75140931f33a8ce20354bf4aeb042e47ea43bf7fa5189d6c5dc09976e2fca"
 dependencies = [
  "async-trait",
  "chrono",
