@@ -1,6 +1,7 @@
 pub mod board;
 pub mod executor;
 pub mod file_board;
+pub mod flynt_board;
 pub mod routes;
 pub mod state_db;
 pub mod tree_board;
@@ -13,6 +14,7 @@ use serde::Deserialize;
 
 pub use board::TaskBoard;
 pub use file_board::FileTaskBoard;
+pub use flynt_board::{FlyntTaskBoard, is_flynt_vault};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SentryConfig {

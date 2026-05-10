@@ -1944,6 +1944,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "flynt-models"
+version = "0.9.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "styrene-forge",
+ "toml",
+ "uuid",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4665,6 +4677,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "flate2",
+ "flynt-models",
  "futures",
  "futures-util",
  "getrandom 0.4.2",
@@ -4726,6 +4739,7 @@ dependencies = [
  "tui-tree-widget",
  "unicode-truncate",
  "unicode-width",
+ "uuid",
  "x509-parser",
 ]
 
@@ -6854,6 +6868,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7172,6 +7192,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "styrene-forge"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -8133,6 +8163,8 @@ dependencies = [
  "atomic",
  "getrandom 0.4.2",
  "js-sys",
+ "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

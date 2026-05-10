@@ -6038,7 +6038,13 @@ async fn run_sentry_command(
 
     let instance_id = paths::instance_id("sentry");
 
-    // Auto-detect board: task tree takes precedence, then sentry.toml
+    // Auto-detect board:
+    //   1. .omegon/tasks/ (task tree) takes precedence
+    //   2. sentry.toml (file board)
+    //   3. flynt vault marker (.flynt/config.toml or default sqlite)
+    //      — selected when omegon is launched into a flynt directory,
+    //      including the ACP-from-Zed path. Explicit override via the
+    //      FLYNT_VAULT env var, which points at any vault root.
     let task_tree_dir = task_tree::tasks_dir(&cwd);
     let has_task_tree = task_tree_dir.exists()
         && std::fs::read_dir(&task_tree_dir)
@@ -6051,6 +6057,11 @@ async fn run_sentry_command(
         cwd.join(config_path)
     };
     let has_config = config_path.exists();
+
+    let flynt_vault_root: Option<std::path::PathBuf> = std::env::var("FLYNT_VAULT")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(|| if sentry::is_flynt_vault(&cwd) { Some(cwd.clone()) } else { None });
 
     let (board, config): (std::sync::Arc<dyn sentry::TaskBoard>, sentry::SentryConfig) =
         if has_task_tree {
@@ -6092,9 +6103,31 @@ async fn run_sentry_command(
                 config_dir,
             ));
             (board, config)
+        } else if let Some(vault_root) = flynt_vault_root {
+            tracing::info!(vault = %vault_root.display(), "using flynt vault board");
+            let board = std::sync::Arc::new(
+                sentry::FlyntTaskBoard::open(
+                    vault_root,
+                    state_db.clone(),
+                    instance_id.clone(),
+                )?
+            );
+            // FlyntTaskBoard sources tasks from the vault, not a TOML
+            // file; the SentryConfig is empty so trigger discovery
+            // (below) sees no fileboard tasks. Per-task triggers come
+            // from each Task's external_refs (cron:/webhook:) and are
+            // surfaced via FlyntTaskBoard::list_actionable.
+            let config = sentry::SentryConfig {
+                sentry: sentry::SentryGlobal {
+                    max_concurrent: 1,
+                    log_retention_days: 30,
+                },
+                tasks: Vec::new(),
+            };
+            (board, config)
         } else {
             anyhow::bail!(
-                "no task source found — create .omegon/tasks/ or sentry.toml"
+                "no task source found — create .omegon/tasks/, sentry.toml, or open a flynt vault"
             );
         };
 

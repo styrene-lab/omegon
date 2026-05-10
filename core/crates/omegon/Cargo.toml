@@ -37,6 +37,8 @@ clap = { workspace = true }
 rusqlite = { workspace = true }
 tokio-util = { workspace = true }
 indexmap = { workspace = true }
+flynt-models = { workspace = true }
+uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "6.0.0"
 socket2 = { version = "0.5", features = ["all"] }
 unicode-truncate = "2.0"

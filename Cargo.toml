@@ -46,3 +46,9 @@ clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 indexmap = { version = "2", features = ["serde"] }
+
+# Flynt vault types — used by sentry::flynt_board to surface flynt
+# kanban tasks to the autonomous executor. Lightweight types-only crate
+# (no comrak/notify); we read the flynt sqlite directly via rusqlite to
+# avoid pulling flynt-store's heavier dep tree.
+flynt-models = { path = "../flynt/crates/flynt-models" }
