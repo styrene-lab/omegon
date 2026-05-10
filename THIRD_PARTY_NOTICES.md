@@ -39,7 +39,7 @@ The vast majority of Omegon's dependencies are licensed under permissive terms:
 | ISC / Zlib / 0BSD | ~9 packages | |
 | Unicode-3.0 / Unicode-DFS-2016 | ~18 packages | Unicode data tables |
 | CDLA-Permissive-2.0 | 2 packages | Community data license, permissive |
-| MPL-2.0 | 3 packages | See section below — file-level copyleft |
+| MPL-2.0 | 7 packages | See section below — file-level copyleft |
 | WTFPL | 1 package | Unconditionally permissive |
 
 Packages licensed `Apache-2.0 OR LGPL-2.1-or-later OR MIT` (r-efi) are used under the Apache-2.0 OR MIT option. No LGPL or GPL code is compiled into the Omegon binary.
@@ -78,6 +78,42 @@ A simple, fast LRU cache.
 - **Copyright:** © 2016 The Servo Project Developers
 - **Source:** https://github.com/servo/uluru
 - **crates.io:** https://crates.io/crates/uluru
+
+### cssparser v0.34.0
+
+A CSS parser written in Rust.
+
+- **License:** MPL-2.0
+- **Copyright:** © The Servo Project Developers
+- **Source:** https://github.com/servo/rust-cssparser
+- **crates.io:** https://crates.io/crates/cssparser
+
+### cssparser-macros v0.6.1
+
+Procedural macros for cssparser.
+
+- **License:** MPL-2.0
+- **Copyright:** © The Servo Project Developers
+- **Source:** https://github.com/servo/rust-cssparser
+- **crates.io:** https://crates.io/crates/cssparser-macros
+
+### dtoa-short v0.3.5
+
+Shortest decimal representation of floating-point numbers.
+
+- **License:** MPL-2.0
+- **Copyright:** © Xidorn Quan and contributors
+- **Source:** https://github.com/upsuper/dtoa-short
+- **crates.io:** https://crates.io/crates/dtoa-short
+
+### selectors v0.26.0
+
+CSS selector matching and parsing.
+
+- **License:** MPL-2.0
+- **Copyright:** © The Servo Project Developers
+- **Source:** https://github.com/servo/stylo
+- **crates.io:** https://crates.io/crates/selectors
 
 ---
 

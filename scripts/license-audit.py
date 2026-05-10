@@ -25,9 +25,13 @@ import textwrap
 # Format: { "name": "version" }  (version is informational only)
 ACKNOWLEDGED = {
     # MPL-2.0 — documented in THIRD_PARTY_NOTICES.md
-    "colored":    "3.1.1",
-    "option-ext": "0.2.0",
-    "uluru":      "3.1.0",
+    "colored":          "3.1.1",
+    "option-ext":       "0.2.0",
+    "uluru":            "3.1.0",
+    "cssparser":        "0.34.0",
+    "cssparser-macros": "0.6.1",
+    "dtoa-short":       "0.3.5",
+    "selectors":        "0.26.0",
 }
 
 # ── Own crates ─────────────────────────────────────────────────────────────
