@@ -108,6 +108,22 @@ impl FlyntTaskBoard {
         // open-order).
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(|e| anyhow::anyhow!("set WAL on flynt sqlite: {e}"))?;
+        // Schema sanity probe — both `tasks` and `boards` tables must
+        // exist for our queries to work (project-scoped path joins on
+        // boards). Reports a clear "not a flynt vault" rather than a
+        // confusing "no such table: boards" deep in list_actionable.
+        let table_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('tasks', 'boards')",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        if table_count < 2 {
+            anyhow::bail!(
+                "flynt vault sqlite at {} is missing required tables (tasks, boards) — \
+                 vault may be corrupted or from an incompatible flynt version",
+                db_path.display()
+            );
+        }
         Ok(Self {
             vault_root,
             conn: Mutex::new(conn),
@@ -125,6 +141,21 @@ impl FlyntTaskBoard {
     pub fn with_project(mut self, project_id: uuid::Uuid) -> Self {
         self.project_id = Some(project_id);
         self
+    }
+
+    /// Returns true if any board in the vault has the given project_id.
+    /// Used at startup to warn the operator when `FLYNT_PROJECT` is
+    /// set to a UUID that doesn't match anything — without this probe,
+    /// list_actionable just returns an empty Vec and the operator
+    /// can't tell typo from "no scheduled tasks."
+    pub fn project_exists(&self, project_id: &uuid::Uuid) -> anyhow::Result<bool> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM boards WHERE project_id = ?1",
+            params![project_id.to_string()],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 
     pub fn vault_root(&self) -> &Path { &self.vault_root }
@@ -841,5 +872,65 @@ mod tests {
         let p2 = uuid::Uuid::new_v4();
         let scoped = board.with_project(p1).with_project(p2);
         assert_eq!(scoped.project_id(), Some(p2), "later with_project wins");
+    }
+
+    #[test]
+    fn find_vault_root_uses_sqlite_marker_when_config_absent() {
+        // Older or oddly-shaped vaults may have only the sqlite at
+        // .flynt-local/flynt/flynt-index.db without the .flynt/config
+        // .toml marker. is_flynt_vault accepts both; walk-up should
+        // therefore find them too.
+        let tmp = TempDir::new().unwrap();
+        let vault = tmp.path().to_path_buf();
+        let db = default_db_path(&vault);
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        // Empty file is enough — is_flynt_vault only checks existence.
+        std::fs::write(&db, b"").unwrap();
+
+        let nested = vault.join("projects/foo");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        let found = find_vault_root(&nested).expect("should find vault via sqlite marker");
+        assert_eq!(
+            std::fs::canonicalize(&found).unwrap(),
+            std::fs::canonicalize(&vault).unwrap()
+        );
+    }
+
+    #[test]
+    fn project_exists_distinguishes_typo_from_no_tasks() {
+        // The whole point of project_exists: tell the operator their
+        // FLYNT_PROJECT typo is the reason list_actionable is empty.
+        let (tmp, board, _) = fixture();
+        let _ = tmp;
+        let db = board.vault_root().join(".flynt-local/flynt/flynt-index.db");
+        let real_project = uuid::Uuid::new_v4();
+        let board_id = uuid::Uuid::new_v4();
+        insert_board(&db, &board_id, Some(&real_project));
+
+        assert!(board.project_exists(&real_project).unwrap());
+        assert!(!board.project_exists(&uuid::Uuid::new_v4()).unwrap());
+    }
+
+    #[test]
+    fn open_rejects_sqlite_without_required_tables() {
+        // A db file that exists but lacks tasks/boards (could be a
+        // fresh empty file, a corrupted vault, or someone pointing
+        // FLYNT_VAULT at a non-flynt sqlite). Should fail at open
+        // with a clear message rather than later in list_actionable.
+        let tmp = TempDir::new().unwrap();
+        let db_path = default_db_path(tmp.path());
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        // Open an empty sqlite (creates the file with no tables).
+        let _ = Connection::open(&db_path).unwrap();
+        let state = Arc::new(StateDb::in_memory().unwrap());
+        let result = FlyntTaskBoard::open(tmp.path().to_path_buf(), state, "t".into());
+        match result {
+            Ok(_) => panic!("open should fail for sqlite missing required tables"),
+            Err(e) => assert!(
+                e.to_string().contains("missing required tables"),
+                "got: {e}"
+            ),
+        }
     }
 }

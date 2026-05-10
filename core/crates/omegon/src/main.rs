@@ -6135,6 +6135,19 @@ async fn run_sentry_command(
                 instance_id.clone(),
             )?;
             if let Some(pid) = flynt_project {
+                // Probe before applying so a typo in FLYNT_PROJECT
+                // surfaces at startup rather than as silent empty
+                // list_actionable() results. Use the agent's
+                // `engagement_list` / `project_list` tools to discover
+                // valid UUIDs for this vault.
+                match board.project_exists(&pid) {
+                    Ok(true) => {}
+                    Ok(false) => tracing::warn!(
+                        project = %pid,
+                        "FLYNT_PROJECT does not match any board in this vault — sentry will see no tasks"
+                    ),
+                    Err(e) => tracing::warn!(error = %e, "could not probe FLYNT_PROJECT validity"),
+                }
                 board = board.with_project(pid);
             }
             let board = std::sync::Arc::new(board);
