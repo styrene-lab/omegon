@@ -6060,7 +6060,16 @@ async fn run_sentry_command(
 
     let flynt_vault_root: Option<std::path::PathBuf> = std::env::var("FLYNT_VAULT")
         .ok()
-        .map(std::path::PathBuf::from)
+        .map(|raw| {
+            // Canonicalize so a relative FLYNT_VAULT under whatever
+            // cwd this process inherited (Zed's project root, a shell,
+            // a test) resolves to a single concrete path. Falls back
+            // to the literal value if the path doesn't exist yet —
+            // FlyntTaskBoard::open() will surface the missing-db
+            // error with the same string the operator set.
+            let p = std::path::PathBuf::from(&raw);
+            std::fs::canonicalize(&p).unwrap_or(p)
+        })
         .or_else(|| if sentry::is_flynt_vault(&cwd) { Some(cwd.clone()) } else { None });
 
     let (board, config): (std::sync::Arc<dyn sentry::TaskBoard>, sentry::SentryConfig) =

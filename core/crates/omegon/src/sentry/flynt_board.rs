@@ -18,15 +18,18 @@
 //!
 //! ## State + lifecycle
 //!
-//! Claim contention goes through omegon's [`StateDb`] (same pattern as
-//! [`super::FileTaskBoard`]). On claim/complete/fail we also mutate
-//! the task's column on the kanban side so the operator sees live
-//! state without a separate "running tasks" UI:
+//! Claim contention and run history go through omegon's [`StateDb`]
+//! (same pattern as [`super::FileTaskBoard`]). The flynt sqlite is
+//! READ-ONLY from this board's perspective — we deliberately do not
+//! mutate task columns to reflect lifecycle. Project-backed tasks have
+//! canonical markdown files on disk; flynt re-imports those files on
+//! reindex, which would clobber any column mutations we made through
+//! sqlite. Files-as-source-of-truth is preserved.
 //!
-//! - `Scheduled → Running` on claim
-//! - `Running → Done` on complete
-//! - `Running → Failed` on fail
-//! - `Running → Scheduled` on release (no terminal state)
+//! The trade-off: the operator does not see "Running" / "Done" state
+//! on the kanban purely from sentry executions. A future kanban
+//! overlay can query StateDb's `task_runs` table for that view; for
+//! now, run history lives in omegon's standard run dashboard.
 //!
 //! Schema knowledge of the flynt sqlite is inlined here. We don't take
 //! a dep on `flynt-store` because that crate pulls in comrak / notify
@@ -47,9 +50,6 @@ use super::state_db::StateDb;
 use super::types::{SentryTask, TaskError, TaskResult, TaskSpec, Trigger};
 
 const SCHEDULED: &str = "Scheduled";
-const RUNNING: &str = "Running";
-const DONE: &str = "Done";
-const FAILED: &str = "Failed";
 
 pub struct FlyntTaskBoard {
     /// Vault root (the directory the operator opens in flynt-app).
@@ -90,6 +90,14 @@ impl FlyntTaskBoard {
         let conn = Connection::open(&db_path).map_err(|e| {
             anyhow::anyhow!("open flynt vault sqlite at {}: {e}", db_path.display())
         })?;
+        // Match flynt-store's WAL mode so concurrent writers (flynt-app
+        // and this process) coexist cleanly. flynt-store sets it on
+        // its own Connection too; ours must do the same — pragmas are
+        // per-connection (the file mode is sticky in WAL once one
+        // writer enables it, but explicit is safer than relying on
+        // open-order).
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(|e| anyhow::anyhow!("set WAL on flynt sqlite: {e}"))?;
         Ok(Self {
             vault_root,
             conn: Mutex::new(conn),
@@ -112,18 +120,6 @@ impl FlyntTaskBoard {
         Ok(Some(row_to_task(row)?))
     }
 
-    /// Update a single column on a single task. Used by claim /
-    /// complete / fail / release to reflect lifecycle on the kanban.
-    fn set_column(&self, id: &str, column: &str) -> anyhow::Result<()> {
-        let id_uuid = uuid::Uuid::parse_str(id)
-            .map_err(|_| anyhow::anyhow!("task id is not a UUID: {id}"))?;
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
-        conn.execute(
-            "UPDATE tasks SET column_name = ?1, updated_at = ?2 WHERE id = ?3",
-            params![column, Utc::now().to_rfc3339(), id_uuid.to_string()],
-        )?;
-        Ok(())
-    }
 }
 
 impl TaskBoard for FlyntTaskBoard {
@@ -167,24 +163,12 @@ impl TaskBoard for FlyntTaskBoard {
     }
 
     fn claim(&self, task_id: &str) -> anyhow::Result<bool> {
-        let claimed = self.state_db.claim_task(task_id, &self.instance_id)?;
-        if claimed {
-            // Best-effort column move. Failure here is logged but does
-            // not invalidate the claim — execution proceeds; on next
-            // sync the column will re-converge.
-            if let Err(e) = self.set_column(task_id, RUNNING) {
-                tracing::warn!(task = task_id, error = %e, "could not set column to Running");
-            }
-        }
-        Ok(claimed)
+        // StateDb only — no column mutation. See module-level doc.
+        self.state_db.claim_task(task_id, &self.instance_id)
     }
 
     fn release(&self, task_id: &str) -> anyhow::Result<()> {
-        self.state_db.release_task(task_id)?;
-        if let Err(e) = self.set_column(task_id, SCHEDULED) {
-            tracing::warn!(task = task_id, error = %e, "could not reset column to Scheduled on release");
-        }
-        Ok(())
+        self.state_db.release_task(task_id)
     }
 
     fn complete(&self, task_id: &str, result: &TaskResult) -> anyhow::Result<()> {
@@ -192,9 +176,6 @@ impl TaskBoard for FlyntTaskBoard {
         self.state_db.record_run_start(&run_id, task_id)?;
         self.state_db.record_run_complete(&run_id, result)?;
         self.state_db.release_task(task_id)?;
-        if let Err(e) = self.set_column(task_id, DONE) {
-            tracing::warn!(task = task_id, error = %e, "could not set column to Done");
-        }
         Ok(())
     }
 
@@ -203,9 +184,6 @@ impl TaskBoard for FlyntTaskBoard {
         self.state_db.record_run_start(&run_id, task_id)?;
         self.state_db.record_run_failure(&run_id, error)?;
         self.state_db.release_task(task_id)?;
-        if let Err(e) = self.set_column(task_id, FAILED) {
-            tracing::warn!(task = task_id, error = %e, "could not set column to Failed");
-        }
         Ok(())
     }
 
@@ -478,7 +456,9 @@ mod tests {
     }
 
     #[test]
-    fn claim_moves_task_to_running_column() {
+    fn claim_locks_via_state_db_and_leaves_column_alone() {
+        // Lifecycle is StateDb-only — flynt's source-of-truth task
+        // file remains canonical, sentry doesn't clobber it.
         let (tmp, board, board_id) = fixture();
         let _ = tmp;
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
@@ -488,14 +468,15 @@ mod tests {
 
         assert!(board.claim(&id).unwrap());
         let after = board.load_task(&id).unwrap().unwrap();
-        assert_eq!(after.column, RUNNING);
+        assert_eq!(after.column, "Scheduled", "FlyntTaskBoard must not mutate task column");
 
-        // Re-claim under same instance → still false (already locked).
+        // Re-claim under same instance → still false (already locked
+        // in StateDb).
         assert!(!board.claim(&id).unwrap());
     }
 
     #[test]
-    fn complete_moves_task_to_done() {
+    fn complete_records_run_and_releases_lock_without_touching_column() {
         let (tmp, board, board_id) = fixture();
         let _ = tmp;
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
@@ -510,11 +491,18 @@ mod tests {
         };
         board.complete(&id, &result).unwrap();
         let after = board.load_task(&id).unwrap().unwrap();
-        assert_eq!(after.column, DONE);
+        assert_eq!(after.column, "Scheduled");
+        // Lock released — re-claim succeeds.
+        assert!(board.claim(&id).unwrap());
+        // Run history was recorded.
+        let listed = board.list_actionable().unwrap();
+        let our = listed.iter().find(|s| s.id == id).expect("task still listed");
+        assert_eq!(our.run_count, 1);
+        assert!(our.last_run.is_some());
     }
 
     #[test]
-    fn fail_moves_task_to_failed_column() {
+    fn fail_records_failure_and_releases_lock() {
         let (tmp, board, board_id) = fixture();
         let _ = tmp;
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
@@ -526,11 +514,12 @@ mod tests {
         let err = TaskError { message: "boom".into(), retriable: true, attempt: 1 };
         board.fail(&id, &err).unwrap();
         let after = board.load_task(&id).unwrap().unwrap();
-        assert_eq!(after.column, FAILED);
+        assert_eq!(after.column, "Scheduled");
+        assert!(board.claim(&id).unwrap(), "fail must release lock");
     }
 
     #[test]
-    fn release_resets_column_to_scheduled() {
+    fn release_only_clears_lock_does_not_touch_column() {
         let (tmp, board, board_id) = fixture();
         let _ = tmp;
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
@@ -541,7 +530,8 @@ mod tests {
         board.claim(&id).unwrap();
         board.release(&id).unwrap();
         let after = board.load_task(&id).unwrap().unwrap();
-        assert_eq!(after.column, SCHEDULED);
+        assert_eq!(after.column, "Scheduled");
+        assert!(board.claim(&id).unwrap(), "release must allow re-claim");
     }
 
     #[test]
