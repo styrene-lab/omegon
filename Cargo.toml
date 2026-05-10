@@ -51,4 +51,4 @@ indexmap = { version = "2", features = ["serde"] }
 # kanban tasks to the autonomous executor. Lightweight types-only crate
 # (no comrak/notify); we read the flynt sqlite directly via rusqlite to
 # avoid pulling flynt-store's heavier dep tree.
-flynt-models = { version = "0.9.0", path = "../flynt/crates/flynt-models" }
+flynt-models = "0.9.0"
