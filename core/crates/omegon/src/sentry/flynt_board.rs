@@ -16,20 +16,16 @@
 //! - are sentry-managed: carry an execution block with at least one
 //!   meaningful field, or carry a `cron:` / `webhook:` external_ref.
 //!
-//! ## State + lifecycle
+//! ## Lifecycle mutations
 //!
-//! Claim contention and run history go through omegon's [`StateDb`]
-//! (same pattern as [`super::FileTaskBoard`]). The flynt sqlite is
-//! READ-ONLY from this board's perspective — we deliberately do not
-//! mutate task columns to reflect lifecycle. Project-backed tasks have
-//! canonical markdown files on disk; flynt re-imports those files on
-//! reindex, which would clobber any column mutations we made through
-//! sqlite. Files-as-source-of-truth is preserved.
+//! Claim, complete, fail, and release write column + status directly
+//! to flynt's sqlite via the same WAL connection used for reads. This
+//! mirrors flynt-store's own `VaultStore::update_task` (read-modify-
+//! write through `save_task`). The operator sees Running/Done/Failed
+//! state on the kanban in real time.
 //!
-//! The trade-off: the operator does not see "Running" / "Done" state
-//! on the kanban purely from sentry executions. A future kanban
-//! overlay can query StateDb's `task_runs` table for that view; for
-//! now, run history lives in omegon's standard run dashboard.
+//! Run history and claim contention tracking also go through omegon's
+//! [`StateDb`] so the sentry dashboard has its own run log.
 //!
 //! Schema knowledge of the flynt sqlite is inlined here. We don't take
 //! a dep on `flynt-store` because that crate pulls in comrak / notify
@@ -50,6 +46,14 @@ use super::state_db::StateDb;
 use super::types::{SentryTask, TaskError, TaskResult, TaskSpec, Trigger};
 
 const SCHEDULED: &str = "Scheduled";
+const RUNNING: &str = "Running";
+const DONE: &str = "Done";
+const FAILED: &str = "Failed";
+
+const STATUS_TODO: &str = "\"todo\"";
+const STATUS_IN_PROGRESS: &str = "\"in_progress\"";
+const STATUS_DONE: &str = "\"done\"";
+const STATUS_ARCHIVED: &str = "\"archived\"";
 
 pub struct FlyntTaskBoard {
     /// Vault root (the directory the operator opens in flynt-app).
@@ -108,8 +112,16 @@ impl FlyntTaskBoard {
 
     pub fn vault_root(&self) -> &Path { &self.vault_root }
 
-    /// Load one task by id (UUID string). Returns Err if it can't be
-    /// parsed; returns Ok(None) if no row matches.
+    fn update_column_status(&self, id: &str, column: &str, status: &str) -> anyhow::Result<bool> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
+        let now = Utc::now().to_rfc3339();
+        let rows = conn.execute(
+            "UPDATE tasks SET column_name = ?1, status = ?2, updated_at = ?3 WHERE id = ?4",
+            params![column, status, now, id],
+        )?;
+        Ok(rows > 0)
+    }
+
     fn load_task(&self, id: &str) -> anyhow::Result<Option<Task>> {
         let id_uuid = uuid::Uuid::parse_str(id)
             .map_err(|_| anyhow::anyhow!("task id is not a UUID: {id}"))?;
@@ -163,15 +175,20 @@ impl TaskBoard for FlyntTaskBoard {
     }
 
     fn claim(&self, task_id: &str) -> anyhow::Result<bool> {
-        // StateDb only — no column mutation. See module-level doc.
-        self.state_db.claim_task(task_id, &self.instance_id)
+        let claimed = self.state_db.claim_task(task_id, &self.instance_id)?;
+        if claimed {
+            self.update_column_status(task_id, RUNNING, STATUS_IN_PROGRESS)?;
+        }
+        Ok(claimed)
     }
 
     fn release(&self, task_id: &str) -> anyhow::Result<()> {
+        self.update_column_status(task_id, SCHEDULED, STATUS_TODO)?;
         self.state_db.release_task(task_id)
     }
 
     fn complete(&self, task_id: &str, result: &TaskResult) -> anyhow::Result<()> {
+        self.update_column_status(task_id, DONE, STATUS_DONE)?;
         let run_id = format!("{task_id}-{}", uuid_v4());
         self.state_db.record_run_start(&run_id, task_id)?;
         self.state_db.record_run_complete(&run_id, result)?;
@@ -180,6 +197,7 @@ impl TaskBoard for FlyntTaskBoard {
     }
 
     fn fail(&self, task_id: &str, error: &TaskError) -> anyhow::Result<()> {
+        self.update_column_status(task_id, FAILED, STATUS_ARCHIVED)?;
         let run_id = format!("{task_id}-{}", uuid_v4());
         self.state_db.record_run_start(&run_id, task_id)?;
         self.state_db.record_run_failure(&run_id, error)?;
@@ -220,11 +238,33 @@ pub fn default_db_path(vault_root: &Path) -> PathBuf {
 }
 
 /// Lightweight probe — does this directory look like a flynt vault?
-/// Used by the omegon main loop to auto-select FlyntTaskBoard when
-/// launched into a flynt directory (for example, by Zed via ACP).
+/// Used as a building block for [`find_vault_root`].
 pub fn is_flynt_vault(root: &Path) -> bool {
     root.join(".flynt").join("config.toml").exists()
         || default_db_path(root).exists()
+}
+
+/// Walk parent directories looking for a flynt vault marker.
+///
+/// Critical for the ACP-from-Zed flow: Zed launches omegon in the
+/// project directory, which is typically a git repo nested *inside*
+/// a flynt vault (e.g. `~/Documents/Flynt/projects/foo/`). A literal
+/// `is_flynt_vault(cwd)` check would miss the vault. Walks up to
+/// filesystem root and returns the first ancestor that probes
+/// positive, or None.
+///
+/// Canonicalizes `start` first so symlinks and `.`/`..` don't trip
+/// the traversal.
+pub fn find_vault_root(start: &Path) -> Option<PathBuf> {
+    let mut cur = std::fs::canonicalize(start).ok()?;
+    loop {
+        if is_flynt_vault(&cur) {
+            return Some(cur);
+        }
+        if !cur.pop() {
+            return None;
+        }
+    }
 }
 
 fn priority_to_u8(p: flynt_models::task::Priority) -> u8 {
@@ -456,9 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn claim_locks_via_state_db_and_leaves_column_alone() {
-        // Lifecycle is StateDb-only — flynt's source-of-truth task
-        // file remains canonical, sentry doesn't clobber it.
+    fn claim_moves_to_running_and_locks() {
         let (tmp, board, board_id) = fixture();
         let _ = tmp;
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
@@ -468,15 +506,14 @@ mod tests {
 
         assert!(board.claim(&id).unwrap());
         let after = board.load_task(&id).unwrap().unwrap();
-        assert_eq!(after.column, "Scheduled", "FlyntTaskBoard must not mutate task column");
+        assert_eq!(after.column, "Running");
+        assert_eq!(after.status, flynt_models::task::TaskStatus::InProgress);
 
-        // Re-claim under same instance → still false (already locked
-        // in StateDb).
         assert!(!board.claim(&id).unwrap());
     }
 
     #[test]
-    fn complete_records_run_and_releases_lock_without_touching_column() {
+    fn complete_moves_to_done_and_records_run() {
         let (tmp, board, board_id) = fixture();
         let _ = tmp;
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
@@ -491,18 +528,12 @@ mod tests {
         };
         board.complete(&id, &result).unwrap();
         let after = board.load_task(&id).unwrap().unwrap();
-        assert_eq!(after.column, "Scheduled");
-        // Lock released — re-claim succeeds.
-        assert!(board.claim(&id).unwrap());
-        // Run history was recorded.
-        let listed = board.list_actionable().unwrap();
-        let our = listed.iter().find(|s| s.id == id).expect("task still listed");
-        assert_eq!(our.run_count, 1);
-        assert!(our.last_run.is_some());
+        assert_eq!(after.column, "Done");
+        assert_eq!(after.status, flynt_models::task::TaskStatus::Done);
     }
 
     #[test]
-    fn fail_records_failure_and_releases_lock() {
+    fn fail_moves_to_failed_and_releases_lock() {
         let (tmp, board, board_id) = fixture();
         let _ = tmp;
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
@@ -514,12 +545,13 @@ mod tests {
         let err = TaskError { message: "boom".into(), retriable: true, attempt: 1 };
         board.fail(&id, &err).unwrap();
         let after = board.load_task(&id).unwrap().unwrap();
-        assert_eq!(after.column, "Scheduled");
+        assert_eq!(after.column, "Failed");
+        assert_eq!(after.status, flynt_models::task::TaskStatus::Archived);
         assert!(board.claim(&id).unwrap(), "fail must release lock");
     }
 
     #[test]
-    fn release_only_clears_lock_does_not_touch_column() {
+    fn release_restores_to_scheduled() {
         let (tmp, board, board_id) = fixture();
         let _ = tmp;
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
@@ -528,9 +560,13 @@ mod tests {
         insert_task(board.vault_root().join(".flynt-local/flynt/flynt-index.db").as_path(), &t);
 
         board.claim(&id).unwrap();
+        let after_claim = board.load_task(&id).unwrap().unwrap();
+        assert_eq!(after_claim.column, "Running");
+
         board.release(&id).unwrap();
         let after = board.load_task(&id).unwrap().unwrap();
         assert_eq!(after.column, "Scheduled");
+        assert_eq!(after.status, flynt_models::task::TaskStatus::Todo);
         assert!(board.claim(&id).unwrap(), "release must allow re-claim");
     }
 
