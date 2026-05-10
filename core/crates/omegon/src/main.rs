@@ -6070,7 +6070,18 @@ async fn run_sentry_command(
             let p = std::path::PathBuf::from(&raw);
             std::fs::canonicalize(&p).unwrap_or(p)
         })
-        .or_else(|| if sentry::is_flynt_vault(&cwd) { Some(cwd.clone()) } else { None });
+        // Walk up from cwd to find a vault marker. Critical for the
+        // ACP-from-Zed flow: cwd is a git repo nested INSIDE the
+        // vault, not the vault root itself.
+        .or_else(|| sentry::flynt_board::find_vault_root(&cwd));
+
+    // Optional explicit project scope. When set, FlyntTaskBoard only
+    // surfaces tasks on boards owned by this flynt project — prevents
+    // cross-project bleed when one omegon process serves a vault that
+    // hosts multiple project boards.
+    let flynt_project: Option<uuid::Uuid> = std::env::var("FLYNT_PROJECT")
+        .ok()
+        .and_then(|s| uuid::Uuid::parse_str(&s).ok());
 
     let (board, config): (std::sync::Arc<dyn sentry::TaskBoard>, sentry::SentryConfig) =
         if has_task_tree {
@@ -6113,14 +6124,20 @@ async fn run_sentry_command(
             ));
             (board, config)
         } else if let Some(vault_root) = flynt_vault_root {
-            tracing::info!(vault = %vault_root.display(), "using flynt vault board");
-            let board = std::sync::Arc::new(
-                sentry::FlyntTaskBoard::open(
-                    vault_root,
-                    state_db.clone(),
-                    instance_id.clone(),
-                )?
+            tracing::info!(
+                vault = %vault_root.display(),
+                project = ?flynt_project,
+                "using flynt vault board"
             );
+            let mut board = sentry::FlyntTaskBoard::open(
+                vault_root,
+                state_db.clone(),
+                instance_id.clone(),
+            )?;
+            if let Some(pid) = flynt_project {
+                board = board.with_project(pid);
+            }
+            let board = std::sync::Arc::new(board);
             // FlyntTaskBoard sources tasks from the vault, not a TOML
             // file; the SentryConfig is empty so trigger discovery
             // (below) sees no fileboard tasks. Per-task triggers come

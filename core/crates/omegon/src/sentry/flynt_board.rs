@@ -63,6 +63,12 @@ pub struct FlyntTaskBoard {
     conn: Mutex<Connection>,
     state_db: Arc<StateDb>,
     instance_id: String,
+    /// When set, list_actionable filters tasks to those whose board
+    /// belongs to this flynt project. Set via `with_project()` after
+    /// construction. None = vault-wide (all tasks). Critical for
+    /// avoiding cross-project bleed when one omegon process serves a
+    /// vault that hosts multiple project boards.
+    project_id: Option<uuid::Uuid>,
 }
 
 impl FlyntTaskBoard {
@@ -107,10 +113,22 @@ impl FlyntTaskBoard {
             conn: Mutex::new(conn),
             state_db,
             instance_id,
+            project_id: None,
         })
     }
 
+    /// Scope this board to a single flynt project. After this call,
+    /// `list_actionable` only surfaces tasks on boards belonging to
+    /// that project — preventing cross-project bleed when omegon is
+    /// launched into one project but the vault hosts several.
+    /// Idempotent; later calls overwrite the scope.
+    pub fn with_project(mut self, project_id: uuid::Uuid) -> Self {
+        self.project_id = Some(project_id);
+        self
+    }
+
     pub fn vault_root(&self) -> &Path { &self.vault_root }
+    pub fn project_id(&self) -> Option<uuid::Uuid> { self.project_id }
 
     fn update_column_status(&self, id: &str, column: &str, status: &str) -> anyhow::Result<bool> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
@@ -142,15 +160,33 @@ impl TaskBoard for FlyntTaskBoard {
         // rather than failing the whole list.
         let tasks: Vec<Task> = {
             let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
-            let mut stmt = conn.prepare(SELECT_ACTIONABLE)?;
-            let mut rows = stmt.query(params![SCHEDULED])?;
-            let mut acc: Vec<Task> = Vec::new();
-            while let Some(row) = rows.next()? {
-                match row_to_task(row) {
-                    Ok(t) => acc.push(t),
-                    Err(e) => tracing::warn!(error = %e, "skipping flynt task row that failed to deserialize"),
+            // Two query variants: vault-wide (legacy) and project-
+            // scoped. The project variant joins via the boards table
+            // so the filter survives boards being renamed or columns
+            // being shuffled — the (board.project_id) link is stable.
+            let acc: Vec<Task> = if let Some(pid) = self.project_id {
+                let mut stmt = conn.prepare(SELECT_ACTIONABLE_PROJECT_SCOPED)?;
+                let mut rows = stmt.query(params![SCHEDULED, pid.to_string()])?;
+                let mut acc = Vec::new();
+                while let Some(row) = rows.next()? {
+                    match row_to_task(row) {
+                        Ok(t) => acc.push(t),
+                        Err(e) => tracing::warn!(error = %e, "skipping flynt task row that failed to deserialize"),
+                    }
                 }
-            }
+                acc
+            } else {
+                let mut stmt = conn.prepare(SELECT_ACTIONABLE)?;
+                let mut rows = stmt.query(params![SCHEDULED])?;
+                let mut acc = Vec::new();
+                while let Some(row) = rows.next()? {
+                    match row_to_task(row) {
+                        Ok(t) => acc.push(t),
+                        Err(e) => tracing::warn!(error = %e, "skipping flynt task row that failed to deserialize"),
+                    }
+                }
+                acc
+            };
             acc
         };
 
@@ -310,6 +346,19 @@ const SELECT_ACTIONABLE: &str = "SELECT \
     engagement_id \
     FROM tasks WHERE column_name = ?1 AND status = '\"todo\"'";
 
+/// Project-scoped variant of [`SELECT_ACTIONABLE`] — joins on the
+/// `boards` table so we only return tasks belonging to boards owned
+/// by the named project. Tasks on un-projected boards (boards with
+/// project_id IS NULL) are excluded when project scope is set.
+const SELECT_ACTIONABLE_PROJECT_SCOPED: &str = "SELECT \
+    t.id, t.board_id, t.column_name, t.title, t.description, t.priority, t.status, t.tags, \
+    t.document_refs, t.due_date, t.position, t.created_at, t.updated_at, t.decay, \
+    t.last_touched_at, t.external_refs, t.design_node_id, t.execution, t.openspec_change, \
+    t.engagement_id \
+    FROM tasks t \
+    JOIN boards b ON b.id = t.board_id \
+    WHERE t.column_name = ?1 AND t.status = '\"todo\"' AND b.project_id = ?2";
+
 fn row_to_task(row: &rusqlite::Row<'_>) -> anyhow::Result<Task> {
     use flynt_models::task::{BoardId, DecayRate, DocumentId, Priority, TaskId, TaskStatus};
 
@@ -405,8 +454,28 @@ mod tests {
                 openspec_change TEXT,
                 engagement_id TEXT
             );
+            CREATE TABLE boards (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                columns TEXT NOT NULL DEFAULT '[]',
+                project_id TEXT,
+                created_at TEXT NOT NULL
+            );
         "#).unwrap();
         (tmp, db_path)
+    }
+
+    fn insert_board(db: &Path, board_id: &uuid::Uuid, project_id: Option<&uuid::Uuid>) {
+        let conn = Connection::open(db).unwrap();
+        conn.execute(
+            "INSERT INTO boards (id, name, columns, project_id, created_at) VALUES (?1, ?2, '[]', ?3, ?4)",
+            params![
+                board_id.to_string(),
+                "test-board",
+                project_id.map(|p| p.to_string()),
+                Utc::now().to_rfc3339(),
+            ],
+        ).unwrap();
     }
 
     fn insert_task(db: &Path, t: &FlyntTask) {
@@ -621,5 +690,156 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join(".flynt")).unwrap();
         std::fs::write(tmp.path().join(".flynt/config.toml"), "vault_name = \"test\"").unwrap();
         assert!(is_flynt_vault(tmp.path()));
+    }
+
+    // ── walk-up vault detection ────────────────────────────────────────────
+
+    #[test]
+    fn find_vault_root_walks_up_from_nested_project() {
+        // Mirrors the ACP-from-Zed flow: cwd is a git repo nested
+        // inside the vault; we should find the vault by walking up.
+        let tmp = TempDir::new().unwrap();
+        let vault = tmp.path().to_path_buf();
+        std::fs::create_dir_all(vault.join(".flynt")).unwrap();
+        std::fs::write(vault.join(".flynt/config.toml"), "vault_name=\"test\"").unwrap();
+
+        let project_subdir = vault.join("projects").join("foo").join("src");
+        std::fs::create_dir_all(&project_subdir).unwrap();
+
+        let found = find_vault_root(&project_subdir).expect("walk-up should find vault");
+        // Use canonicalize on both sides — TempDir gives /var/folders
+        // on macOS that resolves to /private/var/folders.
+        assert_eq!(
+            std::fs::canonicalize(&found).unwrap(),
+            std::fs::canonicalize(&vault).unwrap()
+        );
+    }
+
+    #[test]
+    fn find_vault_root_returns_none_when_no_marker() {
+        let tmp = TempDir::new().unwrap();
+        let nested = tmp.path().join("a").join("b").join("c");
+        std::fs::create_dir_all(&nested).unwrap();
+        // No .flynt/config.toml anywhere up the tree → None.
+        assert!(find_vault_root(&nested).is_none());
+    }
+
+    #[test]
+    fn find_vault_root_returns_self_when_cwd_is_vault() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".flynt")).unwrap();
+        std::fs::write(tmp.path().join(".flynt/config.toml"), "v=1").unwrap();
+        let found = find_vault_root(tmp.path()).unwrap();
+        assert_eq!(
+            std::fs::canonicalize(&found).unwrap(),
+            std::fs::canonicalize(tmp.path()).unwrap()
+        );
+    }
+
+    // ── project-scoped list_actionable ─────────────────────────────────────
+
+    #[test]
+    fn unscoped_board_returns_tasks_from_all_projects() {
+        let (tmp, board, _board_id) = fixture();
+        let _ = tmp;
+        let db = board.vault_root().join(".flynt-local/flynt/flynt-index.db");
+
+        let project_a = uuid::Uuid::new_v4();
+        let project_b = uuid::Uuid::new_v4();
+        let board_a = uuid::Uuid::new_v4();
+        let board_b = uuid::Uuid::new_v4();
+        insert_board(&db, &board_a, Some(&project_a));
+        insert_board(&db, &board_b, Some(&project_b));
+
+        let mut t_a = FlyntTask::new(flynt_models::task::BoardId(board_a), "Scheduled", "A-task");
+        t_a.external_refs = vec!["cron:* * * * *".into()];
+        insert_task(&db, &t_a);
+        let mut t_b = FlyntTask::new(flynt_models::task::BoardId(board_b), "Scheduled", "B-task");
+        t_b.external_refs = vec!["cron:* * * * *".into()];
+        insert_task(&db, &t_b);
+
+        let listed = board.list_actionable().unwrap();
+        let names: std::collections::HashSet<_> = listed.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains("A-task"));
+        assert!(names.contains("B-task"));
+    }
+
+    #[test]
+    fn project_scoped_board_excludes_other_projects() {
+        // The bug Phase 7 fixes: omegon launched in project A picks up
+        // project B's sentry tasks. With with_project(A), only A's
+        // tasks come through.
+        let (tmp, board, _board_id) = fixture();
+        let _ = tmp;
+        let db = board.vault_root().join(".flynt-local/flynt/flynt-index.db");
+
+        let project_a = uuid::Uuid::new_v4();
+        let project_b = uuid::Uuid::new_v4();
+        let board_a = uuid::Uuid::new_v4();
+        let board_b = uuid::Uuid::new_v4();
+        insert_board(&db, &board_a, Some(&project_a));
+        insert_board(&db, &board_b, Some(&project_b));
+
+        let mut t_a = FlyntTask::new(flynt_models::task::BoardId(board_a), "Scheduled", "A-task");
+        t_a.external_refs = vec!["cron:* * * * *".into()];
+        insert_task(&db, &t_a);
+        let mut t_b = FlyntTask::new(flynt_models::task::BoardId(board_b), "Scheduled", "B-task");
+        t_b.external_refs = vec!["cron:* * * * *".into()];
+        insert_task(&db, &t_b);
+
+        let scoped = FlyntTaskBoard::open_with_db(
+            board.vault_root().to_path_buf(),
+            db,
+            Arc::new(StateDb::in_memory().unwrap()),
+            "scoped".into(),
+        ).unwrap().with_project(project_a);
+
+        let listed = scoped.list_actionable().unwrap();
+        let names: Vec<_> = listed.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, vec!["A-task"], "project scope must exclude project_b tasks");
+        assert_eq!(scoped.project_id(), Some(project_a));
+    }
+
+    #[test]
+    fn project_scoped_board_excludes_unprojected_boards() {
+        // Boards with project_id IS NULL are vault-wide. When project
+        // scope is active, those tasks shouldn't slip through either.
+        let (tmp, board, _board_id) = fixture();
+        let _ = tmp;
+        let db = board.vault_root().join(".flynt-local/flynt/flynt-index.db");
+
+        let project_a = uuid::Uuid::new_v4();
+        let board_a = uuid::Uuid::new_v4();
+        let board_unprojected = uuid::Uuid::new_v4();
+        insert_board(&db, &board_a, Some(&project_a));
+        insert_board(&db, &board_unprojected, None);
+
+        let mut t_a = FlyntTask::new(flynt_models::task::BoardId(board_a), "Scheduled", "A-task");
+        t_a.external_refs = vec!["cron:* * * * *".into()];
+        insert_task(&db, &t_a);
+        let mut t_loose = FlyntTask::new(flynt_models::task::BoardId(board_unprojected), "Scheduled", "loose");
+        t_loose.external_refs = vec!["cron:* * * * *".into()];
+        insert_task(&db, &t_loose);
+
+        let scoped = FlyntTaskBoard::open_with_db(
+            board.vault_root().to_path_buf(),
+            db,
+            Arc::new(StateDb::in_memory().unwrap()),
+            "scoped".into(),
+        ).unwrap().with_project(project_a);
+
+        let listed = scoped.list_actionable().unwrap();
+        let names: Vec<_> = listed.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, vec!["A-task"]);
+    }
+
+    #[test]
+    fn with_project_can_be_chained_and_overwritten() {
+        let (tmp, board, _) = fixture();
+        let _ = tmp;
+        let p1 = uuid::Uuid::new_v4();
+        let p2 = uuid::Uuid::new_v4();
+        let scoped = board.with_project(p1).with_project(p2);
+        assert_eq!(scoped.project_id(), Some(p2), "later with_project wins");
     }
 }
