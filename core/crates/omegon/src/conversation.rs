@@ -640,7 +640,6 @@ impl ConversationState {
     ) {
         let turn = self.intent.stats.turns;
 
-        // ─── Input sanitization ────────────────────────────────────
         // Strip invisible unicode characters that serve no semantic
         // purpose but can crash tokenizers and inflate token counts
         // (e.g., zero-width spaces injected between every character).

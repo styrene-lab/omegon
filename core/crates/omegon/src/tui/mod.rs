@@ -2251,7 +2251,6 @@ impl App {
 
     /// Try to cancel the active agent turn. Returns true if cancelled.
     /// Queue a prompt to be sent when the agent finishes.
-    // ─── Well-known secret names for the /secrets selector ────────
     // Grouped: Omegon providers → cloud/infra → databases → dev tools → AI/ML
     const SECRET_CATALOG: &'static [(&'static str, &'static str, &'static str)] = &[
         // (name, suggested_recipe, description)
@@ -2715,7 +2714,6 @@ impl App {
                     SlashResult::Display(format!("Milestone '{}' not found. Create it with: /milestone {} add <node-id>", version, version))
                 }
             }
-            // /milestone <version> add <node-id>
             [version, "add", node_id] => {
                 let mut milestones = load_milestones(&milestone_file);
                 let ms = milestones.entry(version.to_string()).or_insert_with(|| Milestone { nodes: vec![], frozen: false });
@@ -2729,7 +2727,6 @@ impl App {
                 let _ = save_milestones(&milestone_file, &milestones);
                 SlashResult::Display(format!("Added '{}' to milestone {}", node_id, version))
             }
-            // /milestone <version> remove <node-id>
             [version, "remove", node_id] => {
                 let mut milestones = load_milestones(&milestone_file);
                 if let Some(ms) = milestones.get_mut(*version) {
@@ -2740,7 +2737,6 @@ impl App {
                     SlashResult::Display(format!("Milestone '{}' not found.", version))
                 }
             }
-            // /milestone <version> freeze
             [version, "freeze"] => {
                 let mut milestones = load_milestones(&milestone_file);
                 if let Some(ms) = milestones.get_mut(*version) {
@@ -2751,7 +2747,6 @@ impl App {
                     SlashResult::Display(format!("Milestone '{}' not found.", version))
                 }
             }
-            // /milestone <version> unfreeze
             [version, "unfreeze"] => {
                 let mut milestones = load_milestones(&milestone_file);
                 if let Some(ms) = milestones.get_mut(*version) {
@@ -2762,7 +2757,6 @@ impl App {
                     SlashResult::Display(format!("Milestone '{}' not found.", version))
                 }
             }
-            // /milestone <version> status
             [version, "status"] => {
                 let milestones = load_milestones(&milestone_file);
                 if let Some(ms) = milestones.get(*version) {
@@ -6840,8 +6834,6 @@ fn build_model_selector_options(
     options
 }
 
-// ─── Milestone system ───────────────────────────────────────────────────
-
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct Milestone {
     nodes: Vec<String>,
@@ -6862,8 +6854,6 @@ fn save_milestones(
     let json = serde_json::to_string_pretty(milestones)?;
     std::fs::write(path, json)
 }
-
-// ─── Tutorial system ────────────────────────────────────────────────────
 
 /// A single tutorial lesson.
 #[derive(Debug, Clone)]

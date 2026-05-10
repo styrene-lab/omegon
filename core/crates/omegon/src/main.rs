@@ -900,7 +900,6 @@ async fn main() -> anyhow::Result<()> {
     let _ = STARTUP_INSTANT.set(std::time::Instant::now());
     let mut cli = Cli::parse();
 
-    // ─── Permission bypass ───────────────────────────────────────────────
     if cli.dangerously_bypass_permissions {
         // SAFETY: called before spawning any threads that read this var.
         unsafe { std::env::set_var("OMEGON_BYPASS_PERMISSIONS", "1") };
@@ -910,14 +909,12 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // ─── Sandboxed re-exec ──────────────────────────────────────────────
     // If --sandboxed is set and we're NOT already inside a container,
     // re-exec the entire omegon session inside an OCI container.
     if cli.sandboxed && std::env::var("OMEGON_INSIDE_SANDBOX").is_err() {
         return run_sandboxed(&cli).await;
     }
 
-    // ─── Ollama integration detection ────────────────────────────────────
     // When launched via `ollama launch omegon`, the --ollama-model flag
     // (set by Ollama) should override the --model CLI flag.
     if cli.ollama_integration
@@ -927,7 +924,6 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(model = %model, "using Ollama-provided model");
     }
 
-    // ─── Logging setup ──────────────────────────────────────────────────
     // Priority: RUST_LOG env > --log-level flag > "info" default
     // Interactive mode: no subcommand (default) or explicit `interactive`.
     // In both cases ratatui owns stderr — tracing must go to file only.
@@ -1811,7 +1807,6 @@ async fn run_embedded_command(
 ) -> anyhow::Result<()> {
     let cwd = std::fs::canonicalize(".")?;
 
-    // ─── Shared setup ───────────────────────────────────────────────────
     let shared_settings = bootstrap::initialize_shared_settings(&bootstrap::SettingsInit {
         model,
         cwd: &cwd,
@@ -1821,7 +1816,6 @@ async fn run_embedded_command(
         apply_profile_posture: false,
     });
 
-    // ─── Agent manifest pre-resolution (before AgentSetup) ────────────
     // Settings, persona, triggers, and workflows must be materialized
     // before setup so persona registry and tool surface are correct.
     let agent_manifest_resolved = if let Some(agent_id) = agent_id {
@@ -1842,7 +1836,6 @@ async fn run_embedded_command(
         omegon_traits::OmegonAutonomyMode::GuardedAutonomous,
     );
 
-    // ─── Extension/plugin pre-flight reconciliation ──────────────────────
     if let Some(ref resolved) = agent_manifest_resolved
         && let Some(ref exts) = resolved.manifest.extensions
     {
@@ -1863,7 +1856,6 @@ async fn run_embedded_command(
         }
     }
 
-    // ─── LLM model (bridge resolved per-turn for credential freshness) ───
     let mut model = shared_settings
         .lock()
         .map(|s| s.model.clone())
@@ -1894,13 +1886,10 @@ async fn run_embedded_command(
         );
     }
 
-    // ─── Event channel (shared with web dashboard) ──────────────────────
     let (events_tx, _) = bootstrap::wire_event_channel(&agent, 256);
 
-    // ─── Web control plane ──────────────────────────────────────────────
     let state = web::WebState::new(agent.dashboard_handles.clone(), events_tx.clone());
     let vox_daemon_events = state.daemon_events.clone();
-    // ─── Cancellation (Ctrl-C + SIGTERM) ──────────────────────────────────
     let global_cancel = CancellationToken::new();
 
     let acp_state = web::acp_ws::AcpWebState {
@@ -1918,13 +1907,13 @@ async fn run_embedded_command(
         event_type: "omegon.startup",
         schema_version: startup.schema_version,
         pid: std::process::id(),
-        http_base: startup.http_base.clone(),
-        startup_url: startup.startup_url.clone(),
-        health_url: startup.health_url.clone(),
-        ready_url: startup.ready_url.clone(),
-        ws_url: startup.ws_url.clone(),
-        auth_mode: startup.auth_mode.clone(),
-        auth_source: startup.auth_source.clone(),
+        http_base: startup.http_base,
+        startup_url: startup.startup_url,
+        health_url: startup.health_url,
+        ready_url: startup.ready_url,
+        ws_url: startup.ws_url,
+        auth_mode: startup.auth_mode,
+        auth_source: startup.auth_source,
     };
     println!("{}", serde_json::to_string(&event)?);
 
@@ -1945,7 +1934,6 @@ async fn run_embedded_command(
         });
     }
 
-    // ─── IPC server (native Auspex/host control plane) ────────────────
     let ipc_cancel = tokio_util::sync::CancellationToken::new();
     let (ipc_cmd_tx, mut ipc_cmd_rx) = tokio::sync::mpsc::channel::<tui::TuiCommand>(32);
     {
@@ -1964,7 +1952,6 @@ async fn run_embedded_command(
         );
     }
 
-    // ─── MQTT bridge (Auspex event fabric) ────────────────────────────────
     let _mqtt_bridge = mqtt_bridge::start_mqtt_bridge(
         mqtt_bridge::MqttBridgeConfig {
             instance_id: agent.session_id.clone(),
@@ -1973,7 +1960,6 @@ async fn run_embedded_command(
         events_tx.clone(),
     );
 
-    // ─── Vox event bridge (extension-driven comms) ──────────────────────
     if !agent.vox_polling_handles.is_empty() {
         for handle in agent.vox_polling_handles {
             crate::extensions::vox_bridge::start_vox_bridge(
@@ -1985,21 +1971,18 @@ async fn run_embedded_command(
         }
     }
 
-    // ─── Checkpoint subscriber (turn-boundary crash recovery) ────────────
     let _daemon_checkpoint_task = checkpoint::spawn_checkpoint_subscriber(
         &events_tx,
         agent.session_id.clone(),
         agent.context_metrics.clone(),
     );
 
-    // ─── Workflow template (for phase-aware dispatch) ──────────────────
     let daemon_workflow: Option<Arc<workflow::WorkflowTemplate>> =
         workflow::discover_workflow(&cwd).map(Arc::new);
     if let Some(ref wf) = daemon_workflow {
         tracing::info!(workflow = %wf.workflow.name, "daemon loaded workflow template");
     }
 
-    // ─── Session router + default session ──────────────────────────────
     let router = Arc::new(session_router::SessionRouter::new());
     let agent_cwd = agent.cwd.clone();
     let agent_session_id = agent.session_id.clone();
@@ -2015,7 +1998,6 @@ async fn run_embedded_command(
         conversation: agent.conversation,
     })));
 
-    // ─── Load trigger configs + start runtime ──────────────────────────
     let trigger_configs = triggers::load_trigger_configs(&cwd);
     let trigger_events = triggers::EventTriggers::from_configs(&trigger_configs);
     let (mut trigger_runtime, _trigger_tx) = triggers::TriggerRuntimeBuilder::new(
@@ -2027,7 +2009,6 @@ async fn run_embedded_command(
     let triggers_in_flight: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>> =
         Default::default();
 
-    // ─── Dispatch loop — consume commands + autonomous idle tick ─────
     let idle_poll_interval = tokio::time::Duration::from_secs(30);
     let mut idle_tick = tokio::time::interval(idle_poll_interval);
     idle_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -2038,7 +2019,6 @@ async fn run_embedded_command(
     let mut vox_poll = tokio::time::interval(tokio::time::Duration::from_millis(250));
     vox_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    // ─── SIGHUP handler (graceful reload) ──────────────────────────────
     let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
         .expect("failed to register SIGHUP handler");
 
@@ -2277,7 +2257,6 @@ async fn run_embedded_command(
                 }
             }
             ipc_cmd = ipc_cmd_rx.recv() => {
-                // ─── IPC commands (TuiCommand → dispatch) ──────────────
                 match ipc_cmd {
                     Some(tui::TuiCommand::SubmitPrompt(submission)) => {
                         tracing::info!(prompt_len = submission.text.len(), "daemon: IPC prompt");
@@ -2389,7 +2368,6 @@ async fn run_embedded_command(
                 }
             }
             Some(trigger_event) = trigger_runtime.event_rx.recv() => {
-                // ─── Unified trigger events (cron, file watch, git poll) ──
                 let trigger_name = match &trigger_event {
                     triggers::TriggerEvent::Scheduled(c) => c.trigger.name.clone(),
                     triggers::TriggerEvent::FileChanged { trigger_name, .. } => trigger_name.clone(),
@@ -2474,13 +2452,11 @@ async fn run_embedded_command(
                 );
             }
             _ = idle_tick.tick() => {
-                // ─── Evict idle per-user sessions ────────────────────────
                 let parked = router.park_idle_sessions().await;
                 for key in &parked {
                     tracing::info!(caller = %key, "daemon: parked idle session");
                 }
 
-                // ─── Autonomous idle tick: poll design tree for ready nodes ──
                 let ready = workflow::query_ready_nodes(&cwd);
                 if ready.is_empty() {
                     continue;
@@ -2545,7 +2521,6 @@ async fn run_embedded_command(
         }
     }
 
-    // ─── Cleanup — cancel IPC + graceful drain + save ─────────────────
     ipc_cancel.cancel();
 
     // Give in-flight turns a grace period to complete before saving state.
@@ -2805,8 +2780,6 @@ async fn run_cleave_command(
     Ok(())
 }
 
-// ─── Ollama subcommand ─────────────────────────────────────────────────────
-
 async fn run_ollama_command(action: &OllamaAction) -> anyhow::Result<()> {
     match action {
         OllamaAction::Register => ollama_register().await,
@@ -2956,7 +2929,6 @@ async fn ollama_status() -> anyhow::Result<()> {
 }
 
 async fn run_doctor_command(cli: &Cli) -> anyhow::Result<()> {
-    // ─── Lifecycle audit ────────────────────────────────────────────
     let cwd = std::fs::canonicalize(&cli.cwd)?;
     let repo_root = setup::find_project_root(&cwd);
     let findings = lifecycle::doctor::audit_repo(&repo_root);
@@ -2973,7 +2945,6 @@ async fn run_doctor_command(cli: &Cli) -> anyhow::Result<()> {
         }
     }
 
-    // ─── Ollama diagnostics ─────────────────────────────────────────
     println!("\n═══ Ollama Diagnostics ═══");
     let mgr = ollama::OllamaManager::new();
 
@@ -3038,7 +3009,6 @@ async fn run_doctor_command(cli: &Cli) -> anyhow::Result<()> {
         vram_gb, hw.recommended_max_params
     );
 
-    // ─── Toolchain diagnostics ──────────────────────────────────────
     println!("\n═══ Toolchain ═══");
     // PKL (required for custom postures/agent configs)
     match std::process::Command::new("pkl").arg("--version").output() {
@@ -3169,7 +3139,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         eprintln!("{warning}");
     }
 
-    // ─── Shared state (created early so features can reference it) ────
     let shared_settings = bootstrap::initialize_shared_settings(&bootstrap::SettingsInit {
         model: &cli.model,
         cwd: &cli.cwd,
@@ -3179,7 +3148,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         apply_profile_posture: true,
     });
 
-    // ─── Clipboard paste retention sweep ────────────────────────────────
     // Walk the system temp dir for `omegon-clipboard-*` files older
     // than `Settings.clipboard_retention_hours` (default 24h, 0 to
     // disable) and delete them. Without this sweep clipboard image
@@ -3205,14 +3173,12 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         Err(e) => tracing::warn!(error = %e, "clipboard prune failed"),
     }
 
-    // ─── First-run setup ─────────────────────────────────────────────────
     // On first launch (no profile.json), sweep the system for existing tools
     // and let the operator choose a starting posture before the TUI appears.
     if first_run::should_run(&cli.cwd) {
         first_run::run_interactive(&cli.cwd, &shared_settings);
     }
 
-    // ─── Shared setup ───────────────────────────────────────────────────
     // Fresh by default. --resume opts into session restore; --resume with no value
     // means "most recent" and --fresh forces a clean start.
     let resume = interactive_resume_mode(cli);
@@ -3226,7 +3192,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
 
     // LLM provider ──────────────────────────────────────────────────────
     // Native Rust clients by default. --bridge flag forces the Node.js subprocess.
-    // ─── LLM provider (native Rust clients only) ─────────────────────
     let requested_start_model = shared_settings
         .lock()
         .ok()
@@ -3279,7 +3244,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     let bridge: Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>> =
         Arc::new(tokio::sync::RwLock::new(bridge));
 
-    // ─── Event channel ──────────────────────────────────────────────────
     let (events_tx, events_rx) = bootstrap::wire_event_channel(&agent, 256);
     let (command_tx, mut command_rx) = tokio::sync::mpsc::channel::<tui::TuiCommand>(16);
 
@@ -3335,10 +3299,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         }
     }
 
-    // ─── Shared state ─────────────────────────────────────────────────
     let shared_cancel: tui::SharedCancel = std::sync::Arc::new(std::sync::Mutex::new(None));
 
-    // ─── Probe provider for authoritative model limits ──────────────
     // The route matrix is a static fallback. The /v1/models endpoint
     // returns the real context window for the selected model.
     {
@@ -3377,7 +3339,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         .and_then(|provider| providers::resolve_api_key_sync(&provider))
         .is_some_and(|(_, oauth)| oauth);
 
-    // ─── Apply CLI overrides ──────────────────────────────────────────
     if let Some(ref class_str) = cli.context_class
         && let Ok(mut s) = shared_settings.lock() {
             match class_str.to_lowercase().as_str() {
@@ -3390,7 +3351,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
             tracing::info!(class = %class_str, "requested context class policy applied");
         }
 
-    // ─── Launch TUI ─────────────────────────────────────────────────────
     let initial = agent.initial_tui_state();
     // Extract bus command definitions for the TUI command palette
     let bus_commands: Vec<omegon_traits::CommandDefinition> = agent
@@ -3439,7 +3399,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         }
     });
 
-    // ─── IPC server (native Auspex/host control plane) ────────────────
     let ipc_cancel = tokio_util::sync::CancellationToken::new();
     {
         let ipc_cfg = ipc::IpcServerConfig::from_cwd(
@@ -3458,7 +3417,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         );
     }
 
-    // ─── MQTT bridge (Auspex event fabric) ────────────────────────────────
     let _mqtt_bridge = mqtt_bridge::start_mqtt_bridge(
         mqtt_bridge::MqttBridgeConfig {
             instance_id: agent.session_id.clone(),
@@ -3475,7 +3433,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         context_metrics: agent.context_metrics.clone(),
     };
 
-    // ─── Emit session start to bus features ────────────────────────────
     runtime_state.bus.emit(&omegon_traits::BusEvent::SessionStart {
         cwd: agent.cwd.clone(),
         session_id: agent.session_id.clone(),
@@ -3491,7 +3448,6 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         }
     }
 
-    // ─── Interactive agent loop ─────────────────────────────────────────
     let mut runtime = InteractiveRuntimeSupervisor::default();
     let mut deferred_commands = VecDeque::new();
     'interactive: loop {
@@ -5223,7 +5179,6 @@ impl InteractiveRuntimeSupervisor {
 async fn run_smoke_command(cli: &Cli) -> anyhow::Result<()> {
     eprintln!("omegon {} — smoke test mode", env!("CARGO_PKG_VERSION"));
 
-    // ─── LLM provider (native Rust clients only) ─────────────────────
     let bridge = bootstrap::resolve_bridge_or_bail(&cli.model).await?;
     let bridge = std::sync::Arc::new(tokio::sync::RwLock::new(bridge));
 
@@ -5451,7 +5406,6 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
         }
     };
 
-    // ─── Shared setup ───────────────────────────────────────────────────
     let shared_settings = bootstrap::initialize_shared_settings(&bootstrap::SettingsInit {
         model: &cli.model,
         cwd: &cli.cwd,
@@ -5465,7 +5419,6 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
         s.set_model(&cli.model);
     }
 
-    // ─── Persona activation (headless/child) ─────────────────────────
     if let Some(ref persona) = cli.persona {
         // SAFETY: called before spawning any threads that read this var.
         unsafe { std::env::set_var("OMEGON_CHILD_PERSONA", persona) };
@@ -5481,7 +5434,6 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     );
     agent.conversation.push_user(prompt_text.clone());
 
-    // ─── Build loop config ──────────────────────────────────────────────
     let loop_config = bootstrap::build_loop_config(
         &shared_settings,
         &agent.cwd,
@@ -5494,7 +5446,6 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
         },
     );
 
-    // ─── LLM provider (native Rust clients only) ─────────────────────
     let resolved_provider = providers::resolve_execution_provider(&cli.model).await;
     tracing::info!(
         requested_model = %requested_model,
@@ -5514,7 +5465,6 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     }
     let bridge = bootstrap::resolve_bridge_or_bail(&cli.model).await?;
 
-    // ─── Event channel ──────────────────────────────────────────────────
     let (events_tx, mut events_rx) = bootstrap::wire_event_channel(&agent, 256);
 
     let benchmark_summary = std::sync::Arc::new(std::sync::Mutex::new(BenchmarkUsageSummary {
@@ -5526,7 +5476,6 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     let benchmark_summary_task = std::sync::Arc::clone(&benchmark_summary);
     let usage_json_task = usage_json.clone();
 
-    // ─── Event printer (headless mode: print to stderr) ─────────────────
     let event_task = tokio::spawn(async move {
         while let Ok(event) = events_rx.recv().await {
             match event {
@@ -5615,14 +5564,12 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
         }
     });
 
-    // ─── Checkpoint subscriber (turn-boundary crash recovery) ────────────
     let _checkpoint_task = checkpoint::spawn_checkpoint_subscriber(
         &events_tx,
         agent.session_id.clone(),
         agent.context_metrics.clone(),
     );
 
-    // ─── Run the loop ───────────────────────────────────────────────────
     let cancel = CancellationToken::new();
 
     let cancel_clone = cancel.clone();
@@ -5643,7 +5590,6 @@ async fn run_agent_command(cli: &Cli, usage_json: Option<PathBuf>) -> anyhow::Re
     )
     .await;
 
-    // ─── Save session ────────────────────────────────────────────────────
     if !cli.no_session {
         if agent.cwd.join(".cleave-prompt.md").exists() {
             // Cleave child: save to worktree-local file
@@ -6019,8 +5965,6 @@ async fn run_auth_login(provider: &str) -> anyhow::Result<()> {
         }
     }
 }
-
-// ─── Bounded Task Runner (omegon run) ──────────────────────────────────────
 
 /// Task specification — loaded from a TOML file for `omegon run`.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -6964,7 +6908,6 @@ async fn run_sandboxed(cli: &Cli) -> anyhow::Result<()> {
     cmd.arg("OMEGON_EGRESS_MODE=iptables");
     eprintln!("   Network:   filtered egress (LLM APIs + GitHub only)");
 
-    // ─── Secrets: mount vault instead of forwarding raw env vars ─────
     // The host's ~/.omegon/ contains the encrypted secrets vault.
     // Mount it read-only at /data/omegon/ (the container's OMEGON_HOME).
     // omegon-secrets decrypts in memory at runtime — no plaintext on

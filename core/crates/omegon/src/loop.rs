@@ -139,8 +139,6 @@ use behavior::has_local_target_hypothesis;
 use behavior::is_slim_execution_bias;
 use behavior::om_local_first_message;
 
-// ─── Remaining classifier bodies removed — see behavior.rs ──────────────
-
 // Anchor: is_narrow_patch_candidate was here. Now using behavior::*.
 
 pub(crate) fn compute_context_composition(
@@ -298,7 +296,6 @@ pub async fn run(
             context.set_context_window(context_window);
         }
 
-        // ─── Turn limit enforcement ─────────────────────────────────
         if config.max_turns > 0 && turn > config.max_turns {
             tracing::warn!(
                 "Hard turn limit reached ({} turns). Stopping.",
@@ -377,7 +374,6 @@ pub async fn run(
         let _ = events.send(AgentEvent::TurnStart { turn });
         bus.emit(&omegon_traits::BusEvent::TurnStart { turn });
 
-        // ─── Stuck detection ────────────────────────────────────────
         if let Some(warning) = stuck_detector.check(&tool_catalog) {
             tracing::info!(
                 consecutive = warning.consecutive,
@@ -400,7 +396,6 @@ pub async fn run(
             conversation.push_user(format!("[System: {}]", warning.message));
         }
 
-        // ─── Compaction check ────────────────────────────────────────
         // If context is getting large, try LLM-driven compaction.
         // The context_window default is 200k tokens (Anthropic models).
         // Trigger at 75% utilization.
@@ -428,7 +423,6 @@ pub async fn run(
             }
         }
 
-        // ─── Inject IntentDocument if meaningful ─────────────────────
         if conversation.intent.stats.tool_calls > 0
             || conversation.intent.current_task.is_some()
             || conversation.intent.stats.compactions > 0
@@ -437,7 +431,6 @@ pub async fn run(
             context.inject_intent(intent_block);
         }
 
-        // ─── Collect context from bus features ──────────────────────
         {
             let user_prompt = conversation.last_user_prompt();
             bus.emit(&omegon_traits::BusEvent::ContextBuild {
@@ -469,12 +462,10 @@ pub async fn run(
             }]);
         }
 
-        // ─── Pre-compute embeddings for semantic context scoring ────
         context
             .prepare_embeddings(conversation.last_user_prompt())
             .await;
 
-        // ─── Input format hints (MCQ, obfuscation) ─────────────────
         // If the user's input was detected as MCQ or obfuscated, inject
         // a one-shot system hint so the agent responds appropriately.
         // These are appended as user messages that get compacted away
@@ -498,7 +489,6 @@ pub async fn run(
             );
         }
 
-        // ─── Build LLM-facing context ───────────────────────────────
         let system_prompt =
             context.build_system_prompt(conversation.last_user_prompt(), conversation);
         let llm_messages = conversation.build_llm_view();
@@ -513,7 +503,6 @@ pub async fn run(
             "LLM context assembled"
         );
 
-        // ─── Stream LLM response with retry ─────────────────────────
         // Re-read thinking level each turn (can change mid-session via /thinking)
         let stream_options = {
             let mut opts = base_stream_options.clone();
@@ -539,7 +528,6 @@ pub async fn run(
             opts
         };
 
-        // ─── Ollama cold-start warmup ───────────────────────────
         // A cold 20-30B model can take 3+ minutes to load into memory.
         // The SSE idle timeout (90s) fires before the first token arrives
         // on a cold start. We pre-flight the model load here and surface
@@ -662,7 +650,6 @@ pub async fn run(
         let (act_in, act_out, act_cr, act_cc) = assistant_msg.provider_tokens;
         let provider_telemetry = assistant_msg.provider_telemetry.clone();
 
-        // ─── Parse ambient capture blocks (omg: tags) ───────────────
         let captured =
             crate::lifecycle::capture::parse_ambient_blocks(assistant_msg.text_content());
         if !captured.is_empty() {
@@ -755,7 +742,6 @@ pub async fn run(
                 continue; // give it one more turn to commit
             }
 
-            // ─── Skill phase completion check ─────────────────────────
             // If any loaded skill has numbered phases, check whether the
             // agent's response references the final phase. If not, nudge
             // it to continue. Prevents the "I'm done" pattern when
@@ -790,7 +776,6 @@ pub async fn run(
                 }
             }
 
-            // ─── Dead-mouse detection ──────────────────────────────
             // Model responded with text-only (no tool calls) but hasn't
             // made any file changes. It's narrating instead of acting.
             // Nudge up to 2 times, then give up.
@@ -973,7 +958,6 @@ pub async fn run(
             dead_mouse_nudges = 0;
         }
 
-        // ─── Emit ToolStart bus events before dispatch ──────────────
         for call in tool_calls {
             session_used_tools.insert(call.name.clone());
             bus.emit(&omegon_traits::BusEvent::ToolStart {
@@ -984,7 +968,6 @@ pub async fn run(
             });
         }
 
-        // ─── Dispatch tool calls ────────────────────────────────────
         // Auto-delegation is disabled — the agent always executes its
         // own tool calls directly. See classify_auto_delegate_plan().
         let dispatch_calls = tool_calls;
@@ -1126,7 +1109,6 @@ pub async fn run(
             );
         }
 
-        // ─── Emit tool events to bus features ───────────────────────
         for (call, result) in dispatch_calls.iter().zip(results.iter()) {
             bus.emit(&omegon_traits::BusEvent::ToolEnd {
                 id: call.id.clone(),
@@ -1148,7 +1130,6 @@ pub async fn run(
             });
         }
 
-        // ─── Wire context signals ───────────────────────────────────
         for call in dispatch_calls {
             context.record_tool_call(&call.name);
             // Track file access from tool arguments
@@ -1158,7 +1139,6 @@ pub async fn run(
         }
         context.update_phase_from_activity(dispatch_calls);
 
-        // ─── Feed stuck detector ────────────────────────────────────
         for call in dispatch_calls {
             let is_error = results
                 .iter()
@@ -1196,7 +1176,6 @@ pub async fn run(
             },
         )));
 
-        // ─── Handle bus requests from features ──────────────────────
         let turn_requests = bus.drain_requests();
         for request in turn_requests {
             match request {
@@ -1696,7 +1675,6 @@ async fn consume_llm_stream(
         role: "assistant".into(),
     });
 
-    // ─── Degenerate output detector ─────────────────────────────
     // Catches models stuck in a text-repetition loop (e.g. "Append tests."
     // repeated 500 times). Tracks a rolling window of recent text chunks
     // and aborts when a short phrase repeats excessively.
@@ -2702,8 +2680,6 @@ fn is_session_noise_path(path: &str) -> bool {
     ];
     noise_fragments.iter().any(|frag| stem.contains(frag))
 }
-
-// ─── Stuck detection ────────────────────────────────────────────────────────
 
 /// Detects pathological tool-call patterns that indicate the agent is stuck.
 struct StuckWarning {

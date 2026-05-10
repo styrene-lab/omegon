@@ -21,8 +21,6 @@ use crate::bridge::{LlmBridge, LlmEvent, LlmMessage, StreamOptions};
 const CLAUDE_CODE_UA: &str = "claude-cli/2.1.119";
 use omegon_traits::ToolDefinition;
 
-// ─── API Key Resolution ─────────────────────────────────────────────────────
-
 /// Anthropic credential mode — records what credential source is active.
 ///
 /// Omegon may still warn when subscription/OAuth credentials are used in
@@ -518,8 +516,6 @@ pub async fn auto_detect_bridge(model_spec: &str) -> Option<Box<dyn LlmBridge>> 
     None
 }
 
-// ─── SSE Helpers ────────────────────────────────────────────────────────────
-
 /// Extract and log rate limit headers from a provider's HTTP response.
 /// All major providers return quota/remaining/reset information on every
 /// response — this is the only source of subscription usage data.
@@ -843,8 +839,6 @@ where
         }
     })
 }
-
-// ─── Anthropic ──────────────────────────────────────────────────────────────
 
 pub struct AnthropicClient {
     client: reqwest::Client,
@@ -1413,8 +1407,6 @@ async fn parse_anthropic_stream(
     }).await
 }
 
-// ─── OpenAI ─────────────────────────────────────────────────────────────────
-
 pub struct OpenAIClient {
     client: reqwest::Client,
     api_key: String,
@@ -1673,7 +1665,6 @@ async fn parse_openai_stream(
     .await
 }
 
-// ─── OpenRouter ─────────────────────────────────────────────────────────────
 //
 // OpenRouter speaks the OpenAI wire protocol but routes across 27+ free models.
 // Uses the OpenAI client internally with a different base URL and API key source.
@@ -1725,8 +1716,6 @@ impl LlmBridge for OpenRouterClient {
             .await
     }
 }
-
-// ─── Codex Client (OpenAI Responses API) ─────────────────────────────────────
 
 const CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
 
@@ -2285,8 +2274,6 @@ async fn parse_codex_stream(
 
     Ok(())
 }
-
-// ─── OpenAI-Compatible Generic Client ────────────────────────────────────────
 
 /// Generic client for any provider that speaks the OpenAI Chat Completions protocol.
 /// Covers: Groq, xAI, Mistral, Cerebras, HuggingFace, Ollama, and any custom endpoint.
@@ -2872,8 +2859,6 @@ async fn parse_ollama_ndjson_stream(
 
     Ok(())
 }
-
-// ─── Google Antigravity (Cloud Code Assist) Client ────────────────────────────
 
 /// Client for Google's Cloud Code Assist internal API (cloudcode-pa.googleapis.com).
 /// This is the endpoint behind the Gemini CLI OAuth flow. It uses a proprietary

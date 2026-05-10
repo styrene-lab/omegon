@@ -1,0 +1,56 @@
+# Lipstyk configuration for omegon.
+#
+# Rules not listed here use their defaults.
+# Set `enabled = false` to disable, or `weight = N` to override.
+
+[settings]
+exclude_tests = true
+
+[rules.redundant-clone]
+# Disabled. Async Rust requires .clone() for values moving into spawned
+# tasks, Arc::clone() for shared state, and struct field copies where
+# the source is reused. Without borrow-checker context, this rule
+# produces 300+ false positives that escalate to SLOP severity via the
+# density mechanic, drowning out real signals.
+enabled = false
+
+[rules.naming-entropy]
+# Large orchestration files (main.rs, tui/mod.rs) naturally reuse domain
+# vocabulary (agent, session, event, model) across unrelated functions.
+# Low stem uniqueness is inherent to single-domain files, not slop.
+weight = 0.3
+
+[rules.structural-repetition]
+# Shape matching (param_count, stmt_count) flags unrelated functions
+# as "repetitive" — e.g. build_version() and default_timeout() both
+# have (0 params, 1 stmt) but share zero logic. Real repetition needs
+# token-level similarity, not just arity.
+weight = 0.3
+
+[rules.trivial-wrapper]
+# Orchestration files (main.rs, control_runtime.rs) use intentional
+# single-expression functions to decouple callers from implementation.
+# parse_posture(), cli_binary_name(), etc. are stable API surfaces.
+weight = 0.2
+
+[rules.error-swallowing]
+# .unwrap_or_default() on OsStr::to_str(), file_name(), and other
+# platform-boundary fallbacks is idiomatic Rust, not swallowed errors.
+weight = 0.3
+
+[rules.derive-stacking]
+# Debug + Clone + Serialize + Deserialize + PartialEq + Eq is the
+# minimum viable derive set for wire types in a serde-heavy codebase.
+weight = 0.2
+
+[rules.pub-overuse]
+# control_runtime.rs, tool_registry.rs, and trait modules are public
+# API surfaces consumed by extensions and other crates. High pub% is
+# intentional, not visibility neglect.
+weight = 0.3
+
+[rules.unwrap-overuse]
+# Downweight — test files use .unwrap() extensively (idiomatic), and
+# --exclude-tests doesn't catch #[cfg(test)] mod tests; in separate
+# files. Non-test .unwrap() is flagged by clippy.
+weight = 0.5

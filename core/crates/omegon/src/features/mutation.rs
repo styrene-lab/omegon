@@ -19,7 +19,6 @@ use std::sync::Mutex;
 
 use crate::tool_registry;
 
-// ─── Impact configuration ───────────────────────────────────────────────────
 //
 // "Impact" is what RL literature calls "fitness" — a measure of whether a
 // mutation artifact made the harness better or worse. We use "impact" because
@@ -196,8 +195,6 @@ fn load_impact_config(omegon_home: &std::path::Path) -> ImpactConfig {
     }
 }
 
-// ─── Creation context (harness state snapshot at skill creation) ─────────────
-
 /// Snapshot of harness configuration when a skill is created, enabling
 /// eval attribution: "this skill was created under these conditions."
 #[derive(Debug, Clone, Default)]
@@ -235,8 +232,6 @@ tests_component = [{}]"#,
     }
 }
 
-// ─── Impact log entry (for future federation) ───────────────────────────────
-
 /// Structured record of a single impact evaluation, appended to
 /// `~/.omegon/mutation/impact-log.jsonl`. Contains everything needed for
 /// local debugging and future community aggregation. No user-identifying
@@ -272,8 +267,6 @@ struct ImpactLogEntry {
     timestamp: String,
 }
 
-// ─── Instance ID ────────────────────────────────────────────────────────────
-
 /// Read or generate a random instance ID for impact log disambiguation.
 /// Stored at `~/.omegon/instance-id`. Not derived from user identity.
 fn get_or_create_instance_id(omegon_home: &std::path::Path) -> String {
@@ -304,8 +297,6 @@ fn get_or_create_instance_id(omegon_home: &std::path::Path) -> String {
     id
 }
 
-// ─── Configuration ──────────────────────────────────────────────────────────
-
 /// Maximum forward scan window (turns) when looking for a recovery after a failure.
 const RECOVERY_SCAN_WINDOW: u32 = 5;
 /// Burn ratio threshold — above this the session is worth analyzing even
@@ -313,8 +304,6 @@ const RECOVERY_SCAN_WINDOW: u32 = 5;
 const BURN_RATIO_THRESHOLD: f32 = 0.3;
 /// Single recovery token cost threshold.
 const RECOVERY_TOKEN_THRESHOLD: u64 = 10_000;
-
-// ─── Trajectory types ───────────────────────────────────────────────────────
 
 /// Compact trace of a single tool call within a turn.
 #[derive(Debug, Clone)]
@@ -363,8 +352,6 @@ struct SessionTrajectory {
     skills_loaded: Mutex<Vec<String>>,
 }
 
-// ─── Recovery detection types ───────────────────────────────────────────────
-
 /// A detected error→recovery sequence in the trajectory.
 #[derive(Debug, Clone)]
 struct RecoverySequence {
@@ -406,8 +393,6 @@ enum PatternClass {
     // "propose a tool description rewrite" rather than skill or diagnostic.
 }
 
-// ─── Burn metrics ───────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Default, Serialize)]
 struct BurnMetrics {
     total_input_tokens: u64,
@@ -438,8 +423,6 @@ struct BurnLogEntry {
     #[serde(default)]
     active_diagnostics: Vec<String>,
 }
-
-// ─── Crate ownership lookup ─────────────────────────────────────────────────
 
 fn owning_crate(tool_name: &str) -> &'static str {
     match tool_name {
@@ -474,8 +457,6 @@ fn owning_crate(tool_name: &str) -> &'static str {
 fn trace_is_mutation_tool(trace: &ToolCallTrace) -> bool {
     trace.capabilities.contains(&ToolCapability::Mutation)
 }
-
-// ─── Feature ────────────────────────────────────────────────────────────────
 
 pub struct MutationFeature {
     trajectory: SessionTrajectory,
@@ -2024,8 +2005,6 @@ impl Feature for MutationFeature {
     }
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 fn compute_age_decay(age_days: f64, half_life_days: f64) -> f64 {
     if half_life_days <= 0.0 {
         return 0.0;
@@ -2219,8 +2198,6 @@ fn bump_confidence(content: &str) -> String {
     }
     result
 }
-
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

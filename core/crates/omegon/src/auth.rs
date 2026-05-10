@@ -16,7 +16,6 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::time::Duration;
 
-// ─── Canonical provider credential map ──────────────────────────────────────
 // Single source of truth for every provider's auth.json key, env vars,
 // display name, and auth type. Every resolution path MUST use this map
 // instead of hardcoding key names.
@@ -898,8 +897,6 @@ pub async fn refresh_token(provider: &str, refresh: &str) -> anyhow::Result<OAut
     })
 }
 
-// ─── PKCE ───────────────────────────────────────────────────────────────────
-
 fn base64url_encode(bytes: &[u8]) -> String {
     // Manual base64url encoding — no external crate needed
     let b64 = crate::tools::view::base64_encode_bytes(bytes);
@@ -921,8 +918,6 @@ fn generate_pkce() -> (String, String) {
 
     (verifier, challenge)
 }
-
-// ─── Headless detection ────────────────────────────────────────────────────
 
 /// Create an OAuth callback TCP listener.
 ///
@@ -976,8 +971,6 @@ fn parse_callback_url(url: &str) -> anyhow::Result<(String, String)> {
         .ok_or_else(|| anyhow::anyhow!("Missing 'state' parameter in the pasted URL"))?;
     Ok((code, state))
 }
-
-// ─── Login callbacks ───────────────────────────────────────────────────────
 
 /// Run the Anthropic OAuth login flow.
 /// Opens a browser, listens for the callback, exchanges the code for tokens.
@@ -1155,8 +1148,6 @@ pub async fn login_anthropic_with_callbacks(
 
     Ok(creds)
 }
-
-// ─── OpenAI Codex (ChatGPT Plus/Pro) ────────────────────────────────────────
 
 const OPENAI_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const OPENAI_AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
@@ -1357,9 +1348,6 @@ pub async fn refresh_openai_token(refresh: &str) -> anyhow::Result<OAuthCredenti
     })
 }
 
-// ─── Google Antigravity (IDE subscription) ─────────────────────────────────
-
-// ─── Google Antigravity (Gemini CLI) OAuth ─────────────────────────────────
 //
 // Uses the same public OAuth credentials as Gemini CLI (google-gemini/gemini-cli).
 // Google documents that for installed/desktop applications, "the client secret
