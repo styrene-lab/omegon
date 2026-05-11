@@ -40,6 +40,22 @@ timeout_secs = 45</code></pre>
     to import your MCP server configs automatically.
   </p>
 
+  <h3>OpenAPI Specs</h3>
+  <p>
+    If an internal or third-party REST API already publishes an OpenAPI spec, Omegon can
+    compile it into project tools without a custom extension. Add <code>.omegon/openapi.toml</code>:
+  </p>
+  <pre><code>[linear]
+spec = "api/linear.openapi.yaml"
+auth = "bearer"
+secret = "LINEAR_API_KEY"
+read_only = true</code></pre>
+  <p>
+    Specs may be local JSON/YAML files or <code>http(s)</code> URLs. Credentials are read from
+    environment variables, and <code>read_only = true</code> limits the generated tools to
+    <code>GET</code> operations. See <a href="/docs/openapi-tools">OpenAPI Tools</a>.
+  </p>
+
   <h3>IDE Rules &amp; Project Instructions</h3>
   <p>
     Omegon reads project instructions from multiple formats. If you already have rules
@@ -188,6 +204,7 @@ omegon extension install .</code></pre>
       <tr><td>Codex CLI AGENTS.md</td><td>Yes</td><td>Native format</td></tr>
       <tr><td>Aider config</td><td>Yes</td><td><code>omegon migrate aider</code></td></tr>
       <tr><td>Any MCP server</td><td>Yes</td><td><code>.omegon/mcp.toml</code></td></tr>
+      <tr><td>OpenAPI REST API</td><td>Yes</td><td><code>.omegon/openapi.toml</code></td></tr>
       <tr><td>Ollama models</td><td>Yes</td><td>Auto-detected on localhost</td></tr>
       <tr><td>OpenAI API key</td><td>Yes</td><td><code>export OPENAI_API_KEY=...</code></td></tr>
       <tr><td>Anthropic API key</td><td>Yes</td><td><code>export ANTHROPIC_API_KEY=...</code></td></tr>

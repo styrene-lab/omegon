@@ -15,7 +15,7 @@ visibility = "private"
 
 Single Rust binary. Persistent project memory. Multiple inference providers. Parallel git worktrees. Design and spec lifecycles built in.
 
-Omegon is a systems engineering harness, not a transcript viewer. It can read and edit code, run commands, manage project memory across sessions, decompose work into isolated child worktrees, run bounded headless tasks, and operate as a local daemon or ACP agent server for editor integrations.
+Omegon is a systems engineering harness, not a transcript viewer. It can read and edit code, run commands, manage project memory across sessions, expose project-specific REST APIs as agent tools from OpenAPI specs, decompose work into isolated child worktrees, run bounded headless tasks, and operate as a local daemon or ACP agent server for editor integrations.
 
 [![docs](https://img.shields.io/badge/docs-omegon.styrene.io-2ab4c8)](https://omegon.styrene.io/docs/)
 [![license](https://img.shields.io/badge/license-BSL%201.1-344858)](LICENSE)
@@ -164,7 +164,7 @@ Omegon stores durable facts under typed sections:
 - Specs
 
 This is not “chat history with search.”
-It is a project memory system with recall, persistence, and lifecycle-aware usage.
+It is a project memory system with recall, persistence, and lifecycle-aware usage. Semantic recall uses Ollama embeddings when available and can fall back to a local ONNX sentence-transformer model in builds compiled with `local-embeddings`; if neither backend is available, memory degrades to FTS5 keyword search instead of failing.
 
 ### 4. Tracks design and specification as first-class work
 
@@ -259,6 +259,7 @@ Omegon exposes structured tools for:
 - file reads/writes/edits
 - shell execution
 - web search
+- OpenAPI-backed project tools from `.omegon/openapi.toml`
 - git operations
 - date/time resolution
 - memory management
@@ -357,6 +358,7 @@ Common files:
 Project-local control surfaces include:
 - `AGENTS.md`
 - `.omegon-version`
+- `.omegon/openapi.toml`
 - `ai/memory/facts.jsonl`
 - `openspec/`
 - `docs/`

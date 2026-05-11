@@ -1,0 +1,61 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="OpenAPI Tools" description="Compile project OpenAPI specs into structured agent tools.">
+  <h1>OpenAPI Tools</h1>
+  <p>
+    Omegon can turn REST APIs into agent-callable tools from OpenAPI JSON or YAML.
+    Add a project-local <code>.omegon/openapi.toml</code>, restart the session, and matching
+    operations become structured tools alongside the built-in file, memory, search, and lifecycle tools.
+  </p>
+
+  <h2>Configuration</h2>
+  <pre><code>[linear]
+spec = "api/linear.openapi.yaml"
+auth = "bearer"
+secret = "LINEAR_API_KEY"
+read_only = true
+
+[internal]
+spec = "https://example.com/openapi.json"
+auth = "X-API-Key"
+secret = "INTERNAL_API_KEY"
+base_url_override = "https://staging.example.com"</code></pre>
+
+  <table>
+    <thead><tr><th>Field</th><th>Behavior</th></tr></thead>
+    <tbody>
+      <tr><td><code>spec</code></td><td>Local JSON/YAML path resolved from the project root, or an <code>http(s)</code> URL fetched at startup.</td></tr>
+      <tr><td><code>auth</code></td><td><code>bearer</code>, <code>basic</code>, or a custom header name.</td></tr>
+      <tr><td><code>secret</code></td><td>Environment variable containing the credential value.</td></tr>
+      <tr><td><code>base_url_override</code></td><td>Optional replacement for the OpenAPI server URL.</td></tr>
+      <tr><td><code>read_only</code></td><td>When true, only <code>GET</code> operations become tools.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Generated Tools</h2>
+  <ul>
+    <li>Tools are registered in the <code>openapi-tools</code> group.</li>
+    <li>Tool names use <code>api_&lt;config-name&gt;_&lt;operationId&gt;</code>, normalized to snake case.</li>
+    <li>Operations without <code>operationId</code> derive a name from method and path.</li>
+    <li>Path parameters, query parameters, and JSON request-body properties become tool arguments.</li>
+    <li><code>GET</code> operations are treated as inspection tools; other methods are treated as state-changing tools.</li>
+    <li>Responses are returned as text and truncated at 50 KB.</li>
+  </ul>
+
+  <h2>Safety</h2>
+  <p>
+    Treat OpenAPI tools like production API access. Use scoped API keys, prefer
+    <code>read_only = true</code> for inspection-only integrations, and do not store raw
+    credentials in <code>.omegon/openapi.toml</code>. The config parser accepts
+    <code>allow</code> and <code>confirm</code> fields for future policy work, but current
+    enforcement is limited to <code>read_only</code>.
+  </p>
+
+  <h2>When to Use This</h2>
+  <ul>
+    <li>Use OpenAPI tools when an existing REST API already has a spec and you want the agent to call it directly.</li>
+    <li>Use MCP when you already have an MCP server or need resources/prompts in addition to tools.</li>
+    <li>Use an extension when the integration needs custom process logic, widgets, resources, or long-running local behavior.</li>
+  </ul>
+</Docs>

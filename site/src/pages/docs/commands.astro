@@ -116,6 +116,7 @@ import Docs from "../../layouts/Docs.astro";
     <li><code>read</code> / <code>edit</code> / <code>write</code> / <code>bash</code> / <code>change</code> / <code>commit</code> — file and system operations with atomic edits and commits</li>
     <li><code>memory_store</code> / <code>memory_recall</code> / <code>memory_query</code> / <code>memory_episodes</code> — persistent project memory across sessions</li>
     <li><code>web_search</code> — multi-provider web search</li>
+    <li><code>api_*</code> — project REST API tools generated from <code>.omegon/openapi.toml</code> when configured</li>
     <li><code>codebase_search</code> — ranked discovery across code and project knowledge</li>
     <li><code>chronos</code> — authoritative date/time</li>
     <li><code>whoami</code> — auth status across development tools</li>
@@ -147,5 +148,6 @@ import Docs from "../../layouts/Docs.astro";
     <li><code>memory-advanced</code> — <code>memory_connect</code>, <code>memory_search_archive</code>, <code>memory_ingest_lifecycle</code></li>
     <li><code>model-control</code> — <code>set_model_tier</code>, <code>switch_to_offline_driver</code>, <code>set_thinking_level</code></li>
     <li><code>lifecycle-advanced</code> — <code>lifecycle_doctor</code>, <code>codebase_search</code>, <code>codebase_index</code></li>
+    <li><code>openapi-tools</code> — generated <code>api_*</code> tools for project-configured OpenAPI specs</li>
   </ul>
 </Docs>

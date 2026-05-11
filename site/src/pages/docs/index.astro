@@ -20,7 +20,7 @@ const downloadLabel = stats.downloadMB ? `~${stats.downloadMB}MB` : "a single";
     Omegon is {downloadLabel} Rust binary that provides a complete AI-assisted development
     environment. It connects to {stats.providerCount} inference providers through native Rust clients
     (no subprocess shims, no Node.js at runtime), manages persistent project memory
-    across sessions, decomposes work into parallel git worktree children, and tracks
+    across sessions, compiles project OpenAPI specs into agent tools, decomposes work into parallel git worktree children, and tracks
     design decisions in a knowledge graph — all from your terminal.
   </p>
   <p>
@@ -68,6 +68,7 @@ const downloadLabel = stats.downloadMB ? `~${stats.downloadMB}MB` : "a single";
     <li><strong>{stats.providerCount} Inference Providers</strong> — {stats.providerNames.join(", ")}. Native Rust clients with automatic failover.</li>
     <li><strong>Parallel Execution</strong> — Cleave tasks into parallel worktree children with automatic merge, conflict detection, and adversarial review.</li>
     <li><strong>Project Memory</strong> — Persistent facts, episodes, semantic recall, and knowledge graphs across sessions. Not a markdown file — a real memory system.</li>
+    <li><strong>OpenAPI Tools</strong> — Turn project REST APIs into structured tools from <code>.omegon/openapi.toml</code>.</li>
     <li><strong>Design Tree</strong> — knowledge graph tracking architecture decisions, dependencies, and implementation status.</li>
     <li><strong>OpenSpec Lifecycle</strong> — Spec-driven development: propose, spec, fast-forward, cleave, assess, archive.</li>
     <li><strong>Live Dashboard</strong> — Terminal TUI with a wrapped multiline editor, segment rendering with model tags, context and memory telemetry, plus a web dashboard over WebSocket.</li>
@@ -101,7 +102,7 @@ const downloadLabel = stats.downloadMB ? `~${stats.downloadMB}MB` : "a single";
     <tbody>
       <tr><td>Runtime</td><td>{stats.downloadMB ? `Single ~${stats.downloadMB} MB download` : "Single Rust binary"} ({stats.crateCount} crates)</td></tr>
       <tr><td>Providers</td><td>{stats.providerCount} inference + {stats.searchProviderCount} search, native Rust clients</td></tr>
-      <tr><td>Agent tools</td><td>{stats.toolFiles}+ structured tools (file ops, memory, design, search, codebase retrieval, and inference control)</td></tr>
+      <tr><td>Agent tools</td><td>{stats.toolFiles}+ structured tools (file ops, memory, OpenAPI APIs, design, search, codebase retrieval, and inference control)</td></tr>
       <tr><td>License</td><td>BSL 1.1 (converts to MIT on 2031-03-19)</td></tr>
     </tbody>
   </table>

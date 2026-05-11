@@ -8,6 +8,11 @@ import Docs from "../../layouts/Docs.astro";
     semantic search, episodic narratives, a knowledge graph with directional edges, working
     memory pinning, and automatic compaction — all surviving across sessions.
   </p>
+  <p>
+    Semantic recall uses the configured Ollama embedding endpoint when reachable. Builds compiled
+    with <code>local-embeddings</code> can also load a local ONNX sentence-transformer model; without
+    either backend, memory falls back to FTS5 keyword search.
+  </p>
 
   <h2>Architecture</h2>
   <ul>
@@ -69,5 +74,20 @@ import Docs from "../../layouts/Docs.astro";
     This file is git-tracked with <code>merge=union</code> in <code>.gitattributes</code>,
     allowing multiple branches to add facts without merge conflicts. SQLite databases
     are gitignored and rebuilt from the JSONL source of truth.
+  </p>
+
+  <h2>Embedding Backends</h2>
+  <table>
+    <thead><tr><th>Backend</th><th>How it is selected</th><th>Fallback</th></tr></thead>
+    <tbody>
+      <tr><td>Ollama embeddings</td><td>Configured profile or <code>OMEGON_EMBED_URL</code> / <code>OMEGON_EMBED_MODEL</code></td><td>Falls through if the endpoint probe fails</td></tr>
+      <tr><td>Local ONNX</td><td>Binary built with <code>local-embeddings</code> and model files at <code>~/.config/omegon/models/all-MiniLM-L6-v2/</code></td><td>Falls through if files are missing or model load fails</td></tr>
+      <tr><td>FTS5</td><td>Always available</td><td>Keyword recall only</td></tr>
+    </tbody>
+  </table>
+  <p>
+    The local ONNX path expects <code>model.onnx</code> and <code>tokenizer.json</code>. Override the
+    model name with <code>OMEGON_EMBED_LOCAL_MODEL</code> or the exact directory with
+    <code>OMEGON_EMBED_MODEL_DIR</code>.
   </p>
 </Docs>
