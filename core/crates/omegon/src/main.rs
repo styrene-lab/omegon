@@ -39,6 +39,8 @@ mod context;
 mod control_actions;
 mod control_runtime;
 mod embedding;
+#[cfg(feature = "local-embeddings")]
+mod local_embedding;
 pub mod extensions;
 pub mod features;
 mod first_run;
