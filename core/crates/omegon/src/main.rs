@@ -34,6 +34,7 @@ pub mod bus;
 mod cleave;
 mod cleave_smoke;
 mod clipboard;
+pub mod code_act;
 mod codex_config;
 mod context;
 mod control_actions;
