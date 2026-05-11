@@ -67,6 +67,10 @@ impl CodeActExecutor {
         Self { cwd, permitted: bypass || code_act }
     }
 
+    pub fn permitted(cwd: PathBuf) -> Self {
+        Self { cwd, permitted: true }
+    }
+
     pub fn build_prompt(&self, task: &str, context: Option<&str>) -> String {
         let mut prompt = String::with_capacity(2048);
         prompt.push_str("You are an autonomous coding agent operating in code-act mode.\n\n");

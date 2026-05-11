@@ -447,18 +447,31 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
 }
 
 fn glob_matches_any(operation_id: &str, patterns: &[String]) -> bool {
-    patterns.iter().any(|pattern| {
-        if pattern.contains('*') {
-            let parts: Vec<&str> = pattern.split('*').collect();
-            match parts.len() {
-                1 => operation_id == pattern,
-                2 => operation_id.starts_with(parts[0]) && operation_id.ends_with(parts[1]),
-                _ => operation_id.contains(parts[1]),
-            }
+    patterns.iter().any(|pattern| glob_match(operation_id, pattern))
+}
+
+fn glob_match(s: &str, pattern: &str) -> bool {
+    if !pattern.contains('*') {
+        return s == pattern;
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut pos = 0;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() { continue; }
+        if i == 0 {
+            if !s.starts_with(part) { return false; }
+            pos = part.len();
+        } else if i == parts.len() - 1 {
+            if !s[pos..].ends_with(part) { return false; }
+            return true;
         } else {
-            operation_id == pattern
+            match s[pos..].find(part) {
+                Some(idx) => pos += idx + part.len(),
+                None => return false,
+            }
         }
-    })
+    }
+    true
 }
 
 fn sanitize_prefix(name: &str) -> String {
@@ -701,5 +714,10 @@ paths:
         assert!(!glob_matches_any("list_pets", &["create_*".into()]));
         assert!(glob_matches_any("delete_customer", &["*_customer".into()]));
         assert!(glob_matches_any("show_pet_by_id", &["show_*".into()]));
+
+        assert!(glob_match("get_pet_by_id", "get_*_by_id"));
+        assert!(!glob_match("delete_pet_by_id", "get_*_by_id"));
+        assert!(glob_match("anything", "*"));
+        assert!(!glob_match("create_pet", "delete_*"));
     }
 }

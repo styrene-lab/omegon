@@ -542,6 +542,38 @@ fn heuristic_classifier_categorizes_correctly() {
 }
 
 #[test]
+fn execution_mode_parses_from_toml() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("sentry.toml");
+    std::fs::write(&path, r#"
+[sentry]
+[[task]]
+name = "scripted"
+prompt = "Run a data pipeline"
+execution_mode = "code-act"
+"#).unwrap();
+    let config = load_config(&path).unwrap();
+    assert_eq!(config.tasks[0].execution_mode.as_deref(), Some("code-act"));
+}
+
+#[test]
+fn execution_mode_absent_is_none() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("sentry.toml");
+    std::fs::write(&path, "[sentry]\n[[task]]\nname = \"t\"\nprompt = \"do it\"\n").unwrap();
+    let config = load_config(&path).unwrap();
+    assert!(config.tasks[0].execution_mode.is_none());
+}
+
+#[test]
+fn code_act_executor_permitted_bypasses_env_check() {
+    let tmp = tempfile::tempdir().unwrap();
+    let exec = crate::code_act::CodeActExecutor::permitted(tmp.path().to_path_buf());
+    let prompt = exec.build_prompt("test", None);
+    assert!(prompt.contains("bash(command: str)"));
+}
+
+#[test]
 fn routing_config_absent_parses_as_none() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("sentry.toml");

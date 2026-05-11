@@ -572,26 +572,62 @@ async fn run_code_act_task(
     cancel: &CancellationToken,
 ) -> anyhow::Result<TaskResult> {
     let start = Instant::now();
-    let executor = crate::code_act::CodeActExecutor::new(cwd.to_path_buf());
+    let executor = crate::code_act::CodeActExecutor::permitted(cwd.to_path_buf());
+    let mut total_tokens = 0u64;
 
-    let gen_prompt = executor.build_prompt(prompt, None);
-    let completion = crate::providers::quick_completion(model, &gen_prompt).await?;
+    let mut gen_prompt = executor.build_prompt(prompt, None);
+    let mut last_code = String::new();
 
-    let code = crate::code_act::CodeActExecutor::extract_code(&completion.text)
-        .ok_or_else(|| anyhow::anyhow!("LLM did not produce a code block"))?;
+    for attempt in 1..=3u32 {
+        if cancel.is_cancelled() {
+            anyhow::bail!("cancelled");
+        }
 
-    let result = executor.execute_script(&code, Some(timeout_secs), cancel.clone()).await?;
-    let duration = start.elapsed().as_secs();
+        let completion = crate::providers::quick_completion(model, &gen_prompt).await?;
+        total_tokens += completion.input_tokens + completion.output_tokens;
+
+        let code = match crate::code_act::CodeActExecutor::extract_code(&completion.text) {
+            Some(c) => c,
+            None => {
+                tracing::warn!(attempt, "code-act: LLM did not produce a code block");
+                if attempt < 3 {
+                    gen_prompt = executor.build_retry_prompt(
+                        prompt, &completion.text, "No Python code block found in response",
+                    );
+                    continue;
+                }
+                anyhow::bail!("LLM failed to produce a code block after {attempt} attempts");
+            }
+        };
+
+        last_code = code.clone();
+        let result = executor.execute_script(&code, Some(timeout_secs), cancel.clone()).await?;
+        let duration = start.elapsed().as_secs();
+
+        if result.is_error && attempt < 3 {
+            tracing::info!(attempt, "code-act: script failed, retrying with error context");
+            gen_prompt = executor.build_retry_prompt(prompt, &code, &result.output);
+            continue;
+        }
+
+        return Ok(TaskResult {
+            exit_code: result.exit_code,
+            summary: if result.is_error {
+                format!("code-act failed: {}", result.output.chars().take(500).collect::<String>())
+            } else {
+                result.output.chars().take(500).collect()
+            },
+            tokens_used: total_tokens,
+            duration_secs: duration,
+            session_id: format!("code-act-{}", super::file_board::uuid_v4()),
+        });
+    }
 
     Ok(TaskResult {
-        exit_code: result.exit_code,
-        summary: if result.is_error {
-            format!("code-act failed: {}", result.output.chars().take(500).collect::<String>())
-        } else {
-            result.output.chars().take(500).collect()
-        },
-        tokens_used: completion.input_tokens + completion.output_tokens,
-        duration_secs: duration,
+        exit_code: 1,
+        summary: "code-act exhausted retries".into(),
+        tokens_used: total_tokens,
+        duration_secs: start.elapsed().as_secs(),
         session_id: format!("code-act-{}", super::file_board::uuid_v4()),
     })
 }
