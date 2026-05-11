@@ -322,7 +322,7 @@ async fn execute_task_with_retry(
         }
     }
 
-    let (effective_model, classification) = resolve_model(spec.model.as_deref(), model, &spec.prompt, routing).await;
+    let (effective_model, classification) = resolve_model(spec.model.as_deref(), model, &spec.prompt, routing, state_db).await;
     let effective_cwd = spec.cwd.as_deref().unwrap_or(cwd);
     let max_turns = spec.max_turns.unwrap_or(30);
     let timeout_secs = spec.timeout_secs.unwrap_or(600);
@@ -490,6 +490,7 @@ async fn resolve_model<'a>(
     default_model: &'a str,
     task_prompt: &str,
     routing: &Option<Arc<RoutingConfig>>,
+    state_db: &StateDb,
 ) -> (String, Option<String>) {
     match spec_model {
         Some("auto") => {
@@ -497,9 +498,18 @@ async fn resolve_model<'a>(
                 let complexity = classify_task_complexity(&routing.prefilter_model, task_prompt).await;
                 let class_name = format!("{complexity:?}");
                 let model = match complexity {
-                    TaskComplexity::Simple | TaskComplexity::Moderate => {
+                    TaskComplexity::Simple => {
                         tracing::info!(routed = %routing.light_model, class = %class_name, "model routing");
                         routing.light_model.clone()
+                    }
+                    TaskComplexity::Moderate => {
+                        if should_escalate(&class_name, state_db) {
+                            tracing::info!(routed = %routing.heavy_model, class = %class_name, "model routing: adaptive escalation");
+                            routing.heavy_model.clone()
+                        } else {
+                            tracing::info!(routed = %routing.light_model, class = %class_name, "model routing");
+                            routing.light_model.clone()
+                        }
                     }
                     TaskComplexity::Complex => {
                         tracing::info!(routed = %routing.heavy_model, class = %class_name, "model routing");
@@ -514,6 +524,30 @@ async fn resolve_model<'a>(
         Some(explicit) => (explicit.to_string(), None),
         None => (default_model.to_string(), None),
     }
+}
+
+pub(crate) fn should_escalate(class_name: &str, state_db: &StateDb) -> bool {
+    let stats = match state_db.routing_stats() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    if stats.total < 10 {
+        return false;
+    }
+    for (class, total, successes, _tokens) in &stats.by_class {
+        if class == class_name && *total >= 5 {
+            let success_rate = *successes as f64 / *total as f64;
+            if success_rate < 0.7 {
+                tracing::info!(
+                    class = %class_name,
+                    success_rate = %format!("{:.0}%", success_rate * 100.0),
+                    "adaptive routing: escalating to heavy model"
+                );
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[derive(Debug)]

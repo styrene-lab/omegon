@@ -574,6 +574,57 @@ fn code_act_executor_permitted_bypasses_env_check() {
 }
 
 #[test]
+fn adaptive_escalation_triggers_on_low_success_rate() {
+    let state_db = StateDb::in_memory().unwrap();
+
+    for i in 0..10 {
+        state_db.record_routing_outcome(
+            &format!("task-{i}"), "Moderate", "light-model",
+            i < 3, 1000, 10,
+        ).unwrap();
+    }
+
+    assert!(
+        super::executor::should_escalate("Moderate", &state_db),
+        "should escalate when success rate is 30%"
+    );
+}
+
+#[test]
+fn adaptive_escalation_does_not_trigger_on_high_success_rate() {
+    let state_db = StateDb::in_memory().unwrap();
+
+    for i in 0..10 {
+        state_db.record_routing_outcome(
+            &format!("task-{i}"), "Moderate", "light-model",
+            i < 8, 1000, 10,
+        ).unwrap();
+    }
+
+    assert!(
+        !super::executor::should_escalate("Moderate", &state_db),
+        "should NOT escalate when success rate is 80%"
+    );
+}
+
+#[test]
+fn adaptive_escalation_requires_minimum_samples() {
+    let state_db = StateDb::in_memory().unwrap();
+
+    for i in 0..3 {
+        state_db.record_routing_outcome(
+            &format!("task-{i}"), "Moderate", "light-model",
+            false, 1000, 10,
+        ).unwrap();
+    }
+
+    assert!(
+        !super::executor::should_escalate("Moderate", &state_db),
+        "should NOT escalate with fewer than 10 total samples"
+    );
+}
+
+#[test]
 fn routing_config_absent_parses_as_none() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("sentry.toml");

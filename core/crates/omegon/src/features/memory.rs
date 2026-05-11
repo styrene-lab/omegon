@@ -55,6 +55,9 @@ pub struct MemoryFeature {
     /// When set, `SessionEnd` materializes facts and episodes to the vault
     /// and reinforces facts referenced by vault documents.
     codex_vault_path: Option<std::path::PathBuf>,
+    /// Model for session-end fact extraction. When set, SessionEnd uses
+    /// quick_completion to extract novel facts from the session summary.
+    extraction_model: Option<String>,
 }
 
 impl MemoryFeature {
@@ -70,7 +73,13 @@ impl MemoryFeature {
             last_context_hash: Mutex::new(0),
             context_dirty: AtomicBool::new(true), // force initial render
             codex_vault_path: None,
+            extraction_model: None,
         }
+    }
+
+    pub fn with_extraction_model(mut self, model: String) -> Self {
+        self.extraction_model = Some(model);
+        self
     }
 
     /// Set the Codex vault path for automatic materialization on session end.
@@ -145,6 +154,63 @@ impl MemoryFeature {
 }
 
 /// Spawn a non-blocking embedding generation task for a newly stored fact.
+async fn extract_and_store_facts(
+    model: &str,
+    summary: &str,
+    backend: &Arc<dyn MemoryBackend>,
+    mind: &str,
+    embed_svc: Option<&Arc<dyn EmbeddingService>>,
+) -> anyhow::Result<usize> {
+    let prompt = format!(
+        "Extract discrete, reusable facts from this session summary. \
+         Each fact should be a single sentence that would be useful context \
+         in a future conversation. Output one fact per line, no numbering, \
+         no bullets. Only include facts that are specific and actionable — \
+         skip generic observations. If there are no extractable facts, \
+         respond with exactly: NONE\n\n{summary}"
+    );
+
+    let result = crate::providers::quick_completion(model, &prompt).await
+        .map_err(|e| anyhow::anyhow!("extraction LLM call failed: {e}"))?;
+
+    let text = result.text.trim();
+    if text == "NONE" || text.is_empty() {
+        return Ok(0);
+    }
+
+    let mut stored = 0;
+    for line in text.lines() {
+        let fact_text = line.trim();
+        if fact_text.is_empty() || fact_text.len() < 10 {
+            continue;
+        }
+
+        let store_result = backend.store_fact(StoreFact {
+            mind: mind.to_string(),
+            content: fact_text.to_string(),
+            section: Section::Architecture,
+            source: Some("session-extraction".into()),
+            decay_profile: DecayProfileName::Standard,
+        }).await;
+
+        match store_result {
+            Ok(result) => {
+                if matches!(result.action, StoreAction::Stored) {
+                    if let Some(svc) = embed_svc {
+                        spawn_auto_embed(svc, backend, result.fact.id.clone(), fact_text.to_string());
+                    }
+                    stored += 1;
+                }
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "failed to store extracted fact");
+            }
+        }
+    }
+
+    Ok(stored)
+}
+
 fn spawn_auto_embed(
     embed_svc: &Arc<dyn EmbeddingService>,
     backend: &Arc<dyn MemoryBackend>,
@@ -848,11 +914,16 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                 turns,
                 tool_calls,
                 duration_secs,
-                ..
+                initial_prompt,
+                outcome_summary,
             } if *turns > 0 => {
                 let backend = self.backend.clone();
                 let mind = self.mind.clone();
                 let vault_path = self.codex_vault_path.clone();
+                let extraction_model = self.extraction_model.clone();
+                let embed_svc = self.embed_service.clone();
+                let prompt_text = initial_prompt.clone().unwrap_or_default();
+                let outcome_text = outcome_summary.clone().unwrap_or_default();
                 let (t, tc, dur) = (*turns, *tool_calls, *duration_secs);
                 if let Ok(handle) = tokio::runtime::Handle::try_current() {
                     std::thread::scope(|scope| {
@@ -888,7 +959,27 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                                         tracing::warn!("Session episode storage failed: {e}");
                                     }
 
-                                    // Materialize to Codex vault if configured
+                                    if let Some(ref model) = extraction_model {
+                                        if !prompt_text.is_empty() || !outcome_text.is_empty() {
+                                            let summary = format!(
+                                                "User asked: {}\n\nOutcome: {}",
+                                                if prompt_text.is_empty() { "(no prompt recorded)" } else { &prompt_text },
+                                                if outcome_text.is_empty() { "(no outcome recorded)" } else { &outcome_text },
+                                            );
+                                            match extract_and_store_facts(
+                                                model, &summary, &backend, &mind, embed_svc.as_ref(),
+                                            ).await {
+                                                Ok(count) if count > 0 => {
+                                                    tracing::info!(facts = count, "session-end fact extraction");
+                                                }
+                                                Err(e) => {
+                                                    tracing::debug!(error = %e, "session-end fact extraction failed");
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+
                                     if let Some(ref vp) = vault_path {
                                         // Import Codex-authored facts first
                                         match omegon_memory::vault_sync::import_from_vault(
