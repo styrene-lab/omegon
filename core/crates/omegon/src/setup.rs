@@ -431,10 +431,29 @@ impl AgentSetup {
                             model = svc.model_name(),
                             "embedding service available — hybrid search enabled"
                         );
-                        Some(std::sync::Arc::new(svc))
+                        Some(std::sync::Arc::new(svc) as std::sync::Arc<dyn omegon_memory::EmbeddingService>)
                     } else {
-                        tracing::info!("embedding service not reachable — FTS-only recall");
-                        None
+                        #[cfg(feature = "local-embeddings")]
+                        {
+                            match crate::local_embedding::LocalEmbeddingService::from_default_dir() {
+                                Ok(local_svc) => {
+                                    tracing::info!(
+                                        model = local_svc.model_name(),
+                                        "local ONNX embedding service loaded — hybrid search enabled"
+                                    );
+                                    Some(std::sync::Arc::new(local_svc) as std::sync::Arc<dyn omegon_memory::EmbeddingService>)
+                                }
+                                Err(_) => {
+                                    tracing::info!("embedding service not reachable and no local model — FTS-only recall");
+                                    None
+                                }
+                            }
+                        }
+                        #[cfg(not(feature = "local-embeddings"))]
+                        {
+                            tracing::info!("embedding service not reachable — FTS-only recall");
+                            None
+                        }
                     }
                 }; // end if is_child else probe
 

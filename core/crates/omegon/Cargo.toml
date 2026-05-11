@@ -86,9 +86,15 @@ styrene-mqtt = "0.1.0"
 cron = "0.16"
 notify = "8.0"
 
+# Local embedding (optional — adds ~15MB ONNX Runtime to binary)
+ort = { version = "2.0.0-rc.12", optional = true, features = ["ndarray"] }
+tokenizers = { version = "0.23", optional = true, default-features = false, features = ["onig"] }
+ndarray = { version = "0.17", optional = true }
+
 [features]
 default = []
 nex = []
+local-embeddings = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
 
 [dev-dependencies]
 insta = "1.46"
