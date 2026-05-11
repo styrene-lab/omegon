@@ -28,6 +28,7 @@ For user-facing docs, edit `site/src/pages/docs/` and the command snippets in `s
 - `docs/sentry.md`: long-running task executor, triggers, budgets, and auto routing.
 - `docs/n8n-sentry-submission.md`: planned external workflow submission API for n8n, Flynt, Auspex, and future protocol adapters.
 - `docs/omegon-browser-extension.md`: native browser automation extension backed by Vercel agent-browser.
+- `docs/armory-discovery.md`: unified discovery model for browsing upstream extensions, plugins, skills, and catalog agents.
 - `docs/project-memory.md`: project memory behavior.
 - `docs/openapi-tools.md`: project-local OpenAPI specs compiled into agent tools.
 

@@ -500,6 +500,7 @@ pub(crate) enum CanonicalSlashCommand {
     ExtensionEnable(String),
     ExtensionDisable(String),
     ExtensionSearch(Option<String>),
+    ArmoryBrowse(Option<String>),
     PersonaList,
     CatalogView,
     CatalogInstall,
@@ -693,6 +694,23 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 None // "off" and <name> are handled directly in TUI handler
             }
         },
+        "armory" => {
+            if args.is_empty() || args == "browse" || args == "list" {
+                Some(CanonicalSlashCommand::ArmoryBrowse(None))
+            } else if let Some(query) = args.strip_prefix("browse ") {
+                let query = query.trim();
+                Some(CanonicalSlashCommand::ArmoryBrowse(
+                    if query.is_empty() { None } else { Some(query.to_string()) },
+                ))
+            } else if let Some(query) = args.strip_prefix("search ") {
+                let query = query.trim();
+                Some(CanonicalSlashCommand::ArmoryBrowse(
+                    if query.is_empty() { None } else { Some(query.to_string()) },
+                ))
+            } else {
+                Some(CanonicalSlashCommand::ArmoryBrowse(Some(args.to_string())))
+            }
+        }
         "catalog" => {
             if args.is_empty() || args == "list" {
                 Some(CanonicalSlashCommand::CatalogView)
@@ -4365,6 +4383,11 @@ impl App {
             "plugin",
             "manage armory plugins (personas, tones, tools)",
             &["list", "install", "remove", "update"],
+        ),
+        (
+            "armory",
+            "browse extensions, plugins, skills, and agents",
+            &["browse", "search", "list"],
         ),
         (
             "catalog",
@@ -8641,6 +8664,24 @@ mod slash_command_parsing_tests {
         assert!(canonical_slash_command("persona", "my-persona").is_none());
     }
 
+    // ── Armory ────────────────────────────────────────────
+
+    #[test]
+    fn armory_browse_defaults_to_all() {
+        assert!(matches!(
+            canonical_slash_command("armory", ""),
+            Some(CanonicalSlashCommand::ArmoryBrowse(None))
+        ));
+    }
+
+    #[test]
+    fn armory_search_uses_query() {
+        match canonical_slash_command("armory", "search browser") {
+            Some(CanonicalSlashCommand::ArmoryBrowse(Some(query))) => assert_eq!(query, "browser"),
+            other => panic!("expected ArmoryBrowse(Some), got {other:?}"),
+        }
+    }
+
     // ── Catalog ───────────────────────────────────────────
 
     #[test]
@@ -8684,6 +8725,16 @@ mod slash_command_parsing_tests {
             .expect("/catalog command must be in COMMANDS array");
         assert!(cat.2.contains(&"install"));
         assert!(cat.2.contains(&"remove"));
+    }
+
+    #[test]
+    fn commands_array_includes_armory() {
+        let armory = App::COMMANDS
+            .iter()
+            .find(|(name, _, _)| *name == "armory")
+            .expect("/armory command must be in COMMANDS array");
+        assert!(armory.2.contains(&"browse"));
+        assert!(armory.2.contains(&"search"));
     }
 
     #[test]

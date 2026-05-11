@@ -360,6 +360,7 @@ impl Agent for OmegonAcpAgent {
                             AvailableCommand::new("posture", "Show or set behavioral posture"),
                             AvailableCommand::new("skills", "Manage skills (list, get, create, delete)"),
                             AvailableCommand::new("extension", "Manage extensions (list, install, enable, search)"),
+                            AvailableCommand::new("armory", "Browse upstream extensions, plugins, skills, and agents"),
                             AvailableCommand::new("persona", "Manage personas (list, create, switch)"),
                             AvailableCommand::new("catalog", "Browse agent catalog (list, install, remove)"),
                             AvailableCommand::new("secrets", "Show configured secrets (no values)"),
@@ -1096,6 +1097,24 @@ impl OmegonAcpAgent {
 
             // ── Discovery (armory + catalog) ──────────────────────
 
+            "armory/browse" | "armory/search" => {
+                let kind = params
+                    .get("kind")
+                    .and_then(|v| v.as_str())
+                    .map(parse_armory_kind)
+                    .transpose()?
+                    .unwrap_or(crate::armory::ArmoryKind::All);
+                let query = params.get("query").and_then(|v| v.as_str());
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let items = crate::armory::browse(crate::armory::BrowseOptions::new(
+                    kind,
+                    query,
+                    &cwd,
+                ))
+                .await?;
+                Ok(serde_json::json!({ "items": items }))
+            }
+
             "extensions/search" => {
                 let query = params.get("query").and_then(|v| v.as_str());
                 let client = reqwest::Client::builder()
@@ -1777,7 +1796,8 @@ impl OmegonAcpAgent {
                     _ => format!("Catalog subcommand: {args}. Use the **catalog/{args}** RPC for structured operations."),
                 }
             }
-            "/help" => "Commands: /model /thinking /posture /skills /extension /persona /catalog /secrets /status /login /help\n\nFull CRUD is available via RPC ext_methods (skills/*, extensions/*, personas/*, catalog/*).".into(),
+            "/armory" => "Use the **armory/browse** RPC for structured upstream discovery across extensions, plugins, skills, and agents.\nParameters: kind, query.".into(),
+            "/help" => "Commands: /model /thinking /posture /skills /extension /armory /persona /catalog /secrets /status /login /help\n\nFull CRUD is available via RPC ext_methods (armory/*, skills/*, extensions/*, personas/*, catalog/*).".into(),
             _ => format!("Unknown: {cmd}. Type /help"),
         }
     }
@@ -1802,6 +1822,19 @@ fn mcp_config(
         docker_mcp: None,
         styrene_dest: None,
         timeout_secs: 30,
+    }
+}
+
+fn parse_armory_kind(kind: &str) -> anyhow::Result<crate::armory::ArmoryKind> {
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "" | "all" => Ok(crate::armory::ArmoryKind::All),
+        "extension" | "extensions" => Ok(crate::armory::ArmoryKind::Extensions),
+        "plugin" | "plugins" => Ok(crate::armory::ArmoryKind::Plugins),
+        "skill" | "skills" => Ok(crate::armory::ArmoryKind::Skills),
+        "agent" | "agents" | "catalog" => Ok(crate::armory::ArmoryKind::Agents),
+        other => anyhow::bail!(
+            "invalid armory kind '{other}' (expected all, extensions, plugins, skills, or agents)"
+        ),
     }
 }
 

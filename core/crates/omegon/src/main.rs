@@ -59,6 +59,7 @@ mod usage;
 mod workspace;
 
 mod agent_manifest;
+mod armory;
 mod bundle_verify;
 mod catalog;
 mod pkl_modules;
@@ -384,6 +385,12 @@ enum Commands {
         action: ExtensionAction,
     },
 
+    /// Browse the upstream Armory for extensions, plugins, skills, and agents.
+    Armory {
+        #[command(subcommand)]
+        action: ArmoryAction,
+    },
+
     /// Manage secrets — set, list, delete.
     Secret {
         #[command(subcommand)]
@@ -649,6 +656,32 @@ enum CatalogAction {
     Remove {
         /// Agent ID (e.g., "styrene.coding-agent").
         id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ArmoryAction {
+    /// Browse upstream Armory inventory.
+    Browse {
+        /// Filter by kind.
+        #[arg(long, value_enum, default_value_t = armory::ArmoryKind::All)]
+        kind: armory::ArmoryKind,
+        /// Search query matching id, name, description, category, or manifest id.
+        query: Option<String>,
+        /// Emit JSON instead of a terminal summary.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Search upstream Armory inventory.
+    Search {
+        /// Search query matching id, name, description, category, or manifest id.
+        query: String,
+        /// Filter by kind.
+        #[arg(long, value_enum, default_value_t = armory::ArmoryKind::All)]
+        kind: armory::ArmoryKind,
+        /// Emit JSON instead of a terminal summary.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1063,6 +1096,17 @@ async fn main() -> anyhow::Result<()> {
                 ExtensionAction::Update { name } => extension_cli::update(name.as_deref())?,
                 ExtensionAction::Enable { name } => extension_cli::enable(name)?,
                 ExtensionAction::Disable { name } => extension_cli::disable(name)?,
+            }
+            Ok(())
+        }
+        Some(Commands::Armory { ref action }) => {
+            match action {
+                ArmoryAction::Browse { kind, query, json } => {
+                    armory::cmd_browse(*kind, query.as_deref(), *json, &cli.cwd).await?
+                }
+                ArmoryAction::Search { query, kind, json } => {
+                    armory::cmd_browse(*kind, Some(query), *json, &cli.cwd).await?
+                }
             }
             Ok(())
         }

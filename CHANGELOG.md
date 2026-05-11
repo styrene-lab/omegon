@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- **Unified Armory discovery** — added `omegon armory browse/search`, `/armory`, and `armory/browse` ACP discovery across upstream extensions, Armory plugin manifests, skills, and catalog agents, with installed-state markers and JSON output for UI consumers.
 - **`omegon-browser` extension package** — added a native extension wrapper around Vercel `agent-browser`, with browser status, open, snapshot, click, fill, wait, get, screenshot, and batch tools plus domain allowlist/output limit controls. Release packaging now emits `omegon-browser-*` extension archives for Armory installs.
 - **Extension config bootstrap** — native and OCI extensions now receive typed manifest config defaults plus persisted operator config over `bootstrap_config` during startup.
 

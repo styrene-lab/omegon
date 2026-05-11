@@ -114,6 +114,7 @@ pub enum ControlRequest {
     ExtensionEnable { name: String },
     ExtensionDisable { name: String },
     ExtensionSearch { query: Option<String> },
+    ArmoryBrowse { query: Option<String> },
     CatalogView,
     CatalogInstall,
     CatalogRemove { id: String },
@@ -277,6 +278,9 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::ExtensionSearch(query) => {
             ControlRequest::ExtensionSearch { query: query.clone() }
         }
+        crate::tui::CanonicalSlashCommand::ArmoryBrowse(query) => {
+            ControlRequest::ArmoryBrowse { query: query.clone() }
+        }
         crate::tui::CanonicalSlashCommand::PersonaList => ControlRequest::PersonaList,
         crate::tui::CanonicalSlashCommand::CatalogView => ControlRequest::CatalogView,
         crate::tui::CanonicalSlashCommand::CatalogInstall => ControlRequest::CatalogInstall,
@@ -354,6 +358,7 @@ async fn try_stateless_control(
         ControlRequest::ExtensionEnable { name } => extension_enable_response(name).await,
         ControlRequest::ExtensionDisable { name } => extension_disable_response(name).await,
         ControlRequest::ExtensionSearch { query } => extension_search_response(query.as_deref()).await,
+        ControlRequest::ArmoryBrowse { query } => armory_browse_response(query.as_deref()).await,
         ControlRequest::CatalogView => catalog_view_response().await,
         ControlRequest::CatalogInstall => catalog_install_response().await,
         ControlRequest::CatalogRemove { id } => catalog_remove_response(id).await,
@@ -3399,6 +3404,26 @@ pub async fn extension_search_response(query: Option<&str>) -> SlashCommandRespo
         Err(e) => SlashCommandResponse {
             accepted: false,
             output: Some(format!("Could not reach armory: {e}")),
+        },
+    }
+}
+
+pub async fn armory_browse_response(query: Option<&str>) -> SlashCommandResponse {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    match crate::armory::browse(crate::armory::BrowseOptions::new(
+        crate::armory::ArmoryKind::All,
+        query,
+        &cwd,
+    ))
+    .await
+    {
+        Ok(items) => SlashCommandResponse {
+            accepted: true,
+            output: Some(crate::armory::render_items(&items)),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("Could not browse armory: {err}")),
         },
     }
 }
