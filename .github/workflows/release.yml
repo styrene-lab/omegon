@@ -86,6 +86,16 @@ jobs:
             cargo build --release --target ${{ matrix.target }} -p omegon
           fi
 
+      - name: Build omegon-browser extension
+        env:
+          RUSTFLAGS: ${{ matrix.static && '-C target-feature=+crt-static' || '' }}
+        run: |
+          if [ "${{ matrix.zigbuild }}" = "true" ]; then
+            cargo zigbuild --manifest-path extensions/omegon-browser/Cargo.toml --release --target ${{ matrix.target }}
+          else
+            cargo build --manifest-path extensions/omegon-browser/Cargo.toml --release --target ${{ matrix.target }}
+          fi
+
       - name: Strip binary
         run: |
           BINARY="target/${{ matrix.target }}/release/omegon"
@@ -93,6 +103,14 @@ jobs:
             llvm-strip "$BINARY"
           elif command -v strip >/dev/null 2>&1; then
             strip "$BINARY" 2>/dev/null || true
+          fi
+          EXT_BINARY="extensions/omegon-browser/target/${{ matrix.target }}/release/omegon-browser"
+          if [ -f "$EXT_BINARY" ]; then
+            if command -v llvm-strip >/dev/null 2>&1; then
+              llvm-strip "$EXT_BINARY"
+            elif command -v strip >/dev/null 2>&1; then
+              strip "$EXT_BINARY" 2>/dev/null || true
+            fi
           fi
 
       - name: Import Apple signing certificate
@@ -157,15 +175,26 @@ jobs:
           ARCHIVE="omegon-${VERSION}-${{ matrix.target }}.${{ matrix.archive }}"
           BINARY="target/${{ matrix.target }}/release/omegon"
           tar czf "$ARCHIVE" -C "$(dirname $BINARY)" omegon
+          EXT_ARCHIVE="omegon-browser-${VERSION}-${{ matrix.target }}.${{ matrix.archive }}"
+          EXT_BINARY="extensions/omegon-browser/target/${{ matrix.target }}/release/omegon-browser"
+          EXT_PACKAGE="$RUNNER_TEMP/omegon-browser-package"
+          rm -rf "$EXT_PACKAGE"
+          mkdir -p "$EXT_PACKAGE/target/release"
+          cp extensions/omegon-browser/manifest.toml "$EXT_PACKAGE/manifest.toml"
+          cp "$EXT_BINARY" "$EXT_PACKAGE/target/release/omegon-browser"
+          tar czf "$EXT_ARCHIVE" -C "$EXT_PACKAGE" manifest.toml target
           echo "ARCHIVE=$ARCHIVE" >> $GITHUB_ENV
+          echo "EXT_ARCHIVE=$EXT_ARCHIVE" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Generate SHA256 checksum
         run: |
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+            sha256sum "$EXT_ARCHIVE" > "$EXT_ARCHIVE.sha256"
           else
             shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+            shasum -a 256 "$EXT_ARCHIVE" > "$EXT_ARCHIVE.sha256"
           fi
 
       - name: Upload build artifact
@@ -175,6 +204,8 @@ jobs:
           path: |
             ${{ env.ARCHIVE }}
             ${{ env.ARCHIVE }}.sha256
+            ${{ env.EXT_ARCHIVE }}
+            ${{ env.EXT_ARCHIVE }}.sha256
 
   # ── Extended build (Linux ARM — slow cross-compile) ────────────
   # Runs in parallel but does not block release publication.
@@ -201,6 +232,9 @@ jobs:
       - name: Build release binary
         run: cargo zigbuild --release --target aarch64-unknown-linux-gnu -p omegon
 
+      - name: Build omegon-browser extension
+        run: cargo zigbuild --manifest-path extensions/omegon-browser/Cargo.toml --release --target aarch64-unknown-linux-gnu
+
       - name: Strip binary
         run: |
           BINARY="target/aarch64-unknown-linux-gnu/release/omegon"
@@ -209,6 +243,12 @@ jobs:
           elif command -v strip >/dev/null 2>&1; then
             strip "$BINARY" 2>/dev/null || true
           fi
+          EXT_BINARY="extensions/omegon-browser/target/aarch64-unknown-linux-gnu/release/omegon-browser"
+          if command -v llvm-strip >/dev/null 2>&1; then
+            llvm-strip "$EXT_BINARY"
+          elif command -v strip >/dev/null 2>&1; then
+            strip "$EXT_BINARY" 2>/dev/null || true
+          fi
 
       - name: Create archive
         run: |
@@ -216,11 +256,22 @@ jobs:
           ARCHIVE="omegon-${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
           BINARY="target/aarch64-unknown-linux-gnu/release/omegon"
           tar czf "$ARCHIVE" -C "$(dirname $BINARY)" omegon
+          EXT_ARCHIVE="omegon-browser-${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
+          EXT_BINARY="extensions/omegon-browser/target/aarch64-unknown-linux-gnu/release/omegon-browser"
+          EXT_PACKAGE="$RUNNER_TEMP/omegon-browser-package"
+          rm -rf "$EXT_PACKAGE"
+          mkdir -p "$EXT_PACKAGE/target/release"
+          cp extensions/omegon-browser/manifest.toml "$EXT_PACKAGE/manifest.toml"
+          cp "$EXT_BINARY" "$EXT_PACKAGE/target/release/omegon-browser"
+          tar czf "$EXT_ARCHIVE" -C "$EXT_PACKAGE" manifest.toml target
           echo "ARCHIVE=$ARCHIVE" >> $GITHUB_ENV
+          echo "EXT_ARCHIVE=$EXT_ARCHIVE" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Generate SHA256 checksum
-        run: sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+        run: |
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+          sha256sum "$EXT_ARCHIVE" > "$EXT_ARCHIVE.sha256"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -229,6 +280,8 @@ jobs:
           path: |
             ${{ env.ARCHIVE }}
             ${{ env.ARCHIVE }}.sha256
+            ${{ env.EXT_ARCHIVE }}
+            ${{ env.EXT_ARCHIVE }}.sha256
 
   live-upstream-smoke:
     name: Live upstream smoke (non-blocking)
@@ -394,7 +447,7 @@ jobs:
       - name: Sign release artifacts
         run: |
           cd artifacts
-          for archive in omegon-*.tar.gz; do
+          for archive in *.tar.gz; do
             echo "Signing $archive..."
             cosign sign-blob --yes "$archive" \
               --output-signature "${archive}.sig" \
@@ -441,8 +494,10 @@ jobs:
           fi
 
           # Collect asset files
-          ASSET_FILES=(artifacts/omegon-*.tar.gz artifacts/omegon-*.tar.gz.sha256)
-          ASSET_FILES+=(artifacts/omegon-*.tar.gz.sig artifacts/omegon-*.tar.gz.pem)
+          ASSET_FILES=(artifacts/omegon-[0-9]*.tar.gz artifacts/omegon-[0-9]*.tar.gz.sha256)
+          ASSET_FILES+=(artifacts/omegon-[0-9]*.tar.gz.sig artifacts/omegon-[0-9]*.tar.gz.pem)
+          ASSET_FILES+=(artifacts/omegon-browser-*.tar.gz artifacts/omegon-browser-*.tar.gz.sha256)
+          ASSET_FILES+=(artifacts/omegon-browser-*.tar.gz.sig artifacts/omegon-browser-*.tar.gz.pem)
           ASSET_FILES+=(artifacts/checksums.sha256 artifacts/release-manifest.json)
           if [ "$IS_NIGHTLY" = "false" ]; then
             ASSET_FILES+=(artifacts/omegon-sbom.cdx.json artifacts/omegon-sbom.cdx.json.sig)

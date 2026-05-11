@@ -425,11 +425,11 @@ pub async fn spawn_from_manifest(
     match manifest.runtime {
         RuntimeConfig::Native { .. } => {
             let binary = manifest.native_binary_path(ext_dir)?;
-            spawn_native(&manifest, binary, widgets, state, resolved_secrets).await
+            spawn_native(&manifest, ext_dir, binary, widgets, state, resolved_secrets).await
         }
         RuntimeConfig::Oci { .. } => {
             let image = manifest.oci_image()?;
-            spawn_container(&manifest, &image, widgets, state, resolved_secrets).await
+            spawn_container(&manifest, ext_dir, &image, widgets, state, resolved_secrets).await
         }
     }
 }
@@ -454,9 +454,12 @@ fn clean_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Comman
 /// Returns handles with `next_id` advanced past the handshake, and the tool list.
 async fn handshake(
     handles: &mut ProcessHandles,
-    name: &str,
+    manifest: &ExtensionManifest,
+    ext_dir: &Path,
     resolved_secrets: &[(String, String)],
 ) -> Result<Vec<ToolDefinition>> {
+    let name = &manifest.extension.name;
+
     // 1. Discover tools
     let tools: Vec<ToolDefinition> = handles
         .rpc_call("get_tools", json!({}))
@@ -495,11 +498,79 @@ async fn handshake(
         }
     }
 
+    // 3. Deliver typed config defaults + persisted operator values.
+    // Values are delivered over RPC after process start so extension config
+    // stays in the same channel as secrets and never depends on inherited env.
+    let config = resolved_config(manifest, ext_dir)?;
+    if !config.is_empty() {
+        match handles
+            .rpc_call("bootstrap_config", Value::Object(config))
+            .await
+        {
+            Ok(_) => tracing::debug!(extension = name, "bootstrap_config delivered"),
+            Err(e) => {
+                tracing::warn!(
+                    extension = name,
+                    error = %e,
+                    "bootstrap_config delivery failed"
+                );
+            }
+        }
+    }
+
     Ok(tools)
+}
+
+fn resolved_config(
+    manifest: &ExtensionManifest,
+    ext_dir: &Path,
+) -> Result<serde_json::Map<String, Value>> {
+    let mut config = serde_json::Map::new();
+    let stored = config_store::read_config(ext_dir)?;
+
+    for (name, field) in &manifest.config {
+        if let Some(default) = &field.default {
+            config.insert(name.clone(), config_value_to_json(field, default));
+        } else if field.required && !stored.contains_key(name) {
+            return Err(anyhow!(
+                "extension '{}' requires config value '{}'. \
+                 Configure it with the extension settings UI or ACP config RPC.",
+                manifest.extension.name,
+                name
+            ));
+        }
+    }
+
+    for (name, value) in stored {
+        if let Some(field) = manifest.config.get(&name) {
+            config_store::validate_field(field, &value)?;
+            config.insert(name, config_value_to_json(field, &value));
+        } else {
+            config.insert(name, Value::String(value));
+        }
+    }
+
+    Ok(config)
+}
+
+fn config_value_to_json(field: &omegon_extension::ConfigField, value: &str) -> Value {
+    use omegon_extension::ConfigFieldType;
+
+    match field.field_type {
+        ConfigFieldType::Boolean => Value::Bool(value == "true"),
+        ConfigFieldType::Number => value
+            .parse::<serde_json::Number>()
+            .map(Value::Number)
+            .unwrap_or_else(|_| Value::String(value.to_string())),
+        ConfigFieldType::String | ConfigFieldType::Enum | ConfigFieldType::Text => {
+            Value::String(value.to_string())
+        }
+    }
 }
 
 async fn spawn_native(
     manifest: &ExtensionManifest,
+    ext_dir: &Path,
     binary: PathBuf,
     widgets: Vec<WidgetDeclaration>,
     state: ExtensionState,
@@ -516,7 +587,7 @@ async fn spawn_native(
     let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
     let mut handles = ProcessHandles::new(stdin, stdout);
 
-    let tools = handshake(&mut handles, &manifest.extension.name, resolved_secrets).await?;
+    let tools = handshake(&mut handles, manifest, ext_dir, resolved_secrets).await?;
 
     tracing::info!(
         name = %manifest.extension.name,
@@ -577,6 +648,7 @@ async fn spawn_native(
 
 async fn spawn_container(
     manifest: &ExtensionManifest,
+    ext_dir: &Path,
     image: &str,
     widgets: Vec<WidgetDeclaration>,
     state: ExtensionState,
@@ -593,7 +665,7 @@ async fn spawn_container(
     let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
     let mut handles = ProcessHandles::new(stdin, stdout);
 
-    let tools = handshake(&mut handles, &manifest.extension.name, resolved_secrets).await?;
+    let tools = handshake(&mut handles, manifest, ext_dir, resolved_secrets).await?;
 
     tracing::info!(
         name = %manifest.extension.name,
@@ -647,6 +719,8 @@ async fn spawn_container(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omegon_extension::{ConfigField, ConfigFieldType};
+    use std::collections::HashMap;
 
     #[test]
     fn extension_manifest_paths() {
@@ -690,6 +764,77 @@ mod tests {
                     && !var.contains("PASSWORD"),
                 "SAFE_INHERIT_ENVS contains potentially secret var: {var}"
             );
+        }
+    }
+
+    #[test]
+    fn resolved_config_applies_defaults_and_stored_overrides() {
+        let temp = tempfile::tempdir().unwrap();
+        let manifest = test_manifest(HashMap::from([
+            (
+                "agent_browser_binary".to_string(),
+                config_field(ConfigFieldType::String, Some("agent-browser"), false),
+            ),
+            (
+                "max_output".to_string(),
+                config_field(ConfigFieldType::Number, Some("50000"), false),
+            ),
+        ]));
+        config_store::write_config_value(temp.path(), "max_output", "2000").unwrap();
+
+        let config = resolved_config(&manifest, temp.path()).unwrap();
+
+        assert_eq!(
+            config.get("agent_browser_binary"),
+            Some(&Value::String("agent-browser".to_string()))
+        );
+        assert_eq!(config.get("max_output"), Some(&Value::Number(2000.into())));
+    }
+
+    #[test]
+    fn resolved_config_requires_missing_required_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let manifest = test_manifest(HashMap::from([(
+            "required_value".to_string(),
+            config_field(ConfigFieldType::String, None, true),
+        )]));
+
+        let err = resolved_config(&manifest, temp.path()).unwrap_err();
+        assert!(err.to_string().contains("required_value"));
+    }
+
+    fn config_field(
+        field_type: ConfigFieldType,
+        default: Option<&str>,
+        required: bool,
+    ) -> ConfigField {
+        ConfigField {
+            field_type,
+            label: "Test".to_string(),
+            description: String::new(),
+            required,
+            default: default.map(ToString::to_string),
+            pattern: None,
+            placeholder: None,
+            values: Vec::new(),
+        }
+    }
+
+    fn test_manifest(config: HashMap<String, ConfigField>) -> ExtensionManifest {
+        ExtensionManifest {
+            extension: manifest::ExtensionMetadata {
+                name: "test-extension".to_string(),
+                version: "0.1.0".to_string(),
+                description: String::new(),
+            },
+            runtime: RuntimeConfig::Native {
+                binary: "test-extension".to_string(),
+            },
+            startup: manifest::StartupConfig::default(),
+            widgets: HashMap::new(),
+            secrets: manifest::SecretsConfig::default(),
+            mcp: None,
+            config,
         }
     }
 }

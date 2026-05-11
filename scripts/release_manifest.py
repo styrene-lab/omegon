@@ -49,6 +49,7 @@ def parse_checksums(checksums_path: Path) -> dict[str, dict[str, str]]:
                 candidate
                 for candidate in TARGETS
                 if archive_name.endswith(f"-{candidate}.tar.gz")
+                and not archive_name.startswith("omegon-browser-")
             ),
             None,
         )

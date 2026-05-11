@@ -25,6 +25,7 @@ class ReleaseManifestTests(unittest.TestCase):
             checksums = tmp / "checksums.sha256"
             checksums.write_text(textwrap.dedent("""\
                 a1 omegon-0.15.9-aarch64-apple-darwin.tar.gz
+                ext1 omegon-browser-0.15.9-aarch64-apple-darwin.tar.gz
                 b2 omegon-0.15.9-x86_64-apple-darwin.tar.gz
                 c3 omegon-0.15.9-aarch64-unknown-linux-gnu.tar.gz
                 d4 omegon-0.15.9-x86_64-unknown-linux-gnu.tar.gz
@@ -52,6 +53,7 @@ class ReleaseManifestTests(unittest.TestCase):
             self.assertEqual(manifest["channel"], "stable")
             self.assertEqual(manifest["commit"], "deadbeef")
             self.assertEqual(len(manifest["assets"]), 4)
+            self.assertEqual(manifest["assets"][0]["sha256"], "a1")
             self.assertEqual(
                 manifest["assets"][0]["url"],
                 "https://github.com/styrene-lab/omegon/releases/download/v0.15.9/omegon-0.15.9-aarch64-apple-darwin.tar.gz",

@@ -345,6 +345,16 @@ omegon extension install https://github.com/styrene-lab/scry.git
 
 Tools: `generate`, `refine`, `upscale`, `list_models`, `search_models`, `download_model` — [GitHub](https://github.com/styrene-lab/scry)
 
+### Omegon Browser — Browser Automation
+
+Native extension wrapper around Vercel `agent-browser` for controlled browser automation, snapshots, clicks, form fills, waits, screenshots, and command batches.
+
+```sh
+omegon extension install omegon-browser
+```
+
+Tools: `browser_status`, `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_wait`, `browser_get`, `browser_screenshot`, `browser_batch`
+
 ## Manifest Reference
 
 Required sections in `manifest.toml`:

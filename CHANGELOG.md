@@ -16,6 +16,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- **`omegon-browser` extension package** — added a native extension wrapper around Vercel `agent-browser`, with browser status, open, snapshot, click, fill, wait, get, screenshot, and batch tools plus domain allowlist/output limit controls. Release packaging now emits `omegon-browser-*` extension archives for Armory installs.
+- **Extension config bootstrap** — native and OCI extensions now receive typed manifest config defaults plus persisted operator config over `bootstrap_config` during startup.
+
 ### Changed
 
 - **Documentation refresh for current Rust-native surfaces** — updated the README, contributor guide, extension docs, site install/extensions/contributing pages, and docs map to reflect current CLI commands, workspace crates, `just link` behavior, extension `execute_tool` RPC, and Linux Homebrew glibc caveats.

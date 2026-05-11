@@ -1,0 +1,37 @@
+[extension]
+name = "omegon-browser"
+version = "0.1.0"
+description = "Browser automation tools backed by Vercel agent-browser"
+
+[runtime]
+type = "native"
+binary = "target/release/omegon-browser"
+
+[startup]
+ping_method = "get_tools"
+timeout_ms = 5000
+
+[config.agent_browser_binary]
+type = "string"
+label = "agent-browser binary"
+description = "Path or executable name for the Vercel agent-browser CLI."
+default = "agent-browser"
+placeholder = "agent-browser"
+
+[config.default_session]
+type = "string"
+label = "Default session name"
+description = "Optional persistent browser session used when a tool call does not provide session_name."
+required = false
+
+[config.allowed_domains]
+type = "string"
+label = "Allowed domains"
+description = "Comma-separated domain allowlist passed to agent-browser. Tool calls may also provide allowed_domains."
+required = false
+
+[config.max_output]
+type = "number"
+label = "Maximum output characters"
+description = "Maximum page output characters returned by agent-browser."
+default = "50000"
