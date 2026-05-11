@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use super::board::TaskBoard;
 use super::state_db::StateDb;
 use super::types::{TaskError, TaskResult, Trigger};
-use super::BudgetConfig;
+use super::{BudgetConfig, RoutingConfig};
 use crate::triggers::TriggerEvent;
 
 const MAX_RETRIES: u32 = 3;
@@ -91,6 +91,7 @@ pub async fn run_sentry_loop(
     model: String,
     cwd: PathBuf,
     max_concurrent: usize,
+    routing: Option<Arc<RoutingConfig>>,
 ) {
     let in_flight = Arc::new(InFlight::new());
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent.max(1)));
@@ -114,6 +115,7 @@ pub async fn run_sentry_loop(
                     &cancel,
                     &model,
                     &cwd,
+                    &routing,
                 ).await;
             }
         }
@@ -137,6 +139,7 @@ async fn handle_trigger_event(
     cancel: &CancellationToken,
     model: &str,
     cwd: &Path,
+    routing: &Option<Arc<RoutingConfig>>,
 ) {
     match event {
         TriggerEvent::Scheduled(config) => {
@@ -156,6 +159,7 @@ async fn handle_trigger_event(
                         board.clone(), state_db.clone(), budget_limits.clone(),
                         in_flight.clone(), semaphore.clone(), cancel.clone(),
                         task.id.clone(), model.to_string(), cwd.to_path_buf(),
+                        routing.clone(),
                     );
                 }
             }
@@ -175,6 +179,7 @@ async fn handle_trigger_event(
                         board.clone(), state_db.clone(), budget_limits.clone(),
                         in_flight.clone(), semaphore.clone(), cancel.clone(),
                         task.id.clone(), model.to_string(), cwd.to_path_buf(),
+                        routing.clone(),
                     );
                 }
             }
@@ -192,6 +197,7 @@ async fn handle_trigger_event(
                         board.clone(), state_db.clone(), budget_limits.clone(),
                         in_flight.clone(), semaphore.clone(), cancel.clone(),
                         task.id.clone(), model.to_string(), cwd.to_path_buf(),
+                        routing.clone(),
                     );
                 }
             }
@@ -209,6 +215,7 @@ async fn handle_trigger_event(
                         board.clone(), state_db.clone(), budget_limits.clone(),
                         in_flight.clone(), semaphore.clone(), cancel.clone(),
                         task.id.clone(), model.to_string(), cwd.to_path_buf(),
+                        routing.clone(),
                     );
                 }
             }
@@ -219,6 +226,7 @@ async fn handle_trigger_event(
                 board.clone(), state_db.clone(), budget_limits.clone(),
                 in_flight.clone(), semaphore.clone(), cancel.clone(),
                 task_id, model.to_string(), cwd.to_path_buf(),
+                routing.clone(),
             );
         }
     }
@@ -234,6 +242,7 @@ fn spawn_task_execution(
     task_id: String,
     model: String,
     cwd: PathBuf,
+    routing: Option<Arc<RoutingConfig>>,
 ) {
     if !in_flight.try_insert(&task_id) {
         tracing::debug!(task = %task_id, "already in-flight — skipping");
@@ -253,7 +262,7 @@ fn spawn_task_execution(
         };
         execute_task_with_retry(
             &board, &state_db, &budget_limits,
-            &task_id, &model, &cwd, &cancel,
+            &task_id, &model, &cwd, &cancel, &routing,
         ).await;
         in_flight_cleanup.remove(&task_id_cleanup);
     });
@@ -267,6 +276,7 @@ async fn execute_task_with_retry(
     model: &str,
     cwd: &Path,
     cancel: &CancellationToken,
+    routing: &Option<Arc<RoutingConfig>>,
 ) {
     match board.claim(task_id) {
         Ok(true) => {}
@@ -312,7 +322,7 @@ async fn execute_task_with_retry(
         }
     }
 
-    let effective_model = spec.model.as_deref().unwrap_or(model);
+    let effective_model = resolve_model(spec.model.as_deref(), model, &spec.prompt, routing).await;
     let effective_cwd = spec.cwd.as_deref().unwrap_or(cwd);
     let max_turns = spec.max_turns.unwrap_or(30);
     let timeout_secs = spec.timeout_secs.unwrap_or(600);
@@ -340,7 +350,7 @@ async fn execute_task_with_retry(
 
         match run_agent_task(
             &spec.prompt,
-            effective_model,
+            &effective_model,
             effective_cwd,
             max_turns,
             timeout_secs,
@@ -458,6 +468,67 @@ fn record_budget_usage(state_db: &StateDb, task_id: &str, tokens: u64) {
     let today = Utc::now().format("%Y-%m-%d").to_string();
     if let Err(e) = state_db.record_budget(task_id, &today, tokens) {
         tracing::warn!(task = %task_id, error = %e, "failed to record budget usage");
+    }
+}
+
+async fn resolve_model<'a>(
+    spec_model: Option<&'a str>,
+    default_model: &'a str,
+    task_prompt: &str,
+    routing: &Option<Arc<RoutingConfig>>,
+) -> String {
+    match spec_model {
+        Some("auto") => {
+            if let Some(routing) = routing {
+                match classify_task_complexity(&routing.prefilter_model, task_prompt).await {
+                    TaskComplexity::Simple | TaskComplexity::Moderate => {
+                        tracing::info!(routed = %routing.light_model, "model routing: task classified as light");
+                        routing.light_model.clone()
+                    }
+                    TaskComplexity::Complex => {
+                        tracing::info!(routed = %routing.heavy_model, "model routing: task classified as complex");
+                        routing.heavy_model.clone()
+                    }
+                }
+            } else {
+                default_model.to_string()
+            }
+        }
+        Some(explicit) => explicit.to_string(),
+        None => default_model.to_string(),
+    }
+}
+
+#[derive(Debug)]
+enum TaskComplexity {
+    Simple,
+    Moderate,
+    Complex,
+}
+
+async fn classify_task_complexity(_prefilter_model: &str, prompt: &str) -> TaskComplexity {
+    let lower = prompt.to_lowercase();
+    let word_count = prompt.split_whitespace().count();
+
+    let complex_signals = [
+        "architect", "redesign", "refactor", "migrate", "rewrite",
+        "investigate", "analyze", "design", "propose", "evaluate",
+        "multi-file", "cross-cutting", "system-wide",
+    ];
+    let simple_signals = [
+        "check", "status", "verify", "confirm", "list", "count",
+        "is it", "does it", "show me", "what is",
+    ];
+
+    let has_complex = complex_signals.iter().any(|s| lower.contains(s));
+    let has_simple = simple_signals.iter().any(|s| lower.contains(s));
+
+    if has_complex || word_count > 100 {
+        TaskComplexity::Complex
+    } else if has_simple || word_count < 20 {
+        TaskComplexity::Simple
+    } else {
+        TaskComplexity::Moderate
     }
 }
 

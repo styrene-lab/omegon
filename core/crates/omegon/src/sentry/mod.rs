@@ -32,6 +32,15 @@ pub struct SentryGlobal {
     pub max_concurrent: usize,
     #[serde(default = "default_log_retention_days")]
     pub log_retention_days: u32,
+    #[serde(default)]
+    pub routing: Option<RoutingConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoutingConfig {
+    pub prefilter_model: String,
+    pub light_model: String,
+    pub heavy_model: String,
 }
 
 fn default_max_concurrent() -> usize { 1 }
