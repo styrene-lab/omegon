@@ -1,9 +1,9 @@
-//! [`TaskBoard`] backed by a flynt vault.
+//! [`TaskBoard`] backed by a flynt project.
 //!
 //! Reads tasks from the flynt sqlite (default
-//! `<vault>/.flynt-local/flynt/flynt-index.db`) and surfaces sentry-
+//! `<project>/.flynt-local/flynt/flynt-index.db`) and surfaces sentry-
 //! managed ones as [`SentryTask`]s. Enables an omegon launched into a
-//! flynt vault — including ACP from Zed — to run autonomous tasks
+//! flynt project — including ACP from Zed — to run autonomous tasks
 //! against the operator's kanban without a parallel `sentry.toml`.
 //!
 //! ## Selection criteria
@@ -56,18 +56,18 @@ const STATUS_DONE: &str = "\"done\"";
 const STATUS_ARCHIVED: &str = "\"archived\"";
 
 pub struct FlyntTaskBoard {
-    /// Vault root (the directory the operator opens in flynt-app).
+    /// Project root (the directory the operator opens in flynt-app).
     vault_root: PathBuf,
     /// Connection to the flynt sqlite. We hold this open + behind a
-    /// mutex; flynt's own Vault uses the same locking shape.
+    /// mutex; flynt's own Project uses the same locking shape.
     conn: Mutex<Connection>,
     state_db: Arc<StateDb>,
     instance_id: String,
     /// When set, list_actionable filters tasks to those whose board
     /// belongs to this flynt project. Set via `with_project()` after
-    /// construction. None = vault-wide (all tasks). Critical for
+    /// construction. None = project-wide (all tasks). Critical for
     /// avoiding cross-project bleed when one omegon process serves a
-    /// vault that hosts multiple project boards.
+    /// project that hosts multiple project boards.
     project_id: Option<uuid::Uuid>,
 }
 
@@ -75,7 +75,7 @@ impl FlyntTaskBoard {
     /// Open a board pointed at `vault_root`. Resolves the sqlite path
     /// from the same convention flynt-store uses by default
     /// (`<root>/.flynt-local/flynt/flynt-index.db`); pass an explicit
-    /// `db_path` if your vault uses a custom location.
+    /// `db_path` if your project uses a custom location.
     pub fn open(
         vault_root: PathBuf,
         state_db: Arc<StateDb>,
@@ -93,12 +93,12 @@ impl FlyntTaskBoard {
     ) -> anyhow::Result<Self> {
         if !db_path.exists() {
             anyhow::bail!(
-                "flynt vault sqlite not found at {} — open the vault in flynt-app first",
+                "flynt project sqlite not found at {} — open the project in flynt-app first",
                 db_path.display()
             );
         }
         let conn = Connection::open(&db_path).map_err(|e| {
-            anyhow::anyhow!("open flynt vault sqlite at {}: {e}", db_path.display())
+            anyhow::anyhow!("open flynt project sqlite at {}: {e}", db_path.display())
         })?;
         // Match flynt-store's WAL mode so concurrent writers (flynt-app
         // and this process) coexist cleanly. flynt-store sets it on
@@ -110,7 +110,7 @@ impl FlyntTaskBoard {
             .map_err(|e| anyhow::anyhow!("set WAL on flynt sqlite: {e}"))?;
         // Schema sanity probe — both `tasks` and `boards` tables must
         // exist for our queries to work (project-scoped path joins on
-        // boards). Reports a clear "not a flynt vault" rather than a
+        // boards). Reports a clear "not a flynt project" rather than a
         // confusing "no such table: boards" deep in list_actionable.
         let table_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('tasks', 'boards')",
@@ -119,8 +119,8 @@ impl FlyntTaskBoard {
         ).unwrap_or(0);
         if table_count < 2 {
             anyhow::bail!(
-                "flynt vault sqlite at {} is missing required tables (tasks, boards) — \
-                 vault may be corrupted or from an incompatible flynt version",
+                "flynt project sqlite at {} is missing required tables (tasks, boards) — \
+                 project may be corrupted or from an incompatible flynt version",
                 db_path.display()
             );
         }
@@ -136,14 +136,14 @@ impl FlyntTaskBoard {
     /// Scope this board to a single flynt project. After this call,
     /// `list_actionable` only surfaces tasks on boards belonging to
     /// that project — preventing cross-project bleed when omegon is
-    /// launched into one project but the vault hosts several.
+    /// launched into one project but the project hosts several.
     /// Idempotent; later calls overwrite the scope.
     pub fn with_project(mut self, project_id: uuid::Uuid) -> Self {
         self.project_id = Some(project_id);
         self
     }
 
-    /// Returns true if any board in the vault has the given project_id.
+    /// Returns true if any board in the project has the given project_id.
     /// Used at startup to warn the operator when `FLYNT_PROJECT` is
     /// set to a UUID that doesn't match anything — without this probe,
     /// list_actionable just returns an empty Vec and the operator
@@ -191,7 +191,7 @@ impl TaskBoard for FlyntTaskBoard {
         // rather than failing the whole list.
         let tasks: Vec<Task> = {
             let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
-            // Two query variants: vault-wide (legacy) and project-
+            // Two query variants: project-wide (legacy) and project-
             // scoped. The project variant joins via the boards table
             // so the filter survives boards being renamed or columns
             // being shuffled — the (board.project_id) link is stable.
@@ -292,6 +292,7 @@ impl TaskBoard for FlyntTaskBoard {
             token_budget: exec.token_budget,
             cwd: exec.cwd.clone(),
             env: exec.env.clone().into_iter().collect(),
+            execution_mode: None,
             design_node_id: task.design_node_id.map(|u| u.to_string()),
             openspec_change: task.openspec_change.clone(),
         })
@@ -304,19 +305,19 @@ pub fn default_db_path(vault_root: &Path) -> PathBuf {
     vault_root.join(".flynt-local").join("flynt").join("flynt-index.db")
 }
 
-/// Lightweight probe — does this directory look like a flynt vault?
+/// Lightweight probe — does this directory look like a flynt project?
 /// Used as a building block for [`find_vault_root`].
 pub fn is_flynt_vault(root: &Path) -> bool {
     root.join(".flynt").join("config.toml").exists()
         || default_db_path(root).exists()
 }
 
-/// Walk parent directories looking for a flynt vault marker.
+/// Walk parent directories looking for a flynt project marker.
 ///
 /// Critical for the ACP-from-Zed flow: Zed launches omegon in the
 /// project directory, which is typically a git repo nested *inside*
-/// a flynt vault (e.g. `~/Documents/Flynt/projects/foo/`). A literal
-/// `is_flynt_vault(cwd)` check would miss the vault. Walks up to
+/// a flynt project (e.g. `~/Documents/Flynt/projects/foo/`). A literal
+/// `is_flynt_vault(cwd)` check would miss the project. Walks up to
 /// filesystem root and returns the first ancestor that probes
 /// positive, or None.
 ///
@@ -723,26 +724,26 @@ mod tests {
         assert!(is_flynt_vault(tmp.path()));
     }
 
-    // ── walk-up vault detection ────────────────────────────────────────────
+    // ── walk-up project detection ────────────────────────────────────────────
 
     #[test]
     fn find_vault_root_walks_up_from_nested_project() {
         // Mirrors the ACP-from-Zed flow: cwd is a git repo nested
-        // inside the vault; we should find the vault by walking up.
+        // inside the project; we should find the project by walking up.
         let tmp = TempDir::new().unwrap();
-        let vault = tmp.path().to_path_buf();
-        std::fs::create_dir_all(vault.join(".flynt")).unwrap();
-        std::fs::write(vault.join(".flynt/config.toml"), "vault_name=\"test\"").unwrap();
+        let project = tmp.path().to_path_buf();
+        std::fs::create_dir_all(project.join(".flynt")).unwrap();
+        std::fs::write(project.join(".flynt/config.toml"), "vault_name=\"test\"").unwrap();
 
-        let project_subdir = vault.join("projects").join("foo").join("src");
+        let project_subdir = project.join("projects").join("foo").join("src");
         std::fs::create_dir_all(&project_subdir).unwrap();
 
-        let found = find_vault_root(&project_subdir).expect("walk-up should find vault");
+        let found = find_vault_root(&project_subdir).expect("walk-up should find project");
         // Use canonicalize on both sides — TempDir gives /var/folders
         // on macOS that resolves to /private/var/folders.
         assert_eq!(
             std::fs::canonicalize(&found).unwrap(),
-            std::fs::canonicalize(&vault).unwrap()
+            std::fs::canonicalize(&project).unwrap()
         );
     }
 
@@ -833,7 +834,7 @@ mod tests {
 
     #[test]
     fn project_scoped_board_excludes_unprojected_boards() {
-        // Boards with project_id IS NULL are vault-wide. When project
+        // Boards with project_id IS NULL are project-wide. When project
         // scope is active, those tasks shouldn't slip through either.
         let (tmp, board, _board_id) = fixture();
         let _ = tmp;
@@ -881,19 +882,19 @@ mod tests {
         // .toml marker. is_flynt_vault accepts both; walk-up should
         // therefore find them too.
         let tmp = TempDir::new().unwrap();
-        let vault = tmp.path().to_path_buf();
-        let db = default_db_path(&vault);
+        let project = tmp.path().to_path_buf();
+        let db = default_db_path(&project);
         std::fs::create_dir_all(db.parent().unwrap()).unwrap();
         // Empty file is enough — is_flynt_vault only checks existence.
         std::fs::write(&db, b"").unwrap();
 
-        let nested = vault.join("projects/foo");
+        let nested = project.join("projects/foo");
         std::fs::create_dir_all(&nested).unwrap();
 
-        let found = find_vault_root(&nested).expect("should find vault via sqlite marker");
+        let found = find_vault_root(&nested).expect("should find project via sqlite marker");
         assert_eq!(
             std::fs::canonicalize(&found).unwrap(),
-            std::fs::canonicalize(&vault).unwrap()
+            std::fs::canonicalize(&project).unwrap()
         );
     }
 
@@ -915,7 +916,7 @@ mod tests {
     #[test]
     fn open_rejects_sqlite_without_required_tables() {
         // A db file that exists but lacks tasks/boards (could be a
-        // fresh empty file, a corrupted vault, or someone pointing
+        // fresh empty file, a corrupted project, or someone pointing
         // FLYNT_VAULT at a non-flynt sqlite). Should fail at open
         // with a clear message rather than later in list_actionable.
         let tmp = TempDir::new().unwrap();

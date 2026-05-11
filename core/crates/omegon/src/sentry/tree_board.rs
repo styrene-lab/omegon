@@ -109,6 +109,7 @@ impl TaskBoard for TaskTreeBoard {
             token_budget,
             cwd: Some(self.cwd.clone()),
             env: Default::default(),
+            execution_mode: task.meta.execution.as_ref().and_then(|e| e.execution_mode.clone()),
             design_node_id: task.meta.design_node_id.clone(),
             openspec_change: task.meta.openspec_change.clone(),
         })

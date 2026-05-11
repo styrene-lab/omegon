@@ -39,6 +39,7 @@ struct CompiledEndpoint {
     path_params: Vec<String>,
     query_params: Vec<String>,
     has_body: bool,
+    requires_confirm: bool,
     description: String,
     tool_parameters: Value,
 }
@@ -89,16 +90,19 @@ impl ToolProvider for OpenApiToolProvider {
         self.specs
             .iter()
             .flat_map(|spec| {
-                spec.endpoints.iter().map(|ep| ToolDefinition {
-                    name: ep.tool_name.clone(),
-                    label: ep.tool_name.clone(),
-                    description: ep.description.clone(),
-                    parameters: ep.tool_parameters.clone(),
-                    capabilities: if ep.method == reqwest::Method::GET {
-                        vec![ToolCapability::RepoInspection]
-                    } else {
+                spec.endpoints.iter().map(|ep| {
+                    let caps = if ep.requires_confirm || ep.method != reqwest::Method::GET {
                         vec![ToolCapability::StateChanging]
-                    },
+                    } else {
+                        vec![ToolCapability::RepoInspection]
+                    };
+                    ToolDefinition {
+                        name: ep.tool_name.clone(),
+                        label: ep.tool_name.clone(),
+                        description: ep.description.clone(),
+                        parameters: ep.tool_parameters.clone(),
+                        capabilities: caps,
+                    }
                 })
             })
             .collect()
@@ -302,6 +306,13 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
                     format!("{method_str}{slug}")
                 });
 
+            if !config.allow.is_empty() && !glob_matches_any(&operation_id, &config.allow) {
+                continue;
+            }
+
+            let requires_confirm = !config.confirm.is_empty()
+                && glob_matches_any(&operation_id, &config.confirm);
+
             let mut tool_name = format!("api_{prefix}_{operation_id}");
             if tool_name.len() > 64 {
                 tool_name.truncate(64);
@@ -412,6 +423,7 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
                 path_params: path_param_names,
                 query_params: query_param_names,
                 has_body,
+                requires_confirm,
                 description,
                 tool_parameters,
             });
@@ -431,6 +443,21 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
         auth_header_name,
         auth_header_prefix,
         secret_env: config.secret.clone(),
+    })
+}
+
+fn glob_matches_any(operation_id: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| {
+        if pattern.contains('*') {
+            let parts: Vec<&str> = pattern.split('*').collect();
+            match parts.len() {
+                1 => operation_id == pattern,
+                2 => operation_id.starts_with(parts[0]) && operation_id.ends_with(parts[1]),
+                _ => operation_id.contains(parts[1]),
+            }
+        } else {
+            operation_id == pattern
+        }
     })
 }
 
@@ -638,5 +665,41 @@ paths:
         let names: Vec<&str> = spec.endpoints.iter().map(|e| e.tool_name.as_str()).collect();
         assert_eq!(names.len(), 2);
         assert_ne!(names[0], names[1]);
+    }
+
+    #[test]
+    fn allow_filter_restricts_endpoints() {
+        let mut config = test_config();
+        config.allow = vec!["list_pets".into(), "show_*".into()];
+        let mut doc: Value = serde_json::from_str(PETSTORE_JSON).unwrap();
+        openapi_resolve::resolve_refs(&mut doc).unwrap();
+        let spec = compile("petstore", &doc, &config).unwrap();
+        let names: Vec<&str> = spec.endpoints.iter().map(|e| e.tool_name.as_str()).collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"api_petstore_list_pets"));
+        assert!(names.contains(&"api_petstore_show_pet_by_id"));
+        assert!(!names.iter().any(|n| n.contains("create")));
+    }
+
+    #[test]
+    fn confirm_marks_matching_endpoints() {
+        let mut config = test_config();
+        config.confirm = vec!["create_*".into()];
+        let mut doc: Value = serde_json::from_str(PETSTORE_JSON).unwrap();
+        openapi_resolve::resolve_refs(&mut doc).unwrap();
+        let spec = compile("petstore", &doc, &config).unwrap();
+        let create = spec.endpoints.iter().find(|e| e.tool_name.contains("create")).unwrap();
+        assert!(create.requires_confirm);
+        let list = spec.endpoints.iter().find(|e| e.tool_name.contains("list")).unwrap();
+        assert!(!list.requires_confirm);
+    }
+
+    #[test]
+    fn glob_matching() {
+        assert!(glob_matches_any("create_pet", &["create_*".into()]));
+        assert!(glob_matches_any("list_pets", &["list_pets".into()]));
+        assert!(!glob_matches_any("list_pets", &["create_*".into()]));
+        assert!(glob_matches_any("delete_customer", &["*_customer".into()]));
+        assert!(glob_matches_any("show_pet_by_id", &["show_*".into()]));
     }
 }

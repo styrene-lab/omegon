@@ -339,24 +339,27 @@ async fn execute_task_with_retry(
             tracing::error!(task = %task_id, error = %e, "failed to record run start");
         }
 
+        let is_code_act = spec.execution_mode.as_deref() == Some("code-act");
         tracing::info!(
             task = %task_id,
             model = %effective_model,
             max_turns,
             timeout_secs,
             attempt,
+            code_act = is_code_act,
             "executing sentry task"
         );
 
-        match run_agent_task(
-            &spec.prompt,
-            &effective_model,
-            effective_cwd,
-            max_turns,
-            timeout_secs,
-            spec.token_budget,
-            cancel,
-        ).await {
+        let task_result = if is_code_act {
+            run_code_act_task(&spec.prompt, &effective_model, effective_cwd, timeout_secs, cancel).await
+        } else {
+            run_agent_task(
+                &spec.prompt, &effective_model, effective_cwd,
+                max_turns, timeout_secs, spec.token_budget, cancel,
+            ).await
+        };
+
+        match task_result {
             Ok(result) => {
                 tracing::info!(
                     task = %task_id,
@@ -559,6 +562,38 @@ pub(crate) fn classify_heuristic(prompt: &str) -> TaskComplexity {
     } else {
         TaskComplexity::Moderate
     }
+}
+
+async fn run_code_act_task(
+    prompt: &str,
+    model: &str,
+    cwd: &Path,
+    timeout_secs: u64,
+    cancel: &CancellationToken,
+) -> anyhow::Result<TaskResult> {
+    let start = Instant::now();
+    let executor = crate::code_act::CodeActExecutor::new(cwd.to_path_buf());
+
+    let gen_prompt = executor.build_prompt(prompt, None);
+    let completion = crate::providers::quick_completion(model, &gen_prompt).await?;
+
+    let code = crate::code_act::CodeActExecutor::extract_code(&completion.text)
+        .ok_or_else(|| anyhow::anyhow!("LLM did not produce a code block"))?;
+
+    let result = executor.execute_script(&code, Some(timeout_secs), cancel.clone()).await?;
+    let duration = start.elapsed().as_secs();
+
+    Ok(TaskResult {
+        exit_code: result.exit_code,
+        summary: if result.is_error {
+            format!("code-act failed: {}", result.output.chars().take(500).collect::<String>())
+        } else {
+            result.output.chars().take(500).collect()
+        },
+        tokens_used: completion.input_tokens + completion.output_tokens,
+        duration_secs: duration,
+        session_id: format!("code-act-{}", super::file_board::uuid_v4()),
+    })
 }
 
 async fn run_agent_task(

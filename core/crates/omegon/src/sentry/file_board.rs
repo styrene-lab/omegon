@@ -116,6 +116,7 @@ impl TaskBoard for FileTaskBoard {
             token_budget: tc.token_budget,
             cwd: tc.cwd.as_ref().map(PathBuf::from),
             env: tc.env.clone().unwrap_or_default(),
+            execution_mode: None,
             design_node_id: None,
             openspec_change: None,
         })

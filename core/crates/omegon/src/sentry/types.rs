@@ -26,6 +26,8 @@ pub struct TaskSpec {
     #[serde(default)]
     pub env: HashMap<String, String>,
     #[serde(default)]
+    pub execution_mode: Option<String>,
+    #[serde(default)]
     pub design_node_id: Option<String>,
     #[serde(default)]
     pub openspec_change: Option<String>,
@@ -144,6 +146,7 @@ mod tests {
             token_budget: Some(500_000),
             cwd: None,
             env: HashMap::new(),
+            execution_mode: None,
             design_node_id: None,
             openspec_change: None,
         };
