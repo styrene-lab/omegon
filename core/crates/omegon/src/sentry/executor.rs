@@ -499,11 +499,18 @@ async fn resolve_model<'a>(
                 let class_name = format!("{complexity:?}");
                 let model = match complexity {
                     TaskComplexity::Simple => {
-                        tracing::info!(routed = %routing.light_model, class = %class_name, "model routing");
-                        routing.light_model.clone()
+                        let adj = routing_adjustment(&class_name, state_db);
+                        if adj > 0 {
+                            tracing::info!(routed = %routing.light_model, class = %class_name, "model routing: simple escalated to light");
+                            routing.light_model.clone()
+                        } else {
+                            tracing::info!(routed = %routing.light_model, class = %class_name, "model routing");
+                            routing.light_model.clone()
+                        }
                     }
                     TaskComplexity::Moderate => {
-                        if should_escalate(&class_name, state_db) {
+                        let adj = routing_adjustment(&class_name, state_db);
+                        if adj > 0 {
                             tracing::info!(routed = %routing.heavy_model, class = %class_name, "model routing: adaptive escalation");
                             routing.heavy_model.clone()
                         } else {
@@ -512,8 +519,14 @@ async fn resolve_model<'a>(
                         }
                     }
                     TaskComplexity::Complex => {
-                        tracing::info!(routed = %routing.heavy_model, class = %class_name, "model routing");
-                        routing.heavy_model.clone()
+                        let adj = routing_adjustment(&class_name, state_db);
+                        if adj < 0 {
+                            tracing::info!(routed = %routing.light_model, class = %class_name, "model routing: adaptive de-escalation");
+                            routing.light_model.clone()
+                        } else {
+                            tracing::info!(routed = %routing.heavy_model, class = %class_name, "model routing");
+                            routing.heavy_model.clone()
+                        }
                     }
                 };
                 (model, Some(class_name))
@@ -526,13 +539,14 @@ async fn resolve_model<'a>(
     }
 }
 
-pub(crate) fn should_escalate(class_name: &str, state_db: &StateDb) -> bool {
+/// Returns a routing adjustment: positive = escalate, negative = de-escalate, zero = no change.
+pub(crate) fn routing_adjustment(class_name: &str, state_db: &StateDb) -> i8 {
     let stats = match state_db.routing_stats() {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return 0,
     };
     if stats.total < 10 {
-        return false;
+        return 0;
     }
     for (class, total, successes, _tokens) in &stats.by_class {
         if class == class_name && *total >= 5 {
@@ -541,13 +555,21 @@ pub(crate) fn should_escalate(class_name: &str, state_db: &StateDb) -> bool {
                 tracing::info!(
                     class = %class_name,
                     success_rate = %format!("{:.0}%", success_rate * 100.0),
-                    "adaptive routing: escalating to heavy model"
+                    "adaptive routing: escalating"
                 );
-                return true;
+                return 1;
+            }
+            if success_rate > 0.95 && *total >= 10 {
+                tracing::info!(
+                    class = %class_name,
+                    success_rate = %format!("{:.0}%", success_rate * 100.0),
+                    "adaptive routing: de-escalating"
+                );
+                return -1;
             }
         }
     }
-    false
+    0
 }
 
 #[derive(Debug)]

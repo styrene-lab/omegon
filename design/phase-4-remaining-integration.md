@@ -149,6 +149,45 @@ Items 1 and 2 are independent and can be parallelized. Items 3 and 4
 depend on 2 (the proxy must exist before the slash command makes sense,
 and the sandbox needs the proxy for tool access).
 
+## Technical debt from adversarial review (Phase 3)
+
+Resolved during Phase 3 hardening passes:
+
+- **Session-end extraction ran in nested block_on** — moved to
+  `tokio::spawn` fire-and-forget. No longer risks deadlock on
+  single-threaded runtimes or during shutdown.
+- **Extraction used session's primary model** — hardcoded to Haiku.
+  Extraction is a ~200-token classification, not worth Opus tokens.
+- **Fact parsing was untestable** — extracted into `parse_extracted_facts()`
+  pure function. Handles numbered lists, bullets, NONE responses,
+  short-line filtering. 4 unit tests.
+- **Routing stats had no time window** — now 7-day sliding window.
+  Old outcomes age out instead of dominating the statistics.
+- **Routing was escalation-only** — `routing_adjustment()` now returns
+  -1/0/+1. Complex tasks with >95% success rate on light model get
+  de-escalated. All classes participate in adaptive adjustment.
+
+### Known remaining debt
+
+- **`quick_completion` creates a new bridge per call.** `auto_detect_bridge`
+  resolves credentials and creates HTTP clients each time. In a sentry
+  loop with 50 tasks, this means 50+ bridge constructions for the
+  prefilter alone. Fix: add a bridge cache keyed on model_spec to
+  `providers.rs`, or accept a pre-resolved bridge in `quick_completion`.
+  **Impact:** ~100ms overhead per prefilter call. Acceptable for sentry
+  (tasks take minutes), but would matter for interactive code-act where
+  latency is visible.
+
+- **Backfill command re-embeds all facts.** No per-fact check for
+  existing embeddings. Acceptable since backfill is operator-initiated
+  and runs once. A proper fix would require a new `MemoryBackend` method
+  (`facts_without_embeddings`) or a join query.
+
+- **OpenAPI auto-discovery reads the directory on every startup.**
+  No caching of the directory listing. Negligible for typical projects
+  (<10 spec files). Would matter if someone drops hundreds of specs
+  in `.omegon/apis/`.
+
 ## Non-goals for this phase
 
 - **Multi-language code-act** (shell, JavaScript, etc.) — Python-only
@@ -158,3 +197,7 @@ and the sandbox needs the proxy for tool access).
 - **Code-act in ACP** — the ACP protocol doesn't have a code-gen mode.
   If needed, it can be exposed as a tool call that returns the script
   output.
+- **Bridge caching** — the `quick_completion` bridge overhead is
+  documented above but not in scope for Phase 4. It's a cross-cutting
+  concern that should be addressed in the provider layer, not patched
+  per-caller.

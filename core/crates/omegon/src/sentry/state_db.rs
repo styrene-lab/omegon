@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 
 use super::types::{RunRecord, RunStatus, TaskError, TaskResult};
 
@@ -283,17 +283,18 @@ impl StateDb {
 
     pub fn routing_stats(&self) -> anyhow::Result<RoutingStats> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(7)).to_rfc3339();
         let total: u32 = conn.query_row(
-            "SELECT COUNT(*) FROM routing_outcomes",
-            [],
+            "SELECT COUNT(*) FROM routing_outcomes WHERE recorded_at > ?1",
+            params![cutoff],
             |row| row.get(0),
         )?;
         let mut stmt = conn.prepare(
             "SELECT classified_as, COUNT(*), SUM(success), SUM(tokens_used) \
-             FROM routing_outcomes GROUP BY classified_as",
+             FROM routing_outcomes WHERE recorded_at > ?1 GROUP BY classified_as",
         )?;
         let by_class = stmt
-            .query_map([], |row| {
+            .query_map(params![cutoff], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, u32>(1)?,

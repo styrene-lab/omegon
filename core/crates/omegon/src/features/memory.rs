@@ -154,6 +154,36 @@ impl MemoryFeature {
 }
 
 /// Spawn a non-blocking embedding generation task for a newly stored fact.
+fn parse_extracted_facts(text: &str) -> Vec<String> {
+    let text = text.trim();
+    if text.eq_ignore_ascii_case("NONE") || text.is_empty() {
+        return Vec::new();
+    }
+    text.lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            // Strip leading bullets/numbers: "1. ", "- ", "* ", "• "
+            let stripped = trimmed
+                .strip_prefix("- ")
+                .or_else(|| trimmed.strip_prefix("* "))
+                .or_else(|| trimmed.strip_prefix("• "))
+                .or_else(|| {
+                    // "1. ", "2. ", etc.
+                    let dot = trimmed.find(". ")?;
+                    if dot <= 3 && trimmed[..dot].chars().all(|c| c.is_ascii_digit()) {
+                        Some(&trimmed[dot + 2..])
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(trimmed)
+                .trim();
+            stripped.to_string()
+        })
+        .filter(|s| s.len() >= 10)
+        .collect()
+}
+
 async fn extract_and_store_facts(
     model: &str,
     summary: &str,
@@ -173,18 +203,13 @@ async fn extract_and_store_facts(
     let result = crate::providers::quick_completion(model, &prompt).await
         .map_err(|e| anyhow::anyhow!("extraction LLM call failed: {e}"))?;
 
-    let text = result.text.trim();
-    if text == "NONE" || text.is_empty() {
+    let facts = parse_extracted_facts(&result.text);
+    if facts.is_empty() {
         return Ok(0);
     }
 
     let mut stored = 0;
-    for line in text.lines() {
-        let fact_text = line.trim();
-        if fact_text.is_empty() || fact_text.len() < 10 {
-            continue;
-        }
-
+    for fact_text in &facts {
         let store_result = backend.store_fact(StoreFact {
             mind: mind.to_string(),
             content: fact_text.to_string(),
@@ -961,22 +986,31 @@ Also use it when you notice a gap — if you're unsure whether something was alr
 
                                     if let Some(ref model) = extraction_model {
                                         if !prompt_text.is_empty() || !outcome_text.is_empty() {
-                                            let summary = format!(
-                                                "User asked: {}\n\nOutcome: {}",
-                                                if prompt_text.is_empty() { "(no prompt recorded)" } else { &prompt_text },
-                                                if outcome_text.is_empty() { "(no outcome recorded)" } else { &outcome_text },
-                                            );
-                                            match extract_and_store_facts(
-                                                model, &summary, &backend, &mind, embed_svc.as_ref(),
-                                            ).await {
-                                                Ok(count) if count > 0 => {
-                                                    tracing::info!(facts = count, "session-end fact extraction");
+                                            let model = model.clone();
+                                            let backend = backend.clone();
+                                            let mind = mind.clone();
+                                            let embed_svc = embed_svc.clone();
+                                            let prompt_text = prompt_text.clone();
+                                            let outcome_text = outcome_text.clone();
+                                            // Fire-and-forget — don't block shutdown
+                                            tokio::spawn(async move {
+                                                let summary = format!(
+                                                    "User asked: {}\n\nOutcome: {}",
+                                                    if prompt_text.is_empty() { "(no prompt recorded)".to_string() } else { prompt_text },
+                                                    if outcome_text.is_empty() { "(no outcome recorded)".to_string() } else { outcome_text },
+                                                );
+                                                match extract_and_store_facts(
+                                                    &model, &summary, &backend, &mind, embed_svc.as_ref(),
+                                                ).await {
+                                                    Ok(count) if count > 0 => {
+                                                        tracing::info!(facts = count, "session-end fact extraction");
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::debug!(error = %e, "session-end fact extraction failed");
+                                                    }
+                                                    _ => {}
                                                 }
-                                                Err(e) => {
-                                                    tracing::debug!(error = %e, "session-end fact extraction failed");
-                                                }
-                                                _ => {}
-                                            }
+                                            });
                                         }
                                     }
 
@@ -1347,5 +1381,40 @@ mod tests {
         // Should be able to access the backend
         let _backend_ref = feature.backend();
         assert_eq!(feature.mind(), "test");
+    }
+
+    #[test]
+    fn parse_extracted_facts_plain_lines() {
+        let text = "Wilson prefers terse responses.\nThe project uses Rust with tokio async runtime.\nShort.";
+        let facts = parse_extracted_facts(text);
+        assert_eq!(facts.len(), 2);
+        assert_eq!(facts[0], "Wilson prefers terse responses.");
+        assert_eq!(facts[1], "The project uses Rust with tokio async runtime.");
+    }
+
+    #[test]
+    fn parse_extracted_facts_strips_bullets_and_numbers() {
+        let text = "1. The API key is stored in the vault.\n2. Deployments happen on Fridays.\n- CI runs on every push.\n* The database is PostgreSQL.";
+        let facts = parse_extracted_facts(text);
+        assert_eq!(facts.len(), 4);
+        assert_eq!(facts[0], "The API key is stored in the vault.");
+        assert_eq!(facts[1], "Deployments happen on Fridays.");
+        assert_eq!(facts[2], "CI runs on every push.");
+        assert_eq!(facts[3], "The database is PostgreSQL.");
+    }
+
+    #[test]
+    fn parse_extracted_facts_none_response() {
+        assert!(parse_extracted_facts("NONE").is_empty());
+        assert!(parse_extracted_facts("none").is_empty());
+        assert!(parse_extracted_facts("  NONE  ").is_empty());
+        assert!(parse_extracted_facts("").is_empty());
+    }
+
+    #[test]
+    fn parse_extracted_facts_filters_short_lines() {
+        let text = "Good fact that meets the minimum length.\nToo short\n\nAnother valid fact for the memory system.";
+        let facts = parse_extracted_facts(text);
+        assert_eq!(facts.len(), 2);
     }
 }
