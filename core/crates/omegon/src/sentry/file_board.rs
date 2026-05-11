@@ -147,6 +147,7 @@ mod tests {
             sentry: SentryGlobal {
                 max_concurrent: 1,
                 log_retention_days: 7,
+                routing: None,
             },
             tasks: vec![
                 SentryTaskConfig {

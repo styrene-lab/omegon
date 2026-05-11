@@ -6106,6 +6106,7 @@ async fn run_sentry_command(
                     sentry: sentry::SentryGlobal {
                         max_concurrent: 1,
                         log_retention_days: 30,
+                        routing: None,
                     },
                     tasks: Vec::new(),
                 }
@@ -6163,6 +6164,7 @@ async fn run_sentry_command(
                 sentry: sentry::SentryGlobal {
                     max_concurrent: 1,
                     log_retention_days: 30,
+                    routing: None,
                 },
                 tasks: Vec::new(),
             };
@@ -6289,6 +6291,7 @@ async fn run_sentry_command(
     );
 
     // Run the sentry loop — consumes TriggerEvent from the unified runtime
+    let routing = config.sentry.routing.map(std::sync::Arc::new);
     sentry::executor::run_sentry_loop(
         board,
         state_db.clone(),
@@ -6298,6 +6301,7 @@ async fn run_sentry_command(
         model,
         cwd,
         config.sentry.max_concurrent,
+        routing,
     ).await;
 
     // Release any claimed tasks on shutdown
