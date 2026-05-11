@@ -836,4 +836,49 @@ paths:
             .expect("should fall back to cached content on network failure");
         assert_eq!(content, fake_spec);
     }
+
+    #[test]
+    fn api_dir_auto_discovery() {
+        let tmp = tempfile::tempdir().unwrap();
+        let api_dir = tmp.path().join(".omegon").join("apis");
+        std::fs::create_dir_all(&api_dir).unwrap();
+
+        std::fs::write(api_dir.join("petstore.yaml"), PETSTORE_YAML).unwrap();
+        std::fs::write(api_dir.join("stripe.json"), PETSTORE_JSON).unwrap();
+        std::fs::write(api_dir.join("readme.txt"), "not a spec").unwrap();
+
+        let configs = crate::tools::openapi_config::load_openapi_configs(tmp.path());
+        assert_eq!(configs.len(), 2);
+
+        let names: Vec<&str> = configs.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"petstore"));
+        assert!(names.contains(&"stripe"));
+
+        let petstore = configs.iter().find(|(n, _)| n == "petstore").unwrap();
+        assert_eq!(petstore.1.auth, "bearer");
+        assert_eq!(petstore.1.secret, "PETSTORE_API_KEY");
+    }
+
+    #[test]
+    fn toml_config_takes_precedence_over_auto_discovery() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let api_dir = tmp.path().join(".omegon").join("apis");
+        std::fs::create_dir_all(&api_dir).unwrap();
+        std::fs::write(api_dir.join("petstore.yaml"), PETSTORE_YAML).unwrap();
+
+        let toml_path = tmp.path().join(".omegon").join("openapi.toml");
+        std::fs::write(&toml_path, r#"
+[petstore]
+spec = "custom/path.yaml"
+auth = "api_key"
+secret = "CUSTOM_KEY"
+"#).unwrap();
+
+        let configs = crate::tools::openapi_config::load_openapi_configs(tmp.path());
+        assert_eq!(configs.len(), 1);
+        let (name, config) = &configs[0];
+        assert_eq!(name, "petstore");
+        assert_eq!(config.secret, "CUSTOM_KEY");
+    }
 }

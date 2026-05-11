@@ -845,6 +845,8 @@ enum EmbeddingAction {
     },
     /// Show status of local embedding models.
     Status,
+    /// Compute embeddings for all facts that don't have one yet.
+    Backfill,
 }
 
 #[derive(Subcommand)]
@@ -3022,6 +3024,81 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                 println!("\nStatus: not installed");
                 println!("Run: omegon embedding download");
             }
+        }
+        EmbeddingAction::Backfill => {
+            let cwd = std::fs::canonicalize(std::env::current_dir()?)?;
+            let project_root = setup::find_project_root(&cwd);
+
+            let memory_dir = {
+                let ai = project_root.join("ai").join("memory");
+                let omegon = project_root.join(".omegon").join("memory");
+                if omegon.exists() && !ai.exists() { omegon } else { ai }
+            };
+            let db_path = memory_dir.join("facts.db");
+            if !db_path.exists() {
+                println!("No memory database found at {}", db_path.display());
+                return Ok(());
+            }
+
+            let backend: std::sync::Arc<dyn omegon_memory::MemoryBackend> = std::sync::Arc::new(
+                omegon_memory::SqliteBackend::open(&db_path)?
+            );
+
+            let embed_svc: Box<dyn omegon_memory::EmbeddingService> = {
+                let profile = crate::settings::Profile::load(&cwd);
+                let ollama = crate::embedding::OllamaEmbeddingService::from_config(
+                    profile.embed_url.as_deref(), profile.embed_model.as_deref(),
+                );
+                if ollama.probe().await {
+                    Box::new(ollama)
+                } else {
+                    #[cfg(feature = "local-embeddings")]
+                    {
+                        match crate::local_embedding::LocalEmbeddingService::from_default_dir() {
+                            Ok(svc) => Box::new(svc),
+                            Err(e) => {
+                                println!("No embedding service available: {e}");
+                                println!("Run: omegon embedding download");
+                                return Ok(());
+                            }
+                        }
+                    }
+                    #[cfg(not(feature = "local-embeddings"))]
+                    {
+                        println!("No embedding service available (Ollama not reachable, local-embeddings feature not enabled)");
+                        return Ok(());
+                    }
+                }
+            };
+
+            let mind = "default";
+            let facts = backend.list_facts(mind, omegon_memory::FactFilter::default()).await?;
+            let _meta = backend.embedding_metadata(mind).await?;
+
+            let mut backfilled = 0u32;
+            let total = facts.len();
+            println!("Backfilling embeddings for {total} facts using {}...", embed_svc.model_name());
+
+            for (i, fact) in facts.iter().enumerate() {
+                match embed_svc.embed(&fact.content).await {
+                    Ok(embedding) => {
+                        if let Err(e) = backend.store_embedding(&fact.id, embed_svc.model_name(), &embedding).await {
+                            tracing::warn!(fact_id = %fact.id, error = %e, "failed to store embedding");
+                        } else {
+                            backfilled += 1;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(fact_id = %fact.id, error = %e, "failed to generate embedding");
+                    }
+                }
+
+                if (i + 1) % 50 == 0 || i + 1 == total {
+                    println!("  [{}/{}] {backfilled} embedded", i + 1, total);
+                }
+            }
+
+            println!("\nBackfill complete: {backfilled}/{total} facts embedded with {}", embed_svc.model_name());
         }
     }
     Ok(())
