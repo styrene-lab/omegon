@@ -516,6 +516,58 @@ pub async fn auto_detect_bridge(model_spec: &str) -> Option<Box<dyn LlmBridge>> 
     None
 }
 
+/// Single-turn text completion with no tools, no streaming aggregation,
+/// no session state. Resolves a bridge for `model_spec`, sends one user
+/// message, collects all TextDelta events, returns the concatenated text.
+///
+/// Designed for lightweight internal classification (model routing
+/// prefilter, fact extraction, etc.) — not for interactive use.
+pub async fn quick_completion(model_spec: &str, prompt: &str) -> anyhow::Result<QuickCompletionResult> {
+    let bridge = auto_detect_bridge(model_spec)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("no provider available for {model_spec}"))?;
+
+    let messages = vec![crate::bridge::LlmMessage::User {
+        content: prompt.to_string(),
+        images: vec![],
+    }];
+
+    let options = crate::bridge::StreamOptions {
+        model: Some(model_spec.to_string()),
+        reasoning: None,
+        extended_context: false,
+        extra_body: std::collections::HashMap::new(),
+    };
+
+    let mut rx = bridge.stream("You are a concise classification assistant.", &messages, &[], &options).await?;
+
+    let mut text = String::new();
+    let mut input_tokens = 0u64;
+    let mut output_tokens = 0u64;
+
+    while let Some(event) = rx.recv().await {
+        match event {
+            crate::bridge::LlmEvent::TextDelta { delta } => text.push_str(&delta),
+            crate::bridge::LlmEvent::Done { input_tokens: i, output_tokens: o, .. } => {
+                input_tokens = i;
+                output_tokens = o;
+            }
+            crate::bridge::LlmEvent::Error { message } => {
+                return Err(anyhow::anyhow!("LLM error: {message}"));
+            }
+            _ => {}
+        }
+    }
+
+    Ok(QuickCompletionResult { text, input_tokens, output_tokens })
+}
+
+pub struct QuickCompletionResult {
+    pub text: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
 /// Extract and log rate limit headers from a provider's HTTP response.
 /// All major providers return quota/remaining/reset information on every
 /// response — this is the only source of subscription usage data.

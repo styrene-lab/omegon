@@ -500,32 +500,61 @@ async fn resolve_model<'a>(
 }
 
 #[derive(Debug)]
-enum TaskComplexity {
+pub(crate) enum TaskComplexity {
     Simple,
     Moderate,
     Complex,
 }
 
-async fn classify_task_complexity(_prefilter_model: &str, prompt: &str) -> TaskComplexity {
+async fn classify_task_complexity(prefilter_model: &str, prompt: &str) -> TaskComplexity {
+    let truncated = if prompt.len() > 500 { &prompt[..500] } else { prompt };
+    let classification_prompt = format!(
+        "Classify this task's complexity. Respond with exactly one word.\n\
+         SIMPLE: single-step check, yes/no answer, status lookup\n\
+         MODERATE: multi-step but well-defined, standard review\n\
+         COMPLEX: open-ended analysis, architectural decisions, multi-file changes\n\n\
+         Task: \"{truncated}\""
+    );
+
+    match crate::providers::quick_completion(prefilter_model, &classification_prompt).await {
+        Ok(result) => {
+            let trimmed = result.text.trim().to_uppercase();
+            tracing::debug!(
+                response = %trimmed,
+                input_tokens = result.input_tokens,
+                output_tokens = result.output_tokens,
+                "prefilter classification"
+            );
+            if trimmed.contains("SIMPLE") {
+                TaskComplexity::Simple
+            } else if trimmed.contains("COMPLEX") {
+                TaskComplexity::Complex
+            } else {
+                TaskComplexity::Moderate
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "prefilter classification failed — falling back to heuristic");
+            classify_heuristic(prompt)
+        }
+    }
+}
+
+pub(crate) fn classify_heuristic(prompt: &str) -> TaskComplexity {
     let lower = prompt.to_lowercase();
     let word_count = prompt.split_whitespace().count();
 
-    let complex_signals = [
+    const COMPLEX: &[&str] = &[
         "architect", "redesign", "refactor", "migrate", "rewrite",
         "investigate", "analyze", "design", "propose", "evaluate",
-        "multi-file", "cross-cutting", "system-wide",
     ];
-    let simple_signals = [
+    const SIMPLE: &[&str] = &[
         "check", "status", "verify", "confirm", "list", "count",
-        "is it", "does it", "show me", "what is",
     ];
 
-    let has_complex = complex_signals.iter().any(|s| lower.contains(s));
-    let has_simple = simple_signals.iter().any(|s| lower.contains(s));
-
-    if has_complex || word_count > 100 {
+    if COMPLEX.iter().any(|s| lower.contains(s)) || word_count > 100 {
         TaskComplexity::Complex
-    } else if has_simple || word_count < 20 {
+    } else if SIMPLE.iter().any(|s| lower.contains(s)) || word_count < 20 {
         TaskComplexity::Simple
     } else {
         TaskComplexity::Moderate

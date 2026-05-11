@@ -524,6 +524,24 @@ model = "auto"
 }
 
 #[test]
+fn heuristic_classifier_categorizes_correctly() {
+    use super::executor::classify_heuristic;
+
+    let simple = classify_heuristic("Check if CI passed");
+    assert!(matches!(simple, super::executor::TaskComplexity::Simple));
+
+    let complex = classify_heuristic("Refactor the authentication module to use OAuth2 with PKCE flow across all provider integrations and migrate existing sessions");
+    assert!(matches!(complex, super::executor::TaskComplexity::Complex));
+
+    let moderate = classify_heuristic(
+        "Review the open pull request and leave comments on any issues found in the \
+         implementation. Look for correctness, style violations, and potential \
+         performance regressions across each changed file in the diff."
+    );
+    assert!(matches!(moderate, super::executor::TaskComplexity::Moderate));
+}
+
+#[test]
 fn routing_config_absent_parses_as_none() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("sentry.toml");
