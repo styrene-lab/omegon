@@ -190,6 +190,8 @@ CREATE INDEX IF NOT EXISTS idx_submitted_tasks_correlation ON submitted_tasks(co
 
 `task_runs` remains the run history table and should keep storing execution output. `submitted_tasks` provides discovery for ephemeral work that does not exist on a `TaskBoard`, and preserves metadata needed by n8n or Auspex.
 
+The existing `routing_outcomes` table should continue to be used for submitted tasks that set `model = "auto"` so workflow-submitted work participates in the same routing telemetry as board-backed tasks.
+
 ## Executor Contract
 
 Add a `TriggerEvent` variant:
@@ -208,11 +210,12 @@ TaskSubmitted {
 The executor path should bypass `TaskBoard` claim/release:
 
 1. Route `TaskSubmitted` through the same in-flight and semaphore controls.
-2. Resolve `model = "auto"` through the existing Sentry routing logic.
+2. Resolve `model = "auto"` through the existing Sentry routing logic, including `quick_completion` prefilter classification and heuristic fallback.
 3. Execute with the same `run_agent_task` path as board-backed tasks.
 4. Record start/complete/failure in `StateDb`.
 5. Update `submitted_tasks.status`.
-6. Preserve `correlation_id` and metadata for API responses.
+6. Record routing outcomes for auto-routed submitted tasks.
+7. Preserve `correlation_id` and metadata for API responses.
 
 No board lifecycle hooks should run for submitted tasks unless the submission explicitly references `design_node_id` or `openspec_change`.
 

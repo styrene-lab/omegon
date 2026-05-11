@@ -92,7 +92,7 @@ Task fields:
 
 When a task sets `model = "auto"` and `[sentry.routing]` is configured, Sentry classifies the prompt and routes simple/moderate tasks to `light_model` and complex tasks to `heavy_model`.
 
-The `prefilter_model` field is parsed as part of the routing contract. The current implementation uses local prompt heuristics for classification, so treat the configured prefilter as forward-compatible metadata rather than proof that a separate model call ran.
+Sentry uses `prefilter_model` through the internal `quick_completion` API for a single-turn classification call. If that call fails, Sentry falls back to local prompt heuristics rather than blocking the task. Routing outcomes are recorded in `.omegon/sentry/state.db` so cost and success rates can be inspected later.
 
 ## Code-Act Status
 
