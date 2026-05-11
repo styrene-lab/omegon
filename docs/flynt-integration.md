@@ -25,7 +25,7 @@ Flynt locates the omegon binary through this resolution chain:
 To pin a specific version:
 
 ```bash
-export OMEGON_BIN=$HOME/.omegon/versions/v0.19.2/omegon
+export OMEGON_BIN=$HOME/.omegon/versions/v0.19.5/omegon
 ```
 
 ## Configuration

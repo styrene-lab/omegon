@@ -156,4 +156,4 @@ This naming/source mismatch made it hard to be sure which commit was actually co
 
 **Reproduction**: trivial. Any `omegon acp` invocation against a 0.19.1 binary; send any prompt. First turn panics.
 
-**Out of scope for this handoff**: I haven't fixed it. The embedder workaround (pin to 0.19.0) is in place. Pick this up when you're back in the omegon repo.
+**Resolved in v0.19.2+.** The `provider_status` runtime-nesting bug was fixed. Embedders should update to v0.19.5 (latest stable). The pin-to-0.19.0 workaround is no longer needed.
