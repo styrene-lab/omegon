@@ -1,6 +1,8 @@
 ---
 import Docs from "../../layouts/Docs.astro";
 import stats from "../../data/stats.json";
+
+const downloadLabel = stats.downloadMB ? `~${stats.downloadMB}MB` : "a single";
 ---
 
 <Docs title="Introduction" description="Omegon — terminal-native AI agent harness. Single binary, multiple providers, zero dependencies.">
@@ -15,7 +17,7 @@ import stats from "../../data/stats.json";
 
   <h2>What is Omegon?</h2>
   <p>
-    Omegon is a ~{stats.downloadMB}MB Rust binary that provides a complete AI-assisted development
+    Omegon is {downloadLabel} Rust binary that provides a complete AI-assisted development
     environment. It connects to {stats.providerCount} inference providers through native Rust clients
     (no subprocess shims, no Node.js at runtime), manages persistent project memory
     across sessions, decomposes work into parallel git worktree children, and tracks
@@ -97,7 +99,7 @@ import stats from "../../data/stats.json";
   <h2>At a Glance</h2>
   <table>
     <tbody>
-      <tr><td>Runtime</td><td>Single ~{stats.downloadMB} MB download ({stats.crateCount} crates)</td></tr>
+      <tr><td>Runtime</td><td>{stats.downloadMB ? `Single ~${stats.downloadMB} MB download` : "Single Rust binary"} ({stats.crateCount} crates)</td></tr>
       <tr><td>Providers</td><td>{stats.providerCount} inference + {stats.searchProviderCount} search, native Rust clients</td></tr>
       <tr><td>Agent tools</td><td>{stats.toolFiles}+ structured tools (file ops, memory, design, search, codebase retrieval, and inference control)</td></tr>
       <tr><td>License</td><td>BSL 1.1 (converts to MIT on 2031-03-19)</td></tr>

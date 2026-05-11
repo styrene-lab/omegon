@@ -26,7 +26,7 @@ omegon extension install .
 
 This scaffolds a working v1 extension with one tool and a manifest. Edit `src/main.rs` to add your logic. Done.
 
-## v1 vs v2 — Which Protocol?
+## Protocol Options
 
 | | v1 | v2 |
 |---|---|---|
@@ -53,13 +53,13 @@ cd my-omegon-extension
 
 ```toml
 [dependencies]
-omegon-extension = "0.15.6"
+omegon-extension = "0.19"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 async-trait = "0.1"
 ```
 
-The SDK version **must match** your target Omegon release. This constraint is enforced at install time.
+Use the SDK version that matches the Omegon release you target. For source-checkout development, point the dependency at this repository instead of crates.io.
 
 ### 3. Implement the `Extension` trait
 
@@ -101,6 +101,19 @@ impl Extension for MyExtension {
                     }
                 ]
             })),
+            "execute_tool" => {
+                let name = params["name"].as_str().unwrap_or("");
+                let args = params.get("args").cloned().unwrap_or_default();
+                match name {
+                    "my_tool" => Ok(json!({
+                        "content": [{
+                            "type": "text",
+                            "text": format!("called my_tool with {}", args)
+                        }]
+                    })),
+                    _ => Err(omegon_extension::Error::method_not_found(name)),
+                }
+            }
             _ => Err(omegon_extension::Error::method_not_found(method)),
         }
     }
@@ -124,7 +137,6 @@ Create `manifest.toml` in your extension directory:
 name = "my-extension"
 version = "0.1.0"
 description = "My custom extension"
-sdk_version = "0.15"
 
 [runtime]
 type = "native"
@@ -202,9 +214,8 @@ When Omegon discovers an extension, it performs:
 
 1. **Manifest parsing** — validates TOML structure
 2. **Schema validation** — checks required fields (name, version, binary/image, widgets)
-3. **SDK version check** — ensures `sdk_version` in manifest matches Omegon's SDK crate version
-4. **Binary/image validation** — verifies native binary exists or OCI image is pullable
-5. **Startup health check** — calls `ping_method` on startup, fails if unresponsive
+3. **Binary/image validation** — verifies native binary exists or OCI image is pullable
+4. **Startup health check** — calls `ping_method` on startup, fails if unresponsive
 
 **Extensions that fail any check are disabled before TUI starts** — no crashes at runtime.
 
@@ -244,7 +255,7 @@ Error::invalid_params("expected 'id' field")
 // Internal server error (non-fatal)
 Error::internal_error("database connection failed")
 
-// Version mismatch (caught at install time)
+// Version mismatch (available for extension-side compatibility checks)
 Error::version_mismatch("0.15", "0.16")
 
 // Manifest error (caught at install time)
@@ -318,7 +329,7 @@ Return initial data for a widget. Called on extension startup and when user open
 }
 ```
 
-#### `execute_<tool_name>`
+#### `execute_tool`
 
 Execute a tool. Called by Omegon when the user invokes a tool.
 
@@ -327,10 +338,13 @@ Execute a tool. Called by Omegon when the user invokes a tool.
 {
   "jsonrpc": "2.0",
   "id": "2",
-  "method": "execute_analyze_code",
+  "method": "execute_tool",
   "params": {
-    "code": "print('hello')",
-    "language": "python"
+    "name": "analyze_code",
+    "args": {
+      "code": "print('hello')",
+      "language": "python"
+    }
   }
 }
 ```
@@ -357,12 +371,7 @@ Execute a tool. Called by Omegon when the user invokes a tool.
 name = "my-extension"              # Must be lowercase, alphanumeric + hyphens
 version = "0.1.0"                  # Semantic version
 description = "Description..."     # Optional
-sdk_version = "0.15"               # Omegon SDK version constraint (prefix matching)
 ```
-
-SDK version matching:
-- `"0.15"` matches Omegon `0.15.0`, `0.15.6`, `0.15.6-rc.1`
-- `"0.15.6"` matches Omegon `0.15.6`, `0.15.6-rc.1` (but not `0.16.0`)
 
 ### Runtime Configuration
 
@@ -412,14 +421,12 @@ For each widget `{id}`, the extension must implement `get_{id}` RPC method.
 
 ### 1. Version Lock Your Dependencies
 
-Always lock the SDK version to match your target Omegon release:
+Lock the SDK version to the release line you target, or use a source dependency while developing against a checkout:
 
 ```toml
 [dependencies]
-omegon-extension = "0.15.6"  # Not "0.15" or "*"
+omegon-extension = "0.19"
 ```
-
-Omegon will reject extensions with mismatched versions at install time.
 
 ### 2. Validate Parameters Early
 
@@ -531,21 +538,7 @@ mod tests {
 
 ## Version Compatibility
 
-The SDK version defines the contract between Omegon and extensions.
-
-**Omegon 0.15.x** → Extension SDK `0.15`  
-**Omegon 0.16.x** → Extension SDK `0.16`
-
-Extensions declare their SDK version in `manifest.toml`:
-
-```toml
-[extension]
-sdk_version = "0.15"
-```
-
-At install time, Omegon checks:
-- Extension's `sdk_version` matches Omegon's SDK crate version (prefix matching)
-- If mismatch, installation fails with a clear error message
+The SDK crate version defines the Rust API contract between Omegon and extensions. The manifest schema currently does not require an `sdk_version` field; compatibility is managed through the extension protocol and the SDK dependency you build against.
 
 **Breaking changes** (next major version):
 - New required RPC methods

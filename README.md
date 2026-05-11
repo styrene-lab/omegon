@@ -11,11 +11,11 @@ visibility = "private"
 
 # Omegon
 
-**The AI agent harness with enough nerve to act like an operating system for software work.**
+**Terminal-native agent harness for serious software work.**
 
-Single binary. Native Rust. Real memory. Parallel worktrees. Design and spec lifecycles built in.
+Single Rust binary. Persistent project memory. Multiple inference providers. Parallel git worktrees. Design and spec lifecycles built in.
 
-Omegon is not a chatbot in your terminal. It is a systems engineering harness for operators who build: a terminal-native agent that can read and edit code, run commands, manage project memory across sessions, decompose work into parallel children, and track design intent as a first-class artifact.
+Omegon is a systems engineering harness, not a transcript viewer. It can read and edit code, run commands, manage project memory across sessions, decompose work into isolated child worktrees, run bounded headless tasks, and operate as a local daemon or ACP agent server for editor integrations.
 
 [![docs](https://img.shields.io/badge/docs-omegon.styrene.io-2ab4c8)](https://omegon.styrene.io/docs/)
 [![license](https://img.shields.io/badge/license-BSL%201.1-344858)](LICENSE)
@@ -78,14 +78,14 @@ Preview docs: <https://omegon.styrene.dev/docs/install>
 ### Fastest interactive path
 
 ```sh
-omegon login openai-codex
+omegon auth login openai-codex
 om
 ```
 
 Omegon now installs two standard entrypoints from the same binary:
 
-- `om` — slim mode: prompt, edit, validate. The agent sees core coding tools only — no design tree, no OpenSpec, no cleave. Memory works normally. `/help` shows the essentials; `/help all` reveals everything.
-- `omegon` — full harness mode: design tree, OpenSpec lifecycle, parallel cleave execution, delegation, and the full dashboard.
+- `om` - slim mode: prompt, edit, validate. The agent sees the core coding tools by default. Memory works normally. `/help` shows the essentials; `/help all` reveals the full command set.
+- `omegon` - full harness mode: design tree, OpenSpec lifecycle, cleave orchestration, delegation, richer dashboard surfaces, and the same underlying binary.
 
 Start with `om`. When you're ready for more, shift up:
 
@@ -102,7 +102,7 @@ omegon --slim
 ### API-key path
 
 ```sh
-export ANTHROPIC_API_KEY=sk-ant-...
+omegon secret set ANTHROPIC_API_KEY --stdin
 om
 ```
 
@@ -132,6 +132,8 @@ It gives you:
 - live engine, memory, and system telemetry
 - primary browser surface launch via `/auspex open`
 - local browser compatibility/debug surface via `/dash`
+- ACP server mode for editors that speak Agent Client Protocol
+- `serve` mode for persistent local daemon/control-plane use
 
 ### 2. Keeps provider identity honest
 
@@ -183,27 +185,31 @@ That means:
 - merge and conflict detection
 - better operator control over risky multi-file changes
 
+### 6. Runs outside the TUI when needed
+
+The same binary supports scripted and service-oriented use:
+
+```sh
+omegon run task.toml
+omegon run --prompt "Review this repository" --max-turns 10
+omegon serve
+omegon acp
+```
+
+`omegon run` is bounded and exits with structured status codes: `0` completed, `1` error, `2` upstream exhausted, `3` timeout. `omegon serve` exposes a local daemon/control-plane with health probes. `omegon acp` runs an Agent Client Protocol server over stdio by default, or WebSocket with `--listen`.
+
 ### Benchmarking and signal shaping
 
-Omegon now ships with an in-repo token-efficiency comparison harness under `scripts/benchmark_harness.py` and `ai/benchmarks/`.
+Omegon ships with an in-repo token-efficiency comparison harness under `scripts/benchmark_harness.py` and `ai/benchmarks/`.
 
-Use it for two things:
-
-1. **compare harnesses honestly** — same task, same acceptance, different agent surface
-2. **shape Omegon’s signal profile with evidence** — inspect totals, wall clock, and Omegon’s `sys/tools/conv/mem/hist/think` buckets before changing prompt, history, or tool-surface behavior
+Use it to compare harnesses against the same task and acceptance criteria, then inspect totals, wall clock, and Omegon's `sys/tools/conv/mem/hist/think` buckets before changing prompt, history, or tool-surface behavior.
 
 Current stance:
 
-- `om` is the de-facto comparison profile for mainstream CLI coding agents
-- default `omegon` is the premium harness mode when richer systems-engineering behavior is worth extra token cost
-- `omegon --slim` and `om --full` remain valid overrides when you want the opposite posture from the entrypoint default
-- the benchmark harness stays **in-repo for now** because it is still tightly coupled to Omegon internals (`--usage-json`, `omegon_context`, auth/provider behavior, and clean-room runtime mechanics)
-
-Design notes:
-
-- [[docs/design/evidence-driven-signal-shaping|Evidence-Driven Signal Shaping]]
-- [[docs/design/signal-shaping-profiles|Signal Shaping Profiles]]
-- [[docs/design/signal-classes-and-retention-policy|Signal Classes and Retention Policy]]
+- `om` is the comparison profile for mainstream CLI coding agents.
+- `omegon` is the full systems-engineering harness profile.
+- `omegon --slim` and `om --full` remain valid overrides.
+- the benchmark harness stays in-repo while it is coupled to `--usage-json`, `omegon_context`, auth/provider behavior, and clean-room runtime mechanics.
 
 
 ## Quick example
@@ -292,10 +298,14 @@ It can read code, store memory, create lifecycle artifacts, and walk an operator
 core/                       Rust workspace
   crates/
     omegon/                 Main binary — TUI, agent loop, tools, web surface
+    omegon-codescan/        Code scanning helpers
+    omegon-extension/       Extension SDK crate
     omegon-git/             Git and worktree operations
     omegon-memory/          Project memory runtime
+    omegon-opsx/            OpenSpec/lifecycle engine
     omegon-secrets/         Secret resolution and redaction
     omegon-traits/          Shared protocol and event types
+    omegon-web/             Web and ACP-adjacent surfaces
 site/                       Public docs site
 openspec/                   Spec-driven lifecycle artifacts
 docs/                       Durable architecture and design docs
@@ -308,17 +318,25 @@ themes/                     Alpharius theme assets
 ## Build from source
 
 ```sh
-cd core
 cargo build --release
 ```
 
 Release binary:
 
 ```text
-core/target/release/omegon
+target/release/omegon
 ```
 
-Type-check and test path for TypeScript and Rust changes lives in repo-local commands and release validation.
+Common development commands:
+
+```sh
+just build
+just test-rust
+just lint
+just link
+```
+
+`just link` writes a sourceable dev alias file at `~/.omegon/dev-alias.sh` and wires the current shell profile so `omegon` and `om` point at the newest local build. It does not overwrite package-manager owned binaries.
 
 ---
 
@@ -327,7 +345,8 @@ Type-check and test path for TypeScript and Rust changes lives in repo-local com
 Mutable user state lives under:
 
 ```text
-~/.config/omegon/
+~/.config/omegon/      settings and provider auth
+~/.omegon/             installed skills, agents, extensions, dev aliases
 ```
 
 Common files:

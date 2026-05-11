@@ -10,19 +10,19 @@ login_openai_codex:
 
 login_ollama_cloud:
   cmd: "omegon auth login ollama-cloud"
-  desc: "OAuth login for Ollama Cloud"
+  desc: "Configure Ollama Cloud API key"
 
 auth_status:
   cmd: "omegon auth status"
   desc: "Show authentication status for all providers"
 
 set_anthropic_key:
-  cmd: 'export ANTHROPIC_API_KEY="sk-ant-..."'
-  desc: "Set Anthropic API key via environment"
+  cmd: "omegon secret set ANTHROPIC_API_KEY --stdin"
+  desc: "Store Anthropic API key"
 
 set_openai_key:
-  cmd: 'export OPENAI_API_KEY="sk-..."'
-  desc: "Set OpenAI API key via environment"
+  cmd: "omegon secret set OPENAI_API_KEY --stdin"
+  desc: "Store OpenAI API key"
 
 set_ollama_host:
   cmd: 'export OLLAMA_HOST="http://127.0.0.1:11434"'

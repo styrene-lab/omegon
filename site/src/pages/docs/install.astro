@@ -17,6 +17,9 @@ import { snippet } from "../../lib/snippets";
   <pre><code># Install to a custom directory
 {snippet("install.install_custom_dir")}
 
+# Install latest release candidate
+{snippet("install.install_rc")}
+
 # Install latest nightly (bleeding-edge from main)
 {snippet("install.install_nightly")}
 
@@ -30,6 +33,12 @@ import { snippet } from "../../lib/snippets";
   <pre><code>{snippet("install.brew_stable")}</code></pre>
   <p>
     Tracks the latest stable release. Updates via <code>{snippet("install.brew_upgrade_stable")}</code>.
+  </p>
+  <p>
+    On Linux, Homebrew does not provide a newer host glibc for Omegon. If the downloaded
+    binary requires a newer glibc than your distribution has, install can succeed but runtime
+    startup will fail. Check with <code>ldd --version</code> before relying on Linux Homebrew
+    in older distributions.
   </p>
 
   <h2>GitHub Releases</h2>

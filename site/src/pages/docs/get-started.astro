@@ -13,12 +13,13 @@ import Docs from "../../layouts/Docs.astro";
   <table>
     <thead><tr><th>Path</th><th>Best For</th><th>What You Need</th></tr></thead>
     <tbody>
-      <tr><td><a href="/docs/get-started/claude">Claude subscription</a></td><td>Fastest “just make it work” route</td><td>Claude Pro/Max account and browser login</td></tr>
+      <tr><td><a href="/docs/quickstart">OpenAI/Codex OAuth</a></td><td>Fastest default route for most operators</td><td>ChatGPT/Codex account and browser login</td></tr>
+      <tr><td><a href="/docs/get-started/claude">Claude subscription</a></td><td>Interactive Claude-backed TUI work</td><td>Claude Pro/Max account and browser login</td></tr>
       <tr><td><a href="/docs/get-started/api-key">API key path</a></td><td>Direct control over provider credentials</td><td>At least one inference API key</td></tr>
       <tr><td><a href="/docs/get-started/ollama">Local Ollama path</a></td><td>Local/offline-first evaluation</td><td>Ollama installed and at least one model pulled</td></tr>
     </tbody>
   </table>
-  <!-- DIAGRAM:provider-path-decision | Decision tree: "Have Claude Pro/Max?" → yes: Claude subscription path | no → "Have an API key?" → yes: API key path | no → "Want offline?" → yes: Ollama path -->
+  <!-- DIAGRAM:provider-path-decision | Decision tree: "Have ChatGPT/Codex login?" → yes: OpenAI/Codex OAuth path | no → "Have Claude Pro/Max?" → Claude subscription path | no → "Have an API key?" → API key path | no → "Want offline?" → Ollama path -->
 
   <h2>What counts as success?</h2>
   <p>You are done with onboarding when all of these are true:</p>

@@ -24,7 +24,7 @@ omegon extension install .
 
 That's it. You have a working extension with one tool. Edit `src/main.rs` to add your logic.
 
-For the full SDK reference, see [EXTENSION_SDK.md](EXTENSION_SDK.md). For advanced patterns (widgets, state management, v2 bidirectional protocol), see [EXTENSION_INTEGRATION.md](EXTENSION_INTEGRATION.md).
+For the full SDK reference, see [EXTENSION_SDK.md](EXTENSION_SDK.md). For advanced patterns (widgets, state management, and bidirectional protocol work), see [EXTENSION_INTEGRATION.md](EXTENSION_INTEGRATION.md).
 
 ## Overview
 
@@ -78,7 +78,6 @@ Omegon (parent process)
    - Validates schema (name, version, runtime type, widgets)
 
 3. **Validation** (TUI startup)
-   - SDK version check: extension's `sdk_version` matches Omegon's SDK crate version
    - Binary/image existence check
    - If validation fails, extension is disabled (logged)
 
@@ -97,7 +96,7 @@ Omegon (parent process)
    - Extension marked as active
 
 7. **Runtime** (TUI running)
-   - User can invoke tools → Omegon calls `execute_{tool_name}` RPC
+   - User can invoke tools → Omegon calls `execute_tool` with `{ "name": "...", "args": {...} }`
    - User can open widget tabs → Omegon calls `get_{widget_id}` RPC
    - Extension responds with results
    - Omegon renders in UI
@@ -190,7 +189,7 @@ Return initial data for a widget.
 }
 ```
 
-### `execute_{tool_name}`
+### `execute_tool`
 
 Execute a tool with user-provided parameters.
 
@@ -199,8 +198,11 @@ Execute a tool with user-provided parameters.
 {
   "jsonrpc": "2.0",
   "id": "3",
-  "method": "execute_my_tool",
-  "params": {"arg1": "value"}
+  "method": "execute_tool",
+  "params": {
+    "name": "my_tool",
+    "args": {"arg1": "value"}
+  }
 }
 ```
 
@@ -275,10 +277,17 @@ impl Extension for PythonAnalyzer {
                     }
                 }
             ])),
-            "execute_analyze_python" => {
-                let code = params["code"].as_str().unwrap();
-                let errors = analyze(code)?;
-                Ok(json!({"errors": errors}))
+            "execute_tool" => {
+                let name = params["name"].as_str().unwrap_or("");
+                let args = params.get("args").cloned().unwrap_or_default();
+                match name {
+                    "analyze_python" => {
+                        let code = args["code"].as_str().unwrap();
+                        let errors = analyze(code)?;
+                        Ok(json!({"errors": errors}))
+                    }
+                    _ => Err(Error::method_not_found(name)),
+                }
             }
             _ => Err(Error::method_not_found(method)),
         }
@@ -345,7 +354,6 @@ Required sections in `manifest.toml`:
 name = "my-extension"       # Lowercase, alphanumeric + hyphens
 version = "0.1.0"           # Semantic version
 description = "..."         # Optional
-sdk_version = "0.15"        # Omegon SDK version constraint
 
 [runtime]
 type = "native"             # "native" or "oci"
@@ -392,19 +400,9 @@ renderer = "timeline"       # Widget type
 
 ## Version Compatibility
 
-Each Omegon release ships with a specific `omegon-extension` SDK version.
+Each Omegon release ships with a matching `omegon-extension` SDK crate. Rust extensions should depend on the SDK version they target, or on a source checkout during local development.
 
-**Extensions declare their target SDK version:**
-
-```toml
-[extension]
-sdk_version = "0.15"
-```
-
-**Validation at install time:**
-- `sdk_version = "0.15"` matches Omegon SDK `0.15.0`, `0.15.6`, `0.15.6-rc.1` (prefix match)
-- `sdk_version = "0.15.6"` matches Omegon SDK `0.15.6`, `0.15.6-rc.1` (stricter)
-- Mismatch → installation fails with clear error
+The current manifest schema does not require an `sdk_version` field. Compatibility is enforced by the extension protocol and by build-time dependency selection rather than a manifest-level version gate.
 
 **Breaking changes** (next major version):
 - New required RPC methods
@@ -443,8 +441,8 @@ All SDK changes must maintain backward compatibility or clearly document breakin
 
 Future enhancements:
 
-- [ ] Extension marketplace/registry
-- [ ] Extension versioning constraints (allow extensions to require minimal Omegon version)
+- [x] Extension armory/registry commands (`omegon extension list --available`, `omegon extension search`)
+- [ ] Manifest-level minimum Omegon version constraints
 - [ ] Hot-reload without TUI restart
 - [ ] Shared extension dependencies (monorepo support)
 - [ ] gRPC transport option (lower latency than JSON-RPC)
@@ -452,10 +450,4 @@ Future enhancements:
 
 ---
 
-**The extension system is production-ready.** Build with confidence knowing that extension failures will not crash Omegon, and that your extension will remain compatible across Omegon updates.
-
-**Questions?** Join the [Omegon Discord community](https://discord.com/invite/...) or file an issue on GitHub.
-
----
-
-Happy building! 🚀
+Extension failures should not crash Omegon. If an extension stops responding, Omegon disables that extension path and keeps the host process running.

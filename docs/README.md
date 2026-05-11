@@ -1,0 +1,38 @@
++++
+id = "f7acbe5d-5a48-4077-bad2-54a7e08f8d6c"
+tags = ["documentation", "index"]
+aliases = ["docs-index"]
+imported_reference = false
+
+[publication]
+enabled = false
+visibility = "private"
++++
+
+# Documentation Map
+
+This directory is the durable project knowledge base for Omegon. It contains architecture notes, implementation plans, postmortems, and lifecycle records. It is not the same as the public docs site.
+
+For user-facing docs, edit `site/src/pages/docs/` and the command snippets in `site/snippets/`.
+
+## Start Here
+
+- `README.md` at the repository root: product overview, install, core concepts, and source build path.
+- `CONTRIBUTING.md`: branch policy, validation commands, release flow, and workspace layout.
+- `EXTENSIONS.md`: extension system overview.
+- `EXTENSION_SDK.md`: extension authoring quick start and protocol reference.
+- `docs/omegon-install.md`: distribution notes, Linux glibc caveats, and update contract.
+- `docs/provider-credential-map.md`: provider auth and credential behavior.
+- `docs/omegon-session.md`: session persistence behavior.
+- `docs/cleave.md`: parallel worktree orchestration.
+- `docs/project-memory.md`: project memory behavior.
+
+## Directory Boundaries
+
+- `docs/`: durable architecture and implementation docs that should remain readable over time.
+- `design/`: older design notes and exploratory material.
+- `openspec/`: active and archived OpenSpec lifecycle artifacts.
+- `site/`: public documentation site source and generated `dist/`.
+- `ai/benchmarks/`: benchmark tasks and recorded runs.
+
+When adding a new long-lived document, prefer `docs/` and include frontmatter. When adding public-facing guidance, update the Astro page in `site/src/pages/docs/` and use snippets for commands that appear in more than one place.

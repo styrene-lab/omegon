@@ -9,19 +9,19 @@
   },
   "auth.login_ollama_cloud": {
     "cmd": "omegon auth login ollama-cloud",
-    "desc": "OAuth login for Ollama Cloud"
+    "desc": "Configure Ollama Cloud API key"
   },
   "auth.auth_status": {
     "cmd": "omegon auth status",
     "desc": "Show authentication status for all providers"
   },
   "auth.set_anthropic_key": {
-    "cmd": "export ANTHROPIC_API_KEY=\"sk-ant-...\"",
-    "desc": "Set Anthropic API key via environment"
+    "cmd": "omegon secret set ANTHROPIC_API_KEY --stdin",
+    "desc": "Store Anthropic API key"
   },
   "auth.set_openai_key": {
-    "cmd": "export OPENAI_API_KEY=\"sk-...\"",
-    "desc": "Set OpenAI API key via environment"
+    "cmd": "omegon secret set OPENAI_API_KEY --stdin",
+    "desc": "Store OpenAI API key"
   },
   "auth.set_ollama_host": {
     "cmd": "export OLLAMA_HOST=\"http://127.0.0.1:11434\"",
@@ -108,7 +108,7 @@
     "desc": "Scaffold a new extension project"
   },
   "cli.dev_clone_build": {
-    "cmd": "git clone https://github.com/styrene-lab/omegon.git\ncd omegon\ncd core && cargo build -p omegon\ncargo test -p omegon",
+    "cmd": "git clone https://github.com/styrene-lab/omegon.git\ncd omegon\ncargo build -p omegon\ncargo test -p omegon",
     "desc": "Clone, build, and test from source"
   },
   "cli.release_workflow": {
@@ -120,20 +120,20 @@
     "desc": "Quick install — downloads latest signed binary"
   },
   "install.install_custom_dir": {
-    "cmd": "INSTALL_DIR=~/.local/bin curl -fsSL https://omegon.styrene.io/install.sh | sh",
+    "cmd": "curl -fsSL https://omegon.styrene.io/install.sh | INSTALL_DIR=~/.local/bin sh",
     "desc": "Install to a custom directory"
   },
   "install.install_rc": {
-    "cmd": "CHANNEL=rc curl -fsSL https://omegon.styrene.io/install.sh | sh",
-    "desc": "Install latest RC"
+    "cmd": "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --channel=rc",
+    "desc": "Install latest release candidate"
   },
   "install.install_nightly": {
-    "cmd": "CHANNEL=nightly curl -fsSL https://omegon.styrene.io/install.sh | sh",
+    "cmd": "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --channel=nightly",
     "desc": "Install latest nightly"
   },
   "install.install_version": {
-    "cmd": "VERSION=0.19.5 curl -fsSL https://omegon.styrene.io/install.sh | sh",
-    "desc": "Install a specific version (stable, RC, or nightly)"
+    "cmd": "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --version=v0.19.5",
+    "desc": "Install a specific version"
   },
   "install.install_ci": {
     "cmd": "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --no-confirm",
@@ -141,23 +141,11 @@
   },
   "install.brew_stable": {
     "cmd": "brew tap styrene-lab/tap\nbrew install omegon",
-    "desc": "Homebrew stable install"
-  },
-  "install.brew_rc": {
-    "cmd": "brew tap styrene-lab/tap\nbrew install styrene-lab/tap/omegon-rc",
-    "desc": "Homebrew RC channel install"
-  },
-  "install.brew_switch_stable": {
-    "cmd": "brew unlink omegon-rc\nbrew install omegon",
-    "desc": "Switch from RC back to stable Homebrew"
+    "desc": "Homebrew install"
   },
   "install.brew_upgrade_stable": {
     "cmd": "brew upgrade omegon",
-    "desc": "Update stable Homebrew install"
-  },
-  "install.brew_upgrade_rc": {
-    "cmd": "brew upgrade styrene-lab/tap/omegon-rc",
-    "desc": "Update RC Homebrew install"
+    "desc": "Update Homebrew install"
   },
   "install.update_script": {
     "cmd": "curl -fsSL https://omegon.styrene.io/install.sh | sh",

@@ -71,7 +71,6 @@ pub fn init(name: &str) -> anyhow::Result<()> {
 name = "{name}"
 version = "0.1.0"
 description = "TODO: describe your extension"
-sdk_version = "0.16"
 
 [runtime]
 type = "native"
@@ -103,9 +102,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-omegon-extension = {{ git = "https://github.com/styrene-labs/omegon", path = "core/crates/omegon-extension" }}
+omegon-extension = {{ git = "https://github.com/styrene-lab/omegon" }}
 serde_json = "1"
-tokio = {{ version = "1", features = ["rt", "io-util"] }}
+tokio = {{ version = "1", features = ["rt", "macros", "io-util"] }}
 async-trait = "0.1"
 "#
         ),
@@ -153,7 +152,7 @@ impl Extension for {struct_name} {{
                 {{
                     "name": "hello",
                     "label": "Hello",
-                    "description": "A greeting tool — replace this with your own",
+                    "description": "A greeting tool - replace this with your own",
                     "parameters": {{
                         "type": "object",
                         "properties": {{
@@ -163,8 +162,15 @@ impl Extension for {struct_name} {{
                     }}
                 }}
             ])),
-            "execute_hello" => {{
-                let who = params.get("name")
+            "execute_tool" => {{
+                let tool_name = params.get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if tool_name != "hello" {{
+                    return Err(omegon_extension::Error::method_not_found(tool_name));
+                }}
+                let args = params.get("args").cloned().unwrap_or_default();
+                let who = args.get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("World");
                 Ok(json!({{
@@ -1005,10 +1011,7 @@ binary = "my-ext"
             installed.join("manifest.toml").exists(),
             "manifest should exist"
         );
-        assert!(
-            installed.join("my-ext").exists(),
-            "binary should exist"
-        );
+        assert!(installed.join("my-ext").exists(), "binary should exist");
 
         // Verify it's a real copy, not a symlink
         assert!(!installed.is_symlink(), "should not be a symlink");

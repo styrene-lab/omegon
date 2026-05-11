@@ -19,7 +19,7 @@ Extensions run as isolated processes communicating via JSON-RPC over stdin/stdou
 
 ```toml
 [dependencies]
-omegon-extension = "0.16"
+omegon-extension = "0.19"
 ```
 
 ```rust
@@ -36,7 +36,34 @@ impl Extension for MyExtension {
 
     async fn handle_rpc(&self, method: &str, params: Value) -> omegon_extension::Result<Value> {
         match method {
-            "get_tools" => Ok(json!([])),
+            "get_tools" => Ok(json!([
+                {
+                    "name": "hello",
+                    "description": "Return a greeting",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"}
+                        }
+                    }
+                }
+            ])),
+            "execute_tool" => {
+                let name = params["name"].as_str().unwrap_or("");
+                let args = params.get("args").cloned().unwrap_or_default();
+                match name {
+                    "hello" => Ok(json!({
+                        "content": [{
+                            "type": "text",
+                            "text": format!(
+                                "Hello, {}!",
+                                args["name"].as_str().unwrap_or("World")
+                            )
+                        }]
+                    })),
+                    _ => Err(omegon_extension::Error::method_not_found(name)),
+                }
+            }
             _ => Err(omegon_extension::Error::method_not_found(method)),
         }
     }

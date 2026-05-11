@@ -30,8 +30,8 @@ test: add snapshot test for rounded borders</code></pre>
   <h2>Testing Requirements</h2>
   <ul>
     <li>Every non-trivial code change must include tests</li>
-    <li><code>cargo test -p omegon</code> must pass with zero failures</li>
-    <li><code>cargo check</code> must produce zero warnings</li>
+    <li><code>just test-rust</code> must pass before landing code changes</li>
+    <li><code>just lint</code> must pass with zero warnings</li>
     <li>Snapshot tests (via <code>cargo-insta</code>) are accepted with <code>cargo insta test --accept</code></li>
     <li>Tests must pass before merge</li>
   </ul>
@@ -54,7 +54,7 @@ test: add snapshot test for rounded borders</code></pre>
       </ul>
     </li>
     <li>Builds docs site locally (verification)</li>
-    <li>Links the local binary to <code>/opt/homebrew/bin/omegon</code></li>
+    <li>Refreshes the local development aliases through <code>just link</code></li>
     <li>Runs post-publish smoke test</li>
   </ol>
   <p>
@@ -68,11 +68,14 @@ test: add snapshot test for rounded borders</code></pre>
     <thead><tr><th>Crate</th><th>Purpose</th></tr></thead>
     <tbody>
       <tr><td><code>omegon</code></td><td>Binary — TUI, agent loop, providers, tools, cleave orchestrator</td></tr>
+      <tr><td><code>omegon-codescan</code></td><td>Code scanning helpers</td></tr>
+      <tr><td><code>omegon-extension</code></td><td>Extension SDK and protocol types</td></tr>
       <tr><td><code>omegon-git</code></td><td>Git operations — worktree management, merge, diff</td></tr>
       <tr><td><code>omegon-memory</code></td><td>Project memory — facts, episodes, semantic search, knowledge graph</td></tr>
+      <tr><td><code>omegon-opsx</code></td><td>OpenSpec lifecycle engine</td></tr>
       <tr><td><code>omegon-secrets</code></td><td>Credential storage — keychain, encrypted file, Vault</td></tr>
       <tr><td><code>omegon-traits</code></td><td>Shared traits and types across crates</td></tr>
-      <tr><td><code>omegon-opsx</code></td><td>OpenSpec engine — spec parsing, verification, lifecycle</td></tr>
+      <tr><td><code>omegon-web</code></td><td>Web dashboard and web-facing support code</td></tr>
     </tbody>
   </table>
 

@@ -84,7 +84,7 @@ dev_clone_build:
   cmd: |
     git clone https://github.com/styrene-lab/omegon.git
     cd omegon
-    cd core && cargo build -p omegon
+    cargo build -p omegon
     cargo test -p omegon
   desc: "Clone, build, and test from source"
 

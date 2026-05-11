@@ -7,7 +7,7 @@ import { snippet } from "../../lib/snippets";
   <p>
     Extensions add tools, widgets, and integrations to Omegon without modifying
     the core binary. They run as isolated processes, communicate via JSON-RPC 2.0
-    over stdio, and crash-safe by design &mdash; an extension failure never takes
+    over stdio, and are crash-safe by design &mdash; an extension failure never takes
     down Omegon.
   </p>
   <!-- DIAGRAM:extension-isolation | Block diagram: Omegon core ← stdio JSON-RPC 2.0 → [Extension process]. Show process boundary, crash isolation, secret delivery via RPC handshake (not env vars), and optional TCP widget channel -->
@@ -15,8 +15,9 @@ import { snippet } from "../../lib/snippets";
   <h2>Install an extension</h2>
   <pre><code>{snippet("cli.extension_install")}</code></pre>
   <p>
-    Git URLs are cloned and built automatically (requires a Rust toolchain).
-    Local paths are symlinked for development.
+    Git URLs are cloned and built automatically when they contain a Rust project.
+    Local paths are symlinked for development. Registry entries can be discovered with
+    <code>omegon extension list --available</code> and <code>omegon extension search &lt;query&gt;</code>.
   </p>
 
   <h2>Available Extensions</h2>
@@ -69,6 +70,12 @@ import { snippet } from "../../lib/snippets";
   <h2>Managing extensions</h2>
   <pre><code># List installed extensions
 {snippet("cli.extension_list")}
+
+# List available registry extensions
+omegon extension list --available
+
+# Search registry extensions
+omegon extension search communication
 
 # Update all extensions
 {snippet("cli.extension_update")}
