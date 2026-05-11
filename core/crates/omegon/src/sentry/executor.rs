@@ -322,7 +322,7 @@ async fn execute_task_with_retry(
         }
     }
 
-    let effective_model = resolve_model(spec.model.as_deref(), model, &spec.prompt, routing).await;
+    let (effective_model, classification) = resolve_model(spec.model.as_deref(), model, &spec.prompt, routing).await;
     let effective_cwd = spec.cwd.as_deref().unwrap_or(cwd);
     let max_turns = spec.max_turns.unwrap_or(30);
     let timeout_secs = spec.timeout_secs.unwrap_or(600);
@@ -339,24 +339,27 @@ async fn execute_task_with_retry(
             tracing::error!(task = %task_id, error = %e, "failed to record run start");
         }
 
+        let is_code_act = spec.execution_mode.as_deref() == Some("code-act");
         tracing::info!(
             task = %task_id,
             model = %effective_model,
             max_turns,
             timeout_secs,
             attempt,
+            code_act = is_code_act,
             "executing sentry task"
         );
 
-        match run_agent_task(
-            &spec.prompt,
-            &effective_model,
-            effective_cwd,
-            max_turns,
-            timeout_secs,
-            spec.token_budget,
-            cancel,
-        ).await {
+        let task_result = if is_code_act {
+            run_code_act_task(&spec.prompt, &effective_model, effective_cwd, timeout_secs, cancel).await
+        } else {
+            run_agent_task(
+                &spec.prompt, &effective_model, effective_cwd,
+                max_turns, timeout_secs, spec.token_budget, cancel,
+            ).await
+        };
+
+        match task_result {
             Ok(result) => {
                 tracing::info!(
                     task = %task_id,
@@ -368,6 +371,12 @@ async fn execute_task_with_retry(
                 let _ = state_db.record_run_complete(&run_id, &result);
                 record_budget_usage(state_db, task_id, result.tokens_used);
 
+                if let Some(ref class) = classification {
+                    let _ = state_db.record_routing_outcome(
+                        task_id, class, &effective_model,
+                        result.exit_code == 0, result.tokens_used, result.duration_secs,
+                    );
+                }
                 if result.exit_code == 0 {
                     apply_lifecycle_hooks(effective_cwd, &spec, task_id);
                     let _ = board.complete(task_id, &result);
@@ -393,6 +402,11 @@ async fn execute_task_with_retry(
                         error = %e,
                         "task failed permanently"
                     );
+                    if let Some(ref class) = classification {
+                        let _ = state_db.record_routing_outcome(
+                            task_id, class, &effective_model, false, 0, 0,
+                        );
+                    }
                     let _ = board.fail(task_id, &error);
                     return;
                 }
@@ -476,60 +490,160 @@ async fn resolve_model<'a>(
     default_model: &'a str,
     task_prompt: &str,
     routing: &Option<Arc<RoutingConfig>>,
-) -> String {
+) -> (String, Option<String>) {
     match spec_model {
         Some("auto") => {
             if let Some(routing) = routing {
-                match classify_task_complexity(&routing.prefilter_model, task_prompt).await {
+                let complexity = classify_task_complexity(&routing.prefilter_model, task_prompt).await;
+                let class_name = format!("{complexity:?}");
+                let model = match complexity {
                     TaskComplexity::Simple | TaskComplexity::Moderate => {
-                        tracing::info!(routed = %routing.light_model, "model routing: task classified as light");
+                        tracing::info!(routed = %routing.light_model, class = %class_name, "model routing");
                         routing.light_model.clone()
                     }
                     TaskComplexity::Complex => {
-                        tracing::info!(routed = %routing.heavy_model, "model routing: task classified as complex");
+                        tracing::info!(routed = %routing.heavy_model, class = %class_name, "model routing");
                         routing.heavy_model.clone()
                     }
-                }
+                };
+                (model, Some(class_name))
             } else {
-                default_model.to_string()
+                (default_model.to_string(), None)
             }
         }
-        Some(explicit) => explicit.to_string(),
-        None => default_model.to_string(),
+        Some(explicit) => (explicit.to_string(), None),
+        None => (default_model.to_string(), None),
     }
 }
 
 #[derive(Debug)]
-enum TaskComplexity {
+pub(crate) enum TaskComplexity {
     Simple,
     Moderate,
     Complex,
 }
 
-async fn classify_task_complexity(_prefilter_model: &str, prompt: &str) -> TaskComplexity {
+async fn classify_task_complexity(prefilter_model: &str, prompt: &str) -> TaskComplexity {
+    let truncated = if prompt.len() > 500 { &prompt[..500] } else { prompt };
+    let classification_prompt = format!(
+        "Classify this task's complexity. Respond with exactly one word.\n\
+         SIMPLE: single-step check, yes/no answer, status lookup\n\
+         MODERATE: multi-step but well-defined, standard review\n\
+         COMPLEX: open-ended analysis, architectural decisions, multi-file changes\n\n\
+         Task: \"{truncated}\""
+    );
+
+    match crate::providers::quick_completion(prefilter_model, &classification_prompt).await {
+        Ok(result) => {
+            let trimmed = result.text.trim().to_uppercase();
+            tracing::debug!(
+                response = %trimmed,
+                input_tokens = result.input_tokens,
+                output_tokens = result.output_tokens,
+                "prefilter classification"
+            );
+            if trimmed.contains("SIMPLE") {
+                TaskComplexity::Simple
+            } else if trimmed.contains("COMPLEX") {
+                TaskComplexity::Complex
+            } else {
+                TaskComplexity::Moderate
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "prefilter classification failed — falling back to heuristic");
+            classify_heuristic(prompt)
+        }
+    }
+}
+
+pub(crate) fn classify_heuristic(prompt: &str) -> TaskComplexity {
     let lower = prompt.to_lowercase();
     let word_count = prompt.split_whitespace().count();
 
-    let complex_signals = [
+    const COMPLEX: &[&str] = &[
         "architect", "redesign", "refactor", "migrate", "rewrite",
         "investigate", "analyze", "design", "propose", "evaluate",
-        "multi-file", "cross-cutting", "system-wide",
     ];
-    let simple_signals = [
+    const SIMPLE: &[&str] = &[
         "check", "status", "verify", "confirm", "list", "count",
-        "is it", "does it", "show me", "what is",
     ];
 
-    let has_complex = complex_signals.iter().any(|s| lower.contains(s));
-    let has_simple = simple_signals.iter().any(|s| lower.contains(s));
-
-    if has_complex || word_count > 100 {
+    if COMPLEX.iter().any(|s| lower.contains(s)) || word_count > 100 {
         TaskComplexity::Complex
-    } else if has_simple || word_count < 20 {
+    } else if SIMPLE.iter().any(|s| lower.contains(s)) || word_count < 20 {
         TaskComplexity::Simple
     } else {
         TaskComplexity::Moderate
     }
+}
+
+async fn run_code_act_task(
+    prompt: &str,
+    model: &str,
+    cwd: &Path,
+    timeout_secs: u64,
+    cancel: &CancellationToken,
+) -> anyhow::Result<TaskResult> {
+    let start = Instant::now();
+    let executor = crate::code_act::CodeActExecutor::permitted(cwd.to_path_buf());
+    let mut total_tokens = 0u64;
+
+    let mut gen_prompt = executor.build_prompt(prompt, None);
+    let mut last_code = String::new();
+
+    for attempt in 1..=3u32 {
+        if cancel.is_cancelled() {
+            anyhow::bail!("cancelled");
+        }
+
+        let completion = crate::providers::quick_completion(model, &gen_prompt).await?;
+        total_tokens += completion.input_tokens + completion.output_tokens;
+
+        let code = match crate::code_act::CodeActExecutor::extract_code(&completion.text) {
+            Some(c) => c,
+            None => {
+                tracing::warn!(attempt, "code-act: LLM did not produce a code block");
+                if attempt < 3 {
+                    gen_prompt = executor.build_retry_prompt(
+                        prompt, &completion.text, "No Python code block found in response",
+                    );
+                    continue;
+                }
+                anyhow::bail!("LLM failed to produce a code block after {attempt} attempts");
+            }
+        };
+
+        last_code = code.clone();
+        let result = executor.execute_script(&code, Some(timeout_secs), cancel.clone()).await?;
+        let duration = start.elapsed().as_secs();
+
+        if result.is_error && attempt < 3 {
+            tracing::info!(attempt, "code-act: script failed, retrying with error context");
+            gen_prompt = executor.build_retry_prompt(prompt, &code, &result.output);
+            continue;
+        }
+
+        return Ok(TaskResult {
+            exit_code: result.exit_code,
+            summary: if result.is_error {
+                format!("code-act failed: {}", result.output.chars().take(500).collect::<String>())
+            } else {
+                result.output.chars().take(500).collect()
+            },
+            tokens_used: total_tokens,
+            duration_secs: duration,
+            session_id: format!("code-act-{}", super::file_board::uuid_v4()),
+        });
+    }
+
+    Ok(TaskResult {
+        exit_code: 1,
+        summary: "code-act exhausted retries".into(),
+        tokens_used: total_tokens,
+        duration_secs: start.elapsed().as_secs(),
+        session_id: format!("code-act-{}", super::file_board::uuid_v4()),
+    })
 }
 
 async fn run_agent_task(

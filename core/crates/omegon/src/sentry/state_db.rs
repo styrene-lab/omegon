@@ -6,6 +6,13 @@ use rusqlite::Connection;
 
 use super::types::{RunRecord, RunStatus, TaskError, TaskResult};
 
+#[derive(Debug, Clone)]
+pub struct RoutingStats {
+    pub total: u32,
+    /// (class, total, successes, total_tokens)
+    pub by_class: Vec<(String, u32, u32, u64)>,
+}
+
 pub struct StateDb {
     conn: Mutex<Connection>,
 }
@@ -59,6 +66,18 @@ impl StateDb {
                 cost_usd     REAL NOT NULL DEFAULT 0.0,
                 PRIMARY KEY (task_id, window_start)
             );
+
+            CREATE TABLE IF NOT EXISTS routing_outcomes (
+                id            TEXT PRIMARY KEY,
+                task_id       TEXT NOT NULL,
+                classified_as TEXT NOT NULL,
+                model_used    TEXT NOT NULL,
+                success       INTEGER NOT NULL,
+                tokens_used   INTEGER NOT NULL DEFAULT 0,
+                duration_secs INTEGER NOT NULL DEFAULT 0,
+                recorded_at   TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_routing_outcomes_task_id ON routing_outcomes(task_id);
         ")?;
         Ok(())
     }
@@ -230,6 +249,61 @@ impl StateDb {
             [&cutoff],
         )?;
         Ok(deleted as u64)
+    }
+
+    pub fn record_routing_outcome(
+        &self,
+        task_id: &str,
+        classified_as: &str,
+        model_used: &str,
+        success: bool,
+        tokens: u64,
+        duration: u64,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO routing_outcomes \
+             (id, task_id, classified_as, model_used, success, tokens_used, duration_secs, recorded_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                id,
+                task_id,
+                classified_as,
+                model_used,
+                success as i32,
+                tokens as i64,
+                duration as i64,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn routing_stats(&self) -> anyhow::Result<RoutingStats> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let total: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM routing_outcomes",
+            [],
+            |row| row.get(0),
+        )?;
+        let mut stmt = conn.prepare(
+            "SELECT classified_as, COUNT(*), SUM(success), SUM(tokens_used) \
+             FROM routing_outcomes GROUP BY classified_as",
+        )?;
+        let by_class = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u32>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, i64>(3).map(|v| v as u64)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(RoutingStats { total, by_class })
     }
 }
 
@@ -406,5 +480,35 @@ mod tests {
 
         let all = db.list_all_runs(100).unwrap();
         assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn routing_outcome_recorded_and_queryable() {
+        let db = test_db();
+        db.record_routing_outcome("task-1", "Simple", "haiku", true, 500, 10).unwrap();
+        db.record_routing_outcome("task-2", "Complex", "opus", true, 5000, 120).unwrap();
+        db.record_routing_outcome("task-3", "Simple", "haiku", false, 300, 8).unwrap();
+
+        let stats = db.routing_stats().unwrap();
+        assert_eq!(stats.total, 3);
+        assert_eq!(stats.by_class.len(), 2);
+
+        let simple = stats.by_class.iter().find(|r| r.0 == "Simple").unwrap();
+        assert_eq!(simple.1, 2);  // total
+        assert_eq!(simple.2, 1);  // successes
+        assert_eq!(simple.3, 800); // total_tokens
+
+        let complex = stats.by_class.iter().find(|r| r.0 == "Complex").unwrap();
+        assert_eq!(complex.1, 1);
+        assert_eq!(complex.2, 1);
+        assert_eq!(complex.3, 5000);
+    }
+
+    #[test]
+    fn routing_stats_empty_when_no_outcomes() {
+        let db = test_db();
+        let stats = db.routing_stats().unwrap();
+        assert_eq!(stats.total, 0);
+        assert!(stats.by_class.is_empty());
     }
 }

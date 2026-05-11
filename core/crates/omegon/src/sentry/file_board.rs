@@ -116,6 +116,7 @@ impl TaskBoard for FileTaskBoard {
             token_budget: tc.token_budget,
             cwd: tc.cwd.as_ref().map(PathBuf::from),
             env: tc.env.clone().unwrap_or_default(),
+            execution_mode: tc.execution_mode.clone(),
             design_node_id: None,
             openspec_change: None,
         })
@@ -161,6 +162,7 @@ mod tests {
                     token_budget: None,
                     cwd: None,
                     env: None,
+                    execution_mode: None,
                     trigger: Some(TriggerConfig {
                         cron: Some(CronTrigger { schedule: "0 * * * * *".into() }),
                         webhook: None,

@@ -39,6 +39,7 @@ struct CompiledEndpoint {
     path_params: Vec<String>,
     query_params: Vec<String>,
     has_body: bool,
+    requires_confirm: bool,
     description: String,
     tool_parameters: Value,
 }
@@ -89,16 +90,19 @@ impl ToolProvider for OpenApiToolProvider {
         self.specs
             .iter()
             .flat_map(|spec| {
-                spec.endpoints.iter().map(|ep| ToolDefinition {
-                    name: ep.tool_name.clone(),
-                    label: ep.tool_name.clone(),
-                    description: ep.description.clone(),
-                    parameters: ep.tool_parameters.clone(),
-                    capabilities: if ep.method == reqwest::Method::GET {
-                        vec![ToolCapability::RepoInspection]
-                    } else {
+                spec.endpoints.iter().map(|ep| {
+                    let caps = if ep.requires_confirm || ep.method != reqwest::Method::GET {
                         vec![ToolCapability::StateChanging]
-                    },
+                    } else {
+                        vec![ToolCapability::RepoInspection]
+                    };
+                    ToolDefinition {
+                        name: ep.tool_name.clone(),
+                        label: ep.tool_name.clone(),
+                        description: ep.description.clone(),
+                        parameters: ep.tool_parameters.clone(),
+                        capabilities: caps,
+                    }
                 })
             })
             .collect()
@@ -216,19 +220,115 @@ fn parse_spec(raw: &str) -> anyhow::Result<Value> {
     })
 }
 
+/// Return the directory used for caching fetched OpenAPI specs.
+fn spec_cache_dir() -> std::path::PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("omegon")
+        .join("api_cache")
+}
+
+/// Compute a hex-encoded SHA-256 hash of the given bytes.
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::Digest;
+    let hash = sha2::Sha256::digest(data);
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn load_spec_content(spec: &str) -> anyhow::Result<String> {
     if spec.starts_with("http://") || spec.starts_with("https://") {
         let spec = spec.to_string();
-        std::thread::spawn(move || {
-            reqwest::blocking::get(&spec)?
-                .text()
-                .map_err(|e| anyhow::anyhow!("failed to fetch spec from {spec}: {e}"))
-        })
-        .join()
-        .map_err(|_| anyhow::anyhow!("spec fetch thread panicked"))?
+        std::thread::spawn(move || load_spec_from_url(&spec))
+            .join()
+            .map_err(|_| anyhow::anyhow!("spec fetch thread panicked"))?
     } else {
         std::fs::read_to_string(spec)
             .map_err(|e| anyhow::anyhow!("failed to read spec file {spec}: {e}"))
+    }
+}
+
+fn load_spec_from_url(url: &str) -> anyhow::Result<String> {
+    load_spec_from_url_cached(url, &spec_cache_dir())
+}
+
+fn load_spec_from_url_cached(url: &str, cache_dir: &std::path::Path) -> anyhow::Result<String> {
+    let url_hash = sha256_hex(url.as_bytes());
+    let cache_path = cache_dir.join(&url_hash);
+    let etag_path = cache_dir.join(format!("{url_hash}.etag"));
+
+    // Read any previously stored ETag.
+    let stored_etag = std::fs::read_to_string(&etag_path).ok();
+
+    // Build the request, attaching If-None-Match when we have a cached ETag.
+    let client = reqwest::blocking::Client::new();
+    let mut req = client.get(url);
+    if let Some(ref etag) = stored_etag {
+        req = req.header("If-None-Match", etag.as_str());
+    }
+
+    match req.send() {
+        Ok(resp) => {
+            if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+                // Server confirmed our cached copy is still current.
+                return std::fs::read_to_string(&cache_path).map_err(|e| {
+                    anyhow::anyhow!("304 but cached file missing for {url}: {e}")
+                });
+            }
+
+            if !resp.status().is_success() {
+                // Non-success, non-304: try cache fallback, otherwise report the status.
+                if cache_path.exists() {
+                    tracing::warn!(
+                        url = %url,
+                        status = %resp.status(),
+                        "spec fetch returned non-success status, falling back to cache"
+                    );
+                    return std::fs::read_to_string(&cache_path).map_err(|e| {
+                        anyhow::anyhow!("failed to read cached spec for {url}: {e}")
+                    });
+                }
+                return Err(anyhow::anyhow!(
+                    "failed to fetch spec from {url}: HTTP {}",
+                    resp.status()
+                ));
+            }
+
+            // 2xx — extract ETag before consuming the body.
+            let new_etag = resp
+                .headers()
+                .get("etag")
+                .and_then(|v| v.to_str().ok())
+                .map(String::from);
+
+            let body = resp
+                .text()
+                .map_err(|e| anyhow::anyhow!("failed to read response body from {url}: {e}"))?;
+
+            // Persist to cache (best-effort).
+            if std::fs::create_dir_all(&cache_dir).is_ok() {
+                let _ = std::fs::write(&cache_path, &body);
+                if let Some(etag) = &new_etag {
+                    let _ = std::fs::write(&etag_path, etag);
+                }
+            }
+
+            Ok(body)
+        }
+        Err(network_err) => {
+            // Network-level failure — fall back to cache if available.
+            if cache_path.exists() {
+                tracing::warn!(
+                    url = %url,
+                    error = %network_err,
+                    "spec fetch failed, falling back to cache"
+                );
+                std::fs::read_to_string(&cache_path).map_err(|e| {
+                    anyhow::anyhow!("network error and cached spec unreadable for {url}: {e}")
+                })
+            } else {
+                Err(anyhow::anyhow!("failed to fetch spec from {url}: {network_err}"))
+            }
+        }
     }
 }
 
@@ -301,6 +401,13 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
                     let slug = path.replace('/', "_").replace('{', "").replace('}', "");
                     format!("{method_str}{slug}")
                 });
+
+            if !config.allow.is_empty() && !glob_matches_any(&operation_id, &config.allow) {
+                continue;
+            }
+
+            let requires_confirm = !config.confirm.is_empty()
+                && glob_matches_any(&operation_id, &config.confirm);
 
             let mut tool_name = format!("api_{prefix}_{operation_id}");
             if tool_name.len() > 64 {
@@ -412,6 +519,7 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
                 path_params: path_param_names,
                 query_params: query_param_names,
                 has_body,
+                requires_confirm,
                 description,
                 tool_parameters,
             });
@@ -432,6 +540,34 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
         auth_header_prefix,
         secret_env: config.secret.clone(),
     })
+}
+
+fn glob_matches_any(operation_id: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| glob_match(operation_id, pattern))
+}
+
+fn glob_match(s: &str, pattern: &str) -> bool {
+    if !pattern.contains('*') {
+        return s == pattern;
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut pos = 0;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() { continue; }
+        if i == 0 {
+            if !s.starts_with(part) { return false; }
+            pos = part.len();
+        } else if i == parts.len() - 1 {
+            if !s[pos..].ends_with(part) { return false; }
+            return true;
+        } else {
+            match s[pos..].find(part) {
+                Some(idx) => pos += idx + part.len(),
+                None => return false,
+            }
+        }
+    }
+    true
 }
 
 fn sanitize_prefix(name: &str) -> String {
@@ -638,5 +774,111 @@ paths:
         let names: Vec<&str> = spec.endpoints.iter().map(|e| e.tool_name.as_str()).collect();
         assert_eq!(names.len(), 2);
         assert_ne!(names[0], names[1]);
+    }
+
+    #[test]
+    fn allow_filter_restricts_endpoints() {
+        let mut config = test_config();
+        config.allow = vec!["list_pets".into(), "show_*".into()];
+        let mut doc: Value = serde_json::from_str(PETSTORE_JSON).unwrap();
+        openapi_resolve::resolve_refs(&mut doc).unwrap();
+        let spec = compile("petstore", &doc, &config).unwrap();
+        let names: Vec<&str> = spec.endpoints.iter().map(|e| e.tool_name.as_str()).collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"api_petstore_list_pets"));
+        assert!(names.contains(&"api_petstore_show_pet_by_id"));
+        assert!(!names.iter().any(|n| n.contains("create")));
+    }
+
+    #[test]
+    fn confirm_marks_matching_endpoints() {
+        let mut config = test_config();
+        config.confirm = vec!["create_*".into()];
+        let mut doc: Value = serde_json::from_str(PETSTORE_JSON).unwrap();
+        openapi_resolve::resolve_refs(&mut doc).unwrap();
+        let spec = compile("petstore", &doc, &config).unwrap();
+        let create = spec.endpoints.iter().find(|e| e.tool_name.contains("create")).unwrap();
+        assert!(create.requires_confirm);
+        let list = spec.endpoints.iter().find(|e| e.tool_name.contains("list")).unwrap();
+        assert!(!list.requires_confirm);
+    }
+
+    #[test]
+    fn glob_matching() {
+        assert!(glob_matches_any("create_pet", &["create_*".into()]));
+        assert!(glob_matches_any("list_pets", &["list_pets".into()]));
+        assert!(!glob_matches_any("list_pets", &["create_*".into()]));
+        assert!(glob_matches_any("delete_customer", &["*_customer".into()]));
+        assert!(glob_matches_any("show_pet_by_id", &["show_*".into()]));
+
+        assert!(glob_match("get_pet_by_id", "get_*_by_id"));
+        assert!(!glob_match("delete_pet_by_id", "get_*_by_id"));
+        assert!(glob_match("anything", "*"));
+        assert!(!glob_match("create_pet", "delete_*"));
+    }
+
+    #[test]
+    fn cached_spec_survives_fetch_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().to_path_buf();
+
+        // A URL that will not resolve (RFC 5737 TEST-NET address, port 1).
+        let url = "http://192.0.2.1:1/nonexistent-openapi-spec.json";
+        let url_hash = sha256_hex(url.as_bytes());
+        let cache_path = cache_dir.join(&url_hash);
+
+        let fake_spec = r#"{"openapi":"3.0.0","info":{"title":"Cached"},"paths":{}}"#;
+        std::fs::write(&cache_path, fake_spec).unwrap();
+
+        // `load_spec_from_url_cached` should fail the HTTP fetch and fall back
+        // to the cached file we planted.
+        let content = load_spec_from_url_cached(url, &cache_dir)
+            .expect("should fall back to cached content on network failure");
+        assert_eq!(content, fake_spec);
+    }
+
+    #[test]
+    fn api_dir_auto_discovery() {
+        let tmp = tempfile::tempdir().unwrap();
+        let api_dir = tmp.path().join(".omegon").join("apis");
+        std::fs::create_dir_all(&api_dir).unwrap();
+
+        std::fs::write(api_dir.join("petstore.yaml"), PETSTORE_YAML).unwrap();
+        std::fs::write(api_dir.join("stripe.json"), PETSTORE_JSON).unwrap();
+        std::fs::write(api_dir.join("readme.txt"), "not a spec").unwrap();
+
+        let configs = crate::tools::openapi_config::load_openapi_configs(tmp.path());
+        assert_eq!(configs.len(), 2);
+
+        let names: Vec<&str> = configs.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"petstore"));
+        assert!(names.contains(&"stripe"));
+
+        let petstore = configs.iter().find(|(n, _)| n == "petstore").unwrap();
+        assert_eq!(petstore.1.auth, "bearer");
+        assert_eq!(petstore.1.secret, "PETSTORE_API_KEY");
+    }
+
+    #[test]
+    fn toml_config_takes_precedence_over_auto_discovery() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let api_dir = tmp.path().join(".omegon").join("apis");
+        std::fs::create_dir_all(&api_dir).unwrap();
+        std::fs::write(api_dir.join("petstore.yaml"), PETSTORE_YAML).unwrap();
+
+        let toml_path = tmp.path().join(".omegon").join("openapi.toml");
+        std::fs::write(&toml_path, r#"
+[petstore]
+spec = "custom/path.yaml"
+auth = "api_key"
+secret = "CUSTOM_KEY"
+"#).unwrap();
+
+        let configs = crate::tools::openapi_config::load_openapi_configs(tmp.path());
+        assert_eq!(configs.len(), 1);
+        let (name, config) = &configs[0];
+        assert_eq!(name, "petstore");
+        assert_eq!(config.secret, "CUSTOM_KEY");
     }
 }

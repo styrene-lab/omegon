@@ -59,6 +59,7 @@ pub struct SentryTaskConfig {
     pub cwd: Option<String>,
     #[serde(default)]
     pub env: Option<HashMap<String, String>>,
+    pub execution_mode: Option<String>,
     pub trigger: Option<TriggerConfig>,
     pub budget: Option<BudgetConfig>,
     pub priority: Option<u8>,
