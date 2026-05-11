@@ -55,11 +55,16 @@ Respond with ONLY a Python code block (```python ... ```). No explanation before
 
 pub struct CodeActExecutor {
     cwd: PathBuf,
+    permitted: bool,
 }
 
 impl CodeActExecutor {
     pub fn new(cwd: PathBuf) -> Self {
-        Self { cwd }
+        let bypass = std::env::var("OMEGON_BYPASS_PERMISSIONS").is_ok();
+        let code_act = std::env::var("OMEGON_CODE_ACT")
+            .map(|v| matches!(v.as_str(), "1" | "true"))
+            .unwrap_or(false);
+        Self { cwd, permitted: bypass || code_act }
     }
 
     pub fn build_prompt(&self, task: &str, context: Option<&str>) -> String {
@@ -112,9 +117,17 @@ impl CodeActExecutor {
         timeout_secs: Option<u64>,
         cancel: CancellationToken,
     ) -> Result<CodeActResult> {
+        if !self.permitted {
+            anyhow::bail!(
+                "code-act execution requires explicit opt-in: set OMEGON_CODE_ACT=1 \
+                 or use --dangerously-bypass-permissions"
+            );
+        }
+
         let full_script = format!("{PYTHON_PRELUDE}{script}");
 
-        let script_path = self.cwd.join(".omegon").join("code-act-tmp.py");
+        let run_id = uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("tmp").to_string();
+        let script_path = self.cwd.join(".omegon").join(format!("code-act-{run_id}.py"));
         if let Some(parent) = script_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -162,6 +175,7 @@ impl CodeActExecutor {
     }
 }
 
+#[derive(Debug)]
 pub struct CodeActResult {
     pub output: String,
     pub is_error: bool,
@@ -217,10 +231,24 @@ mod tests {
         assert!(prompt.contains("Previous Attempt"));
     }
 
+    fn permitted_executor(cwd: PathBuf) -> CodeActExecutor {
+        CodeActExecutor { cwd, permitted: true }
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_without_opt_in() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exec = CodeActExecutor { cwd: tmp.path().to_path_buf(), permitted: false };
+        let cancel = CancellationToken::new();
+        let result = exec.execute_script("print('nope')", Some(5), cancel).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("code-act execution requires"));
+    }
+
     #[tokio::test]
     async fn execute_simple_script() {
         let tmp = tempfile::tempdir().unwrap();
-        let exec = CodeActExecutor::new(tmp.path().to_path_buf());
+        let exec = permitted_executor(tmp.path().to_path_buf());
         let cancel = CancellationToken::new();
 
         let result = exec
@@ -236,7 +264,7 @@ mod tests {
     #[tokio::test]
     async fn execute_script_with_file_ops() {
         let tmp = tempfile::tempdir().unwrap();
-        let exec = CodeActExecutor::new(tmp.path().to_path_buf());
+        let exec = permitted_executor(tmp.path().to_path_buf());
         let cancel = CancellationToken::new();
 
         let script = r#"
@@ -254,7 +282,7 @@ print(f"Read back: {content}")
     #[tokio::test]
     async fn execute_script_error_captured() {
         let tmp = tempfile::tempdir().unwrap();
-        let exec = CodeActExecutor::new(tmp.path().to_path_buf());
+        let exec = permitted_executor(tmp.path().to_path_buf());
         let cancel = CancellationToken::new();
 
         let result = exec
@@ -270,7 +298,7 @@ print(f"Read back: {content}")
     #[tokio::test]
     async fn execute_script_with_bash_proxy() {
         let tmp = tempfile::tempdir().unwrap();
-        let exec = CodeActExecutor::new(tmp.path().to_path_buf());
+        let exec = permitted_executor(tmp.path().to_path_buf());
         let cancel = CancellationToken::new();
 
         let script = r#"
@@ -286,13 +314,18 @@ print(f"Got: {result.strip()}")
     #[tokio::test]
     async fn execute_script_cleanup_removes_temp_file() {
         let tmp = tempfile::tempdir().unwrap();
-        let exec = CodeActExecutor::new(tmp.path().to_path_buf());
+        let exec = permitted_executor(tmp.path().to_path_buf());
         let cancel = CancellationToken::new();
 
         exec.execute_script("print('clean')", Some(10), cancel)
             .await
             .unwrap();
 
-        assert!(!tmp.path().join(".omegon/code-act-tmp.py").exists());
+        let leftover: Vec<_> = std::fs::read_dir(tmp.path().join(".omegon"))
+            .into_iter()
+            .flat_map(|d| d.filter_map(|e| e.ok()))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "py"))
+            .collect();
+        assert!(leftover.is_empty(), "temp script should be cleaned up, found: {leftover:?}");
     }
 }

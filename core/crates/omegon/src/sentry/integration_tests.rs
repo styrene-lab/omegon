@@ -493,6 +493,46 @@ fn config_accepts_prompt_file() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Model routing config parsing
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn routing_config_parses_from_toml() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("sentry.toml");
+    std::fs::write(&path, r#"
+[sentry]
+max_concurrent = 2
+
+[sentry.routing]
+prefilter_model = "anthropic:claude-haiku-4-5-20251001"
+light_model = "anthropic:claude-sonnet-4-6"
+heavy_model = "anthropic:claude-opus-4-6"
+
+[[task]]
+name = "auto-routed"
+prompt = "Check CI status"
+model = "auto"
+"#).unwrap();
+
+    let config = load_config(&path).unwrap();
+    let routing = config.sentry.routing.unwrap();
+    assert_eq!(routing.prefilter_model, "anthropic:claude-haiku-4-5-20251001");
+    assert_eq!(routing.light_model, "anthropic:claude-sonnet-4-6");
+    assert_eq!(routing.heavy_model, "anthropic:claude-opus-4-6");
+    assert_eq!(config.tasks[0].model.as_deref(), Some("auto"));
+}
+
+#[test]
+fn routing_config_absent_parses_as_none() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("sentry.toml");
+    std::fs::write(&path, "[sentry]\n[[task]]\nname = \"t\"\nprompt = \"do it\"\n").unwrap();
+    let config = load_config(&path).unwrap();
+    assert!(config.sentry.routing.is_none());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Vault detection heuristics
 // ═══════════════════════════════════════════════════════════════════════════
 

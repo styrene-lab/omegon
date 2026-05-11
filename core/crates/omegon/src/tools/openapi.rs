@@ -135,7 +135,11 @@ impl ToolProvider for OpenApiToolProvider {
                     Value::String(s) => s.clone(),
                     other => other.to_string(),
                 };
-                query_parts.push(format!("{param}={s}"));
+                query_parts.push(format!(
+                    "{}={}",
+                    percent_encoding::utf8_percent_encode(param, percent_encoding::NON_ALPHANUMERIC),
+                    percent_encoding::utf8_percent_encode(&s, percent_encoding::NON_ALPHANUMERIC),
+                ));
             }
         }
         if !query_parts.is_empty() {
@@ -214,9 +218,14 @@ fn parse_spec(raw: &str) -> anyhow::Result<Value> {
 
 fn load_spec_content(spec: &str) -> anyhow::Result<String> {
     if spec.starts_with("http://") || spec.starts_with("https://") {
-        reqwest::blocking::get(spec)?
-            .text()
-            .map_err(|e| anyhow::anyhow!("failed to fetch spec from {spec}: {e}"))
+        let spec = spec.to_string();
+        std::thread::spawn(move || {
+            reqwest::blocking::get(&spec)?
+                .text()
+                .map_err(|e| anyhow::anyhow!("failed to fetch spec from {spec}: {e}"))
+        })
+        .join()
+        .map_err(|_| anyhow::anyhow!("spec fetch thread panicked"))?
     } else {
         std::fs::read_to_string(spec)
             .map_err(|e| anyhow::anyhow!("failed to read spec file {spec}: {e}"))
