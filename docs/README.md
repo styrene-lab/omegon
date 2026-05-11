@@ -25,6 +25,7 @@ For user-facing docs, edit `site/src/pages/docs/` and the command snippets in `s
 - `docs/provider-credential-map.md`: provider auth and credential behavior.
 - `docs/omegon-session.md`: session persistence behavior.
 - `docs/cleave.md`: parallel worktree orchestration.
+- `docs/sentry.md`: long-running task executor, triggers, budgets, and auto routing.
 - `docs/project-memory.md`: project memory behavior.
 - `docs/openapi-tools.md`: project-local OpenAPI specs compiled into agent tools.
 

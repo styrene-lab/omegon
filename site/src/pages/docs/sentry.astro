@@ -1,0 +1,77 @@
+---
+import Docs from "../../layouts/Docs.astro";
+---
+<Docs title="Sentry Automation" description="Long-running autonomous task execution with triggers, budgets, and model routing.">
+  <h1>Sentry Automation</h1>
+  <p>
+    Sentry is Omegon's long-running task executor. It consumes scheduled, webhook,
+    file-watch, git, and manual triggers, claims actionable tasks from a board, runs
+    bounded agent work, records outcomes, and exposes a local HTTP control plane.
+  </p>
+
+  <h2>Start Sentry</h2>
+  <pre><code>omegon sentry --config sentry.toml --control-port 7842</code></pre>
+  <p>
+    Health probes are available at <code>/api/healthz</code> and <code>/api/readyz</code>.
+    Task APIs are exposed under <code>/api/sentry/*</code>.
+  </p>
+
+  <h2>Task Sources</h2>
+  <ol>
+    <li><code>.omegon/tasks/</code> task tree</li>
+    <li><code>sentry.toml</code> file board</li>
+    <li>Flynt vault boards when Omegon is running inside a Flynt vault</li>
+  </ol>
+  <p>
+    If both <code>.omegon/tasks/</code> and <code>sentry.toml</code> exist, the task tree is
+    authoritative and <code>sentry.toml</code> task entries are ignored.
+  </p>
+
+  <h2>File Config</h2>
+  <pre><code>[sentry]
+max_concurrent = 2
+log_retention_days = 30
+
+[sentry.routing]
+prefilter_model = "anthropic:claude-haiku-4-5-20251001"
+light_model = "anthropic:claude-sonnet-4-6"
+heavy_model = "anthropic:claude-opus-4-6"
+
+[[task]]
+name = "ci-check"
+prompt = "Check CI status and summarize failures"
+model = "auto"
+max_turns = 10
+timeout_secs = 300
+
+[task.trigger.cron]
+schedule = "*/30 * * * *"
+
+[task.budget]
+max_tokens_per_day = 500000
+max_cost_per_day_usd = 5.00</code></pre>
+
+  <h2>Model Routing</h2>
+  <p>
+    Set <code>model = "auto"</code> on a task and configure <code>[sentry.routing]</code> to
+    route simple or moderate prompts to <code>light_model</code> and complex prompts to
+    <code>heavy_model</code>. The <code>prefilter_model</code> field is part of the routing
+    contract; the current classifier uses local prompt heuristics, so treat it as
+    forward-compatible metadata rather than a guarantee that a separate model call ran.
+  </p>
+
+  <h2>Budgets</h2>
+  <p>
+    Per-task budgets can cap daily token use and estimated daily cost. When a task is over
+    budget, Sentry records the skip instead of launching another agent run.
+  </p>
+
+  <h2>Code-Act Status</h2>
+  <p>
+    The codebase includes an experimental code-act executor that generates and runs Python
+    scripts through the existing bash execution path. It requires explicit opt-in with
+    <code>OMEGON_CODE_ACT=1</code> or <code>--dangerously-bypass-permissions</code>. It is not
+    a stable public command yet, so use normal Sentry task execution unless a release note
+    says otherwise.
+  </p>
+</Docs>

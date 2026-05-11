@@ -15,7 +15,7 @@ visibility = "private"
 
 Single Rust binary. Persistent project memory. Multiple inference providers. Parallel git worktrees. Design and spec lifecycles built in.
 
-Omegon is a systems engineering harness, not a transcript viewer. It can read and edit code, run commands, manage project memory across sessions, expose project-specific REST APIs as agent tools from OpenAPI specs, decompose work into isolated child worktrees, run bounded headless tasks, and operate as a local daemon or ACP agent server for editor integrations.
+Omegon is a systems engineering harness, not a transcript viewer. It can read and edit code, run commands, manage project memory across sessions, expose project-specific REST APIs as agent tools from OpenAPI specs, decompose work into isolated child worktrees, run bounded headless tasks, run long-lived Sentry automation, and operate as a local daemon or ACP agent server for editor integrations.
 
 [![docs](https://img.shields.io/badge/docs-omegon.styrene.io-2ab4c8)](https://omegon.styrene.io/docs/)
 [![license](https://img.shields.io/badge/license-BSL%201.1-344858)](LICENSE)
@@ -192,11 +192,12 @@ The same binary supports scripted and service-oriented use:
 ```sh
 omegon run task.toml
 omegon run --prompt "Review this repository" --max-turns 10
+omegon sentry --config sentry.toml
 omegon serve
 omegon acp
 ```
 
-`omegon run` is bounded and exits with structured status codes: `0` completed, `1` error, `2` upstream exhausted, `3` timeout. `omegon serve` exposes a local daemon/control-plane with health probes. `omegon acp` runs an Agent Client Protocol server over stdio by default, or WebSocket with `--listen`.
+`omegon run` is bounded and exits with structured status codes: `0` completed, `1` error, `2` upstream exhausted, `3` timeout. `omegon sentry` runs the autonomous task executor with triggers, budgets, optional auto model routing, and a local control plane. `omegon serve` exposes a local daemon/control-plane with health probes. `omegon acp` runs an Agent Client Protocol server over stdio by default, or WebSocket with `--listen`.
 
 ### Benchmarking and signal shaping
 
