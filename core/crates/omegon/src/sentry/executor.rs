@@ -322,7 +322,7 @@ async fn execute_task_with_retry(
         }
     }
 
-    let effective_model = resolve_model(spec.model.as_deref(), model, &spec.prompt, routing).await;
+    let (effective_model, classification) = resolve_model(spec.model.as_deref(), model, &spec.prompt, routing).await;
     let effective_cwd = spec.cwd.as_deref().unwrap_or(cwd);
     let max_turns = spec.max_turns.unwrap_or(30);
     let timeout_secs = spec.timeout_secs.unwrap_or(600);
@@ -371,6 +371,12 @@ async fn execute_task_with_retry(
                 let _ = state_db.record_run_complete(&run_id, &result);
                 record_budget_usage(state_db, task_id, result.tokens_used);
 
+                if let Some(ref class) = classification {
+                    let _ = state_db.record_routing_outcome(
+                        task_id, class, &effective_model,
+                        result.exit_code == 0, result.tokens_used, result.duration_secs,
+                    );
+                }
                 if result.exit_code == 0 {
                     apply_lifecycle_hooks(effective_cwd, &spec, task_id);
                     let _ = board.complete(task_id, &result);
@@ -396,6 +402,11 @@ async fn execute_task_with_retry(
                         error = %e,
                         "task failed permanently"
                     );
+                    if let Some(ref class) = classification {
+                        let _ = state_db.record_routing_outcome(
+                            task_id, class, &effective_model, false, 0, 0,
+                        );
+                    }
                     let _ = board.fail(task_id, &error);
                     return;
                 }
@@ -479,26 +490,29 @@ async fn resolve_model<'a>(
     default_model: &'a str,
     task_prompt: &str,
     routing: &Option<Arc<RoutingConfig>>,
-) -> String {
+) -> (String, Option<String>) {
     match spec_model {
         Some("auto") => {
             if let Some(routing) = routing {
-                match classify_task_complexity(&routing.prefilter_model, task_prompt).await {
+                let complexity = classify_task_complexity(&routing.prefilter_model, task_prompt).await;
+                let class_name = format!("{complexity:?}");
+                let model = match complexity {
                     TaskComplexity::Simple | TaskComplexity::Moderate => {
-                        tracing::info!(routed = %routing.light_model, "model routing: task classified as light");
+                        tracing::info!(routed = %routing.light_model, class = %class_name, "model routing");
                         routing.light_model.clone()
                     }
                     TaskComplexity::Complex => {
-                        tracing::info!(routed = %routing.heavy_model, "model routing: task classified as complex");
+                        tracing::info!(routed = %routing.heavy_model, class = %class_name, "model routing");
                         routing.heavy_model.clone()
                     }
-                }
+                };
+                (model, Some(class_name))
             } else {
-                default_model.to_string()
+                (default_model.to_string(), None)
             }
         }
-        Some(explicit) => explicit.to_string(),
-        None => default_model.to_string(),
+        Some(explicit) => (explicit.to_string(), None),
+        None => (default_model.to_string(), None),
     }
 }
 

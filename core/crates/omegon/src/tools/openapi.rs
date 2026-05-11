@@ -220,19 +220,115 @@ fn parse_spec(raw: &str) -> anyhow::Result<Value> {
     })
 }
 
+/// Return the directory used for caching fetched OpenAPI specs.
+fn spec_cache_dir() -> std::path::PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("omegon")
+        .join("api_cache")
+}
+
+/// Compute a hex-encoded SHA-256 hash of the given bytes.
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::Digest;
+    let hash = sha2::Sha256::digest(data);
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn load_spec_content(spec: &str) -> anyhow::Result<String> {
     if spec.starts_with("http://") || spec.starts_with("https://") {
         let spec = spec.to_string();
-        std::thread::spawn(move || {
-            reqwest::blocking::get(&spec)?
-                .text()
-                .map_err(|e| anyhow::anyhow!("failed to fetch spec from {spec}: {e}"))
-        })
-        .join()
-        .map_err(|_| anyhow::anyhow!("spec fetch thread panicked"))?
+        std::thread::spawn(move || load_spec_from_url(&spec))
+            .join()
+            .map_err(|_| anyhow::anyhow!("spec fetch thread panicked"))?
     } else {
         std::fs::read_to_string(spec)
             .map_err(|e| anyhow::anyhow!("failed to read spec file {spec}: {e}"))
+    }
+}
+
+fn load_spec_from_url(url: &str) -> anyhow::Result<String> {
+    load_spec_from_url_cached(url, &spec_cache_dir())
+}
+
+fn load_spec_from_url_cached(url: &str, cache_dir: &std::path::Path) -> anyhow::Result<String> {
+    let url_hash = sha256_hex(url.as_bytes());
+    let cache_path = cache_dir.join(&url_hash);
+    let etag_path = cache_dir.join(format!("{url_hash}.etag"));
+
+    // Read any previously stored ETag.
+    let stored_etag = std::fs::read_to_string(&etag_path).ok();
+
+    // Build the request, attaching If-None-Match when we have a cached ETag.
+    let client = reqwest::blocking::Client::new();
+    let mut req = client.get(url);
+    if let Some(ref etag) = stored_etag {
+        req = req.header("If-None-Match", etag.as_str());
+    }
+
+    match req.send() {
+        Ok(resp) => {
+            if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+                // Server confirmed our cached copy is still current.
+                return std::fs::read_to_string(&cache_path).map_err(|e| {
+                    anyhow::anyhow!("304 but cached file missing for {url}: {e}")
+                });
+            }
+
+            if !resp.status().is_success() {
+                // Non-success, non-304: try cache fallback, otherwise report the status.
+                if cache_path.exists() {
+                    tracing::warn!(
+                        url = %url,
+                        status = %resp.status(),
+                        "spec fetch returned non-success status, falling back to cache"
+                    );
+                    return std::fs::read_to_string(&cache_path).map_err(|e| {
+                        anyhow::anyhow!("failed to read cached spec for {url}: {e}")
+                    });
+                }
+                return Err(anyhow::anyhow!(
+                    "failed to fetch spec from {url}: HTTP {}",
+                    resp.status()
+                ));
+            }
+
+            // 2xx — extract ETag before consuming the body.
+            let new_etag = resp
+                .headers()
+                .get("etag")
+                .and_then(|v| v.to_str().ok())
+                .map(String::from);
+
+            let body = resp
+                .text()
+                .map_err(|e| anyhow::anyhow!("failed to read response body from {url}: {e}"))?;
+
+            // Persist to cache (best-effort).
+            if std::fs::create_dir_all(&cache_dir).is_ok() {
+                let _ = std::fs::write(&cache_path, &body);
+                if let Some(etag) = &new_etag {
+                    let _ = std::fs::write(&etag_path, etag);
+                }
+            }
+
+            Ok(body)
+        }
+        Err(network_err) => {
+            // Network-level failure — fall back to cache if available.
+            if cache_path.exists() {
+                tracing::warn!(
+                    url = %url,
+                    error = %network_err,
+                    "spec fetch failed, falling back to cache"
+                );
+                std::fs::read_to_string(&cache_path).map_err(|e| {
+                    anyhow::anyhow!("network error and cached spec unreadable for {url}: {e}")
+                })
+            } else {
+                Err(anyhow::anyhow!("failed to fetch spec from {url}: {network_err}"))
+            }
+        }
     }
 }
 
@@ -719,5 +815,25 @@ paths:
         assert!(!glob_match("delete_pet_by_id", "get_*_by_id"));
         assert!(glob_match("anything", "*"));
         assert!(!glob_match("create_pet", "delete_*"));
+    }
+
+    #[test]
+    fn cached_spec_survives_fetch_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().to_path_buf();
+
+        // A URL that will not resolve (RFC 5737 TEST-NET address, port 1).
+        let url = "http://192.0.2.1:1/nonexistent-openapi-spec.json";
+        let url_hash = sha256_hex(url.as_bytes());
+        let cache_path = cache_dir.join(&url_hash);
+
+        let fake_spec = r#"{"openapi":"3.0.0","info":{"title":"Cached"},"paths":{}}"#;
+        std::fs::write(&cache_path, fake_spec).unwrap();
+
+        // `load_spec_from_url_cached` should fail the HTTP fetch and fall back
+        // to the cached file we planted.
+        let content = load_spec_from_url_cached(url, &cache_dir)
+            .expect("should fall back to cached content on network failure");
+        assert_eq!(content, fake_spec);
     }
 }
