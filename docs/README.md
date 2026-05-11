@@ -26,6 +26,7 @@ For user-facing docs, edit `site/src/pages/docs/` and the command snippets in `s
 - `docs/omegon-session.md`: session persistence behavior.
 - `docs/cleave.md`: parallel worktree orchestration.
 - `docs/sentry.md`: long-running task executor, triggers, budgets, and auto routing.
+- `docs/n8n-sentry-submission.md`: planned external workflow submission API for n8n, Flynt, Auspex, and future protocol adapters.
 - `docs/project-memory.md`: project memory behavior.
 - `docs/openapi-tools.md`: project-local OpenAPI specs compiled into agent tools.
 
