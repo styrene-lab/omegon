@@ -574,6 +574,74 @@ fn code_act_executor_permitted_bypasses_env_check() {
 }
 
 #[test]
+fn adaptive_routing_escalates_on_low_success_rate() {
+    let state_db = StateDb::in_memory().unwrap();
+
+    for i in 0..10 {
+        state_db.record_routing_outcome(
+            &format!("task-{i}"), "Moderate", "light-model",
+            i < 3, 1000, 10,
+        ).unwrap();
+    }
+
+    assert_eq!(
+        super::executor::routing_adjustment("Moderate", &state_db), 1,
+        "should escalate when success rate is 30%"
+    );
+}
+
+#[test]
+fn adaptive_routing_no_change_on_normal_success_rate() {
+    let state_db = StateDb::in_memory().unwrap();
+
+    for i in 0..10 {
+        state_db.record_routing_outcome(
+            &format!("task-{i}"), "Moderate", "light-model",
+            i < 8, 1000, 10,
+        ).unwrap();
+    }
+
+    assert_eq!(
+        super::executor::routing_adjustment("Moderate", &state_db), 0,
+        "should NOT adjust when success rate is 80%"
+    );
+}
+
+#[test]
+fn adaptive_routing_de_escalates_on_high_success() {
+    let state_db = StateDb::in_memory().unwrap();
+
+    for i in 0..12 {
+        state_db.record_routing_outcome(
+            &format!("task-{i}"), "Complex", "heavy-model",
+            true, 1000, 10,
+        ).unwrap();
+    }
+
+    assert_eq!(
+        super::executor::routing_adjustment("Complex", &state_db), -1,
+        "should de-escalate Complex when success rate is 100%"
+    );
+}
+
+#[test]
+fn adaptive_routing_requires_minimum_samples() {
+    let state_db = StateDb::in_memory().unwrap();
+
+    for i in 0..3 {
+        state_db.record_routing_outcome(
+            &format!("task-{i}"), "Moderate", "light-model",
+            false, 1000, 10,
+        ).unwrap();
+    }
+
+    assert_eq!(
+        super::executor::routing_adjustment("Moderate", &state_db), 0,
+        "should NOT adjust with fewer than 10 total samples"
+    );
+}
+
+#[test]
 fn routing_config_absent_parses_as_none() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("sentry.toml");

@@ -483,6 +483,10 @@ impl AgentSetup {
                 memory_feature = memory_feature.with_codex_vault(vp.clone());
                 tracing::info!(vault = %vp.display(), "Codex vault sync enabled for memory");
             }
+            if embed_service.is_some() {
+                memory_feature = memory_feature
+                    .with_extraction_model("anthropic:claude-haiku-4-5-20251001".into());
+            }
             bus.register(Box::new(memory_feature));
         } else {
             let warning = format!(
