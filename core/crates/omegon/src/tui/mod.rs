@@ -801,6 +801,8 @@ struct AuspexAttachPayload {
     http_base: String,
     ws_url: String,
     ws_token: String,
+    http_transport_security: omegon_traits::OmegonTransportSecurity,
+    ws_transport_security: omegon_traits::OmegonTransportSecurity,
     instance: Option<omegon_traits::OmegonInstanceDescriptor>,
 }
 
@@ -893,6 +895,7 @@ fn build_auspex_attach_payload(
     startup: &crate::web::WebStartupInfo,
     preferred_handoff: AuspexHandoffMode,
 ) -> anyhow::Result<String> {
+    let (http_transport_security, ws_transport_security) = startup_transport_security(startup);
     let payload = AuspexAttachPayload {
         version: 1,
         transport: "omegon-ipc".into(),
@@ -901,9 +904,60 @@ fn build_auspex_attach_payload(
         http_base: startup.http_base.clone(),
         ws_url: startup.ws_url.clone(),
         ws_token: startup.token.clone(),
+        http_transport_security,
+        ws_transport_security,
         instance: startup.instance_descriptor.clone(),
     };
     serde_json::to_string(&payload).map_err(Into::into)
+}
+
+fn startup_transport_security(
+    startup: &crate::web::WebStartupInfo,
+) -> (
+    omegon_traits::OmegonTransportSecurity,
+    omegon_traits::OmegonTransportSecurity,
+) {
+    let http = startup
+        .instance_descriptor
+        .as_ref()
+        .and_then(|instance| instance.control_plane.http_transport_security.clone())
+        .unwrap_or_else(|| {
+            if startup.http_base.starts_with("https://") {
+                omegon_traits::OmegonTransportSecurity::Secure
+            } else {
+                omegon_traits::OmegonTransportSecurity::InsecureBootstrap
+            }
+        });
+    let ws = startup
+        .instance_descriptor
+        .as_ref()
+        .and_then(|instance| instance.control_plane.ws_transport_security.clone())
+        .unwrap_or_else(|| {
+            if startup.ws_url.starts_with("wss://") {
+                omegon_traits::OmegonTransportSecurity::Secure
+            } else {
+                omegon_traits::OmegonTransportSecurity::InsecureBootstrap
+            }
+        });
+    (http, ws)
+}
+
+fn format_transport_security(value: &omegon_traits::OmegonTransportSecurity) -> &'static str {
+    match value {
+        omegon_traits::OmegonTransportSecurity::LocalIpc => "local-ipc",
+        omegon_traits::OmegonTransportSecurity::InsecureBootstrap => "insecure-bootstrap",
+        omegon_traits::OmegonTransportSecurity::Secure => "secure",
+        omegon_traits::OmegonTransportSecurity::IdentityMesh => "identity-mesh",
+    }
+}
+
+fn dash_browser_url(
+    startup: Option<&crate::web::WebStartupInfo>,
+    addr: Option<std::net::SocketAddr>,
+) -> Option<String> {
+    startup
+        .map(|startup| startup.http_base.clone())
+        .or_else(|| addr.map(|addr| format!("http://{addr}")))
 }
 
 fn parse_handoff_modes(value: &serde_json::Value) -> Vec<AuspexHandoffMode> {
@@ -1099,6 +1153,7 @@ impl App {
             .web_startup
             .as_ref()
             .map(|startup| {
+                let (http_security, ws_security) = startup_transport_security(startup);
                 let warning_suffix = if startup.daemon_status.transport_warnings.is_empty() {
                     String::new()
                 } else {
@@ -1108,8 +1163,12 @@ impl App {
                     )
                 };
                 format!(
-                    "running at {}\n  queued events: {}\n  processed events: {}\n  worker: {}{}",
+                    "running at {}\n  startup: {}\n  websocket: {}\n  transport: http={}, ws={}\n  queued events: {}\n  processed events: {}\n  worker: {}{}",
                     startup.http_base,
+                    startup.startup_url,
+                    startup.ws_url,
+                    format_transport_security(&http_security),
+                    format_transport_security(&ws_security),
                     startup.daemon_status.queued_events,
                     startup.daemon_status.processed_events,
                     if startup.daemon_status.worker_running {
@@ -5254,20 +5313,27 @@ impl App {
                 // /dash remains the compatibility/debug command for opening the browser UI.
                 // If the server is already running, open the browser.
                 // If not, start it (which auto-opens on ready).
-                if let Some(addr) = self.web_server_addr {
-                    let url = format!("http://{addr}");
+                if let Some(url) =
+                    dash_browser_url(self.web_startup.as_ref(), self.web_server_addr)
+                {
                     if args == "status" {
                         let detail = self
                             .web_startup
                             .as_ref()
                             .map(|startup| {
+                                let (http_security, ws_security) =
+                                    startup_transport_security(startup);
                                 let warnings = if startup.daemon_status.transport_warnings.is_empty() {
                                     "none".to_string()
                                 } else {
                                     startup.daemon_status.transport_warnings.join(" | ")
                                 };
                                 format!(
-                                    "\nqueue depth: {}\nprocessed events: {}\ntransport warnings: {}",
+                                    "\nstartup: {}\nwebsocket: {}\ntransport: http={}, ws={}\nqueue depth: {}\nprocessed events: {}\ntransport warnings: {}",
+                                    startup.startup_url,
+                                    startup.ws_url,
+                                    format_transport_security(&http_security),
+                                    format_transport_security(&ws_security),
                                     startup.daemon_status.queued_events,
                                     startup.daemon_status.processed_events,
                                     warnings,

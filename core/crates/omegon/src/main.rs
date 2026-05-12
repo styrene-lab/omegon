@@ -517,7 +517,7 @@ enum Commands {
         #[arg(long)]
         agent: Option<String>,
         /// Listen on a network address instead of stdio.
-        /// Starts a WebSocket server at ws://<addr>/acp with health probes.
+        /// Starts a WebSocket server at ws://<addr>/acp, or wss:// with TLS, with health probes.
         /// Example: --listen 0.0.0.0:7842
         #[arg(long)]
         listen: Option<String>,

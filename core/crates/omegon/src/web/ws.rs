@@ -1,7 +1,7 @@
 //! WebSocket handler — bidirectional agent protocol.
 //!
 //! This is the **full agent interface**. Any web UI can connect to
-//! ws://localhost:PORT/ws?token=TOKEN and drive the agent.
+//! ws://localhost:PORT/ws?token=TOKEN or wss://HOST/ws?token=TOKEN and drive the agent.
 //!
 //! # Authentication
 //!

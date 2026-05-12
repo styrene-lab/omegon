@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- **TUI control-plane status surfaces now preserve TLS descriptors** — `/dash status`, `/auspex status`, Auspex attach payloads, and the embedded dashboard now report or use `https://` and `wss://` startup descriptors plus explicit transport-security metadata when TLS listeners are active.
 - **Documentation refresh for current Rust-native surfaces** — updated the README, contributor guide, extension docs, site install/extensions/contributing pages, and docs map to reflect current CLI commands, workspace crates, `just link` behavior, extension `execute_tool` RPC, and Linux Homebrew glibc caveats.
 - **Behavioral tool classification is now capability-driven** — tool governance no longer depends on hardcoded name lists in the loop. `ToolDefinition` now carries explicit capabilities, built-in and plugin tool surfaces propagate them, and evidence pressure distinguishes local coding sufficiency from global task sufficiency.
 - **`edit` is now the only model-facing file mutation primitive** — `change` remains available internally as the harness transaction engine for coordinated exact-text batches, but it is hidden from the model-facing tool surface to reduce mutation-surface ambiguity.

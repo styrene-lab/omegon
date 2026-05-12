@@ -3384,6 +3384,12 @@ fn slash_auspex_status_reports_attach_metadata() {
     assert!(text.contains("ipc.sock"), "got: {text}");
     assert!(text.contains("session id: not yet exposed"), "got: {text}");
     assert!(text.contains("/dash compatibility view:"), "got: {text}");
+    assert!(text.contains("startup: http://127.0.0.1:7842/api/startup"), "got: {text}");
+    assert!(text.contains("websocket: ws://127.0.0.1:7842/ws?token=test"), "got: {text}");
+    assert!(
+        text.contains("transport: http=insecure-bootstrap, ws=insecure-bootstrap"),
+        "got: {text}"
+    );
     assert!(text.contains("queued events:"), "got: {text}");
     assert!(text.contains("transport warnings:"), "got: {text}");
     assert!(text.contains("insecure bootstrap tokens"), "got: {text}");
@@ -3440,8 +3446,56 @@ fn slash_dash_status_uses_compatibility_wording() {
         "got: {text}"
     );
     assert!(text.contains("http://127.0.0.1:7842"), "got: {text}");
+    assert!(text.contains("startup: http://127.0.0.1:7842/api/startup"), "got: {text}");
+    assert!(text.contains("websocket: ws://127.0.0.1:7842/ws?token=test"), "got: {text}");
+    assert!(
+        text.contains("transport: http=insecure-bootstrap, ws=insecure-bootstrap"),
+        "got: {text}"
+    );
     assert!(text.contains("queue depth:"), "got: {text}");
     assert!(text.contains("transport warnings:"), "got: {text}");
+}
+
+#[test]
+fn slash_dash_status_preserves_tls_startup_urls() {
+    let mut app = test_app();
+    app.web_server_addr = Some("127.0.0.1:7842".parse().unwrap());
+    app.web_startup = Some(crate::web::WebStartupInfo {
+        schema_version: 2,
+        addr: "127.0.0.1:7842".into(),
+        http_base: "https://127.0.0.1:7842".into(),
+        state_url: "https://127.0.0.1:7842/api/state".into(),
+        startup_url: "https://127.0.0.1:7842/api/startup".into(),
+        health_url: "https://127.0.0.1:7842/api/healthz".into(),
+        ready_url: "https://127.0.0.1:7842/api/readyz".into(),
+        ws_url: "wss://127.0.0.1:7842/ws?token=test".into(),
+        acp_url: Some("wss://127.0.0.1:7842/acp?token=test".into()),
+        token: "test".into(),
+        auth_mode: "ephemeral-bearer".into(),
+        auth_source: "generated".into(),
+        control_plane_state: crate::web::ControlPlaneState::Ready,
+        daemon_status: WebDaemonStatus {
+            queued_events: 4,
+            processed_events: 7,
+            worker_running: true,
+            transport_warnings: vec![],
+            active_child_runtimes: vec![],
+        },
+        instance_descriptor: None,
+    });
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/dash status", &tx);
+    let SlashResult::Display(text) = result else {
+        panic!("expected Display result");
+    };
+
+    assert!(text.contains("running at https://127.0.0.1:7842"), "got: {text}");
+    assert!(text.contains("startup: https://127.0.0.1:7842/api/startup"), "got: {text}");
+    assert!(text.contains("websocket: wss://127.0.0.1:7842/ws?token=test"), "got: {text}");
+    assert!(text.contains("transport: http=secure, ws=secure"), "got: {text}");
+    assert!(text.contains("transport warnings: none"), "got: {text}");
+    assert!(!text.contains("running at http://127.0.0.1:7842"), "got: {text}");
 }
 
 #[test]
@@ -3580,8 +3634,39 @@ fn auspex_attach_payload_carries_startup_and_instance_metadata() {
     assert_eq!(json["transport"], "omegon-ipc");
     assert_eq!(json["preferred_handoff"], "env");
     assert_eq!(json["startup_url"], "http://127.0.0.1:7842/api/startup");
+    assert_eq!(json["http_transport_security"], "insecure-bootstrap");
+    assert_eq!(json["ws_transport_security"], "insecure-bootstrap");
     assert_eq!(json["ws_token"], "test");
     assert_eq!(json["instance"]["identity"]["instance_id"], "instance-1");
+}
+
+#[test]
+fn auspex_attach_payload_carries_tls_transport_security_without_instance() {
+    let startup = crate::web::WebStartupInfo {
+        schema_version: 2,
+        addr: "127.0.0.1:7842".into(),
+        http_base: "https://127.0.0.1:7842".into(),
+        state_url: "https://127.0.0.1:7842/api/state".into(),
+        startup_url: "https://127.0.0.1:7842/api/startup".into(),
+        health_url: "https://127.0.0.1:7842/api/healthz".into(),
+        ready_url: "https://127.0.0.1:7842/api/readyz".into(),
+        ws_url: "wss://127.0.0.1:7842/ws?token=test".into(),
+        acp_url: Some("wss://127.0.0.1:7842/acp?token=test".into()),
+        token: "test".into(),
+        auth_mode: "ephemeral-bearer".into(),
+        auth_source: "generated".into(),
+        control_plane_state: crate::web::ControlPlaneState::Ready,
+        daemon_status: WebDaemonStatus::default(),
+        instance_descriptor: None,
+    };
+
+    let payload =
+        super::build_auspex_attach_payload(&startup, super::AuspexHandoffMode::Env).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(json["startup_url"], "https://127.0.0.1:7842/api/startup");
+    assert_eq!(json["ws_url"], "wss://127.0.0.1:7842/ws?token=test");
+    assert_eq!(json["http_transport_security"], "secure");
+    assert_eq!(json["ws_transport_security"], "secure");
 }
 
 #[test]

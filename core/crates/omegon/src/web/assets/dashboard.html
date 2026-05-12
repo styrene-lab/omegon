@@ -379,7 +379,8 @@ function switchTab(name) {
 // ── WebSocket connection with auto-reconnect ─────────────────────
 let ws = null;
 let reconnectTimer = null;
-const WS_URL = `ws://${location.host}/ws?token=${encodeURIComponent(AUTH_TOKEN)}`;
+const WS_SCHEME = location.protocol === 'https:' ? 'wss' : 'ws';
+const WS_URL = `${WS_SCHEME}://${location.host}/ws?token=${encodeURIComponent(AUTH_TOKEN)}`;
 
 let wsAttempts = 0;
 function connect() {
