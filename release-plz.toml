@@ -1,0 +1,20 @@
+# release-plz configuration for the omegon workspace.
+#
+# Defaults: don't publish anything. Crates opt-in explicitly below.
+# Most omegon-* crates are internal (BUSL-licensed binary support);
+# only the SDK crate is meant for downstream extensions to depend on.
+
+[workspace]
+publish = false
+release = false
+
+# Public extension SDK — what third-party extensions (shuttle, scry,
+# vox, etc.) and downstream apps (flynt) depend on. Licensed
+# MIT/Apache-2.0 so it can be freely consumed.
+[[package]]
+name = "omegon-extension"
+publish = true
+release = true
+changelog_update = true
+git_release_enable = true
+git_tag_enable = true
