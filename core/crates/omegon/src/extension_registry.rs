@@ -23,6 +23,9 @@ const ARMORY_BASE: &str = "https://raw.githubusercontent.com/styrene-lab/omegon-
 /// Parsed entry from armory `registry.toml`.
 #[derive(serde::Deserialize)]
 pub(crate) struct RegistryEntry {
+    /// Disabled entries remain in the armory registry for review, but are not
+    /// exposed through name-based install/search/list.
+    pub enabled: Option<bool>,
     pub repo: String,
     pub description: String,
     pub category: String,
@@ -43,6 +46,10 @@ impl RegistryEntry {
             .strip_prefix("https://github.com/")
             .map(|s| s.trim_end_matches('/').trim_end_matches(".git"))
     }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
 }
 
 /// Fetch the extension registry from the armory.
@@ -58,7 +65,22 @@ pub(crate) async fn fetch_registry(
         .text()
         .await?;
     let registry: HashMap<String, RegistryEntry> = toml::from_str(&text)?;
-    Ok(registry)
+    Ok(registry
+        .into_iter()
+        .filter(|(_, entry)| entry.is_enabled())
+        .collect())
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let mut truncated = value
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 /// Find the best matching asset for the current platform.
@@ -67,9 +89,7 @@ fn find_platform_asset<'a>(assets: &'a [GitHubAsset], prefix: &str) -> Option<&'
 
     // Try exact platform match first
     let exact = assets.iter().find(|a| {
-        a.name.starts_with(prefix)
-            && a.name.contains(&target)
-            && a.name.ends_with(".tar.gz")
+        a.name.starts_with(prefix) && a.name.contains(&target) && a.name.ends_with(".tar.gz")
     });
     if exact.is_some() {
         return exact;
@@ -216,16 +236,8 @@ pub async fn list_available() -> anyhow::Result<()> {
         } else {
             "  \u{25cb}"
         };
-        // Truncate description to fit
-        let desc = if entry.description.len() > 60 {
-            format!("{}...", &entry.description[..57])
-        } else {
-            entry.description.clone()
-        };
-        println!(
-            "{} {:<12} {:<12} {}",
-            marker, name, entry.category, desc
-        );
+        let desc = truncate_chars(&entry.description, 60);
+        println!("{} {:<12} {:<12} {}", marker, name, entry.category, desc);
     }
 
     println!("\n  Install: omegon extension install <name>\n");
@@ -240,9 +252,9 @@ pub async fn search(query: Option<&str>) -> anyhow::Result<()> {
         .user_agent("omegon")
         .build()?;
 
-    let registry = fetch_registry(&client).await.map_err(|e| {
-        anyhow::anyhow!("Could not reach the omegon armory ({e}).")
-    })?;
+    let registry = fetch_registry(&client)
+        .await
+        .map_err(|e| anyhow::anyhow!("Could not reach the omegon armory ({e})."))?;
 
     let mut entries: Vec<(&String, &RegistryEntry)> = match query {
         Some(q) => {
@@ -266,18 +278,11 @@ pub async fn search(query: Option<&str>) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    println!(
-        "\n{:<12} {:<12} DESCRIPTION",
-        "NAME", "CATEGORY"
-    );
+    println!("\n{:<12} {:<12} DESCRIPTION", "NAME", "CATEGORY");
     println!("{}", "\u{2500}".repeat(70));
 
     for (name, entry) in &entries {
-        let desc = if entry.description.len() > 46 {
-            format!("{}...", &entry.description[..43])
-        } else {
-            entry.description.clone()
-        };
+        let desc = truncate_chars(&entry.description, 46);
         println!("{:<12} {:<12} {}", name, entry.category, desc);
     }
 
@@ -318,6 +323,7 @@ mod tests {
     #[test]
     fn github_slug_extracts_owner_repo() {
         let entry = RegistryEntry {
+            enabled: None,
             repo: "https://github.com/styrene-lab/flynt".into(),
             description: String::new(),
             category: String::new(),
@@ -332,6 +338,7 @@ mod tests {
     #[test]
     fn github_slug_handles_trailing_slash() {
         let entry = RegistryEntry {
+            enabled: None,
             repo: "https://github.com/styrene-lab/vox/".into(),
             description: String::new(),
             category: String::new(),
@@ -346,6 +353,7 @@ mod tests {
     #[test]
     fn github_slug_returns_none_for_non_github() {
         let entry = RegistryEntry {
+            enabled: None,
             repo: "https://gitlab.com/foo/bar".into(),
             description: String::new(),
             category: String::new(),
@@ -389,5 +397,43 @@ mod tests {
         }];
 
         assert!(find_platform_asset(&assets, "codex-agent").is_none());
+    }
+
+    #[test]
+    fn truncate_chars_handles_unicode_boundaries() {
+        let text = "Browser automation tools backed by Vercel agent-browser — open pages";
+        let truncated = truncate_chars(text, 60);
+        assert!(truncated.ends_with("..."));
+        assert!(truncated.len() < text.len());
+    }
+
+    #[test]
+    fn registry_entry_defaults_to_enabled() {
+        let entry = RegistryEntry {
+            enabled: None,
+            repo: "https://github.com/styrene-lab/flynt".into(),
+            description: String::new(),
+            category: String::new(),
+            maintainer: String::new(),
+            license: String::new(),
+            min_sdk: None,
+            asset_prefix: None,
+        };
+        assert!(entry.is_enabled());
+    }
+
+    #[test]
+    fn registry_entry_can_be_disabled() {
+        let entry = RegistryEntry {
+            enabled: Some(false),
+            repo: "https://github.com/styrene-lab/flynt".into(),
+            description: String::new(),
+            category: String::new(),
+            maintainer: String::new(),
+            license: String::new(),
+            min_sdk: None,
+            asset_prefix: None,
+        };
+        assert!(!entry.is_enabled());
     }
 }
