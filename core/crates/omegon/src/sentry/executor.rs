@@ -642,7 +642,14 @@ async fn run_code_act_task(
     cancel: &CancellationToken,
 ) -> anyhow::Result<TaskResult> {
     let start = Instant::now();
-    let executor = crate::code_act::CodeActExecutor::permitted(cwd.to_path_buf());
+
+    let proxy = crate::code_act_proxy::ProxyServer::new(cwd.to_path_buf())?;
+    let proxy_prelude = proxy.python_prelude();
+    let proxy_cancel = cancel.clone();
+    let proxy_handle = tokio::spawn(async move { proxy.serve(proxy_cancel).await });
+
+    let executor = crate::code_act::CodeActExecutor::permitted(cwd.to_path_buf())
+        .with_proxy_prelude(proxy_prelude);
     let mut total_tokens = 0u64;
 
     let mut gen_prompt = executor.build_prompt(prompt, None);
