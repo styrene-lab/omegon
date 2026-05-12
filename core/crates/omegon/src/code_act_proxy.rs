@@ -60,6 +60,7 @@ def _omegon_rpc(method: str, params: dict = None) -> str:
     _OMEGON_RPC_ID += 1
     req = json.dumps({{"id": _OMEGON_RPC_ID, "method": method, "params": params or {{}}}}) + "\n"
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(30)
     s.connect(_OMEGON_SOCK)
     s.sendall(req.encode())
     data = b""
@@ -303,5 +304,45 @@ mod tests {
         assert!(path.exists());
         proxy.cleanup();
         assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn python_script_calls_bash_through_proxy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proxy = ProxyServer::new(tmp.path().to_path_buf()).unwrap();
+        let sock_path = proxy.socket_path().to_path_buf();
+        let prelude = proxy.python_prelude();
+        let cancel = CancellationToken::new();
+
+        let server_cancel = cancel.clone();
+        let server = tokio::spawn(async move { proxy.serve(server_cancel).await });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let script = format!(
+            r#"{}
+result = _omegon_rpc("bash", {{"command": "echo proxy-e2e-works"}})
+print(f"Got: {{result.strip()}}")
+"#,
+            prelude
+        );
+
+        let script_path = tmp.path().join("proxy_test.py");
+        std::fs::write(&script_path, &script).unwrap();
+        let output = tokio::process::Command::new("python3")
+            .arg(&script_path)
+            .current_dir(tmp.path())
+            .output()
+            .await
+            .unwrap();
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("Got: proxy-e2e-works"),
+            "expected proxy-e2e-works in stdout, got: {stdout}"
+        );
+
+        cancel.cancel();
+        let _ = server.await;
     }
 }
