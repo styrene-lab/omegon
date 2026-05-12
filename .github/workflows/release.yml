@@ -359,7 +359,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p abi-artifacts/unpacked
-          tar xzf abi-artifacts/omegon-*.tar.gz -C abi-artifacts/unpacked
+          tar xzf "$(ls abi-artifacts/omegon-[0-9]*.tar.gz | head -1)" -C abi-artifacts/unpacked
           ls -lh abi-artifacts/unpacked/omegon
           file abi-artifacts/unpacked/omegon
 
