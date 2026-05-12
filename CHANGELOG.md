@@ -16,8 +16,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-05-12
+
 ### Added
 
+- **OpenAPI tool compiler** — project REST APIs can now be exposed as structured tools from `.omegon/openapi.toml`, including spec caching and generated `api_*` tool definitions.
+- **Local ONNX embedding fallback** — project memory can use a local sentence-transformer model in `local-embeddings` builds, falling back cleanly to FTS5 when embedding backends are unavailable.
+- **Code-act execution mode** — added the bundled `code-act` skill plus the Unix socket proxy and OCI sandbox path for script-generating execution flows.
+- **Adaptive routing and session-end fact extraction** — Sentry/model routing now records routing outcomes and uses adaptive thresholds, while session-end memory extraction captures durable facts for later recall.
 - **TLS-capable control-plane listeners** — `omegon serve`, hidden `omegon embedded`, and `omegon acp --listen` now accept styrened-compatible `--rpc-tls-cert`, `--rpc-tls-key`, and optional `--rpc-tls-client-ca` flags, plus `--control-tls-*` aliases. TLS listeners publish `https://` and `wss://` descriptors and mark transport security as secure.
 - **Unified Armory discovery** — added `omegon armory browse/search`, `/armory`, and `armory/browse` ACP discovery across upstream extensions, Armory plugin manifests, skills, and catalog agents, with installed-state markers and JSON output for UI consumers.
 - **`omegon-browser` extension package** — added a native extension wrapper around Vercel `agent-browser`, with browser status, open, snapshot, click, fill, wait, get, screenshot, and batch tools plus domain allowlist/output limit controls. Release packaging now emits `omegon-browser-*` extension archives for Armory installs.
