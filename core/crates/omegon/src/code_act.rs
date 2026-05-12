@@ -148,35 +148,62 @@ impl CodeActExecutor {
         }
         std::fs::write(&script_path, &full_script)?;
 
-        let command = format!("python3 {}", script_path.display());
-        let result = bash::execute(&command, &self.cwd, timeout_secs, cancel).await?;
+        let use_sandbox = std::env::var("OMEGON_CODE_ACT_SANDBOX")
+            .map(|v| matches!(v.as_str(), "1" | "true"))
+            .unwrap_or(false);
 
-        let _ = std::fs::remove_file(&script_path);
+        let (output, is_error, exit_code) = if use_sandbox {
+            if let Some(sandbox_config) = crate::code_act_sandbox::SandboxConfig::detect() {
+                let proxy_sock = self.proxy_prelude.as_ref().map(|_| {
+                    self.cwd.join(".omegon").join("placeholder.sock")
+                });
+                let timeout = timeout_secs.unwrap_or(600);
+                let sr = crate::code_act_sandbox::execute_in_sandbox(
+                    &sandbox_config,
+                    &script_path,
+                    &self.cwd,
+                    proxy_sock.as_deref(),
+                    timeout,
+                ).await?;
+                let _ = std::fs::remove_file(&script_path);
+                let combined = if sr.stderr.is_empty() {
+                    sr.stdout
+                } else {
+                    format!("{}\n{}", sr.stdout, sr.stderr)
+                };
+                (combined, sr.exit_code != 0, sr.exit_code)
+            } else {
+                let _ = std::fs::remove_file(&script_path);
+                anyhow::bail!("OMEGON_CODE_ACT_SANDBOX=1 but no container runtime available");
+            }
+        } else {
+            let command = format!("python3 {}", script_path.display());
+            let result = bash::execute(&command, &self.cwd, timeout_secs, cancel).await?;
+            let _ = std::fs::remove_file(&script_path);
 
-        let output = result
-            .content
-            .iter()
-            .filter_map(|b| match b {
-                ContentBlock::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+            let output = result
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
 
-        let is_error = result
-            .details
-            .get("exitCode")
-            .and_then(|v| v.as_i64())
-            .is_some_and(|code| code != 0);
+            let ec = result
+                .details
+                .get("exitCode")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-1) as i32;
+            let is_error = ec != 0;
+            (output, is_error, ec)
+        };
 
         Ok(CodeActResult {
             output,
             is_error,
-            exit_code: result
-                .details
-                .get("exitCode")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(-1) as i32,
+            exit_code,
         })
     }
 
