@@ -35,6 +35,8 @@ mod cleave;
 mod cleave_smoke;
 mod clipboard;
 pub mod code_act;
+pub mod code_act_proxy;
+pub mod code_act_sandbox;
 mod codex_config;
 mod context;
 mod control_actions;

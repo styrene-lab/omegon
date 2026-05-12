@@ -198,6 +198,10 @@ Do NOT ask all questions at once. Start with question 1 only."#,
 /// All skills bundled into the binary at compile time.
 /// Each entry is (name, skill_markdown_content).
 pub const BUNDLED: &[(&str, &str)] = &[
+    (
+        "code-act",
+        include_str!("../../../../skills/code-act/SKILL.md"),
+    ),
     ("git", include_str!("../../../../skills/git/SKILL.md")),
     ("oci", include_str!("../../../../skills/oci/SKILL.md")),
     (
@@ -758,8 +762,8 @@ mod tests {
 
     #[test]
     fn bundled_count_matches_skills_directory() {
-        // 9 skills: git, oci, openspec, python, rust, security, style, typescript, vault
-        assert_eq!(BUNDLED.len(), 9);
+        // 10 skills: code-act, git, oci, openspec, python, rust, security, style, typescript, vault
+        assert_eq!(BUNDLED.len(), 10);
     }
 
     #[test]

@@ -642,11 +642,36 @@ async fn run_code_act_task(
     cancel: &CancellationToken,
 ) -> anyhow::Result<TaskResult> {
     let start = Instant::now();
-    let executor = crate::code_act::CodeActExecutor::permitted(cwd.to_path_buf());
-    let mut total_tokens = 0u64;
 
+    let proxy = crate::code_act_proxy::ProxyServer::new(cwd.to_path_buf())?;
+    let proxy_prelude = proxy.python_prelude();
+    let proxy_cancel = CancellationToken::new();
+    let server_cancel = proxy_cancel.clone();
+    let proxy_handle = tokio::spawn(async move { proxy.serve(server_cancel).await });
+
+    let result = run_code_act_inner(prompt, model, cwd, timeout_secs, cancel, proxy_prelude).await;
+
+    proxy_cancel.cancel();
+    let _ = proxy_handle.await;
+
+    result.map(|mut r| {
+        r.duration_secs = start.elapsed().as_secs();
+        r
+    })
+}
+
+async fn run_code_act_inner(
+    prompt: &str,
+    model: &str,
+    cwd: &Path,
+    timeout_secs: u64,
+    cancel: &CancellationToken,
+    proxy_prelude: String,
+) -> anyhow::Result<TaskResult> {
+    let executor = crate::code_act::CodeActExecutor::permitted(cwd.to_path_buf())
+        .with_proxy_prelude(proxy_prelude);
+    let mut total_tokens = 0u64;
     let mut gen_prompt = executor.build_prompt(prompt, None);
-    let mut last_code = String::new();
 
     for attempt in 1..=3u32 {
         if cancel.is_cancelled() {
@@ -670,9 +695,7 @@ async fn run_code_act_task(
             }
         };
 
-        last_code = code.clone();
         let result = executor.execute_script(&code, Some(timeout_secs), cancel.clone()).await?;
-        let duration = start.elapsed().as_secs();
 
         if result.is_error && attempt < 3 {
             tracing::info!(attempt, "code-act: script failed, retrying with error context");
@@ -688,7 +711,7 @@ async fn run_code_act_task(
                 result.output.chars().take(500).collect()
             },
             tokens_used: total_tokens,
-            duration_secs: duration,
+            duration_secs: 0,
             session_id: format!("code-act-{}", super::file_board::uuid_v4()),
         });
     }
@@ -697,7 +720,7 @@ async fn run_code_act_task(
         exit_code: 1,
         summary: "code-act exhausted retries".into(),
         tokens_used: total_tokens,
-        duration_secs: start.elapsed().as_secs(),
+        duration_secs: 0,
         session_id: format!("code-act-{}", super::file_board::uuid_v4()),
     })
 }

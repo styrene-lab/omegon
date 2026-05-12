@@ -56,6 +56,7 @@ Respond with ONLY a Python code block (```python ... ```). No explanation before
 pub struct CodeActExecutor {
     cwd: PathBuf,
     permitted: bool,
+    proxy_prelude: Option<String>,
 }
 
 impl CodeActExecutor {
@@ -64,11 +65,16 @@ impl CodeActExecutor {
         let code_act = std::env::var("OMEGON_CODE_ACT")
             .map(|v| matches!(v.as_str(), "1" | "true"))
             .unwrap_or(false);
-        Self { cwd, permitted: bypass || code_act }
+        Self { cwd, permitted: bypass || code_act, proxy_prelude: None }
     }
 
     pub fn permitted(cwd: PathBuf) -> Self {
-        Self { cwd, permitted: true }
+        Self { cwd, permitted: true, proxy_prelude: None }
+    }
+
+    pub fn with_proxy_prelude(mut self, prelude: String) -> Self {
+        self.proxy_prelude = Some(prelude);
+        self
     }
 
     pub fn build_prompt(&self, task: &str, context: Option<&str>) -> String {
@@ -81,6 +87,10 @@ impl CodeActExecutor {
         prompt.push_str("def read_file(path: str) -> str\n");
         prompt.push_str("def write_file(path: str, content: str) -> None\n");
         prompt.push_str("def list_files(directory: str = '.', pattern: str = '**/*') -> list[str]\n");
+        if self.proxy_prelude.is_some() {
+            prompt.push_str("def web_search(query: str) -> str\n");
+            prompt.push_str("def web_fetch(url: str) -> str\n");
+        }
         prompt.push_str("```\n\n");
 
         prompt.push_str(&format!("## Working Directory\n\n`{}`\n\n", self.cwd.display()));
@@ -128,7 +138,8 @@ impl CodeActExecutor {
             );
         }
 
-        let full_script = format!("{PYTHON_PRELUDE}{script}");
+        let proxy_section = self.proxy_prelude.as_deref().unwrap_or("");
+        let full_script = format!("{PYTHON_PRELUDE}{proxy_section}{script}");
 
         let run_id = uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("tmp").to_string();
         let script_path = self.cwd.join(".omegon").join(format!("code-act-{run_id}.py"));
@@ -137,35 +148,62 @@ impl CodeActExecutor {
         }
         std::fs::write(&script_path, &full_script)?;
 
-        let command = format!("python3 {}", script_path.display());
-        let result = bash::execute(&command, &self.cwd, timeout_secs, cancel).await?;
+        let use_sandbox = std::env::var("OMEGON_CODE_ACT_SANDBOX")
+            .map(|v| matches!(v.as_str(), "1" | "true"))
+            .unwrap_or(false);
 
-        let _ = std::fs::remove_file(&script_path);
+        let (output, is_error, exit_code) = if use_sandbox {
+            if let Some(sandbox_config) = crate::code_act_sandbox::SandboxConfig::detect() {
+                let proxy_sock = self.proxy_prelude.as_ref().map(|_| {
+                    self.cwd.join(".omegon").join("placeholder.sock")
+                });
+                let timeout = timeout_secs.unwrap_or(600);
+                let sr = crate::code_act_sandbox::execute_in_sandbox(
+                    &sandbox_config,
+                    &script_path,
+                    &self.cwd,
+                    proxy_sock.as_deref(),
+                    timeout,
+                ).await?;
+                let _ = std::fs::remove_file(&script_path);
+                let combined = if sr.stderr.is_empty() {
+                    sr.stdout
+                } else {
+                    format!("{}\n{}", sr.stdout, sr.stderr)
+                };
+                (combined, sr.exit_code != 0, sr.exit_code)
+            } else {
+                let _ = std::fs::remove_file(&script_path);
+                anyhow::bail!("OMEGON_CODE_ACT_SANDBOX=1 but no container runtime available");
+            }
+        } else {
+            let command = format!("python3 {}", script_path.display());
+            let result = bash::execute(&command, &self.cwd, timeout_secs, cancel).await?;
+            let _ = std::fs::remove_file(&script_path);
 
-        let output = result
-            .content
-            .iter()
-            .filter_map(|b| match b {
-                ContentBlock::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+            let output = result
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
 
-        let is_error = result
-            .details
-            .get("exitCode")
-            .and_then(|v| v.as_i64())
-            .is_some_and(|code| code != 0);
+            let ec = result
+                .details
+                .get("exitCode")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-1) as i32;
+            let is_error = ec != 0;
+            (output, is_error, ec)
+        };
 
         Ok(CodeActResult {
             output,
             is_error,
-            exit_code: result
-                .details
-                .get("exitCode")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(-1) as i32,
+            exit_code,
         })
     }
 
@@ -236,13 +274,13 @@ mod tests {
     }
 
     fn permitted_executor(cwd: PathBuf) -> CodeActExecutor {
-        CodeActExecutor { cwd, permitted: true }
+        CodeActExecutor { cwd, permitted: true, proxy_prelude: None }
     }
 
     #[tokio::test]
     async fn execute_rejects_without_opt_in() {
         let tmp = tempfile::tempdir().unwrap();
-        let exec = CodeActExecutor { cwd: tmp.path().to_path_buf(), permitted: false };
+        let exec = CodeActExecutor { cwd: tmp.path().to_path_buf(), permitted: false, proxy_prelude: None };
         let cancel = CancellationToken::new();
         let result = exec.execute_script("print('nope')", Some(5), cancel).await;
         assert!(result.is_err());
