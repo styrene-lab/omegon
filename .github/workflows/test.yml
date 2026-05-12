@@ -30,6 +30,13 @@ jobs:
           cargo test -p omegon-memory --no-default-features
           cargo test -p omegon-secrets --no-default-features
 
+      - name: SDK protocol smoke tests
+        # Spawns the bundled test-extension binary and exchanges
+        # JSON-RPC over stdin/stdout to verify the v2 wire contract
+        # is intact. Failure here means a release would break
+        # every downstream extension (shuttle, scry, vox, etc).
+        run: cargo test -p omegon-extension --test protocol_smoke
+
       - name: Extension install integration tests
         run: cargo test -p omegon --test extension_install_blackbox -- --test-threads=1
 
