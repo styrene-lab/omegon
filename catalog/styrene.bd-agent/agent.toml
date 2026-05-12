@@ -2,7 +2,7 @@
 id = "styrene.bd-agent"
 name = "Business Development"
 version = "1.0.0"
-description = "Engagement tracking, opportunity assessment, proposal drafting, and client reporting. Connects to Scribe MCP for engagement data."
+description = "Engagement tracking, opportunity assessment, proposal drafting, and client reporting using Flynt boards and Sentry run data."
 domain = "ops"
 
 [persona]
@@ -35,9 +35,9 @@ thinking_level = "medium"
 
 [secrets]
 required = ["ANTHROPIC_API_KEY"]
-optional = ["GOOGLE_OAUTH_TOKEN", "SCRIBE_GITHUB_TOKEN", "VOX_SLACK_BOT_TOKEN"]
+optional = ["GOOGLE_OAUTH_TOKEN", "GITHUB_TOKEN", "VOX_SLACK_BOT_TOKEN"]
 
 [[triggers]]
 name = "weekly-status-report"
 schedule = "weekly"
-template = "Generate a weekly action report from Scribe engagement data for the current week. Use the report skill conventions: summarize accomplishments by engagement, flag blockers, list next steps."
+template = "Generate a weekly action report from Flynt engagement boards and Sentry run history for the current week. Use the report skill conventions: summarize accomplishments by engagement, flag blockers, list next steps."

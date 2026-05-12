@@ -15,10 +15,6 @@ name = "vox"
 version = ">=0.3.0"
 
 [[extensions]]
-name = "scribe"
-version = ">=0.1.0"
-
-[[extensions]]
 name = "scry"
 version = ">=0.1.0"
 

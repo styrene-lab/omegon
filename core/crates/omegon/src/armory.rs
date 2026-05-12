@@ -197,16 +197,7 @@ async fn fetch_extensions(
     client: &reqwest::Client,
     installed: &InstalledState,
 ) -> anyhow::Result<Vec<ArmoryItem>> {
-    let url = format!("{ARMORY_RAW_BASE}/registry.toml");
-    let text = client
-        .get(&url)
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?;
-    let registry: HashMap<String, crate::extension_registry::RegistryEntry> =
-        toml::from_str(&text)?;
+    let registry = crate::extension_registry::fetch_registry(client).await?;
     Ok(registry
         .into_iter()
         .map(|(id, entry)| ArmoryItem {
@@ -425,15 +416,15 @@ mod tests {
         let items = vec![
             ArmoryItem {
                 kind: ArmoryItemKind::Extension,
-                id: "scribe".into(),
-                name: "scribe".into(),
-                description: "Forge sync".into(),
-                category: "forge".into(),
+                id: "flynt".into(),
+                name: "flynt".into(),
+                description: "Graph workflow builder".into(),
+                category: "automation".into(),
                 version: None,
-                source: "https://github.com/styrene-lab/scribe".into(),
+                source: "https://github.com/styrene-lab/flynt".into(),
                 manifest_id: None,
                 installed: false,
-                install_hint: "omegon extension install scribe".into(),
+                install_hint: "omegon extension install flynt".into(),
             },
             ArmoryItem {
                 kind: ArmoryItemKind::Skill,
@@ -453,7 +444,7 @@ mod tests {
         let rendered = render_items(&items);
         assert!(rendered.contains("Extensions"));
         assert!(rendered.contains("Skills"));
-        assert!(rendered.contains("o scribe"));
+        assert!(rendered.contains("o flynt"));
         assert!(rendered.contains("+ security"));
     }
 
