@@ -645,11 +645,12 @@ async fn run_code_act_task(
 
     let proxy = crate::code_act_proxy::ProxyServer::new(cwd.to_path_buf())?;
     let proxy_prelude = proxy.python_prelude();
+    let proxy_socket_path = proxy.socket_path().to_path_buf();
     let proxy_cancel = CancellationToken::new();
     let server_cancel = proxy_cancel.clone();
     let proxy_handle = tokio::spawn(async move { proxy.serve(server_cancel).await });
 
-    let result = run_code_act_inner(prompt, model, cwd, timeout_secs, cancel, proxy_prelude).await;
+    let result = run_code_act_inner(prompt, model, cwd, timeout_secs, cancel, proxy_prelude, proxy_socket_path).await;
 
     proxy_cancel.cancel();
     let _ = proxy_handle.await;
@@ -667,9 +668,10 @@ async fn run_code_act_inner(
     timeout_secs: u64,
     cancel: &CancellationToken,
     proxy_prelude: String,
+    proxy_socket_path: PathBuf,
 ) -> anyhow::Result<TaskResult> {
     let executor = crate::code_act::CodeActExecutor::permitted(cwd.to_path_buf())
-        .with_proxy_prelude(proxy_prelude);
+        .with_proxy(proxy_prelude, proxy_socket_path);
     let mut total_tokens = 0u64;
     let mut gen_prompt = executor.build_prompt(prompt, None);
 

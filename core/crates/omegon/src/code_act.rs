@@ -57,6 +57,7 @@ pub struct CodeActExecutor {
     cwd: PathBuf,
     permitted: bool,
     proxy_prelude: Option<String>,
+    proxy_socket_path: Option<PathBuf>,
 }
 
 impl CodeActExecutor {
@@ -65,15 +66,16 @@ impl CodeActExecutor {
         let code_act = std::env::var("OMEGON_CODE_ACT")
             .map(|v| matches!(v.as_str(), "1" | "true"))
             .unwrap_or(false);
-        Self { cwd, permitted: bypass || code_act, proxy_prelude: None }
+        Self { cwd, permitted: bypass || code_act, proxy_prelude: None, proxy_socket_path: None }
     }
 
     pub fn permitted(cwd: PathBuf) -> Self {
-        Self { cwd, permitted: true, proxy_prelude: None }
+        Self { cwd, permitted: true, proxy_prelude: None, proxy_socket_path: None }
     }
 
-    pub fn with_proxy_prelude(mut self, prelude: String) -> Self {
+    pub fn with_proxy(mut self, prelude: String, socket_path: PathBuf) -> Self {
         self.proxy_prelude = Some(prelude);
+        self.proxy_socket_path = Some(socket_path);
         self
     }
 
@@ -154,9 +156,7 @@ impl CodeActExecutor {
 
         let (output, is_error, exit_code) = if use_sandbox {
             if let Some(sandbox_config) = crate::code_act_sandbox::SandboxConfig::detect() {
-                let proxy_sock = self.proxy_prelude.as_ref().map(|_| {
-                    self.cwd.join(".omegon").join("placeholder.sock")
-                });
+                let proxy_sock = self.proxy_socket_path.as_deref();
                 let timeout = timeout_secs.unwrap_or(600);
                 let sr = crate::code_act_sandbox::execute_in_sandbox(
                     &sandbox_config,
@@ -274,13 +274,13 @@ mod tests {
     }
 
     fn permitted_executor(cwd: PathBuf) -> CodeActExecutor {
-        CodeActExecutor { cwd, permitted: true, proxy_prelude: None }
+        CodeActExecutor { cwd, permitted: true, proxy_prelude: None, proxy_socket_path: None }
     }
 
     #[tokio::test]
     async fn execute_rejects_without_opt_in() {
         let tmp = tempfile::tempdir().unwrap();
-        let exec = CodeActExecutor { cwd: tmp.path().to_path_buf(), permitted: false, proxy_prelude: None };
+        let exec = CodeActExecutor { cwd: tmp.path().to_path_buf(), permitted: false, proxy_prelude: None, proxy_socket_path: None };
         let cancel = CancellationToken::new();
         let result = exec.execute_script("print('nope')", Some(5), cancel).await;
         assert!(result.is_err());

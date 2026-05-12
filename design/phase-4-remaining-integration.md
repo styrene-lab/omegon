@@ -201,3 +201,37 @@ Resolved during Phase 3 hardening passes:
   documented above but not in scope for Phase 4. It's a cross-cutting
   concern that should be addressed in the provider layer, not patched
   per-caller.
+
+## Armory positioning
+
+### Current state
+
+- **Code-act skill**: bundled into the binary (`skills/code-act/SKILL.md`).
+  Always available without armory installation. Does NOT appear in
+  `omegon armory browse` since armory discovers skills from the upstream
+  `omegon-armory` GitHub repo, not from bundled skills.
+
+- **OpenAPI tools**: registered dynamically as a ToolProvider. Not visible
+  in armory. Project-local by nature (`.omegon/openapi.toml` and
+  `.omegon/apis/`), not ecosystem-shared.
+
+- **Local embeddings**: binary feature flag (`--features local-embeddings`).
+  Not an installable armory item — it's a compile-time capability.
+
+- **Model routing**: sentry config (`[sentry.routing]`). Not an armory
+  concern — it's runtime configuration, not an installable component.
+
+### Actions needed for upstream armory repo
+
+1. **Add `code-act` to `omegon-armory/skills/`** — create a `plugin.toml`
+   entry so the skill appears in `omegon armory browse --kind skills`.
+   The `InstalledState::skill()` already checks bundled skills, so it
+   would show as "installed" automatically.
+
+2. **Consider an `api-integrations` plugin category** — for distributing
+   curated OpenAPI spec packages (e.g., "Stripe toolkit" with
+   allow/confirm/read_only pre-configured). Not blocking, but would
+   make the OpenAPI system discoverable through armory.
+
+3. **No armory action needed for embeddings or routing** — these are
+   runtime capabilities, not installable ecosystem items.

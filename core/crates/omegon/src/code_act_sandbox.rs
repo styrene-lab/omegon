@@ -45,11 +45,10 @@ pub async fn execute_in_sandbox(
     ));
 
     if let Some(sock) = proxy_socket {
-        let sock_dir = sock.parent().unwrap_or(Path::new("/tmp"));
         cmd.arg(format!(
-            "-v={}:{}:rw",
-            sock_dir.display(),
-            sock_dir.display()
+            "-v={}:{}",
+            sock.display(),
+            sock.display()
         ));
     }
 
