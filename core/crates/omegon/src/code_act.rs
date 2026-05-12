@@ -2,14 +2,13 @@
 //! sequential tool calls. Phase 1: Python scripts with filesystem-local
 //! tool proxies, executed via subprocess.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
-use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::tools::bash;
-use omegon_traits::{ContentBlock, ToolResult};
+use omegon_traits::ContentBlock;
 
 const PYTHON_PRELUDE: &str = r#"
 import json, os, subprocess, sys

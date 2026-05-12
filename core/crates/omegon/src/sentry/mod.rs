@@ -17,7 +17,7 @@ use serde::Deserialize;
 
 pub use board::TaskBoard;
 pub use file_board::FileTaskBoard;
-pub use flynt_board::{FlyntTaskBoard, is_flynt_vault};
+pub use flynt_board::FlyntTaskBoard;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SentryConfig {

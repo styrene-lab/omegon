@@ -346,7 +346,7 @@ impl AgentSetup {
             }
         }
 
-        let codex_integration = crate::codex_config::load(&project_root);
+        let _codex_integration = crate::codex_config::load(&project_root);
         let codex_integration = crate::codex_config::load(&project_root);
         let codex_vault_path = codex_integration
             .as_ref()

@@ -35,8 +35,8 @@
     "ollama",
     "ollama-cloud"
   ],
-  "toolFiles": 20,
-  "skillCount": 9,
+  "toolFiles": 21,
+  "skillCount": 10,
   "searchProviderCount": 5,
   "collectedAt": "2026-05-11T12:27:26.785Z"
 }
