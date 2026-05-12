@@ -199,6 +199,15 @@ omegon acp
 
 `omegon run` is bounded and exits with structured status codes: `0` completed, `1` error, `2` upstream exhausted, `3` timeout. `omegon sentry` runs the autonomous task executor with triggers, budgets, optional auto model routing, and a local control plane. `omegon serve` exposes a local daemon/control-plane with health probes. `omegon acp` runs an Agent Client Protocol server over stdio by default, or WebSocket with `--listen`.
 
+Control-plane TLS uses the same file-based operational model as styrened:
+
+```sh
+omegon serve --rpc-tls-cert server.pem --rpc-tls-key server-key.pem
+omegon acp --listen 0.0.0.0:7842 --rpc-tls-cert server.pem --rpc-tls-key server-key.pem --rpc-tls-client-ca ca.pem
+```
+
+When TLS is active, startup descriptors publish `https://` and `wss://` URLs.
+
 ### Benchmarking and signal shaping
 
 Omegon ships with an in-repo token-efficiency comparison harness under `scripts/benchmark_harness.py` and `ai/benchmarks/`.

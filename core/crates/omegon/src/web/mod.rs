@@ -223,9 +223,15 @@ fn project_web_instance(
     instance.control_plane.ws_url = Some(startup.ws_url.clone());
     instance.control_plane.auth_mode = Some(startup.auth_mode.clone());
     instance.control_plane.auth_source = Some(startup.auth_source.clone());
-    instance.control_plane.http_transport_security =
-        Some(OmegonTransportSecurity::InsecureBootstrap);
-    instance.control_plane.ws_transport_security = Some(OmegonTransportSecurity::InsecureBootstrap);
+    let transport_security = if startup.http_base.starts_with("https://")
+        && startup.ws_url.starts_with("wss://")
+    {
+        OmegonTransportSecurity::Secure
+    } else {
+        OmegonTransportSecurity::InsecureBootstrap
+    };
+    instance.control_plane.http_transport_security = Some(transport_security.clone());
+    instance.control_plane.ws_transport_security = Some(transport_security);
     instance
 }
 
@@ -320,7 +326,7 @@ pub async fn start_server(
         active_connections: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         shutdown: tokio_util::sync::CancellationToken::new(),
     };
-    start_server_with_options(state, preferred_port, false, acp_state).await
+    start_server_with_options(state, preferred_port, false, acp_state, None).await
 }
 
 pub async fn start_server_with_options(
@@ -328,6 +334,7 @@ pub async fn start_server_with_options(
     preferred_port: u16,
     strict_port: bool,
     acp_state: acp_ws::AcpWebState,
+    tls: Option<crate::control_tls::ControlTlsConfig>,
 ) -> anyhow::Result<(WebStartupInfo, mpsc::Receiver<WebCommand>)> {
     // Create the command channel — caller gets the receiver
     let (cmd_tx, cmd_rx) = mpsc::channel(32);
@@ -381,17 +388,23 @@ pub async fn start_server_with_options(
         bind_with_fallback(preferred_port).await?
     };
     let bound = listener.local_addr()?;
+    let (http_scheme, ws_scheme) = crate::control_tls::schemes(tls.as_ref());
+    if tls.is_some()
+        && let Ok(mut status) = daemon_status.lock()
+    {
+        status.transport_warnings.clear();
+    }
 
     let mut startup = WebStartupInfo {
         schema_version: 2,
         addr: bound.to_string(),
-        http_base: format!("http://{bound}"),
-        state_url: format!("http://{bound}/api/state"),
-        startup_url: format!("http://{bound}/api/startup"),
-        health_url: format!("http://{bound}/api/healthz"),
-        ready_url: format!("http://{bound}/api/readyz"),
-        ws_url: format!("ws://{bound}/ws?token={token}"),
-        acp_url: Some(format!("ws://{bound}/acp?token={token}")),
+        http_base: format!("{http_scheme}://{bound}"),
+        state_url: format!("{http_scheme}://{bound}/api/state"),
+        startup_url: format!("{http_scheme}://{bound}/api/startup"),
+        health_url: format!("{http_scheme}://{bound}/api/healthz"),
+        ready_url: format!("{http_scheme}://{bound}/api/readyz"),
+        ws_url: format!("{ws_scheme}://{bound}/ws?token={token}"),
+        acp_url: Some(format!("{ws_scheme}://{bound}/acp?token={token}")),
         token,
         auth_mode: auth_mode.to_string(),
         auth_source,
@@ -420,9 +433,7 @@ pub async fn start_server_with_options(
     );
 
     crate::task_spawn::spawn_infra("web-server", async move {
-        axum::serve(listener, app)
-            .await
-            .map_err(anyhow::Error::from)
+        crate::control_tls::serve_router(listener, app, tls).await
     });
 
     start_daemon_event_worker(&state);
@@ -775,6 +786,41 @@ mod tests {
         assert_eq!(
             descriptor.control_plane.ws_transport_security,
             Some(OmegonTransportSecurity::InsecureBootstrap)
+        );
+    }
+
+    #[test]
+    fn project_descriptor_marks_tls_control_plane_secure() {
+        let state = WebState::new(
+            DashboardHandles::default(),
+            tokio::sync::broadcast::channel(16).0,
+        );
+        let startup = WebStartupInfo {
+            schema_version: 2,
+            addr: "127.0.0.1:7842".into(),
+            http_base: "https://127.0.0.1:7842".into(),
+            state_url: "https://127.0.0.1:7842/api/state".into(),
+            startup_url: "https://127.0.0.1:7842/api/startup".into(),
+            health_url: "https://127.0.0.1:7842/api/healthz".into(),
+            ready_url: "https://127.0.0.1:7842/api/readyz".into(),
+            ws_url: "wss://127.0.0.1:7842/ws?token=test".into(),
+            acp_url: Some("wss://127.0.0.1:7842/acp?token=test".into()),
+            token: "test".into(),
+            auth_mode: "ephemeral-bearer".into(),
+            auth_source: "generated".into(),
+            control_plane_state: ControlPlaneState::Ready,
+            daemon_status: WebDaemonStatus::default(),
+            instance_descriptor: None,
+        };
+
+        let descriptor = project_web_instance(&state.handles, &startup);
+        assert_eq!(
+            descriptor.control_plane.http_transport_security,
+            Some(OmegonTransportSecurity::Secure)
+        );
+        assert_eq!(
+            descriptor.control_plane.ws_transport_security,
+            Some(OmegonTransportSecurity::Secure)
         );
     }
 

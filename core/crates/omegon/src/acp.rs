@@ -1899,6 +1899,7 @@ pub async fn run_server(
     model: &str,
     agent_id: Option<&str>,
     cwd: &std::path::Path,
+    tls: Option<crate::control_tls::ControlTlsConfig>,
 ) -> anyhow::Result<()> {
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
@@ -1935,22 +1936,25 @@ pub async fn run_server(
     let listener = tokio::net::TcpListener::bind(bind_addr).await
         .map_err(|e| anyhow::anyhow!("failed to bind {bind_addr}: {e}"))?;
     let bound = listener.local_addr()?;
+    let (http_scheme, ws_scheme) = crate::control_tls::schemes(tls.as_ref());
 
     // Emit startup JSON for orchestrator discovery
     let startup = serde_json::json!({
         "type": "omegon.startup",
         "schema_version": 3,
         "pid": std::process::id(),
-        "acp_url": format!("ws://{bound}/acp?token={token}"),
-        "health_url": format!("http://{bound}/api/healthz"),
-        "ready_url": format!("http://{bound}/api/readyz"),
+        "acp_url": format!("{ws_scheme}://{bound}/acp?token={token}"),
+        "health_url": format!("{http_scheme}://{bound}/api/healthz"),
+        "ready_url": format!("{http_scheme}://{bound}/api/readyz"),
         "auth_mode": web_auth.mode_name(),
+        "transport_security": if tls.is_some() { "secure" } else { "insecure-bootstrap" },
+        "mtls": tls.as_ref().is_some_and(|config| config.is_mtls()),
     });
     println!("{startup}");
 
     tracing::info!(
         addr = %bound,
-        "ACP WebSocket server listening — ws://{bound}/acp"
+        "ACP WebSocket server listening — {ws_scheme}://{bound}/acp"
     );
 
     // Signal handlers: Ctrl-C + SIGTERM
@@ -1971,9 +1975,13 @@ pub async fn run_server(
         });
     }
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown.cancelled_owned())
-        .await?;
+    crate::control_tls::serve_router_with_shutdown(
+        listener,
+        app,
+        tls,
+        shutdown.cancelled_owned(),
+    )
+    .await?;
 
     tracing::info!("ACP server shut down");
     Ok(())

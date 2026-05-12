@@ -6,7 +6,7 @@
 //! Phase 2: Native TUI rendering.
 //! Phase 3: Native LLM provider clients.
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use crossterm::ExecutableCommand;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{EnterAlternateScreen, disable_raw_mode, enable_raw_mode};
@@ -39,6 +39,7 @@ mod codex_config;
 mod context;
 mod control_actions;
 mod control_runtime;
+mod control_tls;
 mod embedding;
 #[cfg(feature = "local-embeddings")]
 mod local_embedding;
@@ -328,6 +329,9 @@ enum Commands {
         /// Agent manifest to load from catalog (id or path to bundle dir).
         #[arg(long)]
         agent: Option<String>,
+
+        #[command(flatten)]
+        tls: ControlTlsArgs,
     },
 
     /// Run an embedded localhost control-plane for external supervisors.
@@ -340,6 +344,9 @@ enum Commands {
         /// Require the exact control port instead of auto-falling back.
         #[arg(long)]
         strict_port: bool,
+
+        #[command(flatten)]
+        tls: ControlTlsArgs,
     },
 
     /// Unified authentication management.
@@ -514,6 +521,9 @@ enum Commands {
         /// Example: --listen 0.0.0.0:7842
         #[arg(long)]
         listen: Option<String>,
+
+        #[command(flatten)]
+        tls: ControlTlsArgs,
     },
 
     /// Manage local embedding models for semantic memory search.
@@ -578,6 +588,40 @@ enum Commands {
         #[command(subcommand)]
         action: NexAction,
     },
+}
+
+#[derive(Clone, Debug, Default, Args)]
+struct ControlTlsArgs {
+    /// PEM certificate chain for the control-plane TLS listener.
+    #[arg(long = "rpc-tls-cert", alias = "control-tls-cert", value_name = "PATH")]
+    cert: Option<PathBuf>,
+
+    /// PEM private key for the control-plane TLS listener.
+    #[arg(long = "rpc-tls-key", alias = "control-tls-key", value_name = "PATH")]
+    key: Option<PathBuf>,
+
+    /// Optional PEM client CA bundle. When set, client certificates are required.
+    #[arg(long = "rpc-tls-client-ca", alias = "control-tls-client-ca", value_name = "PATH")]
+    client_ca: Option<PathBuf>,
+}
+
+impl ControlTlsArgs {
+    fn into_config(self) -> anyhow::Result<Option<control_tls::ControlTlsConfig>> {
+        match (self.cert, self.key, self.client_ca) {
+            (None, None, None) => Ok(None),
+            (Some(cert_chain_path), Some(private_key_path), client_ca_path) => {
+                Ok(Some(control_tls::ControlTlsConfig {
+                    cert_chain_path,
+                    private_key_path,
+                    client_ca_path,
+                }))
+            }
+            (None, None, Some(_)) => {
+                anyhow::bail!("--rpc-tls-client-ca requires --rpc-tls-cert and --rpc-tls-key")
+            }
+            _ => anyhow::bail!("--rpc-tls-cert and --rpc-tls-key must be provided together"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -1128,11 +1172,31 @@ async fn main() -> anyhow::Result<()> {
             control_port,
             strict_port,
             ref agent,
-        }) => run_embedded_command(control_port, strict_port, &cli.model, agent.as_deref()).await,
+            ref tls,
+        }) => {
+            run_embedded_command(
+                control_port,
+                strict_port,
+                &cli.model,
+                agent.as_deref(),
+                tls.clone().into_config()?,
+            )
+            .await
+        }
         Some(Commands::Embedded {
             control_port,
             strict_port,
-        }) => run_embedded_command(control_port, strict_port, &cli.model, None).await,
+            ref tls,
+        }) => {
+            run_embedded_command(
+                control_port,
+                strict_port,
+                &cli.model,
+                None,
+                tls.clone().into_config()?,
+            )
+            .await
+        }
         Some(Commands::Eval {
             agent,
             suite,
@@ -1194,9 +1258,16 @@ async fn main() -> anyhow::Result<()> {
                 switch::interactive_picker().await
             }
         }
-        Some(Commands::Acp { ref agent, ref listen }) => {
+        Some(Commands::Acp { ref agent, ref listen, ref tls }) => {
             if let Some(addr) = listen {
-                acp::run_server(addr, &cli.model, agent.as_deref(), &cli.cwd).await
+                acp::run_server(
+                    addr,
+                    &cli.model,
+                    agent.as_deref(),
+                    &cli.cwd,
+                    tls.clone().into_config()?,
+                )
+                .await
             } else {
                 let local = tokio::task::LocalSet::new();
                 local.run_until(acp::run(&cli.model, agent.as_deref(), &cli.cwd)).await
@@ -1873,6 +1944,7 @@ async fn run_embedded_command(
     strict_port: bool,
     model: &str,
     agent_id: Option<&str>,
+    tls: Option<control_tls::ControlTlsConfig>,
 ) -> anyhow::Result<()> {
     let cwd = std::fs::canonicalize(".")?;
 
@@ -1970,7 +2042,7 @@ async fn run_embedded_command(
         shutdown: global_cancel.clone(),
     };
     let (startup, mut cmd_rx) =
-        web::start_server_with_options(state, control_port, strict_port, acp_state).await?;
+        web::start_server_with_options(state, control_port, strict_port, acp_state, tls).await?;
 
     let event = EmbeddedStartupEvent {
         event_type: "omegon.startup",
@@ -7971,9 +8043,11 @@ mod tests {
             Commands::Embedded {
                 control_port,
                 strict_port,
+                tls,
             } => {
                 assert_eq!(control_port, 7842);
                 assert!(strict_port);
+                assert!(tls.cert.is_none());
             }
             _ => panic!("Expected Embedded command"),
         }
@@ -7995,9 +8069,77 @@ mod tests {
                 control_port,
                 strict_port,
                 agent: _,
+                tls,
             } => {
                 assert_eq!(control_port, 7842);
                 assert!(strict_port);
+                assert!(tls.key.is_none());
+            }
+            _ => panic!("Expected Serve command"),
+        }
+    }
+
+    #[test]
+    fn control_tls_flags_parse_for_serve_and_acp() {
+        let cli = Cli::try_parse_from(vec![
+            "omegon",
+            "serve",
+            "--rpc-tls-cert",
+            "server.pem",
+            "--rpc-tls-key",
+            "server-key.pem",
+            "--rpc-tls-client-ca",
+            "ca.pem",
+        ])
+        .expect("should parse serve TLS flags");
+
+        match cli.command.unwrap() {
+            Commands::Serve { tls, .. } => {
+                let config = tls.into_config().expect("valid TLS config").unwrap();
+                assert_eq!(config.cert_chain_path, PathBuf::from("server.pem"));
+                assert_eq!(config.private_key_path, PathBuf::from("server-key.pem"));
+                assert_eq!(config.client_ca_path, Some(PathBuf::from("ca.pem")));
+            }
+            _ => panic!("Expected Serve command"),
+        }
+
+        let cli = Cli::try_parse_from(vec![
+            "omegon",
+            "acp",
+            "--listen",
+            "127.0.0.1:0",
+            "--control-tls-cert",
+            "server.pem",
+            "--control-tls-key",
+            "server-key.pem",
+        ])
+        .expect("should parse ACP TLS aliases");
+
+        match cli.command.unwrap() {
+            Commands::Acp { tls, .. } => {
+                let config = tls.into_config().expect("valid TLS config").unwrap();
+                assert_eq!(config.cert_chain_path, PathBuf::from("server.pem"));
+                assert_eq!(config.private_key_path, PathBuf::from("server-key.pem"));
+                assert_eq!(config.client_ca_path, None);
+            }
+            _ => panic!("Expected ACP command"),
+        }
+    }
+
+    #[test]
+    fn control_tls_requires_cert_and_key_pair() {
+        let cli = Cli::try_parse_from(vec![
+            "omegon",
+            "serve",
+            "--rpc-tls-cert",
+            "server.pem",
+        ])
+        .expect("clap accepts partial TLS args for semantic validation");
+
+        match cli.command.unwrap() {
+            Commands::Serve { tls, .. } => {
+                let err = tls.into_config().unwrap_err();
+                assert!(err.to_string().contains("must be provided together"));
             }
             _ => panic!("Expected Serve command"),
         }
