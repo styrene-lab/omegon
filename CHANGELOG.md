@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-05-13
+
 ### Added
 
 - **Operator secret aliases for Vault** — Vault token auth can now load a token from an Omegon-managed secret via `vault.json` `auth.secret_name`, enabling flows like storing `VAULT_ROOT_TOKEN` in the OS keyring and using it without exporting it into every shell.
