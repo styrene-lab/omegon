@@ -3153,6 +3153,22 @@ fn slash_secrets_configure_without_value_opens_selector() {
 }
 
 #[test]
+fn slash_secrets_set_name_enters_hidden_secret_input() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let result = app.handle_slash_command("/secrets set VAULT_ROOT_TOKEN", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    let (label, masked) = app
+        .editor
+        .secret_display()
+        .expect("set NAME should enter hidden secret mode");
+
+    assert_eq!(label, "VAULT_ROOT_TOKEN");
+    assert!(masked.is_empty(), "secret buffer should start empty");
+}
+
+#[test]
 fn secret_selector_confirm_starts_hidden_secret_input() {
     let mut app = test_app();
     let tx = test_tx();

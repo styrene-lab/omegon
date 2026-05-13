@@ -3606,10 +3606,10 @@ pub async fn secrets_view_response(
     out.push_str("  /secrets set NPM_TOKEN cmd:npm token get       always fresh from CLI\n");
     out.push_str("  /secrets set AWS_SECRET env:AWS_SECRET_ACCESS_KEY  from environment\n\n");
     out.push_str("API keys (no CLI available — store directly):\n");
-    out.push_str("  /secrets set OPENROUTER_KEY sk-or-...          free cloud AI\n");
-    out.push_str("  /secrets set ANTHROPIC_API_KEY sk-ant-...      Anthropic API\n\n");
-    out.push_str("Retrieve or remove:\n");
-    out.push_str("  /secrets get GITHUB_TOKEN\n");
+    out.push_str("  /secrets set OPENROUTER_KEY                   hidden input prompt\n");
+    out.push_str("  /secrets set ANTHROPIC_API_KEY                hidden input prompt\n\n");
+    out.push_str("Check or remove:\n");
+    out.push_str("  /secrets get GITHUB_TOKEN       checks resolution, never prints value\n");
     out.push_str("  /secrets delete GITHUB_TOKEN");
     SlashCommandResponse {
         accepted: true,
@@ -3622,11 +3622,11 @@ pub async fn secrets_set_response(
     name: &str,
     value: &str,
 ) -> SlashCommandResponse {
-    let result = if value.contains(':')
+    let is_recipe = value.contains(':')
         && ["env:", "cmd:", "vault:", "keyring:", "file:"]
             .iter()
-            .any(|p| value.starts_with(p))
-    {
+            .any(|p| value.starts_with(p));
+    let result = if is_recipe {
         secrets.set_recipe(name, value)
     } else {
         secrets.set_keyring_secret(name, value)
@@ -3634,9 +3634,15 @@ pub async fn secrets_set_response(
     match result {
         Ok(()) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!(
-                "✓ Secret '{name}' stored (encrypted in OS keyring).\n  The agent will redact this value from all output."
-            )),
+            output: Some(if is_recipe {
+                format!(
+                    "✓ Secret recipe '{name}' stored as {value}.\n  Values resolved from the recipe are redacted from output."
+                )
+            } else {
+                format!(
+                    "✓ Secret '{name}' stored (encrypted in OS keyring).\n  The agent will redact this value from all output."
+                )
+            }),
         },
         Err(e) => SlashCommandResponse {
             accepted: false,
@@ -3650,9 +3656,11 @@ pub async fn secrets_get_response(
     name: &str,
 ) -> SlashCommandResponse {
     match secrets.resolve(name) {
-        Some(val) => SlashCommandResponse {
+        Some(_) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!("🔓 {name} = {val}")),
+            output: Some(format!(
+                "🔒 Secret '{name}' resolves successfully. Values are never printed."
+            )),
         },
         None => SlashCommandResponse {
             accepted: false,

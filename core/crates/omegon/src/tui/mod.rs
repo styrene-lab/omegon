@@ -2178,7 +2178,7 @@ impl App {
             SelectorKind::SecretName => {
                 if value == "(custom)" {
                     self.editor.set_text("/secrets set ");
-                    Some("Type: /secrets set NAME VALUE".to_string())
+                    Some("Type: /secrets set NAME, then press Enter for hidden input".to_string())
                 } else {
                     let suggested = Self::SECRET_CATALOG
                         .iter()
@@ -2432,6 +2432,14 @@ impl App {
     fn handle_secrets(&mut self, args: &str, tx: &mpsc::Sender<TuiCommand>) -> SlashResult {
         let parts: Vec<&str> = args.splitn(3, ' ').collect();
         match parts.first().copied().unwrap_or("") {
+            // /secrets set NAME → enter hidden input mode for arbitrary operator secrets.
+            "set" if parts.len() == 2 && !parts[1].trim().is_empty() => {
+                let name = parts[1].trim();
+                self.editor.start_secret_input(name);
+                SlashResult::Display(format!(
+                    "🔒 Paste or type value for {name} (input is hidden):"
+                ))
+            }
             // /secrets configure and /secrets set with no name/value → open selector
             "configure" | "set" if parts.len() < 3 => {
                 let existing: Vec<String> = {
@@ -2474,13 +2482,13 @@ impl App {
                         SlashResult::Handled
                     } else {
                         SlashResult::Display(
-                            "Usage: /secrets [list|get <name>|set <name> <value>|delete <name>]"
+                            "Usage: /secrets [list|set <name> [value-or-recipe]|delete <name>]"
                                 .into(),
                         )
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /secrets [list|get <name>|set <name> <value>|delete <name>]".into(),
+                        "Usage: /secrets [list|set <name> [value-or-recipe]|delete <name>]".into(),
                     )
                 }
             }

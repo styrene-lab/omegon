@@ -49,12 +49,18 @@ fn default_timeout() -> u64 {
 }
 
 /// Authentication method configuration.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "method")]
 pub enum AuthConfig {
-    #[default]
     #[serde(rename = "token")]
-    Token,
+    Token {
+        /// Optional Omegon secret name to resolve and use as the Vault token.
+        ///
+        /// This keeps Vault bootstrap tokens in the operator-managed secret
+        /// store instead of requiring process-wide VAULT_TOKEN exports.
+        #[serde(default)]
+        secret_name: Option<String>,
+    },
     #[serde(rename = "approle")]
     AppRole {
         role_id: String,
@@ -68,6 +74,12 @@ pub enum AuthConfig {
         #[serde(default = "default_k8s_token_path")]
         token_path: String,
     },
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        AuthConfig::Token { secret_name: None }
+    }
 }
 
 fn default_k8s_token_path() -> String {
@@ -256,7 +268,7 @@ impl VaultConfig {
             );
             return Ok(Some(VaultConfig {
                 addr,
-                auth: AuthConfig::Token,
+                auth: AuthConfig::Token { secret_name: None },
                 allowed_paths: vec![], // DenyAll — operator must create vault.json
                 denied_paths: vec![],
                 timeout_secs: default_timeout(),
@@ -308,6 +320,14 @@ impl VaultClient {
     /// 2. ~/.vault-token file
     /// 3. Configured auth method (AppRole, Kubernetes SA)
     pub async fn authenticate(&mut self) -> Result<()> {
+        // A caller may have injected a token from Omegon's keyring-backed
+        // SecretsManager before authentication. Do not overwrite it with env
+        // or ~/.vault-token in that case.
+        if self.token.is_some() {
+            debug!("using preloaded Vault token");
+            return Ok(());
+        }
+
         // 1. Check VAULT_TOKEN environment variable
         if let Ok(token) = std::env::var("VAULT_TOKEN")
             && !token.is_empty()
@@ -333,7 +353,7 @@ impl VaultClient {
         // 3. Use configured auth method
         let auth_config = self.config.auth.clone();
         match auth_config {
-            AuthConfig::Token => {
+            AuthConfig::Token { .. } => {
                 return Err(anyhow!("no token found in VAULT_TOKEN or ~/.vault-token"));
             }
             AuthConfig::AppRole {
@@ -727,11 +747,43 @@ mod tests {
     fn test_config(server_url: &str) -> VaultConfig {
         VaultConfig {
             addr: server_url.to_string(),
-            auth: AuthConfig::Token,
+            auth: AuthConfig::Token { secret_name: None },
             allowed_paths: vec!["secret/data/omegon/*".to_string()],
             denied_paths: vec!["secret/data/bootstrap/cloudflare/*".to_string()],
             timeout_secs: 5,
         }
+    }
+
+    #[test]
+    fn token_auth_config_accepts_secret_name() {
+        let config: VaultConfig = serde_json::from_str(
+            r#"{
+                "addr": "https://vault.example:8200",
+                "auth": {
+                    "method": "token",
+                    "secret_name": "VAULT_ROOT_TOKEN"
+                },
+                "allowed_paths": ["secret/data/omegon/*"]
+            }"#,
+        )
+        .unwrap();
+
+        match config.auth {
+            AuthConfig::Token { secret_name } => {
+                assert_eq!(secret_name.as_deref(), Some("VAULT_ROOT_TOKEN"));
+            }
+            _ => panic!("expected token auth config"),
+        }
+    }
+
+    #[tokio::test]
+    async fn authenticate_accepts_preloaded_token() {
+        let config = test_config("http://localhost:8200");
+        let mut client = VaultClient::new(config).unwrap();
+        client.set_token(SecretString::from("hvs.preloaded"));
+
+        client.authenticate().await.unwrap();
+        assert!(client.is_authenticated());
     }
 
     #[tokio::test]
@@ -898,7 +950,7 @@ mod tests {
 
         let config = VaultConfig {
             addr: server.url(),
-            auth: AuthConfig::Token,
+            auth: AuthConfig::Token { secret_name: None },
             allowed_paths: vec![
                 "secret/data/omegon/*".to_string(),
                 "secret/metadata/omegon/*".to_string(),
@@ -1049,7 +1101,7 @@ mod tests {
     fn test_reject_non_http_scheme() {
         let config = VaultConfig {
             addr: "file:///etc/passwd".to_string(),
-            auth: AuthConfig::Token,
+            auth: AuthConfig::Token { secret_name: None },
             allowed_paths: vec![],
             denied_paths: vec![],
             timeout_secs: 5,
@@ -1062,7 +1114,7 @@ mod tests {
         // ftp scheme
         let config2 = VaultConfig {
             addr: "ftp://evil.com/".to_string(),
-            auth: AuthConfig::Token,
+            auth: AuthConfig::Token { secret_name: None },
             allowed_paths: vec![],
             denied_paths: vec![],
             timeout_secs: 5,
@@ -1097,7 +1149,7 @@ mod tests {
         // This is the actual attack: path matches the glob but hits a different URL
         let config = VaultConfig {
             addr: "http://localhost:8200".to_string(),
-            auth: AuthConfig::Token,
+            auth: AuthConfig::Token { secret_name: None },
             allowed_paths: vec!["secret/data/*".to_string()],
             denied_paths: vec![],
             timeout_secs: 5,
@@ -1120,7 +1172,7 @@ mod tests {
     fn test_empty_allowlist_denies_all() {
         let config = VaultConfig {
             addr: "http://localhost:8200".to_string(),
-            auth: AuthConfig::Token,
+            auth: AuthConfig::Token { secret_name: None },
             allowed_paths: vec![], // Empty = DenyAll
             denied_paths: vec![],
             timeout_secs: 5,
@@ -1151,7 +1203,7 @@ mod tests {
 
         let config = VaultConfig {
             addr: server.url(),
-            auth: AuthConfig::Token,
+            auth: AuthConfig::Token { secret_name: None },
             allowed_paths: vec![], // DenyAll
             denied_paths: vec![],
             timeout_secs: 5,
@@ -1208,7 +1260,7 @@ mod tests {
     async fn test_deny_all_read_rejected() {
         let config = VaultConfig {
             addr: "http://localhost:8200".to_string(),
-            auth: AuthConfig::Token,
+            auth: AuthConfig::Token { secret_name: None },
             allowed_paths: vec![],
             denied_paths: vec![],
             timeout_secs: 5,

@@ -6,6 +6,7 @@
 //! omegon secret set GITHUB_TOKEN ghp_abc123
 //! echo "ghp_abc123" | omegon secret set GITHUB_TOKEN --stdin
 //! omegon secret set VOX_DISCORD_BOT_TOKEN --recipe "env:DISCORD_TOKEN"
+//! omegon secret set VAULT_TOKEN --recipe "keyring:VAULT_ROOT_TOKEN"
 //! ```
 //!
 //! ## List configured secrets

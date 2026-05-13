@@ -1123,6 +1123,72 @@ impl OmegonAcpAgent {
                 }
             }
 
+            "secrets/list" => {
+                if let Some(ref mgr) = *self.secrets.borrow() {
+                    let items: Vec<serde_json::Value> = mgr
+                        .list_recipes()
+                        .into_iter()
+                        .map(|(name, recipe)| serde_json::json!({ "name": name, "recipe": recipe }))
+                        .collect();
+                    Ok(serde_json::json!({ "items": items }))
+                } else {
+                    anyhow::bail!("secrets manager not available — agent still initializing")
+                }
+            }
+
+            "secrets/set_value" => {
+                let name = params["name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let value = params["value"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'value' field"))?;
+                if let Some(ref mgr) = *self.secrets.borrow() {
+                    mgr.set_keyring_secret(name, value)?;
+                    Ok(serde_json::json!({ "ok": true, "source": "keyring" }))
+                } else {
+                    anyhow::bail!("secrets manager not available — agent still initializing")
+                }
+            }
+
+            "secrets/set_recipe" => {
+                let name = params["name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                let recipe = params["recipe"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'recipe' field"))?;
+                if let Some(ref mgr) = *self.secrets.borrow() {
+                    mgr.set_recipe(name, recipe)?;
+                    Ok(serde_json::json!({ "ok": true, "source": "recipe" }))
+                } else {
+                    anyhow::bail!("secrets manager not available — agent still initializing")
+                }
+            }
+
+            "secrets/check" => {
+                let name = params["name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                if let Some(ref mgr) = *self.secrets.borrow() {
+                    Ok(serde_json::json!({ "name": name, "resolved": mgr.resolve(name).is_some() }))
+                } else {
+                    anyhow::bail!("secrets manager not available — agent still initializing")
+                }
+            }
+
+            "secrets/delete" => {
+                let name = params["name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
+                if let Some(ref mgr) = *self.secrets.borrow() {
+                    mgr.delete_recipe(name)?;
+                    Ok(serde_json::json!({ "ok": true }))
+                } else {
+                    anyhow::bail!("secrets manager not available — agent still initializing")
+                }
+            }
+
             "extensions/secret_delete" => {
                 let name = params["name"]
                     .as_str()
@@ -1997,7 +2063,7 @@ impl OmegonAcpAgent {
                 }
             }
             "/armory" => "Use the **armory/browse** RPC for structured upstream discovery across extensions, plugins, skills, and agents.\nParameters: kind, query.".into(),
-            "/help" => "Commands: /model /thinking /posture /skills /extension /armory /persona /catalog /secrets /status /login /help\n\nFull CRUD is available via RPC ext_methods (armory/*, skills/*, extensions/*, personas/*, catalog/*).".into(),
+            "/help" => "Commands: /model /thinking /posture /skills /extension /armory /persona /catalog /secrets /status /login /help\n\nFull CRUD is available via RPC ext_methods (armory/*, skills/*, extensions/*, personas/*, catalog/*, secrets/*).".into(),
             _ => format!("Unknown: {cmd}. Type /help"),
         }
     }

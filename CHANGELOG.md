@@ -16,6 +16,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- **Operator secret aliases for Vault** — Vault token auth can now load a token from an Omegon-managed secret via `vault.json` `auth.secret_name`, enabling flows like storing `VAULT_ROOT_TOKEN` in the OS keyring and using it without exporting it into every shell.
+- **Generic ACP secrets methods** — added `secrets/list`, `secrets/set_value`, `secrets/set_recipe`, `secrets/check`, and `secrets/delete` so operator-owned secrets are no longer forced through extension-scoped secret configuration.
+
+### Changed
+
+- **TUI custom secret entry** — `/secrets set NAME` now opens hidden input directly, and the custom selector path prompts for name-only entry before hidden value capture instead of encouraging visible `/secrets set NAME VALUE` input.
+- **Secret checks no longer print values** — `/secrets get NAME` now reports whether a secret resolves successfully without echoing the secret into the TUI or agent-visible transcript.
+
 ## [0.20.1] - 2026-05-13
 
 ### Fixed

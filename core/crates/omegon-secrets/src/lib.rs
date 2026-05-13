@@ -116,9 +116,30 @@ impl SecretsManager {
     pub async fn init_vault(&self, config_dir: &std::path::Path) -> anyhow::Result<()> {
         if let Some(config) = VaultConfig::load_config(config_dir)? {
             tracing::info!(addr = %config.addr, "initializing vault client");
+            let token_secret_name = match &config.auth {
+                AuthConfig::Token { secret_name } => secret_name.clone(),
+                _ => None,
+            };
 
             match VaultClient::new(config) {
                 Ok(mut client) => {
+                    if let Some(secret_name) = token_secret_name.as_deref() {
+                        match self.resolve(secret_name) {
+                            Some(token) => {
+                                client.set_token(SecretString::from(token));
+                                tracing::info!(
+                                    secret_name = secret_name,
+                                    "loaded vault token from Omegon secret"
+                                );
+                            }
+                            None => {
+                                tracing::warn!(
+                                    secret_name = secret_name,
+                                    "vault token secret could not be resolved"
+                                );
+                            }
+                        }
+                    }
                     // Attempt authentication — fail-closed: only store if auth succeeds
                     match client.authenticate().await {
                         Ok(()) => {
@@ -692,6 +713,32 @@ impl SecretsManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn init_vault_uses_configured_token_secret_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = SecretsManager::new(dir.path()).unwrap();
+        secrets
+            .set_keyring_secret("VAULT_ROOT_TOKEN", "hvs.test-root")
+            .unwrap();
+        std::fs::write(
+            dir.path().join("vault.json"),
+            r#"{
+                "addr": "http://127.0.0.1:8200",
+                "auth": {
+                    "method": "token",
+                    "secret_name": "VAULT_ROOT_TOKEN"
+                },
+                "allowed_paths": ["secret/data/omegon/*"]
+            }"#,
+        )
+        .unwrap();
+
+        secrets.init_vault(dir.path()).await.unwrap();
+        let client = secrets.vault_client().await;
+        assert!(client.is_some());
+        assert!(client.as_ref().unwrap().is_authenticated());
+    }
 
     #[test]
     fn hydrate_process_env_populates_well_known_recipe_secret() {

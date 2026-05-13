@@ -177,7 +177,9 @@ pub async fn resolve_secret_async(
     // 2. Fallback: check environment variable (only if no recipe matched)
     if let Ok(val) = std::env::var(name)
         && !val.is_empty()
-    {}
+    {
+        return Some(SecretString::from(val));
+    }
 
     None
 }
@@ -437,7 +439,7 @@ mod tests {
 
         let config = VaultConfig {
             addr: server.url(),
-            auth: AuthConfig::Token,
+            auth: AuthConfig::Token { secret_name: None },
             allowed_paths: vec!["secret/data/*".to_string()],
             denied_paths: vec![],
             timeout_secs: 5,
@@ -518,7 +520,7 @@ mod tests {
 
         let config = VaultConfig {
             addr: server.url(),
-            auth: AuthConfig::Token,
+            auth: AuthConfig::Token { secret_name: None },
             allowed_paths: vec!["secret/data/*".to_string()],
             denied_paths: vec![],
             timeout_secs: 5,
@@ -552,7 +554,7 @@ mod tests {
 
         let config = VaultConfig {
             addr: server.url(),
-            auth: AuthConfig::Token,
+            auth: AuthConfig::Token { secret_name: None },
             allowed_paths: vec!["secret/data/*".to_string()],
             denied_paths: vec![],
             timeout_secs: 5,
