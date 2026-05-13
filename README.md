@@ -106,6 +106,18 @@ omegon secret set ANTHROPIC_API_KEY --stdin
 om
 ```
 
+For operator-owned tokens, use the same keyring-backed secrets engine. Raw values can be entered through hidden TUI input:
+
+```text
+/secrets set VAULT_ROOT_TOKEN
+```
+
+Recipes can alias existing keyring entries without copying values:
+
+```sh
+omegon secret set VAULT_TOKEN --recipe keyring:VAULT_ROOT_TOKEN
+```
+
 ### Local path
 
 ```sh

@@ -84,7 +84,7 @@ Type these in the Zed chat input:
 | `/extension` | Manage extensions (list, install, enable, search) |
 | `/persona` | Manage personas (list, create, switch) |
 | `/catalog` | Browse agent catalog (list, install, remove) |
-| `/secrets` | View configured secrets |
+| `/secrets` | View configured secret names and recipes; values are never printed |
 | `/status` | Session status |
 | `/help` | List all commands |
 
@@ -96,6 +96,9 @@ Full CRUD is available via ACP ext_method RPC calls (prefix with `_`):
 - `extensions/list`, `extensions/get`, `extensions/install`, `extensions/remove`, `extensions/enable`, `extensions/disable`, `extensions/search`
 - `personas/list`, `personas/get`, `personas/create`, `personas/update`, `personas/delete`
 - `catalog/list`, `catalog/get`, `catalog/install`, `catalog/remove`
+- `secrets/list`, `secrets/set_value`, `secrets/set_recipe`, `secrets/check`, `secrets/delete`
+
+Secret values should be sent only through operator UI fields intended for secrets. `secrets/check` reports whether a value resolves; it does not return the value.
 
 ## MCP Server Forwarding
 

@@ -22,8 +22,10 @@ Omegon's secrets engine manages sensitive values across three layers: **storage*
 
 ```
 /secrets                    show inventory + usage
-/secrets set NAME VALUE     store a secret
-/secrets get NAME           retrieve a secret value
+/secrets set                open common-secret selector
+/secrets set NAME           enter hidden input for a raw value
+/secrets set NAME RECIPE    store a recipe such as env:, cmd:, keyring:, file:, vault:
+/secrets get NAME           check resolution; never prints the value
 /secrets delete NAME        remove a secret
 ```
 
@@ -57,13 +59,24 @@ The secret is fetched from HashiCorp Vault's KV v2 engine. Requires vault.json c
 /secrets set PROD_DB_PASS vault:secret/data/production/db#password
 ```
 
-**4. Direct value → OS keyring — last resort**
+**4. Keyring aliases (keyring:) — reuse operator-owned values without copying**
+
+The secret is read from another OS keyring entry managed by Omegon. Use this when an external integration expects a conventional secret name, but you want the durable stored item to keep an operator-owned name:
+
+```
+/secrets set VAULT_ROOT_TOKEN
+/secrets set VAULT_TOKEN keyring:VAULT_ROOT_TOKEN
+```
+
+The first command captures the token through hidden input. The second stores only an alias recipe.
+
+**5. Direct value → OS keyring — last resort**
 
 When no CLI, env var, or vault path exists, store the raw value. It goes into the OS keyring (macOS Keychain, Linux Secret Service, Windows Credential Manager), encrypted at rest:
 
 ```
-/secrets set OPENROUTER_KEY sk-or-v1-abc123
-/secrets set ANTHROPIC_API_KEY sk-ant-api03-xyz
+/secrets set OPENROUTER_KEY
+/secrets set ANTHROPIC_API_KEY
 ```
 
 This creates a `keyring:NAME` recipe pointing to the OS keyring entry.
@@ -99,14 +112,15 @@ Use `/login` for provider keys. Use `/secrets` for everything else.
 
 When `resolve("NAME")` is called:
 
-1. **Environment variable** — check `$NAME` directly
+1. **Session cache** — warmed/resolved values for deterministic runtime use
 2. **Recipe** — if a recipe exists for NAME, execute it:
    - `env:VAR` → read `$VAR`
    - `cmd:COMMAND` → run shell command, use stdout
    - `keyring:NAME` → read from OS keyring
    - `file:/path` → read first line of file
    - `vault:path#key` → fetch from Vault KV v2
-3. **Well-known env vars** — check hardcoded list (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, GITHUB_TOKEN, AWS_*, etc.)
+3. **Environment variable** — check `$NAME` directly when no recipe resolves
+4. **Well-known env vars** — hydrate provider/search credentials into the redaction set when present
 
 ### Well-known secret environment variables
 
@@ -173,17 +187,28 @@ Create `~/.omegon/vault.json`:
 ```json
 {
   "addr": "https://vault.example.com:8200",
-  "auth": {"method": "token"},
+  "auth": {
+    "method": "token",
+    "secret_name": "VAULT_ROOT_TOKEN"
+  },
   "allowed_paths": ["secret/data/myproject/*"],
   "denied_paths": ["secret/data/myproject/admin/*"]
 }
 ```
 
+`auth.secret_name` is optional. When present, Omegon resolves that name through the secrets engine and uses it as the in-memory Vault token. This supports operator flows such as:
+
+```
+omegon secret set VAULT_ROOT_TOKEN --stdin
+```
+
+without requiring `VAULT_TOKEN` to be exported into every shell.
+
 ### Authentication methods
 
 | Method | Config | Source |
 |---|---|---|
-| Token | `{"method": "token"}` | `$VAULT_TOKEN` or `~/.vault-token` |
+| Token | `{"method": "token", "secret_name": "VAULT_ROOT_TOKEN"}` | Omegon secret, then `$VAULT_TOKEN` or `~/.vault-token` |
 | AppRole | `{"method": "approle", "role_id": "...", "secret_id_key": "..."}` | Secret ID from OS keyring |
 | Kubernetes | `{"method": "kubernetes", "role": "..."}` | Service account JWT |
 

@@ -36,17 +36,21 @@ import { snippet } from "../../lib/snippets";
 
   <h2>Credential Storage</h2>
   <p>
-    API keys and OAuth tokens are stored in the system keychain:
+    API keys, operator tokens, and OAuth credentials are stored through the secrets engine:
   </p>
   <ul>
-    <li><strong>macOS</strong> — Keychain Services (via <code>security</code> CLI)</li>
+    <li><strong>macOS</strong> — Keychain Services</li>
     <li><strong>Linux</strong> — Secret Service API (GNOME Keyring, KWallet)</li>
-    <li><strong>Fallback</strong> — Encrypted file in <code>~/.config/omegon/</code></li>
+    <li><strong>Windows</strong> — Credential Manager</li>
+    <li><strong>Recipes</strong> — <code>env:</code>, <code>cmd:</code>, <code>keyring:</code>, <code>file:</code>, and <code>vault:</code> references stored without secret values</li>
   </ul>
   <p>
     OAuth tokens are refreshed automatically. JWT claims are extracted for account identity
     (used by the Codex client for account ID routing).
   </p>
+  <pre><code>{snippet("slash.secrets_set_hidden")}   # Hidden TUI input
+{snippet("slash.secrets_alias")}   # Alias one keyring secret to another
+{snippet("slash.secrets_check")}   # Check resolution without printing the value</code></pre>
 
   <h2>HashiCorp Vault Integration</h2>
   <pre><code>{snippet("slash.vault_status")}       # Check Vault connectivity
@@ -57,6 +61,20 @@ import { snippet } from "../../lib/snippets";
     For teams that manage secrets through Vault, Omegon can read credentials directly from
     Vault paths instead of environment variables or the local keychain.
   </p>
+  <p>
+    Token auth can also bootstrap from an Omegon-managed keyring secret by adding
+    <code>"secret_name": "VAULT_ROOT_TOKEN"</code> under <code>auth</code> in
+    <code>~/.omegon/vault.json</code>. The token is loaded into the Vault client in memory and is
+    not exported into the shell environment.
+  </p>
+  <pre><code>{`{
+  "addr": "https://vault.example.com:8200",
+  "auth": {
+    "method": "token",
+    "secret_name": "VAULT_ROOT_TOKEN"
+  },
+  "allowed_paths": ["secret/data/omegon/*"]
+}`}</code></pre>
 
   <h2>Process Safety</h2>
   <ul>

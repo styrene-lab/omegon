@@ -748,10 +748,10 @@ Status legend:
 | `auth.login` | `/login <provider>` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon auth login <provider>` | admin | no | tunneled | Local-only by policy |
 | `auth.logout` | `/logout <provider>` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon auth logout <provider>` | admin | no | tunneled | Local-only by policy; explicit provider now required |
 | `auth.unlock` | `/auth unlock` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon auth unlock` | admin | no | tunneled | Sensitive backend action |
-| `secrets.view` | `/secrets`, `/secrets list` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | edit | no | tunneled | Explicitly not remote-safe today |
-| `secrets.set` | `/secrets set ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | edit | no | tunneled | Local-only by policy |
-| `secrets.get` | `/secrets get ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | edit | no | tunneled | Local-only by policy |
-| `secrets.delete` | `/secrets delete ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | — | edit | no | tunneled | Local-only by policy |
+| `secrets.view` | `/secrets`, `/secrets list` | `secrets/list` | tunneled via `slash_command` | — | edit | no | first-class ACP | Lists names and recipes only |
+| `secrets.set` | `/secrets set ...` | `secrets/set_value`, `secrets/set_recipe` | tunneled via `slash_command` | — | edit | no | first-class ACP | Raw values must come from operator secret UI fields |
+| `secrets.get` | `/secrets get ...` | `secrets/check` | tunneled via `slash_command` | — | edit | no | first-class ACP | Resolution check only; never returns secret values |
+| `secrets.delete` | `/secrets delete ...` | `secrets/delete` | tunneled via `slash_command` | — | edit | no | first-class ACP | Removes recipe and best-effort keyring entry |
 | `plugin.view` | `/plugin`, `/plugin list` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon plugin list` | read | yes | tunneled | Read path exists but not first-class remotely |
 | `plugin.install` | `/plugin install ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon plugin install ...` | edit | no | tunneled | Local-only by policy |
 | `plugin.remove` | `/plugin remove ...` | tunneled via `run_slash_command` | tunneled via `slash_command` | `omegon plugin remove ...` | edit | no | tunneled | Local-only by policy |
@@ -852,10 +852,10 @@ proposed canonical actions they map to.
 
 | Canonical action | Current slash binding | CLI | IPC | Web/daemon | Starter role | Notes |
 |---|---|---:|---:|---:|---|---|
-| `secrets.view` | `/secrets`, `/secrets list` | — | via slash path today | via slash path today | edit | Operational editing surface, not pure read |
-| `secrets.set` | `/secrets set …` | — | via slash path today | via slash path today | edit | Explicitly requested to be edit-capable |
-| `secrets.get` | `/secrets get …` | — | via slash path today | via slash path today | edit | Operational secret use |
-| `secrets.delete` | `/secrets delete …` | — | via slash path today | via slash path today | edit | Operational secret mutation |
+| `secrets.view` | `/secrets`, `/secrets list` | `omegon secret list` | `secrets/list` | via slash path today | edit | Lists names and recipes only |
+| `secrets.set` | `/secrets set …` | `omegon secret set` | `secrets/set_value`, `secrets/set_recipe` | via slash path today | edit | Raw values require operator secret input |
+| `secrets.get` | `/secrets get …` | — | `secrets/check` | via slash path today | edit | Resolution check only; values are never returned |
+| `secrets.delete` | `/secrets delete …` | `omegon secret delete` | `secrets/delete` | via slash path today | edit | Operational secret mutation |
 
 ### Skills / plugins / memory / status (additional common surfaces)
 

@@ -1,7 +1,7 @@
 +++
 id = "9f9e782e-06e7-403c-9f55-1933a9973d50"
 kind = "document"
-tags = []
+tags = ["secrets", "security", "vault", "keyring", "acp"]
 aliases = []
 imported_reference = false
 
@@ -11,56 +11,100 @@ visibility = "private"
 
 [data]
 design_docs = []
-last_updated = "2026-04-12"
+last_updated = "2026-05-13"
 openspec_baselines = []
 subsystem = "secrets"
 +++
 
 # Secrets
 
-> Secure API key and credential management with selector-backed hidden input, 1Password integration, and shell command evaluation.
+Omegon stores operator credentials through recipes and the OS keyring so secret values do not need to live in prompts, command transcripts, project files, or shell profiles.
 
-## What It Does
+## Operator Flows
 
-The secrets extension manages provider API keys and credentials needed by Omegon's model routing layer. It supports three input modes:
+### Hidden TUI Entry
 
-1. **Selector + hidden input**: Run `/secrets configure` or `/secrets set`, pick a known secret, then paste into hidden input mode so the value is never echoed in the transcript
-2. **1Password references**: Store `op://vault/item/field` references that resolve at runtime via 1Password CLI
-3. **Shell command evaluation**: Store `$(command)` patterns that evaluate at runtime (e.g., `$(aws secretsmanager get-secret-value ...)`)
+Use name-only `/secrets set` for raw values:
 
-Secrets are stored in `~/.config/omegon/auth.json` and the configured Omegon secrets backend, with mode-appropriate handling. The extension probes for clipboard commands (`pbpaste`, `xclip`, `xsel`, `wl-paste`) at runtime.
+```text
+/secrets set VAULT_ROOT_TOKEN
+```
 
-## Slash Command UX
+Omegon switches the editor into hidden input mode, stores the value in the OS keyring, and writes a `keyring:VAULT_ROOT_TOKEN` recipe. The typed value is not echoed in the conversation.
 
-- `/secrets` — inspect configured secrets
-- `/secrets set` — open the selector of common secret names
-- `/secrets configure` — alias for the same selector-backed flow
-- `/vault` or `/vault status` — inspect Vault connectivity
-- `/vault configure` — open an interactive selector that primes either `/vault configure env` or `/vault configure file`
+`/secrets set` or `/secrets configure` with no name opens the selector for common provider and infrastructure secrets. Selecting a direct-value secret also uses hidden input.
 
-Direct-value secrets switch the editor into hidden input mode so pasted credentials do not appear on screen. Dynamic recipes such as `GITHUB_TOKEN -> cmd:gh auth token` are applied immediately after selection.
+### Recipes
 
-## Key Files
+Recipes describe where a secret comes from. They are stored in `~/.omegon/secrets.json`; values are not.
 
-| File | Role |
-|------|------|
-| `extensions/00-secrets/index.ts` | Extension entry — `/secrets` command, `promptForSecretValue()`, `detectClipboardCommand()`, `readClipboard()` |
+```text
+/secrets set GITHUB_TOKEN cmd:gh auth token
+/secrets set AWS_SECRET_ACCESS_KEY env:AWS_SECRET_ACCESS_KEY
+/secrets set PROD_DB_PASSWORD vault:secret/data/prod/db#password
+/secrets set VAULT_TOKEN keyring:VAULT_ROOT_TOKEN
+```
 
-## Design Decisions
+Use `keyring:OTHER_NAME` to create aliases without copying values. This is useful when an external tool expects a conventional name such as `VAULT_TOKEN`, but the operator wants to store the durable credential as `VAULT_ROOT_TOKEN`.
 
-- **Hidden editor input over transcript-visible entry**: the TUI now routes direct secret entry through hidden editor state so paste works without exposing the value in the conversation log.
-- **Selector-backed common secret names**: `/secrets set` and `/secrets configure` both open the known-secret selector to reduce typing and avoid malformed command entry.
-- **Interactive vault setup**: `/vault configure` primes specific follow-up commands instead of dumping instructions only.
-- **Fallback to direct input with warning**: If no clipboard command is available, falls back to `ctx.ui.input()` with a security warning.
-- **Non-secret inputs use standard input**: 1Password references and shell commands (not actual secrets) still use `ctx.ui.input()`.
+### CLI
 
-## Constraints & Known Limitations
+The CLI supports the same storage model:
 
-- Clipboard-based input requires `pbpaste` (macOS), `xclip`/`xsel` (Linux X11), or `wl-paste` (Wayland)
-- `ExtensionUIDialogOptions` supports only `signal` and `timeout` — no `secret`/`password` field
-- Secrets state is Omegon-owned under `~/.config/omegon/` and the configured backend, not per-project
+```sh
+omegon secret set VAULT_ROOT_TOKEN --stdin
+omegon secret set VAULT_TOKEN --recipe keyring:VAULT_ROOT_TOKEN
+omegon secret list
+omegon secret delete VAULT_ROOT_TOKEN
+```
+
+Prefer `--stdin` for raw values so credentials do not enter shell history or process listings.
+
+## Vault Token Bootstrap
+
+Vault token auth can load a token from an Omegon-managed secret. Create `~/.omegon/vault.json`:
+
+```json
+{
+  "addr": "https://vault.example.com:8200",
+  "auth": {
+    "method": "token",
+    "secret_name": "VAULT_ROOT_TOKEN"
+  },
+  "allowed_paths": ["secret/data/omegon/*"],
+  "denied_paths": []
+}
+```
+
+At startup, Omegon resolves `VAULT_ROOT_TOKEN` through the secrets engine and injects it into the Vault client only in memory. It is not exported into the process environment.
+
+`VAULT_TOKEN` and `~/.vault-token` still work as standard Vault fallbacks when `auth.secret_name` is not configured.
+
+## ACP Methods
+
+ACP clients can manage operator-owned secrets without going through extension manifests:
+
+| Method | Parameters | Returns |
+|---|---|---|
+| `secrets/list` | `{}` | configured secret names and recipes |
+| `secrets/set_value` | `{ "name": "...", "value": "..." }` | stores value in keyring |
+| `secrets/set_recipe` | `{ "name": "...", "recipe": "keyring:..." }` | stores recipe only |
+| `secrets/check` | `{ "name": "..." }` | whether the secret resolves; never the value |
+| `secrets/delete` | `{ "name": "..." }` | removes recipe and best-effort keyring entry |
+
+Extension-specific `extensions/secret_set` remains available for extension onboarding, but generic operator secrets should use `secrets/*`.
+
+## Safety Invariants
+
+- `/secrets get NAME` checks whether a secret resolves. It does not print the value.
+- Raw TUI secret entry uses hidden input.
+- Recipes contain references only, not values.
+- Resolved values are inserted into the redaction set immediately.
+- Vault paths are still constrained by `allowed_paths` and `denied_paths`.
+- Agent-facing secret tools should not be used as the primary path for operator-entered raw values.
 
 ## Related Subsystems
 
+- [Secrets Engine](secrets-engine.md) — implementation details and resolution order
+- [Vault Secret Backend](vault-secret-backend.md) — Vault policy model and client behavior
 - [Operator Profile](operator-profile.md) — provider authentication status
-- [Model Routing](model-routing.md) — consumes API keys for provider access

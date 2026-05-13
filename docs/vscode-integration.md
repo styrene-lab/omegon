@@ -65,6 +65,18 @@ Once connected (status bar shows "ACP: Omegon Agent"):
 - **Attach files** via `Cmd+Shift+P` → "ACP: Attach File to Prompt"
 - **View protocol traffic** via `Cmd+Shift+P` → "ACP: Show Protocol Traffic"
 
+## Secrets
+
+Omegon exposes generic operator secret methods over ACP:
+
+- `secrets/list`
+- `secrets/set_value`
+- `secrets/set_recipe`
+- `secrets/check`
+- `secrets/delete`
+
+Use `secrets/set_value` only from UI fields intended for secret/password input. `secrets/check` reports whether a value resolves and never returns the value. Extension-scoped secret setup remains available through extension methods, but operator-owned values such as `VAULT_ROOT_TOKEN` should use `secrets/*`.
+
 ## Extension Settings
 
 | Setting | Default | Description |

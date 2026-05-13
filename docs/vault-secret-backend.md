@@ -53,8 +53,8 @@ Elevate HashiCorp Vault from an incidental external tool to a first-class secret
 **Layer 1: Vault client** (`omegon-secrets/src/vault.rs`)
 - HTTP client for Vault KV v2 API: read, write, list, health, seal-status
 - Auth: token-based initially (root token or renewable service token)
-- Address resolution: `VAULT_ADDR` env → recipe → `~/.omegon/vault.json` config
-- Token resolution: `VAULT_TOKEN` env → `~/.vault-token` file → keyring → prompt
+- Address resolution: `~/.omegon/vault.json` config → `VAULT_ADDR` env with deny-all path policy
+- Token resolution: `auth.secret_name` via Omegon secrets → `VAULT_TOKEN` env → `~/.vault-token` file
 - Connection pooling via reqwest::Client (shared with providers)
 
 **Layer 2: Recipe kind** (`resolve.rs`)
@@ -188,7 +188,7 @@ This is defense-in-depth: Vault enforces server-side via policy, omegon enforces
 ### Decision: Support token, AppRole, and Kubernetes SA auth — fallback chain per deployment mode
 
 **Status:** decided
-**Rationale:** Three deployment modes need three auth methods. In-cluster: K8s SA auth (zero-config, pod identity). Laptop: token or OIDC (operator-interactive). Headless: AppRole (role_id in config + secret_id in keyring, auto-renewable). The client negotiates: if K8s SA JWT exists → K8s auth. Else if AppRole config exists → AppRole. Else if VAULT_TOKEN or ~/.vault-token → token. Else prompt operator. All methods produce a scoped Vault token that the recipe resolver uses.
+**Rationale:** Three deployment modes need three auth methods. In-cluster: K8s SA auth (zero-config, pod identity). Laptop: token or OIDC (operator-interactive). Headless: AppRole (role_id in config + secret_id in keyring, auto-renewable). Token auth can now point at an Omegon-managed keyring secret with `auth.secret_name`, then falls back to `VAULT_TOKEN` or `~/.vault-token`. All methods produce a scoped Vault token that the recipe resolver uses.
 
 ### Decision: Cleave children receive scoped child tokens minted by the parent
 
@@ -200,10 +200,10 @@ This is defense-in-depth: Vault enforces server-side via policy, omegon enforces
 **Status:** decided
 **Rationale:** The HTTP client, auth negotiation, token lifecycle, and path allowlist are secret-resolution concerns — they belong in omegon-secrets alongside keyring and recipes. The TUI unseal prompt and /vault command are UI concerns that live in the binary crate and call into omegon-secrets methods. No new crate needed — the 8-endpoint Vault API doesn't justify the workspace overhead. The boundary is: omegon-secrets exports VaultClient with unseal(), status(), read(), write(). The TUI calls these and handles masked input.
 
-### Decision: Auto-detect Vault with explicit override — VAULT_ADDR → vault.json → skip
+### Decision: Explicit Vault config first, VAULT_ADDR only as fail-closed fallback
 
 **Status:** decided
-**Rationale:** Check VAULT_ADDR env first (standard Vault convention, works everywhere). Then check ~/.omegon/vault.json for persisted config. Don't probe localhost:8200 blindly — false positives on machines running Vault for other purposes. If neither is set, Vault features are disabled silently. The operator enables Vault explicitly via /vault configure or by setting VAULT_ADDR.
+**Rationale:** `~/.omegon/vault.json` is authoritative because it carries both auth method and client-side path policy. `VAULT_ADDR` alone is accepted for discoverability, but starts with an empty allowlist (`DenyAll`) and tells the operator to create `vault.json`. Don't probe localhost:8200 blindly — false positives on machines running Vault for other purposes. If neither is set, Vault features are disabled silently.
 
 ### Decision: Non-blocking degradation when sealed — notify and offer /vault unseal, don't gate startup
 
@@ -235,7 +235,7 @@ This is defense-in-depth: Vault enforces server-side via policy, omegon enforces
 - Vault client must degrade gracefully — unreachable Vault returns None from recipe resolution, does not crash
 - Unseal key input must be masked in the TUI — not echoed, not logged, not stored in session history
 - Resolved Vault secrets must flow through the existing redaction pipeline — no special cases
-- Vault configuration (address, token) stored in ~/.omegon/vault.json — never in the recipe file or session state
+- Vault configuration stores address, auth method, token secret name, and path policy in `~/.omegon/vault.json`; raw token values remain in the OS keyring, `VAULT_TOKEN`, or `~/.vault-token`
 - Vault policy is the primary enforcement — omegon MUST NOT bypass or weaken server-side Vault ACLs
 - Client-side allowlist in vault.json is defense-in-depth — agent paths checked against allowlist before any Vault API call
 - Cleave child tokens must have narrower policy, shorter TTL, and optional use-limit compared to parent token

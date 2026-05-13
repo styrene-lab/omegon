@@ -47,8 +47,21 @@ import Docs from "../../layouts/Docs.astro";
       <tr><td><code>/login [provider]</code></td><td>Log in to a provider such as <code>anthropic</code>, <code>openai-codex</code>, <code>openai</code>, <code>openrouter</code>, or <code>ollama-cloud</code>.</td></tr>
       <tr><td><code>/logout [provider]</code></td><td>Log out of a provider.</td></tr>
       <tr><td><code>/auth [action]</code></td><td>Authentication management: <code>status</code>, <code>unlock</code>.</td></tr>
-      <tr><td><code>/secrets [action]</code></td><td>Manage stored secrets: <code>list</code>, <code>set</code>, <code>get</code>, <code>delete</code>. Use this for API-key-backed providers such as OpenAI API, OpenRouter, and Ollama Cloud.</td></tr>
+      <tr><td><code>/secrets [action]</code></td><td>Manage stored secrets: <code>list</code>, <code>set</code>, <code>get</code>, <code>delete</code>. <code>/secrets set NAME</code> opens hidden input for raw values; <code>/secrets get NAME</code> checks resolution without printing the value.</td></tr>
       <tr><td><code>/vault [action]</code></td><td>HashiCorp Vault integration: <code>status</code>, <code>unseal</code>, <code>login</code>, <code>configure</code>, <code>init-policy</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Secrets</h3>
+  <table>
+    <thead><tr><th>Command</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>/secrets</code></td><td>Show configured secret names and recipes. Values are never shown.</td></tr>
+      <tr><td><code>/secrets set</code></td><td>Open the common-secret selector.</td></tr>
+      <tr><td><code>/secrets set VAULT_ROOT_TOKEN</code></td><td>Capture an arbitrary operator secret through hidden input and store it in the OS keyring.</td></tr>
+      <tr><td><code>/secrets set VAULT_TOKEN keyring:VAULT_ROOT_TOKEN</code></td><td>Create a keyring alias recipe without copying or exposing the value.</td></tr>
+      <tr><td><code>/secrets get VAULT_ROOT_TOKEN</code></td><td>Check that a secret resolves. This does not print the value.</td></tr>
+      <tr><td><code>/secrets delete VAULT_ROOT_TOKEN</code></td><td>Remove the recipe and best-effort keyring entry.</td></tr>
     </tbody>
   </table>
 

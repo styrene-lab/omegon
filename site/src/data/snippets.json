@@ -132,7 +132,7 @@
     "desc": "Install latest nightly"
   },
   "install.install_version": {
-    "cmd": "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --version=v0.20.0",
+    "cmd": "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --version=v0.20.1",
     "desc": "Install a specific version"
   },
   "install.install_ci": {
@@ -308,11 +308,23 @@
     "desc": "Log in to provider in-TUI"
   },
   "slash.secrets_set": {
-    "cmd": "/secrets set OLLAMA_API_KEY ...",
-    "desc": "Set a secret in-TUI"
+    "cmd": "/secrets set OLLAMA_API_KEY",
+    "desc": "Set a secret through hidden TUI input"
+  },
+  "slash.secrets_set_hidden": {
+    "cmd": "/secrets set VAULT_ROOT_TOKEN",
+    "desc": "Capture a custom secret through hidden TUI input"
+  },
+  "slash.secrets_alias": {
+    "cmd": "/secrets set VAULT_TOKEN keyring:VAULT_ROOT_TOKEN",
+    "desc": "Alias one keyring-managed secret to another name"
+  },
+  "slash.secrets_check": {
+    "cmd": "/secrets get VAULT_ROOT_TOKEN",
+    "desc": "Check that a secret resolves without printing it"
   },
   "verify.cosign_verify": {
-    "cmd": "cosign verify-blob omegon-0.20.0-aarch64-apple-darwin.tar.gz \\\n  --signature omegon-0.20.0-aarch64-apple-darwin.tar.gz.sig \\\n  --certificate omegon-0.20.0-aarch64-apple-darwin.tar.gz.pem \\\n  --certificate-identity-regexp '.*' \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com",
+    "cmd": "cosign verify-blob omegon-0.20.1-aarch64-apple-darwin.tar.gz \\\n  --signature omegon-0.20.1-aarch64-apple-darwin.tar.gz.sig \\\n  --certificate omegon-0.20.1-aarch64-apple-darwin.tar.gz.pem \\\n  --certificate-identity-regexp '.*' \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com",
     "desc": "Verify cosign signature (keyless) — replace version with actual"
   },
   "verify.gh_attestation": {
