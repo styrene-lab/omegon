@@ -71,7 +71,10 @@ pub fn materialize_container(
     // Filtered egress — inject iptables rules via entrypoint wrapper.
     // Requires NET_ADMIN capability inside the container (scoped to the
     // container's own network namespace, not the host).
-    if let super::profile::NexNetworkPolicy::Egress { filter: Some(filter) } = network_policy {
+    if let super::profile::NexNetworkPolicy::Egress {
+        filter: Some(filter),
+    } = network_policy
+    {
         cmd.arg("--cap-add=NET_ADMIN");
         // The iptables init script is passed via OMEGON_EGRESS_FILTER env var
         // and executed by the container entrypoint before starting the agent.
@@ -94,8 +97,8 @@ pub fn materialize_container(
 
     // Additional mount paths — canonicalize each
     for extra_path in &profile.capabilities.mount_paths {
-        let canonical = std::fs::canonicalize(extra_path)
-            .unwrap_or_else(|_| extra_path.to_path_buf());
+        let canonical =
+            std::fs::canonicalize(extra_path).unwrap_or_else(|_| extra_path.to_path_buf());
         let path_str = canonical.display();
         if profile.capabilities.filesystem_write {
             cmd.arg(format!("-v={}:{}:rw", path_str, path_str));
@@ -105,8 +108,8 @@ pub fn materialize_container(
     }
 
     // Prompt file — if outside the cwd mount, mount it separately
-    let canonical_prompt = std::fs::canonicalize(prompt_file)
-        .unwrap_or_else(|_| prompt_file.to_path_buf());
+    let canonical_prompt =
+        std::fs::canonicalize(prompt_file).unwrap_or_else(|_| prompt_file.to_path_buf());
     if !canonical_prompt.starts_with(&canonical_cwd) {
         cmd.arg(format!("-v={}:/prompt:ro", canonical_prompt.display()));
     }
@@ -205,7 +208,10 @@ filesystem_write = true
             &[("ANTHROPIC_API_KEY".into(), "sk-test".into())],
         );
 
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"--rm".to_string()));
         assert!(args.contains(&"--memory=1024m".to_string()));
         assert!(args.contains(&"--network=none".to_string()));
@@ -227,10 +233,17 @@ policy = "egress"
 "#;
         let profile = NexManifest::from_toml(toml).unwrap().into_profile();
         let cmd = materialize_container(
-            &profile, "podman", Path::new("/tmp"), Path::new("/tmp/p.md"),
-            &[], &[],
+            &profile,
+            "podman",
+            Path::new("/tmp"),
+            Path::new("/tmp/p.md"),
+            &[],
+            &[],
         );
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"--network=bridge".to_string()));
         // Unfiltered egress — no NET_ADMIN cap needed
         assert!(!args.iter().any(|a| a.contains("NET_ADMIN")));
@@ -252,10 +265,17 @@ allow_ports = [443]
 "#;
         let profile = NexManifest::from_toml(toml).unwrap().into_profile();
         let cmd = materialize_container(
-            &profile, "podman", Path::new("/tmp"), Path::new("/tmp/p.md"),
-            &[], &[],
+            &profile,
+            "podman",
+            Path::new("/tmp"),
+            Path::new("/tmp/p.md"),
+            &[],
+            &[],
         );
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"--network=bridge".to_string()));
         assert!(args.contains(&"--cap-add=NET_ADMIN".to_string()));
         assert!(args.iter().any(|a| a.starts_with("OMEGON_EGRESS_FILTER=")));
@@ -282,10 +302,17 @@ protocol = "tcp"
 "#;
         let profile = NexManifest::from_toml(toml).unwrap().into_profile();
         let cmd = materialize_container(
-            &profile, "podman", Path::new("/tmp"), Path::new("/tmp/p.md"),
-            &[], &[],
+            &profile,
+            "podman",
+            Path::new("/tmp"),
+            Path::new("/tmp/p.md"),
+            &[],
+            &[],
         );
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"--network=bridge".to_string()));
         assert!(args.contains(&"--publish=3000:3000/tcp".to_string()));
         assert!(args.contains(&"--publish=8080:80/tcp".to_string()));
@@ -303,10 +330,17 @@ policy = "isolated"
 "#;
         let profile = NexManifest::from_toml(toml).unwrap().into_profile();
         let cmd = materialize_container(
-            &profile, "podman", Path::new("/tmp"), Path::new("/tmp/p.md"),
-            &[], &[],
+            &profile,
+            "podman",
+            Path::new("/tmp"),
+            Path::new("/tmp/p.md"),
+            &[],
+            &[],
         );
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"--network=none".to_string()));
     }
 
@@ -322,10 +356,17 @@ policy = "host"
 "#;
         let profile = NexManifest::from_toml(toml).unwrap().into_profile();
         let cmd = materialize_container(
-            &profile, "podman", Path::new("/tmp"), Path::new("/tmp/p.md"),
-            &[], &[],
+            &profile,
+            "podman",
+            Path::new("/tmp"),
+            Path::new("/tmp/p.md"),
+            &[],
+            &[],
         );
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"--network=host".to_string()));
     }
 
@@ -338,7 +379,10 @@ base = "coding"
 "#;
         let profile = NexManifest::from_toml(toml).unwrap().into_profile();
         let cmd = materialize_container(
-            &profile, "podman", Path::new("/tmp"), Path::new("/tmp/p.md"),
+            &profile,
+            "podman",
+            Path::new("/tmp"),
+            Path::new("/tmp/p.md"),
             &[],
             &[
                 ("GOOD_KEY".into(), "val".into()),
@@ -346,7 +390,10 @@ base = "coding"
                 ("BAD KEY".into(), "val".into()),
             ],
         );
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&"GOOD_KEY=val".to_string()));
         assert!(!args.iter().any(|a| a.contains("BAD")));
     }

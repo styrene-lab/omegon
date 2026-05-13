@@ -33,11 +33,12 @@ pub fn spawn_containerized_child_agent(
 
     // Resolve prompt file path relative to /work inside the container
     let canonical_cwd = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
-    let canonical_prompt = std::fs::canonicalize(prompt_file)
-        .unwrap_or_else(|_| prompt_file.to_path_buf());
+    let canonical_prompt =
+        std::fs::canonicalize(prompt_file).unwrap_or_else(|_| prompt_file.to_path_buf());
 
     let prompt_path_in_container = if canonical_prompt.starts_with(&canonical_cwd) {
-        let relative = canonical_prompt.strip_prefix(&canonical_cwd)
+        let relative = canonical_prompt
+            .strip_prefix(&canonical_cwd)
             .unwrap_or(canonical_prompt.as_ref());
         format!("/work/{}", relative.display())
     } else {
@@ -99,12 +100,13 @@ pub fn spawn_containerized_child_agent(
     }
 
     if !config.runtime.skills.is_empty() {
-        env.push(("OMEGON_CHILD_SKILLS".into(), config.runtime.skills.join(",")));
+        env.push((
+            "OMEGON_CHILD_SKILLS".into(),
+            config.runtime.skills.join(","),
+        ));
     }
 
-    let std_cmd = materialize_container(
-        profile, &runtime, cwd, prompt_file, &agent_args, &env,
-    );
+    let std_cmd = materialize_container(profile, &runtime, cwd, prompt_file, &agent_args, &env);
 
     // Convert to tokio async command
     let mut cmd = tokio::process::Command::from(std_cmd);

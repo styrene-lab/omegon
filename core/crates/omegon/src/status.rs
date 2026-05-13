@@ -596,10 +596,13 @@ impl HarnessStatus {
 
 /// Truncate a name to fit in the footer, adding "…" if needed.
 fn truncate_name(name: &str, max: usize) -> String {
-    if name.len() <= max {
+    if name.chars().count() <= max {
         name.to_string()
     } else {
-        format!("{}…", &name[..max - 1])
+        format!(
+            "{}…",
+            name.chars().take(max.saturating_sub(1)).collect::<String>()
+        )
     }
 }
 
@@ -851,6 +854,14 @@ mod tests {
         let footer = status.footer_summary();
         assert!(footer.contains("Squad"));
         assert!(footer.contains("Medium"));
+    }
+
+    #[test]
+    fn truncate_name_handles_emoji_boundary() {
+        let name = format!("{}✅tail", "x".repeat(9));
+        let truncated = truncate_name(&name, 10);
+        assert_eq!(truncated, format!("{}…", "x".repeat(9)));
+        assert!(truncated.is_char_boundary(truncated.len()));
     }
 
     #[test]

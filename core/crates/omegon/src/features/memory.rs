@@ -200,7 +200,8 @@ async fn extract_and_store_facts(
          respond with exactly: NONE\n\n{summary}"
     );
 
-    let result = crate::providers::quick_completion(model, &prompt).await
+    let result = crate::providers::quick_completion(model, &prompt)
+        .await
         .map_err(|e| anyhow::anyhow!("extraction LLM call failed: {e}"))?;
 
     let facts = parse_extracted_facts(&result.text);
@@ -210,19 +211,26 @@ async fn extract_and_store_facts(
 
     let mut stored = 0;
     for fact_text in &facts {
-        let store_result = backend.store_fact(StoreFact {
-            mind: mind.to_string(),
-            content: fact_text.to_string(),
-            section: Section::Architecture,
-            source: Some("session-extraction".into()),
-            decay_profile: DecayProfileName::Standard,
-        }).await;
+        let store_result = backend
+            .store_fact(StoreFact {
+                mind: mind.to_string(),
+                content: fact_text.to_string(),
+                section: Section::Architecture,
+                source: Some("session-extraction".into()),
+                decay_profile: DecayProfileName::Standard,
+            })
+            .await;
 
         match store_result {
             Ok(result) => {
                 if matches!(result.action, StoreAction::Stored) {
                     if let Some(svc) = embed_svc {
-                        spawn_auto_embed(svc, backend, result.fact.id.clone(), fact_text.to_string());
+                        spawn_auto_embed(
+                            svc,
+                            backend,
+                            result.fact.id.clone(),
+                            fact_text.to_string(),
+                        );
                     }
                     stored += 1;
                 }

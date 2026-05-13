@@ -223,13 +223,12 @@ fn project_web_instance(
     instance.control_plane.ws_url = Some(startup.ws_url.clone());
     instance.control_plane.auth_mode = Some(startup.auth_mode.clone());
     instance.control_plane.auth_source = Some(startup.auth_source.clone());
-    let transport_security = if startup.http_base.starts_with("https://")
-        && startup.ws_url.starts_with("wss://")
-    {
-        OmegonTransportSecurity::Secure
-    } else {
-        OmegonTransportSecurity::InsecureBootstrap
-    };
+    let transport_security =
+        if startup.http_base.starts_with("https://") && startup.ws_url.starts_with("wss://") {
+            OmegonTransportSecurity::Secure
+        } else {
+            OmegonTransportSecurity::InsecureBootstrap
+        };
     instance.control_plane.http_transport_security = Some(transport_security.clone());
     instance.control_plane.ws_transport_security = Some(transport_security);
     instance

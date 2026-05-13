@@ -15,8 +15,7 @@ use std::path::{Path, PathBuf};
 use crate::agent_manifest::{self, ResolvedManifest};
 
 /// Base URL for the upstream armory catalog.
-const ARMORY_BASE: &str =
-    "https://raw.githubusercontent.com/styrene-lab/omegon-armory/main";
+const ARMORY_BASE: &str = "https://raw.githubusercontent.com/styrene-lab/omegon-armory/main";
 
 /// Parsed entry from `catalog-registry.toml`.
 /// Only `files` is consumed; remaining fields are defined in the registry for
@@ -42,28 +41,38 @@ const BUNDLED: &[BundledAgent] = &[
     BundledAgent {
         id: "styrene.bd-agent",
         agent_toml: include_str!("../../../../catalog/styrene.bd-agent/agent.toml"),
-        agent_pkl: Some(include_str!("../../../../catalog/styrene.bd-agent/agent.pkl")),
+        agent_pkl: Some(include_str!(
+            "../../../../catalog/styrene.bd-agent/agent.pkl"
+        )),
         persona_md: include_str!("../../../../catalog/styrene.bd-agent/PERSONA.md"),
-        mind_facts: Some(include_str!("../../../../catalog/styrene.bd-agent/mind/facts.jsonl")),
+        mind_facts: Some(include_str!(
+            "../../../../catalog/styrene.bd-agent/mind/facts.jsonl"
+        )),
     },
     BundledAgent {
         id: "styrene.coding-agent",
         agent_toml: include_str!("../../../../catalog/styrene.coding-agent/agent.toml"),
         agent_pkl: None,
         persona_md: include_str!("../../../../catalog/styrene.coding-agent/PERSONA.md"),
-        mind_facts: Some(include_str!("../../../../catalog/styrene.coding-agent/mind/facts.jsonl")),
+        mind_facts: Some(include_str!(
+            "../../../../catalog/styrene.coding-agent/mind/facts.jsonl"
+        )),
     },
     BundledAgent {
         id: "styrene.community-agent",
         agent_toml: include_str!("../../../../catalog/styrene.community-agent/agent.toml"),
         agent_pkl: None,
         persona_md: include_str!("../../../../catalog/styrene.community-agent/PERSONA.md"),
-        mind_facts: Some(include_str!("../../../../catalog/styrene.community-agent/mind/facts.jsonl")),
+        mind_facts: Some(include_str!(
+            "../../../../catalog/styrene.community-agent/mind/facts.jsonl"
+        )),
     },
     BundledAgent {
         id: "styrene.discord-agent",
         agent_toml: include_str!("../../../../catalog/styrene.discord-agent/agent.toml"),
-        agent_pkl: Some(include_str!("../../../../catalog/styrene.discord-agent/agent.pkl")),
+        agent_pkl: Some(include_str!(
+            "../../../../catalog/styrene.discord-agent/agent.pkl"
+        )),
         persona_md: include_str!("../../../../catalog/styrene.discord-agent/PERSONA.md"),
         mind_facts: None,
     },
@@ -72,12 +81,16 @@ const BUNDLED: &[BundledAgent] = &[
         agent_toml: include_str!("../../../../catalog/styrene.infra-engineer/agent.toml"),
         agent_pkl: None,
         persona_md: include_str!("../../../../catalog/styrene.infra-engineer/PERSONA.md"),
-        mind_facts: Some(include_str!("../../../../catalog/styrene.infra-engineer/mind/facts.jsonl")),
+        mind_facts: Some(include_str!(
+            "../../../../catalog/styrene.infra-engineer/mind/facts.jsonl"
+        )),
     },
     BundledAgent {
         id: "styrene.slack-agent",
         agent_toml: include_str!("../../../../catalog/styrene.slack-agent/agent.toml"),
-        agent_pkl: Some(include_str!("../../../../catalog/styrene.slack-agent/agent.pkl")),
+        agent_pkl: Some(include_str!(
+            "../../../../catalog/styrene.slack-agent/agent.pkl"
+        )),
         persona_md: include_str!("../../../../catalog/styrene.slack-agent/PERSONA.md"),
         mind_facts: None,
     },
@@ -154,8 +167,7 @@ async fn install_from_upstream(cat_dir: &Path) -> anyhow::Result<()> {
         .text()
         .await?;
 
-    let registry: std::collections::HashMap<String, ArmoryEntry> =
-        toml::from_str(&registry_text)?;
+    let registry: std::collections::HashMap<String, ArmoryEntry> = toml::from_str(&registry_text)?;
 
     // Sort for stable output order.
     let mut ids: Vec<&String> = registry.keys().collect();
@@ -273,7 +285,10 @@ fn extract_agent_meta(toml_src: &str) -> (String, String) {
         agent: Option<AgentSection>,
     }
     let parsed: Outer = toml::from_str(toml_src).unwrap_or(Outer { agent: None });
-    let section = parsed.agent.unwrap_or(AgentSection { name: None, domain: None });
+    let section = parsed.agent.unwrap_or(AgentSection {
+        name: None,
+        domain: None,
+    });
     (
         section.name.unwrap_or_default(),
         section.domain.unwrap_or_default(),

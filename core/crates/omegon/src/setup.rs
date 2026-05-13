@@ -334,7 +334,10 @@ impl AgentSetup {
         if !openapi_configs.is_empty() {
             match tools::openapi::OpenApiToolProvider::from_configs(openapi_configs) {
                 Ok(provider) => {
-                    tracing::info!(tools = provider.tool_count(), "OpenAPI tool provider compiled");
+                    tracing::info!(
+                        tools = provider.tool_count(),
+                        "OpenAPI tool provider compiled"
+                    );
                     bus.register(Box::new(features::adapter::ToolAdapter::new(
                         "openapi-tools",
                         Box::new(provider),
@@ -448,20 +451,25 @@ impl AgentSetup {
                             model = svc.model_name(),
                             "embedding service available — hybrid search enabled"
                         );
-                        Some(std::sync::Arc::new(svc) as std::sync::Arc<dyn omegon_memory::EmbeddingService>)
+                        Some(std::sync::Arc::new(svc)
+                            as std::sync::Arc<dyn omegon_memory::EmbeddingService>)
                     } else {
                         #[cfg(feature = "local-embeddings")]
                         {
-                            match crate::local_embedding::LocalEmbeddingService::from_default_dir() {
+                            match crate::local_embedding::LocalEmbeddingService::from_default_dir()
+                            {
                                 Ok(local_svc) => {
                                     tracing::info!(
                                         model = local_svc.model_name(),
                                         "local ONNX embedding service loaded — hybrid search enabled"
                                     );
-                                    Some(std::sync::Arc::new(local_svc) as std::sync::Arc<dyn omegon_memory::EmbeddingService>)
+                                    Some(std::sync::Arc::new(local_svc)
+                                        as std::sync::Arc<dyn omegon_memory::EmbeddingService>)
                                 }
                                 Err(_) => {
-                                    tracing::info!("embedding service not reachable and no local model — FTS-only recall");
+                                    tracing::info!(
+                                        "embedding service not reachable and no local model — FTS-only recall"
+                                    );
                                     None
                                 }
                             }
@@ -1065,7 +1073,8 @@ impl AgentSetup {
         if !pruned.is_empty() {
             tracing::debug!(?pruned, "pruned stale instance directories");
         }
-        let _ = crate::workspace::runtime::write_workspace_lease(&cwd, &instance_id, &workspace_lease);
+        let _ =
+            crate::workspace::runtime::write_workspace_lease(&cwd, &instance_id, &workspace_lease);
         let _ = crate::workspace::runtime::write_workspace_registry(&cwd, &workspace_registry);
         let workspace_state = WorkspaceStartupState {
             lease: workspace_lease,

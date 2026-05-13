@@ -54,14 +54,8 @@ static SCHEMAS: &[(&str, &str)] = &[
         "SkillManifest.pkl",
         include_str!("../../../../pkl/SkillManifest.pkl"),
     ),
-    (
-        "Profile.pkl",
-        include_str!("../../../../pkl/Profile.pkl"),
-    ),
-    (
-        "TaskSpec.pkl",
-        include_str!("../../../../pkl/TaskSpec.pkl"),
-    ),
+    ("Profile.pkl", include_str!("../../../../pkl/Profile.pkl")),
+    ("TaskSpec.pkl", include_str!("../../../../pkl/TaskSpec.pkl")),
     (
         "RouteMatrix.pkl",
         include_str!("../../../../pkl/RouteMatrix.pkl"),
@@ -109,21 +103,15 @@ impl PklModuleReader for OmegonModuleReader {
             .ok_or_else(|| format!("omegon:// URI missing namespace segment: {uri}"))?;
 
         match namespace {
-            "schema" => {
-                SCHEMAS
-                    .iter()
-                    .find(|(name, _)| *name == rest)
-                    .map(|(_, content)| content.to_string())
-                    .ok_or_else(|| format!("unknown schema module: {rest}").into())
-            }
+            "schema" => SCHEMAS
+                .iter()
+                .find(|(name, _)| *name == rest)
+                .map(|(_, content)| content.to_string())
+                .ok_or_else(|| format!("unknown schema module: {rest}").into()),
             "catalog" => {
                 let file_path = self.omegon_home.join("catalog").join(rest);
                 std::fs::read_to_string(&file_path).map_err(|e| {
-                    format!(
-                        "failed to read catalog module {}: {e}",
-                        file_path.display()
-                    )
-                    .into()
+                    format!("failed to read catalog module {}: {e}", file_path.display()).into()
                 })
             }
             other => Err(format!("unknown omegon:// namespace '{other}' in URI: {uri}").into()),

@@ -142,7 +142,10 @@ impl WebSearchProvider {
             anyhow::bail!("Response too large: {} bytes (max 1MB)", bytes.len());
         }
         let body = String::from_utf8_lossy(&bytes);
-        Ok(crate::util::truncate(&omegon_web::extract_content(&body), 50_000))
+        Ok(crate::util::truncate(
+            &omegon_web::extract_content(&body),
+            50_000,
+        ))
     }
 
     async fn search_brave(
@@ -295,19 +298,29 @@ impl WebSearchProvider {
                     "bing" => omegon_web::Engine::Bing,
                     _ => omegon_web::Engine::DuckDuckGo,
                 };
-                let results = self.web.search(query, &omegon_web::SearchOptions {
-                    max_results,
-                    engines: vec![engine],
-                    topic: topic.to_string(),
-                    ..Default::default()
-                }).await.map_err(|e| anyhow::anyhow!("{e}"))?;
-                Ok(results.into_iter().map(|r| SearchResult {
-                    title: r.title,
-                    url: r.url,
-                    snippet: r.snippet,
-                    content: None,
-                    provider: r.engine.to_string(),
-                }).collect())
+                let results = self
+                    .web
+                    .search(
+                        query,
+                        &omegon_web::SearchOptions {
+                            max_results,
+                            engines: vec![engine],
+                            topic: topic.to_string(),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                Ok(results
+                    .into_iter()
+                    .map(|r| SearchResult {
+                        title: r.title,
+                        url: r.url,
+                        snippet: r.snippet,
+                        content: None,
+                        provider: r.engine.to_string(),
+                    })
+                    .collect())
             }
             _ => anyhow::bail!("Unknown provider: {provider}"),
         }

@@ -64,11 +64,13 @@ pub async fn execute_streaming(
 
     // Static blocklist: commands that are known to require interactive input.
     // This is best-effort — programs can prompt from anywhere — but catches
-    // the common footguns before they wedge the process.
-    static INTERACTIVE_PREFIXES: &[&str] = &[
-        "sudo ", "sudo\t", "ssh ", "ssh\t", "passwd", "su ", "su\t", "kinit",
-    ];
+    // the common footguns before they wedge the process. SSH is treated
+    // separately below because BatchMode=yes makes it explicitly non-interactive.
+    static INTERACTIVE_PREFIXES: &[&str] = &["sudo ", "sudo\t", "passwd", "su ", "su\t", "kinit"];
     let trimmed = command.trim_start();
+    if let Some(blocked) = blocked_interactive_command(trimmed) {
+        return Ok(blocked_interactive_result(blocked));
+    }
     for prefix in INTERACTIVE_PREFIXES {
         if trimmed.starts_with(prefix) || trimmed == prefix.trim() {
             return Ok(ToolResult {
@@ -297,6 +299,74 @@ pub async fn execute_streaming(
             "totalBytes": truncated.total_bytes,
         }),
     })
+}
+
+fn blocked_interactive_result(command_name: &str) -> ToolResult {
+    ToolResult {
+        content: vec![ContentBlock::Text {
+            text: format!(
+                "Blocked: `{command_name}` requires interactive input (password/passphrase) \
+                 which the agent cannot provide.\n\n\
+                 Ask the operator to run this command in their terminal, \
+                 then retry the dependent step."
+            ),
+        }],
+        details: serde_json::json!({
+            "exitCode": -1,
+            "durationMs": 0,
+            "blocked": true,
+            "reason": "interactive_input_required",
+        }),
+    }
+}
+
+fn blocked_interactive_command(trimmed: &str) -> Option<&'static str> {
+    if command_after_env_assignments(trimmed) != Some("ssh") {
+        return None;
+    }
+    if ssh_batch_mode_enabled(trimmed) {
+        None
+    } else {
+        Some("ssh")
+    }
+}
+
+fn command_after_env_assignments(trimmed: &str) -> Option<&str> {
+    trimmed
+        .split_whitespace()
+        .find(|token| !looks_like_env_assignment(token))
+}
+
+fn looks_like_env_assignment(token: &str) -> bool {
+    let Some((name, _value)) = token.split_once('=') else {
+        return false;
+    };
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        && !name.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+}
+
+fn ssh_batch_mode_enabled(command: &str) -> bool {
+    let normalized = command.replace('=', " ");
+    let mut tokens = normalized.split_whitespace();
+    while let Some(token) = tokens.next() {
+        if token.eq_ignore_ascii_case("BatchMode") {
+            return tokens
+                .next()
+                .is_some_and(|value| value.eq_ignore_ascii_case("yes"));
+        }
+        if token
+            .strip_prefix("-o")
+            .is_some_and(|option| option.eq_ignore_ascii_case("BatchMode"))
+        {
+            return tokens
+                .next()
+                .is_some_and(|value| value.eq_ignore_ascii_case("yes"));
+        }
+    }
+    false
 }
 
 /// Push a tail-truncated snapshot of `buffer` to the sink, rate-limited
@@ -689,6 +759,43 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.details["blocked"], true);
+    }
+
+    #[test]
+    fn ssh_batch_mode_allows_non_interactive_ssh() {
+        assert_eq!(
+            blocked_interactive_command("ssh -o BatchMode=yes -i ~/.ssh/key user@host 'hostname'"),
+            None
+        );
+        assert_eq!(
+            blocked_interactive_command(
+                "ssh -oBatchMode=yes -o StrictHostKeyChecking=no user@host hostname"
+            ),
+            None
+        );
+        assert_eq!(
+            blocked_interactive_command(
+                "SSH_AUTH_SOCK=$SSH_AUTH_SOCK ssh -o BatchMode=yes user@host hostname"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn ssh_without_batch_mode_is_blocked() {
+        assert_eq!(blocked_interactive_command("ssh user@host"), Some("ssh"));
+        assert_eq!(
+            blocked_interactive_command("ssh -i ~/.ssh/key user@host hostname"),
+            Some("ssh")
+        );
+        assert_eq!(
+            blocked_interactive_command("ssh -o BatchMode=no user@host hostname"),
+            Some("ssh")
+        );
+        assert_eq!(
+            blocked_interactive_command("SSH_AUTH_SOCK=$SSH_AUTH_SOCK ssh user@host hostname"),
+            Some("ssh")
+        );
     }
 
     #[tokio::test]

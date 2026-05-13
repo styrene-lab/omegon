@@ -18,8 +18,8 @@ pub struct SandboxConfig {
 impl SandboxConfig {
     pub fn detect() -> Option<Self> {
         let runtime = crate::nex::spawn::detect_container_runtime_public()?;
-        let image = std::env::var("OMEGON_CODE_ACT_IMAGE")
-            .unwrap_or_else(|_| DEFAULT_IMAGE.to_string());
+        let image =
+            std::env::var("OMEGON_CODE_ACT_IMAGE").unwrap_or_else(|_| DEFAULT_IMAGE.to_string());
         Some(Self { runtime, image })
     }
 }
@@ -39,17 +39,10 @@ pub async fn execute_in_sandbox(
     cmd.arg(format!("-v={}:/work:rw", cwd.display()));
     cmd.arg("--workdir=/work");
 
-    cmd.arg(format!(
-        "-v={}:/script.py:ro",
-        script_path.display()
-    ));
+    cmd.arg(format!("-v={}:/script.py:ro", script_path.display()));
 
     if let Some(sock) = proxy_socket {
-        cmd.arg(format!(
-            "-v={}:{}",
-            sock.display(),
-            sock.display()
-        ));
+        cmd.arg(format!("-v={}:{}", sock.display(), sock.display()));
     }
 
     cmd.arg("--read-only");

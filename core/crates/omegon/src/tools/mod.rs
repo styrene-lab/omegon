@@ -925,16 +925,25 @@ impl ToolProvider for CoreTools {
                     "set" => {
                         let items: Vec<String> = args["items"]
                             .as_array()
-                            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|v| v.as_str().map(String::from))
+                                    .collect()
+                            })
                             .unwrap_or_default();
                         if items.is_empty() {
                             "Error: 'items' array required for 'set' action".into()
                         } else {
-                            let summary: Vec<String> = items.iter()
+                            let summary: Vec<String> = items
+                                .iter()
                                 .enumerate()
                                 .map(|(i, s)| format!("{}. {s}", i + 1))
                                 .collect();
-                            format!("Work plan set ({} items):\n{}", items.len(), summary.join("\n"))
+                            format!(
+                                "Work plan set ({} items):\n{}",
+                                items.len(),
+                                summary.join("\n")
+                            )
                         }
                     }
                     "advance" => "Advanced to next work item.".into(),

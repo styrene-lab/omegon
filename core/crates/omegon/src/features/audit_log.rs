@@ -124,6 +124,10 @@ impl AuditLog {
             .collect()
     }
 
+    fn str_preview(s: &str, max: usize) -> &str {
+        crate::util::truncate_str(s, max)
+    }
+
     fn args_summary(args: &serde_json::Value) -> serde_json::Value {
         // Keep path, command, action — drop large content fields
         let mut summary = serde_json::Map::new();
@@ -199,8 +203,8 @@ impl Feature for AuditLog {
                         "turns": turns,
                         "tool_calls": tool_calls,
                         "duration_secs": duration_secs,
-                        "initial_prompt": initial_prompt.as_deref().map(|s| &s[..s.len().min(200)]),
-                        "outcome": outcome_summary.as_deref().map(|s| &s[..s.len().min(200)]),
+                        "initial_prompt": initial_prompt.as_deref().map(|s| Self::str_preview(s, 200)),
+                        "outcome": outcome_summary.as_deref().map(|s| Self::str_preview(s, 200)),
                     }),
                 });
             }
@@ -314,5 +318,47 @@ impl Feature for AuditLog {
             _ => {}
         }
         vec![]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn str_preview_handles_emoji_at_limit() {
+        let prefix = "a".repeat(199);
+        let text = format!("{prefix}✅ trailing text");
+
+        let preview = AuditLog::str_preview(&text, 200);
+
+        assert!(preview.is_char_boundary(preview.len()));
+        assert!(preview.len() <= text.len());
+    }
+
+    #[test]
+    fn str_preview_matches_real_audit_crash_case() {
+        let text = "Jellyfin is now scheduled and pulling its image. Here's the current status:\n\n\
+| Service | Status | Notes |\n\
+|---|---|---|\n\
+| **Sonarr** | ✅ Running | |\n\
+| **Radarr** | ✅ Running | |\n\
+| **Prowlarr** | ✅ Running | |\n\
+| **Jellyseerr** | ✅ Running | |\n\
+| **Jellyfin** | ✅ Pulling | |";
+
+        let preview = AuditLog::str_preview(text, 200);
+
+        assert!(preview.is_char_boundary(preview.len()));
+    }
+
+    #[test]
+    fn str_preview_matches_pipewire_recovery_crash_case() {
+        let text = "I likely wedged PipeWire / the session shell by touching the live routing stack again. I should not have run another pipeWire link probe after we already knew this machine can hang on that path. That's on me.\n\nDo this recovery first - **don't trouble";
+
+        let preview = AuditLog::str_preview(text, 200);
+
+        assert!(preview.is_char_boundary(preview.len()));
+        assert!(preview.len() <= text.len());
     }
 }

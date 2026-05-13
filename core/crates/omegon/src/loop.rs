@@ -131,11 +131,14 @@ use behavior::is_first_turn_orientation_churn;
 use behavior::is_mutation_tool_name;
 use behavior::is_repo_inspection_tool;
 use behavior::is_validation_tool_name;
+use behavior::meta_recovery_retry_message;
+use behavior::operator_correction_recovery_message;
 use behavior::progress_nudge_reason_for_drift;
 use behavior::should_inject_execution_pressure;
 
 use behavior::evidence_sufficiency_message;
 use behavior::has_local_target_hypothesis;
+use behavior::is_pathological_meta_response;
 use behavior::is_slim_execution_bias;
 use behavior::om_local_first_message;
 
@@ -247,6 +250,7 @@ pub async fn run(
     let session_start = Instant::now();
     let mut controller = ControllerState::default();
     let mut dead_mouse_nudges: u8 = 0;
+    let mut meta_recovery_nudges: u8 = 0;
     // Set when a dead-mouse nudge message was injected this turn.
     // Used to gate the counter reset — noise writes (compliance notes,
     // session acks) must not satisfy the nudge and reset the counter.
@@ -369,6 +373,15 @@ pub async fn run(
                  making progress, continue — hard limit is {} turns.]",
                 turn, config.max_turns
             ));
+        }
+
+        if conversation.intent.operator_correction_pending {
+            tracing::info!("Operator correction detected — entering recovery mode");
+            conversation.intent.operator_correction_pending = false;
+            dead_mouse_nudges = 0;
+            meta_recovery_nudges = 0;
+            controller = ControllerState::default();
+            conversation.push_user(operator_correction_recovery_message());
         }
 
         let _ = events.send(AgentEvent::TurnStart { turn });
@@ -662,6 +675,19 @@ pub async fn run(
         // Extract tool calls
         let tool_calls = assistant_msg.tool_calls();
         if tool_calls.is_empty() {
+            if is_pathological_meta_response(&assistant_msg.text)
+                && turn < config.max_turns
+                && meta_recovery_nudges < 2
+            {
+                meta_recovery_nudges += 1;
+                tracing::info!(
+                    nudges = meta_recovery_nudges,
+                    "Pathological meta response — forcing concrete recovery retry"
+                );
+                conversation.push_user(meta_recovery_retry_message());
+                continue;
+            }
+
             // Check if the agent skipped committing.
             // Only nudge when the agent looks like it is wrapping up (completion
             // language in the text response) or is close to the turn budget.
@@ -943,6 +969,7 @@ pub async fn run(
         }
 
         // Reset dead-mouse counter — model is using tools this turn.
+        meta_recovery_nudges = 0;
         // After a nudge was injected, only reset if the model did real work
         // (not just wrote a noise file acknowledging the warning). Non-Claude
         // models (e.g. GPT-5.5) tend to literalize nudges and write compliance
@@ -1950,8 +1977,16 @@ async fn dispatch_tools(
             async move {
                 // Parallel calls are read-only — no permission prompts expected.
                 let mut perm_log = Vec::new();
-                let result =
-                    dispatch_single_tool(bus, &call, &events, cancel, None, host_context, &mut perm_log).await;
+                let result = dispatch_single_tool(
+                    bus,
+                    &call,
+                    &events,
+                    cancel,
+                    None,
+                    host_context,
+                    &mut perm_log,
+                )
+                .await;
                 (idx, result)
             }
         }))
@@ -2215,16 +2250,17 @@ async fn execute_tool_invocation(
 
     // Try host delegation before local execution.
     if let Some(ctx) = host_context {
-        if let Some(result) = crate::host_context::try_delegate_to_host(
-            ctx,
-            execution_tool_name,
-            &execution_args,
-        ).await {
+        if let Some(result) =
+            crate::host_context::try_delegate_to_host(ctx, execution_tool_name, &execution_args)
+                .await
+        {
             let (tool_result, is_error) = match result {
                 Ok(r) => (r, false),
                 Err(e) => (
                     omegon_traits::ToolResult {
-                        content: vec![ContentBlock::Text { text: e.to_string() }],
+                        content: vec![ContentBlock::Text {
+                            text: e.to_string(),
+                        }],
                         details: Value::Null,
                     },
                     true,
@@ -2274,11 +2310,15 @@ async fn execute_tool_invocation(
 
             let response = if let Some(ctx) = host_context {
                 // ACP path: delegate to the host's permission UI.
-                match ctx.proxy.request_permission(
-                    visible_call_id.to_string(),
-                    visible_tool_name.to_string(),
-                    perm_err.requested_path.clone(),
-                ).await {
+                match ctx
+                    .proxy
+                    .request_permission(
+                        visible_call_id.to_string(),
+                        visible_tool_name.to_string(),
+                        perm_err.requested_path.clone(),
+                    )
+                    .await
+                {
                     Ok(outcome) => match outcome {
                         agent_client_protocol::RequestPermissionOutcome::Selected(sel) => {
                             match sel.option_id.0.as_ref() {
@@ -3490,7 +3530,8 @@ mod tests {
             },
         ];
 
-        let dispatch = dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
+        let dispatch =
+            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
         let results = dispatch.results;
 
         // The second edit should have failed
@@ -3562,7 +3603,8 @@ mod tests {
             arguments: serde_json::json!({"path": "/tmp/fake.rs", "oldText": "a", "newText": "b"}),
         }];
 
-        let dispatch = dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
+        let dispatch =
+            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
         assert!(!dispatch.results[0].is_error);
         let text = dispatch.results[0].content[0].as_text().unwrap();
         assert!(
@@ -3638,7 +3680,8 @@ mod tests {
         ];
 
         let start = Instant::now();
-        let dispatch = dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
+        let dispatch =
+            dispatch_tools(&bus, &calls, &events_tx, cancel, dir.path(), None, None).await;
         let elapsed = start.elapsed();
 
         assert_eq!(dispatch.results.len(), 2);
@@ -5091,8 +5134,10 @@ mod tests {
                 "tier {tier}: must not block delegation"
             );
             assert!(
-                msg.contains("produce") || msg.contains("Produce")
-                    || msg.contains("answer") || msg.contains("Answer"),
+                msg.contains("produce")
+                    || msg.contains("Produce")
+                    || msg.contains("answer")
+                    || msg.contains("Answer"),
                 "tier {tier}: must use task-neutral framing (produce/answer)"
             );
         }

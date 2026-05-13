@@ -64,9 +64,9 @@ pub async fn execute(
 
     let mut text = selected.join("\n");
 
-    // Truncate by bytes if needed
+    // Truncate by bytes if needed, but only at UTF-8 character boundaries.
     if text.len() > MAX_BYTES {
-        text.truncate(MAX_BYTES);
+        text.truncate(text.floor_char_boundary(MAX_BYTES));
         if let Some(last_newline) = text.rfind('\n') {
             text.truncate(last_newline);
         }
@@ -286,6 +286,25 @@ mod tests {
             !text.starts_with("line 1\n"),
             "must not reset to beginning on OOB offset: {text}"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn byte_truncation_handles_emoji_boundary() {
+        let dir =
+            std::env::temp_dir().join(format!("omegon-test-read-emoji-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("emoji-large.txt");
+        let content = format!("{}✅tail", "x".repeat(MAX_BYTES - 1));
+        std::fs::write(&file, content).unwrap();
+
+        let result = execute(&file, None, None).await.unwrap();
+        let text = match &result.content[0] {
+            ContentBlock::Text { text } => text,
+            _ => panic!("expected text"),
+        };
+        assert!(text.is_char_boundary(text.len()));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

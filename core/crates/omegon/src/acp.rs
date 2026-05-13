@@ -179,7 +179,10 @@ impl OmegonAcpAgent {
             let host_ctx = if self.host_caps.borrow().has_any_delegation() {
                 let (proxy_tx, proxy_rx) = tokio::sync::mpsc::channel(64);
                 let caps = std::sync::Arc::new(self.host_caps.borrow().clone());
-                let session_id_str = self.session_id.borrow().as_ref()
+                let session_id_str = self
+                    .session_id
+                    .borrow()
+                    .as_ref()
                     .map(|s| s.to_string())
                     .unwrap_or_default();
                 let ctx = HostContext {
@@ -188,7 +191,10 @@ impl OmegonAcpAgent {
                     session_id: session_id_str.clone(),
                 };
                 // Spawn the ACP-thread pump that services proxy requests.
-                let sid = self.session_id.borrow().clone()
+                let sid = self
+                    .session_id
+                    .borrow()
+                    .clone()
                     .unwrap_or_else(|| SessionId::new("omegon-pending"));
                 host_context::spawn_proxy_pump(proxy_rx, self.conn.clone(), sid);
                 Some(ctx)
@@ -196,11 +202,8 @@ impl OmegonAcpAgent {
                 None
             };
 
-            let mut handle = acp_worker::spawn_worker(
-                self.model.clone(),
-                cwd.to_path_buf(),
-                host_ctx,
-            );
+            let mut handle =
+                acp_worker::spawn_worker(self.model.clone(), cwd.to_path_buf(), host_ctx);
             // Drain the secrets channel asynchronously — the worker sends it
             // after AgentSetup completes. Store in self.secrets for redaction.
             let secrets_cell = self.secrets.clone();
@@ -278,10 +281,7 @@ impl Agent for OmegonAcpAgent {
             Some(Implementation::new("omegon", env!("CARGO_PKG_VERSION")).title("Omegon Agent"));
         response.agent_capabilities = AgentCapabilities::default()
             .load_session(true)
-            .prompt_capabilities(
-                PromptCapabilities::new()
-                    .image(true),
-            )
+            .prompt_capabilities(PromptCapabilities::new().image(true))
             .session_capabilities(
                 SessionCapabilities::new()
                     .list(SessionListCapabilities::new())
@@ -322,7 +322,10 @@ impl Agent for OmegonAcpAgent {
                 .filter_map(|server| convert_acp_mcp_server(server))
                 .collect();
             if !servers.is_empty() {
-                tracing::info!(count = servers.len(), "Forwarding client MCP servers to worker");
+                tracing::info!(
+                    count = servers.len(),
+                    "Forwarding client MCP servers to worker"
+                );
                 if let Some(w) = self.worker.borrow().as_ref() {
                     let tx = w.request_tx.clone();
                     tokio::task::spawn_local(async move {
@@ -339,11 +342,8 @@ impl Agent for OmegonAcpAgent {
         // have already received SetModel/SetThinking/SetPosture before this
         // session started, and we need to advertise what's actually running.
         let (current_model, current_thinking, current_posture) = self.current_settings();
-        response.config_options = Some(self.build_config_options(
-            &current_model,
-            &current_thinking,
-            &current_posture,
-        ));
+        response.config_options =
+            Some(self.build_config_options(&current_model, &current_thinking, &current_posture));
 
         // Send available commands after response (via spawned task)
         let conn = self.conn.clone();
@@ -358,11 +358,26 @@ impl Agent for OmegonAcpAgent {
                             AvailableCommand::new("model", "List or switch LLM model"),
                             AvailableCommand::new("thinking", "Show or set thinking level"),
                             AvailableCommand::new("posture", "Show or set behavioral posture"),
-                            AvailableCommand::new("skills", "Manage skills (list, get, create, delete)"),
-                            AvailableCommand::new("extension", "Manage extensions (list, install, enable, search)"),
-                            AvailableCommand::new("armory", "Browse upstream extensions, plugins, skills, and agents"),
-                            AvailableCommand::new("persona", "Manage personas (list, create, switch)"),
-                            AvailableCommand::new("catalog", "Browse agent catalog (list, install, remove)"),
+                            AvailableCommand::new(
+                                "skills",
+                                "Manage skills (list, get, create, delete)",
+                            ),
+                            AvailableCommand::new(
+                                "extension",
+                                "Manage extensions (list, install, enable, search)",
+                            ),
+                            AvailableCommand::new(
+                                "armory",
+                                "Browse upstream extensions, plugins, skills, and agents",
+                            ),
+                            AvailableCommand::new(
+                                "persona",
+                                "Manage personas (list, create, switch)",
+                            ),
+                            AvailableCommand::new(
+                                "catalog",
+                                "Browse agent catalog (list, install, remove)",
+                            ),
                             AvailableCommand::new("secrets", "Show configured secrets (no values)"),
                             AvailableCommand::new("status", "Session status"),
                             AvailableCommand::new("login", "Authentication help"),
@@ -535,11 +550,10 @@ impl Agent for OmegonAcpAgent {
                         Ok(WorkerEvent::ToolOutput { id, text }) => {
                             let text = redact(&text);
                             if let Some(c) = conn.borrow().as_ref() {
-                                let content = ToolCallContent::Content(
-                                    agent_client_protocol::Content::new(
+                                let content =
+                                    ToolCallContent::Content(agent_client_protocol::Content::new(
                                         ContentBlock::Text(TextContent::new(text)),
-                                    ),
-                                );
+                                    ));
                                 let fields = ToolCallUpdateFields::new().content(vec![content]);
                                 let _ = c
                                     .session_notification(SessionNotification::new(
@@ -568,21 +582,39 @@ impl Agent for OmegonAcpAgent {
                                     } else {
                                         // Single entry status update — merge into existing
                                         for update in &entries {
-                                            if let Some(existing) = plan_state.iter_mut().find(|e| e.content == update.content) {
+                                            if let Some(existing) = plan_state
+                                                .iter_mut()
+                                                .find(|e| e.content == update.content)
+                                            {
                                                 existing.status = update.status;
                                             }
                                         }
                                     }
                                 }
-                                let plan_entries: Vec<PlanEntry> = plan_state.iter().map(|e| {
-                                    let status = match e.status {
-                                        acp_worker::PlanEntryState::Pending => PlanEntryStatus::Pending,
-                                        acp_worker::PlanEntryState::InProgress => PlanEntryStatus::InProgress,
-                                        acp_worker::PlanEntryState::Completed => PlanEntryStatus::Completed,
-                                        acp_worker::PlanEntryState::Failed => PlanEntryStatus::Completed,
-                                    };
-                                    PlanEntry::new(&e.content, PlanEntryPriority::Medium, status)
-                                }).collect();
+                                let plan_entries: Vec<PlanEntry> = plan_state
+                                    .iter()
+                                    .map(|e| {
+                                        let status = match e.status {
+                                            acp_worker::PlanEntryState::Pending => {
+                                                PlanEntryStatus::Pending
+                                            }
+                                            acp_worker::PlanEntryState::InProgress => {
+                                                PlanEntryStatus::InProgress
+                                            }
+                                            acp_worker::PlanEntryState::Completed => {
+                                                PlanEntryStatus::Completed
+                                            }
+                                            acp_worker::PlanEntryState::Failed => {
+                                                PlanEntryStatus::Completed
+                                            }
+                                        };
+                                        PlanEntry::new(
+                                            &e.content,
+                                            PlanEntryPriority::Medium,
+                                            status,
+                                        )
+                                    })
+                                    .collect();
                                 let _ = c
                                     .session_notification(SessionNotification::new(
                                         stream_sid.clone(),
@@ -697,21 +729,30 @@ impl Agent for OmegonAcpAgent {
             "model" => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 (
-                    WorkerRequest::SetModel { value: value.clone(), ack: Some(tx) },
+                    WorkerRequest::SetModel {
+                        value: value.clone(),
+                        ack: Some(tx),
+                    },
                     rx,
                 )
             }
             "thinking" => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 (
-                    WorkerRequest::SetThinking { value: value.clone(), ack: Some(tx) },
+                    WorkerRequest::SetThinking {
+                        value: value.clone(),
+                        ack: Some(tx),
+                    },
                     rx,
                 )
             }
             "posture" => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 (
-                    WorkerRequest::SetPosture { value: value.clone(), ack: Some(tx) },
+                    WorkerRequest::SetPosture {
+                        value: value.clone(),
+                        ack: Some(tx),
+                    },
                     rx,
                 )
             }
@@ -724,7 +765,8 @@ impl Agent for OmegonAcpAgent {
         // mutation, so this captures the actually-applied state (which may
         // differ from `value` if the worker rejected/normalised the input).
         let (current_model, current_thinking, current_posture) = self.current_settings();
-        let options = self.build_config_options(&current_model, &current_thinking, &current_posture);
+        let options =
+            self.build_config_options(&current_model, &current_thinking, &current_posture);
 
         // Also push a ConfigOptionUpdate notification so clients that don't
         // inspect the response value (e.g. flynt-app's set_config which
@@ -787,15 +829,14 @@ impl Agent for OmegonAcpAgent {
     }
 
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
-        let params: serde_json::Value = serde_json::from_str(args.params.get())
-            .unwrap_or(serde_json::Value::Null);
+        let params: serde_json::Value =
+            serde_json::from_str(args.params.get()).unwrap_or(serde_json::Value::Null);
         let response_value = match self.handle_ext_method(&args.method, params).await {
             Ok(v) => v,
             Err(e) => serde_json::json!({ "error": e.to_string() }),
         };
-        let raw = serde_json::value::RawValue::from_string(
-            serde_json::to_string(&response_value)?,
-        )?;
+        let raw =
+            serde_json::value::RawValue::from_string(serde_json::to_string(&response_value)?)?;
         Ok(ExtResponse::new(raw.into()))
     }
 }
@@ -806,7 +847,7 @@ impl OmegonAcpAgent {
         method: &str,
         params: serde_json::Value,
     ) -> anyhow::Result<serde_json::Value> {
-        use crate::extensions::{config_store, ExtensionManifest, ExtensionState};
+        use crate::extensions::{ExtensionManifest, ExtensionState, config_store};
 
         let extensions_dir = crate::extension_cli::extensions_dir()?;
 
@@ -816,10 +857,16 @@ impl OmegonAcpAgent {
                 if extensions_dir.exists() {
                     for entry in std::fs::read_dir(&extensions_dir)?.flatten() {
                         let dir = entry.path();
-                        if !dir.is_dir() { continue; }
+                        if !dir.is_dir() {
+                            continue;
+                        }
                         let manifest_path = dir.join("manifest.toml");
-                        if !manifest_path.exists() { continue; }
-                        let Ok(manifest) = ExtensionManifest::from_extension_dir(&dir) else { continue };
+                        if !manifest_path.exists() {
+                            continue;
+                        }
+                        let Ok(manifest) = ExtensionManifest::from_extension_dir(&dir) else {
+                            continue;
+                        };
                         let state = ExtensionState::load(&dir).unwrap_or_default();
                         let config_values = config_store::read_config(&dir).unwrap_or_default();
 
@@ -830,7 +877,10 @@ impl OmegonAcpAgent {
                                 let mut entry = serde_json::to_value(field).unwrap_or_default();
                                 if let Some(obj) = entry.as_object_mut() {
                                     if let Some(val) = config_values.get(name) {
-                                        obj.insert("current_value".into(), serde_json::Value::String(val.clone()));
+                                        obj.insert(
+                                            "current_value".into(),
+                                            serde_json::Value::String(val.clone()),
+                                        );
                                     }
                                 }
                                 (name.clone(), entry)
@@ -838,35 +888,49 @@ impl OmegonAcpAgent {
                             .collect();
 
                         let secret_status = |names: &[String]| -> Vec<serde_json::Value> {
-                            names.iter().map(|name| {
-                                // Check recipe existence only — don't call resolve()
-                                // which can trigger keychain prompts or shell execution.
-                                let (has_recipe, source) = if let Some(ref mgr) = *self.secrets.borrow() {
-                                    let recipes = mgr.list_recipes();
-                                    match recipes.iter().find(|(n, _)| n == name) {
-                                        Some((_, r)) => {
-                                            let src = if r.starts_with("keyring:") { "keyring" }
-                                                else if r.starts_with("env:") { "env" }
-                                                else if r.starts_with("vault:") { "vault" }
-                                                else if r.starts_with("cmd:") { "cmd" }
-                                                else { "recipe" };
-                                            (true, Some(String::from(src)))
+                            names
+                                .iter()
+                                .map(|name| {
+                                    // Check recipe existence only — don't call resolve()
+                                    // which can trigger keychain prompts or shell execution.
+                                    let (has_recipe, source) = if let Some(ref mgr) =
+                                        *self.secrets.borrow()
+                                    {
+                                        let recipes = mgr.list_recipes();
+                                        match recipes.iter().find(|(n, _)| n == name) {
+                                            Some((_, r)) => {
+                                                let src = if r.starts_with("keyring:") {
+                                                    "keyring"
+                                                } else if r.starts_with("env:") {
+                                                    "env"
+                                                } else if r.starts_with("vault:") {
+                                                    "vault"
+                                                } else if r.starts_with("cmd:") {
+                                                    "cmd"
+                                                } else {
+                                                    "recipe"
+                                                };
+                                                (true, Some(String::from(src)))
+                                            }
+                                            None => {
+                                                // Fallback: check env var existence (cheap)
+                                                let in_env = std::env::var(name).is_ok();
+                                                (
+                                                    in_env,
+                                                    if in_env { Some("env".into()) } else { None },
+                                                )
+                                            }
                                         }
-                                        None => {
-                                            // Fallback: check env var existence (cheap)
-                                            let in_env = std::env::var(name).is_ok();
-                                            (in_env, if in_env { Some("env".into()) } else { None })
-                                        }
-                                    }
-                                } else {
-                                    (false, None)
-                                };
-                                serde_json::json!({
-                                    "name": name,
-                                    "resolved": has_recipe,
-                                    "source": source,
+                                    } else {
+                                        (false, None)
+                                    };
+                                    serde_json::json!({
+                                        "name": name,
+                                        "resolved": has_recipe,
+                                        "source": source,
+                                    })
                                 })
-                            }).collect()
+                                .collect()
                         };
 
                         extensions.push(serde_json::json!({
@@ -882,14 +946,13 @@ impl OmegonAcpAgent {
                         }));
                     }
                 }
-                extensions.sort_by(|a, b| {
-                    a["name"].as_str().cmp(&b["name"].as_str())
-                });
+                extensions.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
                 Ok(serde_json::json!({ "extensions": extensions }))
             }
 
             "extensions/get" => {
-                let ext_name = params["extension"].as_str()
+                let ext_name = params["extension"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
                 let ext_dir = extensions_dir.join(ext_name);
                 if !ext_dir.exists() {
@@ -906,7 +969,10 @@ impl OmegonAcpAgent {
                         let mut entry = serde_json::to_value(field).unwrap_or_default();
                         if let Some(obj) = entry.as_object_mut() {
                             if let Some(val) = config_values.get(name) {
-                                obj.insert("current_value".into(), serde_json::Value::String(val.clone()));
+                                obj.insert(
+                                    "current_value".into(),
+                                    serde_json::Value::String(val.clone()),
+                                );
                             }
                         }
                         (name.clone(), entry)
@@ -914,32 +980,42 @@ impl OmegonAcpAgent {
                     .collect();
 
                 let secret_status = |names: &[String]| -> Vec<serde_json::Value> {
-                    names.iter().map(|name| {
-                        let (has_recipe, source) = if let Some(ref mgr) = *self.secrets.borrow() {
-                            let recipes = mgr.list_recipes();
-                            match recipes.iter().find(|(n, _)| n == name) {
-                                Some((_, r)) => {
-                                    let src = if r.starts_with("keyring:") { "keyring" }
-                                        else if r.starts_with("env:") { "env" }
-                                        else if r.starts_with("vault:") { "vault" }
-                                        else if r.starts_with("cmd:") { "cmd" }
-                                        else { "recipe" };
-                                    (true, Some(String::from(src)))
+                    names
+                        .iter()
+                        .map(|name| {
+                            let (has_recipe, source) = if let Some(ref mgr) = *self.secrets.borrow()
+                            {
+                                let recipes = mgr.list_recipes();
+                                match recipes.iter().find(|(n, _)| n == name) {
+                                    Some((_, r)) => {
+                                        let src = if r.starts_with("keyring:") {
+                                            "keyring"
+                                        } else if r.starts_with("env:") {
+                                            "env"
+                                        } else if r.starts_with("vault:") {
+                                            "vault"
+                                        } else if r.starts_with("cmd:") {
+                                            "cmd"
+                                        } else {
+                                            "recipe"
+                                        };
+                                        (true, Some(String::from(src)))
+                                    }
+                                    None => {
+                                        let in_env = std::env::var(name).is_ok();
+                                        (in_env, if in_env { Some("env".into()) } else { None })
+                                    }
                                 }
-                                None => {
-                                    let in_env = std::env::var(name).is_ok();
-                                    (in_env, if in_env { Some("env".into()) } else { None })
-                                }
-                            }
-                        } else {
-                            (false, None)
-                        };
-                        serde_json::json!({
-                            "name": name,
-                            "resolved": has_recipe,
-                            "source": source,
+                            } else {
+                                (false, None)
+                            };
+                            serde_json::json!({
+                                "name": name,
+                                "resolved": has_recipe,
+                                "source": source,
+                            })
                         })
-                    }).collect()
+                        .collect()
                 };
 
                 let runtime_type = match &manifest.runtime {
@@ -970,7 +1046,8 @@ impl OmegonAcpAgent {
             }
 
             "extensions/config_get" => {
-                let ext_name = params["extension"].as_str()
+                let ext_name = params["extension"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
                 let ext_dir = extensions_dir.join(ext_name);
                 if !ext_dir.exists() {
@@ -981,11 +1058,14 @@ impl OmegonAcpAgent {
             }
 
             "extensions/config_set" => {
-                let ext_name = params["extension"].as_str()
+                let ext_name = params["extension"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
-                let key = params["key"].as_str()
+                let key = params["key"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'key' field"))?;
-                let value = params["value"].as_str()
+                let value = params["value"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'value' field"))?;
                 let ext_dir = extensions_dir.join(ext_name);
                 if !ext_dir.exists() {
@@ -1007,25 +1087,32 @@ impl OmegonAcpAgent {
             }
 
             "extensions/secret_set" => {
-                let ext_name = params["extension"].as_str()
+                let ext_name = params["extension"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
-                let name = params["name"].as_str()
+                let name = params["name"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
-                let value = params["value"].as_str()
+                let value = params["value"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'value' field"))?;
                 let ext_dir = extensions_dir.join(ext_name);
                 if !ext_dir.exists() {
                     anyhow::bail!("extension '{ext_name}' not found");
                 }
                 let manifest = ExtensionManifest::from_extension_dir(&ext_dir)?;
-                let all_secrets: Vec<&str> = manifest.secrets.required.iter()
+                let all_secrets: Vec<&str> = manifest
+                    .secrets
+                    .required
+                    .iter()
                     .chain(manifest.secrets.optional.iter())
                     .map(|s| s.as_str())
                     .collect();
                 if !all_secrets.is_empty() && !all_secrets.contains(&name) {
                     anyhow::bail!(
                         "secret '{name}' is not declared by extension '{ext_name}'. \
-                         Declared secrets: {:?}", all_secrets
+                         Declared secrets: {:?}",
+                        all_secrets
                     );
                 }
                 if let Some(ref mgr) = *self.secrets.borrow() {
@@ -1037,7 +1124,8 @@ impl OmegonAcpAgent {
             }
 
             "extensions/secret_delete" => {
-                let name = params["name"].as_str()
+                let name = params["name"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
                 if let Some(ref mgr) = *self.secrets.borrow() {
                     mgr.delete_recipe(name)?;
@@ -1048,7 +1136,8 @@ impl OmegonAcpAgent {
             }
 
             "extensions/enable" => {
-                let ext_name = params["extension"].as_str()
+                let ext_name = params["extension"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
                 let ext_dir = extensions_dir.join(ext_name);
                 if !ext_dir.exists() {
@@ -1061,7 +1150,8 @@ impl OmegonAcpAgent {
             }
 
             "extensions/disable" => {
-                let ext_name = params["extension"].as_str()
+                let ext_name = params["extension"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
                 let ext_dir = extensions_dir.join(ext_name);
                 if !ext_dir.exists() {
@@ -1074,16 +1164,17 @@ impl OmegonAcpAgent {
             }
 
             // ── Extension CRUD ──────────────────────────────────────
-
             "extensions/install" => {
-                let uri = params["uri"].as_str()
+                let uri = params["uri"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'uri' field"))?;
                 crate::extension_cli::install(uri)?;
                 Ok(serde_json::json!({ "ok": true }))
             }
 
             "extensions/remove" => {
-                let ext_name = params["extension"].as_str()
+                let ext_name = params["extension"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'extension' field"))?;
                 crate::extension_cli::remove(ext_name)?;
                 Ok(serde_json::json!({ "ok": true }))
@@ -1096,7 +1187,6 @@ impl OmegonAcpAgent {
             }
 
             // ── Discovery (armory + catalog) ──────────────────────
-
             "armory/browse" | "armory/search" => {
                 let kind = params
                     .get("kind")
@@ -1106,12 +1196,9 @@ impl OmegonAcpAgent {
                     .unwrap_or(crate::armory::ArmoryKind::All);
                 let query = params.get("query").and_then(|v| v.as_str());
                 let cwd = std::env::current_dir().unwrap_or_default();
-                let items = crate::armory::browse(crate::armory::BrowseOptions::new(
-                    kind,
-                    query,
-                    &cwd,
-                ))
-                .await?;
+                let items =
+                    crate::armory::browse(crate::armory::BrowseOptions::new(kind, query, &cwd))
+                        .await?;
                 Ok(serde_json::json!({ "items": items }))
             }
 
@@ -1121,7 +1208,8 @@ impl OmegonAcpAgent {
                     .timeout(std::time::Duration::from_secs(15))
                     .user_agent("omegon")
                     .build()?;
-                let registry = crate::extension_registry::fetch_registry(&client).await
+                let registry = crate::extension_registry::fetch_registry(&client)
+                    .await
                     .map_err(|e| anyhow::anyhow!("Could not reach armory: {e}"))?;
 
                 let installed: std::collections::HashSet<String> = if extensions_dir.exists() {
@@ -1134,14 +1222,17 @@ impl OmegonAcpAgent {
                     std::collections::HashSet::new()
                 };
 
-                let mut entries: Vec<serde_json::Value> = registry.iter()
+                let mut entries: Vec<serde_json::Value> = registry
+                    .iter()
                     .filter(|(name, entry)| {
-                        query.map(|q| {
-                            let q = q.to_lowercase();
-                            name.to_lowercase().contains(&q)
-                                || entry.description.to_lowercase().contains(&q)
-                                || entry.category.to_lowercase().contains(&q)
-                        }).unwrap_or(true)
+                        query
+                            .map(|q| {
+                                let q = q.to_lowercase();
+                                name.to_lowercase().contains(&q)
+                                    || entry.description.to_lowercase().contains(&q)
+                                    || entry.category.to_lowercase().contains(&q)
+                            })
+                            .unwrap_or(true)
                     })
                     .map(|(name, entry)| {
                         serde_json::json!({
@@ -1161,19 +1252,22 @@ impl OmegonAcpAgent {
                 let home = crate::paths::omegon_home()?;
                 let entries: Vec<serde_json::Value> = crate::catalog::list(&home)
                     .into_iter()
-                    .map(|e| serde_json::json!({
-                        "id": e.id,
-                        "name": e.name,
-                        "version": e.version,
-                        "description": e.description,
-                        "domain": e.domain,
-                    }))
+                    .map(|e| {
+                        serde_json::json!({
+                            "id": e.id,
+                            "name": e.name,
+                            "version": e.version,
+                            "description": e.description,
+                            "domain": e.domain,
+                        })
+                    })
                     .collect();
                 Ok(serde_json::json!({ "agents": entries }))
             }
 
             "catalog/get" => {
-                let agent_id = params["id"].as_str()
+                let agent_id = params["id"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'id' field"))?;
                 let home = crate::paths::omegon_home()?;
                 let resolved = crate::catalog::resolve(&home, agent_id)?;
@@ -1188,57 +1282,79 @@ impl OmegonAcpAgent {
                 });
                 let obj = result.as_object_mut().unwrap();
                 if let Some(ref persona) = m.persona {
-                    obj.insert("persona".into(), serde_json::json!({
-                        "badge": persona.badge,
-                        "activated_skills": persona.activated_skills,
-                        "disabled_tools": persona.disabled_tools,
-                        "has_directive": resolved.persona_directive.is_some(),
-                        "has_mind_facts": resolved.mind_facts_content.is_some(),
-                    }));
+                    obj.insert(
+                        "persona".into(),
+                        serde_json::json!({
+                            "badge": persona.badge,
+                            "activated_skills": persona.activated_skills,
+                            "disabled_tools": persona.disabled_tools,
+                            "has_directive": resolved.persona_directive.is_some(),
+                            "has_mind_facts": resolved.mind_facts_content.is_some(),
+                        }),
+                    );
                 }
                 if let Some(ref settings) = m.settings {
-                    obj.insert("settings".into(), serde_json::json!({
-                        "model": settings.model,
-                        "thinking_level": settings.thinking_level,
-                        "context_class": settings.context_class,
-                        "max_turns": settings.max_turns,
-                    }));
+                    obj.insert(
+                        "settings".into(),
+                        serde_json::json!({
+                            "model": settings.model,
+                            "thinking_level": settings.thinking_level,
+                            "context_class": settings.context_class,
+                            "max_turns": settings.max_turns,
+                        }),
+                    );
                 }
                 if let Some(ref extensions) = m.extensions {
-                    let ext_list: Vec<serde_json::Value> = extensions.iter().map(|e| {
-                        serde_json::json!({ "name": e.name, "version": e.version })
-                    }).collect();
+                    let ext_list: Vec<serde_json::Value> = extensions
+                        .iter()
+                        .map(|e| serde_json::json!({ "name": e.name, "version": e.version }))
+                        .collect();
                     obj.insert("extensions".into(), serde_json::json!(ext_list));
                 }
                 if let Some(ref workflow) = m.workflow {
-                    let phases: Vec<String> = workflow.phases.as_ref()
+                    let phases: Vec<String> = workflow
+                        .phases
+                        .as_ref()
                         .map(|p| p.keys().cloned().collect())
                         .unwrap_or_default();
-                    obj.insert("workflow".into(), serde_json::json!({
-                        "name": workflow.name,
-                        "phases": phases,
-                    }));
+                    obj.insert(
+                        "workflow".into(),
+                        serde_json::json!({
+                            "name": workflow.name,
+                            "phases": phases,
+                        }),
+                    );
                 }
                 Ok(result)
             }
 
             "catalog/install" => {
-                let offline = params.get("offline").and_then(|v| v.as_bool()).unwrap_or(false);
+                let offline = params
+                    .get("offline")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 crate::catalog::cmd_install(offline).await?;
                 Ok(serde_json::json!({ "ok": true }))
             }
 
             "catalog/remove" => {
-                let agent_id = params["id"].as_str()
+                let agent_id = params["id"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'id' field"))?;
-                if agent_id.contains('/') || agent_id.contains('\\') || agent_id.contains("..") || agent_id.contains('\0') {
+                if agent_id.contains('/')
+                    || agent_id.contains('\\')
+                    || agent_id.contains("..")
+                    || agent_id.contains('\0')
+                {
                     anyhow::bail!("invalid agent ID: path traversal rejected");
                 }
                 let home = crate::paths::omegon_home()?;
                 let catalog_dir = home.join("catalog");
                 // Find by directory name or by agent.id in manifests
                 let entries = crate::catalog::list(&home);
-                let entry = entries.iter().find(|e| e.id == agent_id)
+                let entry = entries
+                    .iter()
+                    .find(|e| e.id == agent_id)
                     .ok_or_else(|| anyhow::anyhow!("catalog agent '{agent_id}' not found"))?;
                 if entry.bundle_dir.exists() {
                     // Safety: ensure we're only removing from within catalog/
@@ -1251,31 +1367,37 @@ impl OmegonAcpAgent {
             }
 
             // ── Personas ──────────────────────────────────────────
-
             "personas/list" => {
                 let (personas, tones) = crate::plugins::persona_loader::scan_available();
-                let persona_entries: Vec<serde_json::Value> = personas.iter().map(|p| {
-                    let directive = std::fs::read_to_string(p.path.join("PERSONA.md")).unwrap_or_default();
-                    serde_json::json!({
-                        "id": p.id,
-                        "name": p.name,
-                        "description": p.description,
-                        "directive_preview": if directive.len() > 500 {
-                            format!("{}...", &directive[..500])
-                        } else {
-                            directive
-                        },
-                        "path": p.path.display().to_string(),
+                let persona_entries: Vec<serde_json::Value> = personas
+                    .iter()
+                    .map(|p| {
+                        let directive =
+                            std::fs::read_to_string(p.path.join("PERSONA.md")).unwrap_or_default();
+                        serde_json::json!({
+                            "id": p.id,
+                            "name": p.name,
+                            "description": p.description,
+                            "directive_preview": if directive.len() > 500 {
+                                format!("{}...", crate::util::truncate_str(&directive, 500))
+                            } else {
+                                directive
+                            },
+                            "path": p.path.display().to_string(),
+                        })
                     })
-                }).collect();
-                let tone_entries: Vec<serde_json::Value> = tones.iter().map(|t| {
-                    serde_json::json!({
-                        "id": t.id,
-                        "name": t.name,
-                        "description": t.description,
-                        "path": t.path.display().to_string(),
+                    .collect();
+                let tone_entries: Vec<serde_json::Value> = tones
+                    .iter()
+                    .map(|t| {
+                        serde_json::json!({
+                            "id": t.id,
+                            "name": t.name,
+                            "description": t.description,
+                            "path": t.path.display().to_string(),
+                        })
                     })
-                }).collect();
+                    .collect();
                 Ok(serde_json::json!({
                     "personas": persona_entries,
                     "tones": tone_entries,
@@ -1283,27 +1405,36 @@ impl OmegonAcpAgent {
             }
 
             "personas/get" => {
-                let id = params["id"].as_str()
+                let id = params["id"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'id' field"))?;
                 let (personas, _) = crate::plugins::persona_loader::scan_available();
-                let p = personas.iter().find(|p| p.id == id)
+                let p = personas
+                    .iter()
+                    .find(|p| p.id == id)
                     .ok_or_else(|| anyhow::anyhow!("persona '{id}' not found"))?;
-                let directive = std::fs::read_to_string(p.path.join("PERSONA.md")).unwrap_or_default();
-                let manifest_content = std::fs::read_to_string(p.path.join("plugin.toml")).unwrap_or_default();
+                let directive =
+                    std::fs::read_to_string(p.path.join("PERSONA.md")).unwrap_or_default();
+                let manifest_content =
+                    std::fs::read_to_string(p.path.join("plugin.toml")).unwrap_or_default();
 
                 // Parse disabled_tools and badge from manifest
-                let manifest = crate::plugins::armory::ArmoryManifest::parse(&manifest_content).ok();
-                let disabled_tools: Vec<String> = manifest.as_ref()
+                let manifest =
+                    crate::plugins::armory::ArmoryManifest::parse(&manifest_content).ok();
+                let disabled_tools: Vec<String> = manifest
+                    .as_ref()
                     .and_then(|m| m.persona.as_ref())
                     .and_then(|p| p.tools.as_ref())
                     .map(|t| t.disable.clone())
                     .unwrap_or_default();
-                let activated_skills: Vec<String> = manifest.as_ref()
+                let activated_skills: Vec<String> = manifest
+                    .as_ref()
                     .and_then(|m| m.persona.as_ref())
                     .and_then(|p| p.skills.as_ref())
                     .map(|s| s.activate.clone())
                     .unwrap_or_default();
-                let badge = manifest.as_ref()
+                let badge = manifest
+                    .as_ref()
                     .and_then(|m| m.persona.as_ref())
                     .and_then(|p| p.style.as_ref())
                     .and_then(|s| s.badge.clone());
@@ -1321,19 +1452,33 @@ impl OmegonAcpAgent {
             }
 
             "personas/create" => {
-                let name = params["name"].as_str()
+                let name = params["name"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
-                let directive = params["directive"].as_str()
+                let directive = params["directive"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'directive' field"))?;
-                let description = params.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                let description = params
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let badge = params.get("badge").and_then(|v| v.as_str());
-                let disabled_tools: Vec<String> = params.get("disabled_tools")
+                let disabled_tools: Vec<String> = params
+                    .get("disabled_tools")
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
 
-                let slug: String = name.to_lowercase().replace(' ', "-")
-                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+                let slug: String = name
+                    .to_lowercase()
+                    .replace(' ', "-")
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                    .collect();
                 if slug.is_empty() || slug.contains("..") {
                     anyhow::bail!("invalid persona name — must contain alphanumeric characters");
                 }
@@ -1360,9 +1505,15 @@ impl OmegonAcpAgent {
 
                 if !disabled_tools.is_empty() {
                     let mut tools = toml::Table::new();
-                    tools.insert("disable".into(), toml::Value::Array(
-                        disabled_tools.iter().map(|s| toml::Value::String(s.clone())).collect()
-                    ));
+                    tools.insert(
+                        "disable".into(),
+                        toml::Value::Array(
+                            disabled_tools
+                                .iter()
+                                .map(|s| toml::Value::String(s.clone()))
+                                .collect(),
+                        ),
+                    );
                     persona.insert("tools".into(), toml::Value::Table(tools));
                 }
 
@@ -1388,7 +1539,8 @@ impl OmegonAcpAgent {
             }
 
             "personas/delete" => {
-                let id = params["id"].as_str()
+                let id = params["id"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'id' field"))?;
                 let (personas, _) = crate::plugins::persona_loader::scan_available();
                 match personas.iter().find(|p| p.id == id) {
@@ -1403,10 +1555,13 @@ impl OmegonAcpAgent {
             }
 
             "personas/update" => {
-                let id = params["id"].as_str()
+                let id = params["id"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'id' field"))?;
                 let (personas, _) = crate::plugins::persona_loader::scan_available();
-                let p = personas.iter().find(|p| p.id == id)
+                let p = personas
+                    .iter()
+                    .find(|p| p.id == id)
                     .ok_or_else(|| anyhow::anyhow!("persona '{id}' not found"))?;
                 if !p.path.exists() {
                     anyhow::bail!("persona directory not found at {}", p.path.display());
@@ -1423,46 +1578,66 @@ impl OmegonAcpAgent {
                 let mut manifest: toml::Table = toml::from_str(&manifest_content)?;
 
                 if let Some(name) = params.get("name").and_then(|v| v.as_str()) {
-                    if let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut()) {
+                    if let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut())
+                    {
                         plugin.insert("name".into(), name.into());
                     }
                 }
                 if let Some(desc) = params.get("description").and_then(|v| v.as_str()) {
-                    if let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut()) {
+                    if let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut())
+                    {
                         plugin.insert("description".into(), desc.into());
                     }
                 }
                 if let Some(badge) = params.get("badge").and_then(|v| v.as_str()) {
-                    let persona = manifest.entry("persona")
+                    let persona = manifest
+                        .entry("persona")
                         .or_insert(toml::Value::Table(toml::Table::new()))
-                        .as_table_mut().unwrap();
-                    let style = persona.entry("style")
+                        .as_table_mut()
+                        .unwrap();
+                    let style = persona
+                        .entry("style")
                         .or_insert(toml::Value::Table(toml::Table::new()))
-                        .as_table_mut().unwrap();
+                        .as_table_mut()
+                        .unwrap();
                     style.insert("badge".into(), badge.into());
                 }
-                if let Some(disabled_tools) = params.get("disabled_tools").and_then(|v| v.as_array()) {
-                    let tools_arr: Vec<toml::Value> = disabled_tools.iter()
+                if let Some(disabled_tools) =
+                    params.get("disabled_tools").and_then(|v| v.as_array())
+                {
+                    let tools_arr: Vec<toml::Value> = disabled_tools
+                        .iter()
                         .filter_map(|v| v.as_str().map(|s| toml::Value::String(s.to_string())))
                         .collect();
-                    let persona = manifest.entry("persona")
+                    let persona = manifest
+                        .entry("persona")
                         .or_insert(toml::Value::Table(toml::Table::new()))
-                        .as_table_mut().unwrap();
-                    let tools = persona.entry("tools")
+                        .as_table_mut()
+                        .unwrap();
+                    let tools = persona
+                        .entry("tools")
                         .or_insert(toml::Value::Table(toml::Table::new()))
-                        .as_table_mut().unwrap();
+                        .as_table_mut()
+                        .unwrap();
                     tools.insert("disable".into(), toml::Value::Array(tools_arr));
                 }
-                if let Some(activated_skills) = params.get("activated_skills").and_then(|v| v.as_array()) {
-                    let skills_arr: Vec<toml::Value> = activated_skills.iter()
+                if let Some(activated_skills) =
+                    params.get("activated_skills").and_then(|v| v.as_array())
+                {
+                    let skills_arr: Vec<toml::Value> = activated_skills
+                        .iter()
                         .filter_map(|v| v.as_str().map(|s| toml::Value::String(s.to_string())))
                         .collect();
-                    let persona = manifest.entry("persona")
+                    let persona = manifest
+                        .entry("persona")
                         .or_insert(toml::Value::Table(toml::Table::new()))
-                        .as_table_mut().unwrap();
-                    let skills = persona.entry("skills")
+                        .as_table_mut()
+                        .unwrap();
+                    let skills = persona
+                        .entry("skills")
                         .or_insert(toml::Value::Table(toml::Table::new()))
-                        .as_table_mut().unwrap();
+                        .as_table_mut()
+                        .unwrap();
                     skills.insert("activate".into(), toml::Value::Array(skills_arr));
                 }
 
@@ -1475,14 +1650,14 @@ impl OmegonAcpAgent {
             }
 
             // ── Skills ────────────────────────────────────────────
-
             "skills/list" => {
                 let entries = crate::skills::list_structured()?;
                 Ok(serde_json::json!({ "skills": entries }))
             }
 
             "skills/get" => {
-                let name = params["name"].as_str()
+                let name = params["name"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
                 let (manifest, body, path) = crate::skills::get_skill(name)?;
                 Ok(serde_json::json!({
@@ -1509,15 +1684,23 @@ impl OmegonAcpAgent {
             }
 
             "skills/create" => {
-                let name = params["name"].as_str()
+                let name = params["name"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
-                let content = params["content"].as_str()
+                let content = params["content"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'content' field (SKILL.md body)"))?;
-                let project_local = params.get("project_local")
-                    .and_then(|v| v.as_bool()).unwrap_or(false);
+                let project_local = params
+                    .get("project_local")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
-                let slug: String = name.to_lowercase().replace(' ', "-")
-                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+                let slug: String = name
+                    .to_lowercase()
+                    .replace(' ', "-")
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                    .collect();
                 if slug.is_empty() || slug.contains("..") {
                     anyhow::bail!("invalid skill name");
                 }
@@ -1538,9 +1721,14 @@ impl OmegonAcpAgent {
             }
 
             "skills/update" => {
-                let name = params["name"].as_str()
+                let name = params["name"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
-                if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
+                if name.contains('/')
+                    || name.contains('\\')
+                    || name.contains("..")
+                    || name.contains('\0')
+                {
                     anyhow::bail!("invalid skill name: path traversal rejected");
                 }
 
@@ -1569,13 +1757,22 @@ impl OmegonAcpAgent {
                         manifest.description = desc.to_string();
                     }
                     if let Some(tags) = params.get("tags").and_then(|v| v.as_array()) {
-                        manifest.tags = tags.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+                        manifest.tags = tags
+                            .iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect();
                     }
                     if let Some(aliases) = params.get("aliases").and_then(|v| v.as_array()) {
-                        manifest.aliases = aliases.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+                        manifest.aliases = aliases
+                            .iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect();
                     }
                     if let Some(triggers) = params.get("triggers").and_then(|v| v.as_array()) {
-                        manifest.triggers = triggers.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+                        manifest.triggers = triggers
+                            .iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect();
                     }
                     if let Some(posture) = params.get("posture").and_then(|v| v.as_str()) {
                         manifest.posture = Some(posture.to_string());
@@ -1597,9 +1794,14 @@ impl OmegonAcpAgent {
             }
 
             "skills/delete" => {
-                let name = params["name"].as_str()
+                let name = params["name"]
+                    .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'name' field"))?;
-                if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
+                if name.contains('/')
+                    || name.contains('\\')
+                    || name.contains("..")
+                    || name.contains('\0')
+                {
                     anyhow::bail!("invalid skill name: path traversal rejected");
                 }
 
@@ -1623,7 +1825,6 @@ impl OmegonAcpAgent {
             // ── Control requests (TUI parity) ────────────────────
             // Route through the worker thread which has access to
             // conversation state, settings, and secrets.
-
             "control/stats"
             | "control/max_turns"
             | "control/persona_list"
@@ -1653,14 +1854,13 @@ impl OmegonAcpAgent {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 let worker_tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
                 if let Some(wtx) = worker_tx {
-                    let _ = wtx.send(WorkerRequest::ControlRequest {
-                        command: full_cmd,
-                        response_tx: tx,
-                    }).await;
-                    match tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        rx,
-                    ).await {
+                    let _ = wtx
+                        .send(WorkerRequest::ControlRequest {
+                            command: full_cmd,
+                            response_tx: tx,
+                        })
+                        .await;
+                    match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
                         Ok(Ok(resp)) => Ok(serde_json::json!({
                             "text": resp.text,
                             "error": resp.error,
@@ -1838,32 +2038,48 @@ fn parse_armory_kind(kind: &str) -> anyhow::Result<crate::armory::ArmoryKind> {
     }
 }
 
-fn convert_acp_mcp_server(server: McpServer) -> Option<(String, crate::plugins::mcp::McpServerConfig)> {
+fn convert_acp_mcp_server(
+    server: McpServer,
+) -> Option<(String, crate::plugins::mcp::McpServerConfig)> {
     match server {
         McpServer::Stdio(s) => {
-            let env: std::collections::HashMap<String, String> = s.env
-                .into_iter()
-                .map(|e| (e.name, e.value))
-                .collect();
-            Some((s.name, mcp_config(Some(s.command.to_string_lossy().to_string()), None, s.args, env)))
+            let env: std::collections::HashMap<String, String> =
+                s.env.into_iter().map(|e| (e.name, e.value)).collect();
+            Some((
+                s.name,
+                mcp_config(
+                    Some(s.command.to_string_lossy().to_string()),
+                    None,
+                    s.args,
+                    env,
+                ),
+            ))
         }
-        McpServer::Http(s) => {
-            Some((s.name, mcp_config(None, Some(s.url), Vec::new(), std::collections::HashMap::new())))
-        }
-        McpServer::Sse(s) => {
-            Some((s.name, mcp_config(None, Some(s.url), Vec::new(), std::collections::HashMap::new())))
-        }
+        McpServer::Http(s) => Some((
+            s.name,
+            mcp_config(
+                None,
+                Some(s.url),
+                Vec::new(),
+                std::collections::HashMap::new(),
+            ),
+        )),
+        McpServer::Sse(s) => Some((
+            s.name,
+            mcp_config(
+                None,
+                Some(s.url),
+                Vec::new(),
+                std::collections::HashMap::new(),
+            ),
+        )),
         _ => None,
     }
 }
 
 // ── Entry point ────────────────────────────────────────────────────────
 
-pub async fn run(
-    model: &str,
-    agent_id: Option<&str>,
-    cwd: &std::path::Path,
-) -> anyhow::Result<()> {
+pub async fn run(model: &str, agent_id: Option<&str>, cwd: &std::path::Path) -> anyhow::Result<()> {
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
     if let Some(id) = agent_id {
@@ -1904,7 +2120,8 @@ pub async fn run_server(
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
-    let bind_addr: std::net::SocketAddr = addr.parse()
+    let bind_addr: std::net::SocketAddr = addr
+        .parse()
         .map_err(|e| anyhow::anyhow!("invalid listen address '{addr}': {e}"))?;
 
     let web_auth = Arc::new(crate::web::WebAuthState::ephemeral_generated(
@@ -1928,12 +2145,16 @@ pub async fn run_server(
     }
 
     let app = axum::Router::new()
-        .route("/acp", axum::routing::get(crate::web::acp_ws::acp_ws_handler))
+        .route(
+            "/acp",
+            axum::routing::get(crate::web::acp_ws::acp_ws_handler),
+        )
         .route("/api/healthz", axum::routing::get(healthz))
         .route("/api/readyz", axum::routing::get(healthz))
         .with_state(acp_state);
 
-    let listener = tokio::net::TcpListener::bind(bind_addr).await
+    let listener = tokio::net::TcpListener::bind(bind_addr)
+        .await
         .map_err(|e| anyhow::anyhow!("failed to bind {bind_addr}: {e}"))?;
     let bound = listener.local_addr()?;
     let (http_scheme, ws_scheme) = crate::control_tls::schemes(tls.as_ref());
@@ -1967,21 +2188,15 @@ pub async fn run_server(
     {
         let cancel_sigterm = shutdown.clone();
         tokio::spawn(async move {
-            let mut sig = tokio::signal::unix::signal(
-                tokio::signal::unix::SignalKind::terminate(),
-            ).expect("SIGTERM handler");
+            let mut sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("SIGTERM handler");
             sig.recv().await;
             cancel_sigterm.cancel();
         });
     }
 
-    crate::control_tls::serve_router_with_shutdown(
-        listener,
-        app,
-        tls,
-        shutdown.cancelled_owned(),
-    )
-    .await?;
+    crate::control_tls::serve_router_with_shutdown(listener, app, tls, shutdown.cancelled_owned())
+        .await?;
 
     tracing::info!("ACP server shut down");
     Ok(())
@@ -1993,10 +2208,10 @@ mod tests {
 
     #[test]
     fn convert_stdio_mcp_server() {
-        let server = McpServer::Stdio(McpServerStdio::new(
-            "test-server",
-            std::path::PathBuf::from("/usr/bin/test-mcp"),
-        ).args(vec!["--port".into(), "3000".into()]));
+        let server = McpServer::Stdio(
+            McpServerStdio::new("test-server", std::path::PathBuf::from("/usr/bin/test-mcp"))
+                .args(vec!["--port".into(), "3000".into()]),
+        );
 
         let (name, config) = convert_acp_mcp_server(server).expect("should convert");
         assert_eq!(name, "test-server");
@@ -2035,20 +2250,32 @@ mod tests {
         use crate::acp_worker::{PlanEntryData, PlanEntryState};
 
         let entries = vec![
-            PlanEntryData { content: "Step 1".into(), status: PlanEntryState::Completed },
-            PlanEntryData { content: "Step 2".into(), status: PlanEntryState::InProgress },
-            PlanEntryData { content: "Step 3".into(), status: PlanEntryState::Pending },
+            PlanEntryData {
+                content: "Step 1".into(),
+                status: PlanEntryState::Completed,
+            },
+            PlanEntryData {
+                content: "Step 2".into(),
+                status: PlanEntryState::InProgress,
+            },
+            PlanEntryData {
+                content: "Step 3".into(),
+                status: PlanEntryState::Pending,
+            },
         ];
 
-        let plan_entries: Vec<PlanEntry> = entries.iter().map(|e| {
-            let status = match e.status {
-                PlanEntryState::Pending => PlanEntryStatus::Pending,
-                PlanEntryState::InProgress => PlanEntryStatus::InProgress,
-                PlanEntryState::Completed => PlanEntryStatus::Completed,
-                PlanEntryState::Failed => PlanEntryStatus::Completed,
-            };
-            PlanEntry::new(&e.content, PlanEntryPriority::Medium, status)
-        }).collect();
+        let plan_entries: Vec<PlanEntry> = entries
+            .iter()
+            .map(|e| {
+                let status = match e.status {
+                    PlanEntryState::Pending => PlanEntryStatus::Pending,
+                    PlanEntryState::InProgress => PlanEntryStatus::InProgress,
+                    PlanEntryState::Completed => PlanEntryStatus::Completed,
+                    PlanEntryState::Failed => PlanEntryStatus::Completed,
+                };
+                PlanEntry::new(&e.content, PlanEntryPriority::Medium, status)
+            })
+            .collect();
 
         assert_eq!(plan_entries.len(), 3);
         assert_eq!(plan_entries[0].status, PlanEntryStatus::Completed);
@@ -2079,9 +2306,18 @@ mod tests {
 
         // Multi-entry = fresh plan
         let entries = vec![
-            PlanEntryData { content: "A".into(), status: PlanEntryState::Pending },
-            PlanEntryData { content: "B".into(), status: PlanEntryState::Pending },
-            PlanEntryData { content: "C".into(), status: PlanEntryState::Pending },
+            PlanEntryData {
+                content: "A".into(),
+                status: PlanEntryState::Pending,
+            },
+            PlanEntryData {
+                content: "B".into(),
+                status: PlanEntryState::Pending,
+            },
+            PlanEntryData {
+                content: "C".into(),
+                status: PlanEntryState::Pending,
+            },
         ];
         if entries.len() > 1 {
             plan_state = entries.clone();
@@ -2089,7 +2325,10 @@ mod tests {
         assert_eq!(plan_state.len(), 3);
 
         // Single entry update merges
-        let update = vec![PlanEntryData { content: "B".into(), status: PlanEntryState::Completed }];
+        let update = vec![PlanEntryData {
+            content: "B".into(),
+            status: PlanEntryState::Completed,
+        }];
         for u in &update {
             if let Some(existing) = plan_state.iter_mut().find(|e| e.content == u.content) {
                 existing.status = u.status;
@@ -2107,7 +2346,10 @@ mod tests {
         let mut plan_state: Vec<PlanEntryData> = Vec::new();
 
         // Single entry with empty plan → should initialize
-        let entries = vec![PlanEntryData { content: "Solo".into(), status: PlanEntryState::Pending }];
+        let entries = vec![PlanEntryData {
+            content: "Solo".into(),
+            status: PlanEntryState::Pending,
+        }];
         if entries.len() > 1 {
             plan_state = entries.clone();
         } else if plan_state.is_empty() {
@@ -2122,14 +2364,26 @@ mod tests {
         use crate::acp_worker::{PlanEntryData, PlanEntryState};
 
         let mut plan_state = vec![
-            PlanEntryData { content: "Old A".into(), status: PlanEntryState::Completed },
-            PlanEntryData { content: "Old B".into(), status: PlanEntryState::Pending },
+            PlanEntryData {
+                content: "Old A".into(),
+                status: PlanEntryState::Completed,
+            },
+            PlanEntryData {
+                content: "Old B".into(),
+                status: PlanEntryState::Pending,
+            },
         ];
 
         // New multi-entry plan replaces old
         let new_entries = vec![
-            PlanEntryData { content: "New X".into(), status: PlanEntryState::Pending },
-            PlanEntryData { content: "New Y".into(), status: PlanEntryState::Pending },
+            PlanEntryData {
+                content: "New X".into(),
+                status: PlanEntryState::Pending,
+            },
+            PlanEntryData {
+                content: "New Y".into(),
+                status: PlanEntryState::Pending,
+            },
         ];
         if new_entries.len() > 1 {
             plan_state = new_entries.clone();
@@ -2223,7 +2477,11 @@ mod tests {
         persona.insert("style".into(), toml::Value::Table(style));
         plugin.insert("persona".into(), toml::Value::Table(persona));
 
-        std::fs::write(persona_dir.join("plugin.toml"), toml::to_string_pretty(&plugin).unwrap()).unwrap();
+        std::fs::write(
+            persona_dir.join("plugin.toml"),
+            toml::to_string_pretty(&plugin).unwrap(),
+        )
+        .unwrap();
         std::fs::write(persona_dir.join("PERSONA.md"), "You are a test persona.\n").unwrap();
 
         // Load via persona_loader
@@ -2239,7 +2497,11 @@ mod tests {
         if let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut()) {
             plugin.insert("description".into(), "Updated description".into());
         }
-        std::fs::write(persona_dir.join("plugin.toml"), toml::to_string_pretty(&manifest).unwrap()).unwrap();
+        std::fs::write(
+            persona_dir.join("plugin.toml"),
+            toml::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
 
         // Reload and verify
         let reloaded = crate::plugins::persona_loader::load_persona(&persona_dir).unwrap();

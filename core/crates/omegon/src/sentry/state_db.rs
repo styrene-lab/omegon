@@ -23,21 +23,26 @@ impl StateDb {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
-        let db = Self { conn: Mutex::new(conn) };
+        let db = Self {
+            conn: Mutex::new(conn),
+        };
         db.migrate()?;
         Ok(db)
     }
 
     pub fn in_memory() -> anyhow::Result<Self> {
         let conn = Connection::open_in_memory()?;
-        let db = Self { conn: Mutex::new(conn) };
+        let db = Self {
+            conn: Mutex::new(conn),
+        };
         db.migrate()?;
         Ok(db)
     }
 
     fn migrate(&self) -> anyhow::Result<()> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS task_runs (
                 run_id       TEXT PRIMARY KEY,
                 task_id      TEXT NOT NULL,
@@ -78,7 +83,8 @@ impl StateDb {
                 recorded_at   TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_routing_outcomes_task_id ON routing_outcomes(task_id);
-        ")?;
+        ",
+        )?;
         Ok(())
     }
 
@@ -100,14 +106,15 @@ impl StateDb {
 
     pub fn release_all(&self, instance_id: &str) -> anyhow::Result<Vec<String>> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{e}"))?;
-        let mut stmt = conn.prepare(
-            "SELECT task_id FROM task_claims WHERE instance_id = ?1",
-        )?;
+        let mut stmt = conn.prepare("SELECT task_id FROM task_claims WHERE instance_id = ?1")?;
         let ids: Vec<String> = stmt
             .query_map([instance_id], |row| row.get(0))?
             .filter_map(|r| r.ok())
             .collect();
-        conn.execute("DELETE FROM task_claims WHERE instance_id = ?1", [instance_id])?;
+        conn.execute(
+            "DELETE FROM task_claims WHERE instance_id = ?1",
+            [instance_id],
+        )?;
         Ok(ids)
     }
 
@@ -486,17 +493,20 @@ mod tests {
     #[test]
     fn routing_outcome_recorded_and_queryable() {
         let db = test_db();
-        db.record_routing_outcome("task-1", "Simple", "haiku", true, 500, 10).unwrap();
-        db.record_routing_outcome("task-2", "Complex", "opus", true, 5000, 120).unwrap();
-        db.record_routing_outcome("task-3", "Simple", "haiku", false, 300, 8).unwrap();
+        db.record_routing_outcome("task-1", "Simple", "haiku", true, 500, 10)
+            .unwrap();
+        db.record_routing_outcome("task-2", "Complex", "opus", true, 5000, 120)
+            .unwrap();
+        db.record_routing_outcome("task-3", "Simple", "haiku", false, 300, 8)
+            .unwrap();
 
         let stats = db.routing_stats().unwrap();
         assert_eq!(stats.total, 3);
         assert_eq!(stats.by_class.len(), 2);
 
         let simple = stats.by_class.iter().find(|r| r.0 == "Simple").unwrap();
-        assert_eq!(simple.1, 2);  // total
-        assert_eq!(simple.2, 1);  // successes
+        assert_eq!(simple.1, 2); // total
+        assert_eq!(simple.2, 1); // successes
         assert_eq!(simple.3, 800); // total_tokens
 
         let complex = stats.by_class.iter().find(|r| r.0 == "Complex").unwrap();

@@ -29,8 +29,8 @@ pub mod spawn;
 pub use container::materialize_container;
 pub use manifest::NexManifest;
 pub use profile::{
-    NexCapabilities, NexDomain, NexEgressFilter, NexIdentityBinding, NexNetworkPolicy,
-    NexOverlay, NexPortMapping, NexPortProtocol, NexProfile, NexResourceLimits,
+    NexCapabilities, NexDomain, NexEgressFilter, NexIdentityBinding, NexNetworkPolicy, NexOverlay,
+    NexPortMapping, NexPortProtocol, NexProfile, NexResourceLimits,
 };
 pub use registry::NexRegistry;
 pub use spawn::{detect_container_runtime_public, spawn_containerized_child_agent};

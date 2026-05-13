@@ -25,8 +25,6 @@ use tracing_subscriber::util::SubscriberInitExt;
 mod acp;
 mod acp_worker;
 mod auth;
-mod host_context;
-pub(crate) mod filelock;
 mod behavior;
 mod bootstrap;
 mod bridge;
@@ -43,12 +41,14 @@ mod control_actions;
 mod control_runtime;
 mod control_tls;
 mod embedding;
-#[cfg(feature = "local-embeddings")]
-mod local_embedding;
 pub mod extensions;
 pub mod features;
+pub(crate) mod filelock;
 mod first_run;
+mod host_context;
 mod ipc;
+#[cfg(feature = "local-embeddings")]
+mod local_embedding;
 mod migrate;
 mod shadow_context;
 mod skills;
@@ -65,7 +65,6 @@ mod agent_manifest;
 mod armory;
 mod bundle_verify;
 mod catalog;
-mod pkl_modules;
 mod checkpoint;
 mod child_agent;
 mod conversation;
@@ -75,8 +74,10 @@ mod extension_registry;
 mod lifecycle;
 mod r#loop;
 mod model_registry;
+mod mqtt_bridge;
 mod ollama;
 mod paths;
+mod pkl_modules;
 mod plugin_cli;
 mod plugins;
 mod prompt;
@@ -98,7 +99,6 @@ mod tui;
 pub mod util;
 mod web;
 mod workflow;
-mod mqtt_bridge;
 
 pub mod nex;
 
@@ -603,7 +603,11 @@ struct ControlTlsArgs {
     key: Option<PathBuf>,
 
     /// Optional PEM client CA bundle. When set, client certificates are required.
-    #[arg(long = "rpc-tls-client-ca", alias = "control-tls-client-ca", value_name = "PATH")]
+    #[arg(
+        long = "rpc-tls-client-ca",
+        alias = "control-tls-client-ca",
+        value_name = "PATH"
+    )]
     client_ca: Option<PathBuf>,
 }
 
@@ -1123,7 +1127,9 @@ async fn main() -> anyhow::Result<()> {
                         extension_registry::install_by_name(uri, version.as_deref()).await?
                     } else {
                         if version.is_some() {
-                            anyhow::bail!("--version is only supported for armory installs (bare name)");
+                            anyhow::bail!(
+                                "--version is only supported for armory installs (bare name)"
+                            );
                         }
                         extension_cli::install(uri)?
                     }
@@ -1260,7 +1266,11 @@ async fn main() -> anyhow::Result<()> {
                 switch::interactive_picker().await
             }
         }
-        Some(Commands::Acp { ref agent, ref listen, ref tls }) => {
+        Some(Commands::Acp {
+            ref agent,
+            ref listen,
+            ref tls,
+        }) => {
             if let Some(addr) = listen {
                 acp::run_server(
                     addr,
@@ -1272,7 +1282,9 @@ async fn main() -> anyhow::Result<()> {
                 .await
             } else {
                 let local = tokio::task::LocalSet::new();
-                local.run_until(acp::run(&cli.model, agent.as_deref(), &cli.cwd)).await
+                local
+                    .run_until(acp::run(&cli.model, agent.as_deref(), &cli.cwd))
+                    .await
             }
         }
         Some(Commands::Run {
@@ -1353,42 +1365,50 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Ollama { ref action }) => run_ollama_command(action).await,
         Some(Commands::Embedding { ref action }) => run_embedding_command(action).await,
-        Some(Commands::Sentry { ref config, control_port, strict_port }) => {
-            run_sentry_command(config, control_port, strict_port, &cli).await
-        }
+        Some(Commands::Sentry {
+            ref config,
+            control_port,
+            strict_port,
+        }) => run_sentry_command(config, control_port, strict_port, &cli).await,
         Some(Commands::Doctor) => run_doctor_command(&cli).await,
         Some(Commands::Skills { ref action }) => match action {
             SkillsAction::List => skills::cmd_list(),
             SkillsAction::Install => skills::cmd_install(),
-            SkillsAction::Get { name } => {
-                match skills::get_skill(name) {
-                    Ok((manifest, body, path)) => {
-                        println!("Skill: {}", manifest.name);
-                        if !manifest.description.is_empty() {
-                            println!("Description: {}", manifest.description);
-                        }
-                        if let Some(ref v) = manifest.version {
-                            println!("Version: {v}");
-                        }
-                        if !manifest.tags.is_empty() {
-                            println!("Tags: {}", manifest.tags.join(", "));
-                        }
-                        if !manifest.triggers.is_empty() {
-                            println!("Triggers: {}", manifest.triggers.join(", "));
-                        }
-                        if let Some(ref p) = manifest.posture {
-                            println!("Posture: {p}");
-                        }
-                        println!("Path: {}", path.display());
-                        println!("\n{body}");
-                        Ok(())
+            SkillsAction::Get { name } => match skills::get_skill(name) {
+                Ok((manifest, body, path)) => {
+                    println!("Skill: {}", manifest.name);
+                    if !manifest.description.is_empty() {
+                        println!("Description: {}", manifest.description);
                     }
-                    Err(e) => Err(e),
+                    if let Some(ref v) = manifest.version {
+                        println!("Version: {v}");
+                    }
+                    if !manifest.tags.is_empty() {
+                        println!("Tags: {}", manifest.tags.join(", "));
+                    }
+                    if !manifest.triggers.is_empty() {
+                        println!("Triggers: {}", manifest.triggers.join(", "));
+                    }
+                    if let Some(ref p) = manifest.posture {
+                        println!("Posture: {p}");
+                    }
+                    println!("Path: {}", path.display());
+                    println!("\n{body}");
+                    Ok(())
                 }
-            }
-            SkillsAction::Create { name, content, project_local } => {
-                let slug: String = name.to_lowercase().replace(' ', "-")
-                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+                Err(e) => Err(e),
+            },
+            SkillsAction::Create {
+                name,
+                content,
+                project_local,
+            } => {
+                let slug: String = name
+                    .to_lowercase()
+                    .replace(' ', "-")
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                    .collect();
                 if slug.is_empty() {
                     anyhow::bail!("invalid skill name");
                 }
@@ -1404,7 +1424,11 @@ async fn main() -> anyhow::Result<()> {
                 Ok(())
             }
             SkillsAction::Delete { name } => {
-                if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
+                if name.contains('/')
+                    || name.contains('\\')
+                    || name.contains("..")
+                    || name.contains('\0')
+                {
                     anyhow::bail!("invalid skill name: path traversal rejected");
                 }
                 let cwd = std::env::current_dir()?;
@@ -1432,7 +1456,9 @@ async fn main() -> anyhow::Result<()> {
                 let home = paths::omegon_home()?;
                 let catalog_dir = home.join("catalog");
                 let entries = catalog::list(&home);
-                let entry = entries.iter().find(|e| e.id == *id)
+                let entry = entries
+                    .iter()
+                    .find(|e| e.id == *id)
                     .ok_or_else(|| anyhow::anyhow!("catalog agent '{id}' not found"))?;
                 if !entry.bundle_dir.starts_with(&catalog_dir) {
                     anyhow::bail!("refusing to remove agent outside catalog directory");
@@ -1463,10 +1489,19 @@ async fn main() -> anyhow::Result<()> {
                 }
                 Ok(())
             }
-            PersonaAction::Create { name, directive, description, badge } => {
+            PersonaAction::Create {
+                name,
+                directive,
+                description,
+                badge,
+            } => {
                 let directive_content = std::fs::read_to_string(directive)?;
-                let slug: String = name.to_lowercase().replace(' ', "-")
-                    .chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+                let slug: String = name
+                    .to_lowercase()
+                    .replace(' ', "-")
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                    .collect();
                 if slug.is_empty() {
                     anyhow::bail!("invalid persona name");
                 }
@@ -1523,8 +1558,13 @@ async fn main() -> anyhow::Result<()> {
                 TaskAction::List => task_tree::cmd_list(&cwd),
                 TaskAction::Get { id } => {
                     let task = task_tree::get_task(&cwd, id)?;
-                    println!("{} {} [{}] — {}", task.meta.status.icon(), task.meta.id,
-                        task.meta.status.as_str(), task.meta.title);
+                    println!(
+                        "{} {} [{}] — {}",
+                        task.meta.status.icon(),
+                        task.meta.id,
+                        task.meta.status.as_str(),
+                        task.meta.title
+                    );
                     if !task.meta.depends_on.is_empty() {
                         println!("  depends: {}", task.meta.depends_on.join(", "));
                     }
@@ -1539,7 +1579,15 @@ async fn main() -> anyhow::Result<()> {
                     }
                     Ok(())
                 }
-                TaskAction::Create { title, body, priority, design_node, openspec, tags, depends_on } => {
+                TaskAction::Create {
+                    title,
+                    body,
+                    priority,
+                    design_node,
+                    openspec,
+                    tags,
+                    depends_on,
+                } => {
                     let body_text = body.as_deref().unwrap_or("");
                     let mut task = task_tree::create_task(&cwd, title, body_text)?;
 
@@ -1563,21 +1611,31 @@ async fn main() -> anyhow::Result<()> {
                         modified = true;
                     }
                     if let Some(dep_str) = depends_on {
-                        task.meta.depends_on = dep_str.split(',').map(|s| s.trim().to_string()).collect();
+                        task.meta.depends_on =
+                            dep_str.split(',').map(|s| s.trim().to_string()).collect();
                         modified = true;
                     }
                     if modified {
                         task_tree::save_task(&cwd, &task)?;
                     }
 
-                    println!("Created task '{}' at {}", task.meta.id, task.file_path.display());
+                    println!(
+                        "Created task '{}' at {}",
+                        task.meta.id,
+                        task.file_path.display()
+                    );
                     Ok(())
                 }
                 TaskAction::Status { id, status } => {
                     let s = task_tree::TaskStatus::parse(status)
                         .ok_or_else(|| anyhow::anyhow!("invalid status: {status}"))?;
                     let task = task_tree::update_status(&cwd, id, s)?;
-                    println!("{} {} — {}", task.meta.status.icon(), task.meta.id, task.meta.title);
+                    println!(
+                        "{} {} — {}",
+                        task.meta.status.icon(),
+                        task.meta.id,
+                        task.meta.title
+                    );
                     Ok(())
                 }
                 TaskAction::Delete { id } => {
@@ -2069,9 +2127,8 @@ async fn run_embedded_command(
     {
         let cancel_sigterm = global_cancel.clone();
         tokio::spawn(async move {
-            let mut sig = tokio::signal::unix::signal(
-                tokio::signal::unix::SignalKind::terminate(),
-            ).expect("SIGTERM handler");
+            let mut sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("SIGTERM handler");
             sig.recv().await;
             cancel_sigterm.cancel();
         });
@@ -2143,10 +2200,9 @@ async fn run_embedded_command(
 
     let trigger_configs = triggers::load_trigger_configs(&cwd);
     let trigger_events = triggers::EventTriggers::from_configs(&trigger_configs);
-    let (mut trigger_runtime, _trigger_tx) = triggers::TriggerRuntimeBuilder::new(
-        trigger_configs,
-        cwd.clone(),
-    ).build(global_cancel.clone());
+    let (mut trigger_runtime, _trigger_tx) =
+        triggers::TriggerRuntimeBuilder::new(trigger_configs, cwd.clone())
+            .build(global_cancel.clone());
 
     // Track in-flight triggers to prevent re-entrant execution.
     let triggers_in_flight: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>> =
@@ -3124,14 +3180,27 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
 
             println!("Embedding model: {default_model}");
             println!("Model directory: {}", model_dir.display());
-            println!("model.onnx:     {}", if model_exists { "present" } else { "MISSING" });
-            println!("tokenizer.json: {}", if tokenizer_exists { "present" } else { "MISSING" });
+            println!(
+                "model.onnx:     {}",
+                if model_exists { "present" } else { "MISSING" }
+            );
+            println!(
+                "tokenizer.json: {}",
+                if tokenizer_exists {
+                    "present"
+                } else {
+                    "MISSING"
+                }
+            );
 
             if model_exists && tokenizer_exists {
                 println!("\nStatus: ready");
                 #[cfg(feature = "local-embeddings")]
                 {
-                    match crate::local_embedding::LocalEmbeddingService::load(&model_dir, &default_model) {
+                    match crate::local_embedding::LocalEmbeddingService::load(
+                        &model_dir,
+                        &default_model,
+                    ) {
                         Ok(svc) => println!("Model loads successfully ({})", svc.model_name()),
                         Err(e) => println!("Model failed to load: {e}"),
                     }
@@ -3150,7 +3219,11 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
             let memory_dir = {
                 let ai = project_root.join("ai").join("memory");
                 let omegon = project_root.join(".omegon").join("memory");
-                if omegon.exists() && !ai.exists() { omegon } else { ai }
+                if omegon.exists() && !ai.exists() {
+                    omegon
+                } else {
+                    ai
+                }
             };
             let db_path = memory_dir.join("facts.db");
             if !db_path.exists() {
@@ -3158,14 +3231,14 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            let backend: std::sync::Arc<dyn omegon_memory::MemoryBackend> = std::sync::Arc::new(
-                omegon_memory::SqliteBackend::open(&db_path)?
-            );
+            let backend: std::sync::Arc<dyn omegon_memory::MemoryBackend> =
+                std::sync::Arc::new(omegon_memory::SqliteBackend::open(&db_path)?);
 
             let embed_svc: Box<dyn omegon_memory::EmbeddingService> = {
                 let profile = crate::settings::Profile::load(&cwd);
                 let ollama = crate::embedding::OllamaEmbeddingService::from_config(
-                    profile.embed_url.as_deref(), profile.embed_model.as_deref(),
+                    profile.embed_url.as_deref(),
+                    profile.embed_model.as_deref(),
                 );
                 if ollama.probe().await {
                     Box::new(ollama)
@@ -3183,24 +3256,34 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                     }
                     #[cfg(not(feature = "local-embeddings"))]
                     {
-                        println!("No embedding service available (Ollama not reachable, local-embeddings feature not enabled)");
+                        println!(
+                            "No embedding service available (Ollama not reachable, local-embeddings feature not enabled)"
+                        );
                         return Ok(());
                     }
                 }
             };
 
             let mind = "default";
-            let facts = backend.list_facts(mind, omegon_memory::FactFilter::default()).await?;
+            let facts = backend
+                .list_facts(mind, omegon_memory::FactFilter::default())
+                .await?;
             let _meta = backend.embedding_metadata(mind).await?;
 
             let mut backfilled = 0u32;
             let total = facts.len();
-            println!("Backfilling embeddings for {total} facts using {}...", embed_svc.model_name());
+            println!(
+                "Backfilling embeddings for {total} facts using {}...",
+                embed_svc.model_name()
+            );
 
             for (i, fact) in facts.iter().enumerate() {
                 match embed_svc.embed(&fact.content).await {
                     Ok(embedding) => {
-                        if let Err(e) = backend.store_embedding(&fact.id, embed_svc.model_name(), &embedding).await {
+                        if let Err(e) = backend
+                            .store_embedding(&fact.id, embed_svc.model_name(), &embedding)
+                            .await
+                        {
                             tracing::warn!(fact_id = %fact.id, error = %e, "failed to store embedding");
                         } else {
                             backfilled += 1;
@@ -3216,7 +3299,10 @@ async fn run_embedding_command(action: &EmbeddingAction) -> anyhow::Result<()> {
                 }
             }
 
-            println!("\nBackfill complete: {backfilled}/{total} facts embedded with {}", embed_svc.model_name());
+            println!(
+                "\nBackfill complete: {backfilled}/{total} facts embedded with {}",
+                embed_svc.model_name()
+            );
         }
     }
     Ok(())
@@ -5004,7 +5090,7 @@ fn format_agent_error(
                 }
             }
             // Include truncated raw error so the user can report it
-            let truncated = if raw.len() > 200 { &raw[..200] } else { &raw };
+            let truncated = crate::util::truncate_str(&raw, 200);
             return format!(
                 "⚠ Authentication error ({who}) — credentials were rejected.\n\
                  Raw: {truncated}\n\
@@ -5025,7 +5111,7 @@ fn format_agent_error(
     if let Some(start) = raw.find("status=") {
         let rest = &raw[start..];
         if let Some(end) = rest.find(' ') {
-            return format!("⚠ {}", &rest[..end.min(40)]);
+            return format!("⚠ {}", crate::util::truncate_str(&rest[..end], 40));
         }
     }
     // Fallback: truncate
@@ -5995,7 +6081,8 @@ async fn maybe_run_injected_cleave_smoke_child(
                     s.set_requested_context_class(class);
                 }
             }
-            let mut agent = setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await?;
+            let mut agent =
+                setup::AgentSetup::new(cwd, None, Some(shared_settings.clone())).await?;
             agent.instance_id = paths::instance_id("cleave");
             let status = agent.initial_harness_status.clone();
             let tool_names: Vec<String> = agent
@@ -6326,9 +6413,9 @@ async fn run_sentry_command(
     let cwd = std::fs::canonicalize(std::env::current_dir()?)?;
     let state_dir = cwd.join(".omegon").join("sentry");
     std::fs::create_dir_all(&state_dir)?;
-    let state_db = std::sync::Arc::new(
-        sentry::state_db::StateDb::open(&state_dir.join("state.db"))?,
-    );
+    let state_db = std::sync::Arc::new(sentry::state_db::StateDb::open(
+        &state_dir.join("state.db"),
+    )?);
 
     let instance_id = paths::instance_id("sentry");
 
@@ -6424,11 +6511,8 @@ async fn run_sentry_command(
                 project = ?flynt_project,
                 "using flynt vault board"
             );
-            let mut board = sentry::FlyntTaskBoard::open(
-                vault_root,
-                state_db.clone(),
-                instance_id.clone(),
-            )?;
+            let mut board =
+                sentry::FlyntTaskBoard::open(vault_root, state_db.clone(), instance_id.clone())?;
             if let Some(pid) = flynt_project {
                 // Probe before applying so a typo in FLYNT_PROJECT
                 // surfaces at startup rather than as silent empty
@@ -6487,7 +6571,9 @@ async fn run_sentry_command(
             trigger_configs.push(triggers::TriggerConfig {
                 trigger: meta,
                 filter: None,
-                prompt: triggers::PromptTemplate { template: String::new() },
+                prompt: triggers::PromptTemplate {
+                    template: String::new(),
+                },
                 session: None,
             });
         }
@@ -6495,10 +6581,9 @@ async fn run_sentry_command(
 
     let global_cancel = CancellationToken::new();
 
-    let (trigger_runtime, event_tx) = triggers::TriggerRuntimeBuilder::new(
-        trigger_configs,
-        cwd.clone(),
-    ).build(global_cancel.clone());
+    let (trigger_runtime, event_tx) =
+        triggers::TriggerRuntimeBuilder::new(trigger_configs, cwd.clone())
+            .build(global_cancel.clone());
 
     let sentry_state = sentry::routes::SentryState {
         board: board.clone(),
@@ -6515,9 +6600,9 @@ async fn run_sentry_command(
         let ctrl_c = tokio::signal::ctrl_c();
         #[cfg(unix)]
         {
-            let mut sigterm = tokio::signal::unix::signal(
-                tokio::signal::unix::SignalKind::terminate(),
-            ).expect("failed to register SIGTERM handler");
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("failed to register SIGTERM handler");
             tokio::select! {
                 _ = ctrl_c => { tracing::info!("Ctrl-C received — shutting down sentry"); }
                 _ = sigterm.recv() => { tracing::info!("SIGTERM received — shutting down sentry"); }
@@ -6577,9 +6662,7 @@ async fn run_sentry_command(
         }
     });
 
-    let budget_limits = std::sync::Arc::new(
-        sentry::executor::BudgetLimits::from_config(&config),
-    );
+    let budget_limits = std::sync::Arc::new(sentry::executor::BudgetLimits::from_config(&config));
 
     // Run the sentry loop — consumes TriggerEvent from the unified runtime
     let routing = config.sentry.routing.map(std::sync::Arc::new);
@@ -6593,7 +6676,8 @@ async fn run_sentry_command(
         cwd,
         config.sentry.max_concurrent,
         routing,
-    ).await;
+    )
+    .await;
 
     // Release any claimed tasks on shutdown
     if let Ok(released) = state_db.release_all(&instance_id) {
@@ -6915,11 +6999,10 @@ filesystem_write = true
         }
         NexAction::List => {
             let home = dirs::home_dir().unwrap_or_default().join(".omegon");
-            let registry = nex::NexRegistry::load(&home, Some(&cwd))
-                .unwrap_or_else(|e| {
-                    eprintln!("  Failed to load profiles: {e}");
-                    std::process::exit(1);
-                });
+            let registry = nex::NexRegistry::load(&home, Some(&cwd)).unwrap_or_else(|e| {
+                eprintln!("  Failed to load profiles: {e}");
+                std::process::exit(1);
+            });
             let profiles = registry.list();
             if profiles.is_empty() {
                 eprintln!("  No profiles found.");
@@ -6938,11 +7021,10 @@ filesystem_write = true
         }
         NexAction::Inspect { name } => {
             let home = dirs::home_dir().unwrap_or_default().join(".omegon");
-            let registry = nex::NexRegistry::load(&home, Some(&cwd))
-                .unwrap_or_else(|e| {
-                    eprintln!("  Failed to load profiles: {e}");
-                    std::process::exit(1);
-                });
+            let registry = nex::NexRegistry::load(&home, Some(&cwd)).unwrap_or_else(|e| {
+                eprintln!("  Failed to load profiles: {e}");
+                std::process::exit(1);
+            });
             match registry.resolve(name) {
                 Some(p) => {
                     eprintln!("  Profile: {}", p.name);
@@ -6958,7 +7040,10 @@ filesystem_write = true
                     eprintln!("    readonly: {}", p.resource_limits.readonly_rootfs);
                     eprintln!("\n  Network:");
                     eprintln!("    policy:  {}", p.capabilities.network.display_label());
-                    if let nex::NexNetworkPolicy::Egress { filter: Some(ref f) } = p.capabilities.network {
+                    if let nex::NexNetworkPolicy::Egress {
+                        filter: Some(ref f),
+                    } = p.capabilities.network
+                    {
                         if !f.allow_hosts.is_empty() {
                             eprintln!("    hosts:   {}", f.allow_hosts.join(", "));
                         }
@@ -6966,7 +7051,8 @@ filesystem_write = true
                             eprintln!("    cidrs:   {}", f.allow_cidrs.join(", "));
                         }
                         if !f.allow_ports.is_empty() {
-                            let ports: Vec<String> = f.allow_ports.iter().map(|p| p.to_string()).collect();
+                            let ports: Vec<String> =
+                                f.allow_ports.iter().map(|p| p.to_string()).collect();
                             eprintln!("    ports:   {}", ports.join(", "));
                         }
                         eprintln!("    deny_private:  {}", f.deny_private);
@@ -6996,17 +7082,13 @@ filesystem_write = true
         }
         NexAction::Compose { name, service } => {
             let home = dirs::home_dir().unwrap_or_default().join(".omegon");
-            let registry = nex::NexRegistry::load(&home, Some(&cwd))
-                .unwrap_or_else(|e| {
-                    eprintln!("  Failed to load profiles: {e}");
-                    std::process::exit(1);
-                });
+            let registry = nex::NexRegistry::load(&home, Some(&cwd)).unwrap_or_else(|e| {
+                eprintln!("  Failed to load profiles: {e}");
+                std::process::exit(1);
+            });
             match registry.resolve(name) {
                 Some(p) => {
-                    let output = nex::compose::to_compose_file(
-                        p,
-                        service.as_deref(),
-                    );
+                    let output = nex::compose::to_compose_file(p, service.as_deref());
                     // Write to stdout (not stderr) so it can be piped/redirected
                     print!("{output}");
                 }
@@ -7057,7 +7139,8 @@ filesystem_write = true
                 .map(|h| format!("      - matchPattern: \"{h}\""))
                 .collect();
 
-            print!(r#"# Generated by omegon nex networkpolicy
+            print!(
+                r#"# Generated by omegon nex networkpolicy
 # Apply with: kubectl apply -f <this-file>
 #
 # For clusters using Cilium CNI, use the CiliumNetworkPolicy below.
@@ -7161,14 +7244,15 @@ spec:
 // filesystem isolation.
 
 async fn run_sandboxed(cli: &Cli) -> anyhow::Result<()> {
-    let runtime = nex::spawn::detect_container_runtime_public()
-        .ok_or_else(|| anyhow::anyhow!(
+    let runtime = nex::spawn::detect_container_runtime_public().ok_or_else(|| {
+        anyhow::anyhow!(
             "--sandboxed requires a container runtime.\n\
              Install podman (recommended) or docker:\n  \
              macOS:  brew install podman\n  \
              Linux:  apt install podman\n  \
              NixOS:  nix-env -i podman"
-        ))?;
+        )
+    })?;
 
     let version = env!("CARGO_PKG_VERSION");
     // Allow image override for local/custom builds
@@ -7293,8 +7377,14 @@ async fn run_sandboxed(cli: &Cli) -> anyhow::Result<()> {
         // Use a tmpfs overlay for /data/omegon so the entrypoint can mkdir/write,
         // then bind-mount the vault file on top.
         cmd.arg("--tmpfs=/data/omegon:rw,size=1m");
-        cmd.arg(format!("-v={}:/data/omegon/secrets.json:ro", vault.display()));
-        eprintln!("   Secrets:   {} → /data/omegon/secrets.json (vault, read-only)", vault.display());
+        cmd.arg(format!(
+            "-v={}:/data/omegon/secrets.json:ro",
+            vault.display()
+        ));
+        eprintln!(
+            "   Secrets:   {} → /data/omegon/secrets.json (vault, read-only)",
+            vault.display()
+        );
     } else {
         // No vault — fall back to env var forwarding with a warning.
         // This is less secure (secrets visible in env/podman inspect)
@@ -7347,7 +7437,10 @@ async fn run_sandboxed(cli: &Cli) -> anyhow::Result<()> {
     if let Some(ref pf) = cli.prompt_file {
         // Prompt file must be inside cwd to be accessible in the container
         let pf_rel = pf.strip_prefix(&cwd).unwrap_or(pf);
-        inner_args.extend(["--prompt-file".into(), format!("/work/{}", pf_rel.display())]);
+        inner_args.extend([
+            "--prompt-file".into(),
+            format!("/work/{}", pf_rel.display()),
+        ]);
     }
     inner_args.extend(["--model".into(), cli.model.clone()]);
     inner_args.extend(["--max-turns".into(), cli.max_turns.to_string()]);
@@ -8130,13 +8223,8 @@ mod tests {
 
     #[test]
     fn control_tls_requires_cert_and_key_pair() {
-        let cli = Cli::try_parse_from(vec![
-            "omegon",
-            "serve",
-            "--rpc-tls-cert",
-            "server.pem",
-        ])
-        .expect("clap accepts partial TLS args for semantic validation");
+        let cli = Cli::try_parse_from(vec!["omegon", "serve", "--rpc-tls-cert", "server.pem"])
+            .expect("clap accepts partial TLS args for semantic validation");
 
         match cli.command.unwrap() {
             Commands::Serve { tls, .. } => {

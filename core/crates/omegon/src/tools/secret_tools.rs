@@ -105,8 +105,7 @@ impl ToolProvider for SecretToolsProvider {
                         // Only allow safe recipe types from the model.
                         // cmd: and file: enable arbitrary code execution and
                         // filesystem reads — restrict to operator-only CLI.
-                        let safe = recipe.starts_with("keyring:")
-                            || recipe.starts_with("env:");
+                        let safe = recipe.starts_with("keyring:") || recipe.starts_with("env:");
                         if !safe {
                             anyhow::bail!(
                                 "Recipe type not allowed from agent tools. \

@@ -5,8 +5,8 @@
 //! `!Send` types isolated while allowing the ACP connection to remain
 //! responsive (streaming, cancel, notifications).
 
-use std::path::PathBuf;
 use omegon_traits::Feature;
+use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -37,11 +37,20 @@ pub enum WorkerRequest {
     /// Change the model. `ack` (when provided) fires after shared_settings is
     /// updated so the caller can read the applied state without racing the
     /// channel.
-    SetModel { value: String, ack: Option<oneshot::Sender<()>> },
+    SetModel {
+        value: String,
+        ack: Option<oneshot::Sender<()>>,
+    },
     /// Change thinking level.
-    SetThinking { value: String, ack: Option<oneshot::Sender<()>> },
+    SetThinking {
+        value: String,
+        ack: Option<oneshot::Sender<()>>,
+    },
     /// Change posture.
-    SetPosture { value: String, ack: Option<oneshot::Sender<()>> },
+    SetPosture {
+        value: String,
+        ack: Option<oneshot::Sender<()>>,
+    },
     /// Execute a control request (slash command) and return the response.
     /// This gives ACP clients access to every operation the TUI has.
     ControlRequest {
@@ -130,7 +139,18 @@ pub fn spawn_worker(
                 .expect("worker runtime");
 
             let local = tokio::task::LocalSet::new();
-            local.block_on(&rt, worker_loop(model, cwd, worker_settings, request_rx, event_tx, secrets_tx, host_ctx));
+            local.block_on(
+                &rt,
+                worker_loop(
+                    model,
+                    cwd,
+                    worker_settings,
+                    request_rx,
+                    event_tx,
+                    secrets_tx,
+                    host_ctx,
+                ),
+            );
         })
         .expect("failed to spawn worker thread");
 
@@ -194,7 +214,8 @@ async fn worker_loop(
             WorkerRequest::Prompt { text, response_tx } => {
                 if first_prompt {
                     first_prompt = false;
-                    let title: String = text.chars().take(80).collect::<String>().trim().to_string();
+                    let title: String =
+                        text.chars().take(80).collect::<String>().trim().to_string();
                     let title = title.lines().next().unwrap_or(&title).trim().to_string();
                     if !title.is_empty() {
                         let _ = event_tx.send(WorkerEvent::SessionTitle(title));
@@ -255,22 +276,38 @@ async fn worker_loop(
                                 if partial.tail.is_empty() {
                                     None
                                 } else {
-                                    Some(WorkerEvent::ToolOutput { id, text: partial.tail })
+                                    Some(WorkerEvent::ToolOutput {
+                                        id,
+                                        text: partial.tail,
+                                    })
                                 }
                             }
                             omegon_traits::AgentEvent::DecompositionStarted { children } => {
-                                let entries = children.iter().map(|label| PlanEntryData {
-                                    content: label.clone(),
-                                    status: PlanEntryState::Pending,
-                                }).collect();
+                                let entries = children
+                                    .iter()
+                                    .map(|label| PlanEntryData {
+                                        content: label.clone(),
+                                        status: PlanEntryState::Pending,
+                                    })
+                                    .collect();
                                 Some(WorkerEvent::PlanUpdate { entries })
                             }
-                            omegon_traits::AgentEvent::DecompositionChildCompleted { label, success } => {
+                            omegon_traits::AgentEvent::DecompositionChildCompleted {
+                                label,
+                                success,
+                            } => {
                                 // Emit a single-entry update; the ACP forwarder
                                 // merges it into the running plan state.
-                                let status = if success { PlanEntryState::Completed } else { PlanEntryState::Failed };
+                                let status = if success {
+                                    PlanEntryState::Completed
+                                } else {
+                                    PlanEntryState::Failed
+                                };
                                 Some(WorkerEvent::PlanUpdate {
-                                    entries: vec![PlanEntryData { content: label, status }],
+                                    entries: vec![PlanEntryData {
+                                        content: label,
+                                        status,
+                                    }],
                                 })
                             }
                             omegon_traits::AgentEvent::DecompositionCompleted { .. } => {
@@ -337,8 +374,10 @@ async fn worker_loop(
                     Ok(()) => None,
                     Err(e) => {
                         let raw = e.to_string();
-                        let model_name = shared_settings.lock()
-                            .ok().map(|s| s.model.clone())
+                        let model_name = shared_settings
+                            .lock()
+                            .ok()
+                            .map(|s| s.model.clone())
                             .unwrap_or_default();
                         Some(humanize_agent_error(&raw, &model_name))
                     }
@@ -395,7 +434,10 @@ async fn worker_loop(
                 }
             }
 
-            WorkerRequest::ControlRequest { command, response_tx } => {
+            WorkerRequest::ControlRequest {
+                command,
+                response_tx,
+            } => {
                 let mut text = handle_control_request(
                     &command,
                     &conversation,
@@ -403,16 +445,28 @@ async fn worker_loop(
                     &secrets,
                     &cwd,
                     &mut bus,
-                ).await;
+                )
+                .await;
                 // Persona switch needs async bus.execute_tool — handle the marker
                 if let Some(name) = text.strip_prefix("__async_persona_switch:") {
                     let name = name.to_string();
                     let cancel = CancellationToken::new();
                     let args = serde_json::json!({ "name": name });
-                    match bus.execute_tool("switch_persona", "ctrl", args, cancel).await {
+                    match bus
+                        .execute_tool("switch_persona", "ctrl", args, cancel)
+                        .await
+                    {
                         Ok(result) => {
-                            text = result.content.iter()
-                                .filter_map(|b| if let omegon_traits::ContentBlock::Text { text } = b { Some(text.as_str()) } else { None })
+                            text = result
+                                .content
+                                .iter()
+                                .filter_map(|b| {
+                                    if let omegon_traits::ContentBlock::Text { text } = b {
+                                        Some(text.as_str())
+                                    } else {
+                                        None
+                                    }
+                                })
                                 .collect::<Vec<_>>()
                                 .join("\n");
                         }
@@ -423,30 +477,37 @@ async fn worker_loop(
             }
 
             WorkerRequest::ConnectMcpServers { servers } => {
-                let server_map: std::collections::HashMap<String, crate::plugins::mcp::McpServerConfig> =
-                    servers.into_iter().collect();
+                let server_map: std::collections::HashMap<
+                    String,
+                    crate::plugins::mcp::McpServerConfig,
+                > = servers.into_iter().collect();
                 if !server_map.is_empty() {
                     match crate::plugins::mcp::McpFeature::connect(
                         "acp-client",
                         &server_map,
                         Some(secrets.as_ref()),
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(mcp_feature) => {
                             let tool_count = mcp_feature.tools().len();
                             if tool_count > 0 {
                                 bus.register(Box::new(mcp_feature));
                                 bus.finalize();
-                                tracing::info!(tools = tool_count, "ACP client MCP servers connected");
-                                let _ = event_tx.send(WorkerEvent::StatusUpdate(
-                                    format!("Connected {tool_count} tools from client MCP servers")
-                                ));
+                                tracing::info!(
+                                    tools = tool_count,
+                                    "ACP client MCP servers connected"
+                                );
+                                let _ = event_tx.send(WorkerEvent::StatusUpdate(format!(
+                                    "Connected {tool_count} tools from client MCP servers"
+                                )));
                             }
                         }
                         Err(e) => {
                             tracing::warn!(error = %e, "Failed to connect client MCP servers");
-                            let _ = event_tx.send(WorkerEvent::StatusUpdate(
-                                format!("MCP server connection failed: {e}")
-                            ));
+                            let _ = event_tx.send(WorkerEvent::StatusUpdate(format!(
+                                "MCP server connection failed: {e}"
+                            )));
                         }
                     }
                 }
@@ -475,7 +536,10 @@ async fn handle_control_request(
 
     match cmd {
         "stats" => {
-            let settings = shared_settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let settings = shared_settings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
             let est = conversation.estimate_tokens();
             let usage_pct = if settings.context_window > 0 {
                 (est as f64 / settings.context_window as f64) * 100.0
@@ -497,7 +561,10 @@ async fn handle_control_request(
 
         "max_turns" => {
             if args.is_empty() {
-                let max = shared_settings.lock().unwrap_or_else(|e| e.into_inner()).max_turns;
+                let max = shared_settings
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .max_turns;
                 format!("Max turns: {max}")
             } else if let Ok(n) = args.parse::<u32>() {
                 let n = n.max(1).min(500);
@@ -542,7 +609,10 @@ async fn handle_control_request(
         }
 
         "profile_view" => {
-            let settings = shared_settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let settings = shared_settings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
             format!(
                 "Model: {}\nThinking: {}\nPosture: {}\nContext window: {}\nMax turns: {}",
                 settings.model,
@@ -555,8 +625,15 @@ async fn handle_control_request(
 
         "context_status" => {
             let est = conversation.estimate_tokens();
-            let window = shared_settings.lock().unwrap_or_else(|e| e.into_inner()).context_window;
-            let usage_pct = if window > 0 { (est as f64 / window as f64) * 100.0 } else { 0.0 };
+            let window = shared_settings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .context_window;
+            let usage_pct = if window > 0 {
+                (est as f64 / window as f64) * 100.0
+            } else {
+                0.0
+            };
             format!("Context: ~{est} tokens ({usage_pct:.0}% of {window})")
         }
 
@@ -571,7 +648,10 @@ async fn handle_control_request(
 
         "runtime_mode" => {
             if args.is_empty() {
-                let slim = shared_settings.lock().unwrap_or_else(|e| e.into_inner()).is_slim();
+                let slim = shared_settings
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .is_slim();
                 format!("Runtime mode: {}", if slim { "slim" } else { "standard" })
             } else {
                 format!("Runtime mode changes require restart.")
@@ -592,7 +672,6 @@ async fn handle_control_request(
         }
 
         // ── Notes ──────────────────────────────────────────
-
         "note_add" => {
             if args.is_empty() {
                 "Usage: note_add <text>".into()
@@ -633,20 +712,26 @@ async fn handle_control_request(
         }
 
         // ── Workspace ────────────────────────────────────
-
         "workspace_status" => {
             use crate::workspace::runtime::{read_workspace_lease, read_workspace_registry};
             match read_workspace_lease(cwd).ok().flatten() {
                 Some(lease) => {
                     let occupancy = read_workspace_registry(cwd)
-                        .ok().flatten()
+                        .ok()
+                        .flatten()
                         .map(|r| r.workspaces.len())
                         .unwrap_or(1);
                     format!(
                         "Workspace\n  ID: {}\n  Label: {}\n  Path: {}\n  Backend: {}\n  Branch: {}\n  Role: {:?}\n  Kind: {:?}\n  Mutability: {:?}\n  Local views: {}",
-                        lease.workspace_id, lease.label, lease.path,
-                        lease.backend_kind.as_str(), lease.branch,
-                        lease.role, lease.workspace_kind, lease.mutability, occupancy,
+                        lease.workspace_id,
+                        lease.label,
+                        lease.path,
+                        lease.backend_kind.as_str(),
+                        lease.branch,
+                        lease.role,
+                        lease.workspace_kind,
+                        lease.mutability,
+                        occupancy,
                     )
                 }
                 None => "Workspace: no local runtime metadata yet.".into(),
@@ -659,7 +744,10 @@ async fn handle_control_request(
                 Some(registry) => {
                     let mut out = format!("Workspaces ({}):\n", registry.workspaces.len());
                     for ws in &registry.workspaces {
-                        out.push_str(&format!("  {} — {} ({:?})\n", ws.workspace_id, ws.label, ws.role));
+                        out.push_str(&format!(
+                            "  {} — {} ({:?})\n",
+                            ws.workspace_id, ws.label, ws.role
+                        ));
                     }
                     out
                 }
@@ -668,14 +756,11 @@ async fn handle_control_request(
         }
 
         // ── Design tree ────────────────────────────────
-
-        "tree_view" => {
-            match bus.dispatch_command("design", args) {
-                omegon_traits::CommandResult::Display(msg) => msg,
-                omegon_traits::CommandResult::Handled => "Design tree command handled.".into(),
-                omegon_traits::CommandResult::NotHandled => "Design tree not available.".into(),
-            }
-        }
+        "tree_view" => match bus.dispatch_command("design", args) {
+            omegon_traits::CommandResult::Display(msg) => msg,
+            omegon_traits::CommandResult::Handled => "Design tree command handled.".into(),
+            omegon_traits::CommandResult::NotHandled => "Design tree not available.".into(),
+        },
 
         "provider_status" => {
             let providers = ["anthropic", "openai", "ollama"];
@@ -688,11 +773,11 @@ async fn handle_control_request(
                         ("authenticated", src.to_string())
                     }
                     None => {
-                        let creds = crate::auth::read_credentials(
-                            crate::auth::auth_json_key(p),
-                        );
+                        let creds = crate::auth::read_credentials(crate::auth::auth_json_key(p));
                         match creds {
-                            Some(c) if c.is_expired() => ("expired", "token expired — /login to refresh".into()),
+                            Some(c) if c.is_expired() => {
+                                ("expired", "token expired — /login to refresh".into())
+                            }
                             Some(_) => ("error", "credentials found but resolution failed".into()),
                             None => ("missing", "not configured".into()),
                         }
@@ -704,7 +789,8 @@ async fn handle_control_request(
             let ollama_ok = std::net::TcpStream::connect_timeout(
                 &"127.0.0.1:11434".parse().unwrap(),
                 std::time::Duration::from_millis(500),
-            ).is_ok();
+            )
+            .is_ok();
             if ollama_ok {
                 lines.push("ollama:running:localhost:11434".into());
             } else {
@@ -714,7 +800,8 @@ async fn handle_control_request(
         }
 
         "vault_status" => {
-            "Vault status requires interactive terminal. Use `omegon vault status` in a shell.".into()
+            "Vault status requires interactive terminal. Use `omegon vault status` in a shell."
+                .into()
         }
 
         "auth_status" => {
@@ -729,14 +816,17 @@ async fn handle_control_request(
 fn humanize_agent_error(raw: &str, model: &str) -> String {
     let lower = raw.to_lowercase();
 
-    if lower.contains("connection closed") || lower.contains("connection reset")
+    if lower.contains("connection closed")
+        || lower.contains("connection reset")
         || lower.contains("connection refused")
     {
         let provider = if model.contains("claude") || model.starts_with("anthropic:") {
             "Anthropic"
         } else if model.contains("gpt") || model.starts_with("openai:") {
             "OpenAI"
-        } else if model.contains("llama") || model.contains("qwen") || model.contains("mistral")
+        } else if model.contains("llama")
+            || model.contains("qwen")
+            || model.contains("mistral")
             || model.starts_with("ollama:")
         {
             return format!(

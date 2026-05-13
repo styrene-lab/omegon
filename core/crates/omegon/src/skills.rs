@@ -119,7 +119,11 @@ impl SkillManifest {
             lines.push(format!("triggers = [{}]", triggers.join(", ")));
         }
         if !self.trusted_paths.is_empty() {
-            let paths: Vec<String> = self.trusted_paths.iter().map(|p| format!("\"{p}\"")).collect();
+            let paths: Vec<String> = self
+                .trusted_paths
+                .iter()
+                .map(|p| format!("\"{p}\""))
+                .collect();
             lines.push(format!("trusted_paths = [{}]", paths.join(", ")));
         }
         if let Some(ref path) = self.output_path {
@@ -451,7 +455,11 @@ pub fn extract_phase_info(content: &str) -> Option<SkillPhaseInfo> {
         // Also handles ### Phase N, # Phase N, etc.
         if let Some(rest) = trimmed
             .strip_prefix('#')
-            .and_then(|s| s.trim_start_matches('#').trim_start().strip_prefix("Phase "))
+            .and_then(|s| {
+                s.trim_start_matches('#')
+                    .trim_start()
+                    .strip_prefix("Phase ")
+            })
             .or_else(|| {
                 trimmed
                     .strip_prefix('#')
@@ -464,10 +472,7 @@ pub fn extract_phase_info(content: &str) -> Option<SkillPhaseInfo> {
                 .unwrap_or(rest.len());
             let num = &rest[..num_end];
             if !num.is_empty() {
-                let heading = trimmed
-                    .trim_start_matches('#')
-                    .trim()
-                    .to_string();
+                let heading = trimmed.trim_start_matches('#').trim().to_string();
                 phases.push((num.to_string(), heading));
             }
         }
@@ -500,7 +505,10 @@ pub struct SkillPhaseInfo {
 /// that has numbered phases (most skills don't — only structured workflows like
 /// jputman's opportunity-eval).
 pub fn collect_phase_info(skills: &[String]) -> Vec<SkillPhaseInfo> {
-    skills.iter().filter_map(|s| extract_phase_info(s)).collect()
+    skills
+        .iter()
+        .filter_map(|s| extract_phase_info(s))
+        .collect()
 }
 
 /// A skill entry with structured metadata for the ACP settings surface.
@@ -693,9 +701,7 @@ pub fn get_skill(name: &str) -> anyhow::Result<(SkillManifest, String, std::path
     for (bname, content) in BUNDLED {
         if *bname == name {
             let (manifest, body) = parse_skill_file(content);
-            let path = skills_dir()
-                .map(|d| d.join(name))
-                .unwrap_or_default();
+            let path = skills_dir().map(|d| d.join(name)).unwrap_or_default();
             return Ok((manifest, body, path));
         }
     }
@@ -789,7 +795,10 @@ mod tests {
     fn extract_trusted_paths_yaml() {
         let content = "---\nname: test\ntrusted_paths:\n  - ~/Documents/data/\n  - ~/Library/Obsidian/vault/\n---\n\n# Test";
         let paths = extract_trusted_paths(content);
-        assert_eq!(paths, vec!["~/Documents/data/", "~/Library/Obsidian/vault/"]);
+        assert_eq!(
+            paths,
+            vec!["~/Documents/data/", "~/Library/Obsidian/vault/"]
+        );
     }
 
     #[test]

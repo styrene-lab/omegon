@@ -65,44 +65,52 @@ async fn list_tasks(State(state): State<SentryState>) -> impl IntoResponse {
         Ok(t) => t,
         Err(e) => {
             tracing::error!(error = %e, "failed to list sentry tasks");
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(Vec::<TaskListItem>::new())).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(Vec::<TaskListItem>::new()),
+            )
+                .into_response();
         }
     };
 
-    let items: Vec<TaskListItem> = tasks.iter().map(|t| {
-        let trigger_summaries: Vec<String> = t.triggers.iter().map(|tr| match tr {
-            super::types::Trigger::Cron { schedule } => format!("cron:{schedule}"),
-            super::types::Trigger::Webhook { name } => format!("webhook:{name}"),
-            super::types::Trigger::FileWatch { paths, .. } => {
-                format!("file_watch:{}", paths.len())
-            }
-            super::types::Trigger::GitEvent { events, .. } => {
-                format!("git:{}", events.len())
-            }
-            super::types::Trigger::Manual => "manual".into(),
-        }).collect();
+    let items: Vec<TaskListItem> = tasks
+        .iter()
+        .map(|t| {
+            let trigger_summaries: Vec<String> = t
+                .triggers
+                .iter()
+                .map(|tr| match tr {
+                    super::types::Trigger::Cron { schedule } => format!("cron:{schedule}"),
+                    super::types::Trigger::Webhook { name } => format!("webhook:{name}"),
+                    super::types::Trigger::FileWatch { paths, .. } => {
+                        format!("file_watch:{}", paths.len())
+                    }
+                    super::types::Trigger::GitEvent { events, .. } => {
+                        format!("git:{}", events.len())
+                    }
+                    super::types::Trigger::Manual => "manual".into(),
+                })
+                .collect();
 
-        let claimed = state.state_db.is_claimed(&t.id).unwrap_or(false);
+            let claimed = state.state_db.is_claimed(&t.id).unwrap_or(false);
 
-        TaskListItem {
-            id: t.id.clone(),
-            name: t.name.clone(),
-            priority: t.priority,
-            triggers: trigger_summaries,
-            last_run: t.last_run.map(|dt| dt.to_rfc3339()),
-            run_count: t.run_count,
-            claimed,
-            warning: None,
-        }
-    }).collect();
+            TaskListItem {
+                id: t.id.clone(),
+                name: t.name.clone(),
+                priority: t.priority,
+                triggers: trigger_summaries,
+                last_run: t.last_run.map(|dt| dt.to_rfc3339()),
+                run_count: t.run_count,
+                claimed,
+                warning: None,
+            }
+        })
+        .collect();
 
     Json(items).into_response()
 }
 
-async fn get_task(
-    State(state): State<SentryState>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
+async fn get_task(State(state): State<SentryState>, Path(id): Path<String>) -> impl IntoResponse {
     let tasks = match state.board.list_actionable() {
         Ok(t) => t,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -115,13 +123,17 @@ async fn get_task(
     let runs = state.state_db.run_history(&id, 50).unwrap_or_default();
     let claimed = state.state_db.is_claimed(&id).unwrap_or(false);
 
-    let trigger_summaries: Vec<String> = task.triggers.iter().map(|tr| match tr {
-        super::types::Trigger::Cron { schedule } => format!("cron:{schedule}"),
-        super::types::Trigger::Webhook { name } => format!("webhook:{name}"),
-        super::types::Trigger::FileWatch { paths, .. } => format!("file_watch:{}", paths.len()),
-        super::types::Trigger::GitEvent { events, .. } => format!("git:{}", events.len()),
-        super::types::Trigger::Manual => "manual".into(),
-    }).collect();
+    let trigger_summaries: Vec<String> = task
+        .triggers
+        .iter()
+        .map(|tr| match tr {
+            super::types::Trigger::Cron { schedule } => format!("cron:{schedule}"),
+            super::types::Trigger::Webhook { name } => format!("webhook:{name}"),
+            super::types::Trigger::FileWatch { paths, .. } => format!("file_watch:{}", paths.len()),
+            super::types::Trigger::GitEvent { events, .. } => format!("git:{}", events.len()),
+            super::types::Trigger::Manual => "manual".into(),
+        })
+        .collect();
 
     Json(TaskDetail {
         info: TaskListItem {
@@ -135,44 +147,64 @@ async fn get_task(
             warning: None,
         },
         runs,
-    }).into_response()
+    })
+    .into_response()
 }
 
-async fn run_task(
-    State(state): State<SentryState>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
-    if state.event_tx.send(TriggerEvent::ForceRun { task_id: id.clone() }).await.is_err() {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(RunResponse {
-            queued: false,
-            task_id: id,
-        })).into_response();
+async fn run_task(State(state): State<SentryState>, Path(id): Path<String>) -> impl IntoResponse {
+    if state
+        .event_tx
+        .send(TriggerEvent::ForceRun {
+            task_id: id.clone(),
+        })
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(RunResponse {
+                queued: false,
+                task_id: id,
+            }),
+        )
+            .into_response();
     }
 
     Json(RunResponse {
         queued: true,
         task_id: id,
-    }).into_response()
+    })
+    .into_response()
 }
 
 async fn fire_trigger(
     State(state): State<SentryState>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
-    if state.event_tx.send(TriggerEvent::Webhook {
-        name: name.clone(),
-        payload: serde_json::Value::Null,
-    }).await.is_err() {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(TriggerResponse {
-            fired: false,
-            trigger_name: name,
-        })).into_response();
+    if state
+        .event_tx
+        .send(TriggerEvent::Webhook {
+            name: name.clone(),
+            payload: serde_json::Value::Null,
+        })
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(TriggerResponse {
+                fired: false,
+                trigger_name: name,
+            }),
+        )
+            .into_response();
     }
 
     Json(TriggerResponse {
         fired: true,
         trigger_name: name,
-    }).into_response()
+    })
+    .into_response()
 }
 
 #[cfg(test)]
@@ -181,14 +213,20 @@ mod tests {
 
     #[test]
     fn trigger_response_serializes() {
-        let resp = TriggerResponse { fired: true, trigger_name: "deploy".into() };
+        let resp = TriggerResponse {
+            fired: true,
+            trigger_name: "deploy".into(),
+        };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"fired\":true"));
     }
 
     #[test]
     fn run_response_serializes() {
-        let resp = RunResponse { queued: true, task_id: "pr-review".into() };
+        let resp = RunResponse {
+            queued: true,
+            task_id: "pr-review".into(),
+        };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"queued\":true"));
     }

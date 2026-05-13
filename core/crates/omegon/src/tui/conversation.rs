@@ -189,6 +189,52 @@ fn consolidation_one_liner(
     }
 }
 
+fn tool_consolidation_key(
+    tool_name: &str,
+    detail_args: Option<&str>,
+    args_summary: Option<&str>,
+) -> String {
+    if tool_name != "bash" {
+        return tool_name.to_string();
+    }
+
+    let command = detail_args
+        .or(args_summary)
+        .and_then(|args| args.lines().next())
+        .unwrap_or("bash");
+    let first_word = command.split_whitespace().next().unwrap_or("bash");
+    let family = match first_word {
+        "grep" | "rg" => "search",
+        "find" => "find",
+        "ls" | "dir" => "list",
+        "cat" | "head" | "tail" | "bat" => "read",
+        "sed" | "awk" => "transform",
+        "curl" | "wget" => "fetch",
+        "git" => "git",
+        "cargo" => "cargo",
+        "npm" | "npx" | "pnpm" | "yarn" | "bun" => "npm",
+        "docker" | "podman" => "container",
+        "kubectl" | "k" => "kubectl",
+        "make" | "cmake" => "build",
+        "python" | "python3" | "pip" => "python",
+        "rustc" | "rustup" => "rust",
+        "go" => "go",
+        "dig" | "nslookup" | "host" => "dns",
+        "ssh" | "scp" | "rsync" => "remote",
+        "tar" | "zip" | "unzip" | "gzip" => "archive",
+        "wc" => "count",
+        "sort" | "uniq" => "sort",
+        "diff" | "patch" => "diff",
+        "mkdir" | "rm" | "mv" | "cp" | "chmod" | "chown" => "fs",
+        "echo" | "printf" => "echo",
+        "test" | "[" => "test",
+        "vault" => "vault",
+        "sh" | "bash" | "zsh" => "shell",
+        _ => first_word,
+    };
+    format!("bash:{family}")
+}
+
 fn attachment_placeholder(path: &std::path::Path, idx: usize) -> String {
     let ext = path
         .extension()
@@ -417,6 +463,7 @@ impl ConversationView {
         // Find the card for this tool call and complete it.
         let mut completed_name: Option<String> = None;
         let mut completed_summary: Option<String> = None;
+        let mut completed_key: Option<String> = None;
         let mut completed_idx: Option<usize> = None;
 
         for (i, seg) in self.segments.iter_mut().enumerate().rev() {
@@ -429,6 +476,7 @@ impl ConversationView {
                 detail_result: dr,
                 live_partial: lp,
                 args_summary,
+                detail_args,
                 ..
             } = &mut seg.content
                 && tool_id == id
@@ -463,6 +511,11 @@ impl ConversationView {
                     args_summary.as_deref(),
                     result_text,
                 ));
+                completed_key = Some(tool_consolidation_key(
+                    name,
+                    detail_args.as_deref(),
+                    args_summary.as_deref(),
+                ));
                 completed_idx = Some(i);
                 break;
             }
@@ -471,11 +524,12 @@ impl ConversationView {
         // ── CONSOLIDATION ─────────────────────────────────────────
         // Merge consecutive completed cards of the same tool name
         // into a single grouped card with tree-style entries.
-        if let (Some(ref name), Some(idx)) = (completed_name, completed_idx)
+        if let (Some(ref name), Some(ref key), Some(idx)) =
+            (completed_name, completed_key, completed_idx)
             && idx > 0
             && !is_error
         {
-            self.try_merge_with_predecessor(idx, name, completed_summary.as_deref());
+            self.try_merge_with_predecessor(idx, name, key, completed_summary.as_deref());
         }
 
         self.conv_state.invalidate();
@@ -484,15 +538,28 @@ impl ConversationView {
     /// Attempt to merge segment at `idx` into the preceding segment if both
     /// are completed, non-error tool cards of the same name. Handles index
     /// fixup for pinned_segment and selected_segment after removal.
-    fn try_merge_with_predecessor(&mut self, idx: usize, name: &str, summary: Option<&str>) {
+    fn try_merge_with_predecessor(
+        &mut self,
+        idx: usize,
+        name: &str,
+        key: &str,
+        summary: Option<&str>,
+    ) {
         let should_merge = matches!(
             &self.segments[idx - 1].content,
             SegmentContent::ToolCard {
                 name: prev_name,
+                args_summary: prev_args_summary,
+                detail_args: prev_detail_args,
                 complete: true,
                 is_error: false,
                 ..
             } if prev_name == name
+                && tool_consolidation_key(
+                    prev_name,
+                    prev_detail_args.as_deref(),
+                    prev_args_summary.as_deref(),
+                ) == key
         );
 
         if !should_merge {
@@ -1026,6 +1093,57 @@ mod tests {
             assert!(!is_error);
             assert!(detail_result.is_some());
         }
+    }
+
+    #[test]
+    fn consecutive_bash_commands_merge_only_with_same_command_family() {
+        let mut cv = ConversationView::new();
+        cv.push_tool_start("t1", "bash", Some("git status"), Some("git status"));
+        cv.push_tool_end("t1", false, Some("clean"));
+        cv.push_tool_start("t2", "bash", Some("git push 2>&1"), Some("git push 2>&1"));
+        cv.push_tool_end("t2", false, Some("To github.com:example/repo.git"));
+
+        assert_eq!(cv.segments.len(), 1);
+        assert!(matches!(
+            &cv.segments[0].content,
+            SegmentContent::ToolCard {
+                args_summary: Some(summary),
+                detail_result: Some(result),
+                ..
+            } if summary == "bash (2 operations)" && result.contains("--- merged entry ---")
+        ));
+    }
+
+    #[test]
+    fn consecutive_bash_commands_do_not_merge_different_command_families() {
+        let mut cv = ConversationView::new();
+        cv.push_tool_start("t1", "bash", Some("git push 2>&1"), Some("git push 2>&1"));
+        cv.push_tool_end("t1", false, Some("To github.com:example/repo.git"));
+        cv.push_tool_start(
+            "t2",
+            "bash",
+            Some("kubectl --kubeconfig ~/.kube/brutus.yaml -n argocd get secret"),
+            Some("kubectl --kubeconfig ~/.kube/brutus.yaml -n argocd get secret"),
+        );
+        cv.push_tool_end("t2", false, Some("secret/token"));
+
+        assert_eq!(cv.segments.len(), 2);
+        assert!(matches!(
+            &cv.segments[0].content,
+            SegmentContent::ToolCard {
+                args_summary: Some(summary),
+                detail_result: Some(result),
+                ..
+            } if summary == "git push 2>&1" && !result.contains("--- merged entry ---")
+        ));
+        assert!(matches!(
+            &cv.segments[1].content,
+            SegmentContent::ToolCard {
+                args_summary: Some(summary),
+                detail_result: Some(result),
+                ..
+            } if summary.starts_with("kubectl ") && !result.contains("--- merged entry ---")
+        ));
     }
 
     #[test]

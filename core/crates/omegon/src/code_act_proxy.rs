@@ -36,7 +36,12 @@ pub struct ProxyServer {
 
 impl ProxyServer {
     pub fn new(cwd: PathBuf) -> Result<Self> {
-        let run_id = uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("tmp").to_string();
+        let run_id = uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("tmp")
+            .to_string();
         let socket_dir = cwd.join(".omegon");
         std::fs::create_dir_all(&socket_dir)?;
         let socket_path = socket_dir.join(format!("code-act-proxy-{run_id}.sock"));
@@ -90,10 +95,7 @@ def web_fetch(url: str) -> str:
         )
     }
 
-    pub async fn serve(
-        &self,
-        cancel: CancellationToken,
-    ) -> Result<()> {
+    pub async fn serve(&self, cancel: CancellationToken) -> Result<()> {
         if self.socket_path.exists() {
             std::fs::remove_file(&self.socket_path)?;
         }
@@ -156,8 +158,16 @@ async fn handle_connection(
 
         let response = dispatch_rpc(&req.method, &req.params, cwd, &cancel).await;
         let resp = match response {
-            Ok(text) => RpcResponse { id: req.id, result: Some(text), error: None },
-            Err(e) => RpcResponse { id: req.id, result: None, error: Some(e.to_string()) },
+            Ok(text) => RpcResponse {
+                id: req.id,
+                result: Some(text),
+                error: None,
+            },
+            Err(e) => RpcResponse {
+                id: req.id,
+                result: None,
+                error: Some(e.to_string()),
+            },
         };
         let mut buf = serde_json::to_vec(&resp)?;
         buf.push(b'\n');
@@ -177,17 +187,22 @@ async fn dispatch_rpc(
         "web_search" => {
             let args = serde_json::json!({"query": params.get("query").and_then(|v| v.as_str()).unwrap_or("")});
             let provider = crate::tools::web_search::WebSearchProvider::new();
-            let result = provider.execute("web_search", "proxy", args, cancel.clone()).await?;
+            let result = provider
+                .execute("web_search", "proxy", args, cancel.clone())
+                .await?;
             Ok(extract_text(&result))
         }
         "web_fetch" => {
             let args = serde_json::json!({"url": params.get("url").and_then(|v| v.as_str()).unwrap_or("")});
             let provider = crate::tools::web_search::WebSearchProvider::new();
-            let result = provider.execute("web_fetch", "proxy", args, cancel.clone()).await?;
+            let result = provider
+                .execute("web_fetch", "proxy", args, cancel.clone())
+                .await?;
             Ok(extract_text(&result))
         }
         "bash" => {
-            let command = params.get("command")
+            let command = params
+                .get("command")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("missing 'command' parameter"))?;
             let result = bash::execute(command, cwd, Some(30), cancel.clone()).await?;
@@ -198,7 +213,9 @@ async fn dispatch_rpc(
 }
 
 fn extract_text(result: &ToolResult) -> String {
-    result.content.iter()
+    result
+        .content
+        .iter()
         .filter_map(|b| match b {
             ContentBlock::Text { text } => Some(text.as_str()),
             _ => None,
@@ -215,7 +232,13 @@ mod tests {
     fn proxy_server_creates_socket_path() {
         let tmp = tempfile::tempdir().unwrap();
         let proxy = ProxyServer::new(tmp.path().to_path_buf()).unwrap();
-        assert!(proxy.socket_path().to_str().unwrap().contains("code-act-proxy-"));
+        assert!(
+            proxy
+                .socket_path()
+                .to_str()
+                .unwrap()
+                .contains("code-act-proxy-")
+        );
         assert!(proxy.socket_path().to_str().unwrap().ends_with(".sock"));
     }
 
@@ -238,9 +261,7 @@ mod tests {
 
         let sock_path = proxy.socket_path().to_path_buf();
         let server_cancel = cancel.clone();
-        let server = tokio::spawn(async move {
-            proxy.serve(server_cancel).await
-        });
+        let server = tokio::spawn(async move { proxy.serve(server_cancel).await });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -271,9 +292,7 @@ mod tests {
 
         let sock_path = proxy.socket_path().to_path_buf();
         let server_cancel = cancel.clone();
-        let server = tokio::spawn(async move {
-            proxy.serve(server_cancel).await
-        });
+        let server = tokio::spawn(async move { proxy.serve(server_cancel).await });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 

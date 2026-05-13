@@ -121,10 +121,7 @@ where
             Ok(None)
         }
 
-        fn visit_some<D2: serde::Deserializer<'de>>(
-            self,
-            d: D2,
-        ) -> Result<Self::Value, D2::Error> {
+        fn visit_some<D2: serde::Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
             d.deserialize_any(StringOrVecInner)
         }
     }
@@ -238,9 +235,8 @@ fn resolve(manifest: AgentManifest, bundle_dir: &Path) -> anyhow::Result<Resolve
             let mut parts: Vec<String> = base.into_iter().collect();
             for path in extend_paths {
                 let full = bundle_dir.join(path);
-                let content = std::fs::read_to_string(&full).map_err(|e| {
-                    anyhow::anyhow!("directive_extend {}: {e}", full.display())
-                })?;
+                let content = std::fs::read_to_string(&full)
+                    .map_err(|e| anyhow::anyhow!("directive_extend {}: {e}", full.display()))?;
                 parts.push(content);
             }
             if parts.is_empty() {
@@ -431,7 +427,13 @@ domain = "coding"
 mind_facts = ["mind/base.jsonl", "mind/personal.jsonl"]
 "#;
         let manifest: AgentManifest = toml::from_str(toml_str).unwrap();
-        let facts = manifest.persona.as_ref().unwrap().mind_facts.as_ref().unwrap();
+        let facts = manifest
+            .persona
+            .as_ref()
+            .unwrap()
+            .mind_facts
+            .as_ref()
+            .unwrap();
         assert_eq!(facts, &["mind/base.jsonl", "mind/personal.jsonl"]);
     }
 

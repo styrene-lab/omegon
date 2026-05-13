@@ -27,7 +27,11 @@ pub struct HostCapabilities {
 
 impl Default for HostCapabilities {
     fn default() -> Self {
-        Self { fs_read: false, fs_write: false, terminal: false }
+        Self {
+            fs_read: false,
+            fs_write: false,
+            terminal: false,
+        }
     }
 }
 
@@ -110,16 +114,22 @@ impl HostProxySender {
             .send(HostProxyRequest::ReadTextFile { path, reply })
             .await
             .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
-        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
     }
 
     pub async fn write_text_file(&self, path: PathBuf, content: String) -> anyhow::Result<()> {
         let (reply, rx) = oneshot::channel();
         self.tx
-            .send(HostProxyRequest::WriteTextFile { path, content, reply })
+            .send(HostProxyRequest::WriteTextFile {
+                path,
+                content,
+                reply,
+            })
             .await
             .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
-        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
     }
 
     pub async fn create_terminal(
@@ -131,10 +141,17 @@ impl HostProxySender {
     ) -> anyhow::Result<TerminalId> {
         let (reply, rx) = oneshot::channel();
         self.tx
-            .send(HostProxyRequest::CreateTerminal { command, args, cwd, output_byte_limit, reply })
+            .send(HostProxyRequest::CreateTerminal {
+                command,
+                args,
+                cwd,
+                output_byte_limit,
+                reply,
+            })
             .await
             .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
-        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
     }
 
     pub async fn terminal_output(
@@ -146,7 +163,8 @@ impl HostProxySender {
             .send(HostProxyRequest::TerminalOutput { terminal_id, reply })
             .await
             .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
-        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
     }
 
     pub async fn wait_for_terminal_exit(
@@ -158,7 +176,8 @@ impl HostProxySender {
             .send(HostProxyRequest::WaitForTerminalExit { terminal_id, reply })
             .await
             .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
-        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
     }
 
     pub async fn kill_terminal(&self, terminal_id: TerminalId) -> anyhow::Result<()> {
@@ -167,7 +186,8 @@ impl HostProxySender {
             .send(HostProxyRequest::KillTerminal { terminal_id, reply })
             .await
             .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
-        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
     }
 
     pub async fn release_terminal(&self, terminal_id: TerminalId) -> anyhow::Result<()> {
@@ -176,7 +196,8 @@ impl HostProxySender {
             .send(HostProxyRequest::ReleaseTerminal { terminal_id, reply })
             .await
             .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
-        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
     }
 
     pub async fn request_permission(
@@ -187,10 +208,16 @@ impl HostProxySender {
     ) -> anyhow::Result<RequestPermissionOutcome> {
         let (reply, rx) = oneshot::channel();
         self.tx
-            .send(HostProxyRequest::RequestPermission { tool_call_id, tool_name, path, reply })
+            .send(HostProxyRequest::RequestPermission {
+                tool_call_id,
+                tool_name,
+                path,
+                reply,
+            })
             .await
             .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
-        rx.await.map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
     }
 }
 
@@ -228,16 +255,36 @@ pub fn spawn_proxy_pump(
             let guard = conn.borrow();
             let Some(client) = guard.as_ref() else {
                 drop(guard);
-                macro_rules! no_conn { () => { Err(anyhow::anyhow!("no ACP connection")) }; }
+                macro_rules! no_conn {
+                    () => {
+                        Err(anyhow::anyhow!("no ACP connection"))
+                    };
+                }
                 match req {
-                    HostProxyRequest::ReadTextFile { reply, .. } => { let _ = reply.send(no_conn!()); }
-                    HostProxyRequest::WriteTextFile { reply, .. } => { let _ = reply.send(no_conn!()); }
-                    HostProxyRequest::CreateTerminal { reply, .. } => { let _ = reply.send(no_conn!()); }
-                    HostProxyRequest::TerminalOutput { reply, .. } => { let _ = reply.send(no_conn!()); }
-                    HostProxyRequest::WaitForTerminalExit { reply, .. } => { let _ = reply.send(no_conn!()); }
-                    HostProxyRequest::KillTerminal { reply, .. } => { let _ = reply.send(no_conn!()); }
-                    HostProxyRequest::ReleaseTerminal { reply, .. } => { let _ = reply.send(no_conn!()); }
-                    HostProxyRequest::RequestPermission { reply, .. } => { let _ = reply.send(no_conn!()); }
+                    HostProxyRequest::ReadTextFile { reply, .. } => {
+                        let _ = reply.send(no_conn!());
+                    }
+                    HostProxyRequest::WriteTextFile { reply, .. } => {
+                        let _ = reply.send(no_conn!());
+                    }
+                    HostProxyRequest::CreateTerminal { reply, .. } => {
+                        let _ = reply.send(no_conn!());
+                    }
+                    HostProxyRequest::TerminalOutput { reply, .. } => {
+                        let _ = reply.send(no_conn!());
+                    }
+                    HostProxyRequest::WaitForTerminalExit { reply, .. } => {
+                        let _ = reply.send(no_conn!());
+                    }
+                    HostProxyRequest::KillTerminal { reply, .. } => {
+                        let _ = reply.send(no_conn!());
+                    }
+                    HostProxyRequest::ReleaseTerminal { reply, .. } => {
+                        let _ = reply.send(no_conn!());
+                    }
+                    HostProxyRequest::RequestPermission { reply, .. } => {
+                        let _ = reply.send(no_conn!());
+                    }
                 }
                 continue;
             };
@@ -251,7 +298,11 @@ pub fn spawn_proxy_pump(
                         Err(e) => Err(anyhow::anyhow!("host read_text_file: {}", e.message)),
                     });
                 }
-                HostProxyRequest::WriteTextFile { path, content, reply } => {
+                HostProxyRequest::WriteTextFile {
+                    path,
+                    content,
+                    reply,
+                } => {
                     let r = WriteTextFileRequest::new(session_id.clone(), path, content);
                     let result = client.write_text_file(r).await;
                     let _ = reply.send(match result {
@@ -259,11 +310,23 @@ pub fn spawn_proxy_pump(
                         Err(e) => Err(anyhow::anyhow!("host write_text_file: {}", e.message)),
                     });
                 }
-                HostProxyRequest::CreateTerminal { command, args, cwd, output_byte_limit, reply } => {
+                HostProxyRequest::CreateTerminal {
+                    command,
+                    args,
+                    cwd,
+                    output_byte_limit,
+                    reply,
+                } => {
                     let mut r = CreateTerminalRequest::new(session_id.clone(), command);
-                    if !args.is_empty() { r = r.args(args); }
-                    if let Some(d) = cwd { r = r.cwd(d); }
-                    if let Some(l) = output_byte_limit { r = r.output_byte_limit(l); }
+                    if !args.is_empty() {
+                        r = r.args(args);
+                    }
+                    if let Some(d) = cwd {
+                        r = r.cwd(d);
+                    }
+                    if let Some(l) = output_byte_limit {
+                        r = r.output_byte_limit(l);
+                    }
                     let result = client.create_terminal(r).await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp.terminal_id),
@@ -283,7 +346,10 @@ pub fn spawn_proxy_pump(
                     let result = client.wait_for_terminal_exit(r).await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp),
-                        Err(e) => Err(anyhow::anyhow!("host wait_for_terminal_exit: {}", e.message)),
+                        Err(e) => Err(anyhow::anyhow!(
+                            "host wait_for_terminal_exit: {}",
+                            e.message
+                        )),
                     });
                 }
                 HostProxyRequest::KillTerminal { terminal_id, reply } => {
@@ -302,7 +368,12 @@ pub fn spawn_proxy_pump(
                         Err(e) => Err(anyhow::anyhow!("host release_terminal: {}", e.message)),
                     });
                 }
-                HostProxyRequest::RequestPermission { tool_call_id, tool_name, path, reply } => {
+                HostProxyRequest::RequestPermission {
+                    tool_call_id,
+                    tool_name,
+                    path,
+                    reply,
+                } => {
                     let tool_call = ToolCallUpdate::new(
                         tool_call_id,
                         ToolCallUpdateFields::new()
@@ -311,9 +382,21 @@ pub fn spawn_proxy_pump(
                             .raw_input(Value::String(format!("Access path: {path}"))),
                     );
                     let options = vec![
-                        PermissionOption::new("allow_once", "Allow once", PermissionOptionKind::AllowOnce),
-                        PermissionOption::new("allow_always", "Allow always", PermissionOptionKind::AllowAlways),
-                        PermissionOption::new("reject_once", "Reject", PermissionOptionKind::RejectOnce),
+                        PermissionOption::new(
+                            "allow_once",
+                            "Allow once",
+                            PermissionOptionKind::AllowOnce,
+                        ),
+                        PermissionOption::new(
+                            "allow_always",
+                            "Allow always",
+                            PermissionOptionKind::AllowAlways,
+                        ),
+                        PermissionOption::new(
+                            "reject_once",
+                            "Reject",
+                            PermissionOptionKind::RejectOnce,
+                        ),
                     ];
                     let r = RequestPermissionRequest::new(session_id.clone(), tool_call, options);
                     let result = client.request_permission(r).await;
@@ -341,7 +424,10 @@ fn validate_delegation_path(path_str: &str) -> anyhow::Result<PathBuf> {
     if !path.is_absolute() {
         anyhow::bail!("delegation requires absolute path, got: {path_str}");
     }
-    if path.components().any(|c| c == std::path::Component::ParentDir) {
+    if path
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         anyhow::bail!("path traversal rejected: {path_str}");
     }
     Ok(path)
@@ -355,8 +441,14 @@ pub async fn try_delegate_to_host(
     match tool_name {
         "read" if ctx.caps.fs_read => {
             let path_str = args.get("path").and_then(|v| v.as_str())?;
-            let offset = args.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize);
-            let limit = args.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
+            let offset = args
+                .get("offset")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize);
+            let limit = args
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize);
             let path = match validate_delegation_path(path_str) {
                 Ok(p) => p,
                 Err(e) => return Some(Err(e)),
@@ -401,7 +493,7 @@ async fn delegate_read(
     let mut text = selected.join("\n");
 
     if text.len() > READ_MAX_BYTES {
-        text.truncate(READ_MAX_BYTES);
+        text.truncate(text.floor_char_boundary(READ_MAX_BYTES));
         if let Some(last_newline) = text.rfind('\n') {
             text.truncate(last_newline);
         }
@@ -458,21 +550,26 @@ async fn delegate_bash(
     timeout_ms: Option<u64>,
 ) -> anyhow::Result<ToolResult> {
     let output_byte_limit = Some(50 * 1024u64);
-    let terminal_id = ctx.proxy.create_terminal(
-        "bash".into(),
-        vec!["-c".into(), command.into()],
-        None,
-        output_byte_limit,
-    ).await?;
+    let terminal_id = ctx
+        .proxy
+        .create_terminal(
+            "bash".into(),
+            vec!["-c".into(), command.into()],
+            None,
+            output_byte_limit,
+        )
+        .await?;
 
-    let timeout_dur = timeout_ms.map(std::time::Duration::from_millis)
+    let timeout_dur = timeout_ms
+        .map(std::time::Duration::from_millis)
         .unwrap_or(std::time::Duration::from_secs(600));
 
     // Use wait_for_terminal_exit instead of polling — the host blocks until
     // the command finishes, which is both faster and cheaper than polling.
     let exit_result = tokio::time::timeout(timeout_dur, async {
         ctx.proxy.wait_for_terminal_exit(terminal_id.clone()).await
-    }).await;
+    })
+    .await;
 
     let (output, exit_code, timed_out) = match exit_result {
         Ok(Ok(_exit_resp)) => {
@@ -497,7 +594,10 @@ async fn delegate_bash(
 
     let mut text = output;
     if timed_out {
-        text.push_str(&format!("\n[timed out after {}ms]", timeout_ms.unwrap_or(600_000)));
+        text.push_str(&format!(
+            "\n[timed out after {}ms]",
+            timeout_ms.unwrap_or(600_000)
+        ));
     } else if let Some(code) = exit_code {
         if code != 0 {
             text.push_str(&format!("\n[exit code: {code}]"));

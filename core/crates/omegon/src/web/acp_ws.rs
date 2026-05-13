@@ -6,8 +6,8 @@
 //! ACP thread via unbounded `mpsc` channels.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Query, State, WebSocketUpgrade};
@@ -51,7 +51,11 @@ pub async fn acp_ws_handler(
 
     let active = state.active_connections.load(Ordering::Relaxed);
     if active >= MAX_CONCURRENT_CONNECTIONS {
-        tracing::warn!(active, max = MAX_CONCURRENT_CONNECTIONS, "ACP connection limit reached");
+        tracing::warn!(
+            active,
+            max = MAX_CONCURRENT_CONNECTIONS,
+            "ACP connection limit reached"
+        );
         return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
 
@@ -68,7 +72,9 @@ async fn handle_acp_socket(socket: WebSocket, state: AcpWebState) {
     // Guard: decrement active connections on drop (disconnect, panic, any exit path)
     struct ConnGuard(Arc<AtomicU64>);
     impl Drop for ConnGuard {
-        fn drop(&mut self) { self.0.fetch_sub(1, Ordering::Relaxed); }
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::Relaxed);
+        }
     }
     let _conn_guard = ConnGuard(state.active_connections.clone());
 
@@ -150,10 +156,15 @@ async fn handle_acp_socket(socket: WebSocket, state: AcpWebState) {
                     }
                 };
                 let local = tokio::task::LocalSet::new();
-                local.block_on(&rt, run_acp_session(model, cwd, agent_id, inbound_rx, outbound_tx));
+                local.block_on(
+                    &rt,
+                    run_acp_session(model, cwd, agent_id, inbound_rx, outbound_tx),
+                );
             }));
             if let Err(e) = result {
-                let msg = e.downcast_ref::<&str>().copied()
+                let msg = e
+                    .downcast_ref::<&str>()
+                    .copied()
                     .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
                     .unwrap_or("unknown panic");
                 tracing::error!(error = msg, "ACP WS thread panicked");
@@ -166,7 +177,9 @@ async fn handle_acp_socket(socket: WebSocket, state: AcpWebState) {
             match tokio::time::timeout(
                 std::time::Duration::from_secs(THREAD_JOIN_TIMEOUT_SECS),
                 join_result,
-            ).await {
+            )
+            .await
+            {
                 Ok(Ok(Ok(()))) => {}
                 Ok(Ok(Err(_panic))) => {
                     tracing::error!(conn_id, "ACP WS thread panicked during join");
@@ -175,7 +188,10 @@ async fn handle_acp_socket(socket: WebSocket, state: AcpWebState) {
                     tracing::error!(conn_id, error = %e, "ACP WS join task failed");
                 }
                 Err(_) => {
-                    tracing::error!(conn_id, "ACP WS thread join timed out after {THREAD_JOIN_TIMEOUT_SECS}s");
+                    tracing::error!(
+                        conn_id,
+                        "ACP WS thread join timed out after {THREAD_JOIN_TIMEOUT_SECS}s"
+                    );
                 }
             }
         }
@@ -249,7 +265,9 @@ async fn run_acp_session(
         agent_clone,
         write_server.compat_write(),
         read_client.compat(),
-        |fut| { tokio::task::spawn_local(fut); },
+        |fut| {
+            tokio::task::spawn_local(fut);
+        },
     );
     agent.set_client(conn);
 

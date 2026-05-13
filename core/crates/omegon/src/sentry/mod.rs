@@ -43,8 +43,12 @@ pub struct RoutingConfig {
     pub heavy_model: String,
 }
 
-fn default_max_concurrent() -> usize { 1 }
-fn default_log_retention_days() -> u32 { 30 }
+fn default_max_concurrent() -> usize {
+    1
+}
+fn default_log_retention_days() -> u32 {
+    30
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SentryTaskConfig {
@@ -88,12 +92,10 @@ pub struct BudgetConfig {
 }
 
 pub fn load_config(path: &Path) -> anyhow::Result<SentryConfig> {
-    let content = std::fs::read_to_string(path).map_err(|e| {
-        anyhow::anyhow!("failed to read sentry config {}: {e}", path.display())
-    })?;
-    let config: SentryConfig = toml::from_str(&content).map_err(|e| {
-        anyhow::anyhow!("failed to parse sentry config {}: {e}", path.display())
-    })?;
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("failed to read sentry config {}: {e}", path.display()))?;
+    let config: SentryConfig = toml::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("failed to parse sentry config {}: {e}", path.display()))?;
 
     for task in &config.tasks {
         if task.prompt.is_none() && task.prompt_file.is_none() {
@@ -152,7 +154,10 @@ schedule = "*/30 * * * *"
 
         let pr = &config.tasks[0];
         assert_eq!(pr.name, "pr-review");
-        assert_eq!(pr.prompt.as_deref(), Some("Review all open PRs, leave comments on issues found"));
+        assert_eq!(
+            pr.prompt.as_deref(),
+            Some("Review all open PRs, leave comments on issues found")
+        );
         assert_eq!(pr.model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
         assert_eq!(pr.max_turns, Some(20));
         assert_eq!(pr.timeout_secs, Some(300));
@@ -234,11 +239,15 @@ name = "deploy"
     fn load_config_validates_prompt() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sentry.toml");
-        std::fs::write(&path, r#"
+        std::fs::write(
+            &path,
+            r#"
 [sentry]
 [[task]]
 name = "bad"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         assert!(load_config(&path).is_err());
     }
 

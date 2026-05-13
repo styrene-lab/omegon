@@ -180,6 +180,12 @@ mod tests {
         let registry = NexRegistry::load(Path::new("/nonexistent"), None).unwrap();
         let profile = registry.resolve_for_domain(&NexDomain::CodingRust).unwrap();
         assert_eq!(profile.name, "coding-rust");
-        assert!(profile.image_ref.as_ref().unwrap().contains("omegon-coding-rust"));
+        assert!(
+            profile
+                .image_ref
+                .as_ref()
+                .unwrap()
+                .contains("omegon-coding-rust")
+        );
     }
 }

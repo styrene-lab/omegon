@@ -349,7 +349,7 @@ pub fn tool_card<'a>(
 
     if let Some(args) = args_summary {
         let display = if args.len() > 50 {
-            format!(" {}…", &args[..49.min(args.len())])
+            format!(" {}", truncate_str(args, 50, "…"))
         } else {
             format!(" {args}")
         };
@@ -864,6 +864,16 @@ mod tests {
         let s = "héllo wörld";
         let result = truncate_str(s, 6, "…");
         assert!(visible_width(&result) <= 6);
+    }
+
+    #[test]
+    fn tool_header_args_summary_handles_emoji_boundary() {
+        let t = Alpharius;
+        let args = format!("{}✅tail", "x".repeat(49));
+        let line = tool_card("read", false, false, Some(&args), None, &t);
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains('…'));
+        assert!(text.is_char_boundary(text.len()));
     }
 
     #[test]

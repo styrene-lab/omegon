@@ -47,10 +47,7 @@ pub fn write_config_value(ext_dir: &Path, key: &str, value: &str) -> Result<()> 
 }
 
 /// Validate a value against a config field schema.
-pub fn validate_field(
-    field: &omegon_extension::ConfigField,
-    value: &str,
-) -> Result<()> {
+pub fn validate_field(field: &omegon_extension::ConfigField, value: &str) -> Result<()> {
     use omegon_extension::ConfigFieldType;
     match field.field_type {
         ConfigFieldType::Boolean => {
@@ -65,10 +62,7 @@ pub fn validate_field(
         }
         ConfigFieldType::Enum => {
             if !field.values.contains(&value.to_string()) {
-                anyhow::bail!(
-                    "value '{value}' not in allowed values: {:?}",
-                    field.values
-                );
+                anyhow::bail!("value '{value}' not in allowed values: {:?}", field.values);
             }
         }
         ConfigFieldType::String | ConfigFieldType::Text => {

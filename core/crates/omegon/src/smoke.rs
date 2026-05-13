@@ -168,7 +168,7 @@ async fn run_single(
                 "expected response to contain '{}', got: {}",
                 expected,
                 if response_text.len() > 100 {
-                    format!("{}...", &response_text[..100])
+                    format!("{}...", crate::util::truncate_str(&response_text, 100))
                 } else {
                     response_text
                 }

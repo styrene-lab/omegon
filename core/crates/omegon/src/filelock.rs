@@ -53,12 +53,20 @@ pub fn acquire_lock(path: &Path) -> anyhow::Result<FileLockGuard> {
     for (attempt, delay_ms) in backoffs.iter().enumerate() {
         let ret = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
         if ret == 0 {
-            return Ok(FileLockGuard { fd, _lock_path: lock_path });
+            return Ok(FileLockGuard {
+                fd,
+                _lock_path: lock_path,
+            });
         }
         let err = std::io::Error::last_os_error();
         if err.kind() != std::io::ErrorKind::WouldBlock {
-            unsafe { libc::close(fd); }
-            return Err(anyhow::anyhow!("flock failed on {}: {err}", lock_path.display()));
+            unsafe {
+                libc::close(fd);
+            }
+            return Err(anyhow::anyhow!(
+                "flock failed on {}: {err}",
+                lock_path.display()
+            ));
         }
         tracing::debug!(
             path = %lock_path.display(),
@@ -71,11 +79,19 @@ pub fn acquire_lock(path: &Path) -> anyhow::Result<FileLockGuard> {
     // Final blocking attempt after all retries exhausted
     let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
     if ret == 0 {
-        Ok(FileLockGuard { fd, _lock_path: lock_path })
+        Ok(FileLockGuard {
+            fd,
+            _lock_path: lock_path,
+        })
     } else {
         let err = std::io::Error::last_os_error();
-        unsafe { libc::close(fd); }
-        Err(anyhow::anyhow!("flock timed out on {}: {err}", lock_path.display()))
+        unsafe {
+            libc::close(fd);
+        }
+        Err(anyhow::anyhow!(
+            "flock timed out on {}: {err}",
+            lock_path.display()
+        ))
     }
 }
 
@@ -90,7 +106,9 @@ pub fn acquire_lock(path: &Path) -> anyhow::Result<FileLockGuard> {
         path = %path.display(),
         "advisory file locking not available on this platform"
     );
-    Ok(FileLockGuard { _lock_path: lock_path_for(path) })
+    Ok(FileLockGuard {
+        _lock_path: lock_path_for(path),
+    })
 }
 
 fn lock_path_for(path: &Path) -> PathBuf {

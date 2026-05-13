@@ -52,10 +52,20 @@ pub struct TaskError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Trigger {
-    Cron { schedule: String },
-    Webhook { name: String },
-    FileWatch { paths: Vec<PathBuf>, debounce_secs: u64 },
-    GitEvent { events: Vec<GitEventKind>, poll_interval_secs: u64 },
+    Cron {
+        schedule: String,
+    },
+    Webhook {
+        name: String,
+    },
+    FileWatch {
+        paths: Vec<PathBuf>,
+        debounce_secs: u64,
+    },
+    GitEvent {
+        events: Vec<GitEventKind>,
+        poll_interval_secs: u64,
+    },
     Manual,
 }
 
@@ -124,8 +134,12 @@ mod tests {
             name: "PR Review".into(),
             priority: 2,
             triggers: vec![
-                Trigger::Cron { schedule: "0 */4 * * *".into() },
-                Trigger::Webhook { name: "github-pr".into() },
+                Trigger::Cron {
+                    schedule: "0 */4 * * *".into(),
+                },
+                Trigger::Webhook {
+                    name: "github-pr".into(),
+                },
             ],
             last_run: None,
             run_count: 0,
@@ -174,9 +188,16 @@ mod tests {
     #[test]
     fn trigger_variants_roundtrip() {
         let triggers = vec![
-            Trigger::Cron { schedule: "0 9 * * 1-5".into() },
-            Trigger::Webhook { name: "deploy".into() },
-            Trigger::FileWatch { paths: vec!["src/".into()], debounce_secs: 30 },
+            Trigger::Cron {
+                schedule: "0 9 * * 1-5".into(),
+            },
+            Trigger::Webhook {
+                name: "deploy".into(),
+            },
+            Trigger::FileWatch {
+                paths: vec!["src/".into()],
+                debounce_secs: 30,
+            },
             Trigger::GitEvent {
                 events: vec![GitEventKind::NewCommit, GitEventKind::PullRequest],
                 poll_interval_secs: 60,

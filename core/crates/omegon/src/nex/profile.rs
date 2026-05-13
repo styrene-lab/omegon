@@ -374,15 +374,15 @@ impl NexProfile {
             caps.push("fs:mount-cwd".into());
         }
         if !self.capabilities.mount_paths.is_empty() {
-            caps.push(format!("fs:mount-extra:{}", self.capabilities.mount_paths.len()));
+            caps.push(format!(
+                "fs:mount-extra:{}",
+                self.capabilities.mount_paths.len()
+            ));
         }
         crate::settings::AuthorizationContext {
             roles: vec!["nex-agent".into()],
             capabilities: caps,
-            trust_domain: self
-                .signed_by
-                .as_ref()
-                .and_then(|b| b.issuer.clone()),
+            trust_domain: self.signed_by.as_ref().and_then(|b| b.issuer.clone()),
         }
     }
 }
@@ -397,7 +397,10 @@ mod tests {
 
     #[test]
     fn domain_image_suffix() {
-        assert_eq!(NexDomain::CodingPython.image_suffix(), "omegon-coding-python");
+        assert_eq!(
+            NexDomain::CodingPython.image_suffix(),
+            "omegon-coding-python"
+        );
         assert_eq!(NexDomain::Coding.image_suffix(), "omegon");
     }
 
@@ -419,19 +422,31 @@ mod tests {
     #[test]
     fn network_policy_flags() {
         assert_eq!(NexNetworkPolicy::Isolated.network_flag(), "none");
-        assert_eq!(NexNetworkPolicy::Egress { filter: None }.network_flag(), "bridge");
+        assert_eq!(
+            NexNetworkPolicy::Egress { filter: None }.network_flag(),
+            "bridge"
+        );
         assert_eq!(NexNetworkPolicy::Host.network_flag(), "host");
-        assert_eq!(NexNetworkPolicy::Bridge { ports: vec![] }.network_flag(), "bridge");
-        assert_eq!(NexNetworkPolicy::Custom("mynet".into()).network_flag(), "mynet");
+        assert_eq!(
+            NexNetworkPolicy::Bridge { ports: vec![] }.network_flag(),
+            "bridge"
+        );
+        assert_eq!(
+            NexNetworkPolicy::Custom("mynet".into()).network_flag(),
+            "mynet"
+        );
     }
 
     #[test]
     fn network_policy_access() {
         assert!(!NexNetworkPolicy::Isolated.has_network_access());
         assert!(NexNetworkPolicy::Egress { filter: None }.has_network_access());
-        assert!(NexNetworkPolicy::Egress {
-            filter: Some(NexEgressFilter::default()),
-        }.has_network_access());
+        assert!(
+            NexNetworkPolicy::Egress {
+                filter: Some(NexEgressFilter::default()),
+            }
+            .has_network_access()
+        );
         assert!(NexNetworkPolicy::Bridge { ports: vec![] }.has_network_access());
         assert!(NexNetworkPolicy::Host.has_network_access());
     }
@@ -439,9 +454,15 @@ mod tests {
     #[test]
     fn network_policy_display() {
         assert_eq!(NexNetworkPolicy::Isolated.display_label(), "isolated");
-        assert_eq!(NexNetworkPolicy::Egress { filter: None }.display_label(), "egress");
         assert_eq!(
-            NexNetworkPolicy::Egress { filter: Some(NexEgressFilter::default()) }.display_label(),
+            NexNetworkPolicy::Egress { filter: None }.display_label(),
+            "egress"
+        );
+        assert_eq!(
+            NexNetworkPolicy::Egress {
+                filter: Some(NexEgressFilter::default())
+            }
+            .display_label(),
             "egress (filtered)"
         );
         assert_eq!(NexNetworkPolicy::Host.display_label(), "host");

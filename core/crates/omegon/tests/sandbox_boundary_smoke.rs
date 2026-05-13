@@ -66,11 +66,21 @@ fn run_in_sandbox(runtime: &str, workspace: &Path, shell_command: &str) -> Sandb
     run_in_sandbox_opts(runtime, workspace, shell_command, None)
 }
 
-fn run_in_sandbox_with_vault(runtime: &str, workspace: &Path, shell_command: &str, vault: &Path) -> SandboxResult {
+fn run_in_sandbox_with_vault(
+    runtime: &str,
+    workspace: &Path,
+    shell_command: &str,
+    vault: &Path,
+) -> SandboxResult {
     run_in_sandbox_opts(runtime, workspace, shell_command, Some(vault))
 }
 
-fn run_in_sandbox_opts(runtime: &str, workspace: &Path, shell_command: &str, vault: Option<&Path>) -> SandboxResult {
+fn run_in_sandbox_opts(
+    runtime: &str,
+    workspace: &Path,
+    shell_command: &str,
+    vault: Option<&Path>,
+) -> SandboxResult {
     let image = test_image();
 
     let egress_filter = serde_json::json!({
@@ -95,7 +105,10 @@ fn run_in_sandbox_opts(runtime: &str, workspace: &Path, shell_command: &str, vau
     if let Some(v) = vault {
         let vault_file = v.join("secrets.json");
         if vault_file.exists() {
-            cmd.arg(format!("-v={}:/data/omegon/secrets.json:ro", vault_file.display()));
+            cmd.arg(format!(
+                "-v={}:/data/omegon/secrets.json:ro",
+                vault_file.display()
+            ));
         }
     }
     cmd.arg("--cap-drop=ALL");
@@ -104,7 +117,8 @@ fn run_in_sandbox_opts(runtime: &str, workspace: &Path, shell_command: &str, vau
     cmd.arg("--pids-limit=512");
     cmd.arg("--memory=4g");
     cmd.arg("--network=bridge");
-    cmd.arg("-e").arg(format!("OMEGON_EGRESS_FILTER={egress_filter}"));
+    cmd.arg("-e")
+        .arg(format!("OMEGON_EGRESS_FILTER={egress_filter}"));
     cmd.arg("-e").arg("OMEGON_EGRESS_MODE=iptables");
     cmd.arg("-e").arg("OMEGON_NO_KEYRING=1");
     cmd.arg("-e").arg("OMEGON_INSIDE_SANDBOX=1");
@@ -309,7 +323,10 @@ fn sandbox_boundary_smoke() {
     eprintln!("[sandbox] Category 1: Filesystem isolation");
 
     results.push(sandbox_test!(
-        &runtime, ws, "F1", "filesystem/host-etc-not-exposed",
+        &runtime,
+        ws,
+        "F1",
+        "filesystem/host-etc-not-exposed",
         "cat /etc/hosts 2>&1 || true",
         |r: &SandboxResult| {
             // Container has its own /etc/hosts, not the host's.
@@ -320,37 +337,55 @@ fn sandbox_boundary_smoke() {
     ));
 
     results.push(sandbox_test!(
-        &runtime, ws, "F2", "filesystem/write-outside-work-blocked",
+        &runtime,
+        ws,
+        "F2",
+        "filesystem/write-outside-work-blocked",
         "touch /outside 2>&1",
         expect_failure
     ));
 
     results.push(sandbox_test!(
-        &runtime, ws, "F3", "filesystem/write-usr-blocked",
+        &runtime,
+        ws,
+        "F3",
+        "filesystem/write-usr-blocked",
         "touch /usr/evil 2>&1",
         expect_failure
     ));
 
     results.push(sandbox_test!(
-        &runtime, ws, "F4", "filesystem/write-etc-blocked",
+        &runtime,
+        ws,
+        "F4",
+        "filesystem/write-etc-blocked",
         "touch /etc/evil 2>&1",
         expect_failure
     ));
 
     results.push(sandbox_test!(
-        &runtime, ws, "F5", "filesystem/write-work-allowed",
+        &runtime,
+        ws,
+        "F5",
+        "filesystem/write-work-allowed",
         "touch /work/sandbox-test.txt && echo OK",
         expect_stdout_contains("OK")
     ));
 
     results.push(sandbox_test!(
-        &runtime, ws, "F6", "filesystem/write-tmp-allowed",
+        &runtime,
+        ws,
+        "F6",
+        "filesystem/write-tmp-allowed",
         "touch /tmp/test.txt && echo OK",
         expect_stdout_contains("OK")
     ));
 
     results.push(sandbox_test!(
-        &runtime, ws, "F7", "filesystem/read-workspace-file",
+        &runtime,
+        ws,
+        "F7",
+        "filesystem/read-workspace-file",
         "cat /work/hello.txt",
         expect_stdout_contains("workspace file")
     ));
@@ -359,7 +394,10 @@ fn sandbox_boundary_smoke() {
     // to the container's own rootfs, not the host's. Verify that the content
     // is the container's /etc/passwd (minimal), not the host's (many users).
     results.push(sandbox_test!(
-        &runtime, ws, "F8", "filesystem/symlink-stays-in-container",
+        &runtime,
+        ws,
+        "F8",
+        "filesystem/symlink-stays-in-container",
         "ln -s / /work/escape 2>/dev/null; cat /work/escape/etc/passwd 2>&1 | wc -l",
         |r: &SandboxResult| {
             // Container's /etc/passwd has very few entries (< 10).
@@ -368,13 +406,19 @@ fn sandbox_boundary_smoke() {
             if lines < 20 {
                 (true, String::new())
             } else {
-                (false, format!("too many lines ({lines}) — may be host's /etc/passwd"))
+                (
+                    false,
+                    format!("too many lines ({lines}) — may be host's /etc/passwd"),
+                )
             }
         }
     ));
 
     results.push(sandbox_test!(
-        &runtime, ws, "F9", "filesystem/mount-blocked",
+        &runtime,
+        ws,
+        "F9",
+        "filesystem/mount-blocked",
         "mount -t tmpfs none /mnt 2>&1",
         expect_failure
     ));
@@ -400,7 +444,10 @@ fn sandbox_boundary_smoke() {
     ));
 
     results.push(sandbox_test_entrypoint!(
-        &runtime, ws, "N2", "network/arbitrary-host-blocked",
+        &runtime,
+        ws,
+        "N2",
+        "network/arbitrary-host-blocked",
         "curl -sf --connect-timeout 5 https://example.com/ -o /dev/null 2>&1; echo EXIT=$?",
         |r: &SandboxResult| {
             // Should fail — example.com is not in the allowlist
@@ -408,13 +455,19 @@ fn sandbox_boundary_smoke() {
             if blocked {
                 (true, String::new())
             } else {
-                (false, format!("host should be blocked: {}", r.stdout.trim()))
+                (
+                    false,
+                    format!("host should be blocked: {}", r.stdout.trim()),
+                )
             }
         }
     ));
 
     results.push(sandbox_test_entrypoint!(
-        &runtime, ws, "N3", "network/metadata-endpoint-blocked",
+        &runtime,
+        ws,
+        "N3",
+        "network/metadata-endpoint-blocked",
         "curl -sf --connect-timeout 3 http://169.254.169.254/ 2>&1; echo EXIT=$?",
         |r: &SandboxResult| {
             let blocked = !r.stdout.contains("EXIT=0");
@@ -427,7 +480,10 @@ fn sandbox_boundary_smoke() {
     ));
 
     results.push(sandbox_test_entrypoint!(
-        &runtime, ws, "N4", "network/private-network-blocked",
+        &runtime,
+        ws,
+        "N4",
+        "network/private-network-blocked",
         "curl -sf --connect-timeout 3 http://10.0.0.1/ 2>&1; echo EXIT=$?",
         |r: &SandboxResult| {
             let blocked = !r.stdout.contains("EXIT=0");
@@ -440,7 +496,10 @@ fn sandbox_boundary_smoke() {
     ));
 
     results.push(sandbox_test_entrypoint!(
-        &runtime, ws, "N5", "network/dns-resolution-works",
+        &runtime,
+        ws,
+        "N5",
+        "network/dns-resolution-works",
         "getent hosts api.anthropic.com | head -1",
         |r: &SandboxResult| {
             if !r.stdout.trim().is_empty() && r.exit_code == 0 {
@@ -461,7 +520,10 @@ fn sandbox_boundary_smoke() {
     // On macOS with podman, cap behavior differs (rootless VM). Check that
     // at minimum, dangerous caps like SYS_ADMIN are not present.
     results.push(sandbox_test!(
-        &runtime, ws, "C1", "capability/dangerous-caps-dropped",
+        &runtime,
+        ws,
+        "C1",
+        "capability/dangerous-caps-dropped",
         "cat /proc/self/status 2>/dev/null | grep -i capeff || echo NO_PROC",
         |r: &SandboxResult| {
             // CapEff should show very limited capabilities (only NET_ADMIN = 0x1000)
@@ -476,7 +538,10 @@ fn sandbox_boundary_smoke() {
     ));
 
     results.push(sandbox_test!(
-        &runtime, ws, "C2", "capability/mknod-blocked",
+        &runtime,
+        ws,
+        "C2",
+        "capability/mknod-blocked",
         "mknod /tmp/testdev b 1 1 2>&1",
         expect_failure
     ));
@@ -503,7 +568,10 @@ fn sandbox_boundary_smoke() {
     ));
 
     results.push(sandbox_test!(
-        &runtime, ws, "R2", "resources/pids-limit-set",
+        &runtime,
+        ws,
+        "R2",
+        "resources/pids-limit-set",
         "cat /sys/fs/cgroup/pids.max 2>/dev/null || echo UNKNOWN",
         |r: &SandboxResult| {
             let out = r.stdout.trim();
@@ -523,13 +591,19 @@ fn sandbox_boundary_smoke() {
     eprintln!("[sandbox] Category 5: Secrets isolation");
 
     results.push(sandbox_test!(
-        &runtime, ws, "S1", "secrets/no-api-keys-in-env",
+        &runtime,
+        ws,
+        "S1",
+        "secrets/no-api-keys-in-env",
         "printenv | grep -iE 'API_KEY|SECRET|TOKEN' | grep -v OMEGON || echo CLEAN",
         expect_stdout_contains("CLEAN")
     ));
 
     results.push(sandbox_test!(
-        &runtime, ws, "S2", "secrets/no-host-homedir",
+        &runtime,
+        ws,
+        "S2",
+        "secrets/no-host-homedir",
         "ls /home/ 2>&1 | head -5",
         |r: &SandboxResult| {
             // /home/ should be empty or not exist
@@ -537,13 +611,20 @@ fn sandbox_boundary_smoke() {
             if safe {
                 (true, String::new())
             } else {
-                (false, format!("host /home/ contents exposed: {}", r.stdout.trim()))
+                (
+                    false,
+                    format!("host /home/ contents exposed: {}", r.stdout.trim()),
+                )
             }
         }
     ));
 
     results.push(sandbox_test_vault!(
-        &runtime, ws, vault_dir.path(), "S3", "secrets/vault-read-only",
+        &runtime,
+        ws,
+        vault_dir.path(),
+        "S3",
+        "secrets/vault-read-only",
         "echo evil >> /data/omegon/secrets.json 2>&1",
         expect_failure
     ));
@@ -561,13 +642,18 @@ fn sandbox_boundary_smoke() {
         eprintln!("[sandbox] RESULTS: {passed}/{total} passed");
     } else {
         eprintln!("[sandbox] RESULTS: {passed}/{total} passed, {failed} FAILED");
-        let failed_ids: Vec<&str> = results.iter().filter(|(p, _)| !p).map(|(_, id)| *id).collect();
+        let failed_ids: Vec<&str> = results
+            .iter()
+            .filter(|(p, _)| !p)
+            .map(|(_, id)| *id)
+            .collect();
         eprintln!("[sandbox] Failed: {}", failed_ids.join(", "));
     }
     eprintln!();
 
     assert_eq!(
-        failed, 0,
+        failed,
+        0,
         "{failed} sandbox boundary test(s) failed: {:?}",
         results
             .iter()

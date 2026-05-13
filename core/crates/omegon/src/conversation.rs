@@ -138,6 +138,12 @@ pub struct IntentDocument {
     #[serde(default)]
     pub obfuscation_detected: bool,
 
+    /// Set when the operator corrects the agent's behavior rather than
+    /// assigning a new task. The core loop consumes this as a one-shot
+    /// recovery state before the next model turn.
+    #[serde(default)]
+    pub operator_correction_pending: bool,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub work_plan: Vec<WorkItem>,
 
@@ -225,14 +231,22 @@ impl IntentDocument {
                     self.commit_nudged = false;
                 }
                 "plan" => {
-                    let action = call.arguments.get("action")
+                    let action = call
+                        .arguments
+                        .get("action")
                         .and_then(|v| v.as_str())
                         .unwrap_or("status");
                     match action {
                         "set" => {
-                            let items: Vec<String> = call.arguments.get("items")
+                            let items: Vec<String> = call
+                                .arguments
+                                .get("items")
                                 .and_then(|v| v.as_array())
-                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|v| v.as_str().map(String::from))
+                                        .collect()
+                                })
                                 .unwrap_or_default();
                             if !items.is_empty() {
                                 self.set_work_plan(items);
@@ -240,7 +254,9 @@ impl IntentDocument {
                         }
                         "advance" => self.advance_work_plan(),
                         "complete" => {
-                            let idx = call.arguments.get("index")
+                            let idx = call
+                                .arguments
+                                .get("index")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0) as usize;
                             self.complete_work_item(idx);
@@ -302,10 +318,13 @@ impl IntentDocument {
 
     /// Set the work plan, replacing any existing plan.
     pub fn set_work_plan(&mut self, items: Vec<String>) {
-        self.work_plan = items.into_iter().map(|desc| WorkItem {
-            description: desc,
-            status: WorkItemStatus::Pending,
-        }).collect();
+        self.work_plan = items
+            .into_iter()
+            .map(|desc| WorkItem {
+                description: desc,
+                status: WorkItemStatus::Pending,
+            })
+            .collect();
         if let Some(first) = self.work_plan.first_mut() {
             first.status = WorkItemStatus::Active;
         }
@@ -313,7 +332,10 @@ impl IntentDocument {
 
     /// Advance the work plan: mark the current active item done and activate the next.
     pub fn advance_work_plan(&mut self) {
-        let active_idx = self.work_plan.iter().position(|w| w.status == WorkItemStatus::Active);
+        let active_idx = self
+            .work_plan
+            .iter()
+            .position(|w| w.status == WorkItemStatus::Active);
         if let Some(idx) = active_idx {
             self.work_plan[idx].status = WorkItemStatus::Done;
             if let Some(next) = self.work_plan.get_mut(idx + 1) {
@@ -330,8 +352,16 @@ impl IntentDocument {
             item.status = WorkItemStatus::Done;
         }
         // If no active item remains, activate the first pending
-        if !self.work_plan.iter().any(|w| w.status == WorkItemStatus::Active) {
-            if let Some(next) = self.work_plan.iter_mut().find(|w| w.status == WorkItemStatus::Pending) {
+        if !self
+            .work_plan
+            .iter()
+            .any(|w| w.status == WorkItemStatus::Active)
+        {
+            if let Some(next) = self
+                .work_plan
+                .iter_mut()
+                .find(|w| w.status == WorkItemStatus::Pending)
+            {
                 next.status = WorkItemStatus::Active;
             }
         }
@@ -339,7 +369,10 @@ impl IntentDocument {
 
     /// Skip the current active item and activate the next.
     pub fn skip_work_item(&mut self) {
-        let active_idx = self.work_plan.iter().position(|w| w.status == WorkItemStatus::Active);
+        let active_idx = self
+            .work_plan
+            .iter()
+            .position(|w| w.status == WorkItemStatus::Active);
         if let Some(idx) = active_idx {
             self.work_plan[idx].status = WorkItemStatus::Skipped;
             if let Some(next) = self.work_plan.get_mut(idx + 1) {
@@ -353,13 +386,20 @@ impl IntentDocument {
     /// True when all work items are terminal (done or skipped).
     pub fn work_plan_complete(&self) -> bool {
         !self.work_plan.is_empty()
-            && self.work_plan.iter().all(|w| matches!(w.status, WorkItemStatus::Done | WorkItemStatus::Skipped))
+            && self
+                .work_plan
+                .iter()
+                .all(|w| matches!(w.status, WorkItemStatus::Done | WorkItemStatus::Skipped))
     }
 
     /// Render the work plan as a compact one-line summary.
     pub fn work_plan_summary(&self) -> Option<String> {
-        if self.work_plan.is_empty() { return None; }
-        let parts: Vec<String> = self.work_plan.iter()
+        if self.work_plan.is_empty() {
+            return None;
+        }
+        let parts: Vec<String> = self
+            .work_plan
+            .iter()
             .map(|w| format!("{} {}", w.status.icon(), w.description))
             .collect();
         Some(parts.join("  "))
@@ -601,10 +641,14 @@ impl ConversationState {
             ));
         }
         if !intent.work_plan.is_empty() {
-            let items: Vec<String> = intent.work_plan.iter()
+            let items: Vec<String> = intent
+                .work_plan
+                .iter()
                 .map(|w| format!("{} {}", w.status.icon(), w.description))
                 .collect();
-            let done = intent.work_plan.iter()
+            let done = intent
+                .work_plan
+                .iter()
                 .filter(|w| matches!(w.status, WorkItemStatus::Done))
                 .count();
             lines.push(format!("Plan ({done}/{}):", intent.work_plan.len()));
@@ -668,7 +712,14 @@ impl ConversationState {
 
         // Auto-populate current_task from the first non-system user message
         if !text.starts_with("[System:") {
-            self.intent.set_task_from_prompt(&text);
+            let operator_correction = is_operator_correction(&text);
+            if operator_correction {
+                self.intent.operator_correction_pending = true;
+            }
+
+            if !is_control_only_operator_correction(&text) {
+                self.intent.set_task_from_prompt(&text);
+            }
 
             // Detect MCQ format for response formatting hint
             if is_mcq_format(&text) {
@@ -1355,6 +1406,69 @@ impl ConversationState {
     }
 }
 
+fn is_operator_correction(text: &str) -> bool {
+    let normalized = text.trim().to_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+    let correction_markers = [
+        "what is your problem",
+        "what is your fucking problem",
+        "what is your goddamn problem",
+        "what's your problem",
+        "what's your fucking problem",
+        "what's your goddamn problem",
+        "you are wasting",
+        "you're wasting",
+        "stop exploring",
+        "stop searching",
+        "stop reading",
+        "just do",
+        "do not touch",
+        "don't touch",
+        "do not fuck",
+        "don't fuck",
+        "under no circumstances",
+        "not acceptable",
+        "never acceptable",
+        "this is wrong",
+        "incorrect",
+    ];
+    correction_markers
+        .iter()
+        .any(|marker| normalized.contains(marker))
+}
+
+fn is_control_only_operator_correction(text: &str) -> bool {
+    if !is_operator_correction(text) {
+        return false;
+    }
+    let normalized = text.trim().to_lowercase();
+    let action_markers = [
+        "fix ",
+        "change ",
+        "update ",
+        "edit ",
+        "write ",
+        "add ",
+        "remove ",
+        "delete ",
+        "implement ",
+        "make ",
+        "build ",
+        "test ",
+        "run ",
+        "commit ",
+        "push ",
+        "get ",
+        "let's ",
+        "lets ",
+    ];
+    !action_markers
+        .iter()
+        .any(|marker| normalized.contains(marker))
+}
+
 /// Extract identifier-like tokens from a line of code.
 /// Enforce strict role alternation (user → assistant → user → …).
 /// After compaction/decay/orphan stripping, the message list may violate this.
@@ -1527,10 +1641,7 @@ fn extract_identifiers(line: &str) -> impl Iterator<Item = &str> {
 /// lossless for all human-readable text.
 fn sanitize_invisible_chars(text: &str) -> String {
     let original_len = text.len();
-    let cleaned: String = text
-        .chars()
-        .filter(|c| !is_invisible_char(*c))
-        .collect();
+    let cleaned: String = text.chars().filter(|c| !is_invisible_char(*c)).collect();
 
     let stripped = original_len - cleaned.len();
     if stripped > 0 {
@@ -1672,7 +1783,11 @@ pub fn is_mcq_format(text: &str) -> bool {
                 let s2 = format!("({letter})");
                 let s3 = format!("{letter}.");
                 let s4 = format!("{letter}:");
-                if t.starts_with(&s) || t.starts_with(&s2) || t.starts_with(&s3) || t.starts_with(&s4) {
+                if t.starts_with(&s)
+                    || t.starts_with(&s2)
+                    || t.starts_with(&s3)
+                    || t.starts_with(&s4)
+                {
                     return true;
                 }
             }
@@ -1698,21 +1813,29 @@ pub fn is_obfuscated(text: &str) -> bool {
         return false;
     }
 
-    let obfuscated_words = words.iter().filter(|word| {
-        let chars: Vec<char> = word.chars().collect();
-        if chars.len() < 3 {
-            return false;
-        }
-        // Pattern 1: 3+ consecutive identical characters
-        let has_repeats = chars.windows(3).any(|w| w[0] == w[1] && w[1] == w[2]);
-        // Pattern 2: leet-speak — digits/symbols inside word-like tokens
-        // A word is "leet" if it has at least 2 letters AND at least 1
-        // leet substitution character in a position that looks like a letter
-        let letter_count = chars.iter().filter(|c| c.is_alphabetic()).count();
-        let leet_count = chars.iter().filter(|c| matches!(c, '3' | '@' | '7' | '0' | '1' | '5')).count();
-        let has_leet = letter_count >= 2 && leet_count >= 1 && leet_count as f64 / chars.len() as f64 > 0.15;
-        has_repeats || has_leet
-    }).count();
+    let obfuscated_words = words
+        .iter()
+        .filter(|word| {
+            let chars: Vec<char> = word.chars().collect();
+            if chars.len() < 3 {
+                return false;
+            }
+            // Pattern 1: 3+ consecutive identical characters
+            let has_repeats = chars.windows(3).any(|w| w[0] == w[1] && w[1] == w[2]);
+            // Pattern 2: leet-speak — digits/symbols inside word-like tokens
+            // A word is "leet" if it has at least 2 letters AND at least 1
+            // leet substitution character in a position that looks like a letter
+            let letter_count = chars.iter().filter(|c| c.is_alphabetic()).count();
+            let leet_count = chars
+                .iter()
+                .filter(|c| matches!(c, '3' | '@' | '7' | '0' | '1' | '5'))
+                .count();
+            let has_leet = letter_count >= 2
+                && leet_count >= 1
+                && leet_count as f64 / chars.len() as f64 > 0.15;
+            has_repeats || has_leet
+        })
+        .count();
 
     let ratio = obfuscated_words as f64 / words.len() as f64;
     ratio > 0.25
@@ -1732,7 +1855,9 @@ pub fn normalize_leet_speak(text: &str) -> String {
 
     while i < len {
         // Find word boundaries (sequences of non-whitespace, non-punctuation-only)
-        if chars[i].is_whitespace() || (chars[i].is_ascii_punctuation() && !matches!(chars[i], '@' | '_')) {
+        if chars[i].is_whitespace()
+            || (chars[i].is_ascii_punctuation() && !matches!(chars[i], '@' | '_'))
+        {
             result.push(chars[i]);
             i += 1;
             continue;
@@ -1748,7 +1873,9 @@ pub fn normalize_leet_speak(text: &str) -> String {
         // Only normalize if the word looks like leet-speak:
         // has alphabetic chars AND has leet substitution chars
         let has_alpha = word.chars().any(|c| c.is_alphabetic());
-        let has_leet = word.chars().any(|c| matches!(c, '3' | '@' | '7' | '0' | '1' | '5'));
+        let has_leet = word
+            .chars()
+            .any(|c| matches!(c, '3' | '@' | '7' | '0' | '1' | '5'));
 
         if has_alpha && has_leet {
             for c in word.chars() {
@@ -2256,6 +2383,36 @@ mod tests {
         assert_eq!(
             conv.intent.current_task.as_deref(),
             Some("Also fix the tests")
+        );
+    }
+
+    #[test]
+    fn control_only_operator_correction_does_not_replace_current_task() {
+        let mut conv = ConversationState::new();
+        conv.push_user("Fix the auth bug".into());
+        conv.intent.stats.turns = 3;
+
+        conv.push_user("what is your fucking problem".into());
+
+        assert!(conv.intent.operator_correction_pending);
+        assert_eq!(
+            conv.intent.current_task.as_deref(),
+            Some("Fix the auth bug")
+        );
+    }
+
+    #[test]
+    fn operator_correction_with_action_updates_task_and_sets_recovery() {
+        let mut conv = ConversationState::new();
+        conv.push_user("Fix the auth bug".into());
+        conv.intent.stats.turns = 3;
+
+        conv.push_user("stop exploring and update the loop recovery gate".into());
+
+        assert!(conv.intent.operator_correction_pending);
+        assert_eq!(
+            conv.intent.current_task.as_deref(),
+            Some("stop exploring and update the loop recovery gate")
         );
     }
 
@@ -3141,7 +3298,11 @@ mod tests {
     #[test]
     fn work_plan_set_and_advance() {
         let mut intent = IntentDocument::default();
-        intent.set_work_plan(vec!["Read code".into(), "Design".into(), "Implement".into()]);
+        intent.set_work_plan(vec![
+            "Read code".into(),
+            "Design".into(),
+            "Implement".into(),
+        ]);
 
         assert_eq!(intent.work_plan.len(), 3);
         assert_eq!(intent.work_plan[0].status, WorkItemStatus::Active);
@@ -3189,7 +3350,8 @@ mod tests {
     #[test]
     fn work_plan_renders_in_intent() {
         let mut conv = ConversationState::new();
-        conv.intent.set_work_plan(vec!["Read".into(), "Write".into()]);
+        conv.intent
+            .set_work_plan(vec!["Read".into(), "Write".into()]);
 
         let rendered = conv.render_intent_for_injection();
         assert!(rendered.contains("Plan (0/2):"));

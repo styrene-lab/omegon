@@ -63,7 +63,9 @@ struct InFlight {
 
 impl InFlight {
     fn new() -> Self {
-        Self { tasks: std::sync::Mutex::new(std::collections::HashSet::new()) }
+        Self {
+            tasks: std::sync::Mutex::new(std::collections::HashSet::new()),
+        }
     }
 
     fn try_insert(&self, task_id: &str) -> bool {
@@ -124,7 +126,10 @@ pub async fn run_sentry_loop(
     // Wait briefly for in-flight tasks to notice cancellation
     let active = in_flight.active_ids();
     if !active.is_empty() {
-        tracing::info!(count = active.len(), "waiting for in-flight tasks to finish");
+        tracing::info!(
+            count = active.len(),
+            "waiting for in-flight tasks to finish"
+        );
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     }
 }
@@ -146,7 +151,10 @@ async fn handle_trigger_event(
             tracing::info!(trigger = %config.trigger.name, "scheduled trigger fired");
             let tasks = match board.list_actionable() {
                 Ok(t) => t,
-                Err(e) => { tracing::error!(error = %e, "list_actionable failed"); return; }
+                Err(e) => {
+                    tracing::error!(error = %e, "list_actionable failed");
+                    return;
+                }
             };
             for task in &tasks {
                 let matches = task.triggers.iter().any(|t| match t {
@@ -156,9 +164,15 @@ async fn handle_trigger_event(
                 });
                 if matches {
                     spawn_task_execution(
-                        board.clone(), state_db.clone(), budget_limits.clone(),
-                        in_flight.clone(), semaphore.clone(), cancel.clone(),
-                        task.id.clone(), model.to_string(), cwd.to_path_buf(),
+                        board.clone(),
+                        state_db.clone(),
+                        budget_limits.clone(),
+                        in_flight.clone(),
+                        semaphore.clone(),
+                        cancel.clone(),
+                        task.id.clone(),
+                        model.to_string(),
+                        cwd.to_path_buf(),
                         routing.clone(),
                     );
                 }
@@ -168,53 +182,95 @@ async fn handle_trigger_event(
             tracing::info!(trigger = %name, "webhook trigger fired");
             let tasks = match board.list_actionable() {
                 Ok(t) => t,
-                Err(e) => { tracing::error!(error = %e, "list_actionable failed"); return; }
+                Err(e) => {
+                    tracing::error!(error = %e, "list_actionable failed");
+                    return;
+                }
             };
             for task in &tasks {
-                let matches = task.triggers.iter().any(|t| matches!(
-                    t, Trigger::Webhook { name: n } if *n == name
-                ));
+                let matches = task.triggers.iter().any(|t| {
+                    matches!(
+                        t, Trigger::Webhook { name: n } if *n == name
+                    )
+                });
                 if matches {
                     spawn_task_execution(
-                        board.clone(), state_db.clone(), budget_limits.clone(),
-                        in_flight.clone(), semaphore.clone(), cancel.clone(),
-                        task.id.clone(), model.to_string(), cwd.to_path_buf(),
+                        board.clone(),
+                        state_db.clone(),
+                        budget_limits.clone(),
+                        in_flight.clone(),
+                        semaphore.clone(),
+                        cancel.clone(),
+                        task.id.clone(),
+                        model.to_string(),
+                        cwd.to_path_buf(),
                         routing.clone(),
                     );
                 }
             }
         }
-        TriggerEvent::FileChanged { trigger_name, paths } => {
+        TriggerEvent::FileChanged {
+            trigger_name,
+            paths,
+        } => {
             tracing::info!(trigger = %trigger_name, paths = ?paths, "file change trigger fired");
             let tasks = match board.list_actionable() {
                 Ok(t) => t,
-                Err(e) => { tracing::error!(error = %e, "list_actionable failed"); return; }
+                Err(e) => {
+                    tracing::error!(error = %e, "list_actionable failed");
+                    return;
+                }
             };
             for task in &tasks {
-                let matches = task.triggers.iter().any(|t| matches!(t, Trigger::FileWatch { .. }));
+                let matches = task
+                    .triggers
+                    .iter()
+                    .any(|t| matches!(t, Trigger::FileWatch { .. }));
                 if matches {
                     spawn_task_execution(
-                        board.clone(), state_db.clone(), budget_limits.clone(),
-                        in_flight.clone(), semaphore.clone(), cancel.clone(),
-                        task.id.clone(), model.to_string(), cwd.to_path_buf(),
+                        board.clone(),
+                        state_db.clone(),
+                        budget_limits.clone(),
+                        in_flight.clone(),
+                        semaphore.clone(),
+                        cancel.clone(),
+                        task.id.clone(),
+                        model.to_string(),
+                        cwd.to_path_buf(),
                         routing.clone(),
                     );
                 }
             }
         }
-        TriggerEvent::GitChanged { trigger_name, kind, detail } => {
+        TriggerEvent::GitChanged {
+            trigger_name,
+            kind,
+            detail,
+        } => {
             tracing::info!(trigger = %trigger_name, kind = %kind, detail = %detail, "git change trigger fired");
             let tasks = match board.list_actionable() {
                 Ok(t) => t,
-                Err(e) => { tracing::error!(error = %e, "list_actionable failed"); return; }
+                Err(e) => {
+                    tracing::error!(error = %e, "list_actionable failed");
+                    return;
+                }
             };
             for task in &tasks {
-                let matches = task.triggers.iter().any(|t| matches!(t, Trigger::GitEvent { .. }));
+                let matches = task
+                    .triggers
+                    .iter()
+                    .any(|t| matches!(t, Trigger::GitEvent { .. }));
                 if matches {
                     spawn_task_execution(
-                        board.clone(), state_db.clone(), budget_limits.clone(),
-                        in_flight.clone(), semaphore.clone(), cancel.clone(),
-                        task.id.clone(), model.to_string(), cwd.to_path_buf(),
+                        board.clone(),
+                        state_db.clone(),
+                        budget_limits.clone(),
+                        in_flight.clone(),
+                        semaphore.clone(),
+                        cancel.clone(),
+                        task.id.clone(),
+                        model.to_string(),
+                        cwd.to_path_buf(),
                         routing.clone(),
                     );
                 }
@@ -223,9 +279,15 @@ async fn handle_trigger_event(
         TriggerEvent::ForceRun { task_id } => {
             tracing::info!(task = %task_id, "force-run requested");
             spawn_task_execution(
-                board.clone(), state_db.clone(), budget_limits.clone(),
-                in_flight.clone(), semaphore.clone(), cancel.clone(),
-                task_id, model.to_string(), cwd.to_path_buf(),
+                board.clone(),
+                state_db.clone(),
+                budget_limits.clone(),
+                in_flight.clone(),
+                semaphore.clone(),
+                cancel.clone(),
+                task_id,
+                model.to_string(),
+                cwd.to_path_buf(),
                 routing.clone(),
             );
         }
@@ -261,9 +323,16 @@ fn spawn_task_execution(
             }
         };
         execute_task_with_retry(
-            &board, &state_db, &budget_limits,
-            &task_id, &model, &cwd, &cancel, &routing,
-        ).await;
+            &board,
+            &state_db,
+            &budget_limits,
+            &task_id,
+            &model,
+            &cwd,
+            &cancel,
+            &routing,
+        )
+        .await;
         in_flight_cleanup.remove(&task_id_cleanup);
     });
 }
@@ -322,7 +391,14 @@ async fn execute_task_with_retry(
         }
     }
 
-    let (effective_model, classification) = resolve_model(spec.model.as_deref(), model, &spec.prompt, routing, state_db).await;
+    let (effective_model, classification) = resolve_model(
+        spec.model.as_deref(),
+        model,
+        &spec.prompt,
+        routing,
+        state_db,
+    )
+    .await;
     let effective_cwd = spec.cwd.as_deref().unwrap_or(cwd);
     let max_turns = spec.max_turns.unwrap_or(30);
     let timeout_secs = spec.timeout_secs.unwrap_or(600);
@@ -351,12 +427,25 @@ async fn execute_task_with_retry(
         );
 
         let task_result = if is_code_act {
-            run_code_act_task(&spec.prompt, &effective_model, effective_cwd, timeout_secs, cancel).await
+            run_code_act_task(
+                &spec.prompt,
+                &effective_model,
+                effective_cwd,
+                timeout_secs,
+                cancel,
+            )
+            .await
         } else {
             run_agent_task(
-                &spec.prompt, &effective_model, effective_cwd,
-                max_turns, timeout_secs, spec.token_budget, cancel,
-            ).await
+                &spec.prompt,
+                &effective_model,
+                effective_cwd,
+                max_turns,
+                timeout_secs,
+                spec.token_budget,
+                cancel,
+            )
+            .await
         };
 
         match task_result {
@@ -373,8 +462,12 @@ async fn execute_task_with_retry(
 
                 if let Some(ref class) = classification {
                     let _ = state_db.record_routing_outcome(
-                        task_id, class, &effective_model,
-                        result.exit_code == 0, result.tokens_used, result.duration_secs,
+                        task_id,
+                        class,
+                        &effective_model,
+                        result.exit_code == 0,
+                        result.tokens_used,
+                        result.duration_secs,
                     );
                 }
                 if result.exit_code == 0 {
@@ -386,8 +479,8 @@ async fn execute_task_with_retry(
                 return;
             }
             Err(e) => {
-                let retriable = !e.to_string().contains("authentication")
-                    && !e.to_string().contains("config");
+                let retriable =
+                    !e.to_string().contains("authentication") && !e.to_string().contains("config");
                 let error = TaskError {
                     message: e.to_string(),
                     retriable,
@@ -404,7 +497,12 @@ async fn execute_task_with_retry(
                     );
                     if let Some(ref class) = classification {
                         let _ = state_db.record_routing_outcome(
-                            task_id, class, &effective_model, false, 0, 0,
+                            task_id,
+                            class,
+                            &effective_model,
+                            false,
+                            0,
+                            0,
                         );
                     }
                     let _ = board.fail(task_id, &error);
@@ -495,7 +593,8 @@ async fn resolve_model<'a>(
     match spec_model {
         Some("auto") => {
             if let Some(routing) = routing {
-                let complexity = classify_task_complexity(&routing.prefilter_model, task_prompt).await;
+                let complexity =
+                    classify_task_complexity(&routing.prefilter_model, task_prompt).await;
                 let class_name = format!("{complexity:?}");
                 let model = match complexity {
                     TaskComplexity::Simple => {
@@ -580,7 +679,7 @@ pub(crate) enum TaskComplexity {
 }
 
 async fn classify_task_complexity(prefilter_model: &str, prompt: &str) -> TaskComplexity {
-    let truncated = if prompt.len() > 500 { &prompt[..500] } else { prompt };
+    let truncated = crate::util::truncate_str(prompt, 500);
     let classification_prompt = format!(
         "Classify this task's complexity. Respond with exactly one word.\n\
          SIMPLE: single-step check, yes/no answer, status lookup\n\
@@ -618,12 +717,18 @@ pub(crate) fn classify_heuristic(prompt: &str) -> TaskComplexity {
     let word_count = prompt.split_whitespace().count();
 
     const COMPLEX: &[&str] = &[
-        "architect", "redesign", "refactor", "migrate", "rewrite",
-        "investigate", "analyze", "design", "propose", "evaluate",
+        "architect",
+        "redesign",
+        "refactor",
+        "migrate",
+        "rewrite",
+        "investigate",
+        "analyze",
+        "design",
+        "propose",
+        "evaluate",
     ];
-    const SIMPLE: &[&str] = &[
-        "check", "status", "verify", "confirm", "list", "count",
-    ];
+    const SIMPLE: &[&str] = &["check", "status", "verify", "confirm", "list", "count"];
 
     if COMPLEX.iter().any(|s| lower.contains(s)) || word_count > 100 {
         TaskComplexity::Complex
@@ -650,7 +755,16 @@ async fn run_code_act_task(
     let server_cancel = proxy_cancel.clone();
     let proxy_handle = tokio::spawn(async move { proxy.serve(server_cancel).await });
 
-    let result = run_code_act_inner(prompt, model, cwd, timeout_secs, cancel, proxy_prelude, proxy_socket_path).await;
+    let result = run_code_act_inner(
+        prompt,
+        model,
+        cwd,
+        timeout_secs,
+        cancel,
+        proxy_prelude,
+        proxy_socket_path,
+    )
+    .await;
 
     proxy_cancel.cancel();
     let _ = proxy_handle.await;
@@ -689,7 +803,9 @@ async fn run_code_act_inner(
                 tracing::warn!(attempt, "code-act: LLM did not produce a code block");
                 if attempt < 3 {
                     gen_prompt = executor.build_retry_prompt(
-                        prompt, &completion.text, "No Python code block found in response",
+                        prompt,
+                        &completion.text,
+                        "No Python code block found in response",
                     );
                     continue;
                 }
@@ -697,10 +813,15 @@ async fn run_code_act_inner(
             }
         };
 
-        let result = executor.execute_script(&code, Some(timeout_secs), cancel.clone()).await?;
+        let result = executor
+            .execute_script(&code, Some(timeout_secs), cancel.clone())
+            .await?;
 
         if result.is_error && attempt < 3 {
-            tracing::info!(attempt, "code-act: script failed, retrying with error context");
+            tracing::info!(
+                attempt,
+                "code-act: script failed, retrying with error context"
+            );
             gen_prompt = executor.build_retry_prompt(prompt, &code, &result.output);
             continue;
         }
@@ -708,7 +829,10 @@ async fn run_code_act_inner(
         return Ok(TaskResult {
             exit_code: result.exit_code,
             summary: if result.is_error {
-                format!("code-act failed: {}", result.output.chars().take(500).collect::<String>())
+                format!(
+                    "code-act failed: {}",
+                    result.output.chars().take(500).collect::<String>()
+                )
             } else {
                 result.output.chars().take(500).collect()
             },
@@ -740,16 +864,15 @@ async fn run_agent_task(
 
     let start = Instant::now();
 
-    let shared_settings = crate::bootstrap::initialize_shared_settings(
-        &crate::bootstrap::SettingsInit {
+    let shared_settings =
+        crate::bootstrap::initialize_shared_settings(&crate::bootstrap::SettingsInit {
             model,
             cwd,
             cli_posture: None,
             slim: true,
             max_turns,
             apply_profile_posture: false,
-        },
-    );
+        });
     if let Ok(mut s) = shared_settings.lock() {
         s.set_model(model);
     }
@@ -793,8 +916,12 @@ async fn run_agent_task(
                     tracing::info!("sentry → {name}");
                 }
                 AgentEvent::TurnEnd(te) => {
-                    total_in_t.fetch_add(te.actual_input_tokens, std::sync::atomic::Ordering::Relaxed);
-                    total_out_t.fetch_add(te.actual_output_tokens, std::sync::atomic::Ordering::Relaxed);
+                    total_in_t
+                        .fetch_add(te.actual_input_tokens, std::sync::atomic::Ordering::Relaxed);
+                    total_out_t.fetch_add(
+                        te.actual_output_tokens,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
                 }
                 AgentEvent::AgentEnd => break,
                 _ => {}
@@ -826,7 +953,8 @@ async fn run_agent_task(
         &events_tx,
         cancel.clone(),
         &loop_config,
-    ).await;
+    )
+    .await;
 
     timeout_handle.abort();
     global_handle.abort();
@@ -854,7 +982,9 @@ async fn run_agent_task(
         }
     }
 
-    let summary = agent.conversation.last_assistant_text()
+    let summary = agent
+        .conversation
+        .last_assistant_text()
         .unwrap_or_default()
         .to_string();
 

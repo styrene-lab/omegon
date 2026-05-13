@@ -16,6 +16,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-05-13
+
+### Fixed
+
+- **Audit log Unicode preview panic** — session-end audit logging now truncates prompts and outcomes on UTF-8 character boundaries, preventing emoji or other multibyte text from aborting the TUI.
+- **Unicode-safe preview truncation** — replaced several byte-indexed error and preview truncation paths with the shared Unicode-safe truncation helper.
+- **TUI shell card grouping** — adjacent `bash` tool cards now merge only when they share the same command family, so `kubectl` output no longer appears under a prior `git` card.
+- **TUI interrupt cleanup** — Ctrl+C/Esc interrupts now clear the composer and suppress transient terminal keyboard-protocol fragments, preventing raw CSI-u bytes from leaking into operator input after aborting a tool.
+- **SSH bash guard** — non-interactive SSH commands using `BatchMode=yes` are no longer blocked by the interactive-input guard, while plain SSH remains blocked to avoid password/passphrase hangs.
+- **TUI continuation detection Unicode panic** — assistant continuation-request scanning now slices tail text on character boundaries, avoiding crashes when recent assistant output contains emoji.
+- **Operator-friction recovery** — default behavior prompts and continuation nudges now treat operator frustration as a control signal: recover by taking the next concrete action or stating the blocker, without apology loops, self-critique, profanity mirroring, or process narration.
+- **Core-loop recovery state** — operator corrections no longer replace the active task, and the loop now consumes them as one-shot recovery signals. Text-only apology/self-critique responses are rejected once and retried with a concrete recovery constraint instead of being accepted as task completion.
+- **Read-path Unicode truncation** — local and delegated `read` output now truncate on UTF-8 character boundaries, preventing emoji or other multibyte file contents from panicking at the byte cap.
+
 ## [0.20.0] - 2026-05-12
 
 ### Added

@@ -19,7 +19,12 @@ impl FileTaskBoard {
         instance_id: String,
         config_dir: PathBuf,
     ) -> Self {
-        Self { config, state_db, instance_id, config_dir }
+        Self {
+            config,
+            state_db,
+            instance_id,
+            config_dir,
+        }
     }
 
     fn find_task_config(&self, task_id: &str) -> Option<&super::SentryTaskConfig> {
@@ -48,17 +53,23 @@ impl TaskBoard for FileTaskBoard {
     fn list_actionable(&self) -> anyhow::Result<Vec<SentryTask>> {
         let mut tasks = Vec::with_capacity(self.config.tasks.len());
         for tc in &self.config.tasks {
-            let (last_run, run_count) = self.state_db.last_run(&tc.name)?
+            let (last_run, run_count) = self
+                .state_db
+                .last_run(&tc.name)?
                 .map(|(dt, c)| (Some(dt), c))
                 .unwrap_or((None, 0));
 
             let mut triggers = Vec::new();
             if let Some(ref trig) = tc.trigger {
                 if let Some(ref cron) = trig.cron {
-                    triggers.push(Trigger::Cron { schedule: cron.schedule.clone() });
+                    triggers.push(Trigger::Cron {
+                        schedule: cron.schedule.clone(),
+                    });
                 }
                 if let Some(ref wh) = trig.webhook {
-                    triggers.push(Trigger::Webhook { name: wh.name.clone() });
+                    triggers.push(Trigger::Webhook {
+                        name: wh.name.clone(),
+                    });
                 }
             }
             if triggers.is_empty() {
@@ -102,7 +113,8 @@ impl TaskBoard for FileTaskBoard {
     }
 
     fn task_spec(&self, task_id: &str) -> anyhow::Result<TaskSpec> {
-        let tc = self.find_task_config(task_id)
+        let tc = self
+            .find_task_config(task_id)
             .ok_or_else(|| anyhow::anyhow!("task '{task_id}' not found in config"))?;
 
         let prompt = self.resolve_prompt(tc)?;
@@ -131,17 +143,29 @@ pub(super) fn uuid_v4() -> String {
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0], bytes[1], bytes[2], bytes[3],
-        bytes[4], bytes[5], bytes[6], bytes[7],
-        bytes[8], bytes[9], bytes[10], bytes[11],
-        bytes[12], bytes[13], bytes[14], bytes[15],
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15],
     )
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::{CronTrigger, SentryConfig, SentryGlobal, SentryTaskConfig, TriggerConfig};
     use super::*;
-    use super::super::{SentryConfig, SentryGlobal, SentryTaskConfig, CronTrigger, TriggerConfig};
 
     fn test_config() -> SentryConfig {
         SentryConfig {
@@ -150,27 +174,27 @@ mod tests {
                 log_retention_days: 7,
                 routing: None,
             },
-            tasks: vec![
-                SentryTaskConfig {
-                    name: "test-task".into(),
-                    prompt: Some("do the thing".into()),
-                    prompt_file: None,
-                    model: Some("anthropic:claude-sonnet-4-6".into()),
-                    skill: None,
-                    max_turns: Some(10),
-                    timeout_secs: Some(120),
-                    token_budget: None,
-                    cwd: None,
-                    env: None,
-                    execution_mode: None,
-                    trigger: Some(TriggerConfig {
-                        cron: Some(CronTrigger { schedule: "0 * * * * *".into() }),
-                        webhook: None,
+            tasks: vec![SentryTaskConfig {
+                name: "test-task".into(),
+                prompt: Some("do the thing".into()),
+                prompt_file: None,
+                model: Some("anthropic:claude-sonnet-4-6".into()),
+                skill: None,
+                max_turns: Some(10),
+                timeout_secs: Some(120),
+                token_budget: None,
+                cwd: None,
+                env: None,
+                execution_mode: None,
+                trigger: Some(TriggerConfig {
+                    cron: Some(CronTrigger {
+                        schedule: "0 * * * * *".into(),
                     }),
-                    budget: None,
-                    priority: None,
-                },
-            ],
+                    webhook: None,
+                }),
+                budget: None,
+                priority: None,
+            }],
         }
     }
 

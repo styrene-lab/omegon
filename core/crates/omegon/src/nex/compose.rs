@@ -71,8 +71,14 @@ pub fn to_compose_yaml(profile: &NexProfile, service_name: Option<&str>) -> Stri
             let _ = writeln!(yaml, "    cap_add:");
             let _ = writeln!(yaml, "      - NET_ADMIN");
             if filter.is_some() {
-                let _ = writeln!(yaml, "    # Egress filter applied by entrypoint via iptables");
-                let _ = writeln!(yaml, "    # OMEGON_EGRESS_FILTER is set in environment below");
+                let _ = writeln!(
+                    yaml,
+                    "    # Egress filter applied by entrypoint via iptables"
+                );
+                let _ = writeln!(
+                    yaml,
+                    "    # OMEGON_EGRESS_FILTER is set in environment below"
+                );
             }
         }
         NexNetworkPolicy::Bridge { ports } => {

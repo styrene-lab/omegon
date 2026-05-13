@@ -861,6 +861,52 @@ fn mouse_wheel_scroll_up_matches_natural_scroll_direction() {
 }
 
 #[test]
+fn interrupt_suppresses_terminal_protocol_fragments_from_editor() {
+    let mut app = test_app();
+    app.agent_active = true;
+    app.editor.set_text("draft");
+
+    let _ = app.interrupt();
+
+    assert_eq!(app.editor.render_text(), "");
+    assert!(app.interrupt_pending);
+
+    let protocol_fragment = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('['),
+        crossterm::event::KeyModifiers::NONE,
+    );
+    assert!(
+        app.should_discard_key_after_interrupt(&protocol_fragment),
+        "raw CSI-u fragments from Ctrl+C must not enter the composer"
+    );
+
+    let ctrl_c = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('c'),
+        crossterm::event::KeyModifiers::CONTROL,
+    );
+    assert!(
+        !app.should_discard_key_after_interrupt(&ctrl_c),
+        "repeat Ctrl+C must remain available while an interrupt is pending"
+    );
+}
+
+#[test]
+fn tail_chars_handles_emoji_at_tail_boundary() {
+    let text = "Done. Seed is empty:\n\n\
+| Stack | Containers | Status |\n\
+|-------|-----------|--------|\n\
+| komodo + traefik | komodo-core, periphery, ferretdb, postgres, traefik | ✅ Down |\n\
+| netbox | netbox, postgres, redis, redis-cache | ✅ Down |\n\
+| rustdesk | hbbs, hbbr | ✅ Down |\n";
+
+    for n in 0..text.len() {
+        let tail = App::tail_chars(text, n);
+        assert!(tail.is_char_boundary(0));
+        assert!(text.ends_with(tail));
+    }
+}
+
+#[test]
 fn conversation_scroll_does_not_recall_input_history() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];
@@ -3384,8 +3430,14 @@ fn slash_auspex_status_reports_attach_metadata() {
     assert!(text.contains("ipc.sock"), "got: {text}");
     assert!(text.contains("session id: not yet exposed"), "got: {text}");
     assert!(text.contains("/dash compatibility view:"), "got: {text}");
-    assert!(text.contains("startup: http://127.0.0.1:7842/api/startup"), "got: {text}");
-    assert!(text.contains("websocket: ws://127.0.0.1:7842/ws?token=test"), "got: {text}");
+    assert!(
+        text.contains("startup: http://127.0.0.1:7842/api/startup"),
+        "got: {text}"
+    );
+    assert!(
+        text.contains("websocket: ws://127.0.0.1:7842/ws?token=test"),
+        "got: {text}"
+    );
     assert!(
         text.contains("transport: http=insecure-bootstrap, ws=insecure-bootstrap"),
         "got: {text}"
@@ -3446,8 +3498,14 @@ fn slash_dash_status_uses_compatibility_wording() {
         "got: {text}"
     );
     assert!(text.contains("http://127.0.0.1:7842"), "got: {text}");
-    assert!(text.contains("startup: http://127.0.0.1:7842/api/startup"), "got: {text}");
-    assert!(text.contains("websocket: ws://127.0.0.1:7842/ws?token=test"), "got: {text}");
+    assert!(
+        text.contains("startup: http://127.0.0.1:7842/api/startup"),
+        "got: {text}"
+    );
+    assert!(
+        text.contains("websocket: ws://127.0.0.1:7842/ws?token=test"),
+        "got: {text}"
+    );
     assert!(
         text.contains("transport: http=insecure-bootstrap, ws=insecure-bootstrap"),
         "got: {text}"
@@ -3490,12 +3548,27 @@ fn slash_dash_status_preserves_tls_startup_urls() {
         panic!("expected Display result");
     };
 
-    assert!(text.contains("running at https://127.0.0.1:7842"), "got: {text}");
-    assert!(text.contains("startup: https://127.0.0.1:7842/api/startup"), "got: {text}");
-    assert!(text.contains("websocket: wss://127.0.0.1:7842/ws?token=test"), "got: {text}");
-    assert!(text.contains("transport: http=secure, ws=secure"), "got: {text}");
+    assert!(
+        text.contains("running at https://127.0.0.1:7842"),
+        "got: {text}"
+    );
+    assert!(
+        text.contains("startup: https://127.0.0.1:7842/api/startup"),
+        "got: {text}"
+    );
+    assert!(
+        text.contains("websocket: wss://127.0.0.1:7842/ws?token=test"),
+        "got: {text}"
+    );
+    assert!(
+        text.contains("transport: http=secure, ws=secure"),
+        "got: {text}"
+    );
     assert!(text.contains("transport warnings: none"), "got: {text}");
-    assert!(!text.contains("running at http://127.0.0.1:7842"), "got: {text}");
+    assert!(
+        !text.contains("running at http://127.0.0.1:7842"),
+        "got: {text}"
+    );
 }
 
 #[test]

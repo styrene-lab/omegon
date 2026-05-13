@@ -48,19 +48,24 @@ impl LocalEmbeddingService {
     }
 
     pub fn from_default_dir() -> Result<Self, EmbedError> {
-        let model_name = std::env::var("OMEGON_EMBED_LOCAL_MODEL")
-            .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+        let model_name =
+            std::env::var("OMEGON_EMBED_LOCAL_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
         let model_dir = resolve_model_dir(&model_name);
         Self::load(&model_dir, &model_name)
     }
 
     fn embed_sync(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
-        let encoding = self.tokenizer
+        let encoding = self
+            .tokenizer
             .encode(text, true)
             .map_err(|e| EmbedError::RequestFailed(format!("tokenization failed: {e}")))?;
 
         let input_ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
-        let attention_mask: Vec<i64> = encoding.get_attention_mask().iter().map(|&m| m as i64).collect();
+        let attention_mask: Vec<i64> = encoding
+            .get_attention_mask()
+            .iter()
+            .map(|&m| m as i64)
+            .collect();
         let token_type_ids: Vec<i64> = encoding.get_type_ids().iter().map(|&t| t as i64).collect();
         let seq_len = input_ids.len();
 
@@ -78,7 +83,9 @@ impl LocalEmbeddingService {
         let type_tensor = ort::value::TensorRef::from_array_view(&type_array)
             .map_err(|e| EmbedError::RequestFailed(format!("tensor: {e}")))?;
 
-        let mut session = self.session.lock()
+        let mut session = self
+            .session
+            .lock()
             .map_err(|e| EmbedError::RequestFailed(format!("session lock: {e}")))?;
         let outputs = session
             .run(ort::inputs![ids_tensor, mask_tensor, type_tensor])
@@ -129,8 +136,8 @@ impl EmbeddingService for LocalEmbeddingService {
         let text = text.to_string();
 
         tokio::task::spawn_blocking(move || svc.embed_sync(&text))
-        .await
-        .map_err(|e| EmbedError::RequestFailed(format!("spawn_blocking failed: {e}")))?
+            .await
+            .map_err(|e| EmbedError::RequestFailed(format!("spawn_blocking failed: {e}")))?
     }
 
     fn model_name(&self) -> &str {
@@ -152,16 +159,16 @@ fn resolve_model_dir(model_name: &str) -> PathBuf {
 
 /// Check if local embedding models are available without loading them.
 pub fn local_model_available() -> bool {
-    let model_name = std::env::var("OMEGON_EMBED_LOCAL_MODEL")
-        .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    let model_name =
+        std::env::var("OMEGON_EMBED_LOCAL_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
     let dir = resolve_model_dir(&model_name);
     dir.join("model.onnx").exists() && dir.join("tokenizer.json").exists()
 }
 
 /// Returns the path where model files should be placed.
 pub fn model_dir_path() -> PathBuf {
-    let model_name = std::env::var("OMEGON_EMBED_LOCAL_MODEL")
-        .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    let model_name =
+        std::env::var("OMEGON_EMBED_LOCAL_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
     resolve_model_dir(&model_name)
 }
 
@@ -172,7 +179,10 @@ mod tests {
     #[test]
     fn resolve_model_dir_uses_config() {
         let dir = resolve_model_dir("test-model");
-        assert!(dir.ends_with("omegon/models/test-model") || dir.ends_with("omegon\\models\\test-model"));
+        assert!(
+            dir.ends_with("omegon/models/test-model")
+                || dir.ends_with("omegon\\models\\test-model")
+        );
     }
 
     #[test]
@@ -187,7 +197,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let result = LocalEmbeddingService::load(tmp.path(), "test");
         assert!(result.is_err());
-        let err = match result { Err(e) => e.to_string(), Ok(_) => unreachable!() };
+        let err = match result {
+            Err(e) => e.to_string(),
+            Ok(_) => unreachable!(),
+        };
         assert!(err.contains("model files not found"));
     }
 }

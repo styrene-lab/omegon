@@ -185,10 +185,14 @@ impl ScheduleState {
                     preset_is_due(*preset, &wall, entry.last_fired_wall)
                 }
                 ScheduleKind::Cron(schedule) => {
-                    let since = entry.last_fired_utc.unwrap_or(
-                        utc_now - chrono::Duration::days(365),
-                    );
-                    schedule.after(&since).take_while(|t| *t <= utc_now).next().is_some()
+                    let since = entry
+                        .last_fired_utc
+                        .unwrap_or(utc_now - chrono::Duration::days(365));
+                    schedule
+                        .after(&since)
+                        .take_while(|t| *t <= utc_now)
+                        .next()
+                        .is_some()
                 }
             };
 
@@ -303,10 +307,22 @@ pub struct MatchedTrigger {
 #[derive(Debug, Clone)]
 pub enum TriggerEvent {
     Scheduled(TriggerConfig),
-    FileChanged { trigger_name: String, paths: Vec<std::path::PathBuf> },
-    GitChanged { trigger_name: String, kind: String, detail: String },
-    Webhook { name: String, payload: serde_json::Value },
-    ForceRun { task_id: String },
+    FileChanged {
+        trigger_name: String,
+        paths: Vec<std::path::PathBuf>,
+    },
+    GitChanged {
+        trigger_name: String,
+        kind: String,
+        detail: String,
+    },
+    Webhook {
+        name: String,
+        payload: serde_json::Value,
+    },
+    ForceRun {
+        task_id: String,
+    },
 }
 
 // ── Git event kinds (for trigger config) ────────────────────────────────
@@ -342,14 +358,18 @@ impl GitPollState {
     pub fn snapshot(cwd: &std::path::Path) -> Self {
         let repo = match git2::Repository::discover(cwd) {
             Ok(r) => r,
-            Err(_) => return Self {
-                head_sha: None,
-                branches: Default::default(),
-                tags: Default::default(),
-            },
+            Err(_) => {
+                return Self {
+                    head_sha: None,
+                    branches: Default::default(),
+                    tags: Default::default(),
+                };
+            }
         };
 
-        let head_sha = repo.head().ok()
+        let head_sha = repo
+            .head()
+            .ok()
             .and_then(|h| h.target())
             .map(|oid| oid.to_string());
 
@@ -371,7 +391,11 @@ impl GitPollState {
             true
         });
 
-        Self { head_sha, branches, tags }
+        Self {
+            head_sha,
+            branches,
+            tags,
+        }
     }
 
     pub fn diff(&self, newer: &GitPollState) -> Vec<(GitEventKind, String)> {
@@ -445,21 +469,24 @@ impl TriggerRuntimeBuilder {
         }));
 
         // Git pollers
-        let git_configs: Vec<_> = self.configs.iter()
+        let git_configs: Vec<_> = self
+            .configs
+            .iter()
             .filter(|c| c.trigger.enabled && c.trigger.git_events.is_some())
             .collect();
 
         if !git_configs.is_empty() {
-            let interval = git_configs.iter()
+            let interval = git_configs
+                .iter()
                 .filter_map(|c| c.trigger.git_poll_interval.as_ref())
                 .filter_map(|s| parse_duration(s))
                 .min()
                 .unwrap_or(Duration::from_secs(60));
 
-            let git_trigger_names: Vec<String> = git_configs.iter()
-                .map(|c| c.trigger.name.clone())
-                .collect();
-            let git_event_kinds: Vec<Vec<String>> = git_configs.iter()
+            let git_trigger_names: Vec<String> =
+                git_configs.iter().map(|c| c.trigger.name.clone()).collect();
+            let git_event_kinds: Vec<Vec<String>> = git_configs
+                .iter()
                 .map(|c| c.trigger.git_events.clone().unwrap_or_default())
                 .collect();
 
@@ -503,7 +530,9 @@ impl TriggerRuntimeBuilder {
         }
 
         // File watchers
-        let file_watch_configs: Vec<_> = self.configs.iter()
+        let file_watch_configs: Vec<_> = self
+            .configs
+            .iter()
             .filter(|c| c.trigger.enabled && c.trigger.file_watch.is_some())
             .collect();
         if !file_watch_configs.is_empty() {
@@ -517,7 +546,10 @@ impl TriggerRuntimeBuilder {
             }
         }
 
-        let runtime = TriggerRuntime { event_rx, _handles: handles };
+        let runtime = TriggerRuntime {
+            event_rx,
+            _handles: handles,
+        };
         (runtime, event_tx)
     }
 }
@@ -538,7 +570,10 @@ fn start_file_watcher(
 
     let mut entries = Vec::new();
     for c in configs {
-        let paths: Vec<std::path::PathBuf> = c.trigger.file_watch.as_ref()?
+        let paths: Vec<std::path::PathBuf> = c
+            .trigger
+            .file_watch
+            .as_ref()?
             .iter()
             .filter_map(|p| {
                 let path = if std::path::Path::new(p).is_absolute() {
@@ -549,7 +584,10 @@ fn start_file_watcher(
                 std::fs::canonicalize(&path).ok().or(Some(path))
             })
             .collect();
-        let debounce = c.trigger.debounce.as_ref()
+        let debounce = c
+            .trigger
+            .debounce
+            .as_ref()
             .and_then(|s| parse_duration(s))
             .unwrap_or(Duration::from_secs(5));
         entries.push(WatchEntry {
@@ -561,17 +599,18 @@ fn start_file_watcher(
 
     let (raw_tx, raw_rx) = std::sync::mpsc::channel::<notify::Event>();
 
-    let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(event) = res {
-            let _ = raw_tx.send(event);
-        }
-    }) {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to create file watcher");
-            return None;
-        }
-    };
+    let mut watcher =
+        match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                let _ = raw_tx.send(event);
+            }
+        }) {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to create file watcher");
+                return None;
+            }
+        };
 
     for entry in &entries {
         for path in &entry.paths {
@@ -1080,7 +1119,9 @@ session {
                 ..Default::default()
             },
             filter: None,
-            prompt: PromptTemplate { template: "Do cron work".into() },
+            prompt: PromptTemplate {
+                template: "Do cron work".into(),
+            },
             session: None,
         };
 
@@ -1107,7 +1148,9 @@ session {
                 ..Default::default()
             },
             filter: None,
-            prompt: PromptTemplate { template: "nope".into() },
+            prompt: PromptTemplate {
+                template: "nope".into(),
+            },
             session: None,
         };
 
@@ -1126,7 +1169,8 @@ session {
             let tree_id = index.write_tree().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
             let sig = git2::Signature::now("test", "test@test.com").unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[]).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+                .unwrap();
         }
 
         let s1 = GitPollState::snapshot(dir.path());
@@ -1143,7 +1187,8 @@ session {
             let tree = repo.find_tree(tree_id).unwrap();
             let sig = git2::Signature::now("test", "test@test.com").unwrap();
             let head = repo.head().unwrap().peel_to_commit().unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&head]).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&head])
+                .unwrap();
         }
 
         let s2 = GitPollState::snapshot(dir.path());
@@ -1165,7 +1210,8 @@ session {
             let tree_id = index.write_tree().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
             let sig = git2::Signature::now("test", "test@test.com").unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[]).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+                .unwrap();
         }
 
         let s1 = GitPollState::snapshot(dir.path());
@@ -1176,7 +1222,11 @@ session {
 
         let s2 = GitPollState::snapshot(dir.path());
         let changes = s1.diff(&s2);
-        assert!(changes.iter().any(|(k, detail)| *k == GitEventKind::NewBranch && detail == "feature-x"));
+        assert!(
+            changes
+                .iter()
+                .any(|(k, detail)| *k == GitEventKind::NewBranch && detail == "feature-x")
+        );
     }
 
     #[test]
@@ -1190,18 +1240,24 @@ session {
             let tree_id = index.write_tree().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
             let sig = git2::Signature::now("test", "test@test.com").unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[]).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+                .unwrap();
         }
 
         let s1 = GitPollState::snapshot(dir.path());
 
         // Create a lightweight tag
         let head = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.tag_lightweight("v1.0.0", head.as_object(), false).unwrap();
+        repo.tag_lightweight("v1.0.0", head.as_object(), false)
+            .unwrap();
 
         let s2 = GitPollState::snapshot(dir.path());
         let changes = s1.diff(&s2);
-        assert!(changes.iter().any(|(k, detail)| *k == GitEventKind::NewTag && detail == "v1.0.0"));
+        assert!(
+            changes
+                .iter()
+                .any(|(k, detail)| *k == GitEventKind::NewTag && detail == "v1.0.0")
+        );
     }
 
     #[test]
@@ -1223,23 +1279,21 @@ session {
                 ..Default::default()
             },
             filter: None,
-            prompt: PromptTemplate { template: "interval work".into() },
+            prompt: PromptTemplate {
+                template: "interval work".into(),
+            },
             session: None,
         };
 
         let dir = tempfile::tempdir().unwrap();
         let cancel = tokio_util::sync::CancellationToken::new();
 
-        let (mut runtime, _tx) = TriggerRuntimeBuilder::new(
-            vec![config],
-            dir.path().to_path_buf(),
-        ).build(cancel.clone());
+        let (mut runtime, _tx) = TriggerRuntimeBuilder::new(vec![config], dir.path().to_path_buf())
+            .build(cancel.clone());
 
         // First event should fire within ~1s (interval triggers fire immediately on first tick)
-        let event = tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            runtime.event_rx.recv(),
-        ).await;
+        let event =
+            tokio::time::timeout(std::time::Duration::from_secs(15), runtime.event_rx.recv()).await;
 
         assert!(event.is_ok(), "should receive event within timeout");
         let event = event.unwrap().unwrap();
@@ -1264,16 +1318,16 @@ session {
                 ..Default::default()
             },
             filter: None,
-            prompt: PromptTemplate { template: "file changed".into() },
+            prompt: PromptTemplate {
+                template: "file changed".into(),
+            },
             session: None,
         };
 
         let cancel = tokio_util::sync::CancellationToken::new();
 
-        let (mut runtime, _tx) = TriggerRuntimeBuilder::new(
-            vec![config],
-            dir.path().to_path_buf(),
-        ).build(cancel.clone());
+        let (mut runtime, _tx) = TriggerRuntimeBuilder::new(vec![config], dir.path().to_path_buf())
+            .build(cancel.clone());
 
         // Give watcher time to register (FSEvents on macOS needs settling time)
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -1285,10 +1339,8 @@ session {
         std::fs::write(watch_dir.join("test.txt"), "hello world").unwrap();
 
         // Wait for debounced event (1s debounce + 1s check interval + buffer)
-        let event = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            runtime.event_rx.recv(),
-        ).await;
+        let event =
+            tokio::time::timeout(std::time::Duration::from_secs(10), runtime.event_rx.recv()).await;
 
         // The first event might be the schedule poll (empty), so drain until FileChanged
         // or timeout. For a minimal config with only file_watch, no scheduled triggers exist.
@@ -1302,7 +1354,8 @@ session {
                     let event2 = tokio::time::timeout(
                         std::time::Duration::from_secs(5),
                         runtime.event_rx.recv(),
-                    ).await;
+                    )
+                    .await;
                     if let Ok(Some(TriggerEvent::FileChanged { trigger_name, .. })) = event2 {
                         assert_eq!(trigger_name, "file-watcher");
                     } else {

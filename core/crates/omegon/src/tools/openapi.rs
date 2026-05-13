@@ -124,10 +124,7 @@ impl ToolProvider for OpenApiToolProvider {
 
         let mut path = ep.path_template.clone();
         for param in &ep.path_params {
-            let val = args
-                .get(param)
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+            let val = args.get(param).and_then(|v| v.as_str()).unwrap_or_default();
             path = path.replace(&format!("{{{param}}}"), val);
         }
         let mut url = format!("{}{}", spec.base_url.trim_end_matches('/'), path);
@@ -141,7 +138,10 @@ impl ToolProvider for OpenApiToolProvider {
                 };
                 query_parts.push(format!(
                     "{}={}",
-                    percent_encoding::utf8_percent_encode(param, percent_encoding::NON_ALPHANUMERIC),
+                    percent_encoding::utf8_percent_encode(
+                        param,
+                        percent_encoding::NON_ALPHANUMERIC
+                    ),
                     percent_encoding::utf8_percent_encode(&s, percent_encoding::NON_ALPHANUMERIC),
                 ));
             }
@@ -175,17 +175,14 @@ impl ToolProvider for OpenApiToolProvider {
             req = req.header(spec.auth_header_name.as_str(), header_val);
         }
 
-        let resp = req
-            .timeout(std::time::Duration::from_secs(30))
-            .send()
-            .await;
+        let resp = req.timeout(std::time::Duration::from_secs(30)).send().await;
 
         match resp {
             Ok(resp) => {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
                 let truncated = if text.len() > 50_000 {
-                    format!("{}...(truncated)", &text[..50_000])
+                    format!("{}...(truncated)", crate::util::truncate_str(&text, 50_000))
                 } else {
                     text
                 };
@@ -216,7 +213,8 @@ impl ToolProvider for OpenApiToolProvider {
 
 fn parse_spec(raw: &str) -> anyhow::Result<Value> {
     serde_json::from_str(raw).or_else(|_| {
-        serde_yaml::from_str(raw).map_err(|e| anyhow::anyhow!("failed to parse spec as JSON or YAML: {e}"))
+        serde_yaml::from_str(raw)
+            .map_err(|e| anyhow::anyhow!("failed to parse spec as JSON or YAML: {e}"))
     })
 }
 
@@ -270,9 +268,8 @@ fn load_spec_from_url_cached(url: &str, cache_dir: &std::path::Path) -> anyhow::
         Ok(resp) => {
             if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
                 // Server confirmed our cached copy is still current.
-                return std::fs::read_to_string(&cache_path).map_err(|e| {
-                    anyhow::anyhow!("304 but cached file missing for {url}: {e}")
-                });
+                return std::fs::read_to_string(&cache_path)
+                    .map_err(|e| anyhow::anyhow!("304 but cached file missing for {url}: {e}"));
             }
 
             if !resp.status().is_success() {
@@ -283,9 +280,8 @@ fn load_spec_from_url_cached(url: &str, cache_dir: &std::path::Path) -> anyhow::
                         status = %resp.status(),
                         "spec fetch returned non-success status, falling back to cache"
                     );
-                    return std::fs::read_to_string(&cache_path).map_err(|e| {
-                        anyhow::anyhow!("failed to read cached spec for {url}: {e}")
-                    });
+                    return std::fs::read_to_string(&cache_path)
+                        .map_err(|e| anyhow::anyhow!("failed to read cached spec for {url}: {e}"));
                 }
                 return Err(anyhow::anyhow!(
                     "failed to fetch spec from {url}: HTTP {}",
@@ -326,7 +322,9 @@ fn load_spec_from_url_cached(url: &str, cache_dir: &std::path::Path) -> anyhow::
                     anyhow::anyhow!("network error and cached spec unreadable for {url}: {e}")
                 })
             } else {
-                Err(anyhow::anyhow!("failed to fetch spec from {url}: {network_err}"))
+                Err(anyhow::anyhow!(
+                    "failed to fetch spec from {url}: {network_err}"
+                ))
             }
         }
     }
@@ -406,8 +404,8 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
                 continue;
             }
 
-            let requires_confirm = !config.confirm.is_empty()
-                && glob_matches_any(&operation_id, &config.confirm);
+            let requires_confirm =
+                !config.confirm.is_empty() && glob_matches_any(&operation_id, &config.confirm);
 
             let mut tool_name = format!("api_{prefix}_{operation_id}");
             if tool_name.len() > 64 {
@@ -423,7 +421,8 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
                 .and_then(|p| p.as_array())
                 .cloned()
                 .unwrap_or_default();
-            let all_params: Vec<&Value> = path_params_shared.iter().chain(op_params.iter()).collect();
+            let all_params: Vec<&Value> =
+                path_params_shared.iter().chain(op_params.iter()).collect();
 
             let mut properties = serde_json::Map::new();
             let mut required = Vec::new();
@@ -431,11 +430,23 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
             let mut query_param_names = Vec::new();
 
             for param in &all_params {
-                let param_name = param.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+                let param_name = param
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("unknown");
                 let location = param.get("in").and_then(|i| i.as_str()).unwrap_or("query");
-                let schema = param.get("schema").cloned().unwrap_or(json!({"type": "string"}));
-                let param_required = param.get("required").and_then(|r| r.as_bool()).unwrap_or(location == "path");
-                let desc = param.get("description").and_then(|d| d.as_str()).unwrap_or("");
+                let schema = param
+                    .get("schema")
+                    .cloned()
+                    .unwrap_or(json!({"type": "string"}));
+                let param_required = param
+                    .get("required")
+                    .and_then(|r| r.as_bool())
+                    .unwrap_or(location == "path");
+                let desc = param
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("");
 
                 let mut prop = schema;
                 if !desc.is_empty() {
@@ -470,14 +481,18 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
                     .and_then(|c| c.get("application/json"))
                     .and_then(|j| j.get("schema"))
                 {
-                    if let Some(body_props) = body_schema.get("properties").and_then(|p| p.as_object()) {
+                    if let Some(body_props) =
+                        body_schema.get("properties").and_then(|p| p.as_object())
+                    {
                         for (k, v) in body_props {
                             if !properties.contains_key(k) {
                                 properties.insert(k.clone(), v.clone());
                             }
                         }
                     }
-                    if let Some(body_required) = body_schema.get("required").and_then(|r| r.as_array()) {
+                    if let Some(body_required) =
+                        body_schema.get("required").and_then(|r| r.as_array())
+                    {
                         for r in body_required {
                             if let Some(s) = r.as_str() {
                                 if !required.contains(&s.to_string()) {
@@ -505,7 +520,7 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
                 op_desc.to_string()
             };
             let description = if description.len() > 1024 {
-                format!("{}...", &description[..1021])
+                format!("{}...", crate::util::truncate_str(&description, 1021))
             } else if description.is_empty() {
                 format!("{} {}", method_str.to_uppercase(), path)
             } else {
@@ -514,7 +529,10 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
 
             endpoints.push(CompiledEndpoint {
                 tool_name,
-                method: method_str.to_uppercase().parse().unwrap_or(reqwest::Method::GET),
+                method: method_str
+                    .to_uppercase()
+                    .parse()
+                    .unwrap_or(reqwest::Method::GET),
                 path_template: path.clone(),
                 path_params: path_param_names,
                 query_params: query_param_names,
@@ -543,7 +561,9 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
 }
 
 fn glob_matches_any(operation_id: &str, patterns: &[String]) -> bool {
-    patterns.iter().any(|pattern| glob_match(operation_id, pattern))
+    patterns
+        .iter()
+        .any(|pattern| glob_match(operation_id, pattern))
 }
 
 fn glob_match(s: &str, pattern: &str) -> bool {
@@ -553,12 +573,18 @@ fn glob_match(s: &str, pattern: &str) -> bool {
     let parts: Vec<&str> = pattern.split('*').collect();
     let mut pos = 0;
     for (i, part) in parts.iter().enumerate() {
-        if part.is_empty() { continue; }
+        if part.is_empty() {
+            continue;
+        }
         if i == 0 {
-            if !s.starts_with(part) { return false; }
+            if !s.starts_with(part) {
+                return false;
+            }
             pos = part.len();
         } else if i == parts.len() - 1 {
-            if !s[pos..].ends_with(part) { return false; }
+            if !s[pos..].ends_with(part) {
+                return false;
+            }
             return true;
         } else {
             match s[pos..].find(part) {
@@ -682,7 +708,11 @@ paths:
         assert_eq!(spec.base_url, "https://petstore.example.com/v1");
         assert_eq!(spec.prefix, "petstore");
 
-        let names: Vec<&str> = spec.endpoints.iter().map(|e| e.tool_name.as_str()).collect();
+        let names: Vec<&str> = spec
+            .endpoints
+            .iter()
+            .map(|e| e.tool_name.as_str())
+            .collect();
         assert!(names.contains(&"api_petstore_list_pets"));
         assert!(names.contains(&"api_petstore_create_pet"));
         assert!(names.contains(&"api_petstore_show_pet_by_id"));
@@ -702,7 +732,11 @@ paths:
         let mut doc: Value = serde_json::from_str(PETSTORE_JSON).unwrap();
         openapi_resolve::resolve_refs(&mut doc).unwrap();
         let spec = compile("petstore", &doc, &test_config()).unwrap();
-        let show = spec.endpoints.iter().find(|e| e.tool_name == "api_petstore_show_pet_by_id").unwrap();
+        let show = spec
+            .endpoints
+            .iter()
+            .find(|e| e.tool_name == "api_petstore_show_pet_by_id")
+            .unwrap();
         assert_eq!(show.path_params, vec!["petId"]);
         assert_eq!(show.method.as_str(), "GET");
     }
@@ -712,12 +746,21 @@ paths:
         let mut doc: Value = serde_json::from_str(PETSTORE_JSON).unwrap();
         openapi_resolve::resolve_refs(&mut doc).unwrap();
         let spec = compile("petstore", &doc, &test_config()).unwrap();
-        let create = spec.endpoints.iter().find(|e| e.tool_name == "api_petstore_create_pet").unwrap();
+        let create = spec
+            .endpoints
+            .iter()
+            .find(|e| e.tool_name == "api_petstore_create_pet")
+            .unwrap();
         assert!(create.has_body);
         let props = create.tool_parameters.get("properties").unwrap();
         assert!(props.get("name").is_some());
         assert!(props.get("tag").is_some());
-        let req = create.tool_parameters.get("required").unwrap().as_array().unwrap();
+        let req = create
+            .tool_parameters
+            .get("required")
+            .unwrap()
+            .as_array()
+            .unwrap();
         assert!(req.contains(&json!("name")));
     }
 
@@ -771,7 +814,11 @@ paths:
             }
         });
         let spec = compile("test", &doc, &test_config()).unwrap();
-        let names: Vec<&str> = spec.endpoints.iter().map(|e| e.tool_name.as_str()).collect();
+        let names: Vec<&str> = spec
+            .endpoints
+            .iter()
+            .map(|e| e.tool_name.as_str())
+            .collect();
         assert_eq!(names.len(), 2);
         assert_ne!(names[0], names[1]);
     }
@@ -783,7 +830,11 @@ paths:
         let mut doc: Value = serde_json::from_str(PETSTORE_JSON).unwrap();
         openapi_resolve::resolve_refs(&mut doc).unwrap();
         let spec = compile("petstore", &doc, &config).unwrap();
-        let names: Vec<&str> = spec.endpoints.iter().map(|e| e.tool_name.as_str()).collect();
+        let names: Vec<&str> = spec
+            .endpoints
+            .iter()
+            .map(|e| e.tool_name.as_str())
+            .collect();
         assert_eq!(names.len(), 2);
         assert!(names.contains(&"api_petstore_list_pets"));
         assert!(names.contains(&"api_petstore_show_pet_by_id"));
@@ -797,9 +848,17 @@ paths:
         let mut doc: Value = serde_json::from_str(PETSTORE_JSON).unwrap();
         openapi_resolve::resolve_refs(&mut doc).unwrap();
         let spec = compile("petstore", &doc, &config).unwrap();
-        let create = spec.endpoints.iter().find(|e| e.tool_name.contains("create")).unwrap();
+        let create = spec
+            .endpoints
+            .iter()
+            .find(|e| e.tool_name.contains("create"))
+            .unwrap();
         assert!(create.requires_confirm);
-        let list = spec.endpoints.iter().find(|e| e.tool_name.contains("list")).unwrap();
+        let list = spec
+            .endpoints
+            .iter()
+            .find(|e| e.tool_name.contains("list"))
+            .unwrap();
         assert!(!list.requires_confirm);
     }
 
@@ -868,12 +927,16 @@ paths:
         std::fs::write(api_dir.join("petstore.yaml"), PETSTORE_YAML).unwrap();
 
         let toml_path = tmp.path().join(".omegon").join("openapi.toml");
-        std::fs::write(&toml_path, r#"
+        std::fs::write(
+            &toml_path,
+            r#"
 [petstore]
 spec = "custom/path.yaml"
 auth = "api_key"
 secret = "CUSTOM_KEY"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let configs = crate::tools::openapi_config::load_openapi_configs(tmp.path());
         assert_eq!(configs.len(), 1);

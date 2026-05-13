@@ -607,8 +607,7 @@ pub(crate) fn classify_progress_signal(
         return ProgressSignal::Commit;
     }
     if has_successful_tool_call(tool_calls, results, |call| {
-        is_mutation_tool_name(catalog, &call.name)
-            || is_progress_boundary_tool(catalog, &call.name)
+        is_mutation_tool_name(catalog, &call.name) || is_progress_boundary_tool(catalog, &call.name)
     }) {
         return ProgressSignal::Mutation;
     }
@@ -804,12 +803,12 @@ pub(crate) fn continuation_pressure_message(tier: u8, behavior: BehavioralTier) 
     // an option, after answering, and only when the user explicitly asked to
     // change a file.
     match (tier, behavior) {
-        (1, BehavioralTier::Constrained) => "[System: You have been exploring. Produce output now — answer the user, or state what's blocking you.]".to_string(),
-        (2, BehavioralTier::Constrained) => "[System: Produce output now. Answer the user, or (only if they explicitly asked you to change a file) write/edit one. Otherwise state the blocker.]".to_string(),
-        (_, BehavioralTier::Constrained) => "[System: You must produce output on this turn. Answer the user, or explain why you cannot.]".to_string(),
-        (1, _) => "[System: You have spent several turns exploring without producing output. You likely have enough context. Take the next concrete step toward completing the user's request — answer them directly. If — and only if — they explicitly asked you to modify a file, do that instead. Otherwise reply in chat.]".to_string(),
-        (2, _) => "[System: You are still exploring. Produce a concrete result now: answer the user's question, or (only if they explicitly asked) write/edit a file. Do not invent file-writing tasks the user did not request.]".to_string(),
-        _ => "[System: You have been exploring for many turns without producing output. On this turn, you must do one of: (1) answer the user directly in chat, (2) write or edit a file ONLY if the user explicitly asked for that, or (3) tell the user exactly what is preventing you from completing the task.]".to_string(),
+        (1, BehavioralTier::Constrained) => "[System: You have been exploring. Produce output now — answer the user, or state what's blocking you. Do not apologize, self-criticize, mirror operator frustration, or explain your process.]".to_string(),
+        (2, BehavioralTier::Constrained) => "[System: Produce output now. Answer the user, or (only if they explicitly asked you to change a file) write/edit one. Otherwise state the blocker. Do not apologize, self-criticize, mirror operator frustration, or explain your process.]".to_string(),
+        (_, BehavioralTier::Constrained) => "[System: You must produce output on this turn. Answer the user, or explain why you cannot. Do not apologize, self-criticize, mirror operator frustration, or explain your process.]".to_string(),
+        (1, _) => "[System: You have spent several turns exploring without producing output. You likely have enough context. Take the next concrete step toward completing the user's request — answer them directly. If — and only if — they explicitly asked you to modify a file, do that instead. Otherwise reply in chat. Do not apologize, self-criticize, mirror operator frustration, or explain your process.]".to_string(),
+        (2, _) => "[System: You are still exploring. Produce a concrete result now: answer the user's question, or (only if they explicitly asked) write/edit a file. Do not invent file-writing tasks the user did not request. Do not apologize, self-criticize, mirror operator frustration, or explain your process.]".to_string(),
+        _ => "[System: You have been exploring for many turns without producing output. On this turn, you must do one of: (1) answer the user directly in chat, (2) write or edit a file ONLY if the user explicitly asked for that, or (3) tell the user exactly what is preventing you from completing the task. Do not apologize, self-criticize, mirror operator frustration, or explain your process.]".to_string(),
     }
 }
 
@@ -843,16 +842,91 @@ pub(crate) fn classify_auto_delegate_plan(
 
 pub(crate) fn evidence_sufficiency_message(behavior: BehavioralTier) -> String {
     match behavior {
-        BehavioralTier::Constrained => "[System: You have enough context. Produce output now — answer the user.]".to_string(),
-        BehavioralTier::Standard => "[System: You have gathered enough context to act. Produce a concrete result — answer the user's question. If they explicitly asked you to modify a file, do that. Otherwise reply in chat; do not invent file-writing work.]".to_string(),
+        BehavioralTier::Constrained => "[System: You have enough context. Produce output now — answer the user. Do not apologize, self-criticize, mirror operator frustration, or explain your process.]".to_string(),
+        BehavioralTier::Standard => "[System: You have gathered enough context to act. Produce a concrete result — answer the user's question. If they explicitly asked you to modify a file, do that. Otherwise reply in chat; do not invent file-writing work. Do not apologize, self-criticize, mirror operator frustration, or explain your process.]".to_string(),
     }
 }
 
 pub(crate) fn om_local_first_message(behavior: BehavioralTier) -> String {
     match behavior {
-        BehavioralTier::Constrained => "[System: Produce output now. Do not search again. Answer the user.]".to_string(),
-        BehavioralTier::Standard => "[System: You have enough context. Produce the requested output — answer the user. If they explicitly asked you to modify a file, do that; otherwise reply in chat.]".to_string(),
+        BehavioralTier::Constrained => "[System: Produce output now. Do not search again. Answer the user. Do not apologize, self-criticize, mirror operator frustration, or explain your process.]".to_string(),
+        BehavioralTier::Standard => "[System: You have enough context. Produce the requested output — answer the user. If they explicitly asked you to modify a file, do that; otherwise reply in chat. Do not apologize, self-criticize, mirror operator frustration, or explain your process.]".to_string(),
     }
+}
+
+pub(crate) fn operator_correction_recovery_message() -> String {
+    "[System: The operator corrected your behavior. Treat this as a control signal. Do not apologize, self-criticize, mirror profanity, or explain your process. Preserve the active task, stop broad exploration, and take the smallest concrete next action. If blocked, state the blocker and the exact operator decision needed.]".to_string()
+}
+
+pub(crate) fn meta_recovery_retry_message() -> String {
+    "[System: Your previous response was meta-commentary rather than task progress. Retry now with no apology, self-critique, profanity mirroring, or process narration. Take the next concrete action, answer the user's request, or state the precise blocker.]".to_string()
+}
+
+pub(crate) fn is_pathological_meta_response(text: &str) -> bool {
+    let normalized = text.trim().to_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+    let self_rebuke = [
+        "i'm wasting",
+        "i am wasting",
+        "i've been wasting",
+        "i have been wasting",
+        "i was wasting",
+        "my mistake was",
+        "my failure was",
+        "i over-investigated",
+        "i over investigated",
+        "i over-read",
+        "i over read",
+        "i should have just",
+        "i should stop",
+    ];
+    let apology = [
+        "sorry",
+        "i apologize",
+        "apologies",
+        "you're right",
+        "you are right",
+        "that was wrong",
+    ];
+    let process_only = [
+        "let me stop",
+        "i'll stop exploring",
+        "i will stop exploring",
+        "i'll just do it",
+        "i will just do it",
+        "just doing it",
+    ];
+
+    let has_meta_marker = self_rebuke
+        .iter()
+        .chain(apology.iter())
+        .chain(process_only.iter())
+        .any(|marker| normalized.contains(marker));
+    if !has_meta_marker {
+        return false;
+    }
+
+    let has_concrete_work_marker = [
+        "changed ",
+        "updated ",
+        "fixed ",
+        "implemented ",
+        "added ",
+        "removed ",
+        "ran ",
+        "verified ",
+        "tested ",
+        "committed ",
+        "pushed ",
+        "blocked:",
+        "blocker:",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker));
+
+    !has_concrete_work_marker
 }
 
 // ─── Auto-delegation ───────────────────────────────────────────────────────
@@ -883,5 +957,60 @@ pub(crate) fn auto_delegate_tool_call(
             "background": plan.background,
             "worker_profile": plan.worker_profile,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_recovery_directive(message: &str) {
+        assert!(message.contains("Do not apologize"));
+        assert!(message.contains("self-criticize"));
+        assert!(message.contains("mirror operator frustration"));
+        assert!(message.contains("explain your process"));
+    }
+
+    #[test]
+    fn continuation_pressure_messages_prohibit_meta_recovery() {
+        for behavior in [BehavioralTier::Constrained, BehavioralTier::Standard] {
+            for tier in [1, 2, 3] {
+                let message = continuation_pressure_message(tier, behavior);
+                assert_recovery_directive(&message);
+            }
+        }
+    }
+
+    #[test]
+    fn evidence_and_local_first_messages_prohibit_meta_recovery() {
+        for behavior in [BehavioralTier::Constrained, BehavioralTier::Standard] {
+            assert_recovery_directive(&evidence_sufficiency_message(behavior));
+            assert_recovery_directive(&om_local_first_message(behavior));
+        }
+    }
+
+    #[test]
+    fn operator_correction_recovery_message_preserves_task_and_forces_action() {
+        let message = operator_correction_recovery_message();
+        assert!(message.contains("operator corrected your behavior"));
+        assert!(message.contains("Preserve the active task"));
+        assert!(message.contains("smallest concrete next action"));
+        assert!(message.contains("Do not apologize"));
+    }
+
+    #[test]
+    fn pathological_meta_response_detects_self_rebuke_without_progress() {
+        assert!(is_pathological_meta_response(
+            "You're right. I'm wasting turns reading things I already know."
+        ));
+        assert!(is_pathological_meta_response(
+            "The user is frustrated. Let me stop exploring and just do it."
+        ));
+        assert!(!is_pathological_meta_response(
+            "Updated src/main.rs and ran cargo test -p omegon."
+        ));
+        assert!(!is_pathological_meta_response(
+            "Blocked: ssh requires an operator-provided key."
+        ));
     }
 }

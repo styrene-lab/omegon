@@ -322,6 +322,13 @@ pub struct App {
     cancel: SharedCancel,
     /// Timestamp of last Ctrl+C (for double-tap quit detection).
     last_ctrl_c: Option<std::time::Instant>,
+    /// True after an operator interrupt until the active turn reports AgentEnd.
+    /// While set, editor input is suppressed so terminal protocol fragments
+    /// emitted by Ctrl+C/Esc cannot leak into the composer.
+    interrupt_pending: bool,
+    /// Short post-interrupt grace window for dropping raw keyboard protocol
+    /// fragments that may arrive after the logical Ctrl+C/Esc event.
+    suppress_editor_input_until: Option<std::time::Instant>,
     /// Session start time for /stats.
     session_start: std::time::Instant,
     /// Active selector popup (model picker, think level, etc.)
@@ -651,7 +658,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             } else {
                 None
             }
-        },
+        }
         "extension" | "ext" => {
             if args.is_empty() || args == "list" {
                 Some(CanonicalSlashCommand::ExtensionView)
@@ -675,38 +682,47 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionEnable(name.to_string()))
             } else if let Some(name) = args.strip_prefix("disable ") {
                 let name = name.trim();
-                (!name.is_empty()).then(|| CanonicalSlashCommand::ExtensionDisable(name.to_string()))
+                (!name.is_empty())
+                    .then(|| CanonicalSlashCommand::ExtensionDisable(name.to_string()))
             } else if args == "search" {
                 Some(CanonicalSlashCommand::ExtensionSearch(None))
             } else if let Some(query) = args.strip_prefix("search ") {
                 let query = query.trim();
                 Some(CanonicalSlashCommand::ExtensionSearch(
-                    if query.is_empty() { None } else { Some(query.to_string()) }
+                    if query.is_empty() {
+                        None
+                    } else {
+                        Some(query.to_string())
+                    },
                 ))
             } else {
                 None
             }
-        },
+        }
         "persona" => {
             if args == "list" {
                 Some(CanonicalSlashCommand::PersonaList)
             } else {
                 None // "off" and <name> are handled directly in TUI handler
             }
-        },
+        }
         "armory" => {
             if args.is_empty() || args == "browse" || args == "list" {
                 Some(CanonicalSlashCommand::ArmoryBrowse(None))
             } else if let Some(query) = args.strip_prefix("browse ") {
                 let query = query.trim();
-                Some(CanonicalSlashCommand::ArmoryBrowse(
-                    if query.is_empty() { None } else { Some(query.to_string()) },
-                ))
+                Some(CanonicalSlashCommand::ArmoryBrowse(if query.is_empty() {
+                    None
+                } else {
+                    Some(query.to_string())
+                }))
             } else if let Some(query) = args.strip_prefix("search ") {
                 let query = query.trim();
-                Some(CanonicalSlashCommand::ArmoryBrowse(
-                    if query.is_empty() { None } else { Some(query.to_string()) },
-                ))
+                Some(CanonicalSlashCommand::ArmoryBrowse(if query.is_empty() {
+                    None
+                } else {
+                    Some(query.to_string())
+                }))
             } else {
                 Some(CanonicalSlashCommand::ArmoryBrowse(Some(args.to_string())))
             }
@@ -722,7 +738,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             } else {
                 None
             }
-        },
+        }
         "plugin" => {
             if args.is_empty() || args == "list" {
                 Some(CanonicalSlashCommand::PluginView)
@@ -1252,6 +1268,8 @@ impl App {
             settings,
             cancel: std::sync::Arc::new(std::sync::Mutex::new(None)),
             last_ctrl_c: None,
+            interrupt_pending: false,
+            suppress_editor_input_until: None,
             session_start: std::time::Instant::now(),
             selector: None,
             selector_kind: None,
@@ -1351,12 +1369,9 @@ impl App {
             })
             .unwrap_or("");
 
-        // Check the last ~200 chars for confirmation-seeking patterns
-        let tail: &str = if last_text.len() > 200 {
-            &last_text[last_text.len() - 200..]
-        } else {
-            last_text
-        };
+        // Check the last ~200 chars for confirmation-seeking patterns.
+        // Assistant text can contain emoji, so never slice by byte offset.
+        let tail = Self::tail_chars(last_text, 200);
         let lower = tail.to_ascii_lowercase();
         let seeking = lower.contains("shall i")
             || lower.contains("should i")
@@ -3103,7 +3118,50 @@ impl App {
         }
     }
 
-    fn interrupt(&self) -> bool {
+    fn suppress_editor_input_for(&mut self, duration: Duration) {
+        self.suppress_editor_input_until = Some(std::time::Instant::now() + duration);
+    }
+
+    fn editor_input_suppressed(&mut self) -> bool {
+        if self.interrupt_pending {
+            return true;
+        }
+        if let Some(until) = self.suppress_editor_input_until {
+            if std::time::Instant::now() < until {
+                return true;
+            }
+            self.suppress_editor_input_until = None;
+        }
+        false
+    }
+
+    fn should_discard_key_after_interrupt(&mut self, key: &KeyEvent) -> bool {
+        if !self.editor_input_suppressed() {
+            return false;
+        }
+        let is_interrupt_key = matches!(key.code, KeyCode::Esc)
+            || matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
+                && key.modifiers.contains(KeyModifiers::CONTROL);
+        !is_interrupt_key
+    }
+
+    fn tail_chars(text: &str, max_chars: usize) -> &str {
+        if text.chars().count() <= max_chars {
+            return text;
+        }
+        let start = text
+            .char_indices()
+            .rev()
+            .nth(max_chars.saturating_sub(1))
+            .map(|(idx, _)| idx)
+            .unwrap_or(0);
+        &text[start..]
+    }
+
+    fn interrupt(&mut self) -> bool {
+        self.editor.clear_line();
+        self.interrupt_pending = true;
+        self.suppress_editor_input_for(Duration::from_millis(1500));
         if let Ok(guard) = self.cancel.lock()
             && let Some(ref token) = *guard
         {
@@ -4431,12 +4489,16 @@ impl App {
         (
             "extension",
             "manage extensions (install, remove, enable, disable)",
-            &["list", "get", "install", "remove", "update", "enable", "disable", "search"],
+            &[
+                "list", "get", "install", "remove", "update", "enable", "disable", "search",
+            ],
         ),
         (
             "ext",
             "alias for /extension",
-            &["list", "get", "install", "remove", "update", "enable", "disable", "search"],
+            &[
+                "list", "get", "install", "remove", "update", "enable", "disable", "search",
+            ],
         ),
         (
             "plugin",
@@ -4735,10 +4797,14 @@ impl App {
                         });
                         SlashResult::Handled
                     } else {
-                        SlashResult::Display("Usage: /skills [list|install|create|get <name>|delete <name>]".into())
+                        SlashResult::Display(
+                            "Usage: /skills [list|install|create|get <name>|delete <name>]".into(),
+                        )
                     }
                 } else {
-                    SlashResult::Display("Usage: /skills [list|install|create|get <name>|delete <name>]".into())
+                    SlashResult::Display(
+                        "Usage: /skills [list|install|create|get <name>|delete <name>]".into(),
+                    )
                 }
             }
 
@@ -5313,8 +5379,7 @@ impl App {
                 // /dash remains the compatibility/debug command for opening the browser UI.
                 // If the server is already running, open the browser.
                 // If not, start it (which auto-opens on ready).
-                if let Some(url) =
-                    dash_browser_url(self.web_startup.as_ref(), self.web_server_addr)
+                if let Some(url) = dash_browser_url(self.web_startup.as_ref(), self.web_server_addr)
                 {
                     if args == "status" {
                         let detail = self
@@ -5784,7 +5849,9 @@ impl App {
                             profile.capture_from(&s);
                             let _ = profile.save(&cwd);
                         }
-                        SlashResult::Display("Sandbox disabled. Children run as local subprocesses.".into())
+                        SlashResult::Display(
+                            "Sandbox disabled. Children run as local subprocesses.".into(),
+                        )
                     }
                     "" | "status" => {
                         let enabled = self
@@ -5803,9 +5870,7 @@ impl App {
                              /sandbox off  disable (use local subprocesses)"
                         ))
                     }
-                    _ => SlashResult::Display(
-                        "Usage: /sandbox [on|off|status]".into(),
-                    ),
+                    _ => SlashResult::Display("Usage: /sandbox [on|off|status]".into()),
                 }
             }
             "version" => SlashResult::Display(format!(
@@ -6463,6 +6528,11 @@ impl App {
             }
             AgentEvent::AgentEnd => {
                 self.agent_active = false;
+                if self.interrupt_pending {
+                    self.editor.clear_line();
+                    self.interrupt_pending = false;
+                    self.suppress_editor_input_for(Duration::from_millis(500));
+                }
                 if let Ok(mut ss) = self.dashboard_handles.session.lock() {
                     ss.busy = false;
                 }
@@ -7797,6 +7867,9 @@ pub async fn run_tui(
                 },
                 // ── Paste — pass directly to textarea ──────────
                 Event::Paste(ref text) => {
+                    if app.editor_input_suppressed() {
+                        continue;
+                    }
                     if matches!(app.editor.mode(), editor::EditorMode::SecretInput { .. }) {
                         // In secret mode, paste goes into the hidden buffer
                         for c in text.chars() {
@@ -7822,6 +7895,10 @@ pub async fn run_tui(
                     }
                 }
                 Event::Key(key) => {
+                    if app.should_discard_key_after_interrupt(&key) {
+                        continue;
+                    }
+
                     // ── Permission prompt intercepts y/a/n when pending ─
                     if app.pending_permission.is_some() {
                         let response = match key.code {
@@ -8570,28 +8647,46 @@ mod auspex_copy_tests {
 
 #[cfg(test)]
 mod slash_command_parsing_tests {
-    use super::canonical_slash_command;
-    use super::CanonicalSlashCommand;
     use super::App;
+    use super::CanonicalSlashCommand;
+    use super::canonical_slash_command;
 
     // ── Skills ────────────────────────────────────────────
 
     #[test]
     fn skills_list() {
-        assert!(matches!(canonical_slash_command("skills", ""), Some(CanonicalSlashCommand::SkillsView)));
-        assert!(matches!(canonical_slash_command("skills", "list"), Some(CanonicalSlashCommand::SkillsView)));
-        assert!(matches!(canonical_slash_command("skill", "list"), Some(CanonicalSlashCommand::SkillsView)));
+        assert!(matches!(
+            canonical_slash_command("skills", ""),
+            Some(CanonicalSlashCommand::SkillsView)
+        ));
+        assert!(matches!(
+            canonical_slash_command("skills", "list"),
+            Some(CanonicalSlashCommand::SkillsView)
+        ));
+        assert!(matches!(
+            canonical_slash_command("skill", "list"),
+            Some(CanonicalSlashCommand::SkillsView)
+        ));
     }
 
     #[test]
     fn skills_install() {
-        assert!(matches!(canonical_slash_command("skills", "install"), Some(CanonicalSlashCommand::SkillsInstall)));
+        assert!(matches!(
+            canonical_slash_command("skills", "install"),
+            Some(CanonicalSlashCommand::SkillsInstall)
+        ));
     }
 
     #[test]
     fn skills_create() {
-        assert!(matches!(canonical_slash_command("skills", "create"), Some(CanonicalSlashCommand::SkillCreate)));
-        assert!(matches!(canonical_slash_command("skills", "new"), Some(CanonicalSlashCommand::SkillCreate)));
+        assert!(matches!(
+            canonical_slash_command("skills", "create"),
+            Some(CanonicalSlashCommand::SkillCreate)
+        ));
+        assert!(matches!(
+            canonical_slash_command("skills", "new"),
+            Some(CanonicalSlashCommand::SkillCreate)
+        ));
     }
 
     #[test]
@@ -8620,9 +8715,18 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn extension_list() {
-        assert!(matches!(canonical_slash_command("extension", ""), Some(CanonicalSlashCommand::ExtensionView)));
-        assert!(matches!(canonical_slash_command("extension", "list"), Some(CanonicalSlashCommand::ExtensionView)));
-        assert!(matches!(canonical_slash_command("ext", "list"), Some(CanonicalSlashCommand::ExtensionView)));
+        assert!(matches!(
+            canonical_slash_command("extension", ""),
+            Some(CanonicalSlashCommand::ExtensionView)
+        ));
+        assert!(matches!(
+            canonical_slash_command("extension", "list"),
+            Some(CanonicalSlashCommand::ExtensionView)
+        ));
+        assert!(matches!(
+            canonical_slash_command("ext", "list"),
+            Some(CanonicalSlashCommand::ExtensionView)
+        ));
     }
 
     #[test]
@@ -8701,7 +8805,10 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn ext_alias_works() {
-        assert!(matches!(canonical_slash_command("ext", ""), Some(CanonicalSlashCommand::ExtensionView)));
+        assert!(matches!(
+            canonical_slash_command("ext", ""),
+            Some(CanonicalSlashCommand::ExtensionView)
+        ));
         match canonical_slash_command("ext", "install foo") {
             Some(CanonicalSlashCommand::ExtensionInstall(uri)) => assert_eq!(uri, "foo"),
             other => panic!("expected ExtensionInstall via 'ext', got {other:?}"),
@@ -8752,19 +8859,30 @@ mod slash_command_parsing_tests {
 
     #[test]
     fn catalog_list() {
-        assert!(matches!(canonical_slash_command("catalog", ""), Some(CanonicalSlashCommand::CatalogView)));
-        assert!(matches!(canonical_slash_command("catalog", "list"), Some(CanonicalSlashCommand::CatalogView)));
+        assert!(matches!(
+            canonical_slash_command("catalog", ""),
+            Some(CanonicalSlashCommand::CatalogView)
+        ));
+        assert!(matches!(
+            canonical_slash_command("catalog", "list"),
+            Some(CanonicalSlashCommand::CatalogView)
+        ));
     }
 
     #[test]
     fn catalog_install() {
-        assert!(matches!(canonical_slash_command("catalog", "install"), Some(CanonicalSlashCommand::CatalogInstall)));
+        assert!(matches!(
+            canonical_slash_command("catalog", "install"),
+            Some(CanonicalSlashCommand::CatalogInstall)
+        ));
     }
 
     #[test]
     fn catalog_remove() {
         match canonical_slash_command("catalog", "remove styrene.coding-agent") {
-            Some(CanonicalSlashCommand::CatalogRemove(id)) => assert_eq!(id, "styrene.coding-agent"),
+            Some(CanonicalSlashCommand::CatalogRemove(id)) => {
+                assert_eq!(id, "styrene.coding-agent")
+            }
             other => panic!("expected CatalogRemove, got {other:?}"),
         }
     }

@@ -5,8 +5,8 @@
 //! temporary directories. No LLM calls — tests validate the orchestration
 //! layer (board → executor → state) in isolation.
 
-use std::sync::Arc;
 use std::path::Path;
+use std::sync::Arc;
 
 use chrono::Utc;
 use rusqlite::{Connection, params};
@@ -14,10 +14,10 @@ use rusqlite::{Connection, params};
 use super::board::TaskBoard;
 use super::file_board::FileTaskBoard;
 use super::flynt_board::{FlyntTaskBoard, default_db_path, is_flynt_vault};
+use super::load_config;
 use super::state_db::StateDb;
 use super::tree_board::TaskTreeBoard;
 use super::types::*;
-use super::load_config;
 
 fn create_flynt_db(vault_root: &Path) -> std::path::PathBuf {
     let db_path = default_db_path(vault_root);
@@ -52,8 +52,9 @@ fn create_flynt_db(vault_root: &Path) -> std::path::PathBuf {
             columns TEXT NOT NULL DEFAULT '[]',
             project_id TEXT,
             created_at TEXT NOT NULL
-        );"
-    ).unwrap();
+        );",
+    )
+    .unwrap();
     db_path
 }
 
@@ -70,8 +71,12 @@ fn insert_flynt_task(
     let conn = Connection::open(db_path).unwrap();
     let now = Utc::now().to_rfc3339();
     let refs_json = serde_json::to_string(
-        &external_refs.iter().map(|s| s.to_string()).collect::<Vec<_>>()
-    ).unwrap();
+        &external_refs
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
     let exec_json = execution.map(|v| serde_json::to_string(&v).unwrap());
     conn.execute(
         "INSERT INTO tasks (id, board_id, column_name, title, description, priority, status,
@@ -84,8 +89,11 @@ fn insert_flynt_task(
 
 fn read_task_column(db_path: &Path, id: &str) -> (String, String) {
     let conn = Connection::open(db_path).unwrap();
-    let mut stmt = conn.prepare("SELECT column_name, status FROM tasks WHERE id = ?1").unwrap();
-    stmt.query_row(params![id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap()
+    let mut stmt = conn
+        .prepare("SELECT column_name, status FROM tasks WHERE id = ?1")
+        .unwrap();
+    stmt.query_row(params![id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
 }
 
 fn create_task_file(tasks_dir: &Path, slug: &str, content: &str) {
@@ -106,7 +114,10 @@ fn flynt_vault_full_lifecycle() {
     let task_id = uuid::Uuid::new_v4().to_string();
 
     insert_flynt_task(
-        &db_path, &task_id, &board_id, "Scheduled",
+        &db_path,
+        &task_id,
+        &board_id,
+        "Scheduled",
         "Review open PRs",
         "Scan all open pull requests and leave review comments.",
         &["cron:0 */4 * * *"],
@@ -118,8 +129,12 @@ fn flynt_vault_full_lifecycle() {
     );
 
     let board = FlyntTaskBoard::open_with_db(
-        tmp.path().to_path_buf(), db_path.clone(), state_db.clone(), "e2e-test".into(),
-    ).unwrap();
+        tmp.path().to_path_buf(),
+        db_path.clone(),
+        state_db.clone(),
+        "e2e-test".into(),
+    )
+    .unwrap();
 
     let actionable = board.list_actionable().unwrap();
     assert_eq!(actionable.len(), 1);
@@ -127,7 +142,10 @@ fn flynt_vault_full_lifecycle() {
     assert!(matches!(actionable[0].triggers[0], Trigger::Cron { .. }));
 
     let spec = board.task_spec(&task_id).unwrap();
-    assert_eq!(spec.prompt, "Scan all open pull requests and leave review comments.");
+    assert_eq!(
+        spec.prompt,
+        "Scan all open pull requests and leave review comments."
+    );
     assert_eq!(spec.model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
     assert_eq!(spec.max_turns, Some(20));
     assert_eq!(spec.timeout_secs, Some(300));
@@ -141,8 +159,11 @@ fn flynt_vault_full_lifecycle() {
     assert!(!board.claim(&task_id).unwrap());
 
     let result = TaskResult {
-        exit_code: 0, summary: "Reviewed 3 PRs, left 7 comments".into(),
-        tokens_used: 45_000, duration_secs: 120, session_id: "sess-e2e-1".into(),
+        exit_code: 0,
+        summary: "Reviewed 3 PRs, left 7 comments".into(),
+        tokens_used: 45_000,
+        duration_secs: 120,
+        session_id: "sess-e2e-1".into(),
     };
     board.complete(&task_id, &result).unwrap();
     let (col, status) = read_task_column(&db_path, &task_id);
@@ -159,21 +180,37 @@ fn flynt_vault_fail_and_release_cycle() {
     let task_id = uuid::Uuid::new_v4().to_string();
 
     insert_flynt_task(
-        &db_path, &task_id, &board_id, "Scheduled",
-        "Deploy staging", "Run staging deployment pipeline.",
-        &["webhook:deploy"], None,
+        &db_path,
+        &task_id,
+        &board_id,
+        "Scheduled",
+        "Deploy staging",
+        "Run staging deployment pipeline.",
+        &["webhook:deploy"],
+        None,
     );
 
     let board = FlyntTaskBoard::open_with_db(
-        tmp.path().to_path_buf(), db_path.clone(), state_db.clone(), "e2e-test".into(),
-    ).unwrap();
+        tmp.path().to_path_buf(),
+        db_path.clone(),
+        state_db.clone(),
+        "e2e-test".into(),
+    )
+    .unwrap();
 
     assert!(board.claim(&task_id).unwrap());
     assert_eq!(read_task_column(&db_path, &task_id).0, "Running");
 
-    board.fail(&task_id, &TaskError {
-        message: "deployment timed out".into(), retriable: true, attempt: 1,
-    }).unwrap();
+    board
+        .fail(
+            &task_id,
+            &TaskError {
+                message: "deployment timed out".into(),
+                retriable: true,
+                attempt: 1,
+            },
+        )
+        .unwrap();
     let (col, status) = read_task_column(&db_path, &task_id);
     assert_eq!(col, "Failed");
     assert_eq!(status, "\"archived\"");
@@ -199,29 +236,72 @@ fn flynt_vault_filters_non_sentry_and_non_scheduled() {
     let board_id = uuid::Uuid::new_v4().to_string();
 
     let t1 = uuid::Uuid::new_v4().to_string();
-    insert_flynt_task(&db_path, &t1, &board_id, "Scheduled", "Auto task",
-        "Run automatically.", &["cron:0 * * * *"], None);
+    insert_flynt_task(
+        &db_path,
+        &t1,
+        &board_id,
+        "Scheduled",
+        "Auto task",
+        "Run automatically.",
+        &["cron:0 * * * *"],
+        None,
+    );
 
     let t2 = uuid::Uuid::new_v4().to_string();
-    insert_flynt_task(&db_path, &t2, &board_id, "Backlog", "Backlog idea",
-        "Not ready yet.", &["cron:0 9 * * 1"], None);
+    insert_flynt_task(
+        &db_path,
+        &t2,
+        &board_id,
+        "Backlog",
+        "Backlog idea",
+        "Not ready yet.",
+        &["cron:0 9 * * 1"],
+        None,
+    );
 
     let t3 = uuid::Uuid::new_v4().to_string();
-    insert_flynt_task(&db_path, &t3, &board_id, "Scheduled", "Manual task",
-        "Do this by hand.", &[], None);
+    insert_flynt_task(
+        &db_path,
+        &t3,
+        &board_id,
+        "Scheduled",
+        "Manual task",
+        "Do this by hand.",
+        &[],
+        None,
+    );
 
     let t4 = uuid::Uuid::new_v4().to_string();
-    insert_flynt_task(&db_path, &t4, &board_id, "Scheduled", "Exec-only task",
-        "Has an execution block.", &[],
-        Some(serde_json::json!({"model": "anthropic:claude-sonnet-4-6"})));
+    insert_flynt_task(
+        &db_path,
+        &t4,
+        &board_id,
+        "Scheduled",
+        "Exec-only task",
+        "Has an execution block.",
+        &[],
+        Some(serde_json::json!({"model": "anthropic:claude-sonnet-4-6"})),
+    );
 
     let t5 = uuid::Uuid::new_v4().to_string();
-    insert_flynt_task(&db_path, &t5, &board_id, "Done", "Finished task",
-        "Already done.", &["cron:0 * * * *"], None);
+    insert_flynt_task(
+        &db_path,
+        &t5,
+        &board_id,
+        "Done",
+        "Finished task",
+        "Already done.",
+        &["cron:0 * * * *"],
+        None,
+    );
 
     let board = FlyntTaskBoard::open_with_db(
-        tmp.path().to_path_buf(), db_path, state_db, "e2e-test".into(),
-    ).unwrap();
+        tmp.path().to_path_buf(),
+        db_path,
+        state_db,
+        "e2e-test".into(),
+    )
+    .unwrap();
 
     let actionable = board.list_actionable().unwrap();
     let names: Vec<&str> = actionable.iter().map(|t| t.name.as_str()).collect();
@@ -239,10 +319,26 @@ fn task_tree_dependency_gating_and_completion_unblocks() {
     let tmp = tempfile::tempdir().unwrap();
     let tasks_dir = tmp.path().join(".omegon").join("tasks");
 
-    create_task_file(&tasks_dir, "review-prs", "+++\nid = \"review-prs\"\ntitle = \"Review PRs\"\nstatus = \"todo\"\npriority = \"high\"\n\n[execution]\ncron = \"0 */4 * * *\"\n+++\nReview PRs.\n");
-    create_task_file(&tasks_dir, "check-ci", "+++\nid = \"check-ci\"\ntitle = \"Check CI\"\nstatus = \"todo\"\npriority = \"medium\"\n\n[execution]\nwebhook = \"ci-complete\"\n+++\nCheck CI.\n");
-    create_task_file(&tasks_dir, "deploy-prod", "+++\nid = \"deploy-prod\"\ntitle = \"Deploy Prod\"\nstatus = \"todo\"\npriority = \"critical\"\ndepends_on = [\"review-prs\"]\n+++\nDeploy after review.\n");
-    create_task_file(&tasks_dir, "setup-ci", "+++\nid = \"setup-ci\"\ntitle = \"Setup CI\"\nstatus = \"done\"\npriority = \"low\"\n+++\nAlready done.\n");
+    create_task_file(
+        &tasks_dir,
+        "review-prs",
+        "+++\nid = \"review-prs\"\ntitle = \"Review PRs\"\nstatus = \"todo\"\npriority = \"high\"\n\n[execution]\ncron = \"0 */4 * * *\"\n+++\nReview PRs.\n",
+    );
+    create_task_file(
+        &tasks_dir,
+        "check-ci",
+        "+++\nid = \"check-ci\"\ntitle = \"Check CI\"\nstatus = \"todo\"\npriority = \"medium\"\n\n[execution]\nwebhook = \"ci-complete\"\n+++\nCheck CI.\n",
+    );
+    create_task_file(
+        &tasks_dir,
+        "deploy-prod",
+        "+++\nid = \"deploy-prod\"\ntitle = \"Deploy Prod\"\nstatus = \"todo\"\npriority = \"critical\"\ndepends_on = [\"review-prs\"]\n+++\nDeploy after review.\n",
+    );
+    create_task_file(
+        &tasks_dir,
+        "setup-ci",
+        "+++\nid = \"setup-ci\"\ntitle = \"Setup CI\"\nstatus = \"done\"\npriority = \"low\"\n+++\nAlready done.\n",
+    );
 
     let state_db = Arc::new(StateDb::in_memory().unwrap());
     let board = TaskTreeBoard::new(tmp.path().to_path_buf(), state_db, "e2e-test".into());
@@ -255,14 +351,25 @@ fn task_tree_dependency_gating_and_completion_unblocks() {
     assert!(!ids.contains(&"deploy-prod"));
 
     assert!(board.claim("review-prs").unwrap());
-    board.complete("review-prs", &TaskResult {
-        exit_code: 0, summary: "done".into(), tokens_used: 1000,
-        duration_secs: 10, session_id: "s1".into(),
-    }).unwrap();
+    board
+        .complete(
+            "review-prs",
+            &TaskResult {
+                exit_code: 0,
+                summary: "done".into(),
+                tokens_used: 1000,
+                duration_secs: 10,
+                session_id: "s1".into(),
+            },
+        )
+        .unwrap();
 
     let actionable = board.list_actionable().unwrap();
     let ids: Vec<&str> = actionable.iter().map(|t| t.id.as_str()).collect();
-    assert!(ids.contains(&"deploy-prod"), "deploy-prod should unblock after review-prs completes");
+    assert!(
+        ids.contains(&"deploy-prod"),
+        "deploy-prod should unblock after review-prs completes"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -273,7 +380,9 @@ fn task_tree_dependency_gating_and_completion_unblocks() {
 fn file_board_lifecycle_from_toml_config() {
     let tmp = tempfile::tempdir().unwrap();
     let config_path = tmp.path().join("sentry.toml");
-    std::fs::write(&config_path, r#"
+    std::fs::write(
+        &config_path,
+        r#"
 [sentry]
 max_concurrent = 2
 log_retention_days = 7
@@ -298,7 +407,9 @@ max_turns = 15
 
 [task.trigger.webhook]
 name = "push-main"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     let config = load_config(&config_path).unwrap();
     assert_eq!(config.tasks.len(), 2);
@@ -306,7 +417,9 @@ name = "push-main"
 
     let state_db = Arc::new(StateDb::in_memory().unwrap());
     let board = FileTaskBoard::new(
-        config.clone(), state_db.clone(), "e2e-test".into(),
+        config.clone(),
+        state_db.clone(),
+        "e2e-test".into(),
         tmp.path().to_path_buf(),
     );
 
@@ -323,10 +436,18 @@ name = "push-main"
     assert_eq!(spec.max_turns, Some(10));
 
     assert!(board.claim("lint-check").unwrap());
-    board.complete("lint-check", &TaskResult {
-        exit_code: 0, summary: "fixed 3 warnings".into(), tokens_used: 5000,
-        duration_secs: 30, session_id: "s1".into(),
-    }).unwrap();
+    board
+        .complete(
+            "lint-check",
+            &TaskResult {
+                exit_code: 0,
+                summary: "fixed 3 warnings".into(),
+                tokens_used: 5000,
+                duration_secs: 30,
+                session_id: "s1".into(),
+            },
+        )
+        .unwrap();
 
     let (last_run, count) = state_db.last_run("lint-check").unwrap().unwrap();
     assert_eq!(count, 1);
@@ -342,16 +463,33 @@ fn budget_tracking_isolates_per_task_per_day() {
     let state_db = StateDb::in_memory().unwrap();
     let today = Utc::now().format("%Y-%m-%d").to_string();
 
-    state_db.record_budget("heavy-task", &today, 80_000).unwrap();
-    state_db.record_budget("heavy-task", &today, 25_000).unwrap();
-    assert_eq!(state_db.budget_tokens_today("heavy-task", &today).unwrap(), 105_000);
+    state_db
+        .record_budget("heavy-task", &today, 80_000)
+        .unwrap();
+    state_db
+        .record_budget("heavy-task", &today, 25_000)
+        .unwrap();
+    assert_eq!(
+        state_db.budget_tokens_today("heavy-task", &today).unwrap(),
+        105_000
+    );
 
     state_db.record_budget("light-task", &today, 500).unwrap();
-    assert_eq!(state_db.budget_tokens_today("light-task", &today).unwrap(), 500);
+    assert_eq!(
+        state_db.budget_tokens_today("light-task", &today).unwrap(),
+        500
+    );
 
-    let yesterday = (Utc::now() - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
-    state_db.record_budget("heavy-task", &yesterday, 999_999).unwrap();
-    assert_eq!(state_db.budget_tokens_today("heavy-task", &today).unwrap(), 105_000);
+    let yesterday = (Utc::now() - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+    state_db
+        .record_budget("heavy-task", &yesterday, 999_999)
+        .unwrap();
+    assert_eq!(
+        state_db.budget_tokens_today("heavy-task", &today).unwrap(),
+        105_000
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -369,9 +507,16 @@ fn circuit_breaker_counts_recent_failures() {
     for i in 1..=3 {
         let run_id = format!("run-{i}");
         state_db.record_run_start(&run_id, "flaky-task").unwrap();
-        state_db.record_run_failure(&run_id, &TaskError {
-            message: format!("attempt {i} failed"), retriable: true, attempt: i,
-        }).unwrap();
+        state_db
+            .record_run_failure(
+                &run_id,
+                &TaskError {
+                    message: format!("attempt {i} failed"),
+                    retriable: true,
+                    attempt: i,
+                },
+            )
+            .unwrap();
     }
     assert_eq!(state_db.recent_failure_count("flaky-task").unwrap(), 3);
 
@@ -379,10 +524,18 @@ fn circuit_breaker_counts_recent_failures() {
     // failures within the last hour. The executor uses this count to
     // scale cooldown, not as a binary "healthy" signal.
     state_db.record_run_start("run-ok", "flaky-task").unwrap();
-    state_db.record_run_complete("run-ok", &TaskResult {
-        exit_code: 0, summary: "ok".into(), tokens_used: 100,
-        duration_secs: 1, session_id: "s1".into(),
-    }).unwrap();
+    state_db
+        .record_run_complete(
+            "run-ok",
+            &TaskResult {
+                exit_code: 0,
+                summary: "ok".into(),
+                tokens_used: 100,
+                duration_secs: 1,
+                session_id: "s1".into(),
+            },
+        )
+        .unwrap();
     // Still 3 failures in the window — success doesn't retroactively clear them
     assert_eq!(state_db.recent_failure_count("flaky-task").unwrap(), 3);
 
@@ -403,13 +556,23 @@ fn run_history_accumulates_across_executions() {
     let task_id = uuid::Uuid::new_v4().to_string();
 
     insert_flynt_task(
-        &db_path, &task_id, &board_id, "Scheduled",
-        "Recurring check", "Check things.", &["cron:* * * * *"], None,
+        &db_path,
+        &task_id,
+        &board_id,
+        "Scheduled",
+        "Recurring check",
+        "Check things.",
+        &["cron:* * * * *"],
+        None,
     );
 
     let board = FlyntTaskBoard::open_with_db(
-        tmp.path().to_path_buf(), db_path.clone(), state_db.clone(), "e2e-test".into(),
-    ).unwrap();
+        tmp.path().to_path_buf(),
+        db_path.clone(),
+        state_db.clone(),
+        "e2e-test".into(),
+    )
+    .unwrap();
 
     for i in 0..3 {
         if i > 0 {
@@ -417,14 +580,23 @@ fn run_history_accumulates_across_executions() {
             conn.execute(
                 "UPDATE tasks SET column_name = 'Scheduled', status = '\"todo\"' WHERE id = ?1",
                 params![task_id],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         assert!(board.claim(&task_id).unwrap());
-        board.complete(&task_id, &TaskResult {
-            exit_code: 0, summary: format!("run {i}"), tokens_used: 1000 * (i + 1),
-            duration_secs: 10, session_id: format!("s{i}"),
-        }).unwrap();
+        board
+            .complete(
+                &task_id,
+                &TaskResult {
+                    exit_code: 0,
+                    summary: format!("run {i}"),
+                    tokens_used: 1000 * (i + 1),
+                    duration_secs: 10,
+                    session_id: format!("s{i}"),
+                },
+            )
+            .unwrap();
     }
 
     let history = state_db.run_history(&task_id, 10).unwrap();
@@ -448,17 +620,30 @@ fn concurrent_claim_contention_across_instances() {
     let task_id = uuid::Uuid::new_v4().to_string();
 
     insert_flynt_task(
-        &db_path, &task_id, &board_id, "Scheduled",
-        "Contested task", "Two instances race.",
-        &["cron:* * * * *"], None,
+        &db_path,
+        &task_id,
+        &board_id,
+        "Scheduled",
+        "Contested task",
+        "Two instances race.",
+        &["cron:* * * * *"],
+        None,
     );
 
     let board_a = FlyntTaskBoard::open_with_db(
-        tmp.path().to_path_buf(), db_path.clone(), state_db.clone(), "instance-a".into(),
-    ).unwrap();
+        tmp.path().to_path_buf(),
+        db_path.clone(),
+        state_db.clone(),
+        "instance-a".into(),
+    )
+    .unwrap();
     let board_b = FlyntTaskBoard::open_with_db(
-        tmp.path().to_path_buf(), db_path.clone(), state_db.clone(), "instance-b".into(),
-    ).unwrap();
+        tmp.path().to_path_buf(),
+        db_path.clone(),
+        state_db.clone(),
+        "instance-b".into(),
+    )
+    .unwrap();
 
     assert!(board_a.claim(&task_id).unwrap());
     assert_eq!(read_task_column(&db_path, &task_id).0, "Running");
@@ -480,14 +665,23 @@ fn config_rejects_task_without_prompt() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("sentry.toml");
     std::fs::write(&path, "[sentry]\n[[task]]\nname = \"no-prompt\"\n").unwrap();
-    assert!(load_config(&path).unwrap_err().to_string().contains("prompt"));
+    assert!(
+        load_config(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("prompt")
+    );
 }
 
 #[test]
 fn config_accepts_prompt_file() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("sentry.toml");
-    std::fs::write(&path, "[sentry]\n[[task]]\nname = \"ok\"\nprompt_file = \"p.md\"\n").unwrap();
+    std::fs::write(
+        &path,
+        "[sentry]\n[[task]]\nname = \"ok\"\nprompt_file = \"p.md\"\n",
+    )
+    .unwrap();
     let config = load_config(&path).unwrap();
     assert_eq!(config.tasks[0].prompt_file.as_deref(), Some("p.md"));
 }
@@ -500,7 +694,9 @@ fn config_accepts_prompt_file() {
 fn routing_config_parses_from_toml() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("sentry.toml");
-    std::fs::write(&path, r#"
+    std::fs::write(
+        &path,
+        r#"
 [sentry]
 max_concurrent = 2
 
@@ -513,11 +709,16 @@ heavy_model = "anthropic:claude-opus-4-6"
 name = "auto-routed"
 prompt = "Check CI status"
 model = "auto"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     let config = load_config(&path).unwrap();
     let routing = config.sentry.routing.unwrap();
-    assert_eq!(routing.prefilter_model, "anthropic:claude-haiku-4-5-20251001");
+    assert_eq!(
+        routing.prefilter_model,
+        "anthropic:claude-haiku-4-5-20251001"
+    );
     assert_eq!(routing.light_model, "anthropic:claude-sonnet-4-6");
     assert_eq!(routing.heavy_model, "anthropic:claude-opus-4-6");
     assert_eq!(config.tasks[0].model.as_deref(), Some("auto"));
@@ -530,28 +731,37 @@ fn heuristic_classifier_categorizes_correctly() {
     let simple = classify_heuristic("Check if CI passed");
     assert!(matches!(simple, super::executor::TaskComplexity::Simple));
 
-    let complex = classify_heuristic("Refactor the authentication module to use OAuth2 with PKCE flow across all provider integrations and migrate existing sessions");
+    let complex = classify_heuristic(
+        "Refactor the authentication module to use OAuth2 with PKCE flow across all provider integrations and migrate existing sessions",
+    );
     assert!(matches!(complex, super::executor::TaskComplexity::Complex));
 
     let moderate = classify_heuristic(
         "Review the open pull request and leave comments on any issues found in the \
          implementation. Look for correctness, style violations, and potential \
-         performance regressions across each changed file in the diff."
+         performance regressions across each changed file in the diff.",
     );
-    assert!(matches!(moderate, super::executor::TaskComplexity::Moderate));
+    assert!(matches!(
+        moderate,
+        super::executor::TaskComplexity::Moderate
+    ));
 }
 
 #[test]
 fn execution_mode_parses_from_toml() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("sentry.toml");
-    std::fs::write(&path, r#"
+    std::fs::write(
+        &path,
+        r#"
 [sentry]
 [[task]]
 name = "scripted"
 prompt = "Run a data pipeline"
 execution_mode = "code-act"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     let config = load_config(&path).unwrap();
     assert_eq!(config.tasks[0].execution_mode.as_deref(), Some("code-act"));
 }
@@ -560,7 +770,11 @@ execution_mode = "code-act"
 fn execution_mode_absent_is_none() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("sentry.toml");
-    std::fs::write(&path, "[sentry]\n[[task]]\nname = \"t\"\nprompt = \"do it\"\n").unwrap();
+    std::fs::write(
+        &path,
+        "[sentry]\n[[task]]\nname = \"t\"\nprompt = \"do it\"\n",
+    )
+    .unwrap();
     let config = load_config(&path).unwrap();
     assert!(config.tasks[0].execution_mode.is_none());
 }
@@ -578,14 +792,21 @@ fn adaptive_routing_escalates_on_low_success_rate() {
     let state_db = StateDb::in_memory().unwrap();
 
     for i in 0..10 {
-        state_db.record_routing_outcome(
-            &format!("task-{i}"), "Moderate", "light-model",
-            i < 3, 1000, 10,
-        ).unwrap();
+        state_db
+            .record_routing_outcome(
+                &format!("task-{i}"),
+                "Moderate",
+                "light-model",
+                i < 3,
+                1000,
+                10,
+            )
+            .unwrap();
     }
 
     assert_eq!(
-        super::executor::routing_adjustment("Moderate", &state_db), 1,
+        super::executor::routing_adjustment("Moderate", &state_db),
+        1,
         "should escalate when success rate is 30%"
     );
 }
@@ -595,14 +816,21 @@ fn adaptive_routing_no_change_on_normal_success_rate() {
     let state_db = StateDb::in_memory().unwrap();
 
     for i in 0..10 {
-        state_db.record_routing_outcome(
-            &format!("task-{i}"), "Moderate", "light-model",
-            i < 8, 1000, 10,
-        ).unwrap();
+        state_db
+            .record_routing_outcome(
+                &format!("task-{i}"),
+                "Moderate",
+                "light-model",
+                i < 8,
+                1000,
+                10,
+            )
+            .unwrap();
     }
 
     assert_eq!(
-        super::executor::routing_adjustment("Moderate", &state_db), 0,
+        super::executor::routing_adjustment("Moderate", &state_db),
+        0,
         "should NOT adjust when success rate is 80%"
     );
 }
@@ -612,14 +840,21 @@ fn adaptive_routing_de_escalates_on_high_success() {
     let state_db = StateDb::in_memory().unwrap();
 
     for i in 0..12 {
-        state_db.record_routing_outcome(
-            &format!("task-{i}"), "Complex", "heavy-model",
-            true, 1000, 10,
-        ).unwrap();
+        state_db
+            .record_routing_outcome(
+                &format!("task-{i}"),
+                "Complex",
+                "heavy-model",
+                true,
+                1000,
+                10,
+            )
+            .unwrap();
     }
 
     assert_eq!(
-        super::executor::routing_adjustment("Complex", &state_db), -1,
+        super::executor::routing_adjustment("Complex", &state_db),
+        -1,
         "should de-escalate Complex when success rate is 100%"
     );
 }
@@ -629,14 +864,21 @@ fn adaptive_routing_requires_minimum_samples() {
     let state_db = StateDb::in_memory().unwrap();
 
     for i in 0..3 {
-        state_db.record_routing_outcome(
-            &format!("task-{i}"), "Moderate", "light-model",
-            false, 1000, 10,
-        ).unwrap();
+        state_db
+            .record_routing_outcome(
+                &format!("task-{i}"),
+                "Moderate",
+                "light-model",
+                false,
+                1000,
+                10,
+            )
+            .unwrap();
     }
 
     assert_eq!(
-        super::executor::routing_adjustment("Moderate", &state_db), 0,
+        super::executor::routing_adjustment("Moderate", &state_db),
+        0,
         "should NOT adjust with fewer than 10 total samples"
     );
 }
@@ -645,7 +887,11 @@ fn adaptive_routing_requires_minimum_samples() {
 fn routing_config_absent_parses_as_none() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("sentry.toml");
-    std::fs::write(&path, "[sentry]\n[[task]]\nname = \"t\"\nprompt = \"do it\"\n").unwrap();
+    std::fs::write(
+        &path,
+        "[sentry]\n[[task]]\nname = \"t\"\nprompt = \"do it\"\n",
+    )
+    .unwrap();
     let config = load_config(&path).unwrap();
     assert!(config.sentry.routing.is_none());
 }
@@ -660,7 +906,11 @@ fn vault_detection_by_config_and_db() {
     assert!(!is_flynt_vault(tmp.path()));
 
     std::fs::create_dir_all(tmp.path().join(".flynt")).unwrap();
-    std::fs::write(tmp.path().join(".flynt/config.toml"), "vault_name = \"test\"").unwrap();
+    std::fs::write(
+        tmp.path().join(".flynt/config.toml"),
+        "vault_name = \"test\"",
+    )
+    .unwrap();
     assert!(is_flynt_vault(tmp.path()));
 
     let tmp2 = tempfile::tempdir().unwrap();

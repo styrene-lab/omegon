@@ -73,7 +73,11 @@ pub fn read_workspace_lease(cwd: &Path) -> anyhow::Result<Option<WorkspaceLease>
 }
 
 /// Write workspace lease to the instance-specific path.
-pub fn write_workspace_lease(cwd: &Path, instance_id: &str, lease: &WorkspaceLease) -> anyhow::Result<()> {
+pub fn write_workspace_lease(
+    cwd: &Path,
+    instance_id: &str,
+    lease: &WorkspaceLease,
+) -> anyhow::Result<()> {
     ensure_instance_dir(cwd, instance_id)?;
     let path = instance_lease_path(cwd, instance_id);
     let json = serde_json::to_string_pretty(lease)?;
@@ -110,8 +114,12 @@ pub fn read_all_active_leases(cwd: &Path) -> Vec<(String, WorkspaceLease)> {
         if !lease_file.exists() {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&lease_file) else { continue };
-        let Ok(lease) = serde_json::from_str::<WorkspaceLease>(&text) else { continue };
+        let Ok(text) = std::fs::read_to_string(&lease_file) else {
+            continue;
+        };
+        let Ok(lease) = serde_json::from_str::<WorkspaceLease>(&text) else {
+            continue;
+        };
 
         if let Some(epoch) = heartbeat_epoch_secs(&lease.last_heartbeat) {
             if !heartbeat_is_stale(now, epoch) {
@@ -179,8 +187,12 @@ pub fn prune_stale_instances(cwd: &Path) -> Vec<String> {
         if !lease_file.exists() {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&lease_file) else { continue };
-        let Ok(lease) = serde_json::from_str::<WorkspaceLease>(&text) else { continue };
+        let Ok(text) = std::fs::read_to_string(&lease_file) else {
+            continue;
+        };
+        let Ok(lease) = serde_json::from_str::<WorkspaceLease>(&text) else {
+            continue;
+        };
 
         let stale = heartbeat_epoch_secs(&lease.last_heartbeat)
             .map(|epoch| heartbeat_is_stale(now, epoch))

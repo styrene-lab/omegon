@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use super::profile::{
-    NexCapabilities, NexDomain, NexEgressFilter, NexNetworkPolicy, NexOverlay,
-    NexPortMapping, NexPortProtocol, NexProfile, NexResourceLimits,
+    NexCapabilities, NexDomain, NexEgressFilter, NexNetworkPolicy, NexOverlay, NexPortMapping,
+    NexPortProtocol, NexProfile, NexResourceLimits,
 };
 
 /// On-disk TOML manifest. Parsed then converted to a [`NexProfile`].
@@ -170,7 +170,10 @@ impl NexManifest {
 
         let defaults = NexCapabilities::default();
         let capabilities = NexCapabilities {
-            filesystem_write: self.capabilities.filesystem_write.unwrap_or(defaults.filesystem_write),
+            filesystem_write: self
+                .capabilities
+                .filesystem_write
+                .unwrap_or(defaults.filesystem_write),
             network,
             mount_cwd: self.capabilities.mount_cwd.unwrap_or(defaults.mount_cwd),
             mount_paths: self.capabilities.mount_paths,
@@ -303,12 +306,15 @@ fn compute_manifest_hash(manifest: &NexManifest) -> String {
         hasher.update(format!("\nnet.egress.deny_metadata:{}", egress.deny_metadata).as_bytes());
     }
     for port in &manifest.network.ports {
-        hasher.update(format!(
-            "\nnet.port:{}:{}:{}",
-            port.host,
-            port.container,
-            port.protocol.as_deref().unwrap_or("tcp")
-        ).as_bytes());
+        hasher.update(
+            format!(
+                "\nnet.port:{}:{}:{}",
+                port.host,
+                port.container,
+                port.protocol.as_deref().unwrap_or("tcp")
+            )
+            .as_bytes(),
+        );
     }
 
     // Capabilities — every security-relevant field
@@ -437,8 +443,10 @@ filesystem_write = true
 "#;
         let p1 = NexManifest::from_toml(locked).unwrap().into_profile();
         let p2 = NexManifest::from_toml(open).unwrap().into_profile();
-        assert_ne!(p1.profile_hash, p2.profile_hash,
-            "profiles with different capabilities must have different hashes");
+        assert_ne!(
+            p1.profile_hash, p2.profile_hash,
+            "profiles with different capabilities must have different hashes"
+        );
     }
 
     #[test]

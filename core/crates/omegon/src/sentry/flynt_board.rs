@@ -149,7 +149,10 @@ impl FlyntTaskBoard {
     /// list_actionable just returns an empty Vec and the operator
     /// can't tell typo from "no scheduled tasks."
     pub fn project_exists(&self, project_id: &uuid::Uuid) -> anyhow::Result<bool> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM boards WHERE project_id = ?1",
             params![project_id.to_string()],
@@ -158,11 +161,18 @@ impl FlyntTaskBoard {
         Ok(count > 0)
     }
 
-    pub fn vault_root(&self) -> &Path { &self.vault_root }
-    pub fn project_id(&self) -> Option<uuid::Uuid> { self.project_id }
+    pub fn vault_root(&self) -> &Path {
+        &self.vault_root
+    }
+    pub fn project_id(&self) -> Option<uuid::Uuid> {
+        self.project_id
+    }
 
     fn update_column_status(&self, id: &str, column: &str, status: &str) -> anyhow::Result<bool> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
         let now = Utc::now().to_rfc3339();
         let rows = conn.execute(
             "UPDATE tasks SET column_name = ?1, status = ?2, updated_at = ?3 WHERE id = ?4",
@@ -174,13 +184,17 @@ impl FlyntTaskBoard {
     fn load_task(&self, id: &str) -> anyhow::Result<Option<Task>> {
         let id_uuid = uuid::Uuid::parse_str(id)
             .map_err(|_| anyhow::anyhow!("task id is not a UUID: {id}"))?;
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
         let mut stmt = conn.prepare(SELECT_TASK_BY_ID)?;
         let mut rows = stmt.query(params![id_uuid.to_string()])?;
-        let Some(row) = rows.next()? else { return Ok(None) };
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
         Ok(Some(row_to_task(row)?))
     }
-
 }
 
 impl TaskBoard for FlyntTaskBoard {
@@ -190,7 +204,10 @@ impl TaskBoard for FlyntTaskBoard {
         // forgiving — schema-ahead flynt vaults skip unparseable rows
         // rather than failing the whole list.
         let tasks: Vec<Task> = {
-            let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|e| anyhow::anyhow!("conn lock: {e}"))?;
             // Two query variants: project-wide (legacy) and project-
             // scoped. The project variant joins via the boards table
             // so the filter survives boards being renamed or columns
@@ -202,7 +219,9 @@ impl TaskBoard for FlyntTaskBoard {
                 while let Some(row) = rows.next()? {
                     match row_to_task(row) {
                         Ok(t) => acc.push(t),
-                        Err(e) => tracing::warn!(error = %e, "skipping flynt task row that failed to deserialize"),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "skipping flynt task row that failed to deserialize")
+                        }
                     }
                 }
                 acc
@@ -213,7 +232,9 @@ impl TaskBoard for FlyntTaskBoard {
                 while let Some(row) = rows.next()? {
                     match row_to_task(row) {
                         Ok(t) => acc.push(t),
-                        Err(e) => tracing::warn!(error = %e, "skipping flynt task row that failed to deserialize"),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "skipping flynt task row that failed to deserialize")
+                        }
                     }
                 }
                 acc
@@ -223,9 +244,13 @@ impl TaskBoard for FlyntTaskBoard {
 
         let mut out = Vec::with_capacity(tasks.len());
         for t in tasks {
-            if !t.is_sentry_managed() { continue; }
+            if !t.is_sentry_managed() {
+                continue;
+            }
             let id = t.id.0.to_string();
-            let (last_run, run_count) = self.state_db.last_run(&id)?
+            let (last_run, run_count) = self
+                .state_db
+                .last_run(&id)?
                 .map(|(dt, c)| (Some(dt), c))
                 .unwrap_or((None, 0));
             let triggers = collect_triggers(&t);
@@ -273,7 +298,8 @@ impl TaskBoard for FlyntTaskBoard {
     }
 
     fn task_spec(&self, task_id: &str) -> anyhow::Result<TaskSpec> {
-        let task = self.load_task(task_id)?
+        let task = self
+            .load_task(task_id)?
             .ok_or_else(|| anyhow::anyhow!("flynt task '{task_id}' not found"))?;
         let exec = task.execution.clone().unwrap_or_default();
         Ok(TaskSpec {
@@ -302,14 +328,16 @@ impl TaskBoard for FlyntTaskBoard {
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 pub fn default_db_path(vault_root: &Path) -> PathBuf {
-    vault_root.join(".flynt-local").join("flynt").join("flynt-index.db")
+    vault_root
+        .join(".flynt-local")
+        .join("flynt")
+        .join("flynt-index.db")
 }
 
 /// Lightweight probe — does this directory look like a flynt project?
 /// Used as a building block for [`find_vault_root`].
 pub fn is_flynt_vault(root: &Path) -> bool {
-    root.join(".flynt").join("config.toml").exists()
-        || default_db_path(root).exists()
+    root.join(".flynt").join("config.toml").exists() || default_db_path(root).exists()
 }
 
 /// Walk parent directories looking for a flynt project marker.
@@ -337,16 +365,25 @@ pub fn find_vault_root(start: &Path) -> Option<PathBuf> {
 
 fn priority_to_u8(p: flynt_models::task::Priority) -> u8 {
     use flynt_models::task::Priority::*;
-    match p { Low => 0, Medium => 1, High => 2, Critical => 3 }
+    match p {
+        Low => 0,
+        Medium => 1,
+        High => 2,
+        Critical => 3,
+    }
 }
 
 fn collect_triggers(t: &Task) -> Vec<Trigger> {
     let mut triggers = Vec::new();
     if let Some(cron) = t.cron_trigger() {
-        triggers.push(Trigger::Cron { schedule: cron.to_string() });
+        triggers.push(Trigger::Cron {
+            schedule: cron.to_string(),
+        });
     }
     if let Some(name) = t.webhook_trigger() {
-        triggers.push(Trigger::Webhook { name: name.to_string() });
+        triggers.push(Trigger::Webhook {
+            name: name.to_string(),
+        });
     }
     if triggers.is_empty() {
         triggers.push(Trigger::Manual);
@@ -434,8 +471,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> anyhow::Result<Task> {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or(DecayRate::Natural),
         last_touched_at: last_touched.and_then(|s| s.parse().ok()),
-        design_node_id: design_node_id_str
-            .and_then(|s| uuid::Uuid::parse_str(&s).ok()),
+        design_node_id: design_node_id_str.and_then(|s| uuid::Uuid::parse_str(&s).ok()),
         openspec_change,
         engagement_id: engagement_id_str
             .and_then(|s| uuid::Uuid::parse_str(&s).ok())
@@ -463,7 +499,8 @@ mod tests {
         let db_path = default_db_path(tmp.path());
         std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
         let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(r#"
+        conn.execute_batch(
+            r#"
             CREATE TABLE tasks (
                 id TEXT PRIMARY KEY,
                 board_id TEXT NOT NULL,
@@ -493,7 +530,9 @@ mod tests {
                 project_id TEXT,
                 created_at TEXT NOT NULL
             );
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         (tmp, db_path)
     }
 
@@ -512,7 +551,10 @@ mod tests {
 
     fn insert_task(db: &Path, t: &FlyntTask) {
         let conn = Connection::open(db).unwrap();
-        let exec_json = t.execution.as_ref().map(|e| serde_json::to_string(e).unwrap());
+        let exec_json = t
+            .execution
+            .as_ref()
+            .map(|e| serde_json::to_string(e).unwrap());
         conn.execute(
             "INSERT INTO tasks (id, board_id, column_name, title, description, priority, status, tags, document_refs, due_date, position, created_at, updated_at, decay, last_touched_at, external_refs, design_node_id, execution, openspec_change, engagement_id)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
@@ -550,7 +592,8 @@ mod tests {
             db_path,
             state,
             "test-instance".into(),
-        ).unwrap();
+        )
+        .unwrap();
         (tmp, board, board_id)
     }
 
@@ -558,11 +601,7 @@ mod tests {
     fn open_fails_when_db_missing() {
         let tmp = TempDir::new().unwrap();
         let state = Arc::new(StateDb::in_memory().unwrap());
-        let result = FlyntTaskBoard::open(
-            tmp.path().to_path_buf(),
-            state,
-            "test".into(),
-        );
+        let result = FlyntTaskBoard::open(tmp.path().to_path_buf(), state, "test".into());
         // Unwrap manually since FlyntTaskBoard isn't Debug (Connection
         // isn't either).
         match result {
@@ -579,16 +618,34 @@ mod tests {
         // Sentry-managed (cron in external_refs), in Scheduled column → included.
         let mut t1 = FlyntTask::new(board_id.clone(), "Scheduled", "PR review");
         t1.external_refs = vec!["cron:0 */4 * * *".into()];
-        insert_task(board.vault_root().join(".flynt-local/flynt/flynt-index.db").as_path(), &t1);
+        insert_task(
+            board
+                .vault_root()
+                .join(".flynt-local/flynt/flynt-index.db")
+                .as_path(),
+            &t1,
+        );
 
         // Sentry-managed but not in Scheduled column → excluded (Backlog).
         let mut t2 = FlyntTask::new(board_id.clone(), "Backlog", "Idea");
         t2.external_refs = vec!["cron:* * * * *".into()];
-        insert_task(board.vault_root().join(".flynt-local/flynt/flynt-index.db").as_path(), &t2);
+        insert_task(
+            board
+                .vault_root()
+                .join(".flynt-local/flynt/flynt-index.db")
+                .as_path(),
+            &t2,
+        );
 
         // In Scheduled but NOT sentry-managed → excluded.
         let t3 = FlyntTask::new(board_id.clone(), "Scheduled", "Manual task");
-        insert_task(board.vault_root().join(".flynt-local/flynt/flynt-index.db").as_path(), &t3);
+        insert_task(
+            board
+                .vault_root()
+                .join(".flynt-local/flynt/flynt-index.db")
+                .as_path(),
+            &t3,
+        );
 
         let listed = board.list_actionable().unwrap();
         assert_eq!(listed.len(), 1);
@@ -603,7 +660,13 @@ mod tests {
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
         t.external_refs = vec!["webhook:gh".into()];
         let id = t.id.0.to_string();
-        insert_task(board.vault_root().join(".flynt-local/flynt/flynt-index.db").as_path(), &t);
+        insert_task(
+            board
+                .vault_root()
+                .join(".flynt-local/flynt/flynt-index.db")
+                .as_path(),
+            &t,
+        );
 
         assert!(board.claim(&id).unwrap());
         let after = board.load_task(&id).unwrap().unwrap();
@@ -620,12 +683,21 @@ mod tests {
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
         t.external_refs = vec!["webhook:gh".into()];
         let id = t.id.0.to_string();
-        insert_task(board.vault_root().join(".flynt-local/flynt/flynt-index.db").as_path(), &t);
+        insert_task(
+            board
+                .vault_root()
+                .join(".flynt-local/flynt/flynt-index.db")
+                .as_path(),
+            &t,
+        );
 
         board.claim(&id).unwrap();
         let result = TaskResult {
-            exit_code: 0, summary: "ok".into(), tokens_used: 100,
-            duration_secs: 5, session_id: "s1".into(),
+            exit_code: 0,
+            summary: "ok".into(),
+            tokens_used: 100,
+            duration_secs: 5,
+            session_id: "s1".into(),
         };
         board.complete(&id, &result).unwrap();
         let after = board.load_task(&id).unwrap().unwrap();
@@ -640,10 +712,20 @@ mod tests {
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
         t.external_refs = vec!["webhook:gh".into()];
         let id = t.id.0.to_string();
-        insert_task(board.vault_root().join(".flynt-local/flynt/flynt-index.db").as_path(), &t);
+        insert_task(
+            board
+                .vault_root()
+                .join(".flynt-local/flynt/flynt-index.db")
+                .as_path(),
+            &t,
+        );
 
         board.claim(&id).unwrap();
-        let err = TaskError { message: "boom".into(), retriable: true, attempt: 1 };
+        let err = TaskError {
+            message: "boom".into(),
+            retriable: true,
+            attempt: 1,
+        };
         board.fail(&id, &err).unwrap();
         let after = board.load_task(&id).unwrap().unwrap();
         assert_eq!(after.column, "Failed");
@@ -658,7 +740,13 @@ mod tests {
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Auto");
         t.external_refs = vec!["webhook:gh".into()];
         let id = t.id.0.to_string();
-        insert_task(board.vault_root().join(".flynt-local/flynt/flynt-index.db").as_path(), &t);
+        insert_task(
+            board
+                .vault_root()
+                .join(".flynt-local/flynt/flynt-index.db")
+                .as_path(),
+            &t,
+        );
 
         board.claim(&id).unwrap();
         let after_claim = board.load_task(&id).unwrap().unwrap();
@@ -685,7 +773,13 @@ mod tests {
         });
         t.openspec_change = Some("feature-x".into());
         let id = t.id.0.to_string();
-        insert_task(board.vault_root().join(".flynt-local/flynt/flynt-index.db").as_path(), &t);
+        insert_task(
+            board
+                .vault_root()
+                .join(".flynt-local/flynt/flynt-index.db")
+                .as_path(),
+            &t,
+        );
 
         let spec = board.task_spec(&id).unwrap();
         assert_eq!(spec.prompt, "Walk the repo and propose changes.");
@@ -701,7 +795,13 @@ mod tests {
         let mut t = FlyntTask::new(board_id.clone(), "Scheduled", "Just a title");
         t.external_refs = vec!["webhook:gh".into()];
         let id = t.id.0.to_string();
-        insert_task(board.vault_root().join(".flynt-local/flynt/flynt-index.db").as_path(), &t);
+        insert_task(
+            board
+                .vault_root()
+                .join(".flynt-local/flynt/flynt-index.db")
+                .as_path(),
+            &t,
+        );
 
         let spec = board.task_spec(&id).unwrap();
         assert_eq!(spec.prompt, "Just a title");
@@ -720,7 +820,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         assert!(!is_flynt_vault(tmp.path()));
         std::fs::create_dir_all(tmp.path().join(".flynt")).unwrap();
-        std::fs::write(tmp.path().join(".flynt/config.toml"), "vault_name = \"test\"").unwrap();
+        std::fs::write(
+            tmp.path().join(".flynt/config.toml"),
+            "vault_name = \"test\"",
+        )
+        .unwrap();
         assert!(is_flynt_vault(tmp.path()));
     }
 
@@ -824,11 +928,17 @@ mod tests {
             db,
             Arc::new(StateDb::in_memory().unwrap()),
             "scoped".into(),
-        ).unwrap().with_project(project_a);
+        )
+        .unwrap()
+        .with_project(project_a);
 
         let listed = scoped.list_actionable().unwrap();
         let names: Vec<_> = listed.iter().map(|t| t.name.as_str()).collect();
-        assert_eq!(names, vec!["A-task"], "project scope must exclude project_b tasks");
+        assert_eq!(
+            names,
+            vec!["A-task"],
+            "project scope must exclude project_b tasks"
+        );
         assert_eq!(scoped.project_id(), Some(project_a));
     }
 
@@ -849,7 +959,11 @@ mod tests {
         let mut t_a = FlyntTask::new(flynt_models::task::BoardId(board_a), "Scheduled", "A-task");
         t_a.external_refs = vec!["cron:* * * * *".into()];
         insert_task(&db, &t_a);
-        let mut t_loose = FlyntTask::new(flynt_models::task::BoardId(board_unprojected), "Scheduled", "loose");
+        let mut t_loose = FlyntTask::new(
+            flynt_models::task::BoardId(board_unprojected),
+            "Scheduled",
+            "loose",
+        );
         t_loose.external_refs = vec!["cron:* * * * *".into()];
         insert_task(&db, &t_loose);
 
@@ -858,7 +972,9 @@ mod tests {
             db,
             Arc::new(StateDb::in_memory().unwrap()),
             "scoped".into(),
-        ).unwrap().with_project(project_a);
+        )
+        .unwrap()
+        .with_project(project_a);
 
         let listed = scoped.list_actionable().unwrap();
         let names: Vec<_> = listed.iter().map(|t| t.name.as_str()).collect();

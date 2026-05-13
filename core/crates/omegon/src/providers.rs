@@ -522,7 +522,10 @@ pub async fn auto_detect_bridge(model_spec: &str) -> Option<Box<dyn LlmBridge>> 
 ///
 /// Designed for lightweight internal classification (model routing
 /// prefilter, fact extraction, etc.) — not for interactive use.
-pub async fn quick_completion(model_spec: &str, prompt: &str) -> anyhow::Result<QuickCompletionResult> {
+pub async fn quick_completion(
+    model_spec: &str,
+    prompt: &str,
+) -> anyhow::Result<QuickCompletionResult> {
     let bridge = auto_detect_bridge(model_spec)
         .await
         .ok_or_else(|| anyhow::anyhow!("no provider available for {model_spec}"))?;
@@ -539,7 +542,14 @@ pub async fn quick_completion(model_spec: &str, prompt: &str) -> anyhow::Result<
         extra_body: std::collections::HashMap::new(),
     };
 
-    let mut rx = bridge.stream("You are a concise classification assistant.", &messages, &[], &options).await?;
+    let mut rx = bridge
+        .stream(
+            "You are a concise classification assistant.",
+            &messages,
+            &[],
+            &options,
+        )
+        .await?;
 
     let mut text = String::new();
     let mut input_tokens = 0u64;
@@ -548,7 +558,11 @@ pub async fn quick_completion(model_spec: &str, prompt: &str) -> anyhow::Result<
     while let Some(event) = rx.recv().await {
         match event {
             crate::bridge::LlmEvent::TextDelta { delta } => text.push_str(&delta),
-            crate::bridge::LlmEvent::Done { input_tokens: i, output_tokens: o, .. } => {
+            crate::bridge::LlmEvent::Done {
+                input_tokens: i,
+                output_tokens: o,
+                ..
+            } => {
                 input_tokens = i;
                 output_tokens = o;
             }
@@ -559,7 +573,11 @@ pub async fn quick_completion(model_spec: &str, prompt: &str) -> anyhow::Result<
         }
     }
 
-    Ok(QuickCompletionResult { text, input_tokens, output_tokens })
+    Ok(QuickCompletionResult {
+        text,
+        input_tokens,
+        output_tokens,
+    })
 }
 
 pub struct QuickCompletionResult {
@@ -4617,7 +4635,10 @@ mod tests {
                 } else if is_json || (300..400).contains(&status) {
                     (
                         true,
-                        format!("HTTP {status} — {}", &body_text[..body_text.len().min(120)]),
+                        format!(
+                            "HTTP {status} — {}",
+                            crate::util::truncate_str(&body_text, 120)
+                        ),
                     )
                 } else {
                     (

@@ -797,11 +797,7 @@ fn resolve_and_spawn_sandboxed(
 
     // Try project-local profile first, then fall back to "coding" built-in
     let profile = registry
-        .resolve(
-            cwd.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("coding"),
-        )
+        .resolve(cwd.file_name().and_then(|n| n.to_str()).unwrap_or("coding"))
         .or_else(|| registry.resolve("coding"))
         .ok_or_else(|| anyhow::anyhow!("no nex profile available for sandbox"))?
         .clone();

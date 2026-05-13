@@ -14,7 +14,11 @@ pub struct TaskTreeBoard {
 
 impl TaskTreeBoard {
     pub fn new(cwd: PathBuf, state_db: Arc<StateDb>, instance_id: String) -> Self {
-        Self { cwd, state_db, instance_id }
+        Self {
+            cwd,
+            state_db,
+            instance_id,
+        }
     }
 }
 
@@ -24,14 +28,18 @@ impl TaskBoard for TaskTreeBoard {
         let mut out = Vec::with_capacity(tasks.len());
 
         for t in &tasks {
-            let (last_run, run_count) = self.state_db.last_run(&t.meta.id)?
+            let (last_run, run_count) = self
+                .state_db
+                .last_run(&t.meta.id)?
                 .map(|(dt, c)| (Some(dt), c))
                 .unwrap_or((None, 0));
 
             let mut triggers = Vec::new();
             if let Some(ref exec) = t.meta.execution {
                 if let Some(ref cron) = exec.cron {
-                    triggers.push(Trigger::Cron { schedule: cron.clone() });
+                    triggers.push(Trigger::Cron {
+                        schedule: cron.clone(),
+                    });
                 }
                 if let Some(ref wh) = exec.webhook {
                     triggers.push(Trigger::Webhook { name: wh.clone() });
@@ -71,7 +79,8 @@ impl TaskBoard for TaskTreeBoard {
     }
 
     fn fail(&self, task_id: &str, _error: &TaskError) -> anyhow::Result<()> {
-        if let Err(e) = task_tree::update_status(&self.cwd, task_id, task_tree::TaskStatus::Failed) {
+        if let Err(e) = task_tree::update_status(&self.cwd, task_id, task_tree::TaskStatus::Failed)
+        {
             tracing::warn!(task = %task_id, error = %e, "failed to update task file — releasing claim anyway");
         }
         self.state_db.release_task(task_id)?;
@@ -109,7 +118,11 @@ impl TaskBoard for TaskTreeBoard {
             token_budget,
             cwd: Some(self.cwd.clone()),
             env: Default::default(),
-            execution_mode: task.meta.execution.as_ref().and_then(|e| e.execution_mode.clone()),
+            execution_mode: task
+                .meta
+                .execution
+                .as_ref()
+                .and_then(|e| e.execution_mode.clone()),
             design_node_id: task.meta.design_node_id.clone(),
             openspec_change: task.meta.openspec_change.clone(),
         })
@@ -205,7 +218,8 @@ mod tests {
     fn task_spec_reads_body_as_prompt() {
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path();
-        task_tree::create_task(cwd, "Prompt test", "Review all open PRs and leave comments").unwrap();
+        task_tree::create_task(cwd, "Prompt test", "Review all open PRs and leave comments")
+            .unwrap();
 
         let db = Arc::new(StateDb::in_memory().unwrap());
         let board = TaskTreeBoard::new(cwd.to_path_buf(), db, "test".into());
@@ -268,8 +282,11 @@ mod tests {
         // Complete first step via board
         board.claim("first-step").unwrap();
         let result = TaskResult {
-            exit_code: 0, summary: "ok".into(),
-            tokens_used: 50, duration_secs: 2, session_id: "s".into(),
+            exit_code: 0,
+            summary: "ok".into(),
+            tokens_used: 50,
+            duration_secs: 2,
+            session_id: "s".into(),
         };
         board.complete("first-step", &result).unwrap();
 

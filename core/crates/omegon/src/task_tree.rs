@@ -157,16 +157,28 @@ pub struct Task {
 pub fn serialize_task(task: &Task) -> String {
     let mut out = String::from("+++\n");
     out.push_str(&format!("id = \"{}\"\n", task.meta.id));
-    out.push_str(&format!("title = \"{}\"\n", task.meta.title.replace('"', "\\\"")));
+    out.push_str(&format!(
+        "title = \"{}\"\n",
+        task.meta.title.replace('"', "\\\"")
+    ));
     out.push_str(&format!("status = \"{}\"\n", task.meta.status.as_str()));
-    out.push_str(&format!("priority = \"{}\"\n", serde_json::to_string(&task.meta.priority)
-        .unwrap_or_default().trim_matches('"')));
+    out.push_str(&format!(
+        "priority = \"{}\"\n",
+        serde_json::to_string(&task.meta.priority)
+            .unwrap_or_default()
+            .trim_matches('"')
+    ));
 
     if let Some(ref parent) = task.meta.parent {
         out.push_str(&format!("parent = \"{parent}\"\n"));
     }
     if !task.meta.depends_on.is_empty() {
-        let deps: Vec<String> = task.meta.depends_on.iter().map(|d| format!("\"{d}\"")).collect();
+        let deps: Vec<String> = task
+            .meta
+            .depends_on
+            .iter()
+            .map(|d| format!("\"{d}\""))
+            .collect();
         out.push_str(&format!("depends_on = [{}]\n", deps.join(", ")));
     }
     if !task.meta.tags.is_empty() {
@@ -191,13 +203,27 @@ pub fn serialize_task(task: &Task) -> String {
 
     if let Some(ref exec) = task.meta.execution {
         out.push_str("\n[execution]\n");
-        if let Some(ref m) = exec.model { out.push_str(&format!("model = \"{m}\"\n")); }
-        if let Some(ref s) = exec.skill { out.push_str(&format!("skill = \"{s}\"\n")); }
-        if let Some(t) = exec.max_turns { out.push_str(&format!("max_turns = {t}\n")); }
-        if let Some(t) = exec.timeout_secs { out.push_str(&format!("timeout_secs = {t}\n")); }
-        if let Some(b) = exec.token_budget { out.push_str(&format!("token_budget = {b}\n")); }
-        if let Some(ref c) = exec.cron { out.push_str(&format!("cron = \"{c}\"\n")); }
-        if let Some(ref w) = exec.webhook { out.push_str(&format!("webhook = \"{w}\"\n")); }
+        if let Some(ref m) = exec.model {
+            out.push_str(&format!("model = \"{m}\"\n"));
+        }
+        if let Some(ref s) = exec.skill {
+            out.push_str(&format!("skill = \"{s}\"\n"));
+        }
+        if let Some(t) = exec.max_turns {
+            out.push_str(&format!("max_turns = {t}\n"));
+        }
+        if let Some(t) = exec.timeout_secs {
+            out.push_str(&format!("timeout_secs = {t}\n"));
+        }
+        if let Some(b) = exec.token_budget {
+            out.push_str(&format!("token_budget = {b}\n"));
+        }
+        if let Some(ref c) = exec.cron {
+            out.push_str(&format!("cron = \"{c}\"\n"));
+        }
+        if let Some(ref w) = exec.webhook {
+            out.push_str(&format!("webhook = \"{w}\"\n"));
+        }
     }
 
     out.push_str("+++\n\n");
@@ -212,11 +238,14 @@ pub fn parse_task(content: &str, file_path: PathBuf) -> anyhow::Result<Task> {
     let (frontmatter, body) = split_frontmatter(content)
         .ok_or_else(|| anyhow::anyhow!("missing +++ frontmatter delimiters"))?;
 
-    let meta: TaskMeta = toml::from_str(frontmatter).map_err(|e| {
-        anyhow::anyhow!("invalid task frontmatter: {e}")
-    })?;
+    let meta: TaskMeta = toml::from_str(frontmatter)
+        .map_err(|e| anyhow::anyhow!("invalid task frontmatter: {e}"))?;
 
-    Ok(Task { meta, body: body.to_string(), file_path })
+    Ok(Task {
+        meta,
+        body: body.to_string(),
+        file_path,
+    })
 }
 
 fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
@@ -263,7 +292,10 @@ pub fn list_tasks(cwd: &Path) -> anyhow::Result<Vec<Task>> {
     }
 
     tasks.sort_by(|a, b| {
-        b.meta.priority.as_u8().cmp(&a.meta.priority.as_u8())
+        b.meta
+            .priority
+            .as_u8()
+            .cmp(&a.meta.priority.as_u8())
             .then_with(|| a.meta.title.cmp(&b.meta.title))
     });
 
@@ -275,9 +307,8 @@ pub fn get_task(cwd: &Path, id: &str) -> anyhow::Result<Task> {
         anyhow::bail!("invalid task id: path traversal rejected");
     }
     let path = task_path(cwd, id);
-    let content = std::fs::read_to_string(&path).map_err(|e| {
-        anyhow::anyhow!("task '{id}' not found: {e}")
-    })?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| anyhow::anyhow!("task '{id}' not found: {e}"))?;
     parse_task(&content, path)
 }
 
@@ -291,7 +322,8 @@ pub fn save_task(cwd: &Path, task: &Task) -> anyhow::Result<PathBuf> {
 }
 
 pub fn create_task(cwd: &Path, title: &str, body: &str) -> anyhow::Result<Task> {
-    let slug: String = title.to_lowercase()
+    let slug: String = title
+        .to_lowercase()
         .replace(' ', "-")
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
@@ -358,16 +390,24 @@ pub fn delete_task(cwd: &Path, id: &str) -> anyhow::Result<()> {
 
 pub fn actionable_tasks(cwd: &Path) -> anyhow::Result<Vec<Task>> {
     let all = list_tasks(cwd)?;
-    let done_ids: std::collections::HashSet<String> = all.iter()
+    let done_ids: std::collections::HashSet<String> = all
+        .iter()
         .filter(|t| t.meta.status.is_terminal())
         .map(|t| t.meta.id.clone())
         .collect();
 
-    Ok(all.into_iter().filter(|t| {
-        if t.meta.status.is_terminal() { return false; }
-        if matches!(t.meta.status, TaskStatus::Blocked) { return false; }
-        t.meta.depends_on.iter().all(|dep| done_ids.contains(dep))
-    }).collect())
+    Ok(all
+        .into_iter()
+        .filter(|t| {
+            if t.meta.status.is_terminal() {
+                return false;
+            }
+            if matches!(t.meta.status, TaskStatus::Blocked) {
+                return false;
+            }
+            t.meta.depends_on.iter().all(|dep| done_ids.contains(dep))
+        })
+        .collect())
 }
 
 // ─── CLI Display ────────────────────────────────────────────────────────────
@@ -392,14 +432,28 @@ pub fn cmd_list(cwd: &Path) -> anyhow::Result<()> {
         } else {
             format!(" (depends: {})", task.meta.depends_on.join(", "))
         };
-        let node = task.meta.design_node_id.as_ref()
+        let node = task
+            .meta
+            .design_node_id
+            .as_ref()
             .map(|n| format!(" -> {n}"))
             .unwrap_or_default();
 
-        println!("  {} {}{}{}{} — {}", status.icon(), task.meta.id, pri, deps, node, task.meta.title);
+        println!(
+            "  {} {}{}{}{} — {}",
+            status.icon(),
+            task.meta.id,
+            pri,
+            deps,
+            node,
+            task.meta.title
+        );
     }
 
-    let done = tasks.iter().filter(|t| t.meta.status == TaskStatus::Done).count();
+    let done = tasks
+        .iter()
+        .filter(|t| t.meta.status == TaskStatus::Done)
+        .count();
     let total = tasks.len();
     println!("\n  {done}/{total} done");
     Ok(())
@@ -445,12 +499,24 @@ mod tests {
         assert_eq!(parsed.meta.priority, Priority::High);
         assert_eq!(parsed.meta.depends_on, vec!["schema-migration"]);
         assert_eq!(parsed.meta.tags, vec!["security", "backend"]);
-        assert_eq!(parsed.meta.design_node_id.as_deref(), Some("auth-node-2026"));
+        assert_eq!(
+            parsed.meta.design_node_id.as_deref(),
+            Some("auth-node-2026")
+        );
         assert_eq!(parsed.meta.openspec_change.as_deref(), Some("auth-rewrite"));
-        assert_eq!(parsed.meta.due_date, Some(NaiveDate::from_ymd_opt(2026, 6, 15).unwrap()));
-        assert_eq!(parsed.meta.execution.as_ref().unwrap().model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
+        assert_eq!(
+            parsed.meta.due_date,
+            Some(NaiveDate::from_ymd_opt(2026, 6, 15).unwrap())
+        );
+        assert_eq!(
+            parsed.meta.execution.as_ref().unwrap().model.as_deref(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
         assert_eq!(parsed.meta.execution.as_ref().unwrap().max_turns, Some(50));
-        assert_eq!(parsed.meta.execution.as_ref().unwrap().cron.as_deref(), Some("0 9 * * 1-5"));
+        assert_eq!(
+            parsed.meta.execution.as_ref().unwrap().cron.as_deref(),
+            Some("0 9 * * 1-5")
+        );
         assert!(parsed.body.contains("JWT tokens"));
     }
 

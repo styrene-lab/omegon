@@ -1092,7 +1092,7 @@ impl CleaveFeature {
             if let Some(err) = &child.error {
                 // Truncate long error details (stderr tails can be long)
                 let short = if err.len() > 400 {
-                    format!("{}…", &err[..400])
+                    format!("{}…", crate::util::truncate_str(err, 400))
                 } else {
                     err.clone()
                 };

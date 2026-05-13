@@ -65,11 +65,21 @@ impl CodeActExecutor {
         let code_act = std::env::var("OMEGON_CODE_ACT")
             .map(|v| matches!(v.as_str(), "1" | "true"))
             .unwrap_or(false);
-        Self { cwd, permitted: bypass || code_act, proxy_prelude: None, proxy_socket_path: None }
+        Self {
+            cwd,
+            permitted: bypass || code_act,
+            proxy_prelude: None,
+            proxy_socket_path: None,
+        }
     }
 
     pub fn permitted(cwd: PathBuf) -> Self {
-        Self { cwd, permitted: true, proxy_prelude: None, proxy_socket_path: None }
+        Self {
+            cwd,
+            permitted: true,
+            proxy_prelude: None,
+            proxy_socket_path: None,
+        }
     }
 
     pub fn with_proxy(mut self, prelude: String, socket_path: PathBuf) -> Self {
@@ -87,14 +97,18 @@ impl CodeActExecutor {
         prompt.push_str("def bash(command: str) -> str\n");
         prompt.push_str("def read_file(path: str) -> str\n");
         prompt.push_str("def write_file(path: str, content: str) -> None\n");
-        prompt.push_str("def list_files(directory: str = '.', pattern: str = '**/*') -> list[str]\n");
+        prompt
+            .push_str("def list_files(directory: str = '.', pattern: str = '**/*') -> list[str]\n");
         if self.proxy_prelude.is_some() {
             prompt.push_str("def web_search(query: str) -> str\n");
             prompt.push_str("def web_fetch(url: str) -> str\n");
         }
         prompt.push_str("```\n\n");
 
-        prompt.push_str(&format!("## Working Directory\n\n`{}`\n\n", self.cwd.display()));
+        prompt.push_str(&format!(
+            "## Working Directory\n\n`{}`\n\n",
+            self.cwd.display()
+        ));
 
         if let Some(ctx) = context {
             prompt.push_str(&format!("## Context\n\n{ctx}\n\n"));
@@ -142,8 +156,16 @@ impl CodeActExecutor {
         let proxy_section = self.proxy_prelude.as_deref().unwrap_or("");
         let full_script = format!("{PYTHON_PRELUDE}{proxy_section}{script}");
 
-        let run_id = uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("tmp").to_string();
-        let script_path = self.cwd.join(".omegon").join(format!("code-act-{run_id}.py"));
+        let run_id = uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("tmp")
+            .to_string();
+        let script_path = self
+            .cwd
+            .join(".omegon")
+            .join(format!("code-act-{run_id}.py"));
         if let Some(parent) = script_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -163,7 +185,8 @@ impl CodeActExecutor {
                     &self.cwd,
                     proxy_sock.as_deref(),
                     timeout,
-                ).await?;
+                )
+                .await?;
                 let _ = std::fs::remove_file(&script_path);
                 let combined = if sr.stderr.is_empty() {
                     sr.stdout
@@ -273,17 +296,32 @@ mod tests {
     }
 
     fn permitted_executor(cwd: PathBuf) -> CodeActExecutor {
-        CodeActExecutor { cwd, permitted: true, proxy_prelude: None, proxy_socket_path: None }
+        CodeActExecutor {
+            cwd,
+            permitted: true,
+            proxy_prelude: None,
+            proxy_socket_path: None,
+        }
     }
 
     #[tokio::test]
     async fn execute_rejects_without_opt_in() {
         let tmp = tempfile::tempdir().unwrap();
-        let exec = CodeActExecutor { cwd: tmp.path().to_path_buf(), permitted: false, proxy_prelude: None, proxy_socket_path: None };
+        let exec = CodeActExecutor {
+            cwd: tmp.path().to_path_buf(),
+            permitted: false,
+            proxy_prelude: None,
+            proxy_socket_path: None,
+        };
         let cancel = CancellationToken::new();
         let result = exec.execute_script("print('nope')", Some(5), cancel).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("code-act execution requires"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("code-act execution requires")
+        );
     }
 
     #[tokio::test]
@@ -367,6 +405,9 @@ print(f"Got: {result.strip()}")
             .flat_map(|d| d.filter_map(|e| e.ok()))
             .filter(|e| e.path().extension().is_some_and(|ext| ext == "py"))
             .collect();
-        assert!(leftover.is_empty(), "temp script should be cleaned up, found: {leftover:?}");
+        assert!(
+            leftover.is_empty(),
+            "temp script should be cleaned up, found: {leftover:?}"
+        );
     }
 }
