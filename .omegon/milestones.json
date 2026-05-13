@@ -1025,5 +1025,12 @@
     "notes": [
       "fix: dead-mouse compliance-note spin + commit nudge fires mid-task"
     ]
+  },
+  "nightly": {
+    "status": "nightly",
+    "channel": "nightly",
+    "version": "0.20.0-nightly.20260513",
+    "last_build": "2026-05-13T10:00:10Z",
+    "build_count": 1
   }
 }
