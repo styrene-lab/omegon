@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-05-14
+
 ### Added
 
 - **Librefang integration surface plan** — added a private architecture plan for treating Librefang as an external peer runtime through OpenAI-compatible provider routing, Armory discovery, MCP templates, and a future Auspex/OFP bridge rather than vendoring its overlapping runtime into Omegon core.
@@ -34,6 +36,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Lifecycle read-model projection** — added a shared lifecycle read handle that projects OpenSpec status from `omegon-opsx` plus file diagnostics, and migrated startup, TUI, web, and IPC snapshots away from raw file-derived OpenSpec stages.
 - **Justfile workspace hygiene** — normalized local recipes around the root Cargo workspace, removed stale `core/` path assumptions, made external sibling-repo checks opt-in when present, and restored a passing local `just lint` gate without hiding existing clippy warnings.
 - **Strict clippy hygiene** — cleaned workspace clippy warnings across libs, bins, examples, and tests, then restored `just lint` as a `-D warnings` all-target gate.
+- **Release automation hygiene** — opened the `0.22.0-rc.1` line and corrected ignore rules for committed generated assets so release-plz can evaluate the workspace without reporting a synthetic dirty tree.
 
 ## [0.21.1] - 2026-05-13
 

@@ -3,4 +3,6 @@ dist/
 public/design-tree.svg
 src/data/releases.json
 src/data/snippets.json
+!src/data/releases.json
+!src/data/snippets.json
 .astro/
