@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- **Librefang integration surface plan** — added a private architecture plan for treating Librefang as an external peer runtime through OpenAI-compatible provider routing, Armory discovery, MCP templates, and a future Auspex/OFP bridge rather than vendoring its overlapping runtime into Omegon core.
+
 ### Changed
 
 - **Anthropic subscription automation wording** — docs and TUI consent text now match the current runtime behavior: headless Anthropic subscription OAuth emits an explicit operator-risk warning and proceeds, while `ANTHROPIC_API_KEY` remains the recommended path for policy-clean automation.
