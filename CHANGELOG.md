@@ -16,6 +16,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-05-13
+
+### Fixed
+
+- **Commit-nudge prompt churn** — successful `git commit` or `jj commit` commands run through `bash` now clear the modified-file intent state, preventing stale commit-hygiene nudges after work has already been committed.
+- **Nix/OCI release packaging** — the flake source filter now includes catalog `*.jsonl` files required by embedded agent mind facts, fixing OCI image builds for release tags.
+
 ## [0.21.0] - 2026-05-13
 
 ### Added

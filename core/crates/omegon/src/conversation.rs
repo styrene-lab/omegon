@@ -230,6 +230,10 @@ impl IntentDocument {
                     self.files_modified.clear();
                     self.commit_nudged = false;
                 }
+                "bash" if bash_command_committed_successfully(call, results) => {
+                    self.files_modified.clear();
+                    self.commit_nudged = false;
+                }
                 "plan" => {
                     let action = call
                         .arguments
@@ -1406,6 +1410,21 @@ impl ConversationState {
     }
 }
 
+fn bash_command_committed_successfully(call: &ToolCall, results: &[ToolResultEntry]) -> bool {
+    let Some(command) = call.arguments.get("command").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    let lower = command.to_ascii_lowercase();
+    if !(lower.contains("git commit") || lower.contains("jj commit")) {
+        return false;
+    }
+
+    results
+        .iter()
+        .find(|result| result.call_id == call.id)
+        .is_some_and(|result| !result.is_error)
+}
+
 fn is_operator_correction(text: &str) -> bool {
     let normalized = text.trim().to_lowercase();
     if normalized.is_empty() {
@@ -2363,6 +2382,65 @@ mod tests {
         assert!(
             intent.files_modified.is_empty(),
             "commit must clear files_modified to suppress spurious nudge"
+        );
+    }
+
+    #[test]
+    fn successful_bash_git_commit_clears_files_modified() {
+        // Agents sometimes commit via bash despite the structured commit tool.
+        // If the command succeeds, the commit-hygiene nudge must not keep
+        // prompting the model after the work is already committed.
+        let mut intent = IntentDocument::default();
+        intent.files_modified.insert(PathBuf::from("src/foo.rs"));
+
+        let call = ToolCall {
+            id: "2".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({
+                "command": "git add src/foo.rs && git commit -m 'fix: foo'"
+            }),
+        };
+        let result = ToolResultEntry {
+            call_id: "2".into(),
+            tool_name: "bash".into(),
+            content: vec![],
+            is_error: false,
+            args_summary: Some("git add src/foo.rs && git commit -m 'fix: foo'".into()),
+        };
+
+        intent.update_from_tools(&[call], &[result]);
+
+        assert!(
+            intent.files_modified.is_empty(),
+            "successful bash git commit must suppress stale commit nudges"
+        );
+    }
+
+    #[test]
+    fn failed_bash_git_commit_keeps_files_modified() {
+        let mut intent = IntentDocument::default();
+        intent.files_modified.insert(PathBuf::from("src/foo.rs"));
+
+        let call = ToolCall {
+            id: "2".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({
+                "command": "git add src/foo.rs && git commit -m 'fix: foo'"
+            }),
+        };
+        let result = ToolResultEntry {
+            call_id: "2".into(),
+            tool_name: "bash".into(),
+            content: vec![],
+            is_error: true,
+            args_summary: Some("git add src/foo.rs && git commit -m 'fix: foo'".into()),
+        };
+
+        intent.update_from_tools(&[call], &[result]);
+
+        assert!(
+            !intent.files_modified.is_empty(),
+            "failed bash git commit must not hide dirty intent state"
         );
     }
 
