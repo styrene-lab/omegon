@@ -2573,8 +2573,8 @@ impl App {
                 SlashResult::Display(
                     "Consent recorded. Starting interactive tutorial.\n\
                      Omegon will perform real work using your Anthropic subscription.\n\n\
-                     Note: Anthropic's ToS permits interactive TUI use only.\n\
-                     Background tasks, /cleave, and --prompt require ANTHROPIC_API_KEY.\n\n\
+                     Note: Anthropic subscription OAuth is the interactive path.\n\
+                     For policy-clean background tasks, /cleave, and --prompt, use ANTHROPIC_API_KEY.\n\n\
                      Tab to advance, Esc to dismiss."
                         .into(),
                 )

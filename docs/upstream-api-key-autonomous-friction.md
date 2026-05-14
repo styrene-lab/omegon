@@ -30,29 +30,29 @@ The system is already pointing in the right direction: API keys are preferred ov
 
 ## Ranked friction points
 
-### 1. Anthropic automation policy is warning-only in CLI automation, but hard policy elsewhere
+### 1. Anthropic automation policy must stay consistent across runtime and docs
 
 **Why this is friction**
 
-Omegon documents Anthropic subscription/OAuth as interactive-only and says headless prompt execution is hard-blocked when that is the only Anthropic credential. But the CLI path shown in code currently emits a warning and proceeds.
+Omegon treats Anthropic subscription/OAuth automation as operator-risky rather than API-key-equivalent. The CLI path emits a warning and proceeds, so the docs and UX must not claim this path is hard-blocked.
 
-That creates an operator hazard: autonomous users can infer that Anthropic credential policy is consistently enforced, when in fact one path still relies on operator judgment.
+If documentation drifts back to "hard block" language, operators can infer a stronger policy gate than the runtime actually provides.
 
 **Evidence**
 
-- `core/crates/omegon/src/main.rs:979-1003` defines `anthropic_subscription_automation_warning(cli)` and returns a warning string rather than blocking execution for `--smoke`, `--smoke-cleave`, `--prompt`, and `--prompt-file`.
+- `core/crates/omegon/src/main.rs` defines `anthropic_subscription_automation_warning(cli)` and returns a warning string rather than blocking execution for `--smoke`, `--smoke-cleave`, `--prompt`, and `--prompt-file`.
 - The warning text explicitly says: "Omegon is proceeding because operator agency wins" and recommends `ANTHROPIC_API_KEY` for unrestricted automation (`core/crates/omegon/src/main.rs:996-1000`).
-- `docs/anthropic-subscription-tos.md` says the opposite policy at the product-doc level: `--prompt` / `--prompt-file` and `--smoke` are "Hard-blocked," while Anthropic API keys are "Unrestricted" (`docs/anthropic-subscription-tos.md`).
+- `docs/anthropic-subscription-tos.md` and the public providers page should describe that warning-and-proceed behavior, not a hard block.
 
 **Impact on autonomous API-key users**
 
-Even if the operator has a valid upstream API key available for some providers, the Anthropic policy mismatch makes the autonomy surface feel unreliable. People running unattended jobs need predictable enforcement, not a mix of docs-level prohibition and code-level warnings.
+Even if the operator has a valid upstream API key available for some providers, a policy-language mismatch makes the autonomy surface feel unreliable. People running unattended jobs need predictable disclosure, not a mix of docs-level prohibition and code-level warnings.
 
 **Mitigation direction**
 
-- Unify the policy boundary: either hard-block these Anthropic OAuth automation paths in `main.rs`, or downgrade the doc language so it matches reality.
-- Prefer the former. The current docs are the better design: interactive-only OAuth, API key for automation.
-- Surface the exact remediation in the error path: "configure `ANTHROPIC_API_KEY` or switch to an automation-safe provider."
+- Keep runtime and docs aligned on warning-and-proceed.
+- Continue recommending `ANTHROPIC_API_KEY` or another automation-safe provider for unattended work.
+- Avoid silent fallback when the operator explicitly selected Anthropic subscription OAuth.
 
 ---
 

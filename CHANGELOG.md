@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Changed
+
+- **Anthropic subscription automation wording** — docs and TUI consent text now match the current runtime behavior: headless Anthropic subscription OAuth emits an explicit operator-risk warning and proceeds, while `ANTHROPIC_API_KEY` remains the recommended path for policy-clean automation.
+
 ## [0.21.1] - 2026-05-13
 
 ### Fixed
@@ -418,7 +422,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
-- **Anthropic subscription ToS compliance** — Omegon now enforces Anthropic's Consumer Terms restriction on automated use of subscription (Claude.ai / Claude Pro) credentials. Affected paths (`--prompt`, `--prompt-file`, `--smoke`) are hard-blocked at startup with a clear error citing the ToS URL. Interactive TUI sessions are fully permitted.
+- **Anthropic subscription automation disclosure** — Omegon surfaces Anthropic's Consumer Terms risk for automated use of subscription (Claude.ai / Claude Pro) credentials. Affected paths (`--prompt`, `--prompt-file`, `--smoke`) warn clearly and recommend API-key-backed automation. Interactive TUI sessions are fully permitted.
 - **Subscription-aware cleave fallback routing** — When only an Anthropic subscription credential is present, cleave workers are automatically rerouted to the best available automation-safe provider (OpenAI API key → OpenAI/Codex OAuth → OpenRouter → Ollama) rather than failing. The TUI shows a toast with the fallback model. If no fallback exists, a clear block message lists concrete options to fix it.
 - **`AnthropicCredentialMode` enum and helpers** — `providers.rs` now exports `AnthropicCredentialMode` (`ApiKey` / `OAuthOnly` / `None`), `anthropic_credential_mode()`, and `automation_safe_model()` for credential-aware routing decisions across the codebase.
 - **Tutorial orientation mode** — `/tutorial` now calls `tutorial_gate()` to detect auth state and presents an orientation-only tour (Tab steps, no agent AutoPrompt) when no Victory-tier cloud model is available. `/tutorial consent` upgrades to Interactive mode when an Anthropic subscription is detected.

@@ -30,10 +30,10 @@ import { snippet } from "../../lib/snippets";
       <tr>
         <td><strong>Anthropic/Claude OAuth / subscription</strong></td>
         <td><code>{snippet("auth.login_anthropic")}</code> or <code>{snippet("slash.login_slash")}</code></td>
-        <td>Interactive TUI sessions.</td>
+        <td>Interactive TUI sessions; headless Anthropic runs with an explicit operator-risk warning.</td>
         <td>
-          Omegon hard-blocks headless and automated entry points for this credential class.
-          If you want prompts, smoke tests, cleave, or unattended automation, use
+          Omegon does not treat subscription OAuth as equivalent to an API key.
+          If you want policy-clean prompts, smoke tests, cleave, or unattended automation, use
           <code>ANTHROPIC_API_KEY</code> instead.
         </td>
       </tr>
@@ -120,8 +120,9 @@ import { snippet } from "../../lib/snippets";
 
   <h2>Anthropic subscription boundary</h2>
   <p>
-    Anthropic/Claude subscription auth is the one credential class with a hard Omegon runtime boundary.
-    Interactive TUI use is allowed. Headless and automated paths are blocked.
+    Anthropic/Claude subscription auth is the one credential class with an explicit operator-risk boundary.
+    Interactive TUI use is allowed. Headless Anthropic paths warn and proceed rather than silently switching
+    providers or pretending subscription OAuth has API-key automation semantics.
   </p>
   <p>
     The consumer terms page is here:
@@ -131,7 +132,7 @@ import { snippet } from "../../lib/snippets";
   <h2>Practical guidance</h2>
   <ul>
     <li>If you want to work in the TUI by hand, Anthropic/Claude OAuth is a valid path.</li>
-    <li>If you want unattended or scripted automation, configure <code>ANTHROPIC_API_KEY</code>.</li>
+    <li>If you want unattended or scripted automation with clean provider terms, configure <code>ANTHROPIC_API_KEY</code>.</li>
     <li>If you want GPT-family routing without API-key setup, try <code>omegon auth login openai-codex</code>.</li>
     <li>If you want local-only inference, use <code>Ollama (Local)</code>.</li>
     <li>If you want hosted Ollama without running a local daemon, use <code>Ollama Cloud</code> via <code>/login</code> or <code>/secrets</code>.</li>
