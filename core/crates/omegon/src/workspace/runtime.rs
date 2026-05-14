@@ -121,10 +121,10 @@ pub fn read_all_active_leases(cwd: &Path) -> Vec<(String, WorkspaceLease)> {
             continue;
         };
 
-        if let Some(epoch) = heartbeat_epoch_secs(&lease.last_heartbeat) {
-            if !heartbeat_is_stale(now, epoch) {
-                leases.push((dir_name, lease));
-            }
+        if let Some(epoch) = heartbeat_epoch_secs(&lease.last_heartbeat)
+            && !heartbeat_is_stale(now, epoch)
+        {
+            leases.push((dir_name, lease));
         }
     }
 
@@ -217,17 +217,16 @@ pub fn prune_stale_instances(cwd: &Path) -> Vec<String> {
 
     // Also clean up legacy workspace.json if stale
     let legacy_path = workspace_lease_path(cwd);
-    if legacy_path.exists() {
-        if let Ok(text) = std::fs::read_to_string(&legacy_path) {
-            if let Ok(lease) = serde_json::from_str::<WorkspaceLease>(&text) {
-                let stale = heartbeat_epoch_secs(&lease.last_heartbeat)
-                    .map(|epoch| heartbeat_is_stale(now, epoch))
-                    .unwrap_or(true);
-                if stale {
-                    let _ = std::fs::remove_file(&legacy_path);
-                    pruned.push("legacy".to_string());
-                }
-            }
+    if legacy_path.exists()
+        && let Ok(text) = std::fs::read_to_string(&legacy_path)
+        && let Ok(lease) = serde_json::from_str::<WorkspaceLease>(&text)
+    {
+        let stale = heartbeat_epoch_secs(&lease.last_heartbeat)
+            .map(|epoch| heartbeat_is_stale(now, epoch))
+            .unwrap_or(true);
+        if stale {
+            let _ = std::fs::remove_file(&legacy_path);
+            pruned.push("legacy".to_string());
         }
     }
 

@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn blob_round_trip() {
-        let original = vec![1.0f32, -2.5, 3.14159, 0.0, f32::MIN, f32::MAX];
+        let original = vec![1.0f32, -2.5, std::f32::consts::PI, 0.0, f32::MIN, f32::MAX];
         let blob = vector_to_blob(&original);
         let restored = blob_to_vector(&blob);
         assert_eq!(original, restored);

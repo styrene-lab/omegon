@@ -90,7 +90,7 @@ fn project_session(
 }
 
 fn project_design_tree(handles: &DashboardHandles) -> IpcDesignTreeSnapshot {
-    let Some(ref lp_lock) = handles.lifecycle else {
+    let Some(ref lifecycle) = handles.lifecycle else {
         return IpcDesignTreeSnapshot {
             counts: IpcDesignCounts::default(),
             focused: None,
@@ -99,7 +99,8 @@ fn project_design_tree(handles: &DashboardHandles) -> IpcDesignTreeSnapshot {
             nodes: vec![],
         };
     };
-    let Ok(lp) = lp_lock.lock() else {
+    let provider = lifecycle.provider();
+    let Ok(lp) = provider.lock() else {
         return IpcDesignTreeSnapshot {
             counts: IpcDesignCounts::default(),
             focused: None,
@@ -179,14 +180,14 @@ fn project_design_tree(handles: &DashboardHandles) -> IpcDesignTreeSnapshot {
 }
 
 fn project_openspec(handles: &DashboardHandles) -> IpcOpenSpecSnapshot {
-    let Some(ref lp_lock) = handles.lifecycle else {
+    let Some(ref lifecycle) = handles.lifecycle else {
         return IpcOpenSpecSnapshot {
             changes: vec![],
             total_tasks: 0,
             done_tasks: 0,
         };
     };
-    let Ok(lp) = lp_lock.lock() else {
+    let Ok(openspec) = lifecycle.openspec_snapshot(Default::default()) else {
         return IpcOpenSpecSnapshot {
             changes: vec![],
             total_tasks: 0,
@@ -194,24 +195,21 @@ fn project_openspec(handles: &DashboardHandles) -> IpcOpenSpecSnapshot {
         };
     };
 
-    let changes: Vec<IpcChangeSnapshot> = lp
-        .changes()
-        .iter()
+    let changes: Vec<IpcChangeSnapshot> = openspec
+        .changes
+        .into_iter()
         .map(|c| IpcChangeSnapshot {
-            name: c.name.clone(),
-            stage: format!("{:?}", c.stage).to_lowercase(),
+            name: c.name,
+            stage: c.lifecycle_state,
             total_tasks: c.total_tasks,
             done_tasks: c.done_tasks,
         })
         .collect();
 
-    let total_tasks: usize = changes.iter().map(|c| c.total_tasks).sum();
-    let done_tasks: usize = changes.iter().map(|c| c.done_tasks).sum();
-
     IpcOpenSpecSnapshot {
         changes,
-        total_tasks,
-        done_tasks,
+        total_tasks: openspec.total_tasks,
+        done_tasks: openspec.done_tasks,
     }
 }
 

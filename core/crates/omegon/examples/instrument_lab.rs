@@ -20,6 +20,8 @@
 //!   r      Reset all
 //!   q      Quit
 
+#![allow(clippy::needless_range_loop)]
+
 use crossterm::{
     ExecutableCommand,
     event::{self, Event, KeyCode, KeyEvent},
@@ -92,38 +94,38 @@ fn main() -> io::Result<()> {
             f.render_widget(Paragraph::new(controls), ctrl_area);
         })?;
 
-        if event::poll(Duration::from_millis(33))? {
-            if let Event::Key(KeyEvent { code, .. }) = event::read()? {
-                match code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    KeyCode::Char('1') => state.context_fill = 0.10,
-                    KeyCode::Char('2') => state.context_fill = 0.30,
-                    KeyCode::Char('3') => state.context_fill = 0.50,
-                    KeyCode::Char('4') => state.context_fill = 0.70,
-                    KeyCode::Char('5') => state.fire_tool("bash"),
-                    KeyCode::Char('6') => {
-                        state.fire_tool("write");
-                        state.fire_tool("write");
-                        state.fire_tool("write");
-                    }
-                    KeyCode::Char('7') => state.fire_tool("read"),
-                    KeyCode::Char('8') => state.fire_tool("memory_store"),
-                    KeyCode::Char('9') => state.thinking_active = true,
-                    KeyCode::Char('0') => state.thinking_active = false,
-                    KeyCode::Char('-') => state.pluck_mind(0, WaveDirection::Right), // store →
-                    KeyCode::Char('=') => state.pluck_mind(0, WaveDirection::Left),  // recall ←
-                    KeyCode::Char('\\') => state.pluck_mind(0, WaveDirection::Center), // supersede ↔
-                    KeyCode::Char('[') => state.toggle_mind(1),
-                    KeyCode::Char(']') => {
-                        if state.minds[1].active {
-                            state.toggle_mind(1);
-                        } else {
-                            state.toggle_mind(2);
-                        }
-                    }
-                    KeyCode::Char('r') => state = LabState::default(),
-                    _ => {}
+        if event::poll(Duration::from_millis(33))?
+            && let Event::Key(KeyEvent { code, .. }) = event::read()?
+        {
+            match code {
+                KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Char('1') => state.context_fill = 0.10,
+                KeyCode::Char('2') => state.context_fill = 0.30,
+                KeyCode::Char('3') => state.context_fill = 0.50,
+                KeyCode::Char('4') => state.context_fill = 0.70,
+                KeyCode::Char('5') => state.fire_tool("bash"),
+                KeyCode::Char('6') => {
+                    state.fire_tool("write");
+                    state.fire_tool("write");
+                    state.fire_tool("write");
                 }
+                KeyCode::Char('7') => state.fire_tool("read"),
+                KeyCode::Char('8') => state.fire_tool("memory_store"),
+                KeyCode::Char('9') => state.thinking_active = true,
+                KeyCode::Char('0') => state.thinking_active = false,
+                KeyCode::Char('-') => state.pluck_mind(0, WaveDirection::Right), // store →
+                KeyCode::Char('=') => state.pluck_mind(0, WaveDirection::Left),  // recall ←
+                KeyCode::Char('\\') => state.pluck_mind(0, WaveDirection::Center), // supersede ↔
+                KeyCode::Char('[') => state.toggle_mind(1),
+                KeyCode::Char(']') => {
+                    if state.minds[1].active {
+                        state.toggle_mind(1);
+                    } else {
+                        state.toggle_mind(2);
+                    }
+                }
+                KeyCode::Char('r') => state = LabState::default(),
+                _ => {}
             }
         }
     }
@@ -550,13 +552,13 @@ fn render_memory_strings(state: &LabState, active_minds: &[usize], area: Rect, b
         // Draw │ on all rows above this for the tree trunk
         for prev_row in 0..row_idx {
             let prev_y = area.y + prev_row as u16;
-            if prev_y < area.bottom() {
-                if let Some(cell) = buf.cell_mut(Position::new(area.x, prev_y)) {
-                    if cell.symbol() != "├" && cell.symbol() != "└" {
-                        cell.set_char('│');
-                        cell.set_fg(Color::Rgb(32, 72, 96));
-                    }
-                }
+            if prev_y < area.bottom()
+                && let Some(cell) = buf.cell_mut(Position::new(area.x, prev_y))
+                && cell.symbol() != "├"
+                && cell.symbol() != "└"
+            {
+                cell.set_char('│');
+                cell.set_fg(Color::Rgb(32, 72, 96));
             }
         }
 

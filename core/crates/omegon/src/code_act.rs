@@ -183,7 +183,7 @@ impl CodeActExecutor {
                     &sandbox_config,
                     &script_path,
                     &self.cwd,
-                    proxy_sock.as_deref(),
+                    proxy_sock,
                     timeout,
                 )
                 .await?;

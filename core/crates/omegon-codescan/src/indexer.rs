@@ -302,7 +302,7 @@ mod tests {
         assert!(
             chunks
                 .iter()
-                .any(|chunk| chunk.path == PathBuf::from("src/main.rs")),
+                .any(|chunk| chunk.path == std::path::Path::new("src/main.rs")),
             "canonical repo files should remain indexed: {chunks:?}"
         );
     }

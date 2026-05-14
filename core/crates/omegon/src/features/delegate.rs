@@ -1922,7 +1922,7 @@ mod tests {
     #[test]
     fn hidden_change_tool_does_not_seed_recent_parent_files() {
         let temp_dir = TempDir::new().unwrap();
-        let mut feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), vec![], false);
+        let mut feature = DelegateFeature::new(temp_dir.path(), vec![], false);
 
         feature.on_event(&BusEvent::ToolStart {
             id: "1".into(),
@@ -1987,7 +1987,7 @@ mod tests {
     #[test]
     fn delegate_tool_schema_exposes_worker_profile() {
         let temp_dir = TempDir::new().unwrap();
-        let feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), vec![], false);
+        let feature = DelegateFeature::new(temp_dir.path(), vec![], false);
         let delegate_tool = feature
             .tools()
             .into_iter()
@@ -2013,7 +2013,7 @@ mod tests {
             is_write_agent: true,
         }];
 
-        let feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), agents, false);
+        let feature = DelegateFeature::new(temp_dir.path(), agents, false);
         let tools = feature.tools();
 
         assert_eq!(tools.len(), 3);
@@ -2027,7 +2027,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let agents = vec![];
 
-        let feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), agents, false);
+        let feature = DelegateFeature::new(temp_dir.path(), agents, false);
 
         let args = json!({
             "task": "test task",
@@ -2044,7 +2044,7 @@ mod tests {
     #[tokio::test]
     async fn test_delegate_result_nonexistent() {
         let temp_dir = TempDir::new().unwrap();
-        let feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), vec![], false);
+        let feature = DelegateFeature::new(temp_dir.path(), vec![], false);
 
         let args = json!({ "task_id": "nonexistent_task" });
 
@@ -2075,7 +2075,7 @@ mod tests {
             },
         ];
 
-        let feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), agents, false);
+        let feature = DelegateFeature::new(temp_dir.path(), agents, false);
 
         let signals = ContextSignals {
             user_prompt: "test",
@@ -2133,7 +2133,7 @@ This agent runs in write mode and can modify files.
         )
         .unwrap();
 
-        let agents = scan_agents(&temp_dir.path().to_path_buf());
+        let agents = scan_agents(temp_dir.path());
         assert_eq!(agents.len(), 2);
 
         let names: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();
@@ -2151,7 +2151,7 @@ This agent runs in write mode and can modify files.
     #[tokio::test]
     async fn system_error_messages_rejected_as_delegate_tasks() {
         let temp_dir = TempDir::new().unwrap();
-        let feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), vec![], false);
+        let feature = DelegateFeature::new(temp_dir.path(), vec![], false);
 
         let cases = [
             "[System: Your last several delegate calls returned errors]",
@@ -2245,7 +2245,7 @@ This agent runs in write mode and can modify files.
     #[tokio::test]
     async fn consecutive_failures_disable_delegate() {
         let temp_dir = TempDir::new().unwrap();
-        let feature = DelegateFeature::new(&temp_dir.path().to_path_buf(), vec![], false);
+        let feature = DelegateFeature::new(temp_dir.path(), vec![], false);
 
         // Simulate 3 failures by directly setting the counter
         if let Ok(mut count) = feature.consecutive_failures.lock() {

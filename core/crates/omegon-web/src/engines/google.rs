@@ -29,8 +29,12 @@ pub async fn search(
         params.push(("gl", opts.region.clone()));
     }
 
-    let url = Url::parse_with_params("https://www.google.com/search",
-        &params.iter().map(|(k, v)| (*k, v.as_str())).collect::<Vec<_>>()
+    let url = Url::parse_with_params(
+        "https://www.google.com/search",
+        &params
+            .iter()
+            .map(|(k, v)| (*k, v.as_str()))
+            .collect::<Vec<_>>(),
     )?;
 
     let resp = client.get(url).send().await?;
@@ -42,7 +46,10 @@ pub async fn search(
     let body = resp.error_for_status()?.text().await?;
 
     // Detect bot walls
-    if body.contains("detected unusual traffic") || body.contains("/sorry/") || body.contains("CAPTCHA") {
+    if body.contains("detected unusual traffic")
+        || body.contains("/sorry/")
+        || body.contains("CAPTCHA")
+    {
         anyhow::bail!("bot detection by Google — CAPTCHA or abuse page served");
     }
 
@@ -116,12 +123,11 @@ fn parse_results(body: &str, max_results: usize) -> anyhow::Result<Vec<SearchRes
 }
 
 fn clean_google_url(raw: &str) -> String {
-    if raw.starts_with("/url?") {
-        if let Ok(url) = Url::parse(&format!("https://www.google.com{raw}")) {
-            if let Some((_, v)) = url.query_pairs().find(|(k, _)| k == "q") {
-                return v.to_string();
-            }
-        }
+    if raw.starts_with("/url?")
+        && let Ok(url) = Url::parse(&format!("https://www.google.com{raw}"))
+        && let Some((_, v)) = url.query_pairs().find(|(k, _)| k == "q")
+    {
+        return v.to_string();
     }
     raw.to_string()
 }

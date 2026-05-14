@@ -28,8 +28,8 @@
 //!   0  — Thinking: thinking completes
 //!
 //!   -  — Memory: large recall (inject many facts)
-//!   =  — Memory: large write (store facts)
-//!   [  — Memory: multi-mind activation
+//!      =  — Memory: large write (store facts)
+//!      [  — Memory: multi-mind activation
 //!   ]  — Memory: compaction/cleanup
 
 use crossterm::{
@@ -235,21 +235,21 @@ fn main() -> io::Result<()> {
                 ]),
                 Line::from(vec![
                     Span::styled("  tools    ", Style::default().fg(Color::Rgb(96, 120, 136))),
-                    Span::styled(format!("{}", s.tool_state_label()), Style::default().fg(
+                    Span::styled(s.tool_state_label().to_string(), Style::default().fg(
                         if s.tool_activity > 0.5 { Color::Rgb(42, 180, 200) } else { Color::Rgb(96, 120, 136) }
                     )),
                     Span::styled(format!("  burst {:.2}", s.tool_activity), Style::default().fg(Color::Rgb(64, 88, 112))),
                 ]),
                 Line::from(vec![
                     Span::styled("  thinking ", Style::default().fg(Color::Rgb(96, 120, 136))),
-                    Span::styled(format!("{}", s.thinking_label()), Style::default().fg(
+                    Span::styled(s.thinking_label().to_string(), Style::default().fg(
                         if s.thinking_level > 0.3 { Color::Rgb(42, 180, 200) } else { Color::Rgb(96, 120, 136) }
                     )),
                     Span::styled(format!("  depth {:.2}", s.thinking_level), Style::default().fg(Color::Rgb(64, 88, 112))),
                 ]),
                 Line::from(vec![
                     Span::styled("  memory   ", Style::default().fg(Color::Rgb(96, 120, 136))),
-                    Span::styled(format!("{}", s.memory_label()), Style::default().fg(
+                    Span::styled(s.memory_label().to_string(), Style::default().fg(
                         if s.minds.iter().any(|m| m.activity > 0.3) { Color::Rgb(42, 180, 200) } else { Color::Rgb(96, 120, 136) }
                     )),
                     Span::styled(format!("  {}", s.memory_label()), Style::default().fg(Color::Rgb(64, 88, 112))),
@@ -302,64 +302,63 @@ fn main() -> io::Result<()> {
             f.render_widget(Paragraph::new(controls), chunks[2]);
         })?;
 
-        if event::poll(Duration::from_millis(33))? {
-            if let Event::Key(KeyEvent {
+        if event::poll(Duration::from_millis(33))?
+            && let Event::Key(KeyEvent {
                 code, modifiers, ..
             }) = event::read()?
-            {
-                let fine = modifiers.contains(KeyModifiers::SHIFT);
-                match code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    KeyCode::Tab => {
-                        state.selected_instrument = (state.selected_instrument + 1) % 4;
-                        state.selected_param = 0;
-                    }
-                    KeyCode::BackTab => {
-                        state.selected_instrument = (state.selected_instrument + 3) % 4;
-                        state.selected_param = 0;
-                    }
-                    KeyCode::Up => {
-                        let n = state.params_for(state.selected_instrument).len();
-                        state.selected_param = (state.selected_param + n - 1) % n;
-                    }
-                    KeyCode::Down => {
-                        let n = state.params_for(state.selected_instrument).len();
-                        state.selected_param = (state.selected_param + 1) % n;
-                    }
-                    KeyCode::Left => state.adjust(-1.0, fine),
-                    KeyCode::Right => state.adjust(1.0, fine),
-                    KeyCode::Char(' ') => state.paused = !state.paused,
-                    KeyCode::Char('r') => state.sim = TelemetrySim::default(),
-                    // Context scenarios
-                    KeyCode::Char('1') => state.sim.set_context(0.10),
-                    KeyCode::Char('2') => state.sim.set_context(0.50),
-                    KeyCode::Char('3') => state.sim.set_context(0.90),
-                    KeyCode::Char('4') => state.sim.compaction(),
-                    // Tool scenarios
-                    KeyCode::Char('5') => state.sim.tool_call(),
-                    KeyCode::Char('6') => state.sim.tool_burst(),
-                    KeyCode::Char('7') => state.sim.tool_cleave(),
-                    KeyCode::Char('8') => state.sim.tool_error(),
-                    // Thinking scenarios
-                    KeyCode::Char('9') => state.sim.thinking_start(),
-                    KeyCode::Char('0') => state.sim.thinking_stop(),
-                    // Memory: fire events on specific minds
-                    KeyCode::Char('-') => state.sim.memory_recall(), // recall from project
-                    KeyCode::Char('=') => state.sim.memory_write(),  // write to project
-                    KeyCode::Char('[') => state.sim.memory_multi_mind(), // activate + fire all
-                    KeyCode::Char(']') => state.sim.memory_cleanup(), // cleanup project
-                    // Toggle individual minds on/off
-                    KeyCode::F(1) => state.sim.toggle_mind(0), // project
-                    KeyCode::F(2) => state.sim.toggle_mind(1), // working
-                    KeyCode::F(3) => state.sim.toggle_mind(2), // episodes
-                    KeyCode::F(4) => state.sim.toggle_mind(3), // archive
-                    // Fire event on specific mind
-                    KeyCode::F(5) => state.sim.fire_mind(0),
-                    KeyCode::F(6) => state.sim.fire_mind(1),
-                    KeyCode::F(7) => state.sim.fire_mind(2),
-                    KeyCode::F(8) => state.sim.fire_mind(3),
-                    _ => {}
+        {
+            let fine = modifiers.contains(KeyModifiers::SHIFT);
+            match code {
+                KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Tab => {
+                    state.selected_instrument = (state.selected_instrument + 1) % 4;
+                    state.selected_param = 0;
                 }
+                KeyCode::BackTab => {
+                    state.selected_instrument = (state.selected_instrument + 3) % 4;
+                    state.selected_param = 0;
+                }
+                KeyCode::Up => {
+                    let n = state.params_for(state.selected_instrument).len();
+                    state.selected_param = (state.selected_param + n - 1) % n;
+                }
+                KeyCode::Down => {
+                    let n = state.params_for(state.selected_instrument).len();
+                    state.selected_param = (state.selected_param + 1) % n;
+                }
+                KeyCode::Left => state.adjust(-1.0, fine),
+                KeyCode::Right => state.adjust(1.0, fine),
+                KeyCode::Char(' ') => state.paused = !state.paused,
+                KeyCode::Char('r') => state.sim = TelemetrySim::default(),
+                // Context scenarios
+                KeyCode::Char('1') => state.sim.set_context(0.10),
+                KeyCode::Char('2') => state.sim.set_context(0.50),
+                KeyCode::Char('3') => state.sim.set_context(0.90),
+                KeyCode::Char('4') => state.sim.compaction(),
+                // Tool scenarios
+                KeyCode::Char('5') => state.sim.tool_call(),
+                KeyCode::Char('6') => state.sim.tool_burst(),
+                KeyCode::Char('7') => state.sim.tool_cleave(),
+                KeyCode::Char('8') => state.sim.tool_error(),
+                // Thinking scenarios
+                KeyCode::Char('9') => state.sim.thinking_start(),
+                KeyCode::Char('0') => state.sim.thinking_stop(),
+                // Memory: fire events on specific minds
+                KeyCode::Char('-') => state.sim.memory_recall(), // recall from project
+                KeyCode::Char('=') => state.sim.memory_write(),  // write to project
+                KeyCode::Char('[') => state.sim.memory_multi_mind(), // activate + fire all
+                KeyCode::Char(']') => state.sim.memory_cleanup(), // cleanup project
+                // Toggle individual minds on/off
+                KeyCode::F(1) => state.sim.toggle_mind(0), // project
+                KeyCode::F(2) => state.sim.toggle_mind(1), // working
+                KeyCode::F(3) => state.sim.toggle_mind(2), // episodes
+                KeyCode::F(4) => state.sim.toggle_mind(3), // archive
+                // Fire event on specific mind
+                KeyCode::F(5) => state.sim.fire_mind(0),
+                KeyCode::F(6) => state.sim.fire_mind(1),
+                KeyCode::F(7) => state.sim.fire_mind(2),
+                KeyCode::F(8) => state.sim.fire_mind(3),
+                _ => {}
             }
         }
     }
@@ -1083,7 +1082,7 @@ fn render_waterfall_multi(
 
     let total_w = area.width as usize;
     let gap = if n > 1 { 1 } else { 0 }; // 1-char gap between segments
-    let total_gaps = if n > 1 { n - 1 } else { 0 };
+    let total_gaps = n.saturating_sub(1);
     let usable = total_w.saturating_sub(total_gaps);
     let col_w = usable / n;
 

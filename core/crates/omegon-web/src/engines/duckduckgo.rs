@@ -85,12 +85,12 @@ fn parse_results(body: &str, max_results: usize) -> anyhow::Result<Vec<SearchRes
 }
 
 fn decode_ddg_url(raw: &str) -> String {
-    if raw.contains("uddg=") {
-        if let Some(encoded) = raw.split("uddg=").nth(1).and_then(|s| s.split('&').next()) {
-            return percent_encoding::percent_decode_str(encoded)
-                .decode_utf8_lossy()
-                .into_owned();
-        }
+    if raw.contains("uddg=")
+        && let Some(encoded) = raw.split("uddg=").nth(1).and_then(|s| s.split('&').next())
+    {
+        return percent_encoding::percent_decode_str(encoded)
+            .decode_utf8_lossy()
+            .into_owned();
     }
     if raw.starts_with("//") {
         return String::new();

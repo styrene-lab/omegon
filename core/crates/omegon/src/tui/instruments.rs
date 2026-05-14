@@ -2069,10 +2069,29 @@ impl InstrumentPanel {
     }
 }
 
+impl InstrumentPanel {
+    #[cfg(test)]
+    pub fn debug_mind_fact_count(&self, idx: usize) -> Option<usize> {
+        self.minds.get(idx).map(|mind| mind.fact_count)
+    }
+
+    #[cfg(test)]
+    pub fn debug_activity_mode(&self) -> &'static str {
+        match self.activity_mode() {
+            ActivityMode::Idle => "idle",
+            ActivityMode::Thinking => "think",
+            ActivityMode::ToolChurn => "tool",
+            ActivityMode::Waiting => "wait",
+        }
+    }
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::*;
 
     #[test]
@@ -2370,7 +2389,7 @@ mod tests {
             "footer height should not shrink after activity"
         );
         assert!(
-            grown >= 10 && grown <= 16,
+            (10..=16).contains(&grown),
             "preferred height stays bounded: {grown}"
         );
     }
@@ -2719,19 +2738,19 @@ mod tests {
                     let buf = f.buffer_mut();
                     for y in inference_inner.y..inference_inner.bottom() {
                         for x in inference_inner.x..inference_inner.right() {
-                            if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
-                                if cell.symbol() == "L" {
-                                    cell.set_char('I');
-                                }
+                            if let Some(cell) = buf.cell_mut(Position::new(x, y))
+                                && cell.symbol() == "L"
+                            {
+                                cell.set_char('I');
                             }
                         }
                     }
                     for y in tools_inner.y..tools_inner.bottom() {
                         for x in tools_inner.x..tools_inner.right() {
-                            if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
-                                if cell.symbol() == "R" {
-                                    cell.set_char('T');
-                                }
+                            if let Some(cell) = buf.cell_mut(Position::new(x, y))
+                                && cell.symbol() == "R"
+                            {
+                                cell.set_char('T');
                             }
                         }
                     }
@@ -3478,22 +3497,5 @@ mod tests {
             conversation > 0.0,
             "conversation should still retain its own band"
         );
-    }
-}
-
-impl InstrumentPanel {
-    #[cfg(test)]
-    pub fn debug_mind_fact_count(&self, idx: usize) -> Option<usize> {
-        self.minds.get(idx).map(|mind| mind.fact_count)
-    }
-
-    #[cfg(test)]
-    pub fn debug_activity_mode(&self) -> &'static str {
-        match self.activity_mode() {
-            ActivityMode::Idle => "idle",
-            ActivityMode::Thinking => "think",
-            ActivityMode::ToolChurn => "tool",
-            ActivityMode::Waiting => "wait",
-        }
     }
 }

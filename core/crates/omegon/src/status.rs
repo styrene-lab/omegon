@@ -819,6 +819,8 @@ impl Default for HarnessStatus {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::*;
 
     #[test]
@@ -985,7 +987,7 @@ mod tests {
             last_failure_kind: None,
             last_failure_at: None,
         };
-        let recent = vec![
+        let recent = [
             RecentUpstreamFailure {
                 provider: "openai".into(),
                 failure_kind: "timeout".into(),
@@ -1020,7 +1022,7 @@ mod tests {
             last_failure_kind: None,
             last_failure_at: None,
         };
-        let recent = vec![
+        let recent = [
             RecentUpstreamFailure {
                 provider: "openai".into(),
                 failure_kind: "timeout".into(),

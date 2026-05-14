@@ -339,6 +339,9 @@ const BUILTIN_VERBS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static GLITCH_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn next_verb_cycles() {
@@ -418,6 +421,7 @@ mod tests {
 
     #[test]
     fn glitch_produces_visually_similar_output() {
+        let _guard = GLITCH_TEST_LOCK.lock().expect("glitch test lock");
         // Force the counter to a value that will trigger a glitch.
         // mixed = frame * 2654435761; we need mixed % 3600 == 0.
         // Brute-force find a triggering frame value.
@@ -450,6 +454,7 @@ mod tests {
 
     #[test]
     fn glitch_is_rare() {
+        let _guard = GLITCH_TEST_LOCK.lock().expect("glitch test lock");
         // Run 1000 frames, expect at most a handful of glitches.
         GLITCH_COUNTER.store(0, Ordering::Relaxed);
         let mut glitch_count = 0;

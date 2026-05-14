@@ -329,7 +329,6 @@ mod tests {
     async fn python_script_calls_bash_through_proxy() {
         let tmp = tempfile::tempdir().unwrap();
         let proxy = ProxyServer::new(tmp.path().to_path_buf()).unwrap();
-        let sock_path = proxy.socket_path().to_path_buf();
         let prelude = proxy.python_prelude();
         let cancel = CancellationToken::new();
 

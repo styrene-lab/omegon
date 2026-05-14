@@ -4360,7 +4360,7 @@ mod tests {
 
         let user = Segment::user_prompt("short");
         let h = user.height(80, &t);
-        assert!(h >= 3 && h <= 7, "user prompt height: {h}");
+        assert!((3..=7).contains(&h), "user prompt height: {h}");
 
         let tool = Segment {
             meta: SegmentMeta::default(),

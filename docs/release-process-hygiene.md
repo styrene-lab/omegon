@@ -29,7 +29,7 @@ The release process has multiple disconnected steps that are manually executed a
 
 The release process today is:
 
-1. **Edit `core/Cargo.toml`** — bump the `version` field manually
+1. **Edit root `Cargo.toml`** — bump the workspace `version` field manually
 2. **Commit** — `git commit -m "chore(release): bump to X.Y.Z-rc.N"`
 3. **Tag** — `git tag vX.Y.Z-rc.N` (FREQUENTLY FORGOTTEN)
 4. **Push tag** — `git push origin vX.Y.Z-rc.N` (triggers CI release)

@@ -11,7 +11,32 @@ use crate::update::UpdateInfo;
 use crate::web::WebDaemonStatus;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 use tokio::sync::mpsc;
+
+static CURRENT_DIR_LOCK: Mutex<()> = Mutex::new(());
+
+struct CurrentDirGuard {
+    prev: PathBuf,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl Drop for CurrentDirGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.prev);
+    }
+}
+
+fn push_current_dir(path: &Path) -> CurrentDirGuard {
+    let guard = CURRENT_DIR_LOCK.lock().expect("current dir lock");
+    let prev = std::env::current_dir().expect("current dir");
+    std::env::set_current_dir(path).expect("set current dir");
+    CurrentDirGuard {
+        prev,
+        _guard: guard,
+    }
+}
 
 fn test_settings() -> crate::settings::SharedSettings {
     std::sync::Arc::new(std::sync::Mutex::new(Settings::new(
@@ -2294,14 +2319,11 @@ directive = "PERSONA.md"
     )
     .unwrap();
 
-    let prev = std::env::current_dir().unwrap();
-    std::env::set_current_dir(dir.path()).unwrap();
+    let _cwd = push_current_dir(dir.path());
 
     let mut app = test_app();
     let tx = test_tx();
     let result = app.handle_slash_command("/persona", &tx);
-
-    std::env::set_current_dir(prev).unwrap();
 
     assert!(matches!(result, SlashResult::Handled));
     assert!(
@@ -2348,14 +2370,11 @@ directive = "TONE.md"
     )
     .unwrap();
 
-    let prev = std::env::current_dir().unwrap();
-    std::env::set_current_dir(dir.path()).unwrap();
+    let _cwd = push_current_dir(dir.path());
 
     let mut app = test_app();
     let tx = test_tx();
     let result = app.handle_slash_command("/tone", &tx);
-
-    std::env::set_current_dir(prev).unwrap();
 
     assert!(matches!(result, SlashResult::Handled));
     assert!(
@@ -2612,15 +2631,12 @@ directive = "PERSONA.md"
     )
     .unwrap();
 
-    let prev = std::env::current_dir().unwrap();
-    std::env::set_current_dir(dir.path()).unwrap();
+    let _cwd = push_current_dir(dir.path());
 
     let mut app = test_app();
     app.open_persona_selector();
     let tx = test_tx();
     let message = app.confirm_selector(&tx);
-
-    std::env::set_current_dir(prev).unwrap();
 
     assert_eq!(
         message.as_deref(),
@@ -2656,15 +2672,12 @@ directive = "TONE.md"
     )
     .unwrap();
 
-    let prev = std::env::current_dir().unwrap();
-    std::env::set_current_dir(dir.path()).unwrap();
+    let _cwd = push_current_dir(dir.path());
 
     let mut app = test_app();
     app.open_tone_selector();
     let tx = test_tx();
     let message = app.confirm_selector(&tx);
-
-    std::env::set_current_dir(prev).unwrap();
 
     assert_eq!(message.as_deref(), Some("♪ Tone activated: Test Tone"));
     let active = app
@@ -3887,7 +3900,7 @@ fn tutorial_state_load_and_advance() {
     assert!(tut.go_back());
     assert_eq!(tut.current, 1);
 
-    assert!(!super::TutorialState::load(tmp.path()).is_some()); // no tutorial dir
+    assert!(super::TutorialState::load(tmp.path()).is_none()); // no tutorial dir
 }
 
 #[test]

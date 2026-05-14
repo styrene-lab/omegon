@@ -125,6 +125,8 @@ fn panic_payload_text(payload: &Box<dyn std::any::Any + Send>) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::await_holding_lock)]
+
     use super::*;
     use std::panic;
     use std::sync::{Mutex, OnceLock};

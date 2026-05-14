@@ -1,7 +1,9 @@
 [package]
 name = "omegon-opsx"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "OpenSpec lifecycle FSM — enforced state transitions for design nodes, changes, and milestones"
 
 [dependencies]

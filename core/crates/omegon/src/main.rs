@@ -1592,11 +1592,11 @@ async fn main() -> anyhow::Result<()> {
                     let mut task = task_tree::create_task(&cwd, title, body_text)?;
 
                     let mut modified = false;
-                    if let Some(p) = task_tree::Priority::parse(priority) {
-                        if p != task_tree::Priority::Medium {
-                            task.meta.priority = p;
-                            modified = true;
-                        }
+                    if let Some(p) = task_tree::Priority::parse(priority)
+                        && p != task_tree::Priority::Medium
+                    {
+                        task.meta.priority = p;
+                        modified = true;
                     }
                     if let Some(node) = design_node {
                         task.meta.design_node_id = Some(node.clone());
@@ -6617,10 +6617,10 @@ async fn run_sentry_command(
     });
 
     // Prune old run records on startup
-    if let Ok(pruned) = state_db.prune_old_runs(config.sentry.log_retention_days) {
-        if pruned > 0 {
-            tracing::info!(pruned, "pruned old sentry run records");
-        }
+    if let Ok(pruned) = state_db.prune_old_runs(config.sentry.log_retention_days)
+        && pruned > 0
+    {
+        tracing::info!(pruned, "pruned old sentry run records");
     }
 
     let model = _cli.model.clone();
@@ -6680,10 +6680,10 @@ async fn run_sentry_command(
     .await;
 
     // Release any claimed tasks on shutdown
-    if let Ok(released) = state_db.release_all(&instance_id) {
-        if !released.is_empty() {
-            tracing::info!(count = released.len(), "released claimed tasks on shutdown");
-        }
+    if let Ok(released) = state_db.release_all(&instance_id)
+        && !released.is_empty()
+    {
+        tracing::info!(count = released.len(), "released claimed tasks on shutdown");
     }
 
     tracing::info!("sentry shutdown complete");
@@ -7475,6 +7475,81 @@ mod tests {
     use clap::CommandFactory;
     use tempfile::tempdir;
 
+    fn test_workspace_lease(cwd: &Path) -> crate::workspace::types::WorkspaceLease {
+        use crate::workspace::types::{
+            Mutability, WorkspaceBackendKind, WorkspaceBindings, WorkspaceKind, WorkspaceLease,
+            WorkspaceRole,
+        };
+
+        WorkspaceLease {
+            project_id: "test-project".into(),
+            workspace_id: "test-workspace".into(),
+            label: "test".into(),
+            path: cwd.display().to_string(),
+            backend_kind: WorkspaceBackendKind::LocalDir,
+            vcs_ref: None,
+            bindings: WorkspaceBindings::default(),
+            branch: "main".into(),
+            role: WorkspaceRole::Primary,
+            workspace_kind: WorkspaceKind::Code,
+            mutability: Mutability::Mutable,
+            owner_session_id: Some("test-session".into()),
+            owner_agent_id: Some("test-agent".into()),
+            created_at: "2026-05-14T00:00:00Z".into(),
+            last_heartbeat: "2026-05-14T00:00:00Z".into(),
+            archived: false,
+            archived_at: None,
+            archive_reason: None,
+            parent_workspace_id: None,
+            source: "test".into(),
+        }
+    }
+
+    fn test_agent_setup() -> setup::AgentSetup {
+        let cwd = std::env::current_dir().expect("current dir");
+        let secrets_dir =
+            std::env::temp_dir().join(format!("omegon-test-secrets-{}", std::process::id()));
+        std::fs::create_dir_all(&secrets_dir).expect("test secrets dir");
+        let secrets = std::sync::Arc::new(
+            omegon_secrets::SecretsManager::new(&secrets_dir).expect("secrets manager"),
+        );
+        let workspace_lease = test_workspace_lease(&cwd);
+
+        setup::AgentSetup {
+            bus: crate::bus::EventBus::new(),
+            session_id: "test-session".into(),
+            instance_id: "test-instance".into(),
+            context_metrics: crate::features::context::SharedContextMetrics::new(),
+            command_tx: crate::features::context::new_shared_command_tx(),
+            context_manager: crate::context::ContextManager::new("test prompt".into(), vec![]),
+            conversation: crate::conversation::ConversationState::new(),
+            cwd,
+            secrets,
+            web_auth_state: crate::web::WebAuthState::ephemeral_generated("test-token".into()),
+            session_secret_env: vec![],
+            startup_snapshot: setup::StartupSnapshot {
+                total_facts: 0,
+                lifecycle: setup::LifecycleSnapshot {
+                    focused_node: None,
+                    active_changes: vec![],
+                },
+            },
+            skill_phases: vec![],
+            dashboard_handles: crate::tui::dashboard::DashboardHandles::default(),
+            initial_harness_status: crate::status::HarnessStatus::default(),
+            resume_info: None,
+            workspace_state: setup::WorkspaceStartupState {
+                lease: workspace_lease,
+                admission: crate::workspace::types::AdmissionOutcome::GrantedMutable,
+            },
+            extension_widgets: vec![],
+            widget_receivers: vec![],
+            cleave_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            delegate_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            vox_polling_handles: vec![],
+        }
+    }
+
     #[test]
     fn format_agent_error_extracts_message() {
         let raw = r#"Anthropic 400 Bad Request: {"type":"error","error":{"type":"invalid_request_error","message":"Input should be a valid dictionary"}}"#;
@@ -7815,9 +7890,7 @@ mod tests {
 
     #[tokio::test]
     async fn split_interactive_agent_moves_runtime_state_and_preserves_host_metadata() {
-        let agent = setup::AgentSetup::new(Path::new("."), None, None)
-            .await
-            .expect("agent setup");
+        let agent = test_agent_setup();
         let expected_session_id = agent.session_id.clone();
         let expected_cwd = agent.cwd.clone();
         let expected_resume = agent.resume_info.as_ref().map(|r| r.session_id.clone());
@@ -7844,9 +7917,7 @@ mod tests {
 
     #[tokio::test]
     async fn split_interactive_agent_keeps_runtime_state_mutable_after_split() {
-        let agent = setup::AgentSetup::new(Path::new("."), None, None)
-            .await
-            .expect("agent setup");
+        let agent = test_agent_setup();
         let expected_cwd = agent.cwd.clone();
         let (host, mut runtime_state) = split_interactive_agent(agent);
 
@@ -7869,12 +7940,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn mark_interactive_session_busy_updates_dashboard_flag() {
-        let agent = setup::AgentSetup::new(Path::new("."), None, None)
-            .await
-            .expect("agent setup");
-        let handles = agent.dashboard_handles.clone();
+    #[test]
+    fn mark_interactive_session_busy_updates_dashboard_flag() {
+        let handles = crate::tui::dashboard::DashboardHandles::default();
         mark_interactive_session_busy(&handles, true);
         assert!(handles.session.lock().expect("session lock").busy);
         mark_interactive_session_busy(&handles, false);
@@ -7961,9 +8029,7 @@ mod tests {
     #[test]
     fn remote_slash_login_is_classified_as_interactive_only_for_openai_api() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let agent = rt
-            .block_on(setup::AgentSetup::new(Path::new("."), None, None))
-            .unwrap();
+        let agent = test_agent_setup();
         let (events_tx, _) = broadcast::channel(16);
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
             "anthropic:claude-sonnet-4-6",
@@ -7999,9 +8065,7 @@ mod tests {
     #[test]
     fn remote_slash_logout_requires_provider() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let agent = rt
-            .block_on(setup::AgentSetup::new(Path::new("."), None, None))
-            .unwrap();
+        let agent = test_agent_setup();
         let (events_tx, _) = broadcast::channel(16);
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
             "anthropic:claude-sonnet-4-6",
@@ -8038,9 +8102,7 @@ mod tests {
     #[test]
     fn remote_slash_logout_accepts_openai_codex_provider() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let agent = rt
-            .block_on(setup::AgentSetup::new(Path::new("."), None, None))
-            .unwrap();
+        let agent = test_agent_setup();
         let (events_tx, _) = broadcast::channel(16);
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
             "anthropic:claude-sonnet-4-6",
@@ -8081,9 +8143,7 @@ mod tests {
     #[test]
     fn remote_slash_logout_rejects_unknown_provider_with_supported_list() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let agent = rt
-            .block_on(setup::AgentSetup::new(Path::new("."), None, None))
-            .unwrap();
+        let agent = test_agent_setup();
         let (events_tx, _) = broadcast::channel(16);
         let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
             "anthropic:claude-sonnet-4-6",

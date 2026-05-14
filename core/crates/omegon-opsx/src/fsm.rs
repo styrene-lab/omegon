@@ -84,10 +84,10 @@ impl<S: StateStore> Lifecycle<S> {
             return Err(OpsxError::AlreadyExists(format!("node '{id}'")));
         }
         // Validate parent exists if specified
-        if let Some(parent_id) = parent {
-            if !self.state.nodes.iter().any(|n| n.id == parent_id) {
-                return Err(OpsxError::NotFound(format!("parent node '{parent_id}'")));
-            }
+        if let Some(parent_id) = parent
+            && !self.state.nodes.iter().any(|n| n.id == parent_id)
+        {
+            return Err(OpsxError::NotFound(format!("parent node '{parent_id}'")));
         }
         let now = iso_now();
         self.state.nodes.push(DesignNode {
@@ -507,6 +507,73 @@ impl<S: StateStore> Lifecycle<S> {
         self.audit_and_save("change", name, &from_str, target.as_str(), None, false)
     }
 
+    /// Archive a change while performing the content-store archive step as
+    /// part of the same lifecycle operation.
+    ///
+    /// The closure is called only after the FSM transition is validated. State
+    /// is persisted only after the closure succeeds; if persistence fails, the
+    /// rollback closure is invoked and the in-memory state is restored.
+    ///
+    /// Crash caveat: with the JSON-file backend, content and state still live
+    /// in separate files. A process death after `archive_content` succeeds but
+    /// before `save` completes can leave archived content with pre-archive FSM
+    /// state. Callers should surface that through reconciliation/doctor tooling.
+    pub fn archive_change_with<F, R>(
+        &mut self,
+        name: &str,
+        archive_content: F,
+        rollback_content: R,
+    ) -> Result<(), OpsxError>
+    where
+        F: FnOnce() -> Result<(), OpsxError>,
+        R: FnOnce() -> Result<(), OpsxError>,
+    {
+        let idx = self
+            .state
+            .changes
+            .iter()
+            .position(|c| c.name == name)
+            .ok_or_else(|| OpsxError::NotFound(format!("change '{name}'")))?;
+
+        let from = self.state.changes[idx].state;
+        let target = ChangeState::Archived;
+        if !from.can_transition_to(target) {
+            return Err(OpsxError::InvalidTransition {
+                entity: format!("change '{name}'"),
+                from: from.as_str().into(),
+                to: target.as_str().into(),
+            });
+        }
+
+        archive_content()?;
+
+        let previous_state = self.state.clone();
+        let from_str = from.as_str().to_string();
+        self.state.changes[idx].state = target;
+        self.state.changes[idx].updated_at = iso_now();
+        self.state.audit_log.push(AuditEntry {
+            timestamp: iso_now(),
+            entity_type: "change".into(),
+            entity_id: name.into(),
+            from_state: from_str,
+            to_state: target.as_str().into(),
+            reason: None,
+            forced: false,
+        });
+
+        if let Err(save_err) = self.save() {
+            self.state = previous_state;
+            if let Err(rollback_err) = rollback_content() {
+                return Err(OpsxError::StoreError(format!(
+                    "{save_err}; rollback failed: {rollback_err}"
+                )));
+            }
+            return Err(save_err);
+        }
+
+        Ok(())
+    }
+
     /// 🔓 ESCAPE HATCH: Force a change state transition.
     pub fn force_transition_change(
         &mut self,
@@ -821,8 +888,20 @@ fn days_to_ymd(days: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::JsonFileStore;
+    use crate::store::{JsonFileStore, LifecycleState};
     use tempfile::TempDir;
+
+    struct FailingSaveStore;
+
+    impl StateStore for FailingSaveStore {
+        fn load(&self) -> Result<LifecycleState, OpsxError> {
+            Ok(LifecycleState::default())
+        }
+
+        fn save(&self, _state: &LifecycleState) -> Result<(), OpsxError> {
+            Err(OpsxError::StoreError("forced save failure".into()))
+        }
+    }
 
     fn test_lifecycle() -> (TempDir, Lifecycle<JsonFileStore>) {
         let tmp = TempDir::new().unwrap();
@@ -1205,6 +1284,96 @@ mod tests {
             .unwrap();
         lc.transition_change("reopen", ChangeState::Proposed)
             .unwrap();
+    }
+
+    #[test]
+    fn archive_change_with_runs_content_archive_once() {
+        let (_tmp, mut lc) = test_lifecycle();
+        lc.create_change("archive-me", "Archive Me", None).unwrap();
+        lc.add_spec("archive-me", "core").unwrap();
+        lc.transition_change("archive-me", ChangeState::Specced)
+            .unwrap();
+        lc.update_change_progress("archive-me", 1, 0).unwrap();
+        lc.transition_change("archive-me", ChangeState::Planned)
+            .unwrap();
+        lc.transition_change("archive-me", ChangeState::Testing)
+            .unwrap();
+        lc.add_test_file("archive-me", "test.rs").unwrap();
+        lc.transition_change("archive-me", ChangeState::Implementing)
+            .unwrap();
+        lc.update_change_progress("archive-me", 1, 1).unwrap();
+        lc.transition_change("archive-me", ChangeState::Verifying)
+            .unwrap();
+
+        let archived = std::cell::Cell::new(false);
+        let rolled_back = std::cell::Cell::new(false);
+        lc.archive_change_with(
+            "archive-me",
+            || {
+                archived.set(true);
+                Ok(())
+            },
+            || {
+                rolled_back.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        let change = lc
+            .state()
+            .changes
+            .iter()
+            .find(|c| c.name == "archive-me")
+            .unwrap();
+        assert_eq!(change.state, ChangeState::Archived);
+        assert!(archived.get());
+        assert!(!rolled_back.get());
+    }
+
+    #[test]
+    fn archive_change_with_rolls_content_back_when_state_save_fails() {
+        let mut lc = Lifecycle::load(FailingSaveStore).unwrap();
+        lc.state.changes.push(Change {
+            name: "rollback-me".into(),
+            title: "Rollback Me".into(),
+            state: ChangeState::Verifying,
+            bound_node: None,
+            specs: vec!["core".into()],
+            test_files: vec!["test.rs".into()],
+            tasks_total: 1,
+            tasks_done: 1,
+            created_at: "2026-05-14T00:00:00Z".into(),
+            updated_at: "2026-05-14T00:00:00Z".into(),
+        });
+
+        let archived = std::cell::Cell::new(false);
+        let rolled_back = std::cell::Cell::new(false);
+        let err = lc
+            .archive_change_with(
+                "rollback-me",
+                || {
+                    archived.set(true);
+                    Ok(())
+                },
+                || {
+                    rolled_back.set(true);
+                    Ok(())
+                },
+            )
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("forced save failure"));
+        assert!(archived.get());
+        assert!(rolled_back.get());
+        let change = lc
+            .state()
+            .changes
+            .iter()
+            .find(|c| c.name == "rollback-me")
+            .unwrap();
+        assert_eq!(change.state, ChangeState::Verifying);
     }
 
     #[test]

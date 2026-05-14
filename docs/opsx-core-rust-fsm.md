@@ -50,6 +50,11 @@ Replace markdown-as-source-of-truth with a Rust state machine that owns the life
 **Status:** decided
 **Rationale:** opsx-core owns: state transitions (FSM validation), milestones (freeze enforcement), audit trail (who changed what when), and referential integrity (parent validation, delete guards). Markdown (docs/*.md) owns: rich content (research, decisions, questions, file scope, overview). Integration: design.rs calls opsx_core::transition_node() to validate before writing markdown. If the FSM rejects, the markdown write doesn't happen. Two stores, one authority per concern.
 
+### Decision: Archive is a single lifecycle operation, with a documented crash window
+
+**Status:** decided
+**Rationale:** OpenSpec archive must not be driven by two independent controllers. The tool surface calls one opsx operation that validates the FSM, moves the OpenSpec content into `openspec/archive/`, persists lifecycle state, and rolls the content move back if persistence fails. With the JSON-file backend this still is not a true cross-file transaction: process death after the directory move and before the JSON state save can leave archived content with pre-archive FSM state. `lifecycle_doctor` must detect that case as `openspec_state_drift` so recovery is explicit. A future fully atomic fix needs a transaction journal or a state store that owns both lifecycle state and content moves.
+
 ### Decision: TDD via Testing state (Option A) — first-class lifecycle phase between Planned and Implementing
 
 **Status:** decided

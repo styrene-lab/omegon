@@ -1888,7 +1888,7 @@ mod tests {
             cred_type: "oauth".into(),
             access: "token".into(),
             refresh: "refresh".into(),
-            expires: now_ms + 3600_000,
+            expires: now_ms + 3_600_000,
         };
         assert!(!valid.is_expired());
     }
@@ -1993,7 +1993,7 @@ mod tests {
             cred_type: "oauth".into(),
             access: "fresh-token".into(),
             refresh: "refresh-token".into(),
-            expires: now_ms + 3600_000,
+            expires: now_ms + 3_600_000,
         };
         assert!(
             !creds.is_expired(),

@@ -291,8 +291,8 @@ pub fn build_graph_data(handles: &crate::tui::dashboard::DashboardHandles) -> Gr
     let mut nodes = Vec::new();
     let mut links = Vec::new();
 
-    if let Some(ref lp_lock) = handles.lifecycle
-        && let Ok(lp) = lp_lock.lock()
+    if let Some(ref lifecycle) = handles.lifecycle
+        && let Ok(lp) = lifecycle.provider().lock()
     {
         let all = lp.all_nodes();
         for node in all.values() {
@@ -369,8 +369,8 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
     };
 
     // Read lifecycle state
-    if let Some(ref lp_lock) = state.handles.lifecycle
-        && let Ok(lp) = lp_lock.lock()
+    if let Some(ref lifecycle) = state.handles.lifecycle
+        && let Ok(lp) = lifecycle.provider().lock()
     {
         let nodes = lp.all_nodes();
         design.counts.total = nodes.len();
@@ -426,23 +426,25 @@ pub fn build_snapshot(state: &WebState) -> StateSnapshot {
                 children: children.len(),
             });
         }
+    }
 
-        // OpenSpec changes
-        for change in lp.changes() {
-            if matches!(change.stage, ChangeStage::Archived) {
-                continue;
-            }
-            openspec.total_tasks += change.total_tasks;
-            openspec.done_tasks += change.done_tasks;
-            openspec.changes.push(ChangeSnapshot {
-                name: change.name.clone(),
-                stage: change.stage.as_str().to_string(),
+    if let Some(ref lifecycle) = state.handles.lifecycle
+        && let Ok(snapshot) = lifecycle.openspec_snapshot(Default::default())
+    {
+        openspec.total_tasks = snapshot.total_tasks;
+        openspec.done_tasks = snapshot.done_tasks;
+        openspec.changes = snapshot
+            .changes
+            .into_iter()
+            .map(|change| ChangeSnapshot {
+                name: change.name,
+                stage: change.lifecycle_state,
                 has_specs: change.has_specs,
                 has_tasks: change.has_tasks,
                 total_tasks: change.total_tasks,
                 done_tasks: change.done_tasks,
-            });
-        }
+            })
+            .collect();
     }
 
     // Read cleave state

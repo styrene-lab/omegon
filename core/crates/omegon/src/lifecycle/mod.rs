@@ -12,6 +12,7 @@ pub mod codex_export;
 pub mod context;
 pub mod design;
 pub mod doctor;
+pub mod read_model;
 pub mod spec;
 pub mod types;
 // pub mod decompose; // TODO: decomposition engine (assess, fork, harvest, merge)

@@ -1,18 +1,25 @@
 ---
 import Docs from "../layouts/Docs.astro";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-// Read root CHANGELOG.md — Astro will process this at build time
-const changelogPath = join(process.cwd(), "..", "CHANGELOG.md");
+const here = dirname(fileURLToPath(import.meta.url));
+const changelogPath = resolve(here, "../../../CHANGELOG.md");
+
+function stripFrontmatter(markdown: string): string {
+  const text = markdown.replace(/^\uFEFF/, "");
+  const match = text.match(/^(---|\+\+\+)\r?\n[\s\S]*?\r?\n\1\r?\n?/);
+  return match ? text.slice(match[0].length) : text;
+}
+
 let raw = "";
 try {
-  raw = readFileSync(changelogPath, "utf-8");
+  raw = stripFrontmatter(readFileSync(changelogPath, "utf-8"));
 } catch {
   raw = "# Changelog\n\n*Not available during this build.*";
 }
 
-// Use Astro's built-in markdown rendering
 const { default: markdownit } = await import("markdown-it");
 const md = markdownit({ html: true, linkify: true });
 const html = md.render(raw);

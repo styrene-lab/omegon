@@ -61,7 +61,7 @@ strategy:
 
 **Post-matrix steps (runs once after all builds):**
 6. Collect all archives + checksums into `checksums.sha256`
-7. Generate SBOM: `cargo cyclonedx --manifest-path core/Cargo.toml --format json`
+7. Generate SBOM: `cargo cyclonedx --manifest-path Cargo.toml --format json`
 8. Sign all artifacts with cosign: `cosign sign-blob --yes <each archive>`
 9. Attest build provenance: `actions/attest-build-provenance`
 10. Create GitHub Release with all artifacts attached:

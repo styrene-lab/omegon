@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex};
 use crate::features::cleave::CleaveProgress;
 use crate::lifecycle::context::LifecycleContextProvider;
 use crate::lifecycle::design;
+use crate::lifecycle::read_model::{LifecycleReadHandle, SnapshotOptions};
 use crate::status::HarnessStatus;
 
 /// Shared session stats — written by the TUI, read by the web API.
@@ -41,7 +42,7 @@ pub struct SharedSessionStats {
 /// Shared handles to feature state, for live dashboard updates.
 #[derive(Clone, Default)]
 pub struct DashboardHandles {
-    pub lifecycle: Option<Arc<Mutex<LifecycleContextProvider>>>,
+    pub lifecycle: Option<LifecycleReadHandle>,
     pub cleave: Option<Arc<Mutex<CleaveProgress>>>,
     pub delegate: Option<Arc<Mutex<crate::features::delegate::DelegateProgress>>>,
     pub session: Arc<Mutex<SharedSessionStats>>,
@@ -54,25 +55,44 @@ impl DashboardHandles {
     /// (other Omegon instances, git pull, manual edits).
     /// Combines rescan + refresh to avoid double-locking the lifecycle Mutex.
     pub fn rescan_and_refresh(&self, state: &mut DashboardState) {
-        if let Some(ref lp_lock) = self.lifecycle
-            && let Ok(mut lp) = lp_lock.lock()
+        if let Some(ref lifecycle) = self.lifecycle
+            && let Ok(mut lp) = lifecycle.provider().lock()
         {
             lp.refresh();
             // Fall through to refresh_from_lifecycle below
             Self::refresh_from_lifecycle(&lp, state);
         }
+        self.refresh_openspec(state);
         self.refresh_non_lifecycle(state);
     }
 
     /// Refresh dashboard state from the shared feature handles.
     pub fn refresh_into(&self, state: &mut DashboardState) {
         // Lifecycle
-        if let Some(ref lp_lock) = self.lifecycle
-            && let Ok(lp) = lp_lock.lock()
+        if let Some(ref lifecycle) = self.lifecycle
+            && let Ok(lp) = lifecycle.provider().lock()
         {
             Self::refresh_from_lifecycle(&lp, state);
         }
+        self.refresh_openspec(state);
         self.refresh_non_lifecycle(state);
+    }
+
+    fn refresh_openspec(&self, state: &mut DashboardState) {
+        if let Some(ref lifecycle) = self.lifecycle
+            && let Ok(openspec) = lifecycle.openspec_snapshot(SnapshotOptions::default())
+        {
+            state.active_changes = openspec
+                .changes
+                .into_iter()
+                .map(|c| ChangeSummary {
+                    name: c.name,
+                    stage: c.lifecycle_state,
+                    done_tasks: c.done_tasks,
+                    total_tasks: c.total_tasks,
+                })
+                .collect();
+        }
     }
 
     fn refresh_non_lifecycle(&self, state: &mut DashboardState) {
@@ -115,18 +135,6 @@ impl DashboardHandles {
                 }
             })
         });
-        state.active_changes = lp
-            .changes()
-            .iter()
-            .filter(|c| !matches!(c.stage, ChangeStage::Archived))
-            .map(|c| ChangeSummary {
-                name: c.name.clone(),
-                stage: c.stage,
-                done_tasks: c.done_tasks,
-                total_tasks: c.total_tasks,
-            })
-            .collect();
-
         // Status counts + node lists
         let nodes = lp.all_nodes();
         let mut counts = StatusCounts {
@@ -324,7 +332,7 @@ pub struct DegradedNodeSummary {
 #[derive(Clone)]
 pub struct ChangeSummary {
     pub name: String,
-    pub stage: ChangeStage,
+    pub stage: String,
     pub done_tasks: usize,
     pub total_tasks: usize,
 }
@@ -581,7 +589,7 @@ impl DashboardState {
         lines.push(widgets::section_divider("openspec", w, t));
 
         for change in &self.active_changes {
-            let (icon, color) = stage_badge(change.stage, t);
+            let (icon, color) = stage_badge(&change.stage, t);
             let progress = if change.total_tasks > 0 {
                 format!(" {}/{}", change.done_tasks, change.total_tasks)
             } else {
@@ -821,7 +829,7 @@ fn node_text<'a>(
     // Inline OpenSpec: stage icon + task progress, not a bare ◈
     if let Some(ref change_name) = node.openspec_change {
         if let Some(change) = changes.get(change_name.as_str()) {
-            let (stage_icon, stage_color) = stage_badge(change.stage, t);
+            let (stage_icon, stage_color) = stage_badge(&change.stage, t);
             spans.push(Span::styled(
                 format!(" {stage_icon}"),
                 Style::default().fg(stage_color),
@@ -892,14 +900,16 @@ fn status_color(status: NodeStatus, t: &dyn Theme) -> Color {
     }
 }
 
-fn stage_badge(stage: ChangeStage, t: &dyn Theme) -> (&'static str, Color) {
+fn stage_badge(stage: &str, t: &dyn Theme) -> (&'static str, Color) {
     match stage {
-        ChangeStage::Proposed => ("◌", t.dim()),
-        ChangeStage::Specified => ("◐", t.dim()),
-        ChangeStage::Planned => ("▸", t.muted()),
-        ChangeStage::Implementing => ("⟳", t.warning()),
-        ChangeStage::Verifying => ("◉", t.success()),
-        ChangeStage::Archived => ("✓", t.success()),
+        "proposed" => ("◌", t.dim()),
+        "specced" | "specified" => ("◐", t.dim()),
+        "planned" => ("▸", t.muted()),
+        "testing" => ("◆", t.warning()),
+        "implementing" => ("⟳", t.warning()),
+        "verifying" => ("◉", t.success()),
+        "archived" => ("✓", t.success()),
+        _ => ("◌", t.dim()),
     }
 }
 
@@ -916,6 +926,8 @@ fn format_k(tokens: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::*;
     use crate::features::cleave::ChildProgress;
     use ratatui::Terminal;
@@ -1000,7 +1012,7 @@ mod tests {
         let mut state = DashboardState::default();
         state.active_changes = vec![ChangeSummary {
             name: "my-change".into(),
-            stage: ChangeStage::Implementing,
+            stage: "implementing".into(),
             done_tasks: 3,
             total_tasks: 8,
         }];
@@ -1103,9 +1115,9 @@ mod tests {
     #[test]
     fn stage_badge_mapping() {
         let t = super::super::theme::Alpharius;
-        let (icon, _) = stage_badge(ChangeStage::Implementing, &t);
+        let (icon, _) = stage_badge("implementing", &t);
         assert_eq!(icon, "⟳");
-        let (icon, _) = stage_badge(ChangeStage::Archived, &t);
+        let (icon, _) = stage_badge("archived", &t);
         assert_eq!(icon, "✓");
     }
 

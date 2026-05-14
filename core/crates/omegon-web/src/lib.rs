@@ -37,7 +37,9 @@ pub struct WebClient {
 
 impl WebClient {
     pub fn new() -> Self {
-        Self { client: http::build_client() }
+        Self {
+            client: http::build_client(),
+        }
     }
 
     /// Create from an existing reqwest::Client (for sharing with other code).
@@ -47,7 +49,9 @@ impl WebClient {
 }
 
 impl Default for WebClient {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Search options.
@@ -109,7 +113,8 @@ impl WebClient {
         query: &str,
         opts: &SearchOptions,
     ) -> Result<Vec<SearchResult>, SearchError> {
-        let futures: Vec<_> = engines.iter()
+        let futures: Vec<_> = engines
+            .iter()
             .map(|e| e.search(&self.client, query, opts))
             .collect();
         let outcomes = futures::future::join_all(futures).await;
@@ -124,7 +129,9 @@ impl WebClient {
         deduplicate(&mut all);
         all.truncate(opts.max_results);
         if all.is_empty() {
-            return Err(SearchError::AllEnginesFailed("all engines returned zero results in aggregate mode".into()));
+            return Err(SearchError::AllEnginesFailed(
+                "all engines returned zero results in aggregate mode".into(),
+            ));
         }
         Ok(all)
     }
@@ -138,7 +145,8 @@ impl WebClient {
     ) -> Result<Vec<SearchResult>, SearchError> {
         use futures::future::select_all;
 
-        let mut futs: Vec<_> = engines.iter()
+        let mut futs: Vec<_> = engines
+            .iter()
             .map(|e| Box::pin(e.search(&self.client, query, opts)))
             .collect();
 
@@ -166,7 +174,8 @@ impl WebClient {
     pub async fn fetch_content(&self, url: &str) -> anyhow::Result<String> {
         http::validate_url(url)?;
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(url)
             .timeout(std::time::Duration::from_secs(15))
             .send()
@@ -174,15 +183,18 @@ impl WebClient {
             .error_for_status()?;
 
         // Early size check from Content-Length header
-        if let Some(len) = resp.content_length() {
-            if len > MAX_FETCH_SIZE as u64 {
-                anyhow::bail!("response too large: {len} bytes (max {MAX_FETCH_SIZE})");
-            }
+        if let Some(len) = resp.content_length()
+            && len > MAX_FETCH_SIZE as u64
+        {
+            anyhow::bail!("response too large: {len} bytes (max {MAX_FETCH_SIZE})");
         }
 
         let bytes = resp.bytes().await?;
         if bytes.len() > MAX_FETCH_SIZE {
-            anyhow::bail!("response too large: {} bytes (max {MAX_FETCH_SIZE})", bytes.len());
+            anyhow::bail!(
+                "response too large: {} bytes (max {MAX_FETCH_SIZE})",
+                bytes.len()
+            );
         }
         let html = String::from_utf8_lossy(&bytes);
         Ok(extract::extract_content(&html))
@@ -191,10 +203,7 @@ impl WebClient {
 
 /// Legacy convenience function — creates a temporary client per call.
 /// Prefer `WebClient::new()` for repeated use.
-pub async fn search(
-    query: &str,
-    opts: &SearchOptions,
-) -> Result<Vec<SearchResult>, SearchError> {
+pub async fn search(query: &str, opts: &SearchOptions) -> Result<Vec<SearchResult>, SearchError> {
     WebClient::new().search(query, opts).await
 }
 

@@ -102,43 +102,50 @@ pub(crate) struct LifecycleSnapshot {
 
 impl LifecycleSnapshot {
     fn from_lifecycle_feature(lf: &features::lifecycle::LifecycleFeature) -> Self {
-        let lp = lf.provider();
-        let focused_node = lp.focused_node_id().and_then(|id| {
-            lp.get_node(id).map(|n| {
-                let sections = lifecycle::design::read_node_sections(n);
-                let assumptions = n.assumption_count();
-                let decisions_count = sections
-                    .as_ref()
-                    .map(|s| s.decisions.iter().filter(|d| d.status == "decided").count())
-                    .unwrap_or(0);
-                let readiness = sections
-                    .as_ref()
-                    .map(|s| s.readiness_score())
-                    .unwrap_or(0.0);
-                crate::tui::dashboard::FocusedNodeSummary {
-                    id: n.id.clone(),
-                    title: n.title.clone(),
-                    status: n.status,
-                    open_questions: n.open_questions.len() - assumptions,
-                    assumptions,
-                    decisions: decisions_count,
-                    readiness,
-                    openspec_change: n.openspec_change.clone(),
-                }
+        let focused_node = {
+            let lp = lf.provider();
+            lp.focused_node_id().and_then(|id| {
+                lp.get_node(id).map(|n| {
+                    let sections = lifecycle::design::read_node_sections(n);
+                    let assumptions = n.assumption_count();
+                    let decisions_count = sections
+                        .as_ref()
+                        .map(|s| s.decisions.iter().filter(|d| d.status == "decided").count())
+                        .unwrap_or(0);
+                    let readiness = sections
+                        .as_ref()
+                        .map(|s| s.readiness_score())
+                        .unwrap_or(0.0);
+                    crate::tui::dashboard::FocusedNodeSummary {
+                        id: n.id.clone(),
+                        title: n.title.clone(),
+                        status: n.status,
+                        open_questions: n.open_questions.len() - assumptions,
+                        assumptions,
+                        decisions: decisions_count,
+                        readiness,
+                        openspec_change: n.openspec_change.clone(),
+                    }
+                })
             })
-        });
+        };
 
-        let active_changes: Vec<_> = lp
-            .changes()
-            .iter()
-            .filter(|c| !matches!(c.stage, lifecycle::types::ChangeStage::Archived))
-            .map(|c| crate::tui::dashboard::ChangeSummary {
-                name: c.name.clone(),
-                stage: c.stage,
-                done_tasks: c.done_tasks,
-                total_tasks: c.total_tasks,
+        let active_changes: Vec<_> = lf
+            .read_handle()
+            .openspec_snapshot(Default::default())
+            .map(|snapshot| {
+                snapshot
+                    .changes
+                    .into_iter()
+                    .map(|c| crate::tui::dashboard::ChangeSummary {
+                        name: c.name,
+                        stage: c.lifecycle_state,
+                        done_tasks: c.done_tasks,
+                        total_tasks: c.total_tasks,
+                    })
+                    .collect()
             })
-            .collect();
+            .unwrap_or_default();
 
         Self {
             focused_node,
@@ -519,7 +526,7 @@ impl AgentSetup {
             tracing::info!(vault = %vp.display(), "Codex vault sync enabled for design tree");
         }
         let lifecycle_snapshot = LifecycleSnapshot::from_lifecycle_feature(&lifecycle_feature);
-        let lifecycle_handle = lifecycle_feature.shared_provider();
+        let lifecycle_handle = lifecycle_feature.read_handle();
         bus.register(Box::new(lifecycle_feature));
 
         // ─── Sandbox setting (read once, shared by cleave + delegate) ──
@@ -711,7 +718,7 @@ impl AgentSetup {
             features::context::ContextProvider::new_with_sources(
                 context_metrics.clone(),
                 command_tx.clone(),
-                Some(lifecycle_handle.clone()),
+                Some(lifecycle_handle.provider()),
                 context_memory_backend.clone(),
                 context_memory_mind.clone(),
                 Some(project_root.clone()),

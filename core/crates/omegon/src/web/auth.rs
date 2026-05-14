@@ -241,6 +241,8 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::await_holding_lock)]
+
     use std::sync::{Mutex, OnceLock};
 
     use super::*;

@@ -18,12 +18,12 @@ Omegon is a Rust-native agent loop and lifecycle engine. You are working on the 
 ## Architecture
 
 - **Workspace root**: Cargo workspace at repo root. Crates at `core/crates/`: `omegon` (main binary), `omegon-memory`, `omegon-extension`, `omegon-traits`, `omegon-git`, `omegon-secrets`, `omegon-codescan`, `omegon-opsx`
-- **Build + install**: `just build && just link` — builds release binary, symlinks to `~/.local/bin/omegon` + `om`, installs bundled skills
+- **Build + install**: `just build && just link` — builds release binary, writes dev aliases for `omegon` + `om`, installs bundled skills
 - **Test**: `just test-rust` — 1800+ tests, must all pass before committing
 - **Lint**: `just lint` — type check + clippy
 - **Single crate**: `just test-crate omegon-memory`
 - **Filter**: `just test-filter "vault_sync"`
-- **Config schemas**: `pkl/` directory — 9 Pkl schemas validating all config surfaces
+- **Config schemas**: `pkl/` directory — 10 Pkl schemas validating config surfaces
 - **Skills**: `skills/*/SKILL.md` — TOML frontmatter with `name` and `description` required
 
 ## Key conventions
@@ -31,9 +31,9 @@ Omegon is a Rust-native agent loop and lifecycle engine. You are working on the 
 - **Conventional commits** — `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`. See `skills/git/SKILL.md`.
 - **Direct commits to `main`** for focused changes. Feature branches for multi-session work.
 - **Read before editing** — `Edit` requires exact text matches. Always read the file first.
-- **Run tests after changes** — `cargo test -p omegon` from `core/`. Don't commit with failures.
+- **Run tests after changes** — `cargo test -p omegon` from the repo root. Don't commit with failures.
 - **Build and install after changes** — `just link` from the repo root to install over itself.
-- **CHANGELOG.md** — update the `[Unreleased]` section when landing features or fixes.
+- **CHANGELOG.md is mandatory release memory** — every commit that changes behavior, docs/site output, tooling, packaging, public API, or operator workflow must update `[Unreleased]` in the same change. Every release/tag must have a complete section for that exact version and must not skip intermediate released versions.
 
 ## Provider system
 

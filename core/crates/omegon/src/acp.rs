@@ -319,7 +319,7 @@ impl Agent for OmegonAcpAgent {
             let servers: Vec<(String, crate::plugins::mcp::McpServerConfig)> = args
                 .mcp_servers
                 .into_iter()
-                .filter_map(|server| convert_acp_mcp_server(server))
+                .filter_map(convert_acp_mcp_server)
                 .collect();
             if !servers.is_empty() {
                 tracing::info!(
@@ -875,13 +875,13 @@ impl OmegonAcpAgent {
                             .iter()
                             .map(|(name, field)| {
                                 let mut entry = serde_json::to_value(field).unwrap_or_default();
-                                if let Some(obj) = entry.as_object_mut() {
-                                    if let Some(val) = config_values.get(name) {
-                                        obj.insert(
-                                            "current_value".into(),
-                                            serde_json::Value::String(val.clone()),
-                                        );
-                                    }
+                                if let Some(obj) = entry.as_object_mut()
+                                    && let Some(val) = config_values.get(name)
+                                {
+                                    obj.insert(
+                                        "current_value".into(),
+                                        serde_json::Value::String(val.clone()),
+                                    );
                                 }
                                 (name.clone(), entry)
                             })
@@ -967,13 +967,13 @@ impl OmegonAcpAgent {
                     .iter()
                     .map(|(name, field)| {
                         let mut entry = serde_json::to_value(field).unwrap_or_default();
-                        if let Some(obj) = entry.as_object_mut() {
-                            if let Some(val) = config_values.get(name) {
-                                obj.insert(
-                                    "current_value".into(),
-                                    serde_json::Value::String(val.clone()),
-                                );
-                            }
+                        if let Some(obj) = entry.as_object_mut()
+                            && let Some(val) = config_values.get(name)
+                        {
+                            obj.insert(
+                                "current_value".into(),
+                                serde_json::Value::String(val.clone()),
+                            );
                         }
                         (name.clone(), entry)
                     })
@@ -1643,17 +1643,15 @@ impl OmegonAcpAgent {
                 let manifest_content = std::fs::read_to_string(&manifest_path)?;
                 let mut manifest: toml::Table = toml::from_str(&manifest_content)?;
 
-                if let Some(name) = params.get("name").and_then(|v| v.as_str()) {
-                    if let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut())
-                    {
-                        plugin.insert("name".into(), name.into());
-                    }
+                if let Some(name) = params.get("name").and_then(|v| v.as_str())
+                    && let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut())
+                {
+                    plugin.insert("name".into(), name.into());
                 }
-                if let Some(desc) = params.get("description").and_then(|v| v.as_str()) {
-                    if let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut())
-                    {
-                        plugin.insert("description".into(), desc.into());
-                    }
+                if let Some(desc) = params.get("description").and_then(|v| v.as_str())
+                    && let Some(plugin) = manifest.get_mut("plugin").and_then(|v| v.as_table_mut())
+                {
+                    plugin.insert("description".into(), desc.into());
                 }
                 if let Some(badge) = params.get("badge").and_then(|v| v.as_str()) {
                     let persona = manifest
@@ -2315,7 +2313,7 @@ mod tests {
     fn plan_entry_state_mapping() {
         use crate::acp_worker::{PlanEntryData, PlanEntryState};
 
-        let entries = vec![
+        let entries = [
             PlanEntryData {
                 content: "Step 1".into(),
                 status: PlanEntryState::Completed,
@@ -2416,9 +2414,7 @@ mod tests {
             content: "Solo".into(),
             status: PlanEntryState::Pending,
         }];
-        if entries.len() > 1 {
-            plan_state = entries.clone();
-        } else if plan_state.is_empty() {
+        if entries.len() > 1 || plan_state.is_empty() {
             plan_state = entries.clone();
         }
         assert_eq!(plan_state.len(), 1);

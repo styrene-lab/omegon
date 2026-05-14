@@ -29,10 +29,10 @@ This node resolved the monorepo root-selection question for LSP server spawning:
 
 ### Monorepo workspace root — pragmatic answer
 
-This repo (`omegon`) is itself a Cargo workspace with a `core/Cargo.toml` workspace root. The patterns from Omegon's own structure inform the decision.
+This repo (`omegon`) is itself a Cargo workspace rooted at `Cargo.toml`. The patterns from Omegon's own structure inform the decision.
 
 **The rust-analyzer workspace model:**
-rust-analyzer discovers the workspace root by walking up from the cwd looking for `Cargo.toml` with `[workspace]`. The Omegon case: `core/Cargo.toml` is the workspace root, `core/crates/omegon/Cargo.toml` is a member. rust-analyzer spawned from `core/` understands all crates. Spawned from `core/crates/omegon/` it sees only one crate.
+rust-analyzer discovers the workspace root by walking up from the cwd looking for `Cargo.toml` with `[workspace]`. The Omegon case: root `Cargo.toml` is the workspace root, `core/crates/omegon/Cargo.toml` is a member. rust-analyzer spawned from the repo root understands all crates. Spawned from `core/crates/omegon/` it sees only one crate.
 
 **Practical answer:** Spawn LSP servers rooted at the git root (same as the agent's `repo_path`). This mirrors how cleave children use `repo_path` as cwd. For Cargo workspaces, walk up from the file being queried to find the highest `Cargo.toml` with `[workspace]`, then spawn rust-analyzer there.
 

@@ -15,7 +15,7 @@ aliases = ["opsx"]
 OpenSpec is Omegon's specification layer for spec-and-test-driven development. It ensures that every non-trivial change follows the lifecycle:
 
 ```
-propose → spec → plan → implement → verify → archive
+propose → specced → planned → testing → implementing → verifying → archived
 ```
 
 Specs define **what must be true** before code is written. They are the source of truth for correctness.
@@ -25,9 +25,10 @@ Specs define **what must be true** before code is written. They are the source o
 | Stage | Artifacts | Next Action |
 |-------|-----------|-------------|
 | **proposed** | `proposal.md` | `/opsx:spec <change>` — write specs |
-| **specified** | `specs/*.md` | `/opsx:ff <change>` — generate design + tasks |
-| **planned** | `design.md`, `tasks.md` | `/cleave` — execute tasks |
-| **implementing** | tasks in progress | continue work or `/cleave` |
+| **specced** | `specs/*.md` | write `design.md` + `tasks.md`, then `openspec_manage(register_tasks)` |
+| **planned** | `design.md`, `tasks.md` | register failing test stubs with `openspec_manage(register_test_file)` |
+| **testing** | registered test stubs | implement until tests can pass |
+| **implementing** | tasks in progress | continue work or `/cleave`, update `tasks.md`, then `register_tasks` |
 | **verifying** | all tasks done | `/assess spec <change>` → `/opsx:archive` |
 | **archived** | specs merged to baseline | complete |
 
@@ -38,13 +39,14 @@ OpenSpec artifacts are not write-once planning docs. Treat them as runtime lifec
 At these checkpoints, reconcile the artifacts to match reality:
 
 1. **Implement / scaffold** — ensure the design-tree node is bound to the OpenSpec change and marked `implementing`
-2. **Post-cleave** — ensure `tasks.md` reflects merged work, not just original intent
+2. **Post-plan / post-cleave** — ensure `tasks.md` reflects merged work, not just original intent, then call `openspec_manage` with `action: register_tasks`
 3. **Post-assess / post-fix** — after `/assess spec` or `/assess cleave`, reopen lifecycle state if review found remaining work, and append implementation-note deltas when fixes expanded file scope or constraints
 4. **Pre-archive** — ensure the bound design-tree node and `tasks.md` are current before closing the change
 
 Archive is expected to refuse obviously stale lifecycle state, especially:
 - incomplete tasks in `tasks.md`
 - no design-tree binding for the change
+- missing registered test files before implementation
 
 ## Directory Structure
 
@@ -193,7 +195,7 @@ The contract is the **source of truth for API shape** — code implements the co
 |---------|-------------|
 | `/opsx:propose <name> <title>` | Create a new change with proposal.md |
 | `/opsx:spec <change>` | Generate/add specs (triggers agent to write scenarios) |
-| `/opsx:ff <change>` | Fast-forward: scaffold design.md + tasks.md from specs |
+| `/opsx:ff <change>` | Fast-forward: scaffold design.md + tasks.md from specs, then register task progress |
 | `/opsx:status` | Show all active changes with lifecycle stage |
 | `/opsx:verify <change>` | Delegates to `/assess spec` for spec verification |
 | `/opsx:archive <change>` | Archive change, merge specs to baseline |
@@ -211,23 +213,21 @@ Agent-callable tool for programmatic lifecycle operations.
 | `get` | `change_name` | Get change details, stage, spec summary |
 | `propose` | `name`, `title`, `intent` | Create new change |
 | `add_spec` | `change_name`, `domain`, `spec_content` | Add raw spec markdown |
-| `generate_spec` | `change_name`, `domain` | Generate spec scaffold from proposal |
-| `fast_forward` | `change_name` | Generate design.md + tasks.md |
+| `register_tasks` | `change_name` | Read `tasks.md` and register task progress in the FSM |
+| `register_test_file` | `change_name`, `path` | Register a failing test stub before implementation |
 | `archive` | `change_name` | Archive completed change |
 
-### `generate_spec` Optional Params
-
-- `decisions`: Array of `{title, rationale}` — generates requirements per decision
-- `open_questions`: Array of strings — generates MODIFIED Requirements placeholders
+`register_tasks` reads counts from `tasks.md`; do not pass ad hoc task totals. Update OpenSpec first, then register.
 
 ## Integration with Cleave
 
 OpenSpec and cleave work together:
 
-1. **`/opsx:ff`** generates `tasks.md` in the format cleave expects (numbered groups with checkboxes)
+1. **`/opsx:ff`** or manual planning generates `tasks.md` in the format cleave expects (numbered groups with checkboxes)
 2. **`/cleave`** detects `openspec/changes/<name>/tasks.md` and uses it as the split plan
 3. **`cleave_run`** with `openspec_change_path` updates task checkboxes on completion
-4. **`/assess spec`** verifies implementation against spec scenarios
+4. **`openspec_manage(register_tasks)`** advances the FSM from the current `tasks.md`
+5. **`/assess spec`** verifies implementation against spec scenarios
 
 ### Scenario-First Task Grouping
 

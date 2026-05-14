@@ -30,7 +30,7 @@ This node explores a release candidate system that makes pre-release builds iden
 
 ### Current release infrastructure
 
-- **Version**: workspace-level in `core/Cargo.toml` (currently 0.14.0), `--version` flag via clap derive
+- **Version**: workspace-level in root `Cargo.toml`, `--version` flag via clap derive
 - **Release flow**: `cargo release patch --execute` → bumps version, runs git-cliff for CHANGELOG, tags `v{version}`, pushes tag
 - **CI**: `.github/workflows/release.yml` triggers on `v*` tags, cross-compiles for 4 targets (x86_64/aarch64 × linux/macos), creates GitHub Release with attestations
 - **Install**: `install.sh` pulls latest release from `styrene-lab/omegon-core`, supports `VERSION=` env var for pinning

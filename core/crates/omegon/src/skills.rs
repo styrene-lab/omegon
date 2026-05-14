@@ -603,36 +603,36 @@ pub fn list_structured() -> anyhow::Result<Vec<SkillEntry>> {
     }
 
     // User-installed skills (non-bundled)
-    if let Some(ref dir) = home_skills {
-        if dir.is_dir() {
-            let mut user_skills: Vec<_> = std::fs::read_dir(dir)?
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().join("SKILL.md").exists())
-                .map(|e| e.file_name().to_string_lossy().to_string())
-                .filter(|name| !seen.contains(name))
-                .collect();
-            user_skills.sort();
-            for name in user_skills {
-                let skill_path = dir.join(&name).join("SKILL.md");
-                let content = std::fs::read_to_string(&skill_path).unwrap_or_default();
-                let (manifest, _body) = parse_skill_file(&content);
-                entries.push(SkillEntry {
-                    name: name.clone(),
-                    description: manifest.description.clone(),
-                    id: manifest.id.clone(),
-                    version: manifest.version.clone(),
-                    tags: manifest.tags.clone(),
-                    aliases: manifest.aliases.clone(),
-                    triggers: manifest.triggers.clone(),
-                    posture: manifest.posture.clone(),
-                    max_turns: manifest.max_turns,
-                    installed: true,
-                    bundled: false,
-                    project_local: false,
-                    path: dir.join(&name).display().to_string(),
-                });
-                seen.insert(name);
-            }
+    if let Some(ref dir) = home_skills
+        && dir.is_dir()
+    {
+        let mut user_skills: Vec<_> = std::fs::read_dir(dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().join("SKILL.md").exists())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|name| !seen.contains(name))
+            .collect();
+        user_skills.sort();
+        for name in user_skills {
+            let skill_path = dir.join(&name).join("SKILL.md");
+            let content = std::fs::read_to_string(&skill_path).unwrap_or_default();
+            let (manifest, _body) = parse_skill_file(&content);
+            entries.push(SkillEntry {
+                name: name.clone(),
+                description: manifest.description.clone(),
+                id: manifest.id.clone(),
+                version: manifest.version.clone(),
+                tags: manifest.tags.clone(),
+                aliases: manifest.aliases.clone(),
+                triggers: manifest.triggers.clone(),
+                posture: manifest.posture.clone(),
+                max_turns: manifest.max_turns,
+                installed: true,
+                bundled: false,
+                project_local: false,
+                path: dir.join(&name).display().to_string(),
+            });
+            seen.insert(name);
         }
     }
 

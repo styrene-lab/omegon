@@ -117,7 +117,7 @@ struct ScheduleEntry {
 enum ScheduleKind {
     Interval(Duration),
     Preset(Preset),
-    Cron(cron::Schedule),
+    Cron(Box<cron::Schedule>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -137,7 +137,7 @@ impl ScheduleState {
             .filter_map(|c| {
                 let kind = if let Some(ref cron_expr) = c.trigger.cron {
                     match cron_expr.parse::<cron::Schedule>() {
-                        Ok(schedule) => Some(ScheduleKind::Cron(schedule)),
+                        Ok(schedule) => Some(ScheduleKind::Cron(Box::new(schedule))),
                         Err(e) => {
                             tracing::warn!(
                                 trigger = %c.trigger.name,
@@ -306,7 +306,7 @@ pub struct MatchedTrigger {
 
 #[derive(Debug, Clone)]
 pub enum TriggerEvent {
-    Scheduled(TriggerConfig),
+    Scheduled(Box<TriggerConfig>),
     FileChanged {
         trigger_name: String,
         paths: Vec<std::path::PathBuf>,
@@ -327,6 +327,7 @@ pub enum TriggerEvent {
 
 // ── Git event kinds (for trigger config) ────────────────────────────────
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GitEventKind {
@@ -401,10 +402,10 @@ impl GitPollState {
     pub fn diff(&self, newer: &GitPollState) -> Vec<(GitEventKind, String)> {
         let mut changes = Vec::new();
 
-        if self.head_sha != newer.head_sha {
-            if let Some(ref sha) = newer.head_sha {
-                changes.push((GitEventKind::NewCommit, sha.clone()));
-            }
+        if self.head_sha != newer.head_sha
+            && let Some(ref sha) = newer.head_sha
+        {
+            changes.push((GitEventKind::NewCommit, sha.clone()));
         }
 
         for branch in &newer.branches {
@@ -459,7 +460,11 @@ impl TriggerRuntimeBuilder {
                     _ = sched_cancel.cancelled() => break,
                     _ = tick.tick() => {
                         for config in schedule.poll_due() {
-                            if sched_tx.send(TriggerEvent::Scheduled(config)).await.is_err() {
+                            if sched_tx
+                                .send(TriggerEvent::Scheduled(Box::new(config)))
+                                .await
+                                .is_err()
+                            {
                                 return;
                             }
                         }
@@ -535,15 +540,15 @@ impl TriggerRuntimeBuilder {
             .iter()
             .filter(|c| c.trigger.enabled && c.trigger.file_watch.is_some())
             .collect();
-        if !file_watch_configs.is_empty() {
-            if let Some(handle) = start_file_watcher(
+        if !file_watch_configs.is_empty()
+            && let Some(handle) = start_file_watcher(
                 &file_watch_configs,
                 &self.cwd,
                 event_tx.clone(),
                 cancel.clone(),
-            ) {
-                handles.push(handle);
-            }
+            )
+        {
+            handles.push(handle);
         }
 
         let runtime = TriggerRuntime {
@@ -1023,7 +1028,7 @@ caller_key = "trigger:daily-review"
             session: None,
         };
 
-        let state = ScheduleState::from_configs(&[config.clone()]);
+        let state = ScheduleState::from_configs(std::slice::from_ref(&config));
         assert_eq!(state.len(), 0);
 
         let triggers = EventTriggers::from_configs(&[config]);

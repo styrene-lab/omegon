@@ -457,7 +457,9 @@ default = "gmail"
                 description: "".into(),
                 sdk_version: "".into(),
             },
-            runtime: RuntimeConfig::Native { binary: "bin".into() },
+            runtime: RuntimeConfig::Native {
+                binary: "bin".into(),
+            },
             startup: StartupConfig::default(),
             widgets: HashMap::new(),
             mind: MindConfig::default(),

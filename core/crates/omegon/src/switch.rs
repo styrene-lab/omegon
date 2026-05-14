@@ -1002,7 +1002,7 @@ mod tests {
     #[test]
     fn test_switch_to_latest_sorts_by_version_not_api_order() {
         // Verify that Version ordering puts the right thing first
-        let mut versions = vec![
+        let mut versions = [
             Version::parse("0.13.0").unwrap(),
             Version::parse("0.14.1-rc.12").unwrap(),
             Version::parse("0.14.0").unwrap(),

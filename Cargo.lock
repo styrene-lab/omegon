@@ -4944,7 +4944,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-opsx"
-version = "0.1.0"
+version = "0.21.1"
 dependencies = [
  "libc",
  "serde",

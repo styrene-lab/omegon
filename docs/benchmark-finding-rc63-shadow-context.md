@@ -22,7 +22,7 @@ date = "2026-04-10"
 Benchmark task: `example-shadow-context`
 
 - prompt: `Finish the shadow-context assembly wiring.`
-- acceptance: `cargo test -p omegon shadow_context --manifest-path core/Cargo.toml`
+- acceptance: `cargo test -p omegon shadow_context`
 - clean-room benchmark harness: `scripts/benchmark_harness.py`
 
 ## Compared harnesses

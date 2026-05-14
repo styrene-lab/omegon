@@ -49,6 +49,42 @@ pub fn list_changes(repo_path: &Path) -> Vec<ChangeInfo> {
     changes
 }
 
+/// List archived OpenSpec changes (in openspec/archive/).
+pub fn list_archived_changes(repo_path: &Path) -> Vec<ChangeInfo> {
+    let Some(openspec_dir) = find_openspec_dir(repo_path) else {
+        return vec![];
+    };
+    let archive_dir = openspec_dir.join("archive");
+    if !archive_dir.is_dir() {
+        return vec![];
+    }
+
+    let mut changes = Vec::new();
+    let entries = match fs::read_dir(&archive_dir) {
+        Ok(e) => e,
+        Err(_) => return changes,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+
+        if let Some(mut info) = read_change(&path, &name) {
+            info.stage = ChangeStage::Archived;
+            changes.push(info);
+        }
+    }
+
+    changes.sort_by(|a, b| a.name.cmp(&b.name));
+    changes
+}
+
 /// Read a single change directory into a ChangeInfo.
 pub fn get_change(repo_path: &Path, name: &str) -> Option<ChangeInfo> {
     let openspec_dir = find_openspec_dir(repo_path)?;

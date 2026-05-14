@@ -18,21 +18,11 @@ use tokio::sync::{mpsc, oneshot};
 // Capabilities snapshot
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct HostCapabilities {
     pub fs_read: bool,
     pub fs_write: bool,
     pub terminal: bool,
-}
-
-impl Default for HostCapabilities {
-    fn default() -> Self {
-        Self {
-            fs_read: false,
-            fs_write: false,
-            terminal: false,
-        }
-    }
 }
 
 impl HostCapabilities {
@@ -598,10 +588,10 @@ async fn delegate_bash(
             "\n[timed out after {}ms]",
             timeout_ms.unwrap_or(600_000)
         ));
-    } else if let Some(code) = exit_code {
-        if code != 0 {
-            text.push_str(&format!("\n[exit code: {code}]"));
-        }
+    } else if let Some(code) = exit_code
+        && code != 0
+    {
+        text.push_str(&format!("\n[exit code: {code}]"));
     }
 
     Ok(ToolResult {

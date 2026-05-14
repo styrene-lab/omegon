@@ -94,7 +94,7 @@ After every RC cut, verify:
 - `git status --short` is clean
 - `git log --decorate --oneline -N` shows the release commit
 - `git tag --list 'vX.Y.Z-rc.*'` includes the new tag
-- `cargo run --manifest-path core/Cargo.toml -p omegon -- --version` reports the expected RC
+- `cargo run -p omegon -- --version` reports the expected RC
 
 ### 5. Keep failed experiments in the record
 

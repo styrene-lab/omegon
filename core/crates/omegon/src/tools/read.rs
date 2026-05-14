@@ -120,7 +120,69 @@ fn base64_encode(data: &[u8]) -> String {
     String::from_utf8(buf).unwrap()
 }
 
-/// Simple base64 encoder (avoids adding a dependency for this one use).
+struct Base64Encoder<W: std::io::Write> {
+    writer: W,
+    buf: [u8; 3],
+    len: usize,
+}
+
+const B64_CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+impl<W: std::io::Write> Base64Encoder<W> {
+    fn new(writer: W) -> Self {
+        Self {
+            writer,
+            buf: [0; 3],
+            len: 0,
+        }
+    }
+
+    fn finish(mut self) -> std::io::Result<W> {
+        if self.len > 0 {
+            for i in self.len..3 {
+                self.buf[i] = 0;
+            }
+            let mut out = [b'='; 4];
+            out[0] = B64_CHARS[((self.buf[0] >> 2) & 0x3F) as usize];
+            out[1] = B64_CHARS[(((self.buf[0] & 0x03) << 4) | (self.buf[1] >> 4)) as usize];
+            if self.len > 1 {
+                out[2] = B64_CHARS[(((self.buf[1] & 0x0F) << 2) | (self.buf[2] >> 6)) as usize];
+            }
+            if self.len > 2 {
+                out[3] = B64_CHARS[(self.buf[2] & 0x3F) as usize];
+            }
+            self.writer.write_all(&out)?;
+        }
+        Ok(self.writer)
+    }
+}
+
+impl<W: std::io::Write> std::io::Write for Base64Encoder<W> {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        let mut consumed = 0;
+        for &byte in data {
+            self.buf[self.len] = byte;
+            self.len += 1;
+            if self.len == 3 {
+                let out = [
+                    B64_CHARS[((self.buf[0] >> 2) & 0x3F) as usize],
+                    B64_CHARS[(((self.buf[0] & 0x03) << 4) | (self.buf[1] >> 4)) as usize],
+                    B64_CHARS[(((self.buf[1] & 0x0F) << 2) | (self.buf[2] >> 6)) as usize],
+                    B64_CHARS[(self.buf[2] & 0x3F) as usize],
+                ];
+                self.writer.write_all(&out)?;
+                self.len = 0;
+            }
+            consumed += 1;
+        }
+        Ok(consumed)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.flush()
+    }
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -307,68 +369,5 @@ mod tests {
         assert!(text.is_char_boundary(text.len()));
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-}
-
-struct Base64Encoder<W: std::io::Write> {
-    writer: W,
-    buf: [u8; 3],
-    len: usize,
-}
-
-const B64_CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-impl<W: std::io::Write> Base64Encoder<W> {
-    fn new(writer: W) -> Self {
-        Self {
-            writer,
-            buf: [0; 3],
-            len: 0,
-        }
-    }
-
-    fn finish(mut self) -> std::io::Result<W> {
-        if self.len > 0 {
-            for i in self.len..3 {
-                self.buf[i] = 0;
-            }
-            let mut out = [b'='; 4];
-            out[0] = B64_CHARS[((self.buf[0] >> 2) & 0x3F) as usize];
-            out[1] = B64_CHARS[(((self.buf[0] & 0x03) << 4) | (self.buf[1] >> 4)) as usize];
-            if self.len > 1 {
-                out[2] = B64_CHARS[(((self.buf[1] & 0x0F) << 2) | (self.buf[2] >> 6)) as usize];
-            }
-            if self.len > 2 {
-                out[3] = B64_CHARS[(self.buf[2] & 0x3F) as usize];
-            }
-            self.writer.write_all(&out)?;
-        }
-        Ok(self.writer)
-    }
-}
-
-impl<W: std::io::Write> std::io::Write for Base64Encoder<W> {
-    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        let mut consumed = 0;
-        for &byte in data {
-            self.buf[self.len] = byte;
-            self.len += 1;
-            if self.len == 3 {
-                let out = [
-                    B64_CHARS[((self.buf[0] >> 2) & 0x3F) as usize],
-                    B64_CHARS[(((self.buf[0] & 0x03) << 4) | (self.buf[1] >> 4)) as usize],
-                    B64_CHARS[(((self.buf[1] & 0x0F) << 2) | (self.buf[2] >> 6)) as usize],
-                    B64_CHARS[(self.buf[2] & 0x3F) as usize],
-                ];
-                self.writer.write_all(&out)?;
-                self.len = 0;
-            }
-            consumed += 1;
-        }
-        Ok(consumed)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.writer.flush()
     }
 }

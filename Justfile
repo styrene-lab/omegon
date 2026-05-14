@@ -4,6 +4,7 @@
 # Platform-agnostic in-place sed. macOS sed requires a backup extension
 # after -i; GNU sed does not. Using perl avoids the divergence entirely.
 sedi := "perl -pi -e"
+cargo := "cargo"
 
 # Default: show available recipes
 default:
@@ -20,23 +21,25 @@ bootstrap *args:
 
 # Run all Rust tests
 test-rust:
-    timeout 300 cargo test || (echo "⚠ Tests exceeded 5 minute timeout" && exit 1)
+    {{cargo}} test --workspace
 
 # Run tests for a specific crate
 test-crate crate:
-    cargo test -p {{crate}}
+    {{cargo}} test -p {{crate}}
 
 # Run tests matching a pattern
 test-filter pattern:
-    cargo test -p omegon '{{pattern}}'
+    {{cargo}} test -p omegon '{{pattern}}'
 
 # Type check without building (fast feedback)
 check:
-    cargo check
+    {{cargo}} check --workspace
 
-# Full check: type check + clippy
+# Full local lint gate for the entire workspace, including examples and tests.
 lint:
-    cargo check && cargo clippy -- -D warnings
+    {{cargo}} fmt --all --check
+    {{cargo}} check --workspace
+    {{cargo}} clippy --workspace --all-targets -- -D warnings
 
 # ─── Benchmarks ─────────────────────────────────────────────
 
@@ -48,7 +51,7 @@ bench prompt:
     mkdir -p .tmp/bench
     ts=$(date +%Y%m%d-%H%M%S)
     out=".tmp/bench/run-${ts}.json"
-    cargo run --release -- bench run-task \
+    {{cargo}} run --release -p omegon -- bench run-task \
         --prompt "{{prompt}}" \
         --usage-json "../${out}" 2>&1 | tail -20
     echo ""
@@ -68,7 +71,7 @@ bench-baseline:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "── Building release binary ──"
-    cargo build --release && cd ..
+    {{cargo}} build --release -p omegon
     echo "── Capturing baseline ──"
     mkdir -p ai/benchmarks/runs/baseline
     python3 scripts/benchmark_matrix.py \
@@ -89,7 +92,7 @@ bench-compare:
         exit 1
     fi
     echo "── Building release binary ──"
-    cargo build --release && cd ..
+    {{cargo}} build --release -p omegon
     echo "── Running current ──"
     mkdir -p ai/benchmarks/runs/current
     python3 scripts/benchmark_matrix.py \
@@ -108,7 +111,7 @@ bench-full:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "── Building release binary ──"
-    cargo build --release && cd ..
+    {{cargo}} build --release -p omegon
     ts=$(date +%Y%m%d-%H%M%S)
     out="ai/benchmarks/runs/full-${ts}"
     mkdir -p "$out"
@@ -133,7 +136,7 @@ bench-full:
 bench-task task harness:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build --release && cd ..
+    {{cargo}} build --release -p omegon
     ts=$(date +%Y%m%d-%H%M%S)
     out="ai/benchmarks/runs/single-${ts}"
     mkdir -p "$out"
@@ -148,7 +151,7 @@ bench-task task harness:
 
 # Build release binary
 build:
-    cargo build --release
+    {{cargo}} build --release -p omegon
 
 # Link the newest built binary onto $PATH so it can be run as `omegon` system-wide.
 # Prefers release over dev-release (just rc builds release; just update builds dev-release).
@@ -261,7 +264,7 @@ update:
     git checkout -- Cargo.lock 2>/dev/null || true
     git checkout -- .omegon/history 2>/dev/null || true
     git pull --rebase
-    cargo build --profile dev-release -p omegon
+    {{cargo}} build --profile dev-release -p omegon
     @echo "Updated to $(./target/dev-release/omegon --version 2>/dev/null || echo 'build failed')"
 
 # Build and link a specific tagged RC/stable release into a durable local worktree.
@@ -318,12 +321,12 @@ link-tag tag:
         else
             echo "Building $TAG in durable worktree..."
             echo "  binary version mismatch; rebuilding release binary"
-            (cd "$WT/core" && cargo build --release -p omegon)
+            (cd "$WT" && {{cargo}} build --release -p omegon)
         fi
     else
         echo "Building $TAG in durable worktree..."
         echo "  no existing tagged binary found; building release binary"
-        (cd "$WT/core" && cargo build --release -p omegon)
+        (cd "$WT" && {{cargo}} build --release -p omegon)
     fi
 
     echo "Linking installed omegon to $TAG..."
@@ -340,7 +343,7 @@ link-tag tag:
 
 # Full release build (fat LTO, single codegen unit — slow link, smallest binary)
 build-release:
-    cargo build --release -p omegon
+    {{cargo}} build --release -p omegon
 
 # Run the built binary directly (no recompile)
 run *args:
@@ -417,8 +420,8 @@ rc-validate:
 
     echo "Release validation..."
     echo "Rust warning gate..."
-    RUSTFLAGS="-D warnings" cargo check -p omegon -q
-    cargo test -p omegon 2>&1 | tail -3
+    RUSTFLAGS="-D warnings" {{cargo}} check -p omegon -q
+    {{cargo}} test -p omegon 2>&1 | tail -3
 
 rc:
     #!/usr/bin/env bash
@@ -507,7 +510,7 @@ rc:
         REPORT=$(mktemp)
         NODES_FILE=$(mktemp)
         printf '%s\n' "$MILESTONE_NODES" > "$NODES_FILE"
-        cargo run --quiet -p omegon -- doctor > "$REPORT"
+        {{cargo}} run --quiet -p omegon -- doctor > "$REPORT"
         BLOCKING_NODE=""
         while IFS= read -r node; do
             [ -n "$node" ] || continue
@@ -528,7 +531,7 @@ rc:
 
     echo "Note: full release validation is now split out of 'just rc'. Run 'just rc-validate' before cutting if you need local test confirmation."
     echo "Rust warning gate..."
-    RUSTFLAGS="-D warnings" cargo check -p omegon -q
+    RUSTFLAGS="-D warnings" {{cargo}} check -p omegon -q
 
     # From here on, rollback mutated files if anything fails before commit.
     MUTATED=0
@@ -546,7 +549,7 @@ rc:
     # Refresh the lockfile before commit/tag so release steps do not dirty the
     # tree after the RC is already cut.
     echo "Refreshing lockfile..."
-    cargo check -p omegon -q
+    {{cargo}} check -p omegon -q
     MUTATED=1
 
     # Commit and tag BEFORE final build so the binary has the right sha
@@ -558,7 +561,7 @@ rc:
 
     # Fast local validation build. CI produces the canonical distributable release artifacts.
     echo "Building local validation binary..."
-    cargo build --profile dev-release -p omegon 2>&1 | tail -3
+    {{cargo}} build --profile dev-release -p omegon 2>&1 | tail -3
 
     # Code sign the local validation binary when possible.
     BINARY="target/dev-release/omegon"
@@ -613,8 +616,7 @@ release:
     just preflight
 
     echo "Rust warning gate..."
-    RUSTFLAGS="-D warnings" cargo check -p omegon -q
-    cd ..
+    RUSTFLAGS="-D warnings" {{cargo}} check -p omegon -q
 
     CURRENT=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
     NEW_VERSION=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//')
@@ -627,16 +629,14 @@ release:
 
     # Refresh the lockfile before commit/tag so stable release steps do not
     # rewrite tracked files after the release commit already exists.
-    cargo check -p omegon -q
-    cd ..
+    {{cargo}} check -p omegon -q
 
     git add Cargo.toml Cargo.lock .omegon/milestones.json
     git commit -m "chore(release): ${NEW_VERSION}"
     git tag "v${NEW_VERSION}"
 
     echo "Building..."
-    cargo build --release -p omegon 2>&1 | tail -3
-    cd ..
+    {{cargo}} build --release -p omegon 2>&1 | tail -3
 
     echo ""
     echo "✓ ${NEW_VERSION} — tested, committed, tagged, built."
@@ -654,7 +654,7 @@ release:
     # Open next milestone
     ./scripts/milestone-update.sh open "$NEXT_PATCH"
 
-    cargo check -p omegon -q 2>&1 | tail -1; cd ..
+    {{cargo}} check -p omegon -q 2>&1 | tail -1
     git add Cargo.toml Cargo.lock .omegon/milestones.json
     git commit -m "chore(release): ${NEXT_RC}"
     echo "✓ Bumped to ${NEXT_RC} — branch is now open for the next cycle."
@@ -865,12 +865,13 @@ publish:
     # ── 3. Build docs site locally (verification) ─────────────
     echo ""
     echo "Building docs site locally..."
-    cd site
-    node scripts/build-design-tree.mjs 2>/dev/null
-    npx astro build 2>&1 | tail -5
-    PAGES=$(find dist -name '*.html' | wc -l | tr -d ' ')
-    echo "  Pages: $PAGES"
-    cd ..
+    (
+        cd site
+        node scripts/build-design-tree.mjs 2>/dev/null
+        npx astro build 2>&1 | tail -5
+        PAGES=$(find dist -name '*.html' | wc -l | tr -d ' ')
+        echo "  Pages: $PAGES"
+    )
 
     # ── 4. Link the binary ────────────────────────────────────
     # Do NOT call `just link` here — it uses a newest-wins heuristic between
@@ -966,13 +967,13 @@ brew-tap:
 
 # Build for Linux x86_64 (via zig cross-linker — no containers, no QEMU)
 build-linux-amd64:
-    cargo zigbuild --release --target x86_64-unknown-linux-gnu -p omegon
+    {{cargo}} zigbuild --release --target x86_64-unknown-linux-gnu -p omegon
     @ls -lh target/x86_64-unknown-linux-gnu/release/omegon
     @file target/x86_64-unknown-linux-gnu/release/omegon
 
 # Build for Linux aarch64 (via zig cross-linker)
 build-linux-arm64:
-    cargo zigbuild --release --target aarch64-unknown-linux-gnu -p omegon
+    {{cargo}} zigbuild --release --target aarch64-unknown-linux-gnu -p omegon
     @ls -lh target/aarch64-unknown-linux-gnu/release/omegon
     @file target/aarch64-unknown-linux-gnu/release/omegon
 
@@ -1083,7 +1084,7 @@ finalize-nightly tag='':
     git worktree add --detach "$WORKTREE" "$TAG"
 
     echo "Building macOS release binary..."
-    (cd "$WORKTREE/core" && cargo build --release -p omegon)
+    (cd "$WORKTREE" && {{cargo}} build --release -p omegon)
     BINARY="$WORKTREE/target/release/omegon"
 
     echo "Signing with Apple Developer ID (YubiKey)..."
@@ -1144,20 +1145,44 @@ finalize-nightly tag='':
 
 # Run all TS tests
 test-ts:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d ../omegon-pi ]; then
+        echo "Skipping TypeScript tests: ../omegon-pi is not present."
+        exit 0
+    fi
     cd ../omegon-pi && npx tsx --test tests/*.test.ts extensions/**/*.test.ts
 
 # TS type check
 typecheck:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d ../omegon-pi ]; then
+        echo "Skipping TypeScript typecheck: ../omegon-pi is not present."
+        exit 0
+    fi
     cd ../omegon-pi && npx tsc --noEmit
 
 # Full TS check: typecheck + lifecycle + tests
 check-ts:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d ../omegon-pi ]; then
+        echo "Skipping TypeScript check: ../omegon-pi is not present."
+        exit 0
+    fi
     cd ../omegon-pi && npm run check
 
 # ─── Armory (omegon-armory) ─────────────────────────────────
 
 # Run armory plugin tests
 test-armory:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d /tmp/omegon-armory ]; then
+        echo "Skipping armory tests: /tmp/omegon-armory is not present."
+        exit 0
+    fi
     cd /tmp/omegon-armory && npx tsx --test tests/*.test.ts
 
 # ─── Site ────────────────────────────────────────────────────
@@ -1173,13 +1198,13 @@ site-dev:
 # ─── Combined ───────────────────────────────────────────────
 
 # Run ALL tests (Rust + TS + armory)
-test-all: test-rust test-ts
+test-all: test-rust
 
-# Quick pre-commit check: Rust check + TS typecheck
-pre-commit: check typecheck
+# Quick pre-commit check: local Rust workspace only
+pre-commit: check
 
-# Full CI-equivalent: lint + all tests
-ci: lint test-rust check-ts
+# Local CI-equivalent for this repository
+ci: lint test-rust schema-check
 
 # ─── Counts ─────────────────────────────────────────────────
 
@@ -1188,39 +1213,39 @@ test-count:
     #!/usr/bin/env bash
     set -e
     echo "=== Rust ==="
-    cargo test 2>&1 | grep "test result" | awk '{s+=$4; f+=$6} END {printf "  %d passed, %d failed\n", s, f}'
+    {{cargo}} test --workspace 2>&1 | grep "test result" | awk '{s+=$4; f+=$6} END {printf "  %d passed, %d failed\n", s, f}'
     echo "=== TypeScript ==="
-    cd ../omegon-pi && npx tsx --test tests/*.test.ts extensions/**/*.test.ts 2>&1 | grep "^ℹ tests" | awk '{printf "  %s tests\n", $3}'
+    if [ -d ../omegon-pi ]; then cd ../omegon-pi && npx tsx --test tests/*.test.ts extensions/**/*.test.ts 2>&1 | grep "^ℹ tests" | awk '{printf "  %s tests\n", $3}'; else echo "  (../omegon-pi not present)"; fi
     echo "=== Armory ==="
-    cd /tmp/omegon-armory && npx tsx --test tests/*.test.ts 2>&1 | grep "^ℹ tests" | awk '{printf "  %s tests\n", $3}' 2>/dev/null || echo "  (not available)"
+    if [ -d /tmp/omegon-armory ]; then cd /tmp/omegon-armory && npx tsx --test tests/*.test.ts 2>&1 | grep "^ℹ tests" | awk '{printf "  %s tests\n", $3}'; else echo "  (/tmp/omegon-armory not present)"; fi
 
 # ─── Memory schema ──────────────────────────────────────────
 
 # Regenerate the schema contract file after schema changes
 schema-regen:
-    cargo test -p omegon-memory schema_contract_generate -- --ignored
+    {{cargo}} test -p omegon-memory schema_contract_generate -- --ignored
 
 # Verify schema contract is current
 schema-check:
-    cargo test -p omegon-memory schema_contract_is_current
+    {{cargo}} test -p omegon-memory schema_contract_is_current
 
 # ─── Secrets ────────────────────────────────────────────────
 
 # Run secrets crate tests
 test-secrets:
-    cargo test -p omegon-secrets
+    {{cargo}} test -p omegon-secrets
 
 # ─── MCP ────────────────────────────────────────────────────
 
 # Run MCP transport tests
 test-mcp:
-    cargo test -p omegon plugins::mcp
+    {{cargo}} test -p omegon plugins::mcp
 
 # ─── Plugins ────────────────────────────────────────────────
 
 # Run all plugin tests (armory + mcp + registry)
 test-plugins:
-    cargo test -p omegon plugins
+    {{cargo}} test -p omegon plugins
 
 # ─── Design tree ────────────────────────────────────────────
 
@@ -1243,7 +1268,7 @@ tree-count:
 
 # Generate CycloneDX SBOM from Cargo.lock
 sbom:
-    cargo cyclonedx --format json --output-cdx
+    {{cargo}} cyclonedx --format json --output-cdx
     @echo "SBOM written to core/bom.json"
 
 # Verify a downloaded binary's cosign signature
@@ -1279,7 +1304,7 @@ smoke:
     [[ "$VERSION" == *"omegon"* ]] || { echo "  ✗ Binary doesn't produce version"; FAIL=1; }
 
     # 2. Test count doesn't drop below known floor
-    TEST_COUNT=$(cargo test -p omegon 2>&1 | grep 'test result: ok' | awk '{print $4}')
+    TEST_COUNT=$({{cargo}} test -p omegon 2>&1 | grep 'test result: ok' | awk '{print $4}')
     echo "  Tests: $TEST_COUNT"
     if [ "$TEST_COUNT" -lt 850 ]; then
         echo "  ✗ Test count ($TEST_COUNT) below safety floor (850)"

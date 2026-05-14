@@ -312,8 +312,8 @@ Explain what you did and why this node matters for the project.",
 Something specific that would actually help: better error handling, missing validation, \
 a test gap, a missing feature. \
 Use openspec_manage with action 'propose' to create a change (pick a descriptive slug). \
-Then use action 'generate_spec' to write Given/When/Then scenarios for it \
-(domain name can match the slug). \
+Then use action 'add_spec' to write Given/When/Then scenarios for it \
+(domain name can match the slug, spec_content should contain the scenarios). \
 Keep it focused: one clear requirement, 2-3 scenarios. \
 This creates a real ai/openspec/ entry in your project.",
         ),

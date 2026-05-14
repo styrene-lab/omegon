@@ -356,15 +356,17 @@ impl ContextManager {
                     "Cleave guidelines:\n\
                      - cleave_assess determines complexity. Score ≥ 2.0 suggests decomposition.\n\
                      - When using OpenSpec, pass openspec_change_path to cleave_run.\n\
-                     - After cleave_run, reconcile tasks.md and design-tree status.",
+                     - After cleave_run, update tasks.md, then call openspec_manage(register_tasks) so the FSM reflects task progress.",
                 ),
 
                 // OpenSpec — inject lifecycle guidance
                 "openspec_manage" => (
                     "openspec",
                     "OpenSpec guidelines:\n\
-                     - The lifecycle: propose → spec → fast_forward → /cleave → /assess spec → archive\n\
+                     - The lifecycle: propose → add_spec → write tasks.md → register_tasks → register_test_file → /cleave or implement → /assess spec → archive\n\
                      - Specs define what must be true BEFORE code is written.\n\
+                     - Editing tasks.md alone does not advance lifecycle state; call register_tasks after task changes.\n\
+                     - Register test files before implementation so the FSM can enter implementing.\n\
                      - For tracked changes, use design_tree_update(implement) from a decided node.",
                 ),
 

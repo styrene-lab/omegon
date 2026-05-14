@@ -18,7 +18,7 @@
 //! and any release that ships this state will break extensions
 //! built against the new version.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::time::Duration;

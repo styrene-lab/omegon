@@ -1,8 +1,8 @@
 //! Search engine implementations — Google, Bing, DuckDuckGo.
 
-mod google;
 mod bing;
 mod duckduckgo;
+mod google;
 
 use crate::SearchOptions;
 
@@ -58,9 +58,14 @@ pub enum SearchError {
 impl std::fmt::Display for SearchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::BotDetected { engine, detail } => write!(f, "bot detection by {engine}: {detail}"),
+            Self::BotDetected { engine, detail } => {
+                write!(f, "bot detection by {engine}: {detail}")
+            }
             Self::RateLimited { engine } => write!(f, "rate limited by {engine}"),
-            Self::ParseFailed { engine } => write!(f, "no results parsed from {engine} (possible markup change)"),
+            Self::ParseFailed { engine } => write!(
+                f,
+                "no results parsed from {engine} (possible markup change)"
+            ),
             Self::AllEnginesFailed(msg) => write!(f, "{msg}"),
             Self::Http { engine, source } => write!(f, "{engine}: {source}"),
         }
@@ -72,12 +77,22 @@ impl std::error::Error for SearchError {}
 fn classify_error(engine: &str, err: anyhow::Error) -> SearchError {
     let msg = err.to_string();
     if msg.contains("bot detection") || msg.contains("consent") || msg.contains("CAPTCHA") {
-        SearchError::BotDetected { engine: engine.into(), detail: msg }
+        SearchError::BotDetected {
+            engine: engine.into(),
+            detail: msg,
+        }
     } else if msg.contains("429") || msg.contains("rate limit") {
-        SearchError::RateLimited { engine: engine.into() }
+        SearchError::RateLimited {
+            engine: engine.into(),
+        }
     } else if msg.contains("no results parsed") {
-        SearchError::ParseFailed { engine: engine.into() }
+        SearchError::ParseFailed {
+            engine: engine.into(),
+        }
     } else {
-        SearchError::Http { engine: engine.into(), source: msg }
+        SearchError::Http {
+            engine: engine.into(),
+            source: msg,
+        }
     }
 }

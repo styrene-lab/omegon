@@ -301,7 +301,7 @@ fn load_spec_from_url_cached(url: &str, cache_dir: &std::path::Path) -> anyhow::
                 .map_err(|e| anyhow::anyhow!("failed to read response body from {url}: {e}"))?;
 
             // Persist to cache (best-effort).
-            if std::fs::create_dir_all(&cache_dir).is_ok() {
+            if std::fs::create_dir_all(cache_dir).is_ok() {
                 let _ = std::fs::write(&cache_path, &body);
                 if let Some(etag) = &new_etag {
                     let _ = std::fs::write(&etag_path, etag);
@@ -394,9 +394,9 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
             let operation_id = op
                 .get("operationId")
                 .and_then(|v| v.as_str())
-                .map(|s| to_snake_case(s))
+                .map(to_snake_case)
                 .unwrap_or_else(|| {
-                    let slug = path.replace('/', "_").replace('{', "").replace('}', "");
+                    let slug = path.replace('/', "_").replace(['{', '}'], "");
                     format!("{method_str}{slug}")
                 });
 
@@ -449,10 +449,10 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
                     .unwrap_or("");
 
                 let mut prop = schema;
-                if !desc.is_empty() {
-                    if let Some(obj) = prop.as_object_mut() {
-                        obj.insert("description".into(), json!(desc));
-                    }
+                if !desc.is_empty()
+                    && let Some(obj) = prop.as_object_mut()
+                {
+                    obj.insert("description".into(), json!(desc));
                 }
                 properties.insert(param_name.to_string(), prop);
 
@@ -474,30 +474,28 @@ fn compile(name: &str, doc: &Value, config: &OpenApiConfig) -> anyhow::Result<Co
                 .and_then(|j| j.get("schema"))
                 .is_some();
 
-            if has_body {
-                if let Some(body_schema) = op
+            if has_body
+                && let Some(body_schema) = op
                     .get("requestBody")
                     .and_then(|rb| rb.get("content"))
                     .and_then(|c| c.get("application/json"))
                     .and_then(|j| j.get("schema"))
+            {
+                if let Some(body_props) = body_schema.get("properties").and_then(|p| p.as_object())
                 {
-                    if let Some(body_props) =
-                        body_schema.get("properties").and_then(|p| p.as_object())
-                    {
-                        for (k, v) in body_props {
-                            if !properties.contains_key(k) {
-                                properties.insert(k.clone(), v.clone());
-                            }
+                    for (k, v) in body_props {
+                        if !properties.contains_key(k) {
+                            properties.insert(k.clone(), v.clone());
                         }
                     }
-                    if let Some(body_required) =
-                        body_schema.get("required").and_then(|r| r.as_array())
-                    {
-                        for r in body_required {
-                            if let Some(s) = r.as_str() {
-                                if !required.contains(&s.to_string()) {
-                                    required.push(s.to_string());
-                                }
+                }
+                if let Some(body_required) = body_schema.get("required").and_then(|r| r.as_array())
+                {
+                    for r in body_required {
+                        if let Some(s) = r.as_str() {
+                            let required_name = s.to_string();
+                            if !required.contains(&required_name) {
+                                required.push(required_name);
                             }
                         }
                     }
@@ -608,16 +606,16 @@ fn sanitize_prefix(name: &str) -> String {
 fn to_snake_case(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 4);
     for (i, c) in s.chars().enumerate() {
-        if c.is_uppercase() && i > 0 {
-            if let Some(prev) = s.chars().nth(i - 1) {
-                if prev.is_lowercase() || prev.is_ascii_digit() {
-                    out.push('_');
-                }
-            }
+        if c.is_uppercase()
+            && i > 0
+            && let Some(prev) = s.chars().nth(i - 1)
+            && (prev.is_lowercase() || prev.is_ascii_digit())
+        {
+            out.push('_');
         }
         out.push(c.to_ascii_lowercase());
     }
-    out.replace('-', "_").replace(' ', "_")
+    out.replace(['-', ' '], "_")
 }
 
 #[cfg(test)]

@@ -288,12 +288,16 @@ mod tests {
 
     #[test]
     fn max_message_size_is_reasonable() {
-        assert!(MAX_WS_MESSAGE_BYTES >= 1024 * 1024); // at least 1MB
-        assert!(MAX_WS_MESSAGE_BYTES <= 16 * 1024 * 1024); // at most 16MB
+        const {
+            assert!(MAX_WS_MESSAGE_BYTES >= 1024 * 1024); // at least 1MB
+            assert!(MAX_WS_MESSAGE_BYTES <= 16 * 1024 * 1024); // at most 16MB
+        }
     }
 
     #[test]
     fn duplex_buffer_larger_than_typical_message() {
-        assert!(DUPLEX_BUFFER_BYTES >= 256 * 1024);
+        const {
+            assert!(DUPLEX_BUFFER_BYTES >= 256 * 1024);
+        }
     }
 }

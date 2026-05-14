@@ -3446,9 +3446,9 @@ mod tests {
     fn auto_detect_does_not_panic_regardless_of_env() {
         // auto_detect_bridge should handle missing keys gracefully
         // without us needing to clear/restore env vars
-        let _ = auto_detect_bridge("anthropic:test");
-        let _ = auto_detect_bridge("openai:test");
-        let _ = auto_detect_bridge("unknown-provider:test");
+        std::mem::drop(auto_detect_bridge("anthropic:test"));
+        std::mem::drop(auto_detect_bridge("openai:test"));
+        std::mem::drop(auto_detect_bridge("unknown-provider:test"));
         // All should return Some or None without panicking
     }
 
@@ -3764,7 +3764,7 @@ mod tests {
 
     #[test]
     fn openai_chat_completions_tools_use_sanitized_parameters() {
-        let tools = vec![ToolDefinition {
+        let tools = [ToolDefinition {
             name: "design_tree_update".into(),
             label: "design_tree_update".into(),
             description: "Mutate design tree".into(),

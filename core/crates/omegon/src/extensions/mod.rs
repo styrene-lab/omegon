@@ -730,7 +730,7 @@ mod tests {
     #[test]
     fn required_secret_check_detects_missing() {
         // Required secret not in resolved_secrets → missing
-        let required = vec!["GITHUB_TOKEN".to_string()];
+        let required = ["GITHUB_TOKEN".to_string()];
         let resolved: Vec<(String, String)> = vec![];
         let missing: Vec<&str> = required
             .iter()
@@ -743,8 +743,8 @@ mod tests {
     #[test]
     fn required_secret_check_passes_when_present() {
         // Required secret is in resolved_secrets → no missing
-        let required = vec!["GITHUB_TOKEN".to_string()];
-        let resolved = vec![("GITHUB_TOKEN".to_string(), "ghp_test".to_string())];
+        let required = ["GITHUB_TOKEN".to_string()];
+        let resolved = [("GITHUB_TOKEN".to_string(), "ghp_test".to_string())];
         let missing: Vec<&str> = required
             .iter()
             .filter(|name| !resolved.iter().any(|(k, _)| k == *name))

@@ -2186,6 +2186,7 @@ async fn dispatch_single_tool(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_tool_invocation(
     bus: &crate::bus::EventBus,
     visible_call_id: &str,
@@ -2249,33 +2250,32 @@ async fn execute_tool_invocation(
     });
 
     // Try host delegation before local execution.
-    if let Some(ctx) = host_context {
-        if let Some(result) =
+    if let Some(ctx) = host_context
+        && let Some(result) =
             crate::host_context::try_delegate_to_host(ctx, execution_tool_name, &execution_args)
                 .await
-        {
-            let (tool_result, is_error) = match result {
-                Ok(r) => (r, false),
-                Err(e) => (
-                    omegon_traits::ToolResult {
-                        content: vec![ContentBlock::Text {
-                            text: e.to_string(),
-                        }],
-                        details: Value::Null,
-                    },
-                    true,
-                ),
-            };
-            if emit_agent_events {
-                let _ = events.send(AgentEvent::ToolEnd {
-                    id: visible_call_id.to_string(),
-                    name: visible_tool_name.to_string(),
-                    result: tool_result.clone(),
-                    is_error,
-                });
-            }
-            return (tool_result, is_error);
+    {
+        let (tool_result, is_error) = match result {
+            Ok(r) => (r, false),
+            Err(e) => (
+                omegon_traits::ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: e.to_string(),
+                    }],
+                    details: Value::Null,
+                },
+                true,
+            ),
+        };
+        if emit_agent_events {
+            let _ = events.send(AgentEvent::ToolEnd {
+                id: visible_call_id.to_string(),
+                name: visible_tool_name.to_string(),
+                result: tool_result.clone(),
+                is_error,
+            });
         }
+        return (tool_result, is_error);
     }
 
     let execute = |cancel: CancellationToken, sink: omegon_traits::ToolProgressSink| {
@@ -2488,6 +2488,7 @@ async fn execute_tool_invocation(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_edit_batch(
     bus: &crate::bus::EventBus,
     serial_calls: &[(usize, ToolCall)],

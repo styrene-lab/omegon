@@ -19,9 +19,13 @@ use omegon_traits::{
 };
 
 use crate::lifecycle::context::LifecycleContextProvider;
+use crate::lifecycle::read_model::LifecycleReadHandle;
 use crate::lifecycle::{design, doctor, spec, types::*};
 
-use omegon_opsx::{JsonFileStore, Lifecycle as OpsxLifecycle, NodeState as OpsxNodeState};
+use omegon_opsx::{
+    ChangeState as OpsxChangeState, JsonFileStore, Lifecycle as OpsxLifecycle,
+    NodeState as OpsxNodeState, OpsxError,
+};
 
 /// The lifecycle Feature — wraps the LifecycleContextProvider and adds
 /// tools + commands for design-tree and openspec operations.
@@ -37,7 +41,7 @@ pub struct LifecycleFeature {
     /// omegon-opsx lifecycle engine — validates state transitions before
     /// markdown is written. The FSM is the authority for what transitions
     /// are legal; markdown is the content store.
-    opsx: Mutex<OpsxLifecycle<JsonFileStore>>,
+    opsx: Arc<Mutex<OpsxLifecycle<JsonFileStore>>>,
     /// Memory facts queued from execute() to be returned from on_event(TurnEnd).
     /// execute() takes &self so can't return BusRequests directly — this bridges the gap.
     pending_memory: Mutex<Vec<BusRequest>>,
@@ -46,6 +50,109 @@ pub struct LifecycleFeature {
 }
 
 impl LifecycleFeature {
+    fn opsx_change_states(&self) -> std::collections::HashMap<String, String> {
+        self.opsx
+            .lock()
+            .unwrap()
+            .state()
+            .changes
+            .iter()
+            .map(|c| (c.name.clone(), c.state.as_str().to_string()))
+            .collect()
+    }
+
+    fn ensure_opsx_change(
+        opsx: &mut OpsxLifecycle<JsonFileStore>,
+        name: &str,
+        title: &str,
+    ) -> anyhow::Result<()> {
+        if !opsx.state().changes.iter().any(|c| c.name == name) {
+            opsx.create_change(name, title, None)?;
+        }
+        Ok(())
+    }
+
+    fn sync_opsx_change_from_info(
+        opsx: &mut OpsxLifecycle<JsonFileStore>,
+        change: &ChangeInfo,
+    ) -> anyhow::Result<()> {
+        Self::ensure_opsx_change(opsx, &change.name, &change.name)?;
+        for spec in &change.specs {
+            opsx.add_spec(&change.name, &spec.domain)?;
+        }
+        opsx.update_change_progress(&change.name, change.total_tasks, change.done_tasks)?;
+
+        let state = opsx
+            .state()
+            .changes
+            .iter()
+            .find(|c| c.name == change.name)
+            .map(|c| c.state);
+
+        if state == Some(OpsxChangeState::Proposed) && !change.specs.is_empty() {
+            opsx.transition_change(&change.name, OpsxChangeState::Specced)?;
+        }
+
+        let state = opsx
+            .state()
+            .changes
+            .iter()
+            .find(|c| c.name == change.name)
+            .map(|c| c.state);
+
+        if state == Some(OpsxChangeState::Specced) && change.total_tasks > 0 {
+            opsx.transition_change(&change.name, OpsxChangeState::Planned)?;
+        }
+
+        Ok(())
+    }
+
+    fn sync_opsx_changes_from_info(&self, changes: &[ChangeInfo]) -> anyhow::Result<()> {
+        let mut opsx = self.opsx.lock().unwrap();
+        for change in changes {
+            Self::sync_opsx_change_from_info(&mut opsx, change)?;
+        }
+        Ok(())
+    }
+
+    fn opsx_change_state(
+        opsx: &OpsxLifecycle<JsonFileStore>,
+        name: &str,
+    ) -> Option<OpsxChangeState> {
+        opsx.state()
+            .changes
+            .iter()
+            .find(|c| c.name == name)
+            .map(|c| c.state)
+    }
+
+    fn transition_opsx_change_if(
+        opsx: &mut OpsxLifecycle<JsonFileStore>,
+        name: &str,
+        from: OpsxChangeState,
+        to: OpsxChangeState,
+    ) -> anyhow::Result<()> {
+        if Self::opsx_change_state(opsx, name) == Some(from) {
+            opsx.transition_change(name, to)?;
+        }
+        Ok(())
+    }
+
+    fn sync_opsx_change_by_name(
+        opsx: &mut OpsxLifecycle<JsonFileStore>,
+        repo_path: &std::path::Path,
+        name: &str,
+    ) -> anyhow::Result<ChangeInfo> {
+        let change = spec::get_change(repo_path, name)
+            .ok_or_else(|| anyhow::anyhow!("Change '{name}' not found"))?;
+        Self::sync_opsx_change_from_info(opsx, &change)?;
+        Ok(change)
+    }
+
+    fn opsx_store_error(context: &str, err: std::io::Error) -> OpsxError {
+        OpsxError::StoreError(format!("{context}: {err}"))
+    }
+
     fn is_archived(node: &DesignNode) -> bool {
         matches!(node.status, NodeStatus::Archived)
     }
@@ -82,7 +189,7 @@ impl LifecycleFeature {
             provider: Arc::new(Mutex::new(provider)),
             repo_path: repo_path.to_path_buf(),
             turn_counter: 0,
-            opsx: Mutex::new(opsx),
+            opsx: Arc::new(Mutex::new(opsx)),
             pending_memory: Mutex::new(vec![]),
             codex_vault_path: None,
         }
@@ -102,6 +209,15 @@ impl LifecycleFeature {
     /// Get a shared handle to the provider for live dashboard updates.
     pub fn shared_provider(&self) -> Arc<Mutex<LifecycleContextProvider>> {
         Arc::clone(&self.provider)
+    }
+
+    /// Get a shared lifecycle read-model handle for dashboards, IPC, and APIs.
+    pub fn read_handle(&self) -> LifecycleReadHandle {
+        LifecycleReadHandle::new(
+            Arc::clone(&self.provider),
+            Arc::clone(&self.opsx),
+            self.repo_path.clone(),
+        )
     }
 
     /// Bootstrap a markdown design node into omegon-opsx.
@@ -778,7 +894,23 @@ impl LifecycleFeature {
             .map(|values| values.iter().filter_map(|v| v.as_str()).collect());
         let node_filter = args["node_id"].as_str();
 
-        let findings = doctor::audit_repo(&self.repo_path);
+        let mut findings = doctor::audit_repo(&self.repo_path);
+        let changes = spec::list_changes(&self.repo_path);
+        let opsx_states = self
+            .opsx
+            .lock()
+            .unwrap()
+            .state()
+            .changes
+            .iter()
+            .map(|c| (c.name.clone(), c.state))
+            .collect();
+        findings.extend(doctor::audit_openspec_changes(&changes, &opsx_states));
+        findings.extend(doctor::audit_openspec_archives(
+            &self.repo_path,
+            &opsx_states,
+        ));
+
         let filtered: Vec<&doctor::AuditFinding> = findings
             .iter()
             .filter(|finding| {
@@ -842,12 +974,20 @@ impl LifecycleFeature {
                 if changes.is_empty() {
                     return Ok(text_result("No active OpenSpec changes."));
                 }
+                self.sync_opsx_changes_from_info(changes)?;
+                let opsx_states = self.opsx_change_states();
                 let list: Vec<Value> = changes
                     .iter()
                     .map(|c| {
+                        let state = opsx_states
+                            .get(&c.name)
+                            .cloned()
+                            .unwrap_or_else(|| c.stage.as_str().to_string());
                         json!({
                             "name": c.name,
-                            "stage": c.stage.as_str(),
+                            "state": state,
+                            "stage": state,
+                            "file_stage": c.stage.as_str(),
                             "has_proposal": c.has_proposal,
                             "has_specs": c.has_specs,
                             "has_tasks": c.has_tasks,
@@ -865,10 +1005,18 @@ impl LifecycleFeature {
                     .ok_or_else(|| anyhow::anyhow!("change_name required"))?;
                 let change = spec::get_change(&self.repo_path, name)
                     .ok_or_else(|| anyhow::anyhow!("Change '{name}' not found"))?;
+                self.sync_opsx_changes_from_info(std::slice::from_ref(&change))?;
+                let state = self
+                    .opsx_change_states()
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| change.stage.as_str().to_string());
 
                 let result = json!({
                     "name": change.name,
-                    "stage": change.stage.as_str(),
+                    "state": state,
+                    "stage": state,
+                    "file_stage": change.stage.as_str(),
                     "has_proposal": change.has_proposal,
                     "has_design": change.has_design,
                     "has_specs": change.has_specs,
@@ -898,7 +1046,22 @@ impl LifecycleFeature {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("intent required"))?;
 
+                if self
+                    .opsx
+                    .lock()
+                    .unwrap()
+                    .state()
+                    .changes
+                    .iter()
+                    .any(|c| c.name == name)
+                {
+                    anyhow::bail!("Change '{name}' already exists");
+                }
                 let change = spec::propose_change(&self.repo_path, name, title, intent)?;
+                if let Err(err) = self.opsx.lock().unwrap().create_change(name, title, None) {
+                    let _ = std::fs::remove_dir_all(&change.path);
+                    return Err(err.into());
+                }
                 self.provider.lock().unwrap().refresh();
                 Ok(text_result(&format!(
                     "Proposed change '{name}' at {}",
@@ -918,6 +1081,10 @@ impl LifecycleFeature {
                     .ok_or_else(|| anyhow::anyhow!("spec_content required"))?;
 
                 let path = spec::add_spec(&self.repo_path, name, domain, content)?;
+                {
+                    let mut opsx = self.opsx.lock().unwrap();
+                    Self::sync_opsx_change_by_name(&mut opsx, &self.repo_path, name)?;
+                }
                 self.provider.lock().unwrap().refresh();
                 Ok(text_result(&format!(
                     "Added spec '{domain}' to '{name}' at {}",
@@ -925,17 +1092,159 @@ impl LifecycleFeature {
                 )))
             }
 
+            "register_tasks" => {
+                let name = args["change_name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("change_name required"))?;
+
+                let mut opsx = self.opsx.lock().unwrap();
+                let change = Self::sync_opsx_change_by_name(&mut opsx, &self.repo_path, name)?;
+                if args.get("total_tasks").is_some() || args.get("done_tasks").is_some() {
+                    anyhow::bail!(
+                        "register_tasks reads task counts from tasks.md; update OpenSpec tasks first"
+                    );
+                }
+                let total_tasks = change.total_tasks;
+                let done_tasks = change.done_tasks;
+                if done_tasks > total_tasks {
+                    anyhow::bail!("done_tasks cannot exceed total_tasks");
+                }
+                opsx.update_change_progress(name, total_tasks, done_tasks)?;
+                Self::transition_opsx_change_if(
+                    &mut opsx,
+                    name,
+                    OpsxChangeState::Specced,
+                    OpsxChangeState::Planned,
+                )?;
+                if total_tasks > 0
+                    && done_tasks >= total_tasks
+                    && Self::opsx_change_state(&opsx, name) == Some(OpsxChangeState::Implementing)
+                {
+                    opsx.transition_change(name, OpsxChangeState::Verifying)?;
+                }
+                Ok(text_result(&format!(
+                    "Registered tasks for '{name}': {done_tasks}/{total_tasks}"
+                )))
+            }
+
+            "register_test_file" => {
+                let name = args["change_name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("change_name required"))?;
+                let path = args["path"]
+                    .as_str()
+                    .or_else(|| args["test_file"].as_str())
+                    .ok_or_else(|| anyhow::anyhow!("path required"))?;
+                if path.trim().is_empty() {
+                    anyhow::bail!("path required");
+                }
+
+                let mut opsx = self.opsx.lock().unwrap();
+                Self::sync_opsx_change_by_name(&mut opsx, &self.repo_path, name)?;
+                let state = Self::opsx_change_state(&opsx, name);
+                if !matches!(
+                    state,
+                    Some(
+                        OpsxChangeState::Planned
+                            | OpsxChangeState::Testing
+                            | OpsxChangeState::Implementing
+                    )
+                ) {
+                    anyhow::bail!("Change '{name}' must be planned before registering test files");
+                }
+                Self::transition_opsx_change_if(
+                    &mut opsx,
+                    name,
+                    OpsxChangeState::Planned,
+                    OpsxChangeState::Testing,
+                )?;
+                opsx.add_test_file(name, path)?;
+                Self::transition_opsx_change_if(
+                    &mut opsx,
+                    name,
+                    OpsxChangeState::Testing,
+                    OpsxChangeState::Implementing,
+                )?;
+                Ok(text_result(&format!(
+                    "Registered test file '{path}' for '{name}'"
+                )))
+            }
+
             "archive" => {
                 let name = args["change_name"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("change_name required"))?;
-                spec::archive_change(&self.repo_path, name)?;
+                let change_dir = self.repo_path.join("openspec/changes").join(name);
+                if !change_dir.exists() {
+                    anyhow::bail!("Change '{name}' does not exist");
+                }
+                let archive_dir = self.repo_path.join("openspec/archive").join(name);
+                if archive_dir.exists() {
+                    anyhow::bail!("Archived change '{name}' already exists");
+                }
+                {
+                    let mut opsx = self.opsx.lock().unwrap();
+                    Self::sync_opsx_change_by_name(&mut opsx, &self.repo_path, name)?;
+                    if Self::opsx_change_state(&opsx, name) != Some(OpsxChangeState::Verifying) {
+                        anyhow::bail!(
+                            "Change '{name}' must be verifying before archive; register specs, tasks, test files, and completed tasks first"
+                        );
+                    }
+                    let change_dir_for_archive = change_dir.clone();
+                    let archive_dir_for_archive = archive_dir.clone();
+                    let archive_parent = self.repo_path.join("openspec/archive");
+                    let change_dir_for_rollback = change_dir.clone();
+                    let archive_dir_for_rollback = archive_dir.clone();
+                    opsx.archive_change_with(
+                        name,
+                        move || {
+                            std::fs::create_dir_all(&archive_parent).map_err(|err| {
+                                Self::opsx_store_error(
+                                    &format!("mkdir {}", archive_parent.display()),
+                                    err,
+                                )
+                            })?;
+                            std::fs::rename(&change_dir_for_archive, &archive_dir_for_archive)
+                                .map_err(|err| {
+                                    Self::opsx_store_error(
+                                        &format!(
+                                            "archive {} to {}",
+                                            change_dir_for_archive.display(),
+                                            archive_dir_for_archive.display()
+                                        ),
+                                        err,
+                                    )
+                                })
+                        },
+                        move || {
+                            if archive_dir_for_rollback.exists()
+                                && !change_dir_for_rollback.exists()
+                            {
+                                std::fs::rename(
+                                    &archive_dir_for_rollback,
+                                    &change_dir_for_rollback,
+                                )
+                                .map_err(|err| {
+                                    Self::opsx_store_error(
+                                        &format!(
+                                            "rollback archive {} to {}",
+                                            archive_dir_for_rollback.display(),
+                                            change_dir_for_rollback.display()
+                                        ),
+                                        err,
+                                    )
+                                })?;
+                            }
+                            Ok(())
+                        },
+                    )?;
+                }
                 self.provider.lock().unwrap().refresh();
                 Ok(text_result(&format!("Archived change '{name}'")))
             }
 
             _ => anyhow::bail!(
-                "Unknown action: {action}. Valid: status, get, propose, add_spec, archive"
+                "Unknown action: {action}. Valid: status, get, propose, add_spec, register_tasks, register_test_file, archive"
             ),
         }
     }
@@ -1032,17 +1341,19 @@ impl Feature for LifecycleFeature {
             ToolDefinition {
                 name: crate::tool_registry::lifecycle::OPENSPEC_MANAGE.into(),
                 label: "openspec_manage".into(),
-                description: "Manage OpenSpec changes: list status, get details, propose changes, add specs, archive.".into(),
+                description: "Manage OpenSpec changes: list status, get details, propose changes, add specs, register tasks/test files, archive.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "action": { "type": "string", "enum": ["status", "get", "propose", "add_spec", "archive"] },
+                        "action": { "type": "string", "enum": ["status", "get", "propose", "add_spec", "register_tasks", "register_test_file", "archive"] },
                         "change_name": { "type": "string" },
                         "name": { "type": "string" },
                         "title": { "type": "string" },
                         "intent": { "type": "string" },
                         "domain": { "type": "string" },
-                        "spec_content": { "type": "string" }
+                        "spec_content": { "type": "string" },
+                        "path": { "type": "string", "description": "Test file path for register_test_file." },
+                        "test_file": { "type": "string", "description": "Alias for path." }
                     },
                     "required": ["action"]
                 }),
@@ -1637,6 +1948,9 @@ mod tests {
             .unwrap();
         let text = result.content[0].as_text().unwrap();
         assert!(text.contains("my-change"), "should list the change: {text}");
+        let changes: Vec<Value> = serde_json::from_str(text).unwrap();
+        assert_eq!(changes[0]["state"].as_str(), Some("proposed"));
+        assert_eq!(changes[0]["stage"].as_str(), Some("proposed"));
     }
 
     #[test]
@@ -1671,6 +1985,210 @@ mod tests {
             .unwrap();
         let text = result.content[0].as_text().unwrap();
         assert!(text.contains("auth"), "should list spec domain: {text}");
+        let change: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(change["state"].as_str(), Some("specced"));
+        assert_eq!(change["stage"].as_str(), Some("specced"));
+        assert_eq!(change["file_stage"].as_str(), Some("specified"));
+    }
+
+    #[test]
+    fn openspec_status_bootstraps_legacy_change_into_opsx() {
+        let (_dir, repo) = setup_test_repo();
+        let change_dir = repo.join("openspec/changes/legacy-change");
+        fs::create_dir_all(change_dir.join("specs")).unwrap();
+        fs::write(change_dir.join("proposal.md"), "# Legacy\n").unwrap();
+        fs::write(
+            change_dir.join("specs/auth.md"),
+            "# auth\n\n### Requirement: Login works\n\n#### Scenario: Valid creds\n\nGiven valid credentials\nWhen login\nThen success\n",
+        )
+        .unwrap();
+
+        let feature = LifecycleFeature::new(&repo);
+        let result = feature
+            .execute_openspec_manage(&json!({"action": "status"}))
+            .unwrap();
+        let text = result.content[0].as_text().unwrap();
+        let changes: Vec<Value> = serde_json::from_str(text).unwrap();
+        assert_eq!(changes[0]["name"].as_str(), Some("legacy-change"));
+        assert_eq!(changes[0]["state"].as_str(), Some("specced"));
+        assert_eq!(changes[0]["stage"].as_str(), Some("specced"));
+        assert_eq!(changes[0]["file_stage"].as_str(), Some("specified"));
+    }
+
+    #[test]
+    fn lifecycle_doctor_reports_openspec_state_drift() {
+        let (_dir, repo) = setup_test_repo();
+        let change_dir = repo.join("openspec/changes/drift-change");
+        fs::create_dir_all(change_dir.join("specs")).unwrap();
+        fs::write(change_dir.join("proposal.md"), "# Drift\n").unwrap();
+        fs::write(
+            change_dir.join("specs/auth.md"),
+            "# auth\n\n### Requirement: Login works\n\n#### Scenario: Valid creds\n\nGiven valid credentials\nWhen login\nThen success\n",
+        )
+        .unwrap();
+        fs::write(change_dir.join("tasks.md"), "- [ ] Wire implementation\n").unwrap();
+
+        let feature = LifecycleFeature::new(&repo);
+        feature
+            .execute_openspec_manage(&json!({"action": "status"}))
+            .unwrap();
+
+        let result = feature
+            .execute_lifecycle_doctor(&json!({
+                "kinds": ["openspec_state_drift"],
+                "node_id": "drift-change",
+            }))
+            .unwrap();
+
+        assert_eq!(result.details["total"].as_u64(), Some(1));
+        assert_eq!(
+            result.details["findings"][0]["kind"].as_str(),
+            Some("openspec_state_drift")
+        );
+    }
+
+    #[test]
+    fn lifecycle_doctor_reports_archived_content_state_drift() {
+        let (_dir, repo) = setup_test_repo();
+        let archive_dir = repo.join("openspec/archive/crash-window");
+        fs::create_dir_all(&archive_dir).unwrap();
+        fs::write(archive_dir.join("proposal.md"), "# Crash Window\n").unwrap();
+
+        let feature = LifecycleFeature::new(&repo);
+        feature
+            .opsx
+            .lock()
+            .unwrap()
+            .create_change("crash-window", "Crash Window", None)
+            .unwrap();
+
+        let result = feature
+            .execute_lifecycle_doctor(&json!({
+                "kinds": ["openspec_state_drift"],
+                "node_id": "crash-window",
+            }))
+            .unwrap();
+
+        assert_eq!(result.details["total"].as_u64(), Some(1));
+        assert!(
+            result.details["findings"][0]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("archived on disk")
+        );
+    }
+
+    #[test]
+    fn openspec_full_fsm_path_requires_tests_before_archive() {
+        let (_dir, repo) = setup_test_repo();
+        let feature = LifecycleFeature::new(&repo);
+
+        feature
+            .execute_openspec_manage(&json!({
+                "action": "propose",
+                "name": "full-change",
+                "title": "Full Change",
+                "intent": "Exercise the full OpenSpec FSM",
+            }))
+            .unwrap();
+        feature
+            .execute_openspec_manage(&json!({
+                "action": "add_spec",
+                "change_name": "full-change",
+                "domain": "core",
+                "spec_content": "# core\n\n### Requirement: Flow works\n\n#### Scenario: Valid flow\n\nGiven setup\nWhen run\nThen success\n",
+            }))
+            .unwrap();
+        let tasks_path = repo.join("openspec/changes/full-change/tasks.md");
+        fs::write(&tasks_path, "- [ ] Write tests\n- [ ] Implement\n").unwrap();
+        feature
+            .execute_openspec_manage(&json!({
+                "action": "register_tasks",
+                "change_name": "full-change",
+            }))
+            .unwrap();
+
+        let archive_err = feature
+            .execute_openspec_manage(&json!({
+                "action": "archive",
+                "change_name": "full-change",
+            }))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            archive_err.contains("must be verifying before archive"),
+            "unexpected archive error: {archive_err}"
+        );
+
+        feature
+            .execute_openspec_manage(&json!({
+                "action": "register_test_file",
+                "change_name": "full-change",
+                "path": "core/tests/full_change.rs",
+            }))
+            .unwrap();
+        fs::write(&tasks_path, "- [x] Write tests\n- [x] Implement\n").unwrap();
+        feature
+            .execute_openspec_manage(&json!({
+                "action": "register_tasks",
+                "change_name": "full-change",
+            }))
+            .unwrap();
+
+        let result = feature
+            .execute_openspec_manage(&json!({
+                "action": "get",
+                "change_name": "full-change",
+            }))
+            .unwrap();
+        let text = result.content[0].as_text().unwrap();
+        let change: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(change["state"].as_str(), Some("verifying"));
+        assert_eq!(change["stage"].as_str(), Some("verifying"));
+
+        feature
+            .execute_openspec_manage(&json!({
+                "action": "archive",
+                "change_name": "full-change",
+            }))
+            .unwrap();
+        assert!(repo.join("openspec/archive/full-change").exists());
+    }
+
+    #[test]
+    fn openspec_rejects_test_registration_before_tasks() {
+        let (_dir, repo) = setup_test_repo();
+        let feature = LifecycleFeature::new(&repo);
+
+        feature
+            .execute_openspec_manage(&json!({
+                "action": "propose",
+                "name": "no-plan",
+                "title": "No Plan",
+                "intent": "Try to skip planning",
+            }))
+            .unwrap();
+        feature
+            .execute_openspec_manage(&json!({
+                "action": "add_spec",
+                "change_name": "no-plan",
+                "domain": "core",
+                "spec_content": "# core\n\n### Requirement: Flow works\n\n#### Scenario: Valid flow\n\nGiven setup\nWhen run\nThen success\n",
+            }))
+            .unwrap();
+
+        let err = feature
+            .execute_openspec_manage(&json!({
+                "action": "register_test_file",
+                "change_name": "no-plan",
+                "path": "core/tests/no_plan.rs",
+            }))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("must be planned before registering test files"),
+            "unexpected test registration error: {err}"
+        );
     }
 
     #[test]

@@ -163,7 +163,9 @@ fn flock_exclusive(path: &Path) -> Result<FlockGuard, std::io::Error> {
     let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
     if ret != 0 {
         let err = std::io::Error::last_os_error();
-        unsafe { libc::close(fd); }
+        unsafe {
+            libc::close(fd);
+        }
         return Err(err);
     }
     Ok(FlockGuard { fd })
@@ -243,8 +245,10 @@ mod tests {
     fn rejects_future_schema_version() {
         let tmp = TempDir::new().unwrap();
         let store = JsonFileStore::new(tmp.path());
-        let mut state = LifecycleState::default();
-        state.version = 999;
+        let state = LifecycleState {
+            version: 999,
+            ..Default::default()
+        };
         // Write directly (bypassing version check on save)
         let dir = store.path().parent().unwrap();
         std::fs::create_dir_all(dir).unwrap();

@@ -23,6 +23,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Changed
 
 - **Anthropic subscription automation wording** — docs and TUI consent text now match the current runtime behavior: headless Anthropic subscription OAuth emits an explicit operator-risk warning and proceeds, while `ANTHROPIC_API_KEY` remains the recommended path for policy-clean automation.
+- **Architecture docs workspace alignment** — corrected current operator-facing docs for the root Cargo workspace, `just link` alias behavior, Pkl schema count, and root-level Cargo test/release commands.
+- **OpenSpec lifecycle crate is first-class** — `omegon-opsx` now inherits workspace version, edition, license, and repository metadata so the OpenSpec FSM ships in lockstep with Omegon.
+- **OpenSpec write-side FSM authority** — `openspec_manage propose` now creates an `omegon-opsx` change record, `add_spec` registers spec domains and advances through the validated `proposed -> specced` transition, and `status`/`get` expose the FSM state alongside file-derived stage details.
+- **OpenSpec legacy FSM bootstrap** — `openspec_manage status/get` now backfills existing file-backed changes into `omegon-opsx`, registers parsed spec domains and task counts, advances through validated early states, and `lifecycle_doctor` reports OpenSpec state drift.
+- **OpenSpec stage authority** — `openspec_manage` now reports `stage` from the `omegon-opsx` FSM, preserves parsed markdown state as `file_stage`, registers task progress from `tasks.md`, requires explicit test-file registration before implementation, and only archives changes that have reached `verifying`.
+- **Single-stream OpenSpec archive** — archiving now runs through one `omegon-opsx` lifecycle operation that validates the FSM, moves the OpenSpec content, persists state, and rolls content back if state persistence fails.
+- **OpenSpec archive drift detection** — documented the JSON/content crash window and taught `lifecycle_doctor` to flag archived OpenSpec content whose `omegon-opsx` state is missing or not archived.
+- **OpenSpec guidance alignment** — updated runtime prompts, tutorial copy, Sentry logging, and the bundled OpenSpec skill to direct agents through `register_tasks` and `register_test_file` instead of treating `tasks.md` edits as lifecycle transitions.
+- **Lifecycle read-model projection** — added a shared lifecycle read handle that projects OpenSpec status from `omegon-opsx` plus file diagnostics, and migrated startup, TUI, web, and IPC snapshots away from raw file-derived OpenSpec stages.
+- **Justfile workspace hygiene** — normalized local recipes around the root Cargo workspace, removed stale `core/` path assumptions, made external sibling-repo checks opt-in when present, and restored a passing local `just lint` gate without hiding existing clippy warnings.
+- **Strict clippy hygiene** — cleaned workspace clippy warnings across libs, bins, examples, and tests, then restored `just lint` as a `-D warnings` all-target gate.
 
 ## [0.21.1] - 2026-05-13
 
@@ -79,6 +90,119 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **`validate` is now the canonical model-facing validation tool** — validation is no longer inferred from `bash` command text or run implicitly after every edit/write. The loop classifies validation through explicit tool capabilities, and mutation tools now rely on explicit `validate` calls instead of hidden post-mutation checks.
 - **Progress boundary detection is now capability-driven** — `commit`, `delegate`, and `cleave_run` are classified via `ToolCapability::ProgressBoundary` instead of hardcoded name matching in the behavior engine. Progress signal and boundary detection now use the capability catalog, making the system extensible to plugin tools that mark task completion.
 - **`styrene-mqtt` now resolves as an external crate dependency** — Omegon depends on `styrene-mqtt = "0.1.0"` from crates.io instead of requiring a hard sibling path or local patch override in the main manifest.
+
+## [0.19.6] - 2026-05-11
+
+### Added
+
+- **OpenAPI tool compiler** — project REST APIs can be exposed as model-facing tools from an OpenAPI spec, with generated schemas, operation allow/confirm filters, and cached remote spec loading.
+- **Local ONNX embedding service** — added a privacy-first semantic embedding path for project memory.
+- **Code-act execution mode** — added script-generating execution flows for tasks that are better handled as generated code than stepwise tool calls.
+- **Dual-LLM Sentry routing prefilter** — Sentry can classify tasks before routing to the primary model, reducing cost on quick-completion work.
+
+### Changed
+
+- **Public documentation refresh** — updated site docs and version references for the 0.19.5/0.19.6 surfaces.
+- **OpenAPI provider wiring** — wired the OpenAPI tool provider into agent setup so configured APIs are available during normal sessions.
+
+## [0.19.5] - 2026-05-10
+
+### Fixed
+
+- **Registry-only dependency resolution** — published `flynt-models` and `styrene-forge` to crates.io and removed local path overrides so CI can resolve dependencies without sibling checkouts.
+- **Sentry integration coverage** — added cross-module tests for board lifecycle and orchestration behavior.
+- **Supply-chain license audit** — acknowledged MPL-2.0 Servo crates in the license audit.
+
+## [0.19.4] - 2026-05-09
+
+### Added
+
+- **Autonomous Sentry executor** — added the native task executor, trigger runtime, work-plan tool, and task tree plumbing.
+- **Flynt task board integration** — added autonomous execution for Flynt vaults, lifecycle mutations that reflect Running/Done/Failed state back into kanban, and a vault-to-project bridge.
+
+### Fixed
+
+- **FlyntTaskBoard hardening** — addressed adversarial-review findings and added startup probes for Flynt task boards.
+- **Lipstyk quality gate** — removed flagged wording patterns and added project configuration for the threshold gate.
+
+## [0.19.3] - 2026-05-09
+
+### Added
+
+- **ACP WebSocket transport** — added the network-accessible ACP server transport.
+- **Editor integration docs** — documented Zed, VS Code, and Flynt editor integration paths.
+
+### Fixed
+
+- **ACP WebSocket hardening** — addressed 20 adversarial review findings in the WebSocket transport.
+- **VS Code editor command** — corrected `/editor vscode` to reference the current ACP extension path.
+
+## [0.19.2] - 2026-05-08
+
+### Added
+
+- **Host-aware ACP capability layer** — ACP clients can delegate file I/O, terminal execution, and permission decisions back to the host.
+- **ACP/settings CRUD surface** — filled out the settings/control protocol surface and added concurrent instance isolation.
+- **Per-instance leases and advisory locks** — concurrent sessions now use per-instance workspace leases and advisory file locks.
+
+### Fixed
+
+- **ACP provider status panic** — fixed `provider_status` calling `block_on` from inside an async runtime.
+- **Human-readable agent errors** — replaced raw HTTP/provider errors with actionable operator-facing messages.
+- **Advisory lock ignores** — ignored generated `.json.lock` and `.toml.lock` files.
+
+## [0.19.1] - 2026-05-07
+
+### Added
+
+- **`omegon-web` crate** — added zero-config web search across Google, Bing, and DuckDuckGo.
+- **YAML frontmatter recovery** — recovered legacy YAML frontmatter metadata into TOML `[data]` tables.
+
+### Fixed
+
+- **Web search hardening** — addressed 20 adversarial-review issues in `omegon-web`.
+- **Final review findings** — fixed TOML injection, path traversal, and keychain prompt issues.
+
+## [0.19.0] - 2026-05-07
+
+### Added
+
+- **ACP control parity** — added `control/*` methods, notes, workspace operations, extension install/remove/update, skill list/install, persona switch, design-tree reads, Armory search, catalog browsing, persona CRUD, and skill CRUD.
+- **Extension configuration protocol** — added extension config interfaces, ACP redaction, and hardened secret handling.
+
+### Changed
+
+- **Tool capabilities are explicit** — tool definitions now carry capability metadata instead of relying on hardcoded name checks.
+- **`validate` is first-class** — validation moved to an explicit tool surface instead of implicit bash-command inference.
+- **Progress boundaries are capability-driven** — commit, delegate, and cleave progress detection now use capabilities, with widened stuck-detector behavior.
+- **Configuration source of truth** — ACP and behavior plumbing now carry `ToolCall` metadata, embedder environment state, and balanced nudge behavior.
+- **Styrene MQTT dependency cleanup** — removed the local `styrene-mqtt` override.
+- **Flynt vault frontmatter migration** — migrated markdown files to Flynt vault frontmatter conventions and updated fixtures for the Codyx-to-Flynt rename.
+
+### Fixed
+
+- **ACP message abort forwarding** — ACP now forwards `MessageAbort` events to clients.
+- **Dead-mouse write bias** — hardened behavior and environment handling around write-biased recovery loops and `OMEGON_PROJECT_ROOT`.
+
+## [0.18.6] - 2026-05-05
+
+### Added
+
+- **Armory extension registry** — added name-based extension install, search, and list support.
+
+## [0.18.5] - 2026-05-05
+
+### Added
+
+- **Pre-built extension tarball installs** — extension installation can consume pre-built tarballs directly.
+
+### Fixed
+
+- **Install script GitHub URL** — corrected the raw GitHub URL used by the install script.
+
+### Tests
+
+- **Tarball extension install tests** — added coverage for pre-built extension archive installation.
 
 ## [0.18.4] - 2026-05-03
 

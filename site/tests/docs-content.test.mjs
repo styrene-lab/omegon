@@ -64,4 +64,25 @@ test('site builds successfully', () => {
     env: { ...process.env },
     stdio: 'pipe',
   });
+
+  const changelogHtml = readFileSync(resolve(here, '../dist/changelog/index.html'), 'utf8');
+  const rootChangelog = readFileSync(resolve(here, '../../CHANGELOG.md'), 'utf8');
+
+  assert.match(rootChangelog, /^\+\+\+/);
+  assert.doesNotMatch(changelogHtml, /imported_reference/);
+  assert.doesNotMatch(changelogHtml, /\[publication\]/);
+  assert.match(changelogHtml, /Strict clippy hygiene/);
+  for (const version of [
+    '0.19.6',
+    '0.19.5',
+    '0.19.4',
+    '0.19.3',
+    '0.19.2',
+    '0.19.1',
+    '0.19.0',
+    '0.18.6',
+    '0.18.5',
+  ]) {
+    assert.match(changelogHtml, new RegExp(`\\[${version}\\]`));
+  }
 });

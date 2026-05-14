@@ -4,10 +4,13 @@
 //! nodes that look stale so release flow or operators can reconcile them.
 
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::Path;
 
+use omegon_opsx::ChangeState;
+
 use super::design;
-use super::types::{DesignNode, NodeStatus};
+use super::types::{ChangeInfo, ChangeStage, DesignNode, NodeStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuditKind {
@@ -17,6 +20,7 @@ pub enum AuditKind {
     ExploringWithoutQuestions,
     ParentImplementedWithActiveChildren,
     QuestionAppearsAnsweredByDecision,
+    OpenSpecStateDrift,
 }
 
 impl AuditKind {
@@ -28,6 +32,7 @@ impl AuditKind {
             Self::ExploringWithoutQuestions => "exploring_without_questions",
             Self::ParentImplementedWithActiveChildren => "parent_implemented_with_active_children",
             Self::QuestionAppearsAnsweredByDecision => "question_appears_answered_by_decision",
+            Self::OpenSpecStateDrift => "openspec_state_drift",
         }
     }
 }
@@ -150,6 +155,99 @@ pub fn audit_nodes(nodes: &HashMap<String, DesignNode>) -> Vec<AuditFinding> {
             .then(a.kind.as_str().cmp(b.kind.as_str()))
     });
     findings
+}
+
+pub fn audit_openspec_changes(
+    changes: &[ChangeInfo],
+    opsx_states: &HashMap<String, ChangeState>,
+) -> Vec<AuditFinding> {
+    let mut findings = Vec::new();
+
+    for change in changes {
+        let expected = opsx_state_for_stage(change.stage);
+        let Some(actual) = opsx_states.get(&change.name).copied() else {
+            findings.push(AuditFinding {
+                node_id: change.name.clone(),
+                title: change.name.clone(),
+                kind: AuditKind::OpenSpecStateDrift,
+                detail: "OpenSpec change exists on disk but has no omegon-opsx change record"
+                    .into(),
+            });
+            continue;
+        };
+
+        if actual != expected {
+            findings.push(AuditFinding {
+                node_id: change.name.clone(),
+                title: change.name.clone(),
+                kind: AuditKind::OpenSpecStateDrift,
+                detail: format!(
+                    "OpenSpec file stage is {}, but omegon-opsx state is {}",
+                    change.stage.as_str(),
+                    actual.as_str()
+                ),
+            });
+        }
+    }
+
+    findings.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    findings
+}
+
+pub fn audit_openspec_archives(
+    repo_root: &Path,
+    opsx_states: &HashMap<String, ChangeState>,
+) -> Vec<AuditFinding> {
+    let archive_dir = repo_root.join("openspec/archive");
+    let entries = match fs::read_dir(&archive_dir) {
+        Ok(entries) => entries,
+        Err(_) => return vec![],
+    };
+
+    let mut findings = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        match opsx_states.get(name).copied() {
+            Some(ChangeState::Archived) => {}
+            Some(state) => findings.push(AuditFinding {
+                node_id: name.to_string(),
+                title: name.to_string(),
+                kind: AuditKind::OpenSpecStateDrift,
+                detail: format!(
+                    "OpenSpec content is archived on disk, but omegon-opsx state is {}",
+                    state.as_str()
+                ),
+            }),
+            None => findings.push(AuditFinding {
+                node_id: name.to_string(),
+                title: name.to_string(),
+                kind: AuditKind::OpenSpecStateDrift,
+                detail: "OpenSpec content is archived on disk but has no omegon-opsx change record"
+                    .into(),
+            }),
+        }
+    }
+
+    findings.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    findings
+}
+
+fn opsx_state_for_stage(stage: ChangeStage) -> ChangeState {
+    match stage {
+        ChangeStage::Proposed => ChangeState::Proposed,
+        ChangeStage::Specified => ChangeState::Specced,
+        ChangeStage::Planned => ChangeState::Planned,
+        ChangeStage::Implementing => ChangeState::Implementing,
+        ChangeStage::Verifying => ChangeState::Verifying,
+        ChangeStage::Archived => ChangeState::Archived,
+    }
 }
 
 fn normalize(s: &str) -> String {

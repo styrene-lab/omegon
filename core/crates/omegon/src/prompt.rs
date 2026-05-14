@@ -239,8 +239,10 @@ fn detect_lifecycle_context(cwd: &Path, tools: &[ToolDefinition]) -> String {
     if has_openspec && has_openspec_tools {
         sections.push(
             "openspec: Spec-driven implementation lifecycle. The full cycle is: \
-             design_tree_update(implement) → spec → fast_forward → /cleave → \
-             /assess spec → archive. Specs define what must be true BEFORE code is written."
+             design_tree_update(implement) → add_spec → write tasks.md → \
+             openspec_manage(register_tasks) → openspec_manage(register_test_file) → \
+             /cleave or implement → /assess spec → archive. Specs define what must be true \
+             BEFORE code is written; editing tasks.md alone does not advance FSM state."
                 .into(),
         );
     }
@@ -903,7 +905,7 @@ mod tests {
         }
 
         // Sort by token cost descending
-        all_tools.sort_by(|a, b| b.1.cmp(&a.1));
+        all_tools.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
         eprintln!("\n╔═══════════════════════════════════════════════════════════════╗");
         eprintln!("║              TOOL TOKEN BUDGET AUDIT                         ║");

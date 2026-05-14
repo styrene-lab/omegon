@@ -74,8 +74,10 @@ fn spawn_daemon() -> Result<(SpawnedDaemon, StartupEvent)> {
     let bin = resolve_omegon_binary()?;
 
     let mut child = Command::new(bin)
-        .args(["serve", "--control-port", "7854", "--strict-port"])
+        .args(["serve", "--control-port", "0", "--strict-port"])
         .env("RUST_LOG", "error")
+        .env("HOME", tmp.path())
+        .env("OMEGON_HOME", tmp.path().join(".omegon"))
         .current_dir(tmp.path())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

@@ -217,9 +217,9 @@ expected_solution:
 
 acceptance:
   required:
-    - cargo test -p omegon shadow_context --manifest-path core/Cargo.toml
+    - cargo test -p omegon shadow_context
   optional:
-    - cargo test -p omegon request_context --manifest-path core/Cargo.toml
+    - cargo test -p omegon request_context
   failure_if:
     - git diff --name-only | rg '^core/crates/omegon/src/' -v
 
@@ -292,8 +292,8 @@ Acceptance must be designed in layers.
 This is the non-negotiable pass/fail layer.
 
 Examples:
-- `cargo test -p omegon shadow_context --manifest-path core/Cargo.toml`
-- `cargo test -p omegon request_context --manifest-path core/Cargo.toml`
+- `cargo test -p omegon shadow_context`
+- `cargo test -p omegon request_context`
 - `npm run typecheck`
 - `cargo check`
 - `cargo test specific_module`

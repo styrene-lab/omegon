@@ -342,10 +342,10 @@ impl IntentDocument {
             .position(|w| w.status == WorkItemStatus::Active);
         if let Some(idx) = active_idx {
             self.work_plan[idx].status = WorkItemStatus::Done;
-            if let Some(next) = self.work_plan.get_mut(idx + 1) {
-                if next.status == WorkItemStatus::Pending {
-                    next.status = WorkItemStatus::Active;
-                }
+            if let Some(next) = self.work_plan.get_mut(idx + 1)
+                && next.status == WorkItemStatus::Pending
+            {
+                next.status = WorkItemStatus::Active;
             }
         }
     }
@@ -360,14 +360,12 @@ impl IntentDocument {
             .work_plan
             .iter()
             .any(|w| w.status == WorkItemStatus::Active)
-        {
-            if let Some(next) = self
+            && let Some(next) = self
                 .work_plan
                 .iter_mut()
                 .find(|w| w.status == WorkItemStatus::Pending)
-            {
-                next.status = WorkItemStatus::Active;
-            }
+        {
+            next.status = WorkItemStatus::Active;
         }
     }
 
@@ -379,10 +377,10 @@ impl IntentDocument {
             .position(|w| w.status == WorkItemStatus::Active);
         if let Some(idx) = active_idx {
             self.work_plan[idx].status = WorkItemStatus::Skipped;
-            if let Some(next) = self.work_plan.get_mut(idx + 1) {
-                if next.status == WorkItemStatus::Pending {
-                    next.status = WorkItemStatus::Active;
-                }
+            if let Some(next) = self.work_plan.get_mut(idx + 1)
+                && next.status == WorkItemStatus::Pending
+            {
+                next.status = WorkItemStatus::Active;
             }
         }
     }
@@ -2196,7 +2194,7 @@ mod tests {
         conv.push_user("hello world".into()); // 11 chars
         let tokens = conv.estimate_tokens();
         // "hello world" = 11 chars → 11/4 = 2 tokens (integer division)
-        assert!(tokens >= 2 && tokens <= 4, "got {tokens}");
+        assert!((2..=4).contains(&tokens), "got {tokens}");
     }
 
     #[test]

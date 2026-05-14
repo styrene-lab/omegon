@@ -1213,7 +1213,7 @@ mod tests {
         assert_eq!(partials.len(), 1);
         let p = &partials[0];
         assert_eq!(p.tail, "");
-        assert_eq!(p.progress.heartbeat, false);
+        assert!(!p.progress.heartbeat);
         assert_eq!(p.progress.phase.as_deref(), Some("indexing files"));
         let units = p.progress.units.as_ref().unwrap();
         assert_eq!(units.current, 5);

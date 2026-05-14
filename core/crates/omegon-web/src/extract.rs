@@ -23,22 +23,22 @@ pub fn extract_content(html: &str) -> String {
     ];
 
     for sel_str in &main_selectors {
-        if let Ok(sel) = Selector::parse(sel_str) {
-            if let Some(el) = dom.select(&sel).next() {
-                let text = extract_text_from_element(&el);
-                if text.len() > 200 {
-                    return clean_whitespace(&text);
-                }
+        if let Ok(sel) = Selector::parse(sel_str)
+            && let Some(el) = dom.select(&sel).next()
+        {
+            let text = extract_text_from_element(&el);
+            if text.len() > 200 {
+                return clean_whitespace(&text);
             }
         }
     }
 
     // Fallback: extract from body, skipping non-content elements
-    if let Ok(body_sel) = Selector::parse("body") {
-        if let Some(body) = dom.select(&body_sel).next() {
-            let text = extract_text_from_element(&body);
-            return clean_whitespace(&text);
-        }
+    if let Ok(body_sel) = Selector::parse("body")
+        && let Some(body) = dom.select(&body_sel).next()
+    {
+        let text = extract_text_from_element(&body);
+        return clean_whitespace(&text);
     }
 
     // Last resort: all text
@@ -47,9 +47,11 @@ pub fn extract_content(html: &str) -> String {
 
 fn extract_text_from_element(el: &scraper::ElementRef) -> String {
     let skip_tags: std::collections::HashSet<&str> = [
-        "script", "style", "nav", "footer", "header", "aside",
-        "noscript", "iframe", "svg", "form", "button",
-    ].into_iter().collect();
+        "script", "style", "nav", "footer", "header", "aside", "noscript", "iframe", "svg", "form",
+        "button",
+    ]
+    .into_iter()
+    .collect();
 
     let mut text = String::new();
     collect_text(&mut text, el, &skip_tags);
@@ -76,13 +78,40 @@ fn collect_text(
                     continue;
                 }
                 // Block elements get newlines
-                if matches!(tag, "p" | "div" | "br" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "li" | "tr" | "blockquote" | "pre") {
+                if matches!(
+                    tag,
+                    "p" | "div"
+                        | "br"
+                        | "h1"
+                        | "h2"
+                        | "h3"
+                        | "h4"
+                        | "h5"
+                        | "h6"
+                        | "li"
+                        | "tr"
+                        | "blockquote"
+                        | "pre"
+                ) {
                     out.push('\n');
                 }
                 if let Some(el_ref) = scraper::ElementRef::wrap(child) {
                     collect_text(out, &el_ref, skip_tags);
                 }
-                if matches!(tag, "p" | "div" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "li" | "tr" | "blockquote" | "pre") {
+                if matches!(
+                    tag,
+                    "p" | "div"
+                        | "h1"
+                        | "h2"
+                        | "h3"
+                        | "h4"
+                        | "h5"
+                        | "h6"
+                        | "li"
+                        | "tr"
+                        | "blockquote"
+                        | "pre"
+                ) {
                     out.push('\n');
                 }
             }

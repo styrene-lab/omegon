@@ -18,20 +18,30 @@ pub fn browser_headers() -> HeaderMap {
     h.insert("User-Agent", HeaderValue::from_static(
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     ));
-    h.insert("Accept", HeaderValue::from_static(
-        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-    ));
-    h.insert("Accept-Language", HeaderValue::from_static("en-US,en;q=0.9"));
-    h.insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate, br"));
+    h.insert(
+        "Accept",
+        HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+    );
+    h.insert(
+        "Accept-Language",
+        HeaderValue::from_static("en-US,en;q=0.9"),
+    );
+    h.insert(
+        "Accept-Encoding",
+        HeaderValue::from_static("gzip, deflate, br"),
+    );
     // Sec-Fetch headers — required by modern browsers
     h.insert("Sec-Fetch-Dest", HeaderValue::from_static("document"));
     h.insert("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
     h.insert("Sec-Fetch-Site", HeaderValue::from_static("none"));
     h.insert("Sec-Fetch-User", HeaderValue::from_static("?1"));
     // Client Hints — absence is a bot fingerprint when UA claims Chrome
-    h.insert("Sec-CH-UA", HeaderValue::from_static(
-        "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\""
-    ));
+    h.insert(
+        "Sec-CH-UA",
+        HeaderValue::from_static(
+            "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
+        ),
+    );
     h.insert("Sec-CH-UA-Mobile", HeaderValue::from_static("?0"));
     h.insert("Sec-CH-UA-Platform", HeaderValue::from_static("\"macOS\""));
     h.insert("Upgrade-Insecure-Requests", HeaderValue::from_static("1"));
@@ -40,8 +50,7 @@ pub fn browser_headers() -> HeaderMap {
 
 /// Validate a URL for fetching — blocks SSRF targets.
 pub fn validate_url(url: &str) -> anyhow::Result<()> {
-    let parsed = reqwest::Url::parse(url)
-        .map_err(|e| anyhow::anyhow!("invalid URL: {e}"))?;
+    let parsed = reqwest::Url::parse(url).map_err(|e| anyhow::anyhow!("invalid URL: {e}"))?;
 
     match parsed.scheme() {
         "http" | "https" => {}

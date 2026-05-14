@@ -28,8 +28,12 @@ pub async fn search(
         params.push(("setlang", opts.language.clone()));
     }
 
-    let url = Url::parse_with_params("https://www.bing.com/search",
-        &params.iter().map(|(k, v)| (*k, v.as_str())).collect::<Vec<_>>()
+    let url = Url::parse_with_params(
+        "https://www.bing.com/search",
+        &params
+            .iter()
+            .map(|(k, v)| (*k, v.as_str()))
+            .collect::<Vec<_>>(),
     )?;
 
     let resp = client
@@ -45,7 +49,10 @@ pub async fn search(
     let body = resp.error_for_status()?.text().await?;
 
     // Detect consent wall
-    if body.contains("bnp_container") || body.contains("consent.bing.com") || body.contains("Before you continue") {
+    if body.contains("bnp_container")
+        || body.contains("consent.bing.com")
+        || body.contains("Before you continue")
+    {
         anyhow::bail!("bot detection / consent wall by Bing");
     }
 
@@ -110,12 +117,11 @@ fn extract_text_skipping_icons(el: &ElementRef) -> String {
     for child in el.children() {
         match child.value() {
             scraper::Node::Text(t) => text.push_str(&t.text),
-            scraper::Node::Element(inner) => {
-                if !inner.has_class("algoSlug_icon", scraper::CaseSensitivity::CaseSensitive) {
-                    if let Some(el_ref) = ElementRef::wrap(child) {
-                        text.push_str(&el_ref.text().collect::<String>());
-                    }
-                }
+            scraper::Node::Element(inner)
+                if !inner.has_class("algoSlug_icon", scraper::CaseSensitivity::CaseSensitive)
+                    && let Some(el_ref) = ElementRef::wrap(child) =>
+            {
+                text.push_str(&el_ref.text().collect::<String>());
             }
             _ => {}
         }
@@ -124,19 +130,14 @@ fn extract_text_skipping_icons(el: &ElementRef) -> String {
 }
 
 fn clean_bing_url(raw: &str) -> String {
-    if raw.starts_with("https://www.bing.com/ck/a?") {
-        if let Ok(url) = Url::parse(raw) {
-            if let Some((_, u)) = url.query_pairs().find(|(k, _)| k == "u") {
-                if u.len() > 2 {
-                    if let Ok(decoded) = base64::Engine::decode(
-                        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-                        &u[2..],
-                    ) {
-                        return String::from_utf8_lossy(&decoded).to_string();
-                    }
-                }
-            }
-        }
+    if raw.starts_with("https://www.bing.com/ck/a?")
+        && let Ok(url) = Url::parse(raw)
+        && let Some((_, u)) = url.query_pairs().find(|(k, _)| k == "u")
+        && u.len() > 2
+        && let Ok(decoded) =
+            base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &u[2..])
+    {
+        return String::from_utf8_lossy(&decoded).to_string();
     }
     raw.to_string()
 }

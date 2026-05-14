@@ -192,6 +192,20 @@ pub(super) fn nearest_context(content: &str, old_text: &str) -> Option<String> {
     None
 }
 
+// Helper for tests
+trait ContentBlockExt {
+    fn into_text(self) -> String;
+}
+
+impl ContentBlockExt for ContentBlock {
+    fn into_text(self) -> String {
+        match self {
+            ContentBlock::Text { text } => text,
+            ContentBlock::Image { .. } => String::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,19 +303,5 @@ mod tests {
             msg.contains("fn hello()"),
             "expected context hint, got: {msg}"
         );
-    }
-}
-
-// Helper for tests
-trait ContentBlockExt {
-    fn into_text(self) -> String;
-}
-
-impl ContentBlockExt for ContentBlock {
-    fn into_text(self) -> String {
-        match self {
-            ContentBlock::Text { text } => text,
-            ContentBlock::Image { .. } => String::new(),
-        }
     }
 }

@@ -3179,49 +3179,6 @@ impl App {
         false
     }
 
-    /// Update the dashboard with lifecycle context.
-    pub fn update_dashboard_from_lifecycle(
-        &mut self,
-        nodes: &std::collections::HashMap<String, crate::lifecycle::types::DesignNode>,
-        changes: &[crate::lifecycle::types::ChangeInfo],
-        focused_id: Option<&str>,
-    ) {
-        self.dashboard.focused_node = focused_id.and_then(|id| {
-            nodes.get(id).map(|n| {
-                let sections = crate::lifecycle::design::read_node_sections(n);
-                let assumptions = n.assumption_count();
-                let decisions_count = sections
-                    .as_ref()
-                    .map(|s| s.decisions.iter().filter(|d| d.status == "decided").count())
-                    .unwrap_or(0);
-                let readiness = sections
-                    .as_ref()
-                    .map(|s| s.readiness_score())
-                    .unwrap_or(0.0);
-                dashboard::FocusedNodeSummary {
-                    id: n.id.clone(),
-                    title: n.title.clone(),
-                    status: n.status,
-                    open_questions: n.open_questions.len() - assumptions,
-                    assumptions,
-                    decisions: decisions_count,
-                    readiness,
-                    openspec_change: n.openspec_change.clone(),
-                }
-            })
-        });
-        self.dashboard.active_changes = changes
-            .iter()
-            .filter(|c| !matches!(c.stage, crate::lifecycle::types::ChangeStage::Archived))
-            .map(|c| dashboard::ChangeSummary {
-                name: c.name.clone(),
-                stage: c.stage,
-                done_tasks: c.done_tasks,
-                total_tasks: c.total_tasks,
-            })
-            .collect();
-    }
-
     fn draw(&mut self, frame: &mut Frame) {
         self.refresh_at_picker();
         let area = frame.area();
@@ -5044,7 +5001,7 @@ impl App {
                     self.queued_prompts.push_back((builder_prompt, Vec::new()));
                     self.queue_mode = PromptQueueMode::InterruptAfterTurn;
                     self.conversation.push_system("Starting persona builder...");
-                    return SlashResult::Handled;
+                    SlashResult::Handled
                 } else if args == "list" {
                     if let Some(command) = canonical_slash_command("persona", args)
                         && let Some(request) =

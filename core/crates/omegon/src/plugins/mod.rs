@@ -298,9 +298,46 @@ fn plugin_search_paths(cwd: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
+    struct EnvGuard {
+        home: Option<std::ffi::OsString>,
+        plugin_dir: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn isolate(home: &Path) -> Self {
+            let guard = Self {
+                home: std::env::var_os("OMEGON_HOME"),
+                plugin_dir: std::env::var_os("OMEGON_PLUGIN_DIR"),
+            };
+            unsafe {
+                std::env::set_var("OMEGON_HOME", home);
+                std::env::remove_var("OMEGON_PLUGIN_DIR");
+            }
+            guard
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(prev) = self.home.take() {
+                    std::env::set_var("OMEGON_HOME", prev);
+                } else {
+                    std::env::remove_var("OMEGON_HOME");
+                }
+                if let Some(prev) = self.plugin_dir.take() {
+                    std::env::set_var("OMEGON_PLUGIN_DIR", prev);
+                } else {
+                    std::env::remove_var("OMEGON_PLUGIN_DIR");
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn discover_in_empty_dir() {
         let dir = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::isolate(dir.path());
         let plugins = discover_plugins(dir.path(), None).await;
         assert!(plugins.is_empty());
     }

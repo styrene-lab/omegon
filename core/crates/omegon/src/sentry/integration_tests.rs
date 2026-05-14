@@ -58,6 +58,7 @@ fn create_flynt_db(vault_root: &Path) -> std::path::PathBuf {
     db_path
 }
 
+#[allow(clippy::too_many_arguments)]
 fn insert_flynt_task(
     db_path: &Path,
     id: &str,

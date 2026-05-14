@@ -350,7 +350,7 @@ mod tests {
     fn find_session_most_recent() {
         // find_session with None should return most recent
         // This is tested implicitly by the list ordering (newest first)
-        let sessions = vec![
+        let sessions = [
             SessionEntry {
                 path: PathBuf::from("b_later.json"),
                 meta: SessionMeta {

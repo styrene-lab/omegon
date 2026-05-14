@@ -992,34 +992,34 @@ Also use it when you notice a gap — if you're unsure whether something was alr
                                         tracing::warn!("Session episode storage failed: {e}");
                                     }
 
-                                    if let Some(ref model) = extraction_model {
-                                        if !prompt_text.is_empty() || !outcome_text.is_empty() {
-                                            let model = model.clone();
-                                            let backend = backend.clone();
-                                            let mind = mind.clone();
-                                            let embed_svc = embed_svc.clone();
-                                            let prompt_text = prompt_text.clone();
-                                            let outcome_text = outcome_text.clone();
-                                            // Fire-and-forget — don't block shutdown
-                                            tokio::spawn(async move {
-                                                let summary = format!(
-                                                    "User asked: {}\n\nOutcome: {}",
-                                                    if prompt_text.is_empty() { "(no prompt recorded)".to_string() } else { prompt_text },
-                                                    if outcome_text.is_empty() { "(no outcome recorded)".to_string() } else { outcome_text },
-                                                );
-                                                match extract_and_store_facts(
-                                                    &model, &summary, &backend, &mind, embed_svc.as_ref(),
-                                                ).await {
-                                                    Ok(count) if count > 0 => {
-                                                        tracing::info!(facts = count, "session-end fact extraction");
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::debug!(error = %e, "session-end fact extraction failed");
-                                                    }
-                                                    _ => {}
+                                    if let Some(ref model) = extraction_model
+                                        && (!prompt_text.is_empty() || !outcome_text.is_empty())
+                                    {
+                                        let model = model.clone();
+                                        let backend = backend.clone();
+                                        let mind = mind.clone();
+                                        let embed_svc = embed_svc.clone();
+                                        let prompt_text = prompt_text.clone();
+                                        let outcome_text = outcome_text.clone();
+                                        // Fire-and-forget — don't block shutdown
+                                        tokio::spawn(async move {
+                                            let summary = format!(
+                                                "User asked: {}\n\nOutcome: {}",
+                                                if prompt_text.is_empty() { "(no prompt recorded)".to_string() } else { prompt_text },
+                                                if outcome_text.is_empty() { "(no outcome recorded)".to_string() } else { outcome_text },
+                                            );
+                                            match extract_and_store_facts(
+                                                &model, &summary, &backend, &mind, embed_svc.as_ref(),
+                                            ).await {
+                                                Ok(count) if count > 0 => {
+                                                    tracing::info!(facts = count, "session-end fact extraction");
                                                 }
-                                            });
-                                        }
+                                                Err(e) => {
+                                                    tracing::debug!(error = %e, "session-end fact extraction failed");
+                                                }
+                                                _ => {}
+                                            }
+                                        });
                                     }
 
                                     if let Some(ref vp) = vault_path {

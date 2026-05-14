@@ -35,12 +35,12 @@ impl BudgetLimits {
         let today = Utc::now().format("%Y-%m-%d").to_string();
         let used = state_db.budget_tokens_today(task_id, &today).unwrap_or(0);
 
-        if let Some(limit) = config.max_tokens_per_day {
-            if used >= limit {
-                return Some(format!(
-                    "token budget exhausted: {used}/{limit} tokens today"
-                ));
-            }
+        if let Some(limit) = config.max_tokens_per_day
+            && used >= limit
+        {
+            return Some(format!(
+                "token budget exhausted: {used}/{limit} tokens today"
+            ));
         }
 
         if let Some(cost_limit) = config.max_cost_per_day_usd {
@@ -84,6 +84,7 @@ impl InFlight {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_sentry_loop(
     board: Arc<dyn TaskBoard>,
     state_db: Arc<StateDb>,
@@ -134,6 +135,7 @@ pub async fn run_sentry_loop(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_trigger_event(
     event: TriggerEvent,
     board: &Arc<dyn TaskBoard>,
@@ -157,11 +159,10 @@ async fn handle_trigger_event(
                 }
             };
             for task in &tasks {
-                let matches = task.triggers.iter().any(|t| match t {
-                    Trigger::Cron { .. } => true,
-                    Trigger::Manual => true,
-                    _ => false,
-                });
+                let matches = task
+                    .triggers
+                    .iter()
+                    .any(|t| matches!(t, Trigger::Cron { .. } | Trigger::Manual));
                 if matches {
                     spawn_task_execution(
                         board.clone(),
@@ -294,6 +295,7 @@ async fn handle_trigger_event(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_task_execution(
     board: Arc<dyn TaskBoard>,
     state_db: Arc<StateDb>,
@@ -337,6 +339,7 @@ fn spawn_task_execution(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_task_with_retry(
     board: &Arc<dyn TaskBoard>,
     state_db: &Arc<StateDb>,
@@ -571,7 +574,7 @@ fn apply_lifecycle_hooks(cwd: &Path, spec: &super::types::TaskSpec, task_id: &st
         tracing::info!(
             task = %task_id,
             change = %change,
-            "openspec change linked — stage advancement deferred to tasks.md mutation tool"
+            "openspec change linked — update tasks.md, then call openspec_manage(register_tasks) to advance FSM state"
         );
     }
 }
@@ -973,13 +976,13 @@ async fn run_agent_task(
     let in_tokens = total_in.load(std::sync::atomic::Ordering::Relaxed);
     let out_tokens = total_out.load(std::sync::atomic::Ordering::Relaxed);
 
-    if let Some(budget) = token_budget {
-        if in_tokens + out_tokens > budget {
-            tracing::warn!(
-                "sentry token budget exceeded: {} > {budget}",
-                in_tokens + out_tokens
-            );
-        }
+    if let Some(budget) = token_budget
+        && in_tokens + out_tokens > budget
+    {
+        tracing::warn!(
+            "sentry token budget exceeded: {} > {budget}",
+            in_tokens + out_tokens
+        );
     }
 
     let summary = agent
@@ -998,10 +1001,10 @@ async fn run_agent_task(
         Err(_) => 1,
     };
 
-    if let Err(ref e) = loop_result {
-        if exit_code != 0 {
-            tracing::error!(error = %e, "sentry task error");
-        }
+    if let Err(ref e) = loop_result
+        && exit_code != 0
+    {
+        tracing::error!(error = %e, "sentry task error");
     }
 
     Ok(TaskResult {

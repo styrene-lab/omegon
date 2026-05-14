@@ -87,13 +87,12 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
         validation_results.join("\n")
     );
 
-    if level == ValidationLevel::Full {
-        if let Some(test_result) =
+    if level == ValidationLevel::Full
+        && let Some(test_result) =
             run_affected_tests(cwd, &unique_paths.iter().collect::<Vec<_>>()).await
-        {
-            output.push_str("\n\nTests:\n");
-            output.push_str(&test_result);
-        }
+    {
+        output.push_str("\n\nTests:\n");
+        output.push_str(&test_result);
     }
 
     Ok(ToolResult {

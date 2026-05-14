@@ -567,7 +567,7 @@ async fn handle_control_request(
                     .max_turns;
                 format!("Max turns: {max}")
             } else if let Ok(n) = args.parse::<u32>() {
-                let n = n.max(1).min(500);
+                let n = n.clamp(1, 500);
                 if let Ok(mut s) = shared_settings.lock() {
                     s.max_turns = n;
                 }
@@ -642,7 +642,7 @@ async fn handle_control_request(
                 let settings = shared_settings.lock().unwrap_or_else(|e| e.into_inner());
                 format!("Context class: {:?}", settings.context_class)
             } else {
-                format!("Context class changes require restart. Set in profile.json.")
+                "Context class changes require restart. Set in profile.json.".to_string()
             }
         }
 
@@ -654,7 +654,7 @@ async fn handle_control_request(
                     .is_slim();
                 format!("Runtime mode: {}", if slim { "slim" } else { "standard" })
             } else {
-                format!("Runtime mode changes require restart.")
+                "Runtime mode changes require restart.".to_string()
             }
         }
 
@@ -688,7 +688,7 @@ async fn handle_control_request(
                     .open(&notes_path)
                     .and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()))
                 {
-                    Ok(()) => format!("Noted."),
+                    Ok(()) => "Noted.".to_string(),
                     Err(e) => format!("Failed to save note: {e}"),
                 }
             }

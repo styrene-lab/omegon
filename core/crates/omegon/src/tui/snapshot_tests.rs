@@ -3,6 +3,8 @@
 //! These catch visual regressions: layout changes, text truncation, missing sections.
 //! Run `cargo insta review` to inspect and approve snapshot changes.
 
+#![allow(clippy::field_reassign_with_default)]
+
 use omegon_traits::ContextComposition;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -41,8 +43,8 @@ fn render_to_string(terminal: &Terminal<TestBackend>) -> String {
     let raw = lines.join("\n");
     // Normalize compiled-in version strings so snapshots survive release bumps.
     // Pattern: "vMAJOR.MINOR.PATCH → vMAJOR.MINOR.PATCH"
-    let normalized = regex_replace_version(&raw);
-    normalized
+
+    regex_replace_version(&raw)
 }
 
 fn regex_replace_version(s: &str) -> String {
@@ -212,7 +214,7 @@ fn snapshot_dashboard_with_openspec_change() {
     let mut state = DashboardState::default();
     state.active_changes = vec![ChangeSummary {
         name: "tui-surface-pass".into(),
-        stage: ChangeStage::Implementing,
+        stage: "implementing".into(),
         done_tasks: 7,
         total_tasks: 10,
     }];
