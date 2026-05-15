@@ -85,11 +85,18 @@ Both commands refuse to run with uncommitted changes. Both commands create the t
 **Rationale:** Stable release candidates need a single authority that can harden without making `main` carry two meanings: active development and release stabilization. The target model is:
 
 1. Open the release line on `main` by bumping the workspace to `X.Y.Z-rc.1`, adding the `CHANGELOG.md` section for `X.Y.Z`, and recording the milestone.
-2. Create `release/X.Y` from that commit. The branch name must match the stable version behind the RC, for example `release/0.22` for `0.22.0-rc.1`.
+2. Run `just branch-release` to create/push `release/X.Y` from that commit and switch the working copy to it. The branch name must match the stable version behind the RC, for example `release/0.22` for `0.22.0-rc.1`.
 3. Land release-hardening fixes on `release/X.Y`; CI must run tests and site builds there, but publishing/deployment side effects remain gated to `main` or tag/release events.
 4. Cut RC tags from `release/X.Y` as `vX.Y.Z-rc.N`.
-5. Promote by stripping `-rc.N`, committing `chore(release): X.Y.Z`, tagging `vX.Y.Z`, and publishing that tag.
-6. Merge the stable release commit back to `main`, then open the next development line on `main`.
+5. Continuously run `just merge-release-forward` from `release/X.Y` after hardening commits. The helper merges into `main`, preserves `main`'s version-state files, pushes `main`, and switches back to the release branch.
+6. Promote by stripping `-rc.N`, committing `chore(release): X.Y.Z`, tagging `vX.Y.Z`, and publishing that tag from `release/X.Y`.
+7. Merge the stable release commit back to `main` with `just merge-release-forward`, then open the next development line on `main` if it is not already open.
+
+Channel ownership:
+
+- `release/X.Y` owns stable and RC tags (`vX.Y.Z`, `vX.Y.Z-rc.N`).
+- `main` owns nightly tags (`vX.Y.0-nightly.YYYYMMDD`).
+- Release hardening fixes flow forward from `release/X.Y` to `main`; `main` version metadata must not be pulled backward by release branch merges.
 
 This migration must not leave two release paths. Until the branch-based commands are fully authoritative, the mainline flow remains supported for the active release line.
 
