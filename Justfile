@@ -351,6 +351,22 @@ run *args:
 
 # ─── Release ─────────────────────────────────────────────────
 
+# Create and push the release/X.Y branch for the current RC line, then switch
+# the working copy to it. This is the branch-based release hardening entrypoint.
+branch-release:
+    python3 scripts/release_branch.py branch-release
+
+# Merge the current release/X.Y branch forward into main while preserving
+# main's version-state files, then switch back to the release branch.
+merge-release-forward branch='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "{{branch}}" ]; then
+        python3 scripts/release_branch.py merge-forward "{{branch}}"
+    else
+        python3 scripts/release_branch.py merge-forward
+    fi
+
 # Developer-facing RC cut. Legacy mainline helper: validates main is clean and
 # pushed, creates a fresh release workspace from GitHub, runs `just rc` from
 # there, then pulls the resulting commit + tag back into local main.

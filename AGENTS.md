@@ -29,7 +29,7 @@ Omegon is a Rust-native agent loop and lifecycle engine. You are working on the 
 ## Key conventions
 
 - **Conventional commits** — `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`. See `skills/git/SKILL.md`.
-- **Direct commits to `main`** for focused changes. Feature branches for multi-session work. Release hardening happens on `release/X.Y` branches once the line is cut; the branch name must match the workspace release line.
+- **Direct commits to `main`** for focused changes. Feature branches for multi-session work. Release hardening happens on `release/X.Y` branches once the line is cut; `release/X.Y` owns stable/RC tags, `main` owns nightly tags, and hardening fixes merge forward with `just merge-release-forward`.
 - **Read before editing** — `Edit` requires exact text matches. Always read the file first.
 - **Run tests after changes** — `cargo test -p omegon` from the repo root. Don't commit with failures.
 - **Build and install after changes** — `just link` from the repo root to install over itself.

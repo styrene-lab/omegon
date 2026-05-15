@@ -56,7 +56,7 @@ Duplicate tool names caused Anthropic API 400 on the Rust TUI. Fix was applied l
 ### How to cut an RC
 
 1. Open the release line by setting the workspace version to `0.14.1-rc.1`, adding the `CHANGELOG.md` section for `0.14.1`, and recording the milestone.
-2. Create or check out `release/0.14`; the branch name must match the `major.minor` of the stable target.
+2. Run `just branch-release` to create or check out `release/0.14`; the branch name must match the `major.minor` of the stable target.
 3. Run `just rc` from the release branch to produce the next `v0.14.1-rc.N` tag.
 4. Push the release branch and tag → existing `release.yml` fires, builds all 4 platform targets.
 5. GitHub Release created as **pre-release** (not "latest").
@@ -73,8 +73,12 @@ Or just `scp` the binary — `omegon --version` proves which build is running.
 
 1. If RC is good: run `just release` from `release/0.14` to bump version to `0.14.1` (remove `-rc.N`) and tag `v0.14.1`.
 2. Publish the release branch and tag. CI builds again, GitHub Release created as latest.
-3. Merge the stable release commit back to `main`, then open the next development line on `main`.
+3. Merge the stable release commit back to `main` with `just merge-release-forward`, then open the next development line on `main`.
 4. `install.sh` (no VERSION pin) picks it up automatically.
+
+### Branch/channel ownership
+
+`release/X.Y` is the source of RC and stable tags for the `X.Y` line. `main` is the source of nightly tags and the next development line. Release hardening changes are merged forward with `just merge-release-forward`, which preserves `main`'s `Cargo.toml`, `Cargo.lock`, and milestone version state so a release branch cannot accidentally pull `main` back to an older release line.
 
 ### What the build fingerprint tells you
 
