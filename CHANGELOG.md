@@ -40,6 +40,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Release branch migration groundwork** — release preflight, local release recipes, CI tests, and site validation now recognize `release/X.Y` hardening branches while preserving the current mainline release flow.
 - **Branch-based release helpers** — added `just branch-release` to create/push the matching `release/X.Y` branch for an RC line and `just merge-release-forward` to merge hardening fixes back to `main` without regressing main's version-state files.
 
+## [0.21.2] - 2026-05-15
+
+### Fixed
+
+- **Zero-key web search failover** — automatic `web_search` no longer pins Google first when no API search key is configured. It now falls through across DuckDuckGo, Bing, and Google after API providers, avoiding hard failure when Google serves a bot/CAPTCHA page.
+
 ## [0.21.1] - 2026-05-13
 
 ### Fixed
