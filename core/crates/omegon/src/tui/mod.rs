@@ -100,8 +100,8 @@ pub struct PromptSubmission {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PromptQueueMode {
-    #[default]
     InterruptAfterTurn,
+    #[default]
     UntilReady,
     Immediate,
 }
@@ -1292,7 +1292,7 @@ impl App {
             web_startup: None,
             web_server_addr: None,
             queued_prompts: std::collections::VecDeque::new(),
-            queue_mode: PromptQueueMode::InterruptAfterTurn,
+            queue_mode: PromptQueueMode::UntilReady,
             operator_events: std::collections::VecDeque::new(),
             previous_harness_status: None,
             capability_tier: None,
@@ -4749,7 +4749,7 @@ impl App {
                     let cwd = self.cwd().to_path_buf();
                     let builder_prompt = crate::skills::skill_builder_prompt(&cwd);
                     self.queued_prompts.push_back((builder_prompt, Vec::new()));
-                    self.queue_mode = PromptQueueMode::InterruptAfterTurn;
+                    self.queue_mode = PromptQueueMode::UntilReady;
                     self.conversation.push_system("Starting skill builder...");
                     SlashResult::Handled
                 } else if let Some(command) = canonical_slash_command("skills", args) {
@@ -4999,7 +4999,7 @@ impl App {
                 if args == "create" || args == "new" {
                     let builder_prompt = crate::plugins::persona_loader::persona_builder_prompt();
                     self.queued_prompts.push_back((builder_prompt, Vec::new()));
-                    self.queue_mode = PromptQueueMode::InterruptAfterTurn;
+                    self.queue_mode = PromptQueueMode::UntilReady;
                     self.conversation.push_system("Starting persona builder...");
                     SlashResult::Handled
                 } else if args == "list" {

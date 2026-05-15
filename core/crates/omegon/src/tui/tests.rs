@@ -378,6 +378,52 @@ fn queued_prompt_preview_mentions_attachment_count() {
     );
 }
 
+#[tokio::test]
+async fn submitting_while_agent_active_queues_without_interrupt_by_default() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    app.agent_active = true;
+    app.editor.set_text("follow up after this turn");
+
+    app.submit_editor_buffer(&tx).await;
+
+    assert_eq!(app.queued_prompts.len(), 1);
+    assert!(
+        !app.interrupt_pending,
+        "queued input must not cancel the active turn"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "queued input should not dispatch until the current turn ends"
+    );
+    let rendered = render_app_to_string(&mut app, 100, 20);
+    assert!(rendered.contains("Queued [1]"), "{rendered}");
+    assert!(rendered.contains("Queue mode: ready"), "{rendered}");
+}
+
+#[tokio::test]
+async fn explicit_interrupt_queue_mode_still_requests_cancel() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    app.agent_active = true;
+    app.queue_mode = PromptQueueMode::InterruptAfterTurn;
+    app.editor.set_text("steer immediately");
+
+    app.submit_editor_buffer(&tx).await;
+
+    assert_eq!(app.queued_prompts.len(), 1);
+    assert!(
+        app.interrupt_pending,
+        "explicit interrupt mode should cancel the active turn"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "interrupt uses the shared cancellation token, not a queued command"
+    );
+}
+
 #[test]
 fn queue_prompt_preserves_fifo_order() {
     let mut app = test_app();

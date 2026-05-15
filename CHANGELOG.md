@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- **Queued TUI prompts no longer interrupt by default** — submitting a follow-up while the agent is active now queues it until the current turn finishes instead of cancelling the active turn under the misleading "queued" banner. Explicit interrupt queue mode still cancels when selected.
+
 ## [0.22.0] - 2026-05-14
 
 ### Added
