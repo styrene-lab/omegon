@@ -5201,8 +5201,8 @@ enum ControlSurface {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum QueueMode {
-    #[default]
     InterruptAfterTurn,
+    #[default]
     UntilReady,
     Immediate,
 }
