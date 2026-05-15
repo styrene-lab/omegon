@@ -1039,5 +1039,12 @@
     "notes": [
       "fix: unify lifecycle flow and release hygiene"
     ]
+  },
+  "nightly": {
+    "status": "nightly",
+    "channel": "nightly",
+    "version": "0.22.0-nightly.20260515",
+    "last_build": "2026-05-15T10:00:04Z",
+    "build_count": 1
   }
 }
