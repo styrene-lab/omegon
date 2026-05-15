@@ -16,6 +16,7 @@ from pathlib import Path
 
 VERSION_RE = re.compile(r'^version = "([^"]+)"', re.MULTILINE)
 CHANGELOG_SECTION_RE = r"^## \[{version}\](?=\s|$)"
+RELEASE_BRANCH_RE = re.compile(r"^release/(?P<major>\d+)\.(?P<minor>\d+)$")
 INSTALL_PLACEHOLDER_PATTERNS = (
     re.compile(r"Replace [0-9.]+ with the release you actually want"),
     re.compile(r"Replace [0-9.]+ with the release you downloaded"),
@@ -42,6 +43,13 @@ def stable_version_from_rc(version: str) -> str:
     if "-rc." not in version:
         raise PreflightError(f"Workspace version {version} is not an RC version")
     return version.split("-rc.", 1)[0]
+
+
+def release_branch_base(branch: str) -> str | None:
+    match = RELEASE_BRANCH_RE.fullmatch(branch)
+    if not match:
+        return None
+    return f"{match.group('major')}.{match.group('minor')}"
 
 
 def changelog_has_version(repo_root: Path, version: str) -> bool:
@@ -106,8 +114,11 @@ def collect_failures(repo_root: Path) -> list[str]:
     failures: list[str] = []
 
     branch = git_stdout(repo_root, "branch", "--show-current")
-    if branch != "main":
-        failures.append(f"must be on main (currently: {branch or 'detached'})")
+    branch_base = release_branch_base(branch)
+    if branch != "main" and branch_base is None:
+        failures.append(
+            f"must be on main or release/X.Y branch (currently: {branch or 'detached'})"
+        )
 
     role = read_workspace_role(repo_root)
     if role != "release":
@@ -125,6 +136,13 @@ def collect_failures(repo_root: Path) -> list[str]:
     except PreflightError as err:
         failures.append(str(err))
         return failures
+
+    if branch_base is not None:
+        stable_base = ".".join(stable_version.split(".")[:2])
+        if branch_base != stable_base:
+            failures.append(
+                f"release branch {branch} does not match workspace release line {stable_version}"
+            )
 
     if not changelog_has_version(repo_root, stable_version):
         failures.append(f"CHANGELOG.md is missing section [{stable_version}]")

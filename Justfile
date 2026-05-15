@@ -351,10 +351,9 @@ run *args:
 
 # ─── Release ─────────────────────────────────────────────────
 
-# Developer-facing RC cut. Run this from the main workspace — no manual
-# workspace setup required. Validates main is clean and pushed, creates
-# a fresh release workspace from GitHub, runs `just rc` from there, then
-# pulls the resulting commit + tag back into local main.
+# Developer-facing RC cut. Legacy mainline helper: validates main is clean and
+# pushed, creates a fresh release workspace from GitHub, runs `just rc` from
+# there, then pulls the resulting commit + tag back into local main.
 cut-rc:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -411,7 +410,7 @@ cut-rc:
     echo "✓ $NEW_VERSION — local main is up to date"
 
 # Cut a release candidate: bump rc.N, test, commit, tag, build, sign.
-# Push the tag to trigger CI: git push origin main --tags
+# Run from main for the legacy flow or release/X.Y for branch-based hardening.
 rc-validate:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -427,25 +426,27 @@ rc:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    # Reconcile jj+git colocated state: fast-forward refs/heads/main to include
-    # any jj commits that the harness created, then re-attach HEAD.
-    # Must run before any guard that reads git branch/HEAD state.
-    ./scripts/sync-jj-to-git.sh
-
-    # Refuse detached HEAD or non-main release cuts.
     BRANCH=$(git branch --show-current)
     if [ -z "$BRANCH" ]; then
         echo "✗ Detached HEAD. Check out main before cutting an RC."
         exit 1
     fi
-    if [ "$BRANCH" != "main" ]; then
-        echo "✗ RC cuts must run from main. Current branch: $BRANCH"
-        exit 1
+    if [ "$BRANCH" = "main" ]; then
+        # Reconcile jj+git colocated state for the legacy mainline flow.
+        ./scripts/sync-jj-to-git.sh
+        BRANCH=$(git branch --show-current)
     fi
+    case "$BRANCH" in
+        main|release/*) ;;
+        *)
+            echo "✗ RC cuts must run from main or release/X.Y. Current branch: $BRANCH"
+            exit 1
+            ;;
+    esac
     HEAD_SHA=$(git rev-parse HEAD)
-    MAIN_SHA=$(git rev-parse refs/heads/main)
-    if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
-        echo "✗ HEAD is not the tip of main. Check out main and retry."
+    BRANCH_SHA=$(git rev-parse "refs/heads/$BRANCH")
+    if [ "$HEAD_SHA" != "$BRANCH_SHA" ]; then
+        echo "✗ HEAD is not the tip of $BRANCH. Check out $BRANCH and retry."
         exit 1
     fi
 
@@ -588,7 +589,7 @@ rc:
     just link
 
     echo "Pushing rc tag..."
-    git push origin main "v${NEW_VERSION}"
+    git push origin "$BRANCH" "v${NEW_VERSION}"
 
     echo ""
     echo "✓ ${NEW_VERSION} — preflighted, committed, tagged, built, pushed."
@@ -596,14 +597,16 @@ rc:
     echo "  GitHub Release workflow will create/publish the prerelease and downstream packaging will follow from release artifacts."
 
 # Release preflight: verify repo is releasable BEFORE any version mutation.
-# Checks: on main, clean tree, release line is an RC, changelog target exists,
-# docs/install versioned examples are placeholders, and packaging automation is
-# consistently wired through the release manifest.
+# Checks: on main or release/X.Y, clean tree, release line is an RC, changelog
+# target exists, docs/install versioned examples are placeholders, and packaging
+# automation is consistently wired through the release manifest.
 # Called automatically by `just release`. Run manually: just preflight
 preflight:
     #!/usr/bin/env bash
     set -euo pipefail
-    ./scripts/sync-jj-to-git.sh
+    if [ "$(git branch --show-current)" = "main" ]; then
+        ./scripts/sync-jj-to-git.sh
+    fi
     python3 scripts/release_preflight.py
 
 # Cut a stable release: strip -rc.N, test, commit, tag, build.
@@ -640,7 +643,8 @@ release:
 
     echo ""
     echo "✓ ${NEW_VERSION} — tested, committed, tagged, built."
-    echo "  To publish: git push origin main v${NEW_VERSION}"
+    BRANCH=$(git branch --show-current)
+    echo "  To publish: git push origin ${BRANCH} v${NEW_VERSION}"
 
     # Open the next RC cycle immediately so dev builds aren't mislabelled as the
     # just-shipped stable release.  No rebuild needed — this is just a version bump.
@@ -852,10 +856,16 @@ publish:
     # ── 2. Push to origin (triggers CI: release, npm, site) ──
     echo ""
     echo "Pushing to origin..."
-    # Push main branch + the specific stable tag only.
+    BRANCH=$(git branch --show-current)
+    if [ -z "$BRANCH" ]; then
+        echo "✗ Detached HEAD. Check out main or release/X.Y before publishing."
+        exit 1
+    fi
+
+    # Push current release branch + the specific stable tag only.
     # Do NOT use --tags: pushing many accumulated RC tags at once causes GitHub
     # Actions to silently drop workflow triggers beyond ~3 ref changes per push.
-    git push origin main "$TAG"
+    git push origin "$BRANCH" "$TAG"
 
     echo ""
     echo "CI workflows triggered:"

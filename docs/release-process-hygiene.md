@@ -79,6 +79,20 @@ Both commands refuse to run with uncommitted changes. Both commands create the t
 **Status:** decided
 **Rationale:** The root cause of version drift is that version bump and tag creation are separate manual steps. Making them atomic — one command does both — eliminates the gap. The push remains manual because not every RC should be published to GitHub releases. Build and test are included so the tag is never created on broken code.
 
+### Decision: migrate release hardening to `release/X.Y` branches
+
+**Status:** migrating
+**Rationale:** Stable release candidates need a single authority that can harden without making `main` carry two meanings: active development and release stabilization. The target model is:
+
+1. Open the release line on `main` by bumping the workspace to `X.Y.Z-rc.1`, adding the `CHANGELOG.md` section for `X.Y.Z`, and recording the milestone.
+2. Create `release/X.Y` from that commit. The branch name must match the stable version behind the RC, for example `release/0.22` for `0.22.0-rc.1`.
+3. Land release-hardening fixes on `release/X.Y`; CI must run tests and site builds there, but publishing/deployment side effects remain gated to `main` or tag/release events.
+4. Cut RC tags from `release/X.Y` as `vX.Y.Z-rc.N`.
+5. Promote by stripping `-rc.N`, committing `chore(release): X.Y.Z`, tagging `vX.Y.Z`, and publishing that tag.
+6. Merge the stable release commit back to `main`, then open the next development line on `main`.
+
+This migration must not leave two release paths. Until the branch-based commands are fully authoritative, the mainline flow remains supported for the active release line.
+
 ## Open Questions
 
 *No open questions.*

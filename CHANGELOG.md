@@ -37,6 +37,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Justfile workspace hygiene** — normalized local recipes around the root Cargo workspace, removed stale `core/` path assumptions, made external sibling-repo checks opt-in when present, and restored a passing local `just lint` gate without hiding existing clippy warnings.
 - **Strict clippy hygiene** — cleaned workspace clippy warnings across libs, bins, examples, and tests, then restored `just lint` as a `-D warnings` all-target gate.
 - **Release automation hygiene** — opened the `0.22.0-rc.1` line and corrected ignore rules for committed generated assets so release-plz can evaluate the workspace without reporting a synthetic dirty tree.
+- **Release branch migration groundwork** — release preflight, local release recipes, CI tests, and site validation now recognize `release/X.Y` hardening branches while preserving the current mainline release flow.
 
 ## [0.21.1] - 2026-05-13
 

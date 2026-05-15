@@ -55,10 +55,12 @@ Duplicate tool names caused Anthropic API 400 on the Rust TUI. Fix was applied l
 
 ### How to cut an RC
 
-1. `cd core && cargo release patch --execute` but with `-rc.1` suffix — or manually edit `Cargo.toml` workspace version to `0.14.1-rc.1` and tag `v0.14.1-rc.1`
-2. Push tag → existing `release.yml` fires, builds all 4 platform targets
-3. GitHub Release created as **pre-release** (not "latest")
-4. `--version` output: `omegon 0.14.1-rc.1 (3a4b5c6 2026-03-21)`
+1. Open the release line by setting the workspace version to `0.14.1-rc.1`, adding the `CHANGELOG.md` section for `0.14.1`, and recording the milestone.
+2. Create or check out `release/0.14`; the branch name must match the `major.minor` of the stable target.
+3. Run `just rc` from the release branch to produce the next `v0.14.1-rc.N` tag.
+4. Push the release branch and tag → existing `release.yml` fires, builds all 4 platform targets.
+5. GitHub Release created as **pre-release** (not "latest").
+6. `--version` output: `omegon 0.14.1-rc.1 (3a4b5c6 2026-03-21)`.
 
 ### How to deploy an RC to another machine
 
@@ -69,9 +71,10 @@ Or just `scp` the binary — `omegon --version` proves which build is running.
 
 ### Promoting RC → stable
 
-1. If RC is good: bump version to `0.14.1` (remove `-rc.N`), tag `v0.14.1`
-2. CI builds again, GitHub Release created as latest
-3. `install.sh` (no VERSION pin) picks it up automatically
+1. If RC is good: run `just release` from `release/0.14` to bump version to `0.14.1` (remove `-rc.N`) and tag `v0.14.1`.
+2. Publish the release branch and tag. CI builds again, GitHub Release created as latest.
+3. Merge the stable release commit back to `main`, then open the next development line on `main`.
+4. `install.sh` (no VERSION pin) picks it up automatically.
 
 ### What the build fingerprint tells you
 
