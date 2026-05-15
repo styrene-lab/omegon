@@ -154,7 +154,9 @@ impl WebSearchProvider {
         max_results: usize,
         topic: &str,
     ) -> anyhow::Result<Vec<SearchResult>> {
-        let api_key = env::var("BRAVE_API_KEY")?;
+        let api_key = self
+            .resolve_key("BRAVE_API_KEY")
+            .ok_or_else(|| anyhow::anyhow!("BRAVE_API_KEY not set"))?;
         let mut url = reqwest::Url::parse("https://api.search.brave.com/res/v1/web/search")?;
         url.query_pairs_mut()
             .append_pair("q", query)
@@ -195,7 +197,9 @@ impl WebSearchProvider {
         max_results: usize,
         topic: &str,
     ) -> anyhow::Result<Vec<SearchResult>> {
-        let api_key = env::var("TAVILY_API_KEY")?;
+        let api_key = self
+            .resolve_key("TAVILY_API_KEY")
+            .ok_or_else(|| anyhow::anyhow!("TAVILY_API_KEY not set"))?;
         let body = json!({
             "api_key": api_key,
             "query": query,
@@ -239,7 +243,9 @@ impl WebSearchProvider {
         max_results: usize,
         topic: &str,
     ) -> anyhow::Result<Vec<SearchResult>> {
-        let api_key = env::var("SERPER_API_KEY")?;
+        let api_key = self
+            .resolve_key("SERPER_API_KEY")
+            .ok_or_else(|| anyhow::anyhow!("SERPER_API_KEY not set"))?;
         let endpoint = if topic == "news" {
             "https://google.serper.dev/news"
         } else {
@@ -325,6 +331,49 @@ impl WebSearchProvider {
             _ => anyhow::bail!("Unknown provider: {provider}"),
         }
     }
+
+    async fn search_auto(
+        &self,
+        available: &[&'static str],
+        query: &str,
+        max_results: usize,
+        topic: &str,
+    ) -> anyhow::Result<(Vec<SearchResult>, Vec<String>)> {
+        let mut errors = Vec::new();
+
+        for provider in auto_provider_order(available) {
+            match self
+                .search_provider(provider, query, max_results, topic)
+                .await
+            {
+                Ok(results) if !results.is_empty() => {
+                    return Ok((results, vec![provider.to_string()]));
+                }
+                Ok(_) => errors.push(format!("{provider}: returned zero results")),
+                Err(err) => errors.push(format!("{provider}: {err}")),
+            }
+        }
+
+        anyhow::bail!(
+            "all search providers failed. {}\nTip: configure BRAVE_API_KEY, TAVILY_API_KEY, or SERPER_API_KEY for reliable search.",
+            errors.join("; ")
+        )
+    }
+}
+
+fn auto_provider_order(available: &[&'static str]) -> Vec<&'static str> {
+    [
+        "tavily",
+        "serper",
+        "brave",
+        "firecrawl",
+        "ddg",
+        "bing",
+        "google",
+    ]
+    .into_iter()
+    .filter(|provider| available.contains(provider))
+    .collect()
 }
 
 // ─── Response types ─────────────────────────────────────────────────────────
@@ -605,46 +654,52 @@ impl ToolProvider for WebSearchProvider {
                 }
                 deduplicate(&mut results);
             } else {
-                let provider = if let Some(ref p) = requested_provider {
-                    if available.contains(&p.as_str()) {
-                        p.clone()
-                    } else {
+                if let Some(ref provider) = requested_provider {
+                    if !available.contains(&provider.as_str()) {
                         return Ok(ToolResult {
                             content: vec![ContentBlock::Text {
                                 text: format!(
-                                    "Provider \"{p}\" not available. Configured: {}",
+                                    "Provider \"{provider}\" not available. Configured: {}",
                                     available.join(", ")
                                 ),
                             }],
                             details: json!({"error": true}),
                         });
                     }
-                } else {
-                    // Auto-select: prefer API providers for quality, DDG as fallback
-                    available
-                        .iter()
-                        .find(|&&p| p == "tavily")
-                        .or_else(|| available.iter().find(|&&p| p == "serper"))
-                        .or_else(|| available.iter().find(|&&p| p == "brave"))
-                        .unwrap_or(&available[0])
-                        .to_string()
-                };
-
-                match self
-                    .search_provider(&provider, &query, max_results, &topic)
-                    .await
-                {
-                    Ok(r) => {
-                        results = r;
-                        providers_used.push(provider);
+                    match self
+                        .search_provider(provider, &query, max_results, &topic)
+                        .await
+                    {
+                        Ok(r) => {
+                            results = r;
+                            providers_used.push(provider.clone());
+                        }
+                        Err(e) => {
+                            return Ok(ToolResult {
+                                content: vec![ContentBlock::Text {
+                                    text: format!("Search error ({provider}): {e}"),
+                                }],
+                                details: json!({"error": true}),
+                            });
+                        }
                     }
-                    Err(e) => {
-                        return Ok(ToolResult {
-                            content: vec![ContentBlock::Text {
-                                text: format!("Search error ({provider}): {e}"),
-                            }],
-                            details: json!({"error": true}),
-                        });
+                } else {
+                    match self
+                        .search_auto(&available, &query, max_results, &topic)
+                        .await
+                    {
+                        Ok((r, used)) => {
+                            results = r;
+                            providers_used = used;
+                        }
+                        Err(e) => {
+                            return Ok(ToolResult {
+                                content: vec![ContentBlock::Text {
+                                    text: format!("Search error: {e}"),
+                                }],
+                                details: json!({"error": true}),
+                            });
+                        }
                     }
                 }
             }
@@ -749,5 +804,17 @@ mod tests {
         // Can't assert empty because CI might have keys set
         // Just verify it doesn't panic
         let _ = available;
+    }
+
+    #[test]
+    fn auto_provider_order_prefers_api_then_free_failover() {
+        assert_eq!(
+            auto_provider_order(&["google", "bing", "ddg"]),
+            vec!["ddg", "bing", "google"]
+        );
+        assert_eq!(
+            auto_provider_order(&["google", "tavily", "brave", "ddg"]),
+            vec!["tavily", "brave", "ddg", "google"]
+        );
     }
 }
