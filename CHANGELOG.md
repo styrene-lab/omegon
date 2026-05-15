@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-05-15
+
+### Fixed
+
+- **Zero-key web search failover** — automatic `web_search` no longer pins Google first when no API search key is configured. It now falls through across DuckDuckGo, Bing, and Google after API providers, avoiding hard failure when Google serves a bot/CAPTCHA page.
+
 ## [0.21.1] - 2026-05-13
 
 ### Fixed
