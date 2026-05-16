@@ -420,7 +420,12 @@ impl IpcConnection {
                         "model_list" => Some(crate::control_runtime::ControlRequest::ModelList),
                         "skills_view" => Some(crate::control_runtime::ControlRequest::SkillsView),
                         "skills_install" => {
-                            Some(crate::control_runtime::ControlRequest::SkillsInstall)
+                            let name = payload
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_string);
+                            Some(crate::control_runtime::ControlRequest::SkillsInstall { name })
                         }
                         "plugin_view" => Some(crate::control_runtime::ControlRequest::PluginView),
                         "plugin_install" => payload

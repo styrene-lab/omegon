@@ -1234,8 +1234,8 @@ impl OmegonAcpAgent {
                 let uri = params["uri"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'uri' field"))?;
-                crate::extension_cli::install(uri)?;
-                Ok(serde_json::json!({ "ok": true }))
+                let result = crate::armory::install_extension(uri, None).await?;
+                Ok(serde_json::json!({ "ok": true, "result": result }))
             }
 
             "extensions/remove" => {
@@ -1268,50 +1268,45 @@ impl OmegonAcpAgent {
                 Ok(serde_json::json!({ "items": items }))
             }
 
+            "armory/install" => {
+                let target = params["target"]
+                    .as_str()
+                    .or_else(|| params["uri"].as_str())
+                    .ok_or_else(|| anyhow::anyhow!("missing 'target' field"))?;
+                let kind = params
+                    .get("kind")
+                    .and_then(|v| v.as_str())
+                    .map(parse_armory_kind)
+                    .transpose()?
+                    .map(crate::armory::ArmoryInstallKind::from)
+                    .unwrap_or(crate::armory::ArmoryInstallKind::Auto);
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let result = crate::armory::install(target, kind, &cwd).await?;
+                Ok(serde_json::json!({ "ok": true, "result": result }))
+            }
+
             "extensions/search" => {
                 let query = params.get("query").and_then(|v| v.as_str());
-                let client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(15))
-                    .user_agent("omegon")
-                    .build()?;
-                let registry = crate::extension_registry::fetch_registry(&client)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Could not reach armory: {e}"))?;
-
-                let installed: std::collections::HashSet<String> = if extensions_dir.exists() {
-                    std::fs::read_dir(&extensions_dir)?
-                        .filter_map(|e| e.ok())
-                        .filter(|e| e.path().is_dir() || e.path().is_symlink())
-                        .filter_map(|e| e.file_name().into_string().ok())
-                        .collect()
-                } else {
-                    std::collections::HashSet::new()
-                };
-
-                let mut entries: Vec<serde_json::Value> = registry
-                    .iter()
-                    .filter(|(name, entry)| {
-                        query
-                            .map(|q| {
-                                let q = q.to_lowercase();
-                                name.to_lowercase().contains(&q)
-                                    || entry.description.to_lowercase().contains(&q)
-                                    || entry.category.to_lowercase().contains(&q)
-                            })
-                            .unwrap_or(true)
-                    })
-                    .map(|(name, entry)| {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let items = crate::armory::browse(crate::armory::BrowseOptions::new(
+                    crate::armory::ArmoryKind::Extensions,
+                    query,
+                    &cwd,
+                ))
+                .await?;
+                let extensions: Vec<serde_json::Value> = items
+                    .into_iter()
+                    .map(|item| {
                         serde_json::json!({
-                            "name": name,
-                            "description": entry.description,
-                            "category": entry.category,
-                            "repo": entry.repo,
-                            "installed": installed.contains(name.as_str()),
+                            "name": item.id,
+                            "description": item.description,
+                            "category": item.category,
+                            "repo": item.source,
+                            "installed": item.installed,
                         })
                     })
                     .collect();
-                entries.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-                Ok(serde_json::json!({ "extensions": entries }))
+                Ok(serde_json::json!({ "extensions": extensions }))
             }
 
             "catalog/list" => {
@@ -1743,8 +1738,16 @@ impl OmegonAcpAgent {
             }
 
             "skills/install" => {
-                crate::skills::cmd_install()?;
-                Ok(serde_json::json!({ "ok": true }))
+                if let Some(name) = params.get("name").and_then(|v| v.as_str()) {
+                    let cwd = std::env::current_dir().unwrap_or_default();
+                    let result =
+                        crate::armory::install(name, crate::armory::ArmoryInstallKind::Skill, &cwd)
+                            .await?;
+                    Ok(serde_json::json!({ "ok": true, "result": result }))
+                } else {
+                    crate::skills::cmd_install()?;
+                    Ok(serde_json::json!({ "ok": true }))
+                }
             }
 
             "skills/create" => {

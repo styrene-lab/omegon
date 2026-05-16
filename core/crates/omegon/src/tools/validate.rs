@@ -22,11 +22,29 @@ const VALIDATION_TIMEOUT_SECS: u64 = 30;
 static VALIDATORS: Mutex<Option<(PathBuf, HashMap<ValidatorKind, ValidatorConfig>)>> =
     Mutex::new(None);
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 enum ValidatorKind {
     Rust,
     TypeScript,
     Python,
+}
+
+impl ValidatorKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Rust => "Rust",
+            Self::TypeScript => "TypeScript",
+            Self::Python => "Python",
+        }
+    }
+
+    fn expected_config(self) -> &'static str {
+        match self {
+            Self::Rust => "Cargo.toml",
+            Self::TypeScript => "tsconfig.json",
+            Self::Python => "pyproject.toml",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -67,17 +85,53 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
 
     let mut validation_results = Vec::new();
     let mut validated_paths = Vec::new();
+    let mut unsupported_paths = Vec::new();
+    let mut missing_validator_paths = Vec::new();
     for path in &unique_paths {
-        if let Some(val) = validate_file(path, cwd).await {
-            validation_results.push(val);
-            validated_paths.push(path.display().to_string());
-        }
+        let Some(kind) = validator_for_file(path) else {
+            unsupported_paths.push(format!(
+                "{} (extension: {})",
+                path.display(),
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .filter(|ext| !ext.is_empty())
+                    .unwrap_or("none")
+            ));
+            continue;
+        };
+
+        let validators = discover_validators(cwd);
+        let Some(config) = validators.get(&kind).cloned() else {
+            missing_validator_paths.push(format!(
+                "{} ({}, no {} found from {})",
+                path.display(),
+                kind.label(),
+                kind.expected_config(),
+                cwd.display()
+            ));
+            continue;
+        };
+
+        validation_results.push(validate_file(path, kind, config, cwd).await);
+        validated_paths.push(path.display().to_string());
     }
 
     if validation_results.is_empty() {
-        anyhow::bail!(
-            "No validator applies to the supplied path set. Supported source types: Rust, TypeScript, Python."
-        );
+        let mut message =
+            "No validator applies to the supplied path set. Supported source types: Rust, TypeScript, Python.".to_string();
+        if !unsupported_paths.is_empty() {
+            message.push_str("\nUnsupported paths:\n");
+            for path in &unsupported_paths {
+                message.push_str(&format!("  - {path}\n"));
+            }
+        }
+        if !missing_validator_paths.is_empty() {
+            message.push_str("Supported paths without a discovered project validator:\n");
+            for path in &missing_validator_paths {
+                message.push_str(&format!("  - {path}\n"));
+            }
+        }
+        anyhow::bail!("{}", message.trim_end());
     }
 
     let mut output = format!(
@@ -99,6 +153,8 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
         content: vec![ContentBlock::Text { text: output }],
         details: serde_json::json!({
             "paths": validated_paths,
+            "unsupported_paths": unsupported_paths,
+            "missing_validator_paths": missing_validator_paths,
             "level": match level {
                 ValidationLevel::Quick => "quick",
                 ValidationLevel::Standard => "standard",
@@ -110,13 +166,12 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
 }
 
 /// Run validation for a single file path.
-async fn validate_file(file_path: &Path, cwd: &Path) -> Option<String> {
-    let kind = validator_for_file(file_path)?;
-    let config = {
-        let validators = discover_validators(cwd);
-        validators.get(&kind)?.clone()
-    };
-
+async fn validate_file(
+    file_path: &Path,
+    kind: ValidatorKind,
+    config: ValidatorConfig,
+    cwd: &Path,
+) -> String {
     let child = Command::new("bash")
         .args([
             "-c",
@@ -137,21 +192,30 @@ async fn validate_file(file_path: &Path, cwd: &Path) -> Option<String> {
             let stdout = String::from_utf8_lossy(&output.stdout);
 
             if exit_code == 0 {
-                Some(format!("Validation (`{}`): ✓ passed", config.command))
+                format!(
+                    "Validation (`{}`) for {}: ✓ passed",
+                    config.command,
+                    file_path.display()
+                )
             } else {
                 // Extract just the error lines, not the full output
                 let errors = extract_error_summary(&stdout, &stderr, &kind);
-                Some(format!(
-                    "Validation (`{}`): ✗ {} error(s)\n{}",
+                format!(
+                    "Validation (`{}`) for {}: ✗ {} error(s)\n{}",
                     config.command,
+                    file_path.display(),
                     count_errors(&errors),
                     truncate_validation(&errors, 500),
-                ))
+                )
             }
         }
         Ok(Err(e)) => {
             tracing::debug!("Validation command failed to execute: {e}");
-            None // Don't report if the validator itself fails to run
+            format!(
+                "Validation (`{}`) for {}: failed to execute: {e}",
+                config.command,
+                file_path.display()
+            )
         }
         Err(_) => {
             tracing::warn!(
@@ -159,10 +223,12 @@ async fn validate_file(file_path: &Path, cwd: &Path) -> Option<String> {
                 VALIDATION_TIMEOUT_SECS,
                 config.command
             );
-            Some(format!(
-                "Validation (`{}`): ⏱ timed out after {}s",
-                config.command, VALIDATION_TIMEOUT_SECS
-            ))
+            format!(
+                "Validation (`{}`) for {}: ⏱ timed out after {}s",
+                config.command,
+                file_path.display(),
+                VALIDATION_TIMEOUT_SECS
+            )
         }
     }
 }
@@ -424,5 +490,43 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("No paths provided"));
+    }
+
+    #[tokio::test]
+    async fn validate_reports_unsupported_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("README.md");
+        std::fs::write(&path, "# docs").unwrap();
+
+        let err = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("Unsupported paths"));
+        assert!(message.contains("README.md"));
+        assert!(message.contains("extension: md"));
+    }
+
+    #[tokio::test]
+    async fn validate_reports_supported_paths_without_project_validator() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+
+        let err = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("Supported paths without a discovered project validator"));
+        assert!(message.contains("main.rs"));
+        assert!(message.contains("Cargo.toml"));
     }
 }

@@ -320,7 +320,7 @@ async fn handle_client_command(
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             let accepted = command_tx
                 .send(WebCommand::ExecuteControl {
-                    request: crate::control_runtime::ControlRequest::SkillsInstall,
+                    request: crate::control_runtime::ControlRequest::SkillsInstall { name: None },
                     respond_to: Some(reply_tx),
                 })
                 .await
