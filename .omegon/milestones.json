@@ -1027,12 +1027,12 @@
     ]
   },
   "0.22.0": {
-    "status": "open",
+    "status": "released",
     "channel": "stable",
     "nodes": [],
-    "frozen": false,
+    "frozen": true,
     "opened": "2026-05-14T23:43:41Z",
-    "released": null,
+    "released": "2026-05-16T21:13:31Z",
     "notes": [
       "fix: unify lifecycle flow and release hygiene"
     ]
