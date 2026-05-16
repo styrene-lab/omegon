@@ -1212,10 +1212,7 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
 }
 
 pub fn git_ceiling_directory(cwd: &Path) -> Option<PathBuf> {
-    cwd.canonicalize()
-        .unwrap_or_else(|_| cwd.to_path_buf())
-        .parent()
-        .map(Path::to_path_buf)
+    find_project_root(cwd).parent().map(Path::to_path_buf)
 }
 
 fn has_explicit_project_marker(dir: &Path) -> bool {
@@ -1622,6 +1619,23 @@ mod tests {
         assert_eq!(
             git_ceiling_directory(&child),
             child
+                .canonicalize()
+                .unwrap()
+                .parent()
+                .map(Path::to_path_buf)
+        );
+    }
+
+    #[test]
+    fn git_ceiling_preserves_parent_repo_for_unmarked_subdirectories() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let child = dir.path().join("src/bin");
+        std::fs::create_dir_all(&child).unwrap();
+
+        assert_eq!(
+            git_ceiling_directory(&child),
+            dir.path()
                 .canonicalize()
                 .unwrap()
                 .parent()

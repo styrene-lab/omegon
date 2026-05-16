@@ -270,15 +270,16 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         let cwd = dir.path().join("nested/project");
         std::fs::create_dir_all(&cwd).unwrap();
-        assert_eq!(workspace_root(&cwd), dir.path());
-        assert_eq!(runtime_dir(&cwd), dir.path().join(".omegon/runtime"));
+        let root = dir.path().canonicalize().unwrap();
+        assert_eq!(workspace_root(&cwd), root);
+        assert_eq!(runtime_dir(&cwd), root.join(".omegon/runtime"));
         assert_eq!(
             workspace_lease_path(&cwd),
-            dir.path().join(".omegon/runtime/workspace.json")
+            root.join(".omegon/runtime/workspace.json")
         );
         assert_eq!(
             workspace_registry_path(&cwd),
-            dir.path().join(".omegon/runtime/workspaces.json")
+            root.join(".omegon/runtime/workspaces.json")
         );
     }
 

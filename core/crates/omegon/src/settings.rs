@@ -2053,10 +2053,11 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
         let nested = tmp.path().join("core/crates/omegon");
         std::fs::create_dir_all(&nested).unwrap();
+        let root = tmp.path().canonicalize().unwrap();
 
         assert_eq!(
             project_profile_path(&nested),
-            tmp.path().join(".omegon/profile.json")
+            root.join(".omegon/profile.json")
         );
     }
 
