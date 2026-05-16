@@ -89,11 +89,18 @@ fn view_image(path: &Path) -> ToolResult {
     // Return as image content block — the rendering layer handles protocol
     match fs::read(path) {
         Ok(data) => {
-            let mime = match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let mime = match ext.as_str() {
                 "png" => "image/png",
                 "jpg" | "jpeg" => "image/jpeg",
                 "gif" => "image/gif",
                 "webp" => "image/webp",
+                "bmp" => "image/bmp",
+                "tiff" | "tif" => "image/tiff",
                 _ => "application/octet-stream",
             };
             // Encode as data: URI for inline rendering
@@ -109,7 +116,12 @@ fn view_image(path: &Path) -> ToolResult {
                         media_type: mime.into(),
                     },
                 ],
-                details: json!({}),
+                details: json!({
+                    "path": path.display().to_string(),
+                    "media_type": mime,
+                    "bytes": data.len(),
+                    "rendered": true,
+                }),
             }
         }
         Err(e) => ToolResult {
@@ -415,6 +427,26 @@ mod tests {
         let data = b"Hello, World!";
         let encoded = base64_encode(data);
         assert_eq!(encoded, "SGVsbG8sIFdvcmxkIQ==");
+    }
+
+    #[test]
+    fn view_image_returns_image_block_and_structured_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("screenshot.PNG");
+        std::fs::write(&path, b"not-a-real-png-but-readable").unwrap();
+
+        let result = view_image(&path);
+
+        assert!(matches!(
+            result.content.as_slice(),
+            [
+                omegon_traits::ContentBlock::Text { .. },
+                omegon_traits::ContentBlock::Image { media_type, .. },
+            ] if media_type == "image/png"
+        ));
+        assert_eq!(result.details["path"], path.display().to_string());
+        assert_eq!(result.details["media_type"], "image/png");
+        assert_eq!(result.details["rendered"], true);
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! MockBridge provides scripted responses for testing.
 
 use async_trait::async_trait;
-use omegon_traits::ToolDefinition;
+use omegon_traits::{ContentBlock, ToolDefinition};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -70,6 +70,8 @@ pub enum LlmMessage {
         call_id: String,
         tool_name: String,
         content: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<ImageAttachment>,
         is_error: bool,
         /// Key arguments summarized for decay context. Survives serialization.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -97,9 +99,48 @@ impl LlmMessage {
                 text_len + think_len + tc_len
             }
             LlmMessage::ToolResult {
-                content, tool_name, ..
-            } => content.len() + tool_name.len(),
+                content,
+                tool_name,
+                images,
+                ..
+            } => {
+                content.len()
+                    + tool_name.len()
+                    + images
+                        .iter()
+                        .map(|img| img.data.len() + img.media_type.len())
+                        .sum::<usize>()
+            }
         }
+    }
+}
+
+impl ImageAttachment {
+    /// Build a user-image attachment from an image content block data URI.
+    pub fn from_content_block(block: &ContentBlock, source_path: Option<String>) -> Option<Self> {
+        let ContentBlock::Image { url, media_type } = block else {
+            return None;
+        };
+        let (uri_media_type, data) = parse_data_uri(url)?;
+        Some(Self {
+            data: data.to_string(),
+            media_type: if media_type.is_empty() {
+                uri_media_type.to_string()
+            } else {
+                media_type.clone()
+            },
+            source_path,
+        })
+    }
+}
+
+fn parse_data_uri(uri: &str) -> Option<(&str, &str)> {
+    let rest = uri.strip_prefix("data:")?;
+    let (media_type, data) = rest.split_once(";base64,")?;
+    if media_type.starts_with("image/") && !data.is_empty() {
+        Some((media_type, data))
+    } else {
+        None
     }
 }
 
@@ -324,6 +365,7 @@ mod tests {
             call_id: "tc1".into(),
             tool_name: "read".into(),
             content: "file contents here".into(),
+            images: vec![],
             is_error: false,
             args_summary: Some("test.txt".into()),
         };
