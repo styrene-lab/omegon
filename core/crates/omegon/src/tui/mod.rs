@@ -4460,12 +4460,12 @@ impl App {
         ("memory", "memory stats", &[]),
         (
             "skills",
-            "manage skills (bundled, user, project-local)",
+            "manage bundled, user, project-local, and armory skills",
             &["list", "install", "create", "get", "delete"],
         ),
         (
             "extension",
-            "manage extensions (install, remove, enable, disable)",
+            "manage extensions (armory name, URL, path)",
             &[
                 "list", "get", "install", "remove", "update", "enable", "disable", "search",
             ],
@@ -4479,13 +4479,13 @@ impl App {
         ),
         (
             "plugin",
-            "manage armory plugins (personas, tones, tools)",
+            "manage local or git plugins",
             &["list", "install", "remove", "update"],
         ),
         (
             "armory",
-            "browse extensions, plugins, skills, and agents",
-            &["browse", "search", "list"],
+            "browse and install extensions, plugins, skills, and agents",
+            &["browse", "search", "list", "install"],
         ),
         (
             "catalog",
@@ -4775,12 +4775,14 @@ impl App {
                         SlashResult::Handled
                     } else {
                         SlashResult::Display(
-                            "Usage: /skills [list|install|create|get <name>|delete <name>]".into(),
+                            "Usage: /skills [list|install [name|skills/name]|create|get <name>|delete <name>]"
+                                .into(),
                         )
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /skills [list|install|create|get <name>|delete <name>]".into(),
+                        "Usage: /skills [list|install [name|skills/name]|create|get <name>|delete <name>]"
+                            .into(),
                     )
                 }
             }
@@ -4797,13 +4799,13 @@ impl App {
                         SlashResult::Handled
                     } else {
                         SlashResult::Display(
-                            "Usage: /extension [list|get <name>|install <uri>|remove <name>|update [name]|enable <name>|disable <name>|search [query]]"
+                            "Usage: /extension [list|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|search [query]]"
                                 .into(),
                         )
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /extension [list|get <name>|install <uri>|remove <name>|update [name]|enable <name>|disable <name>|search [query]]"
+                        "Usage: /extension [list|get <name>|install <name|url|path>|remove <name>|update [name]|enable <name>|disable <name>|search [query]]"
                             .into(),
                     )
                 }
@@ -4839,13 +4841,14 @@ impl App {
                         SlashResult::Handled
                     } else {
                         SlashResult::Display(
-                            "Usage: /plugin [list|install <uri>|remove <name>|update [name]]"
+                            "Usage: /plugin [list|install <git-url|local-path>|remove <name>|update [name]]. Use /armory install <path> for registry plugins."
                                 .into(),
                         )
                     }
                 } else {
                     SlashResult::Display(
-                        "Usage: /plugin [list|install <uri>|remove <name>|update [name]]".into(),
+                        "Usage: /plugin [list|install <git-url|local-path>|remove <name>|update [name]]. Use /armory install <path> for registry plugins."
+                            .into(),
                     )
                 }
             }
@@ -8908,8 +8911,10 @@ mod slash_command_parsing_tests {
             .iter()
             .find(|(name, _, _)| *name == "armory")
             .expect("/armory command must be in COMMANDS array");
+        assert!(armory.1.contains("install"));
         assert!(armory.2.contains(&"browse"));
         assert!(armory.2.contains(&"search"));
+        assert!(armory.2.contains(&"install"));
     }
 
     #[test]

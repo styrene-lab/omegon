@@ -2037,15 +2037,15 @@ impl OmegonAcpAgent {
             "/skills" => {
                 let args = args.trim();
                 match args {
-                    "" | "list" => "Use the **skills/list** RPC to get structured skill data, or type `/skills list` to see a summary.\nAvailable: list, get <name>, create, delete <name>, install".into(),
-                    "install" => "Use the **skills/install** RPC to install bundled skills.".into(),
+                    "" | "list" => "Use the **skills/list** RPC to get structured skill data, or type `/skills list` to see a summary.\nAvailable: list, get <name>, create, delete <name>, install [name|skills/name]".into(),
+                    "install" => "Use the **skills/install** RPC to install bundled skills, or pass a skill name to install through Armory.".into(),
                     _ => format!("Skills subcommand: {args}. Use the **skills/{args}** RPC for structured operations."),
                 }
             }
             "/extension" | "/ext" => {
                 let args = args.trim();
                 match args {
-                    "" | "list" => "Use the **extensions/list** RPC for structured extension data.\nAvailable: list, get <name>, install <uri>, remove <name>, update [name], enable <name>, disable <name>, search [query]".into(),
+                    "" | "list" => "Use the **extensions/list** RPC for structured extension data.\nAvailable: list, get <name>, install <name|url|path>, remove <name>, update [name], enable <name>, disable <name>, search [query]".into(),
                     _ => format!("Extension subcommand: {args}. Use the **extensions/{args}** RPC for structured operations."),
                 }
             }
@@ -2063,7 +2063,7 @@ impl OmegonAcpAgent {
                     _ => format!("Catalog subcommand: {args}. Use the **catalog/{args}** RPC for structured operations."),
                 }
             }
-            "/armory" => "Use the **armory/browse** RPC for structured upstream discovery across extensions, plugins, skills, and agents.\nParameters: kind, query.".into(),
+            "/armory" => "Use the **armory/browse** RPC for structured upstream discovery across extensions, plugins, skills, and agents, and **armory/install** to install a registry item.\nBrowse parameters: kind, query. Install parameter: target.".into(),
             "/help" => "Commands: /model /thinking /posture /skills /extension /armory /persona /catalog /secrets /status /login /help\n\nFull CRUD is available via RPC ext_methods (armory/*, skills/*, extensions/*, personas/*, catalog/*, secrets/*).".into(),
             _ => format!("Unknown: {cmd}. Type /help"),
         }
