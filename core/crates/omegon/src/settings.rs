@@ -987,8 +987,11 @@ pub struct Profile {
     pub default_posture: Option<String>,
 
     // ── Permissions ──
-    /// Directories outside the workspace that the agent can access without
-    /// per-operation confirmation. Paths are expanded at runtime (~ → $HOME).
+    /// Unified operator permission policy.
+    #[serde(default, skip_serializing_if = "ProfilePermissions::is_empty")]
+    pub permissions: ProfilePermissions,
+    /// Legacy compatibility alias for `permissions.trustedDirectories`.
+    /// New writes migrate this into the `permissions` object.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trusted_directories: Vec<String>,
 
@@ -1039,6 +1042,21 @@ pub struct Profile {
 pub struct ProfileModel {
     pub provider: String,
     pub model_id: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfilePermissions {
+    /// Directories outside the workspace that the agent can access without
+    /// per-operation confirmation. Paths are expanded at runtime (~ → $HOME).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_directories: Vec<String>,
+}
+
+impl ProfilePermissions {
+    pub fn is_empty(&self) -> bool {
+        self.trusted_directories.is_empty()
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1158,7 +1176,9 @@ impl Profile {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let json = serde_json::to_string_pretty(self)?;
+        let mut profile = self.clone();
+        profile.normalize_permissions();
+        let json = serde_json::to_string_pretty(&profile)?;
         crate::filelock::atomic_write_locked(&path, json.as_bytes())?;
         tracing::debug!(path = %path.display(), "project profile saved");
         Ok(())
@@ -1169,10 +1189,50 @@ impl Profile {
         let path = global_profile_path()
             .ok_or_else(|| anyhow::anyhow!("Cannot determine config directory"))?;
         let _ = std::fs::create_dir_all(path.parent().unwrap());
-        let json = serde_json::to_string_pretty(self)?;
+        let mut profile = self.clone();
+        profile.normalize_permissions();
+        let json = serde_json::to_string_pretty(&profile)?;
         crate::filelock::atomic_write_locked(&path, json.as_bytes())?;
         tracing::debug!(path = %path.display(), "global profile saved");
         Ok(())
+    }
+
+    pub fn effective_trusted_directories(&self) -> Vec<String> {
+        let mut dirs = Vec::new();
+        for dir in self
+            .permissions
+            .trusted_directories
+            .iter()
+            .chain(self.trusted_directories.iter())
+        {
+            push_unique(&mut dirs, dir);
+        }
+        dirs
+    }
+
+    pub fn set_trusted_directories(&mut self, dirs: Vec<String>) {
+        self.permissions.trusted_directories.clear();
+        for dir in dirs {
+            push_unique(&mut self.permissions.trusted_directories, &dir);
+        }
+        self.trusted_directories.clear();
+    }
+
+    pub fn add_trusted_directory(&mut self, dir: String) {
+        let mut dirs = self.effective_trusted_directories();
+        push_unique(&mut dirs, &dir);
+        self.set_trusted_directories(dirs);
+    }
+
+    pub fn remove_trusted_directory(&mut self, dir: &str) {
+        let mut dirs = self.effective_trusted_directories();
+        retain_not_equal(&mut dirs, dir);
+        self.set_trusted_directories(dirs);
+    }
+
+    fn normalize_permissions(&mut self) {
+        let dirs = self.effective_trusted_directories();
+        self.set_trusted_directories(dirs);
     }
 
     /// Apply profile to settings (called at startup).
@@ -1191,8 +1251,9 @@ impl Profile {
         if !self.provider_order.is_empty() {
             settings.provider_order = self.provider_order.clone();
         }
-        if !self.trusted_directories.is_empty() {
-            settings.trusted_directories = self.trusted_directories.clone();
+        let trusted_directories = self.effective_trusted_directories();
+        if !trusted_directories.is_empty() {
+            settings.trusted_directories = trusted_directories;
         }
         if let Some(ref ch) = self.update_channel {
             settings.update_channel = ch.clone();
@@ -1256,9 +1317,7 @@ impl Profile {
         if !settings.provider_order.is_empty() {
             self.provider_order = settings.provider_order.clone();
         }
-        if !settings.trusted_directories.is_empty() {
-            self.trusted_directories = settings.trusted_directories.clone();
-        }
+        self.set_trusted_directories(settings.trusted_directories.clone());
         if settings.update_channel != "stable" {
             self.update_channel = Some(settings.update_channel.clone());
         }
@@ -1274,6 +1333,17 @@ impl Profile {
         if settings.sandbox {
             self.sandbox = Some(true);
         }
+    }
+}
+
+fn retain_not_equal(values: &mut Vec<String>, target: &str) {
+    values.retain(|value| value.trim() != target.trim());
+}
+
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    let value = value.trim();
+    if !value.is_empty() && !values.iter().any(|existing| existing.trim() == value) {
+        values.push(value.to_string());
     }
 }
 
@@ -1928,6 +1998,41 @@ mod tests {
         assert!(p.extensions.permits("scry", &[], &[]));
         assert!(!p.extensions.permits("vox", &[], &[]));
         assert!(!p.extensions.permits("lipstyk", &[], &[]));
+    }
+
+    #[test]
+    fn profile_permissions_prefer_unified_surface_with_legacy_fallback() {
+        let legacy_json = r#"{"trustedDirectories":["/legacy"]}"#;
+        let p: Profile = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(p.effective_trusted_directories(), vec!["/legacy"]);
+
+        let unified_json = r#"{
+            "permissions": {"trustedDirectories":["/unified"]},
+            "trustedDirectories":["/legacy"]
+        }"#;
+        let p: Profile = serde_json::from_str(unified_json).unwrap();
+        assert_eq!(
+            p.effective_trusted_directories(),
+            vec!["/unified", "/legacy"]
+        );
+    }
+
+    #[test]
+    fn profile_permission_save_migrates_legacy_trusted_directories() {
+        let mut p = Profile {
+            trusted_directories: vec!["/legacy".into()],
+            ..Profile::default()
+        };
+        p.add_trusted_directory("/unified".into());
+
+        let json = serde_json::to_string_pretty(&p).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(value.get("permissions").is_some());
+        assert!(value.get("trustedDirectories").is_none());
+        assert_eq!(
+            p.effective_trusted_directories(),
+            vec!["/legacy", "/unified"]
+        );
     }
 
     #[test]

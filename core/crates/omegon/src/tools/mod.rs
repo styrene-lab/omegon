@@ -991,20 +991,42 @@ impl ToolProvider for CoreTools {
                 let path_str = args["path"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'path' argument"))?;
+                let scope = args["scope"].as_str().unwrap_or("session");
                 let expanded = expand_tilde(path_str);
                 let canonical = expanded.canonicalize().unwrap_or(expanded.clone());
                 self.approve_directory(canonical.clone());
+                if matches!(scope, "persistent" | "always" | "project") {
+                    let canonical_str = canonical.display().to_string();
+                    if let Some(ref settings) = self.boundary.settings
+                        && let Ok(mut s) = settings.lock()
+                        && !s.trusted_directories.contains(&canonical_str)
+                    {
+                        s.trusted_directories.push(canonical_str.clone());
+                    }
+                    let mut profile = crate::settings::Profile::load(&self.cwd);
+                    profile.add_trusted_directory(canonical_str);
+                    profile.save(&self.cwd)?;
+                }
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: format!(
-                            "✓ Directory approved for this session: {}\n\
+                            "✓ Directory approved for {}: {}\n\
                              You can now read and write files in this directory.",
+                            if matches!(scope, "persistent" | "always" | "project") {
+                                "future sessions"
+                            } else {
+                                "this session"
+                            },
                             canonical.display()
                         ),
                     }],
                     details: serde_json::json!({
                         "path": canonical.display().to_string(),
-                        "scope": "session",
+                        "scope": if matches!(scope, "persistent" | "always" | "project") {
+                            "persistent"
+                        } else {
+                            "session"
+                        },
                     }),
                 })
             }
@@ -1179,6 +1201,48 @@ mod tests {
             result.is_ok(),
             "approved directory should be allowed: {:?}",
             result.unwrap_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn trust_directory_persistent_scope_updates_profile_permissions() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("AGENTS.md"), "instructions").unwrap();
+        let trusted = tempfile::tempdir().unwrap();
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+        let tools = CoreTools::new(project.path().to_path_buf()).with_settings(settings.clone());
+
+        tools
+            .execute(
+                reg::TRUST_DIRECTORY,
+                "test",
+                serde_json::json!({
+                    "path": trusted.path().display().to_string(),
+                    "scope": "persistent",
+                }),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let trusted_dir = trusted.path().canonicalize().unwrap().display().to_string();
+        assert!(
+            settings
+                .lock()
+                .unwrap()
+                .trusted_directories
+                .contains(&trusted_dir)
+        );
+        let profile = crate::settings::Profile::load(project.path());
+        assert!(
+            profile
+                .effective_trusted_directories()
+                .contains(&trusted_dir)
+        );
+        assert!(profile.trusted_directories.is_empty());
+        assert_eq!(
+            profile.permissions.trusted_directories,
+            vec![trusted_dir.clone()]
         );
     }
 

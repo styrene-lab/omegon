@@ -2369,7 +2369,10 @@ async fn execute_tool_invocation(
                         path: perm_err.requested_path.clone(),
                         decision: "allow".into(),
                     });
-                    let trust_args = serde_json::json!({ "path": perm_err.directory });
+                    let trust_args = serde_json::json!({
+                        "path": perm_err.directory,
+                        "scope": "session",
+                    });
                     if let Err(e) = bus
                         .execute_internal(
                             crate::tool_registry::core::TRUST_DIRECTORY,
@@ -2401,7 +2404,10 @@ async fn execute_tool_invocation(
                         path: perm_err.requested_path.clone(),
                         decision: "always_allow".into(),
                     });
-                    let trust_args = serde_json::json!({ "path": perm_err.directory });
+                    let trust_args = serde_json::json!({
+                        "path": perm_err.directory,
+                        "scope": "persistent",
+                    });
                     if let Err(e) = bus
                         .execute_internal(
                             crate::tool_registry::core::TRUST_DIRECTORY,

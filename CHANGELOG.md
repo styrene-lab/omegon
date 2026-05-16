@@ -25,10 +25,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- **Permissions persistence now has a single profile surface** — path grants are written under `profile.permissions.trustedDirectories`, with legacy `trustedDirectories` still accepted as a read/write migration alias.
 - **Release candidates retired again** — release branches now carry stable semver versions directly, `just release` cuts stable tags without opening a follow-on RC line, and install/Homebrew/docs surfaces only advertise stable and nightly channels.
 
 ### Fixed
 
+- **ACP and TUI always-allow now persist through the same grant path** — `allow_always` decisions route through the internal permission grant tool, so host-panel approvals and terminal approvals update the same project profile permission store.
 - **Workspace path discovery no longer escapes into ancestor home repos** — Omegon project/runtime state now respects explicit project markers and shell git commands run with a discovery ceiling so child workspaces do not inherit unrelated parent repository status.
 - **MQTT bridge no longer starts implicitly** — interactive and daemon sessions now leave MQTT disabled unless the profile or environment explicitly enables it, and enabled bridges preflight the broker socket before handing control to the MQTT client event loop.
 - **Startup persona and tone now honor profile defaults** — local, ACP, and embedded startup can load persona/tone defaults from the profile instead of requiring ad hoc child environment variables.
