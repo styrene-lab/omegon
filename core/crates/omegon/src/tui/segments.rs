@@ -4,7 +4,7 @@
 //! background, borders, and internal layout. The ConversationWidget
 //! composes these into a scrollable view.
 
-use std::sync::OnceLock;
+use std::{path::Path, sync::OnceLock};
 
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap};
@@ -12,6 +12,18 @@ use tui_syntax_highlight::Highlighter;
 use unicode_width::UnicodeWidthStr;
 
 use super::theme::Theme;
+
+const FILE_URL_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'%')
+    .add(b'<')
+    .add(b'>')
+    .add(b'?')
+    .add(b'`')
+    .add(b'{')
+    .add(b'}');
 
 /// Cached syntax highlighting resources — loaded once, reused forever.
 struct SyntaxCache {
@@ -75,6 +87,137 @@ fn apply_rows_bg(area: Rect, start_row: u16, row_count: u16, bg: Color, buf: &mu
             }
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenderedLink {
+    start_col: u16,
+    label: String,
+    url: String,
+}
+
+fn collect_rendered_links(line: &Line<'_>) -> Vec<RenderedLink> {
+    let text: String = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect();
+    detect_links(&text)
+}
+
+fn detect_links(text: &str) -> Vec<RenderedLink> {
+    const SCHEMES: [&str; 3] = ["https://", "http://", "file://"];
+
+    let mut links = Vec::new();
+    let mut cursor = 0usize;
+    while cursor < text.len() {
+        let rest = &text[cursor..];
+        let Some((rel_start, scheme)) = SCHEMES
+            .iter()
+            .filter_map(|scheme| rest.find(scheme).map(|idx| (idx, *scheme)))
+            .min_by_key(|(idx, _)| *idx)
+        else {
+            break;
+        };
+
+        let start = cursor + rel_start;
+        let after_scheme = start + scheme.len();
+        let mut end = text.len();
+        for (idx, ch) in text[after_scheme..].char_indices() {
+            if ch.is_whitespace() || ch.is_control() || matches!(ch, '<' | '>' | '"' | '\'') {
+                end = after_scheme + idx;
+                break;
+            }
+        }
+        while end > start {
+            let Some(ch) = text[..end].chars().next_back() else {
+                break;
+            };
+            if matches!(ch, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']') {
+                end -= ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+
+        if end > after_scheme {
+            let label = text[start..end].to_string();
+            let start_col = UnicodeWidthStr::width(&text[..start]) as u16;
+            links.push(RenderedLink {
+                start_col,
+                url: label.clone(),
+                label,
+            });
+        }
+        cursor = end.max(after_scheme);
+    }
+    links
+}
+
+fn apply_rendered_links(
+    area: Rect,
+    lines: &[Line<'_>],
+    buf: &mut Buffer,
+    style: Style,
+    max_rows: u16,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let mut visual_row = 0u16;
+    for line in lines {
+        if visual_row >= area.height || visual_row >= max_rows {
+            break;
+        }
+
+        let line_width = line.width() as u16;
+        if line_width <= area.width {
+            for link in collect_rendered_links(line) {
+                if link.start_col >= area.width {
+                    continue;
+                }
+                let width = area.width.saturating_sub(link.start_col);
+                if width == 0 {
+                    continue;
+                }
+                let label_width = UnicodeWidthStr::width(link.label.as_str()) as u16;
+                let width = width.min(label_width.max(1));
+                let link_area = Rect {
+                    x: area.x + link.start_col,
+                    y: area.y + visual_row,
+                    width,
+                    height: 1,
+                };
+                hyperrat::Link::new(link.label, link.url)
+                    .style(style)
+                    .render(link_area, buf);
+            }
+        }
+
+        visual_row = visual_row.saturating_add(line_width.max(1).div_ceil(area.width));
+    }
+}
+
+fn file_url_for_path(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.chars().any(char::is_control) {
+        return None;
+    }
+    if trimmed.starts_with("file://") {
+        return Some(trimmed.to_string());
+    }
+
+    let path = Path::new(trimmed);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let encoded =
+        percent_encoding::utf8_percent_encode(&absolute.to_string_lossy(), FILE_URL_ENCODE_SET)
+            .to_string();
+    Some(format!("file://{encoded}"))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -870,10 +1013,20 @@ fn render_user_prompt(
             ))
         })
         .collect();
-    Paragraph::new(content)
+    Paragraph::new(content.clone())
         .wrap(Wrap { trim: false })
         .style(Style::default().bg(bg))
         .render(inner, buf);
+    apply_rendered_links(
+        inner,
+        &content,
+        buf,
+        Style::default()
+            .fg(t.accent_muted())
+            .bg(bg)
+            .add_modifier(Modifier::UNDERLINED),
+        inner.height,
+    );
 }
 
 /// Build a compact meta tag string from SegmentMeta for display in the response header.
@@ -1184,10 +1337,20 @@ fn render_assistant_text(
         lines.push(Line::from(Span::styled("…", t.style_dim().bg(bg))));
     }
 
-    Paragraph::new(lines)
+    Paragraph::new(lines.clone())
         .wrap(Wrap { trim: false })
         .style(Style::default().bg(bg))
         .render(inner, buf);
+    apply_rendered_links(
+        inner,
+        &lines,
+        buf,
+        Style::default()
+            .fg(t.accent_muted())
+            .bg(bg)
+            .add_modifier(Modifier::UNDERLINED),
+        inner.height,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1438,10 +1601,20 @@ fn render_tool_card(
                     .add_modifier(Modifier::DIM),
             )));
         }
-        let para = Paragraph::new(lines)
+        let para = Paragraph::new(lines.clone())
             .wrap(Wrap { trim: false })
             .style(Style::default().bg(bg));
         para.render(card_inner, buf);
+        apply_rendered_links(
+            card_inner,
+            &lines,
+            buf,
+            Style::default()
+                .fg(t.accent_muted())
+                .bg(bg)
+                .add_modifier(Modifier::UNDERLINED),
+            card_inner.height,
+        );
         return;
     }
 
@@ -1928,7 +2101,7 @@ fn render_tool_card(
         }
     }
 
-    Paragraph::new(lines)
+    Paragraph::new(lines.clone())
         .wrap(Wrap { trim: false })
         .render(card_inner, buf);
 
@@ -1942,6 +2115,16 @@ fn render_tool_card(
     for (row, fill_bg) in result_row_fills {
         apply_rows_bg(card_inner, row, 1, fill_bg, buf);
     }
+    apply_rendered_links(
+        card_inner,
+        &lines,
+        buf,
+        Style::default()
+            .fg(t.accent_muted())
+            .bg(bg)
+            .add_modifier(Modifier::UNDERLINED),
+        card_inner.height,
+    );
 
     // ── Post-render: OSC 8 hyperlinks for single-file tool paths ────────────
     if matches!(name, "read" | "write" | "view")
@@ -1974,8 +2157,9 @@ fn render_tool_card(
                 }
 
                 let available = card_inner.width.saturating_sub(prefix.len() as u16);
-                if available > 0 {
-                    let url = format!("file://{file_path}");
+                if available > 0
+                    && let Some(url) = file_url_for_path(&file_path)
+                {
                     let link_area = Rect {
                         x: card_inner.x + prefix.len() as u16,
                         y: card_inner.y,
@@ -2464,10 +2648,20 @@ fn render_system(text: &str, area: Rect, buf: &mut Buffer, t: &dyn Theme, mode: 
         lines.push(Line::from(Span::styled(line.to_string(), style)));
     }
 
-    Paragraph::new(lines)
+    Paragraph::new(lines.clone())
         .wrap(Wrap { trim: false })
         .style(Style::default().bg(bg))
         .render(inner, buf);
+    apply_rendered_links(
+        inner,
+        &lines,
+        buf,
+        Style::default()
+            .fg(t.accent_muted())
+            .bg(bg)
+            .add_modifier(Modifier::UNDERLINED),
+        inner.height,
+    );
 }
 
 fn render_lifecycle(icon: &str, text: &str, area: Rect, buf: &mut Buffer, t: &dyn Theme) {
@@ -2592,6 +2786,54 @@ mod tests {
             }
         }
         None
+    }
+
+    #[test]
+    fn detects_bare_agent_links_without_trailing_punctuation() {
+        let links = detect_links("See https://example.com/docs, then file:///tmp/x.");
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].label, "https://example.com/docs");
+        assert_eq!(links[0].url, "https://example.com/docs");
+        assert_eq!(links[1].label, "file:///tmp/x");
+        assert_eq!(links[1].url, "file:///tmp/x");
+    }
+
+    #[test]
+    fn file_tool_links_resolve_relative_paths_to_file_urls() {
+        let url = file_url_for_path("Cargo.toml").expect("relative path should resolve");
+        assert!(
+            url.starts_with("file:///"),
+            "relative file paths should become absolute file URLs: {url}"
+        );
+        assert!(
+            url.ends_with("/Cargo.toml"),
+            "resolved URL should preserve the target file name: {url}"
+        );
+    }
+
+    #[test]
+    fn inline_link_rendering_preserves_text_after_the_link() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::AssistantText {
+                text: "See https://example.com/docs for details.".into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        };
+        let (area, mut buf) = make_buf(90, 8);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Full,
+            crate::settings::ToolDetail::Detailed,
+        );
+        let text = buf_text(&buf, area);
+        assert!(
+            text.contains("for details."),
+            "link overlay must not clear the suffix after the URL: {text}"
+        );
     }
 
     #[test]
