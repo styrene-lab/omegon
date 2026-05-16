@@ -19,12 +19,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 
 - **Native `/plan` session gate** — added a first-class TUI/remote slash surface over the existing session intent work plan with `set`, `approve`, `execute`, `advance`, `skip`, `clear`, and status rendering so high-level plan mode can reuse the current conversation state instead of creating a shadow planning store.
+- **Unified profile operator surface** — `/profile`, IPC/web control commands, and ACP control methods can now view, capture, apply, and edit profile defaults for MQTT, extension allow/deny policy, persona, and tone.
 - **Unified Armory install surface** — `/armory install`, `armory/install`, extension installs, and named skill installs now route through one Armory installer that materializes extensions, plugins, and skills into the runtime paths Omegon actually loads.
 - **Profile-scoped integration defaults** — project/global profiles can now opt into MQTT bridge startup and constrain native extension loading with allow/deny lists instead of letting every installed operator extension load everywhere by default.
 
 ### Fixed
 
 - **MQTT bridge no longer starts implicitly** — interactive and daemon sessions now leave MQTT disabled unless the profile or environment explicitly enables it, and enabled bridges preflight the broker socket before handing control to the MQTT client event loop.
+- **Startup persona and tone now honor profile defaults** — local, ACP, and embedded startup can load persona/tone defaults from the profile instead of requiring ad hoc child environment variables.
 - **TUI provider status no longer probes credentials every frame** — OAuth footer state is cached on model changes instead of repeatedly reading external credential files during redraws.
 - **Armory installation is reachable and discoverable from the TUI** — command suggestions, slash usage, ACP help, browse output, dispatcher routing, and post-install messages now point operators at `/armory install`, `/skills install <name>`, and `/extension install <name|url|path>` instead of leaving registry installs as a hidden CLI path.
 - **Queued TUI prompts no longer interrupt by default** — submitting a follow-up while the agent is active now queues it until the current turn finishes instead of cancelling the active turn under the misleading "queued" banner. Explicit interrupt queue mode still cancels when selected.

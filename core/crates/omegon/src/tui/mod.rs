@@ -464,6 +464,16 @@ pub enum CanonicalSlashCommand {
     ModelList,
     SetModel(String),
     SetThinking(crate::settings::ThinkingLevel),
+    ProfileView,
+    ProfileExport,
+    ProfileCapture,
+    ProfileApply,
+    ProfileSetMqtt(Option<bool>),
+    ProfileExtensionAllow(String),
+    ProfileExtensionDeny(String),
+    ProfileExtensionClear,
+    ProfileSetPersona(Option<String>),
+    ProfileSetTone(Option<String>),
     StatusView,
     WorkspaceStatusView,
     WorkspaceListView,
@@ -549,6 +559,63 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "model" if !args.is_empty() => Some(CanonicalSlashCommand::SetModel(args.to_string())),
         "think" => {
             crate::settings::ThinkingLevel::parse(args).map(CanonicalSlashCommand::SetThinking)
+        }
+        "profile" if args.is_empty() || args == "status" || args == "view" => {
+            Some(CanonicalSlashCommand::ProfileView)
+        }
+        "profile" if args == "export" => Some(CanonicalSlashCommand::ProfileExport),
+        "profile" if args == "capture" || args == "save" => {
+            Some(CanonicalSlashCommand::ProfileCapture)
+        }
+        "profile" if args == "apply" || args == "load" => Some(CanonicalSlashCommand::ProfileApply),
+        "profile" if args == "mqtt" || args == "mqtt status" => {
+            Some(CanonicalSlashCommand::ProfileSetMqtt(None))
+        }
+        "profile" if args == "mqtt on" || args == "mqtt enable" => {
+            Some(CanonicalSlashCommand::ProfileSetMqtt(Some(true)))
+        }
+        "profile" if args == "mqtt off" || args == "mqtt disable" => {
+            Some(CanonicalSlashCommand::ProfileSetMqtt(Some(false)))
+        }
+        "profile" if args == "extensions clear" || args == "extension clear" => {
+            Some(CanonicalSlashCommand::ProfileExtensionClear)
+        }
+        "profile" => {
+            if let Some(name) = args
+                .strip_prefix("extension allow ")
+                .or_else(|| args.strip_prefix("extensions allow "))
+                .or_else(|| args.strip_prefix("extension enable "))
+                .or_else(|| args.strip_prefix("extensions enable "))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                Some(CanonicalSlashCommand::ProfileExtensionAllow(
+                    name.to_string(),
+                ))
+            } else if let Some(name) = args
+                .strip_prefix("extension deny ")
+                .or_else(|| args.strip_prefix("extensions deny "))
+                .or_else(|| args.strip_prefix("extension disable "))
+                .or_else(|| args.strip_prefix("extensions disable "))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                Some(CanonicalSlashCommand::ProfileExtensionDeny(
+                    name.to_string(),
+                ))
+            } else if let Some(name) = args.strip_prefix("persona ").map(str::trim) {
+                Some(CanonicalSlashCommand::ProfileSetPersona(
+                    (!name.is_empty() && name != "off" && name != "clear")
+                        .then(|| name.to_string()),
+                ))
+            } else {
+                args.strip_prefix("tone ").map(str::trim).map(|name| {
+                    CanonicalSlashCommand::ProfileSetTone(
+                        (!name.is_empty() && name != "off" && name != "clear")
+                            .then(|| name.to_string()),
+                    )
+                })
+            }
         }
         "status" if args.is_empty() => Some(CanonicalSlashCommand::StatusView),
         "workspace" if args.is_empty() => Some(CanonicalSlashCommand::WorkspaceStatusView),
@@ -4472,6 +4539,19 @@ impl App {
             "set thinking level",
             &["off", "minimal", "low", "medium", "high"],
         ),
+        (
+            "profile",
+            "view, capture, apply, or edit runtime profile defaults",
+            &[
+                "view",
+                "capture",
+                "apply",
+                "mqtt",
+                "extension",
+                "persona",
+                "tone",
+            ],
+        ),
         ("stats", "session telemetry", &[]),
         (
             "bench",
@@ -4799,6 +4879,23 @@ impl App {
                     SlashResult::Display(format!(
                         "Unknown level: {args}. Options: off, low, medium, high"
                     ))
+                }
+            }
+
+            "profile" => {
+                if let Some(command) = canonical_slash_command("profile", args)
+                    && let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
+                {
+                    let _ = tx.try_send(TuiCommand::ExecuteControl {
+                        request,
+                        respond_to: None,
+                    });
+                    SlashResult::Handled
+                } else {
+                    SlashResult::Display(
+                        "Usage: /profile [view|export|capture|apply|mqtt on|mqtt off|extension allow <name>|extension deny <name>|extensions clear|persona <name|off>|tone <name|off>]".into(),
+                    )
                 }
             }
 
@@ -8758,6 +8855,68 @@ mod slash_command_parsing_tests {
     use super::TuiCommand;
     use super::canonical_slash_command;
     use tokio::sync::mpsc;
+
+    // ── Profile ───────────────────────────────────────────
+
+    #[test]
+    fn profile_commands_parse() {
+        assert_eq!(
+            canonical_slash_command("profile", ""),
+            Some(CanonicalSlashCommand::ProfileView)
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "capture"),
+            Some(CanonicalSlashCommand::ProfileCapture)
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "apply"),
+            Some(CanonicalSlashCommand::ProfileApply)
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "mqtt on"),
+            Some(CanonicalSlashCommand::ProfileSetMqtt(Some(true)))
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "mqtt off"),
+            Some(CanonicalSlashCommand::ProfileSetMqtt(Some(false)))
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "mqtt"),
+            Some(CanonicalSlashCommand::ProfileSetMqtt(None))
+        );
+    }
+
+    #[test]
+    fn profile_extension_and_persona_commands_parse() {
+        assert_eq!(
+            canonical_slash_command("profile", "extension allow scry"),
+            Some(CanonicalSlashCommand::ProfileExtensionAllow("scry".into()))
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "extension deny vox"),
+            Some(CanonicalSlashCommand::ProfileExtensionDeny("vox".into()))
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "extensions clear"),
+            Some(CanonicalSlashCommand::ProfileExtensionClear)
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "persona flynt"),
+            Some(CanonicalSlashCommand::ProfileSetPersona(Some(
+                "flynt".into()
+            )))
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "persona off"),
+            Some(CanonicalSlashCommand::ProfileSetPersona(None))
+        );
+        assert_eq!(
+            canonical_slash_command("profile", "tone concise"),
+            Some(CanonicalSlashCommand::ProfileSetTone(Some(
+                "concise".into()
+            )))
+        );
+    }
 
     // ── Skills ────────────────────────────────────────────
 

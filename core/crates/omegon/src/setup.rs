@@ -672,26 +672,16 @@ impl AgentSetup {
             );
         }
 
-        // ─── Activate startup persona (child or headless --persona) ────
-        if let Ok(persona_name) = std::env::var("OMEGON_CHILD_PERSONA") {
-            let (personas, _) = crate::plugins::persona_loader::scan_available();
-            let target = persona_name.to_lowercase();
-            if let Some(available) = personas
-                .iter()
-                .find(|p| p.name.to_lowercase() == target || p.id.to_lowercase().contains(&target))
-            {
-                match crate::plugins::persona_loader::load_persona(&available.path) {
-                    Ok(loaded) => {
-                        tracing::info!(persona = %loaded.name, "activating startup persona");
-                        persona_registry.activate_persona(loaded);
-                    }
-                    Err(e) => {
-                        tracing::warn!(persona = %persona_name, error = %e, "startup persona load failed");
-                    }
-                }
-            } else {
-                tracing::warn!(persona = %persona_name, "startup persona not found");
-            }
+        // ─── Activate startup persona/tone from child env or profile ────
+        let startup_profile = crate::settings::Profile::load(&cwd);
+        if let Some(persona_name) = std::env::var("OMEGON_CHILD_PERSONA")
+            .ok()
+            .or_else(|| startup_profile.persona.clone())
+        {
+            activate_startup_persona(&mut persona_registry, &persona_name);
+        }
+        if let Some(tone_name) = startup_profile.tone.clone() {
+            activate_startup_tone(&mut persona_registry, &tone_name);
         }
 
         bus.register(Box::new(features::persona::PersonaFeature::new(
@@ -1490,4 +1480,49 @@ async fn discover_and_register_extensions(
 fn extension_state_disabled(path: &Path) -> bool {
     crate::extensions::ExtensionState::load(path)
         .is_ok_and(|state| !state.enabled || state.stability.auto_disabled)
+}
+
+fn activate_startup_persona(
+    registry: &mut crate::plugins::registry::PluginRegistry,
+    persona_name: &str,
+) {
+    let (personas, _) = crate::plugins::persona_loader::scan_available();
+    let target = persona_name.to_lowercase();
+    if let Some(available) = personas
+        .iter()
+        .find(|p| p.name.to_lowercase() == target || p.id.to_lowercase().contains(&target))
+    {
+        match crate::plugins::persona_loader::load_persona(&available.path) {
+            Ok(loaded) => {
+                tracing::info!(persona = %loaded.name, "activating startup persona");
+                registry.activate_persona(loaded);
+            }
+            Err(e) => {
+                tracing::warn!(persona = %persona_name, error = %e, "startup persona load failed");
+            }
+        }
+    } else {
+        tracing::warn!(persona = %persona_name, "startup persona not found");
+    }
+}
+
+fn activate_startup_tone(registry: &mut crate::plugins::registry::PluginRegistry, tone_name: &str) {
+    let (_, tones) = crate::plugins::persona_loader::scan_available();
+    let target = tone_name.to_lowercase();
+    if let Some(available) = tones
+        .iter()
+        .find(|t| t.name.to_lowercase() == target || t.id.to_lowercase().contains(&target))
+    {
+        match crate::plugins::persona_loader::load_tone(&available.path) {
+            Ok(loaded) => {
+                tracing::info!(tone = %loaded.name, "activating startup tone");
+                registry.activate_tone(loaded);
+            }
+            Err(e) => {
+                tracing::warn!(tone = %tone_name, error = %e, "startup tone load failed");
+            }
+        }
+    } else {
+        tracing::warn!(tone = %tone_name, "startup tone not found");
+    }
 }

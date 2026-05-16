@@ -613,14 +613,132 @@ async fn handle_control_request(
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
-            format!(
-                "Model: {}\nThinking: {}\nPosture: {}\nContext window: {}\nMax turns: {}",
-                settings.model,
-                settings.thinking.as_str(),
-                settings.posture.effective.as_str(),
-                settings.context_window,
-                settings.max_turns,
-            )
+            let profile = crate::settings::Profile::load(cwd);
+            serde_json::json!({
+                "live": {
+                    "model": settings.model,
+                    "thinkingLevel": settings.thinking.as_str(),
+                    "posture": settings.posture.effective.as_str(),
+                    "contextWindow": settings.context_window,
+                    "maxTurns": settings.max_turns,
+                },
+                "profile": profile,
+            })
+            .to_string()
+        }
+
+        "profile_capture" => {
+            let settings = shared_settings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let mut profile = crate::settings::Profile::load(cwd);
+            profile.capture_from(&settings);
+            match profile.save(cwd) {
+                Ok(()) => "Profile captured from live ACP runtime.".into(),
+                Err(e) => format!("failed to save profile: {e}"),
+            }
+        }
+
+        "profile_apply" => {
+            let profile = crate::settings::Profile::load(cwd);
+            if let Ok(mut settings) = shared_settings.lock() {
+                profile.apply_to_with_posture(&mut settings, cwd);
+                let slim = settings.is_slim();
+                let disabled = settings.posture_disabled_tools.clone();
+                let enabled = settings.posture_enabled_tools.clone();
+                drop(settings);
+                bus.apply_operator_tool_profile(slim, &disabled, &enabled);
+                "Profile applied to ACP runtime. Integration and extension load policy changes take effect on next startup.".into()
+            } else {
+                "failed to update settings".into()
+            }
+        }
+
+        "profile_mqtt" => {
+            let mut profile = crate::settings::Profile::load(cwd);
+            match args {
+                "on" | "enable" | "true" => profile.integrations.mqtt.enabled = Some(true),
+                "off" | "disable" | "false" => profile.integrations.mqtt.enabled = Some(false),
+                "" | "status" => {
+                    return match profile.integrations.mqtt.enabled {
+                        Some(true) => "MQTT bridge profile default: enabled".into(),
+                        Some(false) => "MQTT bridge profile default: disabled".into(),
+                        None => "MQTT bridge profile default: unset (disabled by default)".into(),
+                    };
+                }
+                _ => return "Usage: profile_mqtt [on|off|status]".into(),
+            }
+            match profile.save(cwd) {
+                Ok(()) => {
+                    "MQTT bridge profile default updated. Takes effect on next startup.".into()
+                }
+                Err(e) => format!("failed to save profile: {e}"),
+            }
+        }
+
+        "profile_extension_allow" | "profile_extension_deny" => {
+            if args.is_empty() {
+                return format!("Usage: {cmd} <name>");
+            }
+            let mut profile = crate::settings::Profile::load(cwd);
+            let name = args.to_string();
+            if cmd == "profile_extension_allow" {
+                profile
+                    .extensions
+                    .disabled
+                    .retain(|v| !v.eq_ignore_ascii_case(&name));
+                if !profile
+                    .extensions
+                    .enabled
+                    .iter()
+                    .any(|v| v.eq_ignore_ascii_case(&name))
+                {
+                    profile.extensions.enabled.push(name);
+                }
+            } else {
+                profile
+                    .extensions
+                    .enabled
+                    .retain(|v| !v.eq_ignore_ascii_case(&name));
+                if !profile
+                    .extensions
+                    .disabled
+                    .iter()
+                    .any(|v| v.eq_ignore_ascii_case(&name))
+                {
+                    profile.extensions.disabled.push(name);
+                }
+            }
+            match profile.save(cwd) {
+                Ok(()) => "Extension profile policy updated. Takes effect on next startup.".into(),
+                Err(e) => format!("failed to save profile: {e}"),
+            }
+        }
+
+        "profile_extension_clear" => {
+            let mut profile = crate::settings::Profile::load(cwd);
+            profile.extensions.enabled.clear();
+            profile.extensions.disabled.clear();
+            match profile.save(cwd) {
+                Ok(()) => "Extension profile policy cleared.".into(),
+                Err(e) => format!("failed to save profile: {e}"),
+            }
+        }
+
+        "profile_persona" | "profile_tone" => {
+            let mut profile = crate::settings::Profile::load(cwd);
+            let value =
+                (!args.is_empty() && args != "off" && args != "clear").then(|| args.to_string());
+            if cmd == "profile_persona" {
+                profile.persona = value;
+            } else {
+                profile.tone = value;
+            }
+            match profile.save(cwd) {
+                Ok(()) => "Profile default updated.".into(),
+                Err(e) => format!("failed to save profile: {e}"),
+            }
         }
 
         "context_status" => {

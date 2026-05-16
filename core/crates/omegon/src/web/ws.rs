@@ -1393,8 +1393,21 @@ async fn handle_client_command(
             };
             let _ = snapshot_tx.send(message).await;
         }
-        "set_context_class" | "set_runtime_mode" | "set_max_turns" | "profile_view"
-        | "profile_export" | "persona_list" | "persona_switch" => {
+        "set_context_class"
+        | "set_runtime_mode"
+        | "set_max_turns"
+        | "profile_view"
+        | "profile_export"
+        | "profile_capture"
+        | "profile_apply"
+        | "profile_mqtt"
+        | "profile_extension_allow"
+        | "profile_extension_deny"
+        | "profile_extension_clear"
+        | "profile_persona"
+        | "profile_tone"
+        | "persona_list"
+        | "persona_switch" => {
             let classified = crate::control_actions::classify_web_method(cmd_type);
             if !crate::control_actions::is_role_sufficient(caller_role, classified.role) {
                 let _ = snapshot_tx
@@ -1469,6 +1482,58 @@ async fn handle_client_command(
                 }
                 "profile_view" => crate::control_runtime::ControlRequest::ProfileView,
                 "profile_export" => crate::control_runtime::ControlRequest::ProfileExport,
+                "profile_capture" => crate::control_runtime::ControlRequest::ProfileCapture,
+                "profile_apply" => crate::control_runtime::ControlRequest::ProfileApply,
+                "profile_mqtt" => crate::control_runtime::ControlRequest::ProfileSetMqtt {
+                    enabled: cmd["enabled"].as_bool(),
+                },
+                "profile_extension_allow" => {
+                    let name = cmd["name"].as_str().unwrap_or("").to_string();
+                    if name.is_empty() {
+                        let _ = snapshot_tx
+                            .send(control_result_message(
+                                cmd_type,
+                                omegon_traits::ControlOutputResponse {
+                                    accepted: false,
+                                    output: Some("missing required field: name".to_string()),
+                                },
+                            ))
+                            .await;
+                        return;
+                    }
+                    crate::control_runtime::ControlRequest::ProfileExtensionAllow { name }
+                }
+                "profile_extension_deny" => {
+                    let name = cmd["name"].as_str().unwrap_or("").to_string();
+                    if name.is_empty() {
+                        let _ = snapshot_tx
+                            .send(control_result_message(
+                                cmd_type,
+                                omegon_traits::ControlOutputResponse {
+                                    accepted: false,
+                                    output: Some("missing required field: name".to_string()),
+                                },
+                            ))
+                            .await;
+                        return;
+                    }
+                    crate::control_runtime::ControlRequest::ProfileExtensionDeny { name }
+                }
+                "profile_extension_clear" => {
+                    crate::control_runtime::ControlRequest::ProfileExtensionClear
+                }
+                "profile_persona" => crate::control_runtime::ControlRequest::ProfileSetPersona {
+                    name: cmd["name"]
+                        .as_str()
+                        .map(str::to_string)
+                        .filter(|s| !s.is_empty()),
+                },
+                "profile_tone" => crate::control_runtime::ControlRequest::ProfileSetTone {
+                    name: cmd["name"]
+                        .as_str()
+                        .map(str::to_string)
+                        .filter(|s| !s.is_empty()),
+                },
                 "persona_list" => crate::control_runtime::ControlRequest::PersonaList,
                 "persona_switch" => {
                     let name = cmd["name"].as_str().unwrap_or("").to_string();

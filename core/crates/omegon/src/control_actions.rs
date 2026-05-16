@@ -61,6 +61,8 @@ pub enum CanonicalAction {
     MaxTurnsSet,
     ProfileView,
     ProfileExport,
+    ProfileEdit,
+    ProfileApply,
     PersonaList,
     PersonaSwitch,
     RuntimeModeSet,
@@ -126,6 +128,15 @@ pub fn classify_ipc_method(method: &str) -> ClassifiedAction {
         "set_max_turns" => (CanonicalAction::MaxTurnsSet, ControlRole::Edit, true),
         "profile_view" => (CanonicalAction::ProfileView, ControlRole::Read, true),
         "profile_export" => (CanonicalAction::ProfileExport, ControlRole::Read, true),
+        "profile_capture" => (CanonicalAction::ProfileEdit, ControlRole::Edit, true),
+        "profile_apply" => (CanonicalAction::ProfileApply, ControlRole::Edit, true),
+        "profile_mqtt" => (CanonicalAction::ProfileEdit, ControlRole::Edit, true),
+        "profile_extension_allow" | "profile_extension_deny" | "profile_extension_clear" => {
+            (CanonicalAction::ProfileEdit, ControlRole::Edit, true)
+        }
+        "profile_persona" | "profile_tone" => {
+            (CanonicalAction::ProfileEdit, ControlRole::Edit, true)
+        }
         "persona_list" => (CanonicalAction::PersonaList, ControlRole::Read, true),
         "persona_switch" => (CanonicalAction::PersonaSwitch, ControlRole::Edit, true),
         "submit_prompt" => (CanonicalAction::PromptSubmit, ControlRole::Edit, true),
@@ -198,6 +209,15 @@ pub fn classify_web_method(method: &str) -> ClassifiedAction {
         "set_max_turns" => (CanonicalAction::MaxTurnsSet, ControlRole::Edit, true),
         "profile_view" => (CanonicalAction::ProfileView, ControlRole::Read, true),
         "profile_export" => (CanonicalAction::ProfileExport, ControlRole::Read, true),
+        "profile_capture" => (CanonicalAction::ProfileEdit, ControlRole::Edit, true),
+        "profile_apply" => (CanonicalAction::ProfileApply, ControlRole::Edit, true),
+        "profile_mqtt" => (CanonicalAction::ProfileEdit, ControlRole::Edit, true),
+        "profile_extension_allow" | "profile_extension_deny" | "profile_extension_clear" => {
+            (CanonicalAction::ProfileEdit, ControlRole::Edit, true)
+        }
+        "profile_persona" | "profile_tone" => {
+            (CanonicalAction::ProfileEdit, ControlRole::Edit, true)
+        }
         "persona_list" => (CanonicalAction::PersonaList, ControlRole::Read, true),
         "persona_switch" => (CanonicalAction::PersonaSwitch, ControlRole::Edit, true),
         "skills_view" => (CanonicalAction::SkillsView, ControlRole::Read, true),

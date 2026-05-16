@@ -36,6 +36,24 @@ pub enum ControlRequest {
     SetThinking {
         level: crate::settings::ThinkingLevel,
     },
+    ProfileCapture,
+    ProfileApply,
+    ProfileSetMqtt {
+        enabled: Option<bool>,
+    },
+    ProfileExtensionAllow {
+        name: String,
+    },
+    ProfileExtensionDeny {
+        name: String,
+    },
+    ProfileExtensionClear,
+    ProfileSetPersona {
+        name: Option<String>,
+    },
+    ProfileSetTone {
+        name: Option<String>,
+    },
     StatusView,
     WorkspaceStatusView,
     WorkspaceListView,
@@ -199,6 +217,28 @@ pub fn control_request_from_slash(
         },
         crate::tui::CanonicalSlashCommand::SetThinking(level) => {
             ControlRequest::SetThinking { level: *level }
+        }
+        crate::tui::CanonicalSlashCommand::ProfileView => ControlRequest::ProfileView,
+        crate::tui::CanonicalSlashCommand::ProfileExport => ControlRequest::ProfileExport,
+        crate::tui::CanonicalSlashCommand::ProfileCapture => ControlRequest::ProfileCapture,
+        crate::tui::CanonicalSlashCommand::ProfileApply => ControlRequest::ProfileApply,
+        crate::tui::CanonicalSlashCommand::ProfileSetMqtt(enabled) => {
+            ControlRequest::ProfileSetMqtt { enabled: *enabled }
+        }
+        crate::tui::CanonicalSlashCommand::ProfileExtensionAllow(name) => {
+            ControlRequest::ProfileExtensionAllow { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::ProfileExtensionDeny(name) => {
+            ControlRequest::ProfileExtensionDeny { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::ProfileExtensionClear => {
+            ControlRequest::ProfileExtensionClear
+        }
+        crate::tui::CanonicalSlashCommand::ProfileSetPersona(name) => {
+            ControlRequest::ProfileSetPersona { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::ProfileSetTone(name) => {
+            ControlRequest::ProfileSetTone { name: name.clone() }
         }
         crate::tui::CanonicalSlashCommand::StatusView => ControlRequest::StatusView,
         crate::tui::CanonicalSlashCommand::WorkspaceStatusView => {
@@ -427,9 +467,26 @@ async fn try_stateless_control(
         ControlRequest::SetMaxTurns { max_turns } => {
             set_max_turns_response(shared_settings, cwd, *max_turns).await
         }
-        ControlRequest::ProfileView => profile_view_response(shared_settings).await,
+        ControlRequest::ProfileView => profile_view_response(shared_settings, cwd).await,
         ControlRequest::ProfileExport => {
             profile_export_response(shared_settings, cwd, handles).await
+        }
+        ControlRequest::ProfileCapture => profile_capture_response(shared_settings, cwd).await,
+        ControlRequest::ProfileSetMqtt { enabled } => {
+            profile_set_mqtt_response(cwd, *enabled).await
+        }
+        ControlRequest::ProfileExtensionAllow { name } => {
+            profile_extension_allow_response(cwd, name).await
+        }
+        ControlRequest::ProfileExtensionDeny { name } => {
+            profile_extension_deny_response(cwd, name).await
+        }
+        ControlRequest::ProfileExtensionClear => profile_extension_clear_response(cwd).await,
+        ControlRequest::ProfileSetPersona { name } => {
+            profile_set_persona_response(cwd, name.as_deref()).await
+        }
+        ControlRequest::ProfileSetTone { name } => {
+            profile_set_tone_response(cwd, name.as_deref()).await
         }
         ControlRequest::PersonaList => persona_list_response(handles).await,
         ControlRequest::PersonaSwitch { name } => persona_switch_response(name).await,
@@ -477,6 +534,16 @@ pub async fn execute_control(
         }
         ControlRequest::SetThinking { level } => {
             set_thinking_response(ctx.shared_settings, level).await
+        }
+        ControlRequest::ProfileApply => {
+            profile_apply_response(
+                ctx.agent,
+                ctx.runtime_state,
+                ctx.shared_settings,
+                ctx.bridge,
+                ctx.events_tx,
+            )
+            .await
         }
         ControlRequest::StatusView => {
             status_view_response(ctx.runtime_state, ctx.shared_settings).await
@@ -590,6 +657,14 @@ pub async fn execute_daemon_control(
             | ControlRequest::SetContextClass { .. }
             | ControlRequest::SetRuntimeMode { .. }
             | ControlRequest::SetMaxTurns { .. }
+            | ControlRequest::ProfileApply
+            | ControlRequest::ProfileCapture
+            | ControlRequest::ProfileSetMqtt { .. }
+            | ControlRequest::ProfileExtensionAllow { .. }
+            | ControlRequest::ProfileExtensionDeny { .. }
+            | ControlRequest::ProfileExtensionClear
+            | ControlRequest::ProfileSetPersona { .. }
+            | ControlRequest::ProfileSetTone { .. }
     );
     // Try stateless handlers first (shared with TUI mode).
     let resp = if let Some(resp) =
@@ -610,6 +685,9 @@ pub async fn execute_daemon_control(
             }
             ControlRequest::SetRuntimeMode { slim } => {
                 set_runtime_mode_daemon_response(shared_settings, cwd, slim).await
+            }
+            ControlRequest::ProfileApply => {
+                profile_apply_daemon_response(shared_settings, cwd).await
             }
             ControlRequest::AuthLogin { provider } => auth_login_daemon_response(&provider).await,
             ControlRequest::ListSessions => {
@@ -2936,18 +3014,23 @@ pub async fn set_max_turns_response(
 
 pub async fn profile_view_response(
     shared_settings: &settings::SharedSettings,
+    cwd: &Path,
 ) -> SlashCommandResponse {
+    let profile = settings::Profile::load(cwd);
     let output = if let Ok(s) = shared_settings.lock() {
         serde_json::json!({
-            "model": s.model,
-            "thinking_level": s.thinking.as_str(),
-            "context_class": s.effective_requested_class().label(),
-            "context_window": s.context_window,
-            "max_turns": s.max_turns,
-            "slim_mode": s.is_slim(),
-            "posture": serde_json::to_value(&s.posture).unwrap_or(serde_json::json!(null)),
-            "provider_order": s.provider_order,
-            "provider_connected": s.provider_connected,
+            "live": {
+                "model": s.model,
+                "thinkingLevel": s.thinking.as_str(),
+                "contextClass": s.effective_requested_class().label(),
+                "contextWindow": s.context_window,
+                "maxTurns": s.max_turns,
+                "slimMode": s.is_slim(),
+                "posture": serde_json::to_value(&s.posture).unwrap_or(serde_json::json!(null)),
+                "providerOrder": s.provider_order,
+                "providerConnected": s.provider_connected,
+            },
+            "profile": serde_json::to_value(&profile).unwrap_or(serde_json::json!(null)),
         })
         .to_string()
     } else {
@@ -2956,6 +3039,282 @@ pub async fn profile_view_response(
     SlashCommandResponse {
         accepted: true,
         output: Some(output),
+    }
+}
+
+pub async fn profile_capture_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+) -> SlashCommandResponse {
+    let Ok(s) = shared_settings.lock() else {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some("failed to read settings".into()),
+        };
+    };
+    let mut profile = settings::Profile::load(cwd);
+    profile.capture_from(&s);
+    match profile.save(cwd) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some("Profile captured from live runtime.".into()),
+        },
+        Err(e) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("failed to save profile: {e}")),
+        },
+    }
+}
+
+pub async fn profile_apply_response(
+    agent: &mut InteractiveAgentHost,
+    runtime_state: &mut InteractiveAgentState,
+    shared_settings: &settings::SharedSettings,
+    bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
+    events_tx: &broadcast::Sender<AgentEvent>,
+) -> SlashCommandResponse {
+    let profile = settings::Profile::load(&agent.cwd);
+    let old_model = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.model.clone())
+        .unwrap_or_default();
+    if let Ok(mut s) = shared_settings.lock() {
+        profile.apply_to_with_posture(&mut s, &agent.cwd);
+    }
+
+    let new_model = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.model.clone())
+        .unwrap_or_default();
+    if !new_model.is_empty()
+        && new_model != old_model
+        && let Some(new_bridge) = providers::auto_detect_bridge(&new_model).await
+    {
+        let mut guard = bridge.write().await;
+        *guard = new_bridge;
+    }
+
+    let (slim, posture_disabled, posture_enabled) = shared_settings
+        .lock()
+        .ok()
+        .map(|s| {
+            (
+                s.is_slim(),
+                s.posture_disabled_tools.clone(),
+                s.posture_enabled_tools.clone(),
+            )
+        })
+        .unwrap_or_default();
+    runtime_state.conversation.set_slim_mode(slim);
+    runtime_state
+        .bus
+        .apply_operator_tool_profile(slim, &posture_disabled, &posture_enabled);
+    if let Some(persona) = profile.persona.as_deref() {
+        let _ = runtime_state
+            .bus
+            .execute_tool(
+                crate::tool_registry::persona::SWITCH_PERSONA,
+                "profile-apply-persona",
+                serde_json::json!({ "name": persona, "reason": "profile apply" }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await;
+    }
+    if let Some(tone) = profile.tone.as_deref() {
+        let _ = runtime_state
+            .bus
+            .execute_tool(
+                crate::tool_registry::persona::SWITCH_TONE,
+                "profile-apply-tone",
+                serde_json::json!({ "name": tone, "reason": "profile apply" }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await;
+    }
+
+    let mut status = crate::status::HarnessStatus::assemble();
+    if let Ok(settings) = shared_settings.lock().map(|s| s.clone()) {
+        let operating_profile = settings.operating_profile();
+        status.update_routing(
+            settings.effective_requested_class().label(),
+            settings.thinking.as_str(),
+            &status.capability_tier.clone(),
+            operating_profile.posture.effective.display_name(),
+            &operating_profile.summary(),
+            operating_profile
+                .identity
+                .principal_id
+                .as_deref()
+                .unwrap_or("anonymous"),
+            operating_profile
+                .identity
+                .issuer
+                .as_deref()
+                .unwrap_or("unknown"),
+            operating_profile
+                .identity
+                .session_kind
+                .as_deref()
+                .unwrap_or("unknown"),
+            &operating_profile.authorization.summary(),
+        );
+    }
+    status.update_from_bus(&runtime_state.bus);
+    let status_json = runtime_state.bus.emit_harness_status(&status);
+    let _ = events_tx.send(AgentEvent::HarnessStatusChanged { status_json });
+
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(
+            "Profile applied to live runtime. Integration and extension load policy changes take effect on next startup."
+                .into(),
+        ),
+    }
+}
+
+pub async fn profile_apply_daemon_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+) -> SlashCommandResponse {
+    let profile = settings::Profile::load(cwd);
+    if let Ok(mut s) = shared_settings.lock() {
+        profile.apply_to_with_posture(&mut s, cwd);
+        s.provider_connected = crate::auth::provider_connected_for_model(&s.model);
+        SlashCommandResponse {
+            accepted: true,
+            output: Some(
+                "Profile applied to daemon runtime. Integration and extension load policy changes take effect on next startup."
+                    .into(),
+            ),
+        }
+    } else {
+        SlashCommandResponse {
+            accepted: false,
+            output: Some("failed to update settings".into()),
+        }
+    }
+}
+
+pub async fn profile_set_mqtt_response(cwd: &Path, enabled: Option<bool>) -> SlashCommandResponse {
+    let mut profile = settings::Profile::load(cwd);
+    if let Some(enabled) = enabled {
+        profile.integrations.mqtt.enabled = Some(enabled);
+        let output = if enabled {
+            "MQTT bridge profile default enabled. Takes effect on next startup."
+        } else {
+            "MQTT bridge profile default disabled. Takes effect on next startup."
+        };
+        return save_profile_response(cwd, profile, output);
+    }
+
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(format!(
+            "MQTT bridge profile default: {}",
+            match profile.integrations.mqtt.enabled {
+                Some(true) => "enabled",
+                Some(false) => "disabled",
+                None => "unset (disabled by default)",
+            }
+        )),
+    }
+}
+
+pub async fn profile_extension_allow_response(cwd: &Path, name: &str) -> SlashCommandResponse {
+    let name = name.trim();
+    if name.is_empty() {
+        return usage_response("Usage: /profile extension allow <name>");
+    }
+    let mut profile = settings::Profile::load(cwd);
+    retain_not_equal(&mut profile.extensions.disabled, name);
+    push_unique(&mut profile.extensions.enabled, name);
+    save_profile_response(
+        cwd,
+        profile,
+        "Extension allowed in profile. Extension load policy takes effect on next startup.",
+    )
+}
+
+pub async fn profile_extension_deny_response(cwd: &Path, name: &str) -> SlashCommandResponse {
+    let name = name.trim();
+    if name.is_empty() {
+        return usage_response("Usage: /profile extension deny <name>");
+    }
+    let mut profile = settings::Profile::load(cwd);
+    retain_not_equal(&mut profile.extensions.enabled, name);
+    push_unique(&mut profile.extensions.disabled, name);
+    save_profile_response(
+        cwd,
+        profile,
+        "Extension denied in profile. Extension load policy takes effect on next startup.",
+    )
+}
+
+pub async fn profile_extension_clear_response(cwd: &Path) -> SlashCommandResponse {
+    let mut profile = settings::Profile::load(cwd);
+    profile.extensions.enabled.clear();
+    profile.extensions.disabled.clear();
+    save_profile_response(
+        cwd,
+        profile,
+        "Extension profile policy cleared. Installed enabled extensions are loadable again on next startup.",
+    )
+}
+
+pub async fn profile_set_persona_response(cwd: &Path, name: Option<&str>) -> SlashCommandResponse {
+    let mut profile = settings::Profile::load(cwd);
+    profile.persona = name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    save_profile_response(cwd, profile, "Profile default persona updated.")
+}
+
+pub async fn profile_set_tone_response(cwd: &Path, name: Option<&str>) -> SlashCommandResponse {
+    let mut profile = settings::Profile::load(cwd);
+    profile.tone = name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    save_profile_response(cwd, profile, "Profile default tone updated.")
+}
+
+fn save_profile_response(
+    cwd: &Path,
+    profile: settings::Profile,
+    success: &str,
+) -> SlashCommandResponse {
+    match profile.save(cwd) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(success.to_string()),
+        },
+        Err(e) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("failed to save profile: {e}")),
+        },
+    }
+}
+
+fn usage_response(message: &str) -> SlashCommandResponse {
+    SlashCommandResponse {
+        accepted: false,
+        output: Some(message.to_string()),
+    }
+}
+
+fn retain_not_equal(values: &mut Vec<String>, target: &str) {
+    values.retain(|value| !value.eq_ignore_ascii_case(target));
+}
+
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    if !values
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(value))
+    {
+        values.push(value.to_string());
     }
 }
 
