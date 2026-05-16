@@ -2522,6 +2522,17 @@ async fn run_embedded_command(
                             let _ = tx.send(response);
                         }
                     }
+                    Some(tui::TuiCommand::UpdatePlan { respond_to, .. }) => {
+                        let response = omegon_traits::ControlOutputResponse {
+                            accepted: false,
+                            output: Some(
+                                "Plan mode is not available in daemon IPC sessions yet.".into(),
+                            ),
+                        };
+                        if let Some(tx) = respond_to {
+                            let _ = tx.send(response);
+                        }
+                    }
                     Some(tui::TuiCommand::RunSlashCommand { name, args, respond_to }) => {
                         tracing::info!(command = %name, "daemon: IPC slash command → prompt");
                         let prompt = if args.is_empty() {
@@ -3871,6 +3882,22 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     },
                 };
                 let response = control_runtime::execute_control(&mut ctx, request).await;
+                if let Some(output) = response.output.clone() {
+                    let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
+                }
+                if let Some(respond_to) = respond_to {
+                    let _ = respond_to.send(omegon_traits::ControlOutputResponse {
+                        accepted: response.accepted,
+                        output: response.output,
+                    });
+                }
+            }
+
+            tui::TuiCommand::UpdatePlan {
+                command,
+                respond_to,
+            } => {
+                let response = execute_plan_slash_command(&mut runtime_state, command);
                 if let Some(output) = response.output.clone() {
                     let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
                 }
@@ -6291,11 +6318,54 @@ async fn execute_remote_slash_command(
         return control_runtime::execute_control(&mut ctx, control_request).await;
     }
 
+    if matches!(
+        command,
+        crate::tui::CanonicalSlashCommand::PlanView
+            | crate::tui::CanonicalSlashCommand::PlanSet(_)
+            | crate::tui::CanonicalSlashCommand::PlanApprove
+            | crate::tui::CanonicalSlashCommand::PlanExecute
+            | crate::tui::CanonicalSlashCommand::PlanAdvance
+            | crate::tui::CanonicalSlashCommand::PlanSkip
+            | crate::tui::CanonicalSlashCommand::PlanClear
+    ) {
+        return execute_plan_slash_command(runtime_state, command);
+    }
+
     SlashCommandResponse {
         accepted: false,
         output: Some(format!(
             "Command /{name} is interactive-only or unavailable via remote slash execution."
         )),
+    }
+}
+
+fn execute_plan_slash_command(
+    runtime_state: &mut InteractiveAgentState,
+    command: crate::tui::CanonicalSlashCommand,
+) -> omegon_traits::SlashCommandResponse {
+    use crate::tui::CanonicalSlashCommand;
+    use omegon_traits::SlashCommandResponse;
+
+    let intent = &mut runtime_state.conversation.intent;
+    match command {
+        CanonicalSlashCommand::PlanView => {}
+        CanonicalSlashCommand::PlanSet(items) => intent.set_work_plan(items),
+        CanonicalSlashCommand::PlanApprove => intent.approve_work_plan(),
+        CanonicalSlashCommand::PlanExecute => intent.execute_work_plan(),
+        CanonicalSlashCommand::PlanAdvance => intent.advance_work_plan(),
+        CanonicalSlashCommand::PlanSkip => intent.skip_work_item(),
+        CanonicalSlashCommand::PlanClear => intent.clear_work_plan(),
+        _ => {
+            return SlashCommandResponse {
+                accepted: false,
+                output: Some("Not a plan command.".into()),
+            };
+        }
+    }
+
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(intent.render_work_plan()),
     }
 }
 

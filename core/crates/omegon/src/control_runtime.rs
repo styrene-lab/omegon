@@ -285,6 +285,13 @@ pub fn control_request_from_slash(
         crate::tui::CanonicalSlashCommand::SkillDelete(name) => {
             ControlRequest::SkillDelete { name: name.clone() }
         }
+        crate::tui::CanonicalSlashCommand::PlanView
+        | crate::tui::CanonicalSlashCommand::PlanSet(_)
+        | crate::tui::CanonicalSlashCommand::PlanApprove
+        | crate::tui::CanonicalSlashCommand::PlanExecute
+        | crate::tui::CanonicalSlashCommand::PlanAdvance
+        | crate::tui::CanonicalSlashCommand::PlanSkip
+        | crate::tui::CanonicalSlashCommand::PlanClear => return None,
         crate::tui::CanonicalSlashCommand::ExtensionView => ControlRequest::ExtensionView,
         crate::tui::CanonicalSlashCommand::ExtensionGet(name) => {
             ControlRequest::ExtensionGet { name: name.clone() }

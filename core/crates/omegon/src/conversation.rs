@@ -146,6 +146,8 @@ pub struct IntentDocument {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub work_plan: Vec<WorkItem>,
+    #[serde(default)]
+    pub plan_mode: PlanMode,
 
     pub constraints_discovered: Vec<String>,
     pub failed_approaches: Vec<FailedApproach>,
@@ -168,6 +170,41 @@ pub enum WorkItemStatus {
     Active,
     Done,
     Skipped,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanMode {
+    #[default]
+    Off,
+    Planning,
+    Approved,
+    Executing,
+    Complete,
+}
+
+impl PlanMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Planning => "planning",
+            Self::Approved => "approved",
+            Self::Executing => "executing",
+            Self::Complete => "complete",
+        }
+    }
+
+    pub fn guidance(&self) -> &'static str {
+        match self {
+            Self::Off => "No active plan gate.",
+            Self::Planning => {
+                "Planning gate active: keep work to read/search/design until /plan approve."
+            }
+            Self::Approved => "Plan approved: use /plan execute before mutation-heavy work.",
+            Self::Executing => "Plan executing: update progress with /plan advance or /plan skip.",
+            Self::Complete => "Plan complete: use /plan clear or set a new plan.",
+        }
+    }
 }
 
 impl WorkItemStatus {
@@ -257,6 +294,8 @@ impl IntentDocument {
                             }
                         }
                         "advance" => self.advance_work_plan(),
+                        "approve" => self.approve_work_plan(),
+                        "execute" => self.execute_work_plan(),
                         "complete" => {
                             let idx = call
                                 .arguments
@@ -266,6 +305,7 @@ impl IntentDocument {
                             self.complete_work_item(idx);
                         }
                         "skip" => self.skip_work_item(),
+                        "clear" => self.clear_work_plan(),
                         _ => {}
                     }
                 }
@@ -324,6 +364,10 @@ impl IntentDocument {
     pub fn set_work_plan(&mut self, items: Vec<String>) {
         self.work_plan = items
             .into_iter()
+            .filter_map(|desc| {
+                let desc = desc.trim();
+                (!desc.is_empty()).then(|| desc.to_string())
+            })
             .map(|desc| WorkItem {
                 description: desc,
                 status: WorkItemStatus::Pending,
@@ -331,7 +375,41 @@ impl IntentDocument {
             .collect();
         if let Some(first) = self.work_plan.first_mut() {
             first.status = WorkItemStatus::Active;
+            self.plan_mode = PlanMode::Planning;
+        } else {
+            self.plan_mode = PlanMode::Off;
         }
+    }
+
+    /// Approve the current work plan without starting execution.
+    pub fn approve_work_plan(&mut self) {
+        if !self.work_plan.is_empty() && !self.work_plan_complete() {
+            self.plan_mode = PlanMode::Approved;
+        }
+    }
+
+    /// Move an approved plan into execution.
+    pub fn execute_work_plan(&mut self) {
+        if !self.work_plan.is_empty() && !self.work_plan_complete() {
+            self.plan_mode = PlanMode::Executing;
+            if !self
+                .work_plan
+                .iter()
+                .any(|w| w.status == WorkItemStatus::Active)
+                && let Some(next) = self
+                    .work_plan
+                    .iter_mut()
+                    .find(|w| w.status == WorkItemStatus::Pending)
+            {
+                next.status = WorkItemStatus::Active;
+            }
+        }
+    }
+
+    /// Clear the active work plan and disable the plan gate.
+    pub fn clear_work_plan(&mut self) {
+        self.work_plan.clear();
+        self.plan_mode = PlanMode::Off;
     }
 
     /// Advance the work plan: mark the current active item done and activate the next.
@@ -346,6 +424,9 @@ impl IntentDocument {
                 && next.status == WorkItemStatus::Pending
             {
                 next.status = WorkItemStatus::Active;
+            }
+            if self.work_plan_complete() {
+                self.plan_mode = PlanMode::Complete;
             }
         }
     }
@@ -367,6 +448,9 @@ impl IntentDocument {
         {
             next.status = WorkItemStatus::Active;
         }
+        if self.work_plan_complete() {
+            self.plan_mode = PlanMode::Complete;
+        }
     }
 
     /// Skip the current active item and activate the next.
@@ -381,6 +465,9 @@ impl IntentDocument {
                 && next.status == WorkItemStatus::Pending
             {
                 next.status = WorkItemStatus::Active;
+            }
+            if self.work_plan_complete() {
+                self.plan_mode = PlanMode::Complete;
             }
         }
     }
@@ -405,6 +492,33 @@ impl IntentDocument {
             .map(|w| format!("{} {}", w.status.icon(), w.description))
             .collect();
         Some(parts.join("  "))
+    }
+
+    /// Render the active work plan with mode and approval-gate guidance.
+    pub fn render_work_plan(&self) -> String {
+        if self.work_plan.is_empty() {
+            return "Plan mode: off\nNo active work plan.".into();
+        }
+        let done = self
+            .work_plan
+            .iter()
+            .filter(|w| matches!(w.status, WorkItemStatus::Done))
+            .count();
+        let mut lines = vec![
+            format!("Plan mode: {}", self.plan_mode.label()),
+            self.plan_mode.guidance().to_string(),
+            format!("Progress: {done}/{}", self.work_plan.len()),
+            String::new(),
+        ];
+        for (idx, item) in self.work_plan.iter().enumerate() {
+            lines.push(format!(
+                "{}. {} {}",
+                idx + 1,
+                item.status.icon(),
+                item.description
+            ));
+        }
+        lines.join("\n")
     }
 }
 
@@ -654,6 +768,11 @@ impl ConversationState {
                 .filter(|w| matches!(w.status, WorkItemStatus::Done))
                 .count();
             lines.push(format!("Plan ({done}/{}):", intent.work_plan.len()));
+            lines.push(format!(
+                "Plan mode: {} — {}",
+                intent.plan_mode.label(),
+                intent.plan_mode.guidance()
+            ));
             for item in &items {
                 lines.push(format!("  {item}"));
             }
@@ -3383,6 +3502,7 @@ mod tests {
         assert_eq!(intent.work_plan.len(), 3);
         assert_eq!(intent.work_plan[0].status, WorkItemStatus::Active);
         assert_eq!(intent.work_plan[1].status, WorkItemStatus::Pending);
+        assert_eq!(intent.plan_mode, PlanMode::Planning);
         assert!(!intent.work_plan_complete());
 
         intent.advance_work_plan();
@@ -3392,6 +3512,27 @@ mod tests {
         intent.advance_work_plan();
         intent.advance_work_plan();
         assert!(intent.work_plan_complete());
+        assert_eq!(intent.plan_mode, PlanMode::Complete);
+    }
+
+    #[test]
+    fn work_plan_mode_tracks_approval_and_execution() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Read".into(), "Patch".into()]);
+
+        intent.approve_work_plan();
+        assert_eq!(intent.plan_mode, PlanMode::Approved);
+
+        intent.execute_work_plan();
+        assert_eq!(intent.plan_mode, PlanMode::Executing);
+
+        let rendered = intent.render_work_plan();
+        assert!(rendered.contains("Plan mode: executing"));
+        assert!(rendered.contains("1. ◐ Read"));
+
+        intent.clear_work_plan();
+        assert_eq!(intent.plan_mode, PlanMode::Off);
+        assert!(intent.work_plan.is_empty());
     }
 
     #[test]
@@ -3431,6 +3572,7 @@ mod tests {
 
         let rendered = conv.render_intent_for_injection();
         assert!(rendered.contains("Plan (0/2):"));
+        assert!(rendered.contains("Plan mode: planning"));
         assert!(rendered.contains("◐ Read"));
         assert!(rendered.contains("○ Write"));
 
