@@ -3129,7 +3129,7 @@ pub async fn skills_install_response(name: Option<&str>) -> SlashCommandResponse
         {
             Ok(result) => SlashCommandResponse {
                 accepted: true,
-                output: Some(result.message),
+                output: Some(armory_install_output(result)),
             },
             Err(err) => SlashCommandResponse {
                 accepted: false,
@@ -3377,7 +3377,7 @@ pub async fn extension_install_response(uri: &str) -> SlashCommandResponse {
     match crate::armory::install_extension(uri.trim(), None).await {
         Ok(result) => SlashCommandResponse {
             accepted: true,
-            output: Some(result.message),
+            output: Some(armory_install_output(result)),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
@@ -3490,10 +3490,16 @@ pub async fn armory_browse_response(query: Option<&str>) -> SlashCommandResponse
     ))
     .await
     {
-        Ok(items) => SlashCommandResponse {
-            accepted: true,
-            output: Some(crate::armory::render_items(&items)),
-        },
+        Ok(items) => {
+            let mut output = crate::armory::render_items(&items);
+            output.push_str(
+                "\n\nTUI install: /armory install <item> (examples: /armory install skills/security, /extension install flynt).",
+            );
+            SlashCommandResponse {
+                accepted: true,
+                output: Some(output),
+            }
+        }
         Err(err) => SlashCommandResponse {
             accepted: false,
             output: Some(format!("Could not browse armory: {err}")),
@@ -3506,13 +3512,31 @@ pub async fn armory_install_response(target: &str) -> SlashCommandResponse {
     match crate::armory::install(target, crate::armory::ArmoryInstallKind::Auto, &cwd).await {
         Ok(result) => SlashCommandResponse {
             accepted: true,
-            output: Some(result.message),
+            output: Some(armory_install_output(result)),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
             output: Some(format!("/armory install failed: {err}")),
         },
     }
+}
+
+fn armory_install_output(result: crate::armory::ArmoryInstallResult) -> String {
+    let followup = match result.kind {
+        crate::armory::ArmoryItemKind::Extension => {
+            "New sessions will discover the extension. Use /extension list to verify it is installed."
+        }
+        crate::armory::ArmoryItemKind::Plugin => {
+            "New sessions will discover the plugin. Use /plugin list, /persona list, or /armory search to verify the installed surface."
+        }
+        crate::armory::ArmoryItemKind::Skill => {
+            "New sessions will load the skill. Use /skills list to verify it is installed."
+        }
+        crate::armory::ArmoryItemKind::Agent => {
+            "Use /catalog list to verify installed agent catalog entries."
+        }
+    };
+    format!("{}\n\n{followup}", result.message)
 }
 
 // ── Catalog response handler ────────────────────────────────────
