@@ -1066,7 +1066,7 @@ smoke:
     [[ "$VERSION" == *"omegon"* ]] || { echo "  ✗ Binary doesn't produce version"; FAIL=1; }
 
     # 2. Test count doesn't drop below known floor
-    TEST_COUNT=$({{cargo}} test -p omegon 2>&1 | grep 'test result: ok' | awk '{print $4}')
+    TEST_COUNT=$({{cargo}} test -p omegon 2>&1 | awk '/test result: ok/ { sum += $4 } END { print sum + 0 }')
     echo "  Tests: $TEST_COUNT"
     if [ "$TEST_COUNT" -lt 850 ]; then
         echo "  ✗ Test count ($TEST_COUNT) below safety floor (850)"
