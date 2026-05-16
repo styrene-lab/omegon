@@ -16,9 +16,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- **Unified Armory install surface** — `/armory install`, `armory/install`, extension installs, and named skill installs now route through one Armory installer that materializes extensions, plugins, and skills into the runtime paths Omegon actually loads.
+
 ### Fixed
 
 - **Queued TUI prompts no longer interrupt by default** — submitting a follow-up while the agent is active now queues it until the current turn finishes instead of cancelling the active turn under the misleading "queued" banner. Explicit interrupt queue mode still cancels when selected.
+- **Web search timeout path no longer burns one timeout per free engine** — automatic web search now tries DuckDuckGo, Bing, and Google through the shared concurrent failover path instead of spending a full sequential timeout on each free engine, and the tool schema exposes a real `timeout` parameter.
+- **Validate failures identify rejected paths** — `validate` now reports each unsupported path and each supported source file missing a project validator instead of only saying the supported source types.
+- **Non-UTF8 read and shell output errors are actionable** — `read` now reports the path and invalid byte offset for non-UTF8 text files or identifies binary files, and `bash` output capture no longer fails the whole command when stdout/stderr contains invalid UTF-8 bytes.
 
 ## [0.22.0] - 2026-05-14
 

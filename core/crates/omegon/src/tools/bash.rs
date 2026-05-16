@@ -169,8 +169,8 @@ pub async fn execute_streaming(
         .take()
         .ok_or_else(|| anyhow::anyhow!("failed to capture stderr"))?;
 
-    let mut stdout_lines = BufReader::new(stdout).lines();
-    let mut stderr_lines = BufReader::new(stderr).lines();
+    let mut stdout_lines = BufReader::new(stdout);
+    let mut stderr_lines = BufReader::new(stderr);
 
     // Combined buffer — same shape as the legacy join order (stdout, then
     // a separator newline if stderr is non-empty, then stderr) but here we
@@ -220,7 +220,7 @@ pub async fn execute_streaming(
                     last_flush = Instant::now();
                 }
             }
-            line = stdout_lines.next_line() => {
+            line = read_lossy_line(&mut stdout_lines) => {
                 match line? {
                     Some(l) => {
                         combined.push_str(&l);
@@ -230,7 +230,7 @@ pub async fn execute_streaming(
                     }
                     None => {
                         // stdout closed — drain remaining stderr then wait for exit
-                        while let Some(l) = stderr_lines.next_line().await? {
+                        while let Some(l) = read_lossy_line(&mut stderr_lines).await? {
                             combined.push_str(&l);
                             combined.push('\n');
                             lines_seen += 1;
@@ -240,7 +240,7 @@ pub async fn execute_streaming(
                     }
                 }
             }
-            line = stderr_lines.next_line() => {
+            line = read_lossy_line(&mut stderr_lines) => {
                 match line? {
                     Some(l) => {
                         combined.push_str(&l);
@@ -250,7 +250,7 @@ pub async fn execute_streaming(
                     }
                     None => {
                         // stderr closed — drain remaining stdout then wait for exit
-                        while let Some(l) = stdout_lines.next_line().await? {
+                        while let Some(l) = read_lossy_line(&mut stdout_lines).await? {
                             combined.push_str(&l);
                             combined.push('\n');
                             lines_seen += 1;
@@ -417,6 +417,23 @@ fn maybe_flush_partial(
             "truncated": truncated.was_truncated,
         }),
     });
+}
+
+async fn read_lossy_line<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+) -> std::io::Result<Option<String>> {
+    let mut buf = Vec::new();
+    let n = reader.read_until(b'\n', &mut buf).await?;
+    if n == 0 {
+        return Ok(None);
+    }
+    if buf.ends_with(b"\n") {
+        buf.pop();
+        if buf.ends_with(b"\r") {
+            buf.pop();
+        }
+    }
+    Ok(Some(String::from_utf8_lossy(&buf).into_owned()))
 }
 
 /// Strip CSI terminal control sequences that aren't SGR color codes.
@@ -858,6 +875,21 @@ mod tests {
             .unwrap();
         let text = result.content[0].as_text().unwrap();
         assert!(text.contains("err"), "should capture stderr: {text}");
+    }
+
+    #[tokio::test]
+    async fn execute_binary_output_is_lossy_not_fatal() {
+        let cancel = CancellationToken::new();
+        let result = execute("printf 'abc\\377def\\n'", Path::new("."), None, cancel)
+            .await
+            .unwrap();
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("abc"), "should capture prefix: {text}");
+        assert!(text.contains("def"), "should capture suffix: {text}");
+        assert!(
+            text.contains('\u{fffd}'),
+            "invalid byte should be replacement char: {text}"
+        );
     }
 
     #[tokio::test]

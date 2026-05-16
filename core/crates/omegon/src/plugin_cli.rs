@@ -206,7 +206,7 @@ pub fn update(name: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn plugins_dir() -> anyhow::Result<PathBuf> {
+pub(crate) fn plugins_dir() -> anyhow::Result<PathBuf> {
     Ok(crate::paths::omegon_home()?.join("plugins"))
 }
 

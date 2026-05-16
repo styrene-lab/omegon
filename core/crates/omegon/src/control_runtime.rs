@@ -103,7 +103,9 @@ pub enum ControlRequest {
         provider: String,
     },
     SkillsView,
-    SkillsInstall,
+    SkillsInstall {
+        name: Option<String>,
+    },
     SkillGet {
         name: String,
     },
@@ -134,6 +136,9 @@ pub enum ControlRequest {
     },
     ArmoryBrowse {
         query: Option<String>,
+    },
+    ArmoryInstall {
+        target: String,
     },
     CatalogView,
     CatalogInstall,
@@ -268,7 +273,9 @@ pub fn control_request_from_slash(
             provider: provider.clone(),
         },
         crate::tui::CanonicalSlashCommand::SkillsView => ControlRequest::SkillsView,
-        crate::tui::CanonicalSlashCommand::SkillsInstall => ControlRequest::SkillsInstall,
+        crate::tui::CanonicalSlashCommand::SkillsInstall(name) => {
+            ControlRequest::SkillsInstall { name: name.clone() }
+        }
         // SkillCreate is handled directly in the TUI (queues a prompt) —
         // it never reaches control_runtime. Return None to signal this.
         crate::tui::CanonicalSlashCommand::SkillCreate => return None,
@@ -304,6 +311,9 @@ pub fn control_request_from_slash(
         }
         crate::tui::CanonicalSlashCommand::ArmoryBrowse(query) => ControlRequest::ArmoryBrowse {
             query: query.clone(),
+        },
+        crate::tui::CanonicalSlashCommand::ArmoryInstall(target) => ControlRequest::ArmoryInstall {
+            target: target.clone(),
         },
         crate::tui::CanonicalSlashCommand::PersonaList => ControlRequest::PersonaList,
         crate::tui::CanonicalSlashCommand::CatalogView => ControlRequest::CatalogView,
@@ -371,7 +381,7 @@ async fn try_stateless_control(
             resp
         }
         ControlRequest::SkillsView => skills_view_response().await,
-        ControlRequest::SkillsInstall => skills_install_response().await,
+        ControlRequest::SkillsInstall { name } => skills_install_response(name.as_deref()).await,
         ControlRequest::SkillGet { name } => skill_get_response(name).await,
         ControlRequest::SkillDelete { name } => skill_delete_response(name).await,
         ControlRequest::ExtensionView => extension_view_response().await,
@@ -387,6 +397,7 @@ async fn try_stateless_control(
             extension_search_response(query.as_deref()).await
         }
         ControlRequest::ArmoryBrowse { query } => armory_browse_response(query.as_deref()).await,
+        ControlRequest::ArmoryInstall { target } => armory_install_response(target).await,
         ControlRequest::CatalogView => catalog_view_response().await,
         ControlRequest::CatalogInstall => catalog_install_response().await,
         ControlRequest::CatalogRemove { id } => catalog_remove_response(id).await,
@@ -3110,7 +3121,23 @@ pub async fn skills_view_response() -> SlashCommandResponse {
     }
 }
 
-pub async fn skills_install_response() -> SlashCommandResponse {
+pub async fn skills_install_response(name: Option<&str>) -> SlashCommandResponse {
+    if let Some(name) = name.map(str::trim).filter(|name| !name.is_empty()) {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        return match crate::armory::install(name, crate::armory::ArmoryInstallKind::Skill, &cwd)
+            .await
+        {
+            Ok(result) => SlashCommandResponse {
+                accepted: true,
+                output: Some(result.message),
+            },
+            Err(err) => SlashCommandResponse {
+                accepted: false,
+                output: Some(format!("/skills install failed: {err}")),
+            },
+        };
+    }
+
     match crate::skills::cmd_install() {
         Ok(()) => SlashCommandResponse {
             accepted: true,
@@ -3347,10 +3374,10 @@ pub async fn extension_get_response(name: &str) -> SlashCommandResponse {
 }
 
 pub async fn extension_install_response(uri: &str) -> SlashCommandResponse {
-    match crate::extension_cli::install(uri.trim()) {
-        Ok(()) => SlashCommandResponse {
+    match crate::armory::install_extension(uri.trim(), None).await {
+        Ok(result) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!("Installed extension from {}", uri.trim())),
+            output: Some(result.message),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
@@ -3415,38 +3442,16 @@ pub async fn extension_disable_response(name: &str) -> SlashCommandResponse {
 }
 
 pub async fn extension_search_response(query: Option<&str>) -> SlashCommandResponse {
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .user_agent("omegon")
-        .build()
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    match crate::armory::browse(crate::armory::BrowseOptions::new(
+        crate::armory::ArmoryKind::Extensions,
+        query,
+        &cwd,
+    ))
+    .await
     {
-        Ok(c) => c,
-        Err(e) => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(format!("HTTP client error: {e}")),
-            };
-        }
-    };
-
-    match crate::extension_registry::fetch_registry(&client).await {
-        Ok(registry) => {
-            let mut entries: Vec<(&String, &crate::extension_registry::RegistryEntry)> = registry
-                .iter()
-                .filter(|(name, entry)| {
-                    query
-                        .map(|q| {
-                            let q = q.to_lowercase();
-                            name.to_lowercase().contains(&q)
-                                || entry.description.to_lowercase().contains(&q)
-                                || entry.category.to_lowercase().contains(&q)
-                        })
-                        .unwrap_or(true)
-                })
-                .collect();
-            entries.sort_by(|a, b| a.0.cmp(b.0));
-
-            if entries.is_empty() {
+        Ok(items) => {
+            if items.is_empty() {
                 return SlashCommandResponse {
                     accepted: true,
                     output: Some(match query {
@@ -3456,11 +3461,11 @@ pub async fn extension_search_response(query: Option<&str>) -> SlashCommandRespo
                 };
             }
 
-            let mut out = format!("Available extensions ({}):\n\n", entries.len());
-            for (name, entry) in &entries {
+            let mut out = format!("Available extensions ({}):\n\n", items.len());
+            for item in &items {
                 out.push_str(&format!(
-                    "  {name:<28} {}\n    {}\n\n",
-                    entry.category, entry.description
+                    "  {:<28} {}\n    {}\n\n",
+                    item.id, item.category, item.description
                 ));
             }
             out.push_str("Install: /extension install <name>");
@@ -3492,6 +3497,20 @@ pub async fn armory_browse_response(query: Option<&str>) -> SlashCommandResponse
         Err(err) => SlashCommandResponse {
             accepted: false,
             output: Some(format!("Could not browse armory: {err}")),
+        },
+    }
+}
+
+pub async fn armory_install_response(target: &str) -> SlashCommandResponse {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    match crate::armory::install(target, crate::armory::ArmoryInstallKind::Auto, &cwd).await {
+        Ok(result) => SlashCommandResponse {
+            accepted: true,
+            output: Some(result.message),
+        },
+        Err(err) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("/armory install failed: {err}")),
         },
     }
 }

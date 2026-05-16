@@ -341,7 +341,7 @@ impl WebSearchProvider {
     ) -> anyhow::Result<(Vec<SearchResult>, Vec<String>)> {
         let mut errors = Vec::new();
 
-        for provider in auto_provider_order(available) {
+        for provider in auto_api_provider_order(available) {
             match self
                 .search_provider(provider, query, max_results, topic)
                 .await
@@ -354,6 +354,45 @@ impl WebSearchProvider {
             }
         }
 
+        let free_engines = free_engines_from_available(available);
+        if !free_engines.is_empty() {
+            match self
+                .web
+                .search(
+                    query,
+                    &omegon_web::SearchOptions {
+                        max_results,
+                        engines: free_engines,
+                        topic: topic.to_string(),
+                        ..Default::default()
+                    },
+                )
+                .await
+            {
+                Ok(results) if !results.is_empty() => {
+                    let providers = results
+                        .iter()
+                        .map(|result| result.engine.to_string())
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .into_iter()
+                        .collect();
+                    let results = results
+                        .into_iter()
+                        .map(|r| SearchResult {
+                            title: r.title,
+                            url: r.url,
+                            snippet: r.snippet,
+                            content: None,
+                            provider: r.engine.to_string(),
+                        })
+                        .collect();
+                    return Ok((results, providers));
+                }
+                Ok(_) => errors.push("free engines: returned zero results".into()),
+                Err(err) => errors.push(format!("free engines: {err}")),
+            }
+        }
+
         anyhow::bail!(
             "all search providers failed. {}\nTip: configure BRAVE_API_KEY, TAVILY_API_KEY, or SERPER_API_KEY for reliable search.",
             errors.join("; ")
@@ -362,18 +401,34 @@ impl WebSearchProvider {
 }
 
 fn auto_provider_order(available: &[&'static str]) -> Vec<&'static str> {
-    [
-        "tavily",
-        "serper",
-        "brave",
-        "firecrawl",
-        "ddg",
-        "bing",
-        "google",
-    ]
-    .into_iter()
-    .filter(|provider| available.contains(provider))
-    .collect()
+    auto_api_provider_order(available)
+        .into_iter()
+        .chain(
+            ["ddg", "bing", "google"]
+                .into_iter()
+                .filter(|provider| available.contains(provider)),
+        )
+        .collect()
+}
+
+fn auto_api_provider_order(available: &[&'static str]) -> Vec<&'static str> {
+    ["tavily", "serper", "brave", "firecrawl"]
+        .into_iter()
+        .filter(|provider| available.contains(provider))
+        .collect()
+}
+
+fn free_engines_from_available(available: &[&'static str]) -> Vec<omegon_web::Engine> {
+    ["ddg", "bing", "google"]
+        .into_iter()
+        .filter(|provider| available.contains(provider))
+        .map(|provider| match provider {
+            "ddg" => omegon_web::Engine::DuckDuckGo,
+            "bing" => omegon_web::Engine::Bing,
+            "google" => omegon_web::Engine::Google,
+            _ => unreachable!("filtered to known free engines"),
+        })
+        .collect()
 }
 
 // ─── Response types ─────────────────────────────────────────────────────────
@@ -538,7 +593,8 @@ impl ToolProvider for WebSearchProvider {
                         "provider": { "type": "string", "enum": ["brave", "tavily", "serper", "firecrawl", "google", "bing", "ddg"], "description": "Specific provider. Omit to auto-select." },
                         "mode": { "type": "string", "enum": ["quick", "deep", "compare"], "description": "Search mode. Default: quick" },
                         "max_results": { "type": "number", "description": "Max results per provider. Default: 5", "minimum": 1, "maximum": 20 },
-                        "topic": { "type": "string", "enum": ["general", "news"], "description": "Search topic. Default: general" }
+                        "topic": { "type": "string", "enum": ["general", "news"], "description": "Search topic. Default: general" },
+                        "timeout": { "type": "number", "description": "Optional tool timeout in seconds. Default: 30.", "minimum": 1, "maximum": 600 }
                     },
                     "required": ["query"]
                 }),
@@ -638,7 +694,7 @@ impl ToolProvider for WebSearchProvider {
             let mut providers_used = Vec::new();
 
             if mode == "compare" {
-                for provider in &available {
+                for provider in auto_api_provider_order(&available) {
                     match self
                         .search_provider(provider, &query, max_results, &topic)
                         .await
@@ -649,6 +705,42 @@ impl ToolProvider for WebSearchProvider {
                         }
                         Err(e) => {
                             providers_used.push(format!("{provider} (error: {e})"));
+                        }
+                    }
+                }
+                let free_engines = free_engines_from_available(&available);
+                if !free_engines.is_empty() {
+                    match self
+                        .web
+                        .search(
+                            &query,
+                            &omegon_web::SearchOptions {
+                                max_results,
+                                engines: free_engines,
+                                topic: topic.to_string(),
+                                aggregate: true,
+                                ..Default::default()
+                            },
+                        )
+                        .await
+                    {
+                        Ok(free_results) => {
+                            providers_used.extend(
+                                free_results
+                                    .iter()
+                                    .map(|result| result.engine.to_string())
+                                    .collect::<std::collections::BTreeSet<_>>(),
+                            );
+                            results.extend(free_results.into_iter().map(|r| SearchResult {
+                                title: r.title,
+                                url: r.url,
+                                snippet: r.snippet,
+                                content: None,
+                                provider: r.engine.to_string(),
+                            }));
+                        }
+                        Err(e) => {
+                            providers_used.push(format!("free engines (error: {e})"));
                         }
                     }
                 }
@@ -815,6 +907,18 @@ mod tests {
         assert_eq!(
             auto_provider_order(&["google", "tavily", "brave", "ddg"]),
             vec!["tavily", "brave", "ddg", "google"]
+        );
+    }
+
+    #[test]
+    fn free_engines_preserve_parallel_failover_order() {
+        assert_eq!(
+            free_engines_from_available(&["google", "bing", "ddg"]),
+            vec![
+                omegon_web::Engine::DuckDuckGo,
+                omegon_web::Engine::Bing,
+                omegon_web::Engine::Google
+            ]
         );
     }
 }

@@ -35,6 +35,8 @@ pub(crate) struct RegistryEntry {
     pub license: String,
     #[allow(dead_code)]
     pub min_sdk: Option<String>,
+    #[allow(dead_code)]
+    pub manifest_path: Option<String>,
     /// Prefix for release asset filenames (defaults to extension name).
     pub asset_prefix: Option<String>,
 }
@@ -330,6 +332,7 @@ mod tests {
             maintainer: String::new(),
             license: String::new(),
             min_sdk: None,
+            manifest_path: None,
             asset_prefix: None,
         };
         assert_eq!(entry.github_slug(), Some("styrene-lab/flynt"));
@@ -345,6 +348,7 @@ mod tests {
             maintainer: String::new(),
             license: String::new(),
             min_sdk: None,
+            manifest_path: None,
             asset_prefix: None,
         };
         assert_eq!(entry.github_slug(), Some("styrene-lab/vox"));
@@ -360,6 +364,7 @@ mod tests {
             maintainer: String::new(),
             license: String::new(),
             min_sdk: None,
+            manifest_path: None,
             asset_prefix: None,
         };
         assert_eq!(entry.github_slug(), None);
@@ -417,6 +422,7 @@ mod tests {
             maintainer: String::new(),
             license: String::new(),
             min_sdk: None,
+            manifest_path: None,
             asset_prefix: None,
         };
         assert!(entry.is_enabled());
@@ -432,6 +438,7 @@ mod tests {
             maintainer: String::new(),
             license: String::new(),
             min_sdk: None,
+            manifest_path: None,
             asset_prefix: None,
         };
         assert!(!entry.is_enabled());

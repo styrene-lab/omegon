@@ -666,8 +666,11 @@ enum NexAction {
 enum SkillsAction {
     /// List skills — bundled, user-installed, and project-local.
     List,
-    /// Install all bundled skills to ~/.omegon/skills/.
-    Install,
+    /// Install all bundled skills, or install one skill from the upstream armory.
+    Install {
+        /// Armory skill name or skills/<name>. Omit to install bundled skills.
+        name: Option<String>,
+    },
     /// Show details of a specific skill.
     Get {
         /// Skill name (e.g., "rust", "security").
@@ -732,6 +735,14 @@ enum ArmoryAction {
         /// Emit JSON instead of a terminal summary.
         #[arg(long)]
         json: bool,
+    },
+    /// Install an item from the upstream Armory.
+    Install {
+        /// Item name, scoped path (skills/security), URL, or extension source.
+        target: String,
+        /// Force a specific install surface.
+        #[arg(long, value_enum)]
+        kind: Option<armory::ArmoryKind>,
     },
 }
 
@@ -1123,16 +1134,7 @@ async fn main() -> anyhow::Result<()> {
             match action {
                 ExtensionAction::Init { name } => extension_cli::init(name)?,
                 ExtensionAction::Install { uri, version } => {
-                    if extension_registry::is_bare_name(uri) {
-                        extension_registry::install_by_name(uri, version.as_deref()).await?
-                    } else {
-                        if version.is_some() {
-                            anyhow::bail!(
-                                "--version is only supported for armory installs (bare name)"
-                            );
-                        }
-                        extension_cli::install(uri)?
-                    }
+                    armory::install_extension(uri, version.as_deref()).await?;
                 }
                 ExtensionAction::List { available } => {
                     if *available {
@@ -1158,6 +1160,12 @@ async fn main() -> anyhow::Result<()> {
                 }
                 ArmoryAction::Search { query, kind, json } => {
                     armory::cmd_browse(*kind, Some(query), *json, &cli.cwd).await?
+                }
+                ArmoryAction::Install { target, kind } => {
+                    let kind = kind
+                        .map(armory::ArmoryInstallKind::from)
+                        .unwrap_or(armory::ArmoryInstallKind::Auto);
+                    armory::cmd_install(target, kind, &cli.cwd).await?
                 }
             }
             Ok(())
@@ -1373,7 +1381,13 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Doctor) => run_doctor_command(&cli).await,
         Some(Commands::Skills { ref action }) => match action {
             SkillsAction::List => skills::cmd_list(),
-            SkillsAction::Install => skills::cmd_install(),
+            SkillsAction::Install { name } => {
+                if let Some(name) = name.as_deref() {
+                    armory::cmd_install(name, armory::ArmoryInstallKind::Skill, &cli.cwd).await
+                } else {
+                    skills::cmd_install()
+                }
+            }
             SkillsAction::Get { name } => match skills::get_skill(name) {
                 Ok((manifest, body, path)) => {
                     println!("Skill: {}", manifest.name);

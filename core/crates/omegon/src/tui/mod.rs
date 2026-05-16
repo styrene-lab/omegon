@@ -495,7 +495,7 @@ pub(crate) enum CanonicalSlashCommand {
     AuthLogin(String),
     AuthLogout(String),
     SkillsView,
-    SkillsInstall,
+    SkillsInstall(Option<String>),
     SkillCreate,
     SkillGet(String),
     SkillDelete(String),
@@ -508,6 +508,7 @@ pub(crate) enum CanonicalSlashCommand {
     ExtensionDisable(String),
     ExtensionSearch(Option<String>),
     ArmoryBrowse(Option<String>),
+    ArmoryInstall(String),
     PersonaList,
     CatalogView,
     CatalogInstall,
@@ -646,7 +647,11 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             if args.is_empty() || args == "list" {
                 Some(CanonicalSlashCommand::SkillsView)
             } else if args == "install" {
-                Some(CanonicalSlashCommand::SkillsInstall)
+                Some(CanonicalSlashCommand::SkillsInstall(None))
+            } else if let Some(name) = args.strip_prefix("install ") {
+                let name = name.trim();
+                (!name.is_empty())
+                    .then(|| CanonicalSlashCommand::SkillsInstall(Some(name.to_string())))
             } else if args == "create" || args == "new" {
                 Some(CanonicalSlashCommand::SkillCreate)
             } else if let Some(name) = args.strip_prefix("get ") {
@@ -723,6 +728,10 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 } else {
                     Some(query.to_string())
                 }))
+            } else if let Some(target) = args.strip_prefix("install ") {
+                let target = target.trim();
+                (!target.is_empty())
+                    .then(|| CanonicalSlashCommand::ArmoryInstall(target.to_string()))
             } else {
                 Some(CanonicalSlashCommand::ArmoryBrowse(Some(args.to_string())))
             }
@@ -1659,7 +1668,10 @@ impl App {
         }
         // Timeout
         if lower.contains("timeout") || lower.contains("timed out") {
-            return "Operation timed out. Try a simpler request or increase timeout.";
+            if tool_name == Some(crate::tool_registry::web_search::WEB_SEARCH) {
+                return "Web search timed out. Retrying will try the free search engines concurrently; API search keys are more reliable.";
+            }
+            return "Operation timed out. Retry, or set a larger timeout when the tool supports it.";
         }
         // MCP errors
         if lower.contains("mcp")
@@ -8638,8 +8650,12 @@ mod slash_command_parsing_tests {
     fn skills_install() {
         assert!(matches!(
             canonical_slash_command("skills", "install"),
-            Some(CanonicalSlashCommand::SkillsInstall)
+            Some(CanonicalSlashCommand::SkillsInstall(None))
         ));
+        match canonical_slash_command("skills", "install security") {
+            Some(CanonicalSlashCommand::SkillsInstall(Some(name))) => assert_eq!(name, "security"),
+            other => panic!("expected SkillsInstall(Some), got {other:?}"),
+        }
     }
 
     #[test]
@@ -8817,6 +8833,16 @@ mod slash_command_parsing_tests {
         match canonical_slash_command("armory", "search browser") {
             Some(CanonicalSlashCommand::ArmoryBrowse(Some(query))) => assert_eq!(query, "browser"),
             other => panic!("expected ArmoryBrowse(Some), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn armory_install_routes_to_install() {
+        match canonical_slash_command("armory", "install skills/security") {
+            Some(CanonicalSlashCommand::ArmoryInstall(target)) => {
+                assert_eq!(target, "skills/security")
+            }
+            other => panic!("expected ArmoryInstall, got {other:?}"),
         }
     }
 

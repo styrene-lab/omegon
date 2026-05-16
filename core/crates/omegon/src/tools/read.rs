@@ -46,7 +46,7 @@ pub async fn execute(
         });
     }
 
-    let content = tokio::time::timeout(timeout, tokio::fs::read_to_string(path))
+    let data = tokio::time::timeout(timeout, tokio::fs::read(path))
         .await
         .map_err(|_| {
             anyhow::anyhow!(
@@ -54,6 +54,20 @@ pub async fn execute(
                 path.display()
             )
         })??;
+    if looks_binary(&data) {
+        anyhow::bail!(
+            "Cannot read {} as text: file appears to be binary ({} bytes). Use `view` for supported images or `bash`/`xxd` for byte-level inspection.",
+            path.display(),
+            data.len()
+        );
+    }
+    let content = String::from_utf8(data).map_err(|err| {
+        anyhow::anyhow!(
+            "Cannot read {} as UTF-8 text: invalid byte sequence starting at byte {}. Use `bash`/`file`/`xxd` for byte-level inspection, or convert the file to UTF-8 before using `read`.",
+            path.display(),
+            err.utf8_error().valid_up_to()
+        )
+    })?;
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();
 
@@ -109,6 +123,10 @@ fn mime_from_ext(path: &Path) -> String {
         Some("svg") => "image/svg+xml".to_string(),
         _ => "application/octet-stream".to_string(),
     }
+}
+
+fn looks_binary(data: &[u8]) -> bool {
+    data.iter().take(8192).any(|byte| *byte == 0)
 }
 
 fn base64_encode(data: &[u8]) -> String {
@@ -268,6 +286,39 @@ mod tests {
     async fn read_nonexistent_file() {
         let result = execute(Path::new("/tmp/omegon-nonexistent-file.xyz"), None, None).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn read_non_utf8_file_reports_path_and_offset() {
+        let dir =
+            std::env::temp_dir().join(format!("omegon-test-read-nonutf8-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("latin1.txt");
+        std::fs::write(&file, b"abc\xffdef").unwrap();
+
+        let err = execute(&file, None, None).await.unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("latin1.txt"), "{message}");
+        assert!(message.contains("UTF-8"), "{message}");
+        assert!(message.contains("byte 3"), "{message}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn read_binary_file_reports_path() {
+        let dir =
+            std::env::temp_dir().join(format!("omegon-test-read-binary-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("data.bin");
+        std::fs::write(&file, b"abc\0def").unwrap();
+
+        let err = execute(&file, None, None).await.unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("data.bin"), "{message}");
+        assert!(message.contains("binary"), "{message}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
