@@ -471,6 +471,9 @@ pub enum CanonicalSlashCommand {
     ProfileExtensionClear,
     ProfileSetPersona(Option<String>),
     ProfileSetTone(Option<String>),
+    PermissionsView,
+    PermissionTrustAdd(String),
+    PermissionTrustRemove(String),
     StatusView,
     WorkspaceStatusView,
     WorkspaceListView,
@@ -612,6 +615,39 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                             .then(|| name.to_string()),
                     )
                 })
+            }
+        }
+        "permissions" | "permission" if args.is_empty() || args == "status" || args == "list" => {
+            Some(CanonicalSlashCommand::PermissionsView)
+        }
+        "permissions" | "permission" | "trust" => {
+            let normalized = args
+                .strip_prefix("trusted ")
+                .or_else(|| args.strip_prefix("trust "))
+                .unwrap_or(args)
+                .trim();
+            if let Some(path) = normalized
+                .strip_prefix("add ")
+                .or_else(|| normalized.strip_prefix("allow "))
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+            {
+                Some(CanonicalSlashCommand::PermissionTrustAdd(path.to_string()))
+            } else if let Some(path) = normalized
+                .strip_prefix("remove ")
+                .or_else(|| normalized.strip_prefix("rm "))
+                .or_else(|| normalized.strip_prefix("revoke "))
+                .or_else(|| normalized.strip_prefix("deny "))
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+            {
+                Some(CanonicalSlashCommand::PermissionTrustRemove(
+                    path.to_string(),
+                ))
+            } else if normalized.is_empty() || normalized == "list" || normalized == "status" {
+                Some(CanonicalSlashCommand::PermissionsView)
+            } else {
+                None
             }
         }
         "status" if args.is_empty() => Some(CanonicalSlashCommand::StatusView),
@@ -4748,8 +4784,13 @@ impl App {
         ),
         ("prefs", "alias for /preferences", &[]),
         (
+            "permissions",
+            "view and manage operator permission grants",
+            &["list", "add", "remove"],
+        ),
+        (
             "trust",
-            "manage trusted directories (outside-workspace access)",
+            "alias for /permissions trusted directories",
             &["add", "remove", "list"],
         ),
         (
@@ -4891,6 +4932,25 @@ impl App {
                 } else {
                     SlashResult::Display(
                         "Usage: /profile [view|export|capture|apply|mqtt on|mqtt off|extension allow <name>|extension deny <name>|extensions clear|persona <name|off>|tone <name|off>]".into(),
+                    )
+                }
+            }
+
+            "permissions" | "permission" | "trust" => {
+                if let Some(command) = canonical_slash_command(cmd, args)
+                    && let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
+                {
+                    let _ = tx.try_send(TuiCommand::ExecuteControl {
+                        request,
+                        respond_to: None,
+                    });
+                    SlashResult::Handled
+                } else {
+                    SlashResult::Display(
+                        "Usage: /permissions [list|add <path>|remove <path>]\n\
+                         Alias: /trust [list|add <path>|remove <path>]"
+                            .into(),
                     )
                 }
             }
@@ -5906,72 +5966,6 @@ impl App {
             "preferences" | "prefs" => {
                 self.open_preferences_selector();
                 SlashResult::Handled
-            }
-            "trust" => {
-                let (sub, path) = args.split_once(' ').unwrap_or((args, ""));
-                let path = path.trim();
-                match sub {
-                    "list" | "" => {
-                        let dirs = self
-                            .settings
-                            .lock()
-                            .ok()
-                            .map(|s| s.trusted_directories.clone())
-                            .unwrap_or_default();
-                        if dirs.is_empty() {
-                            SlashResult::Display(
-                                "No trusted directories configured.\n\
-                                 Use /trust add <path> to allow access outside the workspace."
-                                    .into(),
-                            )
-                        } else {
-                            let list = dirs
-                                .iter()
-                                .map(|d| format!("  {d}"))
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            SlashResult::Display(format!(
-                                "Trusted directories:\n{list}\n\n\
-                                 /trust add <path>    add a directory\n\
-                                 /trust remove <path> remove a directory"
-                            ))
-                        }
-                    }
-                    "add" if !path.is_empty() => {
-                        let cwd = self.cwd().to_path_buf();
-                        if let Ok(mut s) = self.settings.lock() {
-                            let path_str = path.to_string();
-                            if !s.trusted_directories.contains(&path_str) {
-                                s.trusted_directories.push(path_str.clone());
-                            }
-                            let mut profile = crate::settings::Profile::load(&cwd);
-                            profile.capture_from(&s);
-                            let _ = profile.save(&cwd);
-                            SlashResult::Display(format!(
-                                "✓ Added trusted directory: {path_str}\n\
-                                 The agent can now read/write files in this directory."
-                            ))
-                        } else {
-                            SlashResult::Display("Failed to update settings.".into())
-                        }
-                    }
-                    "remove" if !path.is_empty() => {
-                        let cwd = self.cwd().to_path_buf();
-                        if let Ok(mut s) = self.settings.lock() {
-                            let path_str = path.to_string();
-                            s.trusted_directories.retain(|d| d != &path_str);
-                            let mut profile = crate::settings::Profile::load(&cwd);
-                            profile.capture_from(&s);
-                            let _ = profile.save(&cwd);
-                            SlashResult::Display(format!("✓ Removed trusted directory: {path_str}"))
-                        } else {
-                            SlashResult::Display("Failed to update settings.".into())
-                        }
-                    }
-                    _ => SlashResult::Display(
-                        "Usage: /trust list | /trust add <path> | /trust remove <path>".into(),
-                    ),
-                }
             }
             "sandbox" => {
                 let sub = args.split_whitespace().next().unwrap_or("");
@@ -8890,6 +8884,32 @@ mod slash_command_parsing_tests {
             Some(CanonicalSlashCommand::ProfileSetTone(Some(
                 "concise".into()
             )))
+        );
+    }
+
+    #[test]
+    fn permissions_commands_parse() {
+        assert_eq!(
+            canonical_slash_command("permissions", ""),
+            Some(CanonicalSlashCommand::PermissionsView)
+        );
+        assert_eq!(
+            canonical_slash_command("permissions", "add /tmp/vault"),
+            Some(CanonicalSlashCommand::PermissionTrustAdd(
+                "/tmp/vault".into()
+            ))
+        );
+        assert_eq!(
+            canonical_slash_command("permissions", "remove /tmp/vault"),
+            Some(CanonicalSlashCommand::PermissionTrustRemove(
+                "/tmp/vault".into()
+            ))
+        );
+        assert_eq!(
+            canonical_slash_command("trust", "add /tmp/vault"),
+            Some(CanonicalSlashCommand::PermissionTrustAdd(
+                "/tmp/vault".into()
+            ))
         );
     }
 

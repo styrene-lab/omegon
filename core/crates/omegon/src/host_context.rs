@@ -379,7 +379,7 @@ pub fn spawn_proxy_pump(
                         ),
                         PermissionOption::new(
                             "allow_always",
-                            "Allow always",
+                            "Allow always (save)",
                             PermissionOptionKind::AllowAlways,
                         ),
                         PermissionOption::new(

@@ -54,6 +54,13 @@ pub enum ControlRequest {
     ProfileSetTone {
         name: Option<String>,
     },
+    PermissionsView,
+    PermissionTrustAdd {
+        path: String,
+    },
+    PermissionTrustRemove {
+        path: String,
+    },
     StatusView,
     WorkspaceStatusView,
     WorkspaceListView,
@@ -239,6 +246,13 @@ pub fn control_request_from_slash(
         }
         crate::tui::CanonicalSlashCommand::ProfileSetTone(name) => {
             ControlRequest::ProfileSetTone { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::PermissionsView => ControlRequest::PermissionsView,
+        crate::tui::CanonicalSlashCommand::PermissionTrustAdd(path) => {
+            ControlRequest::PermissionTrustAdd { path: path.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::PermissionTrustRemove(path) => {
+            ControlRequest::PermissionTrustRemove { path: path.clone() }
         }
         crate::tui::CanonicalSlashCommand::StatusView => ControlRequest::StatusView,
         crate::tui::CanonicalSlashCommand::WorkspaceStatusView => {
@@ -487,6 +501,13 @@ async fn try_stateless_control(
         }
         ControlRequest::ProfileSetTone { name } => {
             profile_set_tone_response(cwd, name.as_deref()).await
+        }
+        ControlRequest::PermissionsView => permissions_view_response(shared_settings, cwd).await,
+        ControlRequest::PermissionTrustAdd { path } => {
+            permission_trust_add_response(shared_settings, cwd, path).await
+        }
+        ControlRequest::PermissionTrustRemove { path } => {
+            permission_trust_remove_response(shared_settings, cwd, path).await
         }
         ControlRequest::PersonaList => persona_list_response(handles).await,
         ControlRequest::PersonaSwitch { name } => persona_switch_response(name).await,
@@ -3281,6 +3302,90 @@ pub async fn profile_set_tone_response(cwd: &Path, name: Option<&str>) -> SlashC
     save_profile_response(cwd, profile, "Profile default tone updated.")
 }
 
+pub async fn permissions_view_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+) -> SlashCommandResponse {
+    let profile = settings::Profile::load(cwd);
+    let live_trusted = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.trusted_directories.clone())
+        .unwrap_or_default();
+    let profile_trusted = profile.effective_trusted_directories();
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(
+            serde_json::json!({
+                "permissions": {
+                    "workspace": cwd.display().to_string(),
+                    "liveTrustedDirectories": live_trusted,
+                    "profileTrustedDirectories": profile_trusted,
+                    "commands": [
+                        "/permissions list",
+                        "/permissions add <path>",
+                        "/permissions remove <path>",
+                        "/trust add <path>",
+                        "/trust remove <path>"
+                    ],
+                    "promptKeys": {
+                        "y": "allow once for this session",
+                        "a": "always allow and save to project profile permissions",
+                        "n": "deny",
+                        "Esc": "deny"
+                    }
+                }
+            })
+            .to_string(),
+        ),
+    }
+}
+
+pub async fn permission_trust_add_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+    path: &str,
+) -> SlashCommandResponse {
+    let path = path.trim();
+    if path.is_empty() {
+        return usage_response("Usage: /permissions add <path>");
+    }
+    if let Ok(mut s) = shared_settings.lock() {
+        push_unique(&mut s.trusted_directories, path);
+    }
+    let mut profile = settings::Profile::load(cwd);
+    profile.add_trusted_directory(path.to_string());
+    save_profile_response(
+        cwd,
+        profile,
+        &format!(
+            "Trusted directory added to project permissions: {path}\n\
+             The agent can now read/write files in this directory."
+        ),
+    )
+}
+
+pub async fn permission_trust_remove_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+    path: &str,
+) -> SlashCommandResponse {
+    let path = path.trim();
+    if path.is_empty() {
+        return usage_response("Usage: /permissions remove <path>");
+    }
+    if let Ok(mut s) = shared_settings.lock() {
+        retain_not_equal(&mut s.trusted_directories, path);
+    }
+    let mut profile = settings::Profile::load(cwd);
+    profile.remove_trusted_directory(path);
+    save_profile_response(
+        cwd,
+        profile,
+        &format!("Trusted directory removed from project permissions: {path}"),
+    )
+}
+
 fn save_profile_response(
     cwd: &Path,
     profile: settings::Profile,
@@ -4322,4 +4427,44 @@ pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
     }
 
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn permission_trust_add_remove_updates_live_settings_and_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("AGENTS.md"), "instructions").unwrap();
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+
+        let add = permission_trust_add_response(&settings, tmp.path(), "/tmp/vault").await;
+        assert!(add.accepted);
+        assert!(
+            settings
+                .lock()
+                .unwrap()
+                .trusted_directories
+                .contains(&"/tmp/vault".to_string())
+        );
+        let profile = crate::settings::Profile::load(tmp.path());
+        assert_eq!(
+            profile.permissions.trusted_directories,
+            vec!["/tmp/vault".to_string()]
+        );
+        assert!(profile.trusted_directories.is_empty());
+
+        let remove = permission_trust_remove_response(&settings, tmp.path(), "/tmp/vault").await;
+        assert!(remove.accepted);
+        assert!(
+            !settings
+                .lock()
+                .unwrap()
+                .trusted_directories
+                .contains(&"/tmp/vault".to_string())
+        );
+        let profile = crate::settings::Profile::load(tmp.path());
+        assert!(profile.effective_trusted_directories().is_empty());
+    }
 }

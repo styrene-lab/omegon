@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- **Unified `/permissions` operator surface** — added `/permissions list|add|remove` as the canonical permission-grant control surface, with `/trust` retained as an alias so TUI and ACP/control callers share the same persisted profile permissions path.
 - **Native `/plan` session gate** — added a first-class TUI/remote slash surface over the existing session intent work plan with `set`, `approve`, `execute`, `advance`, `skip`, `clear`, and status rendering so high-level plan mode can reuse the current conversation state instead of creating a shadow planning store.
 - **Unified profile operator surface** — `/profile`, IPC/web control commands, and ACP control methods can now view, capture, apply, and edit profile defaults for MQTT, extension allow/deny policy, persona, and tone.
 - **Unified Armory install surface** — `/armory install`, `armory/install`, extension installs, and named skill installs now route through one Armory installer that materializes extensions, plugins, and skills into the runtime paths Omegon actually loads.
