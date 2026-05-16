@@ -3507,8 +3507,7 @@ impl App {
             self.footer_data.authorization = s.operating_profile().authorization.summary();
             self.footer_data.provider_connected = s.provider_connected;
             self.footer_data.sandbox = s.sandbox;
-            self.footer_data.is_oauth = crate::providers::resolve_api_key_sync(&s.provider())
-                .is_some_and(|(_, is_oauth)| is_oauth);
+            self.footer_data.is_oauth = s.provider_is_oauth;
         }
         {
             self.footer_data.model_tier = self.footer_data.harness.capability_tier.clone();

@@ -344,6 +344,32 @@ pub fn provider_session_status(provider: &ProviderCredential) -> ProviderSession
 }
 
 pub fn provider_connected_for_model(model_spec: &str) -> bool {
+    let Some(provider) = provider_for_model(model_spec) else {
+        return false;
+    };
+
+    provider_session_status(provider) == ProviderSessionStatus::Configured
+}
+
+pub fn provider_oauth_for_model(model_spec: &str) -> bool {
+    let Some(provider) = provider_for_model(model_spec) else {
+        return false;
+    };
+
+    if provider
+        .env_vars
+        .iter()
+        .any(|key| key.contains("OAUTH") && std::env::var(key).is_ok_and(|s| !s.trim().is_empty()))
+    {
+        return true;
+    }
+
+    read_credentials(provider.auth_key)
+        .or_else(|| read_external_credentials(provider.auth_key))
+        .is_some_and(|creds| creds.cred_type == "oauth")
+}
+
+fn provider_for_model(model_spec: &str) -> Option<&'static ProviderCredential> {
     let trimmed = model_spec.trim();
     let provider_id = if let Some((head, _tail)) = trimmed.split_once(':') {
         if head == "local" {
@@ -351,17 +377,13 @@ pub fn provider_connected_for_model(model_spec: &str) -> bool {
         } else if provider_by_id(head).is_some() {
             head.to_string()
         } else {
-            return false;
+            return None;
         }
     } else {
         crate::providers::infer_provider_id(trimmed)
     };
 
-    let Some(provider) = provider_by_id(&provider_id) else {
-        return false;
-    };
-
-    provider_session_status(provider) == ProviderSessionStatus::Configured
+    provider_by_id(&provider_id)
 }
 
 /// Authentication status for all providers and backends.

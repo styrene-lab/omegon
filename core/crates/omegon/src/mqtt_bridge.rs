@@ -49,12 +49,30 @@ impl Default for MqttBridgeConfig {
 /// Start the MQTT bridge task.
 ///
 /// Connects to the Auspex-hosted MQTT broker as a TCP client. If the broker
-/// is unreachable, the task retries in the background with backoff.
+/// is unreachable, the task exits and Omegon continues without MQTT.
 pub fn start_mqtt_bridge(
     config: MqttBridgeConfig,
     events_tx: broadcast::Sender<AgentEvent>,
 ) -> MqttBridgeHandle {
     let task = tokio::spawn(async move {
+        let addr = format!("{}:{}", config.broker_host, config.broker_port);
+        match tokio::time::timeout(
+            Duration::from_millis(250),
+            tokio::net::TcpStream::connect(&addr),
+        )
+        .await
+        {
+            Ok(Ok(stream)) => drop(stream),
+            Ok(Err(e)) => {
+                tracing::debug!(broker = %addr, error = %e, "MQTT bridge broker unavailable");
+                return;
+            }
+            Err(_) => {
+                tracing::debug!(broker = %addr, "MQTT bridge broker connection timed out");
+                return;
+            }
+        }
+
         let identity = ServiceIdentity {
             operator_id: config.operator_id,
             service: "omegon".into(),

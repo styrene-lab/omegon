@@ -194,7 +194,7 @@ impl AgentSetup {
         }
         // Extension-declared required secrets — read manifests early so keyring-backed
         // secrets (e.g. GITHUB_TOKEN) are resolved before extension subprocesses spawn.
-        for name in collect_extension_secret_requirements() {
+        for name in collect_extension_secret_requirements(&cwd) {
             preflight.insert(name);
         }
         // Plugin MCP env templates — scan {VAR_NAME} references so vault-backed
@@ -728,7 +728,8 @@ impl AgentSetup {
         // ─── Operator-installed extensions (RPC + OCI) ────────────────
         // All extensions, including bundled ones (scribe-rpc), are discovered here
         let (extension_widgets, widget_receivers, vox_polling_handles) =
-            match discover_and_register_extensions(&mut bus, std::sync::Arc::clone(&secrets)).await
+            match discover_and_register_extensions(&cwd, &mut bus, std::sync::Arc::clone(&secrets))
+                .await
             {
                 Ok((widgets, receivers, handles)) => (widgets, receivers, handles),
                 Err(e) => {
@@ -1198,10 +1199,10 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
 /// Scan installed extension manifests and collect all declared secret names.
 /// Called during the startup preflight phase — before extensions are spawned —
 /// so keyring-backed secrets are warmed into the session cache in time.
-fn collect_extension_secret_requirements() -> Vec<String> {
-    let ext_dir = match dirs::home_dir() {
-        Some(h) => h.join(".omegon/extensions"),
-        None => return vec![],
+fn collect_extension_secret_requirements(cwd: &Path) -> Vec<String> {
+    let ext_dir = match crate::paths::omegon_home() {
+        Ok(home) => home.join("extensions"),
+        Err(_) => return vec![],
     };
     if !ext_dir.exists() {
         return vec![];
@@ -1210,9 +1211,33 @@ fn collect_extension_secret_requirements() -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(&ext_dir) else {
         return vec![];
     };
+    let profile = crate::settings::Profile::load(cwd);
+    let env_enabled = crate::parse_csv_env("OMEGON_CHILD_ENABLED_EXTENSIONS");
+    let env_disabled = crate::parse_csv_env("OMEGON_CHILD_DISABLED_EXTENSIONS");
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_dir() {
+            continue;
+        }
+        let ext_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        if !profile
+            .extensions
+            .permits(ext_name, &env_enabled, &env_disabled)
+        {
+            tracing::debug!(
+                extension = ext_name,
+                "extension skipped during secret preflight"
+            );
+            continue;
+        }
+        if extension_state_disabled(&path) {
+            tracing::debug!(
+                extension = ext_name,
+                "disabled extension skipped during secret preflight"
+            );
             continue;
         }
         if let Ok(manifest) = crate::extensions::ExtensionManifest::from_extension_dir(&path) {
@@ -1346,6 +1371,7 @@ fn collect_plugin_secret_requirements(cwd: &std::path::Path) -> Vec<String> {
 /// Resolves declared secrets from the session cache and delivers them to each
 /// extension via `bootstrap_secrets` RPC — never via subprocess environment.
 async fn discover_and_register_extensions(
+    cwd: &Path,
     bus: &mut crate::bus::EventBus,
     secrets: std::sync::Arc<omegon_secrets::SecretsManager>,
 ) -> anyhow::Result<(
@@ -1360,6 +1386,9 @@ async fn discover_and_register_extensions(
         return Ok((vec![], vec![], vec![]));
     }
 
+    let profile = crate::settings::Profile::load(cwd);
+    let env_enabled = crate::parse_csv_env("OMEGON_CHILD_ENABLED_EXTENSIONS");
+    let env_disabled = crate::parse_csv_env("OMEGON_CHILD_DISABLED_EXTENSIONS");
     let mut count = 0;
     let mut extension_widgets = vec![];
     let mut widget_receivers = vec![];
@@ -1374,6 +1403,21 @@ async fn discover_and_register_extensions(
 
         let manifest_path = path.join("manifest.toml");
         if !manifest_path.exists() {
+            continue;
+        }
+        let ext_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        if !profile
+            .extensions
+            .permits(ext_name, &env_enabled, &env_disabled)
+        {
+            tracing::debug!(extension = ext_name, "extension skipped by profile policy");
+            continue;
+        }
+        if extension_state_disabled(&path) {
+            tracing::debug!(extension = ext_name, "disabled extension skipped");
             continue;
         }
 
@@ -1402,10 +1446,6 @@ async fn discover_and_register_extensions(
         // Try to spawn this extension
         match crate::extensions::spawn_from_manifest(&path, &resolved_secrets).await {
             Ok(spawned) => {
-                let ext_name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown");
                 let tool_count = spawned.feature.tools().len();
                 let widget_count = spawned.widgets.len();
                 tracing::info!(
@@ -1445,4 +1485,9 @@ async fn discover_and_register_extensions(
     }
 
     Ok((extension_widgets, widget_receivers, vox_polling_handles))
+}
+
+fn extension_state_disabled(path: &Path) -> bool {
+    crate::extensions::ExtensionState::load(path)
+        .is_ok_and(|state| !state.enabled || state.stability.auto_disabled)
 }

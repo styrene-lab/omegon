@@ -989,6 +989,53 @@ fn parse_csv_env(name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn parse_bool_env(name: &str) -> Option<bool> {
+    let raw = std::env::var(name).ok()?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" | "enabled" => Some(true),
+        "0" | "false" | "no" | "off" | "disabled" => Some(false),
+        _ => None,
+    }
+}
+
+fn maybe_start_mqtt_bridge(
+    cwd: &Path,
+    instance_id: String,
+    events_tx: broadcast::Sender<AgentEvent>,
+) -> Option<mqtt_bridge::MqttBridgeHandle> {
+    let profile = settings::Profile::load(cwd);
+    let mqtt = &profile.integrations.mqtt;
+    let enabled = parse_bool_env("OMEGON_MQTT_ENABLED")
+        .or_else(|| parse_bool_env("OMEGON_MQTT"))
+        .or(mqtt.enabled)
+        .unwrap_or(false);
+    if !enabled {
+        tracing::debug!("MQTT bridge disabled by profile/default policy");
+        return None;
+    }
+
+    let broker_host = std::env::var("OMEGON_MQTT_HOST")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| mqtt.broker_host.clone())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let broker_port = std::env::var("OMEGON_MQTT_PORT")
+        .ok()
+        .and_then(|raw| raw.parse::<u16>().ok())
+        .or(mqtt.broker_port)
+        .unwrap_or(mqtt_bridge::DEFAULT_BROKER_PORT);
+
+    Some(mqtt_bridge::start_mqtt_bridge(
+        mqtt_bridge::MqttBridgeConfig {
+            instance_id,
+            broker_host,
+            broker_port,
+            ..Default::default()
+        },
+        events_tx,
+    ))
+}
+
 fn child_preloaded_files() -> Vec<PathBuf> {
     std::env::var("OMEGON_CHILD_PRELOADED_FILES")
         .ok()
@@ -2166,13 +2213,7 @@ async fn run_embedded_command(
         );
     }
 
-    let _mqtt_bridge = mqtt_bridge::start_mqtt_bridge(
-        mqtt_bridge::MqttBridgeConfig {
-            instance_id: agent.session_id.clone(),
-            ..Default::default()
-        },
-        events_tx.clone(),
-    );
+    let _mqtt_bridge = maybe_start_mqtt_bridge(&cwd, agent.session_id.clone(), events_tx.clone());
 
     if !agent.vox_polling_handles.is_empty() {
         for handle in agent.vox_polling_handles {
@@ -3822,13 +3863,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         );
     }
 
-    let _mqtt_bridge = mqtt_bridge::start_mqtt_bridge(
-        mqtt_bridge::MqttBridgeConfig {
-            instance_id: agent.session_id.clone(),
-            ..Default::default()
-        },
-        events_tx.clone(),
-    );
+    let _mqtt_bridge =
+        maybe_start_mqtt_bridge(&agent.cwd, agent.session_id.clone(), events_tx.clone());
 
     let (mut agent, mut runtime_state) = split_interactive_agent(agent);
 

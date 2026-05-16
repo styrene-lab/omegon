@@ -350,6 +350,12 @@ pub struct Settings {
     #[serde(skip)]
     pub provider_connected: bool,
 
+    /// Whether the active provider credential path is OAuth-backed. Updated
+    /// only when the model changes so rendering does not probe credential files
+    /// on every frame.
+    #[serde(skip)]
+    pub provider_is_oauth: bool,
+
     /// Enable mouse capture (pane clicks, wheel scroll, segment targeting).
     /// Defaults to true. Set to false to restore terminal-native text selection.
     #[serde(default = "default_mouse")]
@@ -637,6 +643,7 @@ impl Default for Settings {
             auto_update: false,
             trusted_directories: Vec::new(),
             provider_connected: true, // optimistic default — set false when NullBridge
+            provider_is_oauth: false,
             mouse: true,
             sandbox: false,
             clipboard_retention_hours: default_clipboard_retention_hours(),
@@ -654,6 +661,7 @@ impl Settings {
             model: model.to_string(),
             context_window,
             context_class,
+            provider_is_oauth: crate::auth::provider_oauth_for_model(model),
             ..Default::default()
         }
     }
@@ -663,6 +671,7 @@ impl Settings {
         self.model = model.to_string();
         self.context_window = infer_context_window(model);
         self.context_class = ContextClass::from_tokens(self.context_window);
+        self.provider_is_oauth = crate::auth::provider_oauth_for_model(model);
     }
 
     /// The effective working-set policy class for this turn.
@@ -1011,6 +1020,18 @@ pub struct Profile {
     /// Active tone name. Restored on next session start.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tone: Option<String>,
+
+    // ── Optional integrations ──
+    /// Optional bridge integrations. Missing integrations stay disabled unless
+    /// explicitly enabled by project/global profile or environment.
+    #[serde(default, skip_serializing_if = "ProfileIntegrations::is_empty")]
+    pub integrations: ProfileIntegrations,
+
+    // ── Extension loading policy ──
+    /// Native extension loading policy for this profile. Empty policy preserves
+    /// existing behavior: installed enabled extensions are considered loadable.
+    #[serde(default, skip_serializing_if = "ProfileExtensions::is_empty")]
+    pub extensions: ProfileExtensions,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1018,6 +1039,93 @@ pub struct Profile {
 pub struct ProfileModel {
     pub provider: String,
     pub model_id: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileIntegrations {
+    #[serde(default, skip_serializing_if = "ProfileMqttIntegration::is_empty")]
+    pub mqtt: ProfileMqttIntegration,
+}
+
+impl ProfileIntegrations {
+    pub fn is_empty(&self) -> bool {
+        self.mqtt.is_empty()
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileMqttIntegration {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker_host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker_port: Option<u16>,
+}
+
+impl ProfileMqttIntegration {
+    pub fn is_empty(&self) -> bool {
+        self.enabled.is_none() && self.broker_host.is_none() && self.broker_port.is_none()
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileExtensions {
+    /// When non-empty, only these native extension names may load.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enabled: Vec<String>,
+    /// Native extension names that must not load.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled: Vec<String>,
+}
+
+impl ProfileExtensions {
+    pub fn is_empty(&self) -> bool {
+        self.enabled.is_empty() && self.disabled.is_empty()
+    }
+
+    pub fn permits(
+        &self,
+        extension_name: &str,
+        env_enabled: &[String],
+        env_disabled: &[String],
+    ) -> bool {
+        let name = extension_name.to_ascii_lowercase();
+        let normalize = |s: &String| s.trim().to_ascii_lowercase();
+
+        if env_disabled
+            .iter()
+            .map(normalize)
+            .any(|disabled| disabled == name)
+            || self
+                .disabled
+                .iter()
+                .map(normalize)
+                .any(|disabled| disabled == name)
+        {
+            return false;
+        }
+
+        if !env_enabled.is_empty() {
+            return env_enabled
+                .iter()
+                .map(normalize)
+                .any(|enabled| enabled == name);
+        }
+
+        if !self.enabled.is_empty() {
+            return self
+                .enabled
+                .iter()
+                .map(normalize)
+                .any(|enabled| enabled == name);
+        }
+
+        true
+    }
 }
 
 impl Profile {
@@ -1791,6 +1899,47 @@ mod tests {
         let json = r#"{"lastUsedModel": {"provider": "anthropic", "modelId": "claude-sonnet-4-6"}, "thinkingLevel": "medium"}"#;
         let p: Profile = serde_json::from_str(json).unwrap();
         assert!(p.provider_order.is_empty());
+        assert!(p.integrations.is_empty());
+        assert!(p.extensions.is_empty());
+    }
+
+    #[test]
+    fn profile_integration_and_extension_policy_round_trip() {
+        let json = r#"{
+            "integrations": {
+                "mqtt": {
+                    "enabled": true,
+                    "brokerHost": "mqtt.internal",
+                    "brokerPort": 1884
+                }
+            },
+            "extensions": {
+                "enabled": ["scry"],
+                "disabled": ["vox"]
+            }
+        }"#;
+        let p: Profile = serde_json::from_str(json).unwrap();
+        assert_eq!(p.integrations.mqtt.enabled, Some(true));
+        assert_eq!(
+            p.integrations.mqtt.broker_host.as_deref(),
+            Some("mqtt.internal")
+        );
+        assert_eq!(p.integrations.mqtt.broker_port, Some(1884));
+        assert!(p.extensions.permits("scry", &[], &[]));
+        assert!(!p.extensions.permits("vox", &[], &[]));
+        assert!(!p.extensions.permits("lipstyk", &[], &[]));
+    }
+
+    #[test]
+    fn env_extension_policy_overrides_profile_allow_list() {
+        let policy = ProfileExtensions {
+            enabled: vec!["scry".into()],
+            disabled: vec!["vox".into()],
+        };
+        assert!(policy.permits("lipstyk", &["lipstyk".into()], &[]));
+        assert!(!policy.permits("scry", &["lipstyk".into()], &[]));
+        assert!(!policy.permits("vox", &["vox".into()], &[]));
+        assert!(!policy.permits("scry", &["scry".into()], &["scry".into()]));
     }
 
     #[test]
