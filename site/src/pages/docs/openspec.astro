@@ -6,8 +6,8 @@ import Docs from "../../layouts/Docs.astro";
   <p class="discovery-note">
     <strong>Discovery path:</strong> OpenSpec is a full-mode feature. In <code>om</code> (slim mode),
     the agent won't reference it. When you want spec-driven development — defining acceptance
-    criteria before writing code — type <code>/opsx:propose</code> directly or <code>/warp</code>
-    to switch to full mode.
+    criteria before writing code — switch to full mode with <code>/warp</code> and ask the agent
+    to create or manage an OpenSpec change.
   </p>
   <p>
     OpenSpec is the spec-driven development system in Omegon. Specs define what must be true
@@ -27,16 +27,22 @@ import Docs from "../../layouts/Docs.astro";
     <li><strong>Archive</strong> — move completed change to baseline</li>
   </ol>
 
-  <h2>Commands</h2>
+  <h2>Runtime Surface</h2>
+  <p>
+    OpenSpec lifecycle operations are exposed through the agent tool
+    <code>openspec_manage</code>. The older <code>/opsx:*</code> slash commands are not part of
+    the current Rust runtime.
+  </p>
   <table>
-    <thead><tr><th>Command</th><th>Description</th></tr></thead>
+    <thead><tr><th>Action</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>/opsx:propose</code></td><td>Create a new change proposal</td></tr>
-      <tr><td><code>/opsx:spec</code></td><td>Generate or add specs (Given/When/Then scenarios)</td></tr>
-      <tr><td><code>/opsx:ff</code></td><td>Fast-forward: generate design.md and tasks.md</td></tr>
-      <tr><td><code>/opsx:status</code></td><td>Show all active changes with lifecycle stage</td></tr>
-      <tr><td><code>/opsx:verify</code></td><td>Verify specs are satisfied by implementation</td></tr>
-      <tr><td><code>/opsx:archive</code></td><td>Archive completed change to baseline</td></tr>
+      <tr><td><code>status</code></td><td>Show all active changes with lifecycle stage</td></tr>
+      <tr><td><code>get</code></td><td>Show details for one change</td></tr>
+      <tr><td><code>propose</code></td><td>Create a new change proposal</td></tr>
+      <tr><td><code>add_spec</code></td><td>Add specs with Given/When/Then scenarios</td></tr>
+      <tr><td><code>register_tasks</code></td><td>Register task progress from <code>tasks.md</code></td></tr>
+      <tr><td><code>register_test_file</code></td><td>Register a required test file before implementation</td></tr>
+      <tr><td><code>archive</code></td><td>Archive a verifying change to baseline</td></tr>
     </tbody>
   </table>
 
@@ -56,10 +62,10 @@ And ollama is ranked last (local tier only)</code></pre>
 │       ├── proposal.md     # Intent and scope
 │       ├── specs/
 │       │   └── routing.md  # Given/When/Then scenarios
-│       ├── design.md       # Generated architecture (from /opsx:ff)
-│       └── tasks.md        # Generated work items (from /opsx:ff)
+│       ├── design.md       # Architecture notes
+│       └── tasks.md        # Work items tracked by register_tasks
 └── baseline/
-    └── archived-change/    # Completed changes (from /opsx:archive)</code></pre>
+    └── archived-change/    # Completed changes</code></pre>
 
   <h2>Integration with Design Tree</h2>
   <p>
@@ -71,10 +77,10 @@ And ollama is ranked last (local tier only)</code></pre>
     <li>Design node reaches <code>decided</code> status</li>
     <li><code>design_tree_update(implement)</code> creates the OpenSpec change</li>
     <li>Specs are generated from the node's decisions and acceptance criteria</li>
-    <li><code>/opsx:ff</code> generates design.md and tasks.md</li>
+    <li><code>openspec_manage(register_tasks)</code> records task progress from tasks.md</li>
     <li><code>/cleave</code> executes the tasks in parallel</li>
     <li><code>/assess spec</code> verifies against the original specs</li>
-    <li><code>/opsx:archive</code> closes the loop</li>
+    <li><code>openspec_manage(archive)</code> closes the loop</li>
   </ol>
 
   <h2>Reconciliation</h2>

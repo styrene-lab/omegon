@@ -29,6 +29,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Validate failures identify rejected paths** — `validate` now reports each unsupported path and each supported source file missing a project validator instead of only saying the supported source types.
 - **Non-UTF8 read and shell output errors are actionable** — `read` now reports the path and invalid byte offset for non-UTF8 text files or identifies binary files, and `bash` output capture no longer fails the whole command when stdout/stderr contains invalid UTF-8 bytes.
 - **Image tool results survive the full surface stack** — `view`, `read`, render tools, and MCP image outputs now keep structured image payloads in the LLM-facing tool result path, expose local render metadata for the TUI, and report explicit terminal render-path failures instead of silently degrading to metadata-only success.
+- **Stale native extensions recover after transport failure** — extension tool calls now drop broken stdin/stdout handles, respawn the extension, rerun the handshake, and retry once when the child process exits or the pipe closes.
+- **OpenSpec docs no longer advertise removed `/opsx:*` slash commands** — the site now points operators at the current `openspec_manage` lifecycle tool actions.
+- **Non-English TUI output has regression coverage** — added coverage for Cyrillic streaming output so future truncation/rendering changes cannot reintroduce byte-boundary panics.
 
 ## [0.22.0] - 2026-05-14
 
