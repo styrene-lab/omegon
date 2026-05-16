@@ -37,11 +37,13 @@ pub async fn execute(
         return Ok(ToolResult {
             content: vec![ContentBlock::Image {
                 url: format!("data:{media_type};base64,{base64}"),
-                media_type,
+                media_type: media_type.clone(),
             }],
             details: serde_json::json!({
                 "path": path.display().to_string(),
                 "bytes": data.len(),
+                "media_type": media_type,
+                "rendered": true,
             }),
         });
     }

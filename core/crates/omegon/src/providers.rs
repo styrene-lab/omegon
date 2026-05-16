@@ -1008,14 +1008,35 @@ impl AnthropicClient {
                             LlmMessage::ToolResult {
                                 call_id,
                                 content,
+                                images,
                                 is_error,
                                 ..
                             } => {
                                 let sanitized_id = sanitize_tool_id(call_id);
+                                let tool_content = if images.is_empty() {
+                                    json!(content)
+                                } else {
+                                    let mut content_blocks = Vec::new();
+                                    if !content.trim().is_empty() {
+                                        content_blocks
+                                            .push(json!({"type": "text", "text": content}));
+                                    }
+                                    for img in images {
+                                        content_blocks.push(json!({
+                                            "type": "image",
+                                            "source": {
+                                                "type": "base64",
+                                                "media_type": img.media_type,
+                                                "data": img.data,
+                                            }
+                                        }));
+                                    }
+                                    json!(content_blocks)
+                                };
                                 blocks.push(json!({
                                     "type": "tool_result",
                                     "tool_use_id": sanitized_id,
-                                    "content": content,
+                                    "content": tool_content,
                                     "is_error": is_error,
                                 }));
                                 idx += 1;
@@ -3520,6 +3541,7 @@ mod tests {
             call_id: "tc1".into(),
             tool_name: "read".into(),
             content: "file contents".into(),
+            images: vec![],
             is_error: false,
             args_summary: None,
         }];
@@ -3530,12 +3552,41 @@ mod tests {
     }
 
     #[test]
+    fn anthropic_build_tool_result_with_image_payload() {
+        let messages = vec![LlmMessage::ToolResult {
+            call_id: "tc1".into(),
+            tool_name: "view".into(),
+            content:
+                "**/tmp/screenshot.png** (12 B)\n[image output: image/png at /tmp/screenshot.png]"
+                    .into(),
+            images: vec![crate::bridge::ImageAttachment {
+                data: "iVBORw0KGgo=".into(),
+                media_type: "image/png".into(),
+                source_path: Some("/tmp/screenshot.png".into()),
+            }],
+            is_error: false,
+            args_summary: Some("/tmp/screenshot.png".into()),
+        }];
+        let wire = AnthropicClient::build_messages(&messages);
+        let tool_result = &wire[0]["content"][0];
+        assert_eq!(tool_result["type"], "tool_result");
+        assert_eq!(tool_result["content"][0]["type"], "text");
+        assert_eq!(tool_result["content"][1]["type"], "image");
+        assert_eq!(
+            tool_result["content"][1]["source"]["media_type"],
+            "image/png"
+        );
+        assert_eq!(tool_result["content"][1]["source"]["data"], "iVBORw0KGgo=");
+    }
+
+    #[test]
     fn anthropic_batches_adjacent_tool_results_into_single_user_message() {
         let messages = vec![
             LlmMessage::ToolResult {
                 call_id: "toolu_a".into(),
                 tool_name: "read".into(),
                 content: "a".into(),
+                images: vec![],
                 is_error: false,
                 args_summary: None,
             },
@@ -3543,6 +3594,7 @@ mod tests {
                 call_id: "toolu_b".into(),
                 tool_name: "bash".into(),
                 content: "b".into(),
+                images: vec![],
                 is_error: false,
                 args_summary: None,
             },
@@ -4403,6 +4455,7 @@ mod tests {
             call_id: "call_abc|fc_1".into(),
             tool_name: "bash".into(),
             content: "result text".into(),
+            images: vec![],
             args_summary: None,
             is_error: false,
         }];

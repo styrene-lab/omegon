@@ -6478,25 +6478,55 @@ impl App {
                     self.effects.pulse_new_card();
                 }
 
-                // Detect image results from view/extension render tools
+                // Detect image results from structured blocks/details first.
+                // Text scraping remains as a fallback for legacy render tools.
                 if !is_error
-                    && image::is_available()
-                    && let Some(ref name) = self.last_tool_name
-                    && matches!(
-                        name.as_str(),
-                        "view"
-                            | "render_excalidraw"
-                            | "render_composition_still"
-                            | "render_native_diagram"
-                    )
-                    && let Some(ref text) = full_text
+                    && result
+                        .content
+                        .iter()
+                        .any(|block| matches!(block, omegon_traits::ContentBlock::Image { .. }))
                 {
-                    for line in text.lines() {
-                        let trimmed = line.trim();
-                        if image::is_image_path(trimmed) && std::path::Path::new(trimmed).exists() {
-                            self.conversation
-                                .push_image(std::path::PathBuf::from(trimmed), "");
-                            break;
+                    let image_path = result
+                        .details
+                        .get("path")
+                        .or_else(|| result.details.get("output_path"))
+                        .and_then(|value| value.as_str())
+                        .map(std::path::PathBuf::from)
+                        .or_else(|| {
+                            full_text.as_ref().and_then(|text| {
+                                text.lines().find_map(|line| {
+                                    let trimmed = line.trim();
+                                    if image::is_image_path(trimmed)
+                                        && std::path::Path::new(trimmed).exists()
+                                    {
+                                        Some(std::path::PathBuf::from(trimmed))
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                        });
+
+                    match (image::is_available(), image_path) {
+                        (true, Some(path)) if path.exists() => {
+                            self.conversation.push_image(path, "");
+                        }
+                        (false, Some(path)) => {
+                            self.conversation.push_system(&format!(
+                                "Image result available, but terminal image rendering is unavailable here: {}",
+                                path.display()
+                            ));
+                        }
+                        (_, Some(path)) => {
+                            self.conversation.push_system(&format!(
+                                "Image result available, but the local render path does not exist: {}",
+                                path.display()
+                            ));
+                        }
+                        (_, None) => {
+                            self.conversation.push_system(
+                                "Image result available, but no local render path was provided.",
+                            );
                         }
                     }
                 }

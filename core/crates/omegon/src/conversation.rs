@@ -3,7 +3,7 @@
 //! Maintains two views: the canonical (unmodified) history for persistence,
 //! and the LLM-facing view with decay applied for context efficiency.
 
-use crate::bridge::{LlmMessage, WireToolCall};
+use crate::bridge::{ImageAttachment, LlmMessage, WireToolCall};
 use indexmap::IndexSet;
 use omegon_traits::LifecyclePhase;
 use serde::{Deserialize, Serialize};
@@ -1061,6 +1061,7 @@ impl ConversationState {
                     call_id: result.call_id.clone(),
                     tool_name: result.tool_name.clone(),
                     content: summary,
+                    images: vec![],
                     is_error: result.is_error,
                     args_summary: result.args_summary.clone(),
                 }
@@ -1232,6 +1233,7 @@ impl ConversationState {
                         call_id,
                         tool_name,
                         content,
+                        images: _,
                         is_error,
                         args_summary,
                     } => AgentMessage::ToolResult(
@@ -1387,27 +1389,47 @@ impl ConversationState {
                 raw: Some(a.raw.clone()),
             },
             AgentMessage::ToolResult(r, _) => {
-                // Flatten content blocks to text
-                let text = r
-                    .content
-                    .iter()
-                    .filter_map(|c| match c {
-                        omegon_traits::ContentBlock::Text { text } => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let (text, images) = tool_result_text_and_images(r);
 
                 LlmMessage::ToolResult {
                     call_id: r.call_id.clone(),
                     tool_name: r.tool_name.clone(),
                     content: text,
+                    images,
                     is_error: r.is_error,
                     args_summary: r.args_summary.clone(),
                 }
             }
         }
     }
+}
+
+fn tool_result_text_and_images(result: &ToolResultEntry) -> (String, Vec<ImageAttachment>) {
+    let mut text_blocks = Vec::new();
+    let mut images = Vec::new();
+    let source_path = result.args_summary.clone();
+
+    for block in &result.content {
+        match block {
+            omegon_traits::ContentBlock::Text { text } => text_blocks.push(text.clone()),
+            omegon_traits::ContentBlock::Image { media_type, .. } => {
+                if let Some(image) = ImageAttachment::from_content_block(block, source_path.clone())
+                {
+                    images.push(image);
+                }
+                text_blocks.push(format!(
+                    "[image output: {}{}]",
+                    media_type,
+                    source_path
+                        .as_deref()
+                        .map(|path| format!(" at {path}"))
+                        .unwrap_or_default()
+                ));
+            }
+        }
+    }
+
+    (text_blocks.join("\n"), images)
 }
 
 fn bash_command_committed_successfully(call: &ToolCall, results: &[ToolResultEntry]) -> bool {
@@ -2569,6 +2591,47 @@ mod tests {
     }
 
     #[test]
+    fn recent_image_tool_result_preserves_image_payload_for_llm_view() {
+        let mut conv = ConversationState::new();
+        push_matching_assistant(&mut conv, "t1");
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "t1".into(),
+            tool_name: "view".into(),
+            content: vec![
+                omegon_traits::ContentBlock::Text {
+                    text: "**/tmp/screenshot.png** (12 B)".into(),
+                },
+                omegon_traits::ContentBlock::Image {
+                    url: "data:image/png;base64,iVBORw0KGgo=".into(),
+                    media_type: "image/png".into(),
+                },
+            ],
+            is_error: false,
+            args_summary: Some("/tmp/screenshot.png".into()),
+        });
+
+        let view = conv.build_llm_view();
+        let tool_msg = view
+            .iter()
+            .find(|msg| matches!(msg, LlmMessage::ToolResult { .. }))
+            .expect("tool result should survive");
+        if let LlmMessage::ToolResult {
+            content, images, ..
+        } = tool_msg
+        {
+            assert!(content.contains("**/tmp/screenshot.png**"));
+            assert!(content.contains("[image output: image/png at /tmp/screenshot.png]"));
+            assert_eq!(images.len(), 1);
+            assert_eq!(images[0].media_type, "image/png");
+            assert_eq!(images[0].data, "iVBORw0KGgo=");
+            assert_eq!(
+                images[0].source_path.as_deref(),
+                Some("/tmp/screenshot.png")
+            );
+        }
+    }
+
+    #[test]
     fn slim_decay_preserves_path_bearing_generic_results() {
         let mut conv = ConversationState::new();
         conv.set_slim_mode(true);
@@ -3016,6 +3079,7 @@ mod tests {
                 call_id: "t1".into(),
                 tool_name: "bash".into(),
                 content: "output".into(),
+                images: vec![],
                 args_summary: None,
                 is_error: false,
             },

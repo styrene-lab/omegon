@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.21.3] - 2026-05-16
+
+### Fixed
+
+- **Image tool results survive the full surface stack** — `view`, `read`, render tools, and MCP image outputs now keep structured image payloads in the LLM-facing tool result path, expose local render metadata for the TUI, and report explicit terminal render-path failures instead of silently degrading to metadata-only success.
+
 ## [0.21.2] - 2026-05-15
 
 ### Fixed
