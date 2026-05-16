@@ -68,14 +68,20 @@ const SAFE_INHERIT_ENVS: &[&str] = &[
 
 /// Handles for communicating with an extension process.
 pub struct ProcessHandles {
+    child: tokio::process::Child,
     stdin: tokio::process::ChildStdin,
     reader: BufReader<tokio::process::ChildStdout>,
     next_id: u64,
 }
 
 impl ProcessHandles {
-    fn new(stdin: tokio::process::ChildStdin, stdout: tokio::process::ChildStdout) -> Self {
+    fn new(
+        child: tokio::process::Child,
+        stdin: tokio::process::ChildStdin,
+        stdout: tokio::process::ChildStdout,
+    ) -> Self {
         Self {
+            child,
             stdin,
             reader: BufReader::new(stdout),
             next_id: 1,
@@ -125,11 +131,18 @@ impl ProcessHandles {
     }
 }
 
+#[derive(Clone)]
+struct ExtensionRuntimeContext {
+    name: String,
+    ext_dir: PathBuf,
+    manifest: ExtensionManifest,
+    resolved_secrets: Vec<(String, String)>,
+}
+
 /// Wrapper Feature for any extension (native or OCI).
 /// Manages RPC communication via stdin/stdout, agnostic to runtime type.
 pub struct ExtensionFeature {
-    name: String,
-    ext_dir: PathBuf,
+    runtime: ExtensionRuntimeContext,
     tools: Vec<ToolDefinition>,
     handles: Arc<Mutex<Option<ProcessHandles>>>,
     request_id: Arc<AtomicU64>,
@@ -140,9 +153,8 @@ pub struct ExtensionFeature {
 
 impl ExtensionFeature {
     /// Create a new extension feature from already-handshaked process handles.
-    pub fn new(
-        name: String,
-        ext_dir: PathBuf,
+    fn new(
+        runtime: ExtensionRuntimeContext,
         tools: Vec<ToolDefinition>,
         widgets: Vec<WidgetDeclaration>,
         handles: ProcessHandles,
@@ -152,8 +164,7 @@ impl ExtensionFeature {
         let next_id = handles.next_id;
         (
             Self {
-                name,
-                ext_dir,
+                runtime,
                 tools,
                 handles: Arc::new(Mutex::new(Some(handles))),
                 request_id: Arc::new(AtomicU64::new(next_id)),
@@ -209,6 +220,45 @@ impl ExtensionFeature {
         }
     }
 
+    async fn respawn_after_transport_error(&self, cause: &anyhow::Error) -> Result<()> {
+        let mut guard = self.handles.lock().await;
+        if let Some(mut stale) = guard.take() {
+            let _ = stale.child.kill().await;
+            let _ = stale.child.wait().await;
+        }
+
+        let mut handles = spawn_process_handles(&self.runtime.manifest, &self.runtime.ext_dir)
+            .await
+            .map_err(|err| {
+                anyhow!(
+                    "extension '{}' transport failed ({cause}); respawn failed: {err}",
+                    self.runtime.name
+                )
+            })?;
+        let tools = handshake(
+            &mut handles,
+            &self.runtime.manifest,
+            &self.runtime.ext_dir,
+            &self.runtime.resolved_secrets,
+        )
+        .await
+        .map_err(|err| {
+            anyhow!(
+                "extension '{}' transport failed ({cause}); respawn handshake failed: {err}",
+                self.runtime.name
+            )
+        })?;
+        self.request_id.store(handles.next_id, Ordering::SeqCst);
+        *guard = Some(handles);
+        tracing::warn!(
+            extension = %self.runtime.name,
+            tools = tools.len(),
+            cause = %cause,
+            "respawned extension after transport failure"
+        );
+        Ok(())
+    }
+
     /// Get widgets declared by this extension.
     pub fn widgets(&self) -> &[WidgetDeclaration] {
         &self.widgets
@@ -223,7 +273,7 @@ impl ExtensionFeature {
     pub async fn record_error(&self, error: String) {
         let mut state = self.state.lock().await;
         state.record_error(error);
-        let _ = state.save(&self.ext_dir);
+        let _ = state.save(&self.runtime.ext_dir);
     }
 
     /// Broadcast a widget event (for internal use).
@@ -245,7 +295,7 @@ impl ExtensionFeature {
         ExtensionPollingHandle {
             handles: self.handles.clone(),
             request_id: self.request_id.clone(),
-            name: self.name.clone(),
+            name: self.runtime.name.clone(),
         }
     }
 }
@@ -314,7 +364,7 @@ impl ExtensionPollingHandle {
 #[async_trait::async_trait]
 impl Feature for ExtensionFeature {
     fn name(&self) -> &str {
-        &self.name
+        &self.runtime.name
     }
 
     fn tools(&self) -> Vec<ToolDefinition> {
@@ -338,6 +388,26 @@ impl Feature for ExtensionFeature {
                 }],
                 details: json!({}),
             }),
+            Err(e) if is_extension_transport_error(&e) => {
+                self.record_error(format!("transport failure: {e}")).await;
+                self.respawn_after_transport_error(&e).await?;
+                let output = self
+                    .rpc_call("execute_tool", json!({ "name": tool_name, "args": args }))
+                    .await
+                    .map_err(|retry_err| {
+                        anyhow!(
+                            "extension '{}' reconnected after transport failure, but retrying '{}' failed: {retry_err}",
+                            self.runtime.name,
+                            tool_name
+                        )
+                    })?;
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: output.to_string(),
+                    }],
+                    details: json!({"extension_reconnected": true}),
+                })
+            }
             Err(e) => {
                 let msg = e.to_string();
                 if msg.contains("MethodNotFound") {
@@ -346,7 +416,7 @@ impl Feature for ExtensionFeature {
                             text: format!(
                                 "Extension '{}' does not support tool execution. \
                                  The tool '{}' was advertised but cannot be called.",
-                                self.name, tool_name
+                                self.runtime.name, tool_name
                             ),
                         }],
                         details: json!({"is_error": true}),
@@ -445,6 +515,36 @@ fn clean_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Comman
         }
     }
     cmd
+}
+
+async fn spawn_process_handles(
+    manifest: &ExtensionManifest,
+    ext_dir: &Path,
+) -> Result<ProcessHandles> {
+    let mut child = match &manifest.runtime {
+        RuntimeConfig::Native { .. } => {
+            let binary = manifest.native_binary_path(ext_dir)?;
+            clean_command(&binary)
+                .arg("--rpc")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::inherit())
+                .spawn()?
+        }
+        RuntimeConfig::Oci { .. } => {
+            let image = manifest.oci_image()?;
+            clean_command("podman")
+                .args(["run", "--rm", "-i", &image])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::inherit())
+                .spawn()?
+        }
+    };
+
+    let stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
+    let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
+    Ok(ProcessHandles::new(child, stdin, stdout))
 }
 
 /// Run the extension handshake sequence on a single process:
@@ -553,6 +653,17 @@ fn resolved_config(
     Ok(config)
 }
 
+fn is_extension_transport_error(error: &anyhow::Error) -> bool {
+    let msg = error.to_string().to_ascii_lowercase();
+    msg.contains("broken pipe")
+        || msg.contains("connection reset")
+        || msg.contains("connection aborted")
+        || msg.contains("extension closed connection")
+        || msg.contains("closed channel")
+        || msg.contains("early eof")
+        || msg.contains("unexpected eof")
+}
+
 fn config_value_to_json(field: &omegon_extension::ConfigField, value: &str) -> Value {
     use omegon_extension::ConfigFieldType;
 
@@ -576,16 +687,7 @@ async fn spawn_native(
     state: ExtensionState,
     resolved_secrets: &[(String, String)],
 ) -> Result<SpawnedExtension> {
-    let mut child = clean_command(&binary)
-        .arg("--rpc")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()?;
-
-    let stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
-    let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
-    let mut handles = ProcessHandles::new(stdin, stdout);
+    let mut handles = spawn_process_handles(manifest, ext_dir).await?;
 
     let tools = handshake(&mut handles, manifest, ext_dir, resolved_secrets).await?;
 
@@ -598,17 +700,15 @@ async fn spawn_native(
         "spawned native extension"
     );
 
-    let (feature, widget_rx) = ExtensionFeature::new(
-        manifest.extension.name.clone(),
-        binary
-            .parent()
-            .unwrap_or(std::path::Path::new("."))
-            .to_path_buf(),
-        tools.clone(),
-        widgets.clone(),
-        handles,
-        state,
-    );
+    let runtime = ExtensionRuntimeContext {
+        name: manifest.extension.name.clone(),
+        ext_dir: ext_dir.to_path_buf(),
+        manifest: manifest.clone(),
+        resolved_secrets: resolved_secrets.to_vec(),
+    };
+
+    let (feature, widget_rx) =
+        ExtensionFeature::new(runtime, tools.clone(), widgets.clone(), handles, state);
 
     // Extract polling handle if this extension provides vox_route
     let vox_polling_handle = if tools.iter().any(|t| t.name == "vox_route") {
@@ -654,16 +754,7 @@ async fn spawn_container(
     state: ExtensionState,
     resolved_secrets: &[(String, String)],
 ) -> Result<SpawnedExtension> {
-    let mut child = clean_command("podman")
-        .args(["run", "--rm", "-i", image])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()?;
-
-    let stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
-    let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
-    let mut handles = ProcessHandles::new(stdin, stdout);
+    let mut handles = spawn_process_handles(manifest, ext_dir).await?;
 
     let tools = handshake(&mut handles, manifest, ext_dir, resolved_secrets).await?;
 
@@ -676,14 +767,15 @@ async fn spawn_container(
         "spawned OCI extension"
     );
 
-    let (feature, widget_rx) = ExtensionFeature::new(
-        manifest.extension.name.clone(),
-        PathBuf::new(),
-        tools.clone(),
-        widgets.clone(),
-        handles,
-        state,
-    );
+    let runtime = ExtensionRuntimeContext {
+        name: manifest.extension.name.clone(),
+        ext_dir: ext_dir.to_path_buf(),
+        manifest: manifest.clone(),
+        resolved_secrets: resolved_secrets.to_vec(),
+    };
+
+    let (feature, widget_rx) =
+        ExtensionFeature::new(runtime, tools.clone(), widgets.clone(), handles, state);
 
     let vox_polling_handle = if tools.iter().any(|t| t.name == "vox_route") {
         Some(feature.polling_handle())
@@ -801,6 +893,82 @@ mod tests {
 
         let err = resolved_config(&manifest, temp.path()).unwrap_err();
         assert!(err.to_string().contains("required_value"));
+    }
+
+    #[test]
+    fn extension_transport_error_detection_covers_stale_handles() {
+        assert!(is_extension_transport_error(&anyhow!("broken pipe")));
+        assert!(is_extension_transport_error(&anyhow!(
+            "extension closed connection"
+        )));
+        assert!(is_extension_transport_error(&anyhow!("unexpected EOF")));
+        assert!(!is_extension_transport_error(&anyhow!(
+            "RPC error: MethodNotFound"
+        )));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn extension_tool_call_respawns_after_child_exits() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let marker = temp.path().join("first-call-done");
+        let script = temp.path().join("flaky-extension.sh");
+        let script_body = format!(
+            r#"#!/bin/sh
+marker={marker:?}
+while IFS= read -r line; do
+  case "$line" in
+    *get_tools*)
+      printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":[{{"name":"echo","label":"Echo","description":"Echo","parameters":{{"type":"object","properties":{{}}}}}}]}}'
+      ;;
+    *execute_tool*)
+      printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"ok":true}}}}'
+      if [ ! -f "$marker" ]; then
+        touch "$marker"
+        exit 0
+      fi
+      ;;
+  esac
+done
+"#,
+            marker = marker.display().to_string()
+        );
+        std::fs::write(&script, script_body).unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        std::fs::write(
+            temp.path().join("manifest.toml"),
+            r#"
+[extension]
+name = "flaky"
+version = "0.1.0"
+description = "Flaky test extension"
+
+[runtime]
+type = "native"
+binary = "flaky-extension.sh"
+"#,
+        )
+        .unwrap();
+
+        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
+        let first = spawned
+            .feature
+            .execute("echo", "call-1", json!({}), CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(first.details["extension_reconnected"], Value::Null);
+
+        let second = spawned
+            .feature
+            .execute("echo", "call-2", json!({}), CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(second.details["extension_reconnected"], true);
     }
 
     fn config_field(

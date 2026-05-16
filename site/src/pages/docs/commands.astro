@@ -92,15 +92,20 @@ import Docs from "../../layouts/Docs.astro";
   </table>
 
   <h2>OpenSpec</h2>
+  <p>
+    OpenSpec lifecycle operations are currently agent tool actions on
+    <code>openspec_manage</code>, not <code>/opsx:*</code> slash commands.
+  </p>
   <table>
-    <thead><tr><th>Command</th><th>Description</th></tr></thead>
+    <thead><tr><th>Tool action</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>/opsx:propose</code></td><td>Create a new OpenSpec change proposal.</td></tr>
-      <tr><td><code>/opsx:spec</code></td><td>Generate or add specs to a change.</td></tr>
-      <tr><td><code>/opsx:ff</code></td><td>Fast-forward: generate design.md and tasks.md from specs.</td></tr>
-      <tr><td><code>/opsx:status</code></td><td>Show all active OpenSpec changes.</td></tr>
-      <tr><td><code>/opsx:verify</code></td><td>Verify specs are satisfied by implementation.</td></tr>
-      <tr><td><code>/opsx:archive</code></td><td>Archive a completed change to baseline.</td></tr>
+      <tr><td><code>openspec_manage(status)</code></td><td>Show all active OpenSpec changes.</td></tr>
+      <tr><td><code>openspec_manage(get)</code></td><td>Show one change and its spec/task state.</td></tr>
+      <tr><td><code>openspec_manage(propose)</code></td><td>Create a new OpenSpec change proposal.</td></tr>
+      <tr><td><code>openspec_manage(add_spec)</code></td><td>Add specs to a change.</td></tr>
+      <tr><td><code>openspec_manage(register_tasks)</code></td><td>Register task progress from tasks.md.</td></tr>
+      <tr><td><code>openspec_manage(register_test_file)</code></td><td>Register required test coverage before implementation.</td></tr>
+      <tr><td><code>openspec_manage(archive)</code></td><td>Archive a verifying change to baseline.</td></tr>
     </tbody>
   </table>
 

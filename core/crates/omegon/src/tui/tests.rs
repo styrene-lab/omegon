@@ -978,6 +978,28 @@ fn tail_chars_handles_emoji_at_tail_boundary() {
 }
 
 #[test]
+fn non_english_streaming_output_does_not_panic_at_char_boundaries() {
+    let mut app = test_app();
+    let russian_output = "Запушил. `dcf210b` уехал в `origin/feat/aml-backend-sandbox-env`. \
+Запушил. `dcf210b` — `fix: rename sandbox.company.dev DNS record to beta.company.dev` \
+теперь на `origin/feat/aml-backend-sandbox-env`.\n\nОдин момент. "
+        .repeat(24);
+
+    for chunk_size in 1..128 {
+        let chunk = App::tail_chars(&russian_output, chunk_size);
+        assert!(chunk.is_char_boundary(0));
+        app.handle_agent_event(AgentEvent::MessageChunk {
+            text: chunk.to_string(),
+        });
+    }
+
+    let mut terminal = Terminal::new(TestBackend::new(100, 32)).unwrap();
+    terminal
+        .draw(|frame| app.draw(frame))
+        .expect("non-English output should render without panicking");
+}
+
+#[test]
 fn conversation_scroll_does_not_recall_input_history() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];
