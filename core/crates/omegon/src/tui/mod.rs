@@ -712,7 +712,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             }
         }
         "armory" => {
-            if args.is_empty() || args == "browse" || args == "list" {
+            if args.is_empty() || args == "browse" || args == "search" || args == "list" {
                 Some(CanonicalSlashCommand::ArmoryBrowse(None))
             } else if let Some(query) = args.strip_prefix("browse ") {
                 let query = query.trim();
@@ -732,6 +732,8 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 let target = target.trim();
                 (!target.is_empty())
                     .then(|| CanonicalSlashCommand::ArmoryInstall(target.to_string()))
+            } else if args == "install" {
+                None
             } else {
                 Some(CanonicalSlashCommand::ArmoryBrowse(Some(args.to_string())))
             }
@@ -4853,6 +4855,30 @@ impl App {
                 }
             }
 
+            "armory" => {
+                if let Some(command) = canonical_slash_command("armory", args) {
+                    if let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
+                    {
+                        let _ = tx.try_send(TuiCommand::ExecuteControl {
+                            request,
+                            respond_to: None,
+                        });
+                        SlashResult::Handled
+                    } else {
+                        SlashResult::Display(
+                            "Usage: /armory [list|browse [query]|search [query]|install <name|skills/name|personas/name|tones/name|examples/name>]"
+                                .into(),
+                        )
+                    }
+                } else {
+                    SlashResult::Display(
+                        "Usage: /armory [list|browse [query]|search [query]|install <name|skills/name|personas/name|tones/name|examples/name>]"
+                            .into(),
+                    )
+                }
+            }
+
             "stats" => {
                 if let Some(command) = canonical_slash_command("stats", args)
                     && let Some(request) =
@@ -8629,7 +8655,10 @@ mod auspex_copy_tests {
 mod slash_command_parsing_tests {
     use super::App;
     use super::CanonicalSlashCommand;
+    use super::SlashResult;
+    use super::TuiCommand;
     use super::canonical_slash_command;
+    use tokio::sync::mpsc;
 
     // ── Skills ────────────────────────────────────────────
 
@@ -8840,12 +8869,45 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
+    fn armory_search_without_query_browses_all() {
+        assert!(matches!(
+            canonical_slash_command("armory", "search"),
+            Some(CanonicalSlashCommand::ArmoryBrowse(None))
+        ));
+    }
+
+    #[test]
     fn armory_install_routes_to_install() {
         match canonical_slash_command("armory", "install skills/security") {
             Some(CanonicalSlashCommand::ArmoryInstall(target)) => {
                 assert_eq!(target, "skills/security")
             }
             other => panic!("expected ArmoryInstall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn armory_install_without_target_is_rejected() {
+        assert!(canonical_slash_command("armory", "install").is_none());
+    }
+
+    #[test]
+    fn armory_dispatch_routes_to_control_runtime() {
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-5");
+        let mut app = App::new(settings);
+        let (tx, mut rx) = mpsc::channel(1);
+
+        assert!(matches!(
+            app.handle_slash_command("/armory install skills/security", &tx),
+            SlashResult::Handled
+        ));
+
+        match rx.try_recv() {
+            Ok(TuiCommand::ExecuteControl {
+                request: crate::control_runtime::ControlRequest::ArmoryInstall { target },
+                respond_to: None,
+            }) => assert_eq!(target, "skills/security"),
+            other => panic!("expected ArmoryInstall ExecuteControl, got {other:?}"),
         }
     }
 

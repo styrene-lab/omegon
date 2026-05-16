@@ -22,7 +22,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
-- **Armory installation is discoverable from the TUI** — command suggestions, slash usage, ACP help, browse output, and post-install messages now point operators at `/armory install`, `/skills install <name>`, and `/extension install <name|url|path>` instead of leaving registry installs as a hidden CLI path.
+- **Armory installation is reachable and discoverable from the TUI** — command suggestions, slash usage, ACP help, browse output, dispatcher routing, and post-install messages now point operators at `/armory install`, `/skills install <name>`, and `/extension install <name|url|path>` instead of leaving registry installs as a hidden CLI path.
 - **Queued TUI prompts no longer interrupt by default** — submitting a follow-up while the agent is active now queues it until the current turn finishes instead of cancelling the active turn under the misleading "queued" banner. Explicit interrupt queue mode still cancels when selected.
 - **Web search timeout path no longer burns one timeout per free engine** — automatic web search now tries DuckDuckGo, Bing, and Google through the shared concurrent failover path instead of spending a full sequential timeout on each free engine, and the tool schema exposes a real `timeout` parameter.
 - **Validate failures identify rejected paths** — `validate` now reports each unsupported path and each supported source file missing a project validator instead of only saying the supported source types.
