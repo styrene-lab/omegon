@@ -31,6 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- **Publish links the local binary with an absolute target** — `just publish` no longer creates a broken `~/.local/bin/omegon -> target/release/omegon` symlink when run from the repository root.
 - **ACP and TUI always-allow now persist through the same grant path** — `allow_always` decisions route through the internal permission grant tool, so host-panel approvals and terminal approvals update the same project profile permission store.
 - **Standard device streams are no longer blocked as outside-workspace paths** — `/dev/null`, standard stdio aliases, and fd aliases for descriptors 0-2 are allowed by the shared workspace boundary instead of triggering permission prompts.
 - **Workspace path discovery no longer escapes into ancestor home repos** — Omegon project/runtime state now respects explicit project markers and shell git commands run with a project-root discovery ceiling, preserving legitimate nested repo status while preventing child workspaces from inheriting unrelated parent repositories.

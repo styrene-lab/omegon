@@ -428,7 +428,7 @@ release:
 sign:
     #!/usr/bin/env bash
     set -euo pipefail
-    BINARY="target/release/omegon"
+    BINARY="$(pwd)/target/release/omegon"
     if [ ! -f "$BINARY" ]; then
         echo "✗ No binary at $BINARY — run 'just release' first."
         exit 1
@@ -568,7 +568,7 @@ publish:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    BINARY="target/release/omegon"
+    BINARY="$(pwd)/target/release/omegon"
 
     # Read version from the built binary — not Cargo.toml.
     # The binary is the release artifact that was built and signed locally.
