@@ -629,13 +629,12 @@ publish:
     # ── 3. Build docs site locally (verification) ─────────────
     echo ""
     echo "Building docs site locally..."
-    (
-        cd site
-        node scripts/build-design-tree.mjs 2>/dev/null
-        npx astro build 2>&1 | tail -5
-        PAGES=$(find dist -name '*.html' | wc -l | tr -d ' ')
-        echo "  Pages: $PAGES"
-    )
+    pushd site >/dev/null
+    node scripts/build-design-tree.mjs 2>/dev/null
+    npx astro build 2>&1 | tail -5
+    PAGES=$(find dist -name '*.html' | wc -l | tr -d ' ')
+    echo "  Pages: $PAGES"
+    popd >/dev/null
 
     # ── 4. Link the binary ────────────────────────────────────
     # Do NOT call `just link` here — it uses a newest-wins heuristic between
