@@ -181,9 +181,17 @@ pub(crate) fn compute_context_composition(
                 );
             }
             LlmMessage::ToolResult {
-                content, tool_name, ..
+                content,
+                tool_name,
+                images,
+                ..
             } => {
-                tool_history_tokens += estimate_chars_to_tokens(content.len() + tool_name.len());
+                let image_chars = images
+                    .iter()
+                    .map(|img| img.data.len() + img.media_type.len())
+                    .sum::<usize>();
+                tool_history_tokens +=
+                    estimate_chars_to_tokens(content.len() + tool_name.len() + image_chars);
                 if tool_name.starts_with("memory_") {
                     memory_tokens += estimate_chars_to_tokens(content.len());
                 }
