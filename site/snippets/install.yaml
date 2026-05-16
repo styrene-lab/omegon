@@ -9,10 +9,6 @@ install_custom_dir:
   cmd: "curl -fsSL https://omegon.styrene.io/install.sh | INSTALL_DIR=~/.local/bin sh"
   desc: "Install to a custom directory"
 
-install_rc:
-  cmd: "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --channel=rc"
-  desc: "Install latest release candidate"
-
 install_nightly:
   cmd: "curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --channel=nightly"
   desc: "Install latest nightly"

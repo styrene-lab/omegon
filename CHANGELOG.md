@@ -23,6 +23,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Unified Armory install surface** — `/armory install`, `armory/install`, extension installs, and named skill installs now route through one Armory installer that materializes extensions, plugins, and skills into the runtime paths Omegon actually loads.
 - **Profile-scoped integration defaults** — project/global profiles can now opt into MQTT bridge startup and constrain native extension loading with allow/deny lists instead of letting every installed operator extension load everywhere by default.
 
+### Changed
+
+- **Release candidates retired again** — release branches now carry stable semver versions directly, `just release` cuts stable tags without opening a follow-on RC line, and install/Homebrew/docs surfaces only advertise stable and nightly channels.
+
 ### Fixed
 
 - **MQTT bridge no longer starts implicitly** — interactive and daemon sessions now leave MQTT disabled unless the profile or environment explicitly enables it, and enabled bridges preflight the broker socket before handing control to the MQTT client event loop.

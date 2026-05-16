@@ -28,8 +28,6 @@ FORMULA_TARGET_ORDER = TARGETS
 def infer_channel(tag: str) -> str:
     if "-nightly." in tag:
         return "nightly"
-    if "-rc." in tag:
-        return "rc"
     return "stable"
 
 

@@ -24,7 +24,7 @@ Engineers should be able to install Omegon with a single command: no git clone, 
 Current install surfaces:
 
 - install script: `curl -fsSL https://omegon.styrene.io/install.sh | sh`
-- release candidates: `curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --channel=rc`
+- nightlies: `curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --channel=nightly`
 - Homebrew: `brew tap styrene-lab/tap && brew install omegon`
 - direct GitHub release artifacts from `styrene-lab/omegon`
 
@@ -70,7 +70,7 @@ Linux install surfaces must state runtime ABI requirements explicitly. `brew ins
 Omegon is the single installed product boundary. There is no Node.js runtime package or companion TypeScript fork to update separately.
 
 The authoritative update path therefore must:
-- mutate the installed runtime surface (`/update install`, `brew upgrade omegon`, `brew upgrade styrene-lab/tap/omegon-rc`, or reinstall via `install.sh` depending on channel)
+- mutate the installed runtime surface (`/update install`, `brew upgrade omegon`, or reinstall via `install.sh` depending on channel)
 - verify the active `omegon` / `om` executable still resolves to Omegon
 - stop at a deliberate restart handoff that tells the operator to relaunch `om` or `omegon`
 

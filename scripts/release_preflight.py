@@ -2,7 +2,7 @@
 """Release preflight checks for Omegon.
 
 This script validates that the repository is in a coherent state before a
-stable release is cut from an RC line.
+stable release tag is cut from a release branch.
 """
 
 from __future__ import annotations
@@ -39,10 +39,12 @@ def read_workspace_version(repo_root: Path) -> str:
     return match.group(1)
 
 
-def stable_version_from_rc(version: str) -> str:
-    if "-rc." not in version:
-        raise PreflightError(f"Workspace version {version} is not an RC version")
-    return version.split("-rc.", 1)[0]
+def stable_version(version: str) -> str:
+    if "-" in version:
+        raise PreflightError(
+            f"Workspace version {version} is not a stable release version"
+        )
+    return version
 
 
 def release_branch_base(branch: str) -> str | None:
@@ -123,7 +125,7 @@ def collect_failures(repo_root: Path) -> list[str]:
     role = read_workspace_role(repo_root)
     if role != "release":
         failures.append(
-            f"workspace role must be 'release' for RC/release cuts (currently: {role or 'unset'})"
+            f"workspace role must be 'release' for release cuts (currently: {role or 'unset'})"
         )
 
     dirty = git_stdout(repo_root, "status", "--porcelain")
@@ -132,20 +134,20 @@ def collect_failures(repo_root: Path) -> list[str]:
 
     try:
         current_version = read_workspace_version(repo_root)
-        stable_version = stable_version_from_rc(current_version)
+        release_version = stable_version(current_version)
     except PreflightError as err:
         failures.append(str(err))
         return failures
 
     if branch_base is not None:
-        stable_base = ".".join(stable_version.split(".")[:2])
-        if branch_base != stable_base:
+        release_base = ".".join(release_version.split(".")[:2])
+        if branch_base != release_base:
             failures.append(
-                f"release branch {branch} does not match workspace release line {stable_version}"
+                f"release branch {branch} does not match workspace release line {release_version}"
             )
 
-    if not changelog_has_version(repo_root, stable_version):
-        failures.append(f"CHANGELOG.md is missing section [{stable_version}]")
+    if not changelog_has_version(repo_root, release_version):
+        failures.append(f"CHANGELOG.md is missing section [{release_version}]")
 
     if not install_docs_use_placeholders(repo_root):
         failures.append("site/src/pages/docs/install.astro versioned examples are not marked as placeholders")
@@ -179,8 +181,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {failure}", file=sys.stderr)
         return 1
 
-    stable = stable_version_from_rc(read_workspace_version(repo_root))
-    print(f"✓ Release preflight passed — repo is releasable as {stable}")
+    version = stable_version(read_workspace_version(repo_root))
+    print(f"✓ Release preflight passed — repo is releasable as {version}")
     return 0
 
 

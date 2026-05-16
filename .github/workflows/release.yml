@@ -32,6 +32,7 @@ jobs:
   # These finish in ~10 minutes and unblock the release.
   build:
     name: Build ${{ matrix.target }}
+    if: ${{ !contains(inputs.tag_name || github.ref_name, '-rc.') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -211,6 +212,7 @@ jobs:
   # Runs in parallel but does not block release publication.
   build-extended:
     name: Build aarch64-unknown-linux-gnu
+    if: ${{ !contains(inputs.tag_name || github.ref_name, '-rc.') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -285,6 +287,7 @@ jobs:
 
   live-upstream-smoke:
     name: Live upstream smoke (non-blocking)
+    if: ${{ !contains(inputs.tag_name || github.ref_name, '-rc.') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
@@ -481,16 +484,12 @@ jobs:
 
           # Determine release flags
           IS_NIGHTLY=false
-          IS_RC=false
           PRERELEASE_FLAG=""
           DRAFT_FLAG=""
           if echo "${{ env.RELEASE_TAG }}" | grep -q "\-nightly\."; then
             IS_NIGHTLY=true
             PRERELEASE_FLAG="--prerelease"
             DRAFT_FLAG="--draft"
-          elif echo "${{ env.RELEASE_TAG }}" | grep -q "\-rc\."; then
-            IS_RC=true
-            PRERELEASE_FLAG="--prerelease"
           fi
 
           # Collect asset files
@@ -530,7 +529,7 @@ jobs:
           subject-path: artifacts/omegon-*.tar.gz
 
       - name: Trigger Homebrew formula update
-        if: ${{ !contains(env.RELEASE_TAG, '-rc.') && !contains(env.RELEASE_TAG, '-nightly.') }}
+        if: ${{ !contains(env.RELEASE_TAG, '-nightly.') }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN || github.token }}
         run: |
@@ -541,9 +540,9 @@ jobs:
   oci-images:
     name: OCI images (${{ matrix.image }})
     needs: release
-    # Only build OCI images for stable releases — RCs and nightlies don't
+    # Only build OCI images for stable releases — nightlies don't
     # need container images, and 7 Nix builds burn ~70 runner-minutes.
-    if: ${{ !contains(inputs.tag_name || github.ref_name, '-nightly.') && !contains(inputs.tag_name || github.ref_name, '-rc.') }}
+    if: ${{ !contains(inputs.tag_name || github.ref_name, '-nightly.') }}
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -589,7 +588,6 @@ jobs:
           echo "Pushed ${{ matrix.image }}:${VERSION} to ghcr.io"
 
       - name: Tag as latest (stable only)
-        if: ${{ !contains(env.RELEASE_TAG, '-rc.') }}
         run: |
           set -euo pipefail
           VERSION="${RELEASE_TAG#v}"

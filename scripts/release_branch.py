@@ -3,7 +3,7 @@
 
 The release branch model has one authority split:
 
-- release/X.Y owns RC and stable tags for the X.Y line.
+- release/X.Y owns stable tags for the X.Y line.
 - main owns nightly tags and the next development line.
 
 These helpers keep branch creation and forward merges mechanical so release
@@ -58,14 +58,16 @@ def read_workspace_version(repo_root: Path) -> str:
     return match.group(1)
 
 
-def stable_from_rc(version: str) -> str:
-    if "-rc." not in version:
-        raise ReleaseBranchError(f"workspace version {version} is not an RC version")
-    return version.split("-rc.", 1)[0]
+def stable_version(version: str) -> str:
+    if "-" in version:
+        raise ReleaseBranchError(
+            f"workspace version {version} is not a stable release version"
+        )
+    return version
 
 
 def release_branch_for_version(version: str) -> str:
-    stable = stable_from_rc(version)
+    stable = stable_version(version)
     parts = stable.split(".")
     if len(parts) < 2:
         raise ReleaseBranchError(f"could not derive release branch from version {version}")

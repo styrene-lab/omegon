@@ -90,8 +90,7 @@ dev_clone_build:
 
 release_workflow:
   cmd: |
-    just rc
+    just release
     just sign
     just publish
-    just release
-  desc: "Release workflow (cut RC, sign, publish, release)"
+  desc: "Release workflow (tag, build, optionally sign, publish)"
