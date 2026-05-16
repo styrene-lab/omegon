@@ -569,7 +569,18 @@ fn truncate_tail(output: &str) -> Truncated {
 // - The Nex container sandbox is the security boundary
 
 /// Paths that are always allowed regardless of workspace boundary.
-const ALLOWED_PATHS: &[&str] = &["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin"];
+const ALLOWED_PATHS: &[&str] = &[
+    "/dev/null",
+    "/dev/stdin",
+    "/dev/stdout",
+    "/dev/stderr",
+    "/dev/fd/0",
+    "/dev/fd/1",
+    "/dev/fd/2",
+    "/proc/self/fd/0",
+    "/proc/self/fd/1",
+    "/proc/self/fd/2",
+];
 
 /// Scan a bash command for filesystem write patterns targeting paths
 /// outside the workspace boundary. Returns a list of violating paths.
@@ -1103,6 +1114,33 @@ mod tests {
         let b = test_boundary("/tmp/workspace");
         let v = scan_boundary_violations("command 2> /dev/null", &b, Path::new("/tmp/workspace"));
         assert!(v.is_empty(), "should allow /dev/null: {:?}", v);
+    }
+
+    #[test]
+    fn scanner_allows_standard_fd_redirects() {
+        let b = test_boundary("/tmp/workspace");
+        for path in [
+            "/dev/stdout",
+            "/dev/stderr",
+            "/dev/fd/1",
+            "/dev/fd/2",
+            "/proc/self/fd/1",
+            "/proc/self/fd/2",
+        ] {
+            let command = format!("echo data > {path}");
+            let v = scan_boundary_violations(&command, &b, Path::new("/tmp/workspace"));
+            assert!(v.is_empty(), "should allow {path}: {v:?}");
+        }
+    }
+
+    #[test]
+    fn scanner_blocks_unsafe_device_redirects() {
+        let b = test_boundary("/tmp/workspace");
+        for path in ["/dev/zero", "/dev/fd/3", "/proc/self/fd/3"] {
+            let command = format!("echo data > {path}");
+            let v = scan_boundary_violations(&command, &b, Path::new("/tmp/workspace"));
+            assert!(!v.is_empty(), "should block {path}");
+        }
     }
 
     #[test]

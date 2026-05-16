@@ -31,6 +31,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - **ACP and TUI always-allow now persist through the same grant path** — `allow_always` decisions route through the internal permission grant tool, so host-panel approvals and terminal approvals update the same project profile permission store.
+- **Standard device streams are no longer blocked as outside-workspace paths** — `/dev/null`, standard stdio aliases, and fd aliases for descriptors 0-2 are allowed by the shared workspace boundary instead of triggering permission prompts.
 - **Workspace path discovery no longer escapes into ancestor home repos** — Omegon project/runtime state now respects explicit project markers and shell git commands run with a discovery ceiling so child workspaces do not inherit unrelated parent repository status.
 - **MQTT bridge no longer starts implicitly** — interactive and daemon sessions now leave MQTT disabled unless the profile or environment explicitly enables it, and enabled bridges preflight the broker socket before handing control to the MQTT client event loop.
 - **Startup persona and tone now honor profile defaults** — local, ACP, and embedded startup can load persona/tone defaults from the profile instead of requiring ad hoc child environment variables.

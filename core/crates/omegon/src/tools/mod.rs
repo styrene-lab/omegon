@@ -128,6 +128,10 @@ impl WorkspaceBoundary {
             return Ok(resolved);
         }
 
+        if is_allowed_special_path(&resolved) {
+            return Ok(resolved);
+        }
+
         // Canonicalize to resolve symlinks and `..` — but the file may not
         // exist yet (write/edit creating new files). In that case, canonicalize
         // the parent directory and append the filename.
@@ -174,6 +178,10 @@ impl WorkspaceBoundary {
     /// or a trusted directory. Does not return error details.
     pub fn is_inside_boundary(&self, path: &Path) -> bool {
         if self.bypass {
+            return true;
+        }
+
+        if is_allowed_special_path(path) {
             return true;
         }
 
@@ -239,6 +247,31 @@ impl WorkspaceBoundary {
         }
         false
     }
+}
+
+fn is_allowed_special_path(path: &Path) -> bool {
+    let Some(path) = path.to_str() else {
+        return false;
+    };
+
+    #[cfg(windows)]
+    if path.eq_ignore_ascii_case("NUL") {
+        return true;
+    }
+
+    matches!(
+        path,
+        "/dev/null"
+            | "/dev/stdin"
+            | "/dev/stdout"
+            | "/dev/stderr"
+            | "/dev/fd/0"
+            | "/dev/fd/1"
+            | "/dev/fd/2"
+            | "/proc/self/fd/0"
+            | "/proc/self/fd/1"
+            | "/proc/self/fd/2"
+    )
 }
 
 /// Expand `~` to the home directory in a path string.
@@ -1125,6 +1158,55 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("PERMISSION REQUIRED"), "error: {err}");
+    }
+
+    #[test]
+    fn standard_device_streams_are_allowed_by_boundary() {
+        let tools = CoreTools::new(PathBuf::from("/tmp/workspace"));
+        for path in [
+            "/dev/null",
+            "/dev/stdin",
+            "/dev/stdout",
+            "/dev/stderr",
+            "/dev/fd/0",
+            "/dev/fd/1",
+            "/dev/fd/2",
+            "/proc/self/fd/0",
+            "/proc/self/fd/1",
+            "/proc/self/fd/2",
+        ] {
+            let result = tools.resolve_path(path);
+            assert!(result.is_ok(), "{path} should be allowed: {result:?}");
+        }
+    }
+
+    #[test]
+    fn unsafe_device_paths_are_not_allowlisted() {
+        let tools = CoreTools::new(PathBuf::from("/tmp/workspace"));
+        for path in [
+            "/dev/zero",
+            "/dev/random",
+            "/dev/urandom",
+            "/dev/fd/3",
+            "/proc/self/fd/3",
+        ] {
+            let result = tools.resolve_path(path);
+            assert!(result.is_err(), "{path} should still require permission");
+        }
+    }
+
+    #[test]
+    fn native_cat_dev_null_is_not_blocked_by_boundary() {
+        let boundary = WorkspaceBoundary::new(PathBuf::from("/tmp/workspace"));
+        let result = native_cmd::try_dispatch(
+            "cat /dev/null",
+            Path::new("/tmp/workspace"),
+            Some(&boundary),
+        )
+        .expect("cat should dispatch natively");
+
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.is_empty());
     }
 
     #[test]
