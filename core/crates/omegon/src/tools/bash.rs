@@ -154,6 +154,7 @@ pub async fn execute_streaming(
     let mut cmd = Command::new("bash");
     cmd.args(["-c", command])
         .current_dir(cwd)
+        .envs(git_discovery_env(cwd))
         .stdin(std::process::Stdio::null()) // /dev/null — commands needing input fail fast
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -299,6 +300,12 @@ pub async fn execute_streaming(
             "totalBytes": truncated.total_bytes,
         }),
     })
+}
+
+fn git_discovery_env(cwd: &Path) -> Vec<(&'static str, String)> {
+    crate::setup::git_ceiling_directory(cwd)
+        .map(|ceiling| vec![("GIT_CEILING_DIRECTORIES", ceiling.display().to_string())])
+        .unwrap_or_default()
 }
 
 fn blocked_interactive_result(command_name: &str) -> ToolResult {
@@ -1044,6 +1051,31 @@ mod tests {
         .unwrap();
         assert_eq!(result.details["exitCode"], 0);
         assert!(result.content[0].as_text().unwrap().contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn bash_git_discovery_does_not_escape_marked_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+
+        let child = dir.path().join("child-workspace");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(child.join("AGENTS.md"), "instructions").unwrap();
+
+        let result = execute(
+            "git rev-parse --show-toplevel",
+            &child,
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+        assert_ne!(result.details["exitCode"], 0);
     }
 
     // Output filter tests moved to tools/output_filter.rs

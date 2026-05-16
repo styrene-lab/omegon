@@ -266,25 +266,36 @@ impl AgentSetup {
 
         let mut bus = EventBus::new();
 
+        let project_root = find_project_root(&cwd);
+
         // ─── Repo model (git state tracking) ────────────────────────────
-        let repo_model = match omegon_git::RepoModel::discover(&cwd) {
-            Ok(Some(model)) => {
-                tracing::info!(
-                    repo = %model.repo_path().display(),
-                    branch = model.branch().as_deref().unwrap_or("(detached)"),
-                    submodules = model.submodules().len(),
-                    "RepoModel active"
-                );
-                Some(model)
+        let repo_model = if project_root.join(".git").exists() || project_root.join(".jj").exists()
+        {
+            match omegon_git::RepoModel::discover(&project_root) {
+                Ok(Some(model)) => {
+                    tracing::info!(
+                        repo = %model.repo_path().display(),
+                        branch = model.branch().as_deref().unwrap_or("(detached)"),
+                        submodules = model.submodules().len(),
+                        "RepoModel active"
+                    );
+                    Some(model)
+                }
+                Ok(None) => {
+                    tracing::debug!("not inside a git repo — RepoModel disabled");
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!("git repo discovery failed: {e} — RepoModel disabled");
+                    None
+                }
             }
-            Ok(None) => {
-                tracing::debug!("not inside a git repo — RepoModel disabled");
-                None
-            }
-            Err(e) => {
-                tracing::warn!("git repo discovery failed: {e} — RepoModel disabled");
-                None
-            }
+        } else {
+            tracing::debug!(
+                project = %project_root.display(),
+                "selected project root is not a VCS root — RepoModel disabled"
+            );
+            None
         };
 
         // ─── Core tools (bash, read, write, edit, commit; hidden internal change) ──
@@ -334,8 +345,6 @@ impl AgentSetup {
                 secrets.clone(),
             )),
         )));
-
-        let project_root = find_project_root(&cwd);
 
         let openapi_configs = tools::openapi_config::load_openapi_configs(&project_root);
         if !openapi_configs.is_empty() {
@@ -1151,15 +1160,31 @@ impl AgentSetup {
     }
 }
 
-/// Find the project root by walking up from cwd looking for .git.
+/// Find the project root for Omegon-local state.
+///
+/// Git discovery is intentionally bounded away from the user's home directory:
+/// a `$HOME/.git` repository must not capture arbitrary child workspaces and
+/// make `.omegon/`, memory, status, or generated git commands operate against
+/// the wrong tree.
 pub fn find_project_root(cwd: &Path) -> PathBuf {
-    let mut dir = cwd.to_path_buf();
+    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    if has_explicit_project_marker(&cwd) {
+        return cwd;
+    }
+
+    let mut dir = cwd.clone();
     loop {
         let git_path = dir.join(".git");
         if git_path.is_dir() {
+            if is_home_ancestor_repo(&dir, &cwd) {
+                return cwd;
+            }
             return dir;
         }
         if git_path.is_file() {
+            if is_home_ancestor_repo(&dir, &cwd) {
+                return cwd;
+            }
             if let Ok(content) = std::fs::read_to_string(&git_path)
                 && let Some(gitdir) = content.strip_prefix("gitdir: ")
             {
@@ -1184,6 +1209,38 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
         }
     }
     cwd.to_path_buf()
+}
+
+pub fn git_ceiling_directory(cwd: &Path) -> Option<PathBuf> {
+    cwd.canonicalize()
+        .unwrap_or_else(|_| cwd.to_path_buf())
+        .parent()
+        .map(Path::to_path_buf)
+}
+
+fn has_explicit_project_marker(dir: &Path) -> bool {
+    [
+        ".git",
+        ".jj",
+        ".omegon",
+        ".codex",
+        "AGENTS.md",
+        "Cargo.toml",
+        "package.json",
+        "pyproject.toml",
+        "go.mod",
+        "Justfile",
+        "justfile",
+    ]
+    .iter()
+    .any(|marker| dir.join(marker).exists())
+}
+
+fn is_home_ancestor_repo(repo_root: &Path, cwd: &Path) -> bool {
+    cwd != repo_root
+        && dirs::home_dir()
+            .and_then(|home| home.canonicalize().ok())
+            .is_some_and(|home| repo_root == home)
 }
 
 /// Scan installed extension manifests and collect all declared secret names.
@@ -1524,5 +1581,51 @@ fn activate_startup_tone(registry: &mut crate::plugins::registry::PluginRegistry
         }
     } else {
         tracing::warn!(tone = %tone_name, "startup tone not found");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_project_marker_wins_over_parent_git_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let child = dir.path().join("child-workspace");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(child.join("AGENTS.md"), "instructions").unwrap();
+
+        assert_eq!(find_project_root(&child), child.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn git_repo_still_wins_for_unmarked_subdirectories() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let child = dir.path().join("src/bin");
+        std::fs::create_dir_all(&child).unwrap();
+
+        assert_eq!(
+            find_project_root(&child),
+            dir.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn git_ceiling_is_parent_of_selected_project_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let child = dir.path().join("child-workspace");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(child.join("AGENTS.md"), "instructions").unwrap();
+
+        assert_eq!(
+            git_ceiling_directory(&child),
+            child
+                .canonicalize()
+                .unwrap()
+                .parent()
+                .map(Path::to_path_buf)
+        );
     }
 }

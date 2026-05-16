@@ -8,18 +8,7 @@ use super::types::{WorkspaceLease, WorkspaceRegistry};
 const STALE_HEARTBEAT_SECS: i64 = 300;
 
 pub fn workspace_root(cwd: &Path) -> PathBuf {
-    let mut dir = cwd.to_path_buf();
-    loop {
-        let git_path = dir.join(".git");
-        let jj_path = dir.join(".jj");
-        if git_path.is_dir() || git_path.is_file() || jj_path.is_dir() {
-            return dir;
-        }
-        if !dir.pop() {
-            break;
-        }
-    }
-    cwd.to_path_buf()
+    crate::setup::find_project_root(cwd)
 }
 
 pub fn runtime_dir(cwd: &Path) -> PathBuf {
