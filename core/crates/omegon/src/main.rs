@@ -5431,6 +5431,8 @@ async fn run_interactive_active_turn(
     events_tx: broadcast::Sender<AgentEvent>,
     active: ActiveTurnMeta,
 ) -> InteractiveAgentState {
+    const CANCEL_DRAIN_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
+
     let loop_config = build_interactive_loop_config(&runtime, &shared_settings, &pending_compact);
 
     if active.prompt.image_paths.is_empty() {
@@ -5469,19 +5471,50 @@ async fn run_interactive_active_turn(
         *guard = Some(cancel.clone());
     }
 
-    let bridge_guard = bridge.read().await;
-    if let Err(e) = r#loop::run(
-        bridge_guard.as_ref(),
-        &mut runtime_state.bus,
-        &mut runtime_state.context_manager,
-        &mut runtime_state.conversation,
-        &events_tx,
-        cancel,
-        &loop_config,
-    )
-    .await
-    {
-        drop(bridge_guard);
+    let run_result = {
+        let bridge_guard = bridge.read().await;
+        let mut run = std::pin::pin!(r#loop::run(
+            bridge_guard.as_ref(),
+            &mut runtime_state.bus,
+            &mut runtime_state.context_manager,
+            &mut runtime_state.conversation,
+            &events_tx,
+            cancel.clone(),
+            &loop_config,
+        ));
+
+        tokio::select! {
+            result = &mut run => Some(result),
+            _ = cancel.cancelled() => {
+                tracing::warn!(
+                    runtime_turn_id = active.runtime_turn_id,
+                    "operator cancellation requested; waiting for agent loop to drain"
+                );
+                let _ = events_tx.send(AgentEvent::SystemNotification {
+                    message: "Interrupt requested — waiting up to 10s for the active turn to stop cleanly.".into(),
+                });
+                match tokio::time::timeout(CANCEL_DRAIN_GRACE, &mut run).await {
+                    Ok(result) => Some(result),
+                    Err(_) => {
+                        tracing::error!(
+                            runtime_turn_id = active.runtime_turn_id,
+                            "agent loop did not stop after cancellation grace period; forcing TUI recovery"
+                        );
+                        let _ = events_tx.send(AgentEvent::MessageAbort {
+                            reason: Some("Interrupted turn did not stop within 10s; returning the operator surface to idle.".into()),
+                        });
+                        let _ = events_tx.send(AgentEvent::SystemNotification {
+                            message: "Interrupted turn did not stop within 10s; recovered the operator surface. The abandoned provider/tool request may finish in the background.".into(),
+                        });
+                        let _ = events_tx.send(AgentEvent::AgentEnd);
+                        None
+                    }
+                }
+            }
+        }
+    };
+
+    if let Some(Err(e)) = run_result {
         let recent_telemetry = runtime_state.conversation.last_provider_telemetry(None);
         let user_msg = format_agent_error(&e, recent_telemetry.as_ref());
         tracing::error!(
