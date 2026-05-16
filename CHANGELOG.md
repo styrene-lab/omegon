@@ -31,8 +31,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
-- **Interrupted interactive turns can no longer hold the TUI hostage indefinitely** — local TUI cancellation now gives the active agent loop a bounded grace period to drain and then recovers the operator surface with an explicit warning if a provider/tool future fails to stop.
-- **Publish and smoke recipe summaries no longer fail after successful release work** — `just publish` now keeps the docs page count in the parent shell, and `just smoke` sums multi-binary test results before its safety-floor comparison so release verification output stays clean under `set -u`.
 - **ACP and TUI always-allow now persist through the same grant path** — `allow_always` decisions route through the internal permission grant tool, so host-panel approvals and terminal approvals update the same project profile permission store.
 - **Standard device streams are no longer blocked as outside-workspace paths** — `/dev/null`, standard stdio aliases, and fd aliases for descriptors 0-2 are allowed by the shared workspace boundary instead of triggering permission prompts.
 - **Workspace path discovery no longer escapes into ancestor home repos** — Omegon project/runtime state now respects explicit project markers and shell git commands run with a project-root discovery ceiling, preserving legitimate nested repo status while preventing child workspaces from inheriting unrelated parent repositories.
@@ -48,6 +46,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Stale native extensions recover after transport failure** — extension tool calls now drop broken stdin/stdout handles, respawn the extension, rerun the handshake, and retry once when the child process exits or the pipe closes.
 - **OpenSpec docs no longer advertise removed `/opsx:*` slash commands** — the site now points operators at the current `openspec_manage` lifecycle tool actions.
 - **Non-English TUI output has regression coverage** — added coverage for Cyrillic streaming output so future truncation/rendering changes cannot reintroduce byte-boundary panics.
+
+## [0.22.1] - 2026-05-16
+
+### Fixed
+
+- **Interrupted interactive turns can no longer hold the TUI hostage indefinitely** — local TUI cancellation now gives the active agent loop a bounded grace period to drain and then recovers the operator surface with an explicit warning if a provider/tool future fails to stop.
+- **Publish and smoke recipe summaries no longer fail after successful release work** — `just publish` now keeps the docs page count in the parent shell, and `just smoke` sums multi-binary test results before its safety-floor comparison so release verification output stays clean under `set -u`.
 
 ## [0.22.0] - 2026-05-14
 
