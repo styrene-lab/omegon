@@ -540,15 +540,17 @@ impl ToolProvider for CoreTools {
                 label: reg::PLAN.into(),
                 description: "Manage the session work plan — a lightweight checklist for \
                     tracking progress on the current request. Use 'set' to establish a plan \
-                    at the start of multi-step work, 'advance' to mark progress, 'complete' \
-                    to mark a specific item done, and 'skip' to skip an item."
+                    at the start of multi-step work, 'approve' to mark operator approval, \
+                    'execute' to start mutation work, 'advance' to mark progress, 'complete' \
+                    to mark a specific item done, 'skip' to skip an item, and 'clear' to \
+                    disable the plan gate."
                     .into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["set", "advance", "complete", "skip", "status"],
+                            "enum": ["set", "approve", "execute", "advance", "complete", "skip", "clear", "status"],
                             "description": "Action to perform"
                         },
                         "items": {
@@ -947,11 +949,16 @@ impl ToolProvider for CoreTools {
                         }
                     }
                     "advance" => "Advanced to next work item.".into(),
+                    "approve" => {
+                        "Plan approved. Mutation-heavy work should wait for execution.".into()
+                    }
+                    "execute" => "Plan execution started.".into(),
                     "complete" => {
                         let index = args["index"].as_u64().unwrap_or(0) as usize;
                         format!("Marked item {index} complete.")
                     }
                     "skip" => "Skipped current work item.".into(),
+                    "clear" => "Cleared the active work plan.".into(),
                     "status" => "Work plan status rendered in context.".into(),
                     other => format!("Unknown plan action: {other}"),
                 };

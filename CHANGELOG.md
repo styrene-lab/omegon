@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- **Native `/plan` session gate** — added a first-class TUI/remote slash surface over the existing session intent work plan with `set`, `approve`, `execute`, `advance`, `skip`, `clear`, and status rendering so high-level plan mode can reuse the current conversation state instead of creating a shadow planning store.
 - **Unified Armory install surface** — `/armory install`, `armory/install`, extension installs, and named skill installs now route through one Armory installer that materializes extensions, plugins, and skills into the runtime paths Omegon actually loads.
 
 ### Fixed

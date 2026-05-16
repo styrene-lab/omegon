@@ -166,6 +166,11 @@ pub enum TuiCommand {
         args: String,
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::SlashCommandResponse>>,
     },
+    /// Update the session plan stored in the runtime conversation state.
+    UpdatePlan {
+        command: CanonicalSlashCommand,
+        respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
+    },
     /// Dispatch a bus command from a feature (name, args).
     BusCommand { name: String, args: String },
     /// Trigger manual compaction.
@@ -454,7 +459,7 @@ enum SlashResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CanonicalSlashCommand {
+pub enum CanonicalSlashCommand {
     ModelView,
     ModelList,
     SetModel(String),
@@ -499,6 +504,13 @@ pub(crate) enum CanonicalSlashCommand {
     SkillCreate,
     SkillGet(String),
     SkillDelete(String),
+    PlanView,
+    PlanSet(Vec<String>),
+    PlanApprove,
+    PlanExecute,
+    PlanAdvance,
+    PlanSkip,
+    PlanClear,
     ExtensionView,
     ExtensionGet(String),
     ExtensionInstall(String),
@@ -664,6 +676,26 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 None
             }
         }
+        "plan" => {
+            if args.is_empty() || args == "status" || args == "list" {
+                Some(CanonicalSlashCommand::PlanView)
+            } else if let Some(raw_items) = args.strip_prefix("set ") {
+                let items = split_plan_items(raw_items);
+                (!items.is_empty()).then_some(CanonicalSlashCommand::PlanSet(items))
+            } else if args == "approve" {
+                Some(CanonicalSlashCommand::PlanApprove)
+            } else if args == "execute" || args == "exec" {
+                Some(CanonicalSlashCommand::PlanExecute)
+            } else if args == "advance" || args == "next" {
+                Some(CanonicalSlashCommand::PlanAdvance)
+            } else if args == "skip" {
+                Some(CanonicalSlashCommand::PlanSkip)
+            } else if args == "clear" || args == "off" {
+                Some(CanonicalSlashCommand::PlanClear)
+            } else {
+                None
+            }
+        }
         "extension" | "ext" => {
             if args.is_empty() || args == "list" {
                 Some(CanonicalSlashCommand::ExtensionView)
@@ -809,6 +841,14 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         },
         _ => None,
     }
+}
+
+fn split_plan_items(raw: &str) -> Vec<String> {
+    raw.split('|')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
 
 /// Compute dynamic editor height from the editor's wrapped visual rows.
@@ -4458,6 +4498,13 @@ impl App {
                 "status", "compact", "clear", "squad", "maniple", "clan", "legion",
             ],
         ),
+        (
+            "plan",
+            "manage session plan gate and progress",
+            &[
+                "status", "set", "approve", "execute", "advance", "skip", "clear",
+            ],
+        ),
         ("sessions", "list saved sessions", &[]),
         ("memory", "memory stats", &[]),
         (
@@ -4786,6 +4833,29 @@ impl App {
                         "Usage: /skills [list|install [name|skills/name]|create|get <name>|delete <name>]"
                             .into(),
                     )
+                }
+            }
+
+            "plan" => {
+                const USAGE: &str =
+                    "Usage: /plan [status|set <item> | <item>|approve|execute|advance|skip|clear]";
+                match canonical_slash_command("plan", args) {
+                    Some(
+                        command @ (CanonicalSlashCommand::PlanView
+                        | CanonicalSlashCommand::PlanSet(_)
+                        | CanonicalSlashCommand::PlanApprove
+                        | CanonicalSlashCommand::PlanExecute
+                        | CanonicalSlashCommand::PlanAdvance
+                        | CanonicalSlashCommand::PlanSkip
+                        | CanonicalSlashCommand::PlanClear),
+                    ) => {
+                        let _ = tx.try_send(TuiCommand::UpdatePlan {
+                            command,
+                            respond_to: None,
+                        });
+                        SlashResult::Handled
+                    }
+                    _ => SlashResult::Display(USAGE.into()),
                 }
             }
 
@@ -8721,6 +8791,77 @@ mod slash_command_parsing_tests {
         match canonical_slash_command("skills", "delete my-skill") {
             Some(CanonicalSlashCommand::SkillDelete(name)) => assert_eq!(name, "my-skill"),
             other => panic!("expected SkillDelete, got {other:?}"),
+        }
+    }
+
+    // ── Plan ──────────────────────────────────────────────
+
+    #[test]
+    fn plan_status_defaults_to_view() {
+        assert!(matches!(
+            canonical_slash_command("plan", ""),
+            Some(CanonicalSlashCommand::PlanView)
+        ));
+        assert!(matches!(
+            canonical_slash_command("plan", "status"),
+            Some(CanonicalSlashCommand::PlanView)
+        ));
+    }
+
+    #[test]
+    fn plan_set_splits_pipe_delimited_items() {
+        match canonical_slash_command("plan", "set read files | patch code | test") {
+            Some(CanonicalSlashCommand::PlanSet(items)) => {
+                assert_eq!(items, vec!["read files", "patch code", "test"]);
+            }
+            other => panic!("expected PlanSet, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plan_gate_commands_parse() {
+        assert!(matches!(
+            canonical_slash_command("plan", "approve"),
+            Some(CanonicalSlashCommand::PlanApprove)
+        ));
+        assert!(matches!(
+            canonical_slash_command("plan", "execute"),
+            Some(CanonicalSlashCommand::PlanExecute)
+        ));
+        assert!(matches!(
+            canonical_slash_command("plan", "advance"),
+            Some(CanonicalSlashCommand::PlanAdvance)
+        ));
+        assert!(matches!(
+            canonical_slash_command("plan", "clear"),
+            Some(CanonicalSlashCommand::PlanClear)
+        ));
+    }
+
+    #[test]
+    fn plan_dispatch_updates_session_intent() {
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-5");
+        let mut app = App::new(settings);
+        let (tx, mut rx) = mpsc::channel(1);
+
+        let result = app.handle_slash_command("/plan set read | patch | test", &tx);
+        assert!(matches!(result, SlashResult::Handled));
+        match rx.try_recv() {
+            Ok(TuiCommand::UpdatePlan {
+                command: CanonicalSlashCommand::PlanSet(items),
+                respond_to: None,
+            }) => assert_eq!(items, vec!["read", "patch", "test"]),
+            other => panic!("expected PlanSet UpdatePlan, got {other:?}"),
+        }
+
+        let result = app.handle_slash_command("/plan approve", &tx);
+        assert!(matches!(result, SlashResult::Handled));
+        match rx.try_recv() {
+            Ok(TuiCommand::UpdatePlan {
+                command: CanonicalSlashCommand::PlanApprove,
+                respond_to: None,
+            }) => {}
+            other => panic!("expected PlanApprove UpdatePlan, got {other:?}"),
         }
     }
 
