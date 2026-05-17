@@ -810,6 +810,30 @@ pub async fn run(
                 }
             }
 
+            if turn < config.max_turns
+                && dead_mouse_nudges < 3
+                && should_continue_text_only_turn(
+                    conversation.last_user_prompt(),
+                    &assistant_msg.text,
+                    conversation.intent.stats.tool_calls > 0,
+                )
+            {
+                dead_mouse_nudges += 1;
+                tracing::info!(
+                    nudge = dead_mouse_nudges,
+                    "Text-only turn ended before action — auto-continuing"
+                );
+                conversation.push_user(
+                    "[System: The operator already asked you to proceed. Do not ask for \
+                     confirmation or describe work you will do next. Take the next concrete \
+                     action now with the available tools, or give a final answer only if the \
+                     requested work is actually complete.]"
+                        .to_string(),
+                );
+                dead_mouse_nudge_injected = true;
+                continue;
+            }
+
             // Model responded with text-only (no tool calls) but hasn't
             // made any file changes. It's narrating instead of acting.
             // Nudge up to 2 times, then give up.
@@ -2662,6 +2686,147 @@ fn counts_as_real_work_for_dead_mouse(call: &ToolCall) -> bool {
                 .unwrap_or(false))
 }
 
+fn should_continue_text_only_turn(
+    user_prompt: &str,
+    assistant_text: &str,
+    prior_tool_activity: bool,
+) -> bool {
+    let assistant = assistant_text.trim();
+    if assistant.is_empty() {
+        return false;
+    }
+    if looks_like_blocked_response(assistant) || looks_like_completion(assistant) {
+        return false;
+    }
+    if looks_like_continuation_request(assistant) {
+        return true;
+    }
+    if user_prompt_is_continue_or_proceed(user_prompt) {
+        return looks_like_plan_or_future_action(assistant) || !prior_tool_activity;
+    }
+    user_prompt_expects_concrete_action(user_prompt) && looks_like_plan_or_future_action(assistant)
+}
+
+fn looks_like_continuation_request(text: &str) -> bool {
+    let tail = text
+        .chars()
+        .rev()
+        .take(300)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>()
+        .to_ascii_lowercase();
+    tail.contains("shall i")
+        || tail.contains("should i")
+        || tail.contains("would you like")
+        || tail.contains("do you want me to")
+        || tail.contains("ready to proceed")
+        || tail.contains("want me to proceed")
+        || tail.contains("want me to continue")
+        || tail.contains("let me know if you want me to")
+        || tail.contains("let me know and i")
+        || tail.ends_with('?')
+            && (tail.contains("proceed")
+                || tail.contains("continue")
+                || tail.contains("implement")
+                || tail.contains("make the change")
+                || tail.contains("go ahead"))
+}
+
+fn user_prompt_is_continue_or_proceed(text: &str) -> bool {
+    let lower = text.trim().to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "continue" | "proceed" | "go ahead" | "do it" | "make it so"
+    ) || lower.contains("get it done")
+        || lower.contains("do it already")
+        || lower.contains("stop talking")
+        || lower.contains("make it so")
+        || lower.contains("go ahead")
+        || lower.contains("continue on")
+}
+
+fn user_prompt_expects_concrete_action(text: &str) -> bool {
+    let lower = text.trim().to_ascii_lowercase();
+    let trimmed = lower.trim_start();
+    let action_prefixes = [
+        "fix ",
+        "get ",
+        "implement ",
+        "make ",
+        "build ",
+        "wire ",
+        "add ",
+        "update ",
+        "remove ",
+        "delete ",
+        "clean ",
+        "cleanup ",
+        "install ",
+        "link ",
+        "commit ",
+        "push ",
+        "publish ",
+        "cut ",
+        "release ",
+        "run ",
+        "test ",
+        "validate ",
+        "proceed",
+        "continue",
+    ];
+    action_prefixes
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+        || lower.contains("make it so")
+        || lower.contains("get it done")
+        || lower.contains("go fix")
+        || lower.contains("go clean")
+        || lower.contains("go ahead")
+}
+
+fn looks_like_plan_or_future_action(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let planning_markers = [
+        "i'll ",
+        "i will ",
+        "i’m going to ",
+        "i'm going to ",
+        "i can ",
+        "i would ",
+        "i should ",
+        "next i",
+        "the next step",
+        "my plan",
+        "plan:",
+        "approach:",
+        "i’ll start",
+        "i'll start",
+        "i’ll inspect",
+        "i'll inspect",
+        "i’ll update",
+        "i'll update",
+        "i’ll implement",
+        "i'll implement",
+        "i’ll make",
+        "i'll make",
+    ];
+    planning_markers.iter().any(|marker| lower.contains(marker))
+}
+
+fn looks_like_blocked_response(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("blocked")
+        || lower.contains("i need clarification")
+        || lower.contains("need clarification")
+        || lower.contains("i need you to")
+        || lower.contains("cannot proceed")
+        || lower.contains("can't proceed")
+        || lower.contains("unable to proceed")
+        || lower.contains("permission")
+}
+
 /// Returns true if an assistant text response contains language that suggests
 /// the agent is wrapping up a task rather than pausing mid-work.
 ///
@@ -3912,6 +4077,39 @@ mod tests {
         ));
         assert!(!looks_like_completion("I'll write the fix next."));
         assert!(!looks_like_completion("short")); // too short
+    }
+
+    #[test]
+    fn text_only_continuation_requests_force_another_turn() {
+        assert!(should_continue_text_only_turn(
+            "fix the release flow",
+            "I can make that change. Should I proceed?",
+            false
+        ));
+        assert!(should_continue_text_only_turn(
+            "continue",
+            "I'll inspect the relevant files and then make the change.",
+            true
+        ));
+    }
+
+    #[test]
+    fn text_only_final_answers_and_blockers_do_not_force_continue() {
+        assert!(!should_continue_text_only_turn(
+            "describe the API surface",
+            "The API surface should be a single facade over profiles, tools, and tasking.",
+            false
+        ));
+        assert!(!should_continue_text_only_turn(
+            "fix the release flow",
+            "I am blocked because the repository has conflicting local edits that overlap this file.",
+            true
+        ));
+        assert!(!should_continue_text_only_turn(
+            "fix the release flow",
+            "All done. The release flow has been updated and tested.",
+            true
+        ));
     }
 
     #[test]
