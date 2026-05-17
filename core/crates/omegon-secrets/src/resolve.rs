@@ -21,8 +21,11 @@ static TEST_KEYRING: LazyLock<Mutex<HashMap<(String, String), String>>> =
 /// Well-known environment variables that commonly contain secrets.
 pub const WELL_KNOWN_SECRET_ENVS: &[&str] = &[
     "ANTHROPIC_API_KEY",
+    "ANTHROPIC_OAUTH_TOKEN",
     "OPENAI_API_KEY",
+    "CHATGPT_OAUTH_TOKEN",
     "OPENROUTER_API_KEY",
+    "ANTIGRAVITY_OAUTH_TOKEN",
     "BRAVE_API_KEY",
     "TAVILY_API_KEY",
     "SERPER_API_KEY",

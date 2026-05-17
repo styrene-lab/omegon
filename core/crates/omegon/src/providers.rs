@@ -3,7 +3,7 @@
 //! Replaces core/bridge/llm-bridge.mjs entirely. The Rust binary makes
 //! HTTPS requests directly to api.anthropic.com / api.openai.com.
 //!
-//! API keys resolved from: env vars → ~/.config/omegon/auth.json (OAuth tokens).
+//! API keys resolved from: env vars → auth.json (OAuth tokens).
 //! The upstream provider APIs are the only external dependency — no npm,
 //! no Node.js, no supply chain risk from package registries.
 
@@ -203,7 +203,7 @@ pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
     resolve_api_key_from_sources(&env_values, persisted)
 }
 
-/// Resolve API key from env vars or ~/.config/omegon/auth.json (legacy, no refresh).
+/// Resolve API key from env vars or auth.json (legacy, no refresh).
 fn resolve_api_key(provider: &str) -> Option<String> {
     // Use canonical provider map for env vars
     let env_keys = crate::auth::provider_env_vars(provider);
@@ -223,15 +223,9 @@ fn resolve_api_key(provider: &str) -> Option<String> {
         return Some(val);
     }
 
-    // auth.json — use canonical key mapping
+    // auth.json — use canonical key mapping and the shared path resolver.
     let auth_key = crate::auth::auth_json_key(provider);
-    let auth_path = crate::auth::auth_json_path()?;
-    let content = std::fs::read_to_string(&auth_path).ok()?;
-    let auth: Value = serde_json::from_str(&content).ok()?;
-    auth.get(auth_key)?
-        .get("access")?
-        .as_str()
-        .map(String::from)
+    crate::auth::read_credentials(auth_key).map(|creds| creds.access)
 }
 
 fn is_known_provider_id(provider_id: &str) -> bool {

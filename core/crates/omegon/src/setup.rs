@@ -226,7 +226,7 @@ impl AgentSetup {
         // Replaces the sync preflight_session_cache() which silently skips vault recipes.
         secrets.preflight_session_cache_async(preflight).await;
         let mut session_secret_env = secrets.session_env();
-        hydrate_provider_auth_env_from_auth_json(&mut session_secret_env);
+        hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
         for (name, value) in &session_secret_env {
             // SAFETY: setup runs before provider detection for this process; exporting
             // startup-resolved secrets here makes the active provider path see the
@@ -1304,7 +1304,10 @@ fn collect_extension_secret_requirements(cwd: &Path) -> Vec<String> {
     names
 }
 
-fn hydrate_provider_auth_env_from_auth_json(session_secret_env: &mut Vec<(String, String)>) {
+fn hydrate_provider_auth_env_from_auth_json(
+    session_secret_env: &mut Vec<(String, String)>,
+    secrets: &omegon_secrets::SecretsManager,
+) {
     // Hydrate credentials for ALL providers that have stored auth, not just the
     // parent session's model. Children (cleave, delegate) may use any provider
     // and need the corresponding API keys in their inherited environment.
@@ -1319,6 +1322,23 @@ fn hydrate_provider_auth_env_from_auth_json(session_secret_env: &mut Vec<(String
             continue;
         }
         if let Some(creds) = crate::auth::read_credentials(provider.auth_key) {
+            secrets.register_redaction_secret(primary_env, &creds.access);
+            secrets.register_redaction_secret(
+                &format!("{}_AUTH_JSON_ACCESS", provider.id),
+                &creds.access,
+            );
+            secrets.register_redaction_secret(
+                &format!("{}_AUTH_JSON_REFRESH", provider.id),
+                &creds.refresh,
+            );
+            if let Some(account_id) =
+                crate::auth::read_credential_extra(provider.auth_key, "accountId")
+            {
+                secrets.register_redaction_secret(
+                    &format!("{}_AUTH_JSON_ACCOUNT_ID", provider.id),
+                    &account_id,
+                );
+            }
             session_secret_env.push((primary_env.to_string(), creds.access));
             tracing::info!(
                 provider = provider.id,
