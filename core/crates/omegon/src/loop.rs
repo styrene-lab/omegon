@@ -7,7 +7,9 @@
 use crate::bridge::{LlmBridge, LlmEvent, LlmMessage, StreamOptions};
 
 use crate::context::ContextManager;
-use crate::conversation::{AssistantMessage, ConversationState, ToolCall, ToolResultEntry};
+use crate::conversation::{
+    AssistantMessage, ConversationState, IntentDocument, ToolCall, ToolResultEntry,
+};
 use crate::ollama::{OllamaManager, WarmupResult};
 use crate::upstream_errors::{
     TransientFailureKind, UpstreamFailureLogEntry, append_upstream_failure_log,
@@ -1064,6 +1066,10 @@ pub async fn run(
             .intent
             .update_from_tools(dispatch_calls, &results);
 
+        if let Some(message) = plan_status_notification(dispatch_calls, &conversation.intent) {
+            let _ = events.send(AgentEvent::SystemNotification { message });
+        }
+
         let dominant_phase = classify_turn_phase(&tool_catalog, dispatch_calls, &results);
         let drift_kind =
             classify_drift_kind(&tool_catalog, turn, conversation, dispatch_calls, &results);
@@ -1414,6 +1420,29 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+fn plan_status_notification(calls: &[ToolCall], intent: &IntentDocument) -> Option<String> {
+    let plan_call = calls
+        .iter()
+        .rev()
+        .find(|call| call.name == crate::tool_registry::core::PLAN)?;
+    let action = plan_call
+        .arguments
+        .get("action")
+        .and_then(|value| value.as_str())
+        .unwrap_or("status");
+    let heading = match action {
+        "set" => "Plan set",
+        "advance" | "complete" => "Plan progress",
+        "skip" => "Plan item skipped",
+        "approve" => "Plan approved",
+        "execute" => "Plan executing",
+        "clear" => "Plan cleared",
+        "status" => "Plan status",
+        _ => "Plan updated",
+    };
+    Some(format!("{heading}\n{}", intent.render_work_plan()))
 }
 
 /// Request an LLM-driven compaction summary for old conversation messages.
@@ -3625,6 +3654,37 @@ mod tests {
             &serde_json::json!({"directive": "implement OAuth flow"}),
         );
         assert_eq!(result.as_deref(), Some("implement OAuth flow"));
+    }
+
+    #[test]
+    fn plan_tool_update_renders_operator_checklist_snapshot() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Inspect plan rendering".into(), "Patch TUI".into()]);
+        intent.execute_work_plan();
+        intent.advance_work_plan();
+        let calls = vec![ToolCall {
+            id: "plan-1".into(),
+            name: crate::tool_registry::core::PLAN.into(),
+            arguments: serde_json::json!({"action": "advance"}),
+        }];
+
+        let notification = plan_status_notification(&calls, &intent).unwrap();
+
+        assert!(notification.starts_with("Plan progress"));
+        assert!(notification.contains("Progress: 1/2"));
+        assert!(notification.contains("● Inspect plan rendering"));
+        assert!(notification.contains("◐ Patch TUI"));
+    }
+
+    #[test]
+    fn non_plan_tool_does_not_emit_plan_snapshot() {
+        let calls = vec![ToolCall {
+            id: "read-1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "src/main.rs"}),
+        }];
+
+        assert!(plan_status_notification(&calls, &IntentDocument::default()).is_none());
     }
 
     #[tokio::test]

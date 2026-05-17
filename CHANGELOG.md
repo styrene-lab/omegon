@@ -34,6 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - **Text-only continuation stalls now auto-recover** — when the operator has already said to proceed or requested a concrete action, assistant replies that only ask for confirmation or describe future work now trigger an internal continuation nudge instead of ending the turn and forcing the operator to type "continue" again.
+- **Plan tool progress is now visible in the TUI** — model-driven `plan` tool calls now emit an operator-facing checklist snapshot after set/advance/skip/execute/status updates instead of only appearing as an opaque tool card.
 - **Auspex projected provider auth is honored** — `OMEGON_AUTH_JSON_PATH` now overrides the provider `auth.json` location, provider readers and legacy resolvers share that path, projected credentials are registered for output redaction, and read-only refresh write-back failures report credential-rotation guidance without exposing secret material.
 - **TUI operator surfaces are clearer** — permission prompts now show tool/path/key consequences explicitly, queued prompts explain when they will run, `/auth status` reports the active provider auth file source, and `/permissions`/`/automation` status output documents persistence and hard boundaries.
 - **Publish links the local binary with an absolute target** — `just publish` no longer creates a broken `~/.local/bin/omegon -> target/release/omegon` symlink when run from the repository root.
