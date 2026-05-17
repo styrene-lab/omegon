@@ -813,6 +813,11 @@ pub async fn run(
             if turn < config.max_turns
                 && dead_mouse_nudges < 3
                 && should_continue_text_only_turn(
+                    config
+                        .settings
+                        .as_ref()
+                        .and_then(|s| s.lock().ok().map(|s| s.automation_level))
+                        .unwrap_or_default(),
                     conversation.last_user_prompt(),
                     &assistant_msg.text,
                     conversation.intent.stats.tool_calls > 0,
@@ -2687,10 +2692,14 @@ fn counts_as_real_work_for_dead_mouse(call: &ToolCall) -> bool {
 }
 
 fn should_continue_text_only_turn(
+    automation_level: crate::settings::AutomationLevel,
     user_prompt: &str,
     assistant_text: &str,
     prior_tool_activity: bool,
 ) -> bool {
+    if matches!(automation_level, crate::settings::AutomationLevel::Ask) {
+        return false;
+    }
     let assistant = assistant_text.trim();
     if assistant.is_empty() {
         return false;
@@ -2700,6 +2709,10 @@ fn should_continue_text_only_turn(
     }
     if looks_like_continuation_request(assistant) {
         return true;
+    }
+    if matches!(automation_level, crate::settings::AutomationLevel::Guarded) {
+        return user_prompt_is_continue_or_proceed(user_prompt)
+            && looks_like_plan_or_future_action(assistant);
     }
     if user_prompt_is_continue_or_proceed(user_prompt) {
         return looks_like_plan_or_future_action(assistant) || !prior_tool_activity;
@@ -4082,11 +4095,13 @@ mod tests {
     #[test]
     fn text_only_continuation_requests_force_another_turn() {
         assert!(should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Guarded,
             "fix the release flow",
             "I can make that change. Should I proceed?",
             false
         ));
         assert!(should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
             "continue",
             "I'll inspect the relevant files and then make the change.",
             true
@@ -4096,19 +4111,32 @@ mod tests {
     #[test]
     fn text_only_final_answers_and_blockers_do_not_force_continue() {
         assert!(!should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
             "describe the API surface",
             "The API surface should be a single facade over profiles, tools, and tasking.",
             false
         ));
         assert!(!should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
             "fix the release flow",
             "I am blocked because the repository has conflicting local edits that overlap this file.",
             true
         ));
         assert!(!should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
             "fix the release flow",
             "All done. The release flow has been updated and tested.",
             true
+        ));
+    }
+
+    #[test]
+    fn text_only_automation_ask_disables_auto_continue() {
+        assert!(!should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Ask,
+            "fix the release flow",
+            "I can make that change. Should I proceed?",
+            false
         ));
     }
 

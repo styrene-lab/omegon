@@ -305,6 +305,12 @@ pub struct Settings {
     /// Maximum turns per agent invocation. 0 = no limit.
     pub max_turns: u32,
 
+    /// Operator-tuned continuation policy. This controls whether the agent
+    /// keeps driving after text-only "should I proceed?" style turns; it never
+    /// bypasses permission, plan, or security gates.
+    #[serde(default)]
+    pub automation_level: AutomationLevel,
+
     /// Context compaction threshold (fraction of context window).
     pub compaction_threshold: f32,
 
@@ -633,6 +639,7 @@ impl Default for Settings {
             posture: BehavioralPosture::fixed(PosturePreset::Architect),
             thinking: ThinkingLevel::Medium,
             max_turns: 50,
+            automation_level: AutomationLevel::default(),
             compaction_threshold: 0.75,
             context_window,
             context_class: ContextClass::from_tokens(context_window),
@@ -649,6 +656,46 @@ impl Default for Settings {
             clipboard_retention_hours: default_clipboard_retention_hours(),
             posture_disabled_tools: Vec::new(),
             posture_enabled_tools: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationLevel {
+    Ask,
+    #[default]
+    Guarded,
+    Flow,
+    Autonomous,
+}
+
+impl AutomationLevel {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "ask" | "manual" | "confirm" => Some(Self::Ask),
+            "guarded" | "default" => Some(Self::Guarded),
+            "flow" | "proceed" => Some(Self::Flow),
+            "autonomous" | "auto" | "run" => Some(Self::Autonomous),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Guarded => "guarded",
+            Self::Flow => "flow",
+            Self::Autonomous => "autonomous",
+        }
+    }
+
+    pub fn summary(&self) -> &'static str {
+        match self {
+            Self::Ask => "ask before continuation",
+            Self::Guarded => "continue through low-risk stalls",
+            Self::Flow => "continue until task completion",
+            Self::Autonomous => "run to completion within hard gates",
         }
     }
 }
@@ -995,6 +1042,11 @@ pub struct Profile {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trusted_directories: Vec<String>,
 
+    // ── Automation ──
+    /// Operator continuation policy. Does not override permissions or plan gates.
+    #[serde(default, skip_serializing_if = "ProfileAutomation::is_empty")]
+    pub automation: ProfileAutomation,
+
     // ── Updates ──
     /// Update channel: "stable" or "nightly".
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1035,6 +1087,19 @@ pub struct Profile {
     /// existing behavior: installed enabled extensions are considered loadable.
     #[serde(default, skip_serializing_if = "ProfileExtensions::is_empty")]
     pub extensions: ProfileExtensions,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileAutomation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<AutomationLevel>,
+}
+
+impl ProfileAutomation {
+    pub fn is_empty(&self) -> bool {
+        self.level.is_none()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1248,6 +1313,9 @@ impl Profile {
         if let Some(turns) = self.max_turns {
             settings.max_turns = turns;
         }
+        if let Some(level) = self.automation.level {
+            settings.automation_level = level;
+        }
         if !self.provider_order.is_empty() {
             settings.provider_order = self.provider_order.clone();
         }
@@ -1314,6 +1382,7 @@ impl Profile {
         });
         self.thinking_level = Some(settings.thinking.as_str().to_string());
         self.max_turns = Some(settings.max_turns);
+        self.automation.level = Some(settings.automation_level);
         if !settings.provider_order.is_empty() {
             self.provider_order = settings.provider_order.clone();
         }
@@ -2015,6 +2084,37 @@ mod tests {
             p.effective_trusted_directories(),
             vec!["/unified", "/legacy"]
         );
+    }
+
+    #[test]
+    fn profile_automation_applies_to_settings() {
+        let profile: Profile = serde_json::from_str(r#"{"automation":{"level":"flow"}}"#).unwrap();
+        let mut settings = Settings::default();
+        profile.apply_to(&mut settings);
+        assert_eq!(settings.automation_level, AutomationLevel::Flow);
+
+        let mut captured = Profile::default();
+        settings.automation_level = AutomationLevel::Autonomous;
+        captured.capture_from(&settings);
+        assert_eq!(captured.automation.level, Some(AutomationLevel::Autonomous));
+    }
+
+    #[test]
+    fn automation_level_parse_accepts_aliases() {
+        assert_eq!(AutomationLevel::parse("ask"), Some(AutomationLevel::Ask));
+        assert_eq!(
+            AutomationLevel::parse("default"),
+            Some(AutomationLevel::Guarded)
+        );
+        assert_eq!(
+            AutomationLevel::parse("proceed"),
+            Some(AutomationLevel::Flow)
+        );
+        assert_eq!(
+            AutomationLevel::parse("auto"),
+            Some(AutomationLevel::Autonomous)
+        );
+        assert_eq!(AutomationLevel::parse("bogus"), None);
     }
 
     #[test]

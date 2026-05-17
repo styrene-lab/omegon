@@ -471,6 +471,8 @@ pub enum CanonicalSlashCommand {
     ProfileExtensionClear,
     ProfileSetPersona(Option<String>),
     ProfileSetTone(Option<String>),
+    AutomationView,
+    AutomationSet(crate::settings::AutomationLevel),
     PermissionsView,
     PermissionTrustAdd(String),
     PermissionTrustRemove(String),
@@ -616,6 +618,12 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                     )
                 })
             }
+        }
+        "automation" | "autonomy" if args.is_empty() || args == "status" || args == "view" => {
+            Some(CanonicalSlashCommand::AutomationView)
+        }
+        "automation" | "autonomy" => {
+            crate::settings::AutomationLevel::parse(args).map(CanonicalSlashCommand::AutomationSet)
         }
         "permissions" | "permission" if args.is_empty() || args == "status" || args == "list" => {
             Some(CanonicalSlashCommand::PermissionsView)
@@ -4789,6 +4797,16 @@ impl App {
             &["list", "add", "remove"],
         ),
         (
+            "automation",
+            "tune whether the agent asks before proceeding",
+            &["ask", "guarded", "flow", "autonomous"],
+        ),
+        (
+            "autonomy",
+            "alias for /automation continuation policy",
+            &["ask", "guarded", "flow", "autonomous"],
+        ),
+        (
             "trust",
             "alias for /permissions trusted directories",
             &["add", "remove", "list"],
@@ -4950,6 +4968,25 @@ impl App {
                     SlashResult::Display(
                         "Usage: /permissions [list|add <path>|remove <path>]\n\
                          Alias: /trust [list|add <path>|remove <path>]"
+                            .into(),
+                    )
+                }
+            }
+
+            "automation" | "autonomy" => {
+                if let Some(command) = canonical_slash_command(cmd, args)
+                    && let Some(request) =
+                        crate::control_runtime::control_request_from_slash(&command)
+                {
+                    let _ = tx.try_send(TuiCommand::ExecuteControl {
+                        request,
+                        respond_to: None,
+                    });
+                    SlashResult::Handled
+                } else {
+                    SlashResult::Display(
+                        "Usage: /automation [ask|guarded|flow|autonomous]\n\
+                         Alias: /autonomy [ask|guarded|flow|autonomous]"
                             .into(),
                     )
                 }
@@ -8911,6 +8948,27 @@ mod slash_command_parsing_tests {
                 "/tmp/vault".into()
             ))
         );
+    }
+
+    #[test]
+    fn automation_commands_parse() {
+        assert_eq!(
+            canonical_slash_command("automation", ""),
+            Some(CanonicalSlashCommand::AutomationView)
+        );
+        assert_eq!(
+            canonical_slash_command("automation", "flow"),
+            Some(CanonicalSlashCommand::AutomationSet(
+                crate::settings::AutomationLevel::Flow
+            ))
+        );
+        assert_eq!(
+            canonical_slash_command("autonomy", "auto"),
+            Some(CanonicalSlashCommand::AutomationSet(
+                crate::settings::AutomationLevel::Autonomous
+            ))
+        );
+        assert_eq!(canonical_slash_command("automation", "wild"), None);
     }
 
     // ── Skills ────────────────────────────────────────────

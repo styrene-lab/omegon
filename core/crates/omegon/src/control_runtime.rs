@@ -54,6 +54,10 @@ pub enum ControlRequest {
     ProfileSetTone {
         name: Option<String>,
     },
+    AutomationView,
+    AutomationSet {
+        level: settings::AutomationLevel,
+    },
     PermissionsView,
     PermissionTrustAdd {
         path: String,
@@ -246,6 +250,10 @@ pub fn control_request_from_slash(
         }
         crate::tui::CanonicalSlashCommand::ProfileSetTone(name) => {
             ControlRequest::ProfileSetTone { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::AutomationView => ControlRequest::AutomationView,
+        crate::tui::CanonicalSlashCommand::AutomationSet(level) => {
+            ControlRequest::AutomationSet { level: *level }
         }
         crate::tui::CanonicalSlashCommand::PermissionsView => ControlRequest::PermissionsView,
         crate::tui::CanonicalSlashCommand::PermissionTrustAdd(path) => {
@@ -501,6 +509,10 @@ async fn try_stateless_control(
         }
         ControlRequest::ProfileSetTone { name } => {
             profile_set_tone_response(cwd, name.as_deref()).await
+        }
+        ControlRequest::AutomationView => automation_view_response(shared_settings, cwd).await,
+        ControlRequest::AutomationSet { level } => {
+            automation_set_response(shared_settings, cwd, *level).await
         }
         ControlRequest::PermissionsView => permissions_view_response(shared_settings, cwd).await,
         ControlRequest::PermissionTrustAdd { path } => {
@@ -1188,7 +1200,12 @@ pub async fn status_view_response(
         &session_kind,
         &authorization,
     );
-    let panel = crate::tui::bootstrap::render_bootstrap(&status, false);
+    let panel = format!(
+        "{}\nAutomation\n  Level:        {} ({})",
+        crate::tui::bootstrap::render_bootstrap(&status, false),
+        settings.automation_level.as_str(),
+        settings.automation_level.summary()
+    );
     SlashCommandResponse {
         accepted: true,
         output: Some(panel),
@@ -3046,6 +3063,10 @@ pub async fn profile_view_response(
                 "contextClass": s.effective_requested_class().label(),
                 "contextWindow": s.context_window,
                 "maxTurns": s.max_turns,
+                "automation": {
+                    "level": s.automation_level.as_str(),
+                    "summary": s.automation_level.summary()
+                },
                 "slimMode": s.is_slim(),
                 "posture": serde_json::to_value(&s.posture).unwrap_or(serde_json::json!(null)),
                 "providerOrder": s.provider_order,
@@ -3339,6 +3360,69 @@ pub async fn permissions_view_response(
             .to_string(),
         ),
     }
+}
+
+pub async fn automation_view_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+) -> SlashCommandResponse {
+    let profile = settings::Profile::load(cwd);
+    let live_level = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.automation_level)
+        .unwrap_or_default();
+    let profile_level = profile.automation.level.unwrap_or_default();
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(
+            serde_json::json!({
+                "automation": {
+                    "liveLevel": live_level.as_str(),
+                    "liveSummary": live_level.summary(),
+                    "profileLevel": profile_level.as_str(),
+                    "profileSummary": profile_level.summary(),
+                    "commands": [
+                        "/automation ask",
+                        "/automation guarded",
+                        "/automation flow",
+                        "/automation autonomous",
+                        "/autonomy flow"
+                    ],
+                    "hardBoundaries": [
+                        "permissions",
+                        "security",
+                        "plan gates",
+                        "operator interrupt",
+                        "max turns"
+                    ]
+                }
+            })
+            .to_string(),
+        ),
+    }
+}
+
+pub async fn automation_set_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+    level: settings::AutomationLevel,
+) -> SlashCommandResponse {
+    if let Ok(mut s) = shared_settings.lock() {
+        s.automation_level = level;
+    }
+    let mut profile = settings::Profile::load(cwd);
+    profile.automation.level = Some(level);
+    save_profile_response(
+        cwd,
+        profile,
+        &format!(
+            "Automation → {} ({})\n\
+             This tunes continuation behavior only; permissions and plan gates remain hard boundaries.",
+            level.as_str(),
+            level.summary()
+        ),
+    )
 }
 
 pub async fn permission_trust_add_response(
@@ -4466,5 +4550,29 @@ mod tests {
         );
         let profile = crate::settings::Profile::load(tmp.path());
         assert!(profile.effective_trusted_directories().is_empty());
+    }
+
+    #[tokio::test]
+    async fn automation_set_updates_live_settings_and_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("AGENTS.md"), "instructions").unwrap();
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+
+        let response =
+            automation_set_response(&settings, tmp.path(), settings::AutomationLevel::Flow).await;
+        assert!(response.accepted);
+        assert_eq!(
+            settings.lock().unwrap().automation_level,
+            settings::AutomationLevel::Flow
+        );
+        let profile = crate::settings::Profile::load(tmp.path());
+        assert_eq!(
+            profile.automation.level,
+            Some(settings::AutomationLevel::Flow)
+        );
+
+        let view = automation_view_response(&settings, tmp.path()).await;
+        let output = view.output.unwrap_or_default();
+        assert!(output.contains("\"liveLevel\":\"flow\""));
     }
 }
