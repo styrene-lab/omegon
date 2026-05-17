@@ -2899,7 +2899,9 @@ pub async fn auth_login_daemon_response(provider: &str) -> SlashCommandResponse 
             output: Some(format!(
                 "{} uses OAuth login which requires a browser. \
                      Run `omegon auth login {}` from a terminal with browser access, \
-                     then the daemon will pick up the new credentials on the next request.",
+                     or mount a grant-backed provider auth file and set \
+                     `OMEGON_AUTH_JSON_PATH=/config/omegon/auth.json`. \
+                     The daemon will pick up credentials on the next request.",
                 provider_info.display_name, provider,
             )),
         },
@@ -2910,6 +2912,8 @@ pub async fn auth_login_daemon_response(provider: &str) -> SlashCommandResponse 
                 output: Some(format!(
                     "{} uses API key auth. Set {} in the environment or run \
                      `omegon auth login {}` from a terminal to store the key. \
+                     For Auspex-managed agents, project provider credentials via \
+                     `OMEGON_AUTH_JSON_PATH=/config/omegon/auth.json`. \
                      The daemon will pick up credentials on the next request.",
                     provider_info.display_name, env_hint, provider,
                 )),
@@ -3354,7 +3358,13 @@ pub async fn permissions_view_response(
                         "a": "always allow and save to project profile permissions",
                         "n": "deny",
                         "Esc": "deny"
-                    }
+                    },
+                    "persistence": "always-allow grants are saved under profile.permissions.trustedDirectories",
+                    "hardBoundaries": [
+                        "secrets are still redacted and guarded",
+                        "auth.json material is provider credential material, not an identity grant",
+                        "operator deny always wins"
+                    ]
                 }
             })
             .to_string(),
@@ -3395,7 +3405,13 @@ pub async fn automation_view_response(
                         "plan gates",
                         "operator interrupt",
                         "max turns"
-                    ]
+                    ],
+                    "levels": {
+                        "ask": "never auto-continue text-only proceed prompts",
+                        "guarded": "continue only through low-risk proceed stalls",
+                        "flow": "continue through action-shaped stalls until task completion",
+                        "autonomous": "run to completion within the same hard gates"
+                    }
                 }
             })
             .to_string(),
@@ -4476,6 +4492,22 @@ pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
         "Authentication Overview".to_string(),
         String::new(),
         format!(
+            "Auth file\n  Path:            {}{}",
+            auth::auth_json_path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "unavailable".into()),
+            if std::env::var("OMEGON_AUTH_JSON_PATH")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .is_some()
+            {
+                " (OMEGON_AUTH_JSON_PATH)"
+            } else {
+                ""
+            }
+        ),
+        String::new(),
+        format!(
             "Providers\n  Authenticated:   {authenticated}/{}",
             status.providers.len()
         ),
@@ -4574,5 +4606,25 @@ mod tests {
         let view = automation_view_response(&settings, tmp.path()).await;
         let output = view.output.unwrap_or_default();
         assert!(output.contains("\"liveLevel\":\"flow\""));
+    }
+
+    #[test]
+    fn auth_status_includes_auth_file_surface() {
+        let status = auth::AuthStatus {
+            providers: vec![auth::ProviderInfo {
+                name: "openai-codex".into(),
+                status: auth::ProviderAuthStatus::Authenticated,
+                is_oauth: true,
+                details: Some("stored".into()),
+            }],
+            vault: vec![],
+            secrets: vec![],
+            mcp: vec![],
+        };
+
+        let rendered = format_auth_status(&status);
+        assert!(rendered.contains("Auth file"));
+        assert!(rendered.contains("Provider Status"));
+        assert!(rendered.contains("openai-codex"));
     }
 }

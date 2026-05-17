@@ -392,6 +392,8 @@ pub struct App {
             std::sync::Mutex<Option<std::sync::mpsc::Sender<omegon_traits::PermissionResponse>>>,
         >,
     >,
+    /// Human-readable context for the pending permission prompt.
+    pending_permission_context: Option<(String, String)>,
     /// Update checker — receives notification when a newer version is available.
     update_rx: Option<crate::update::UpdateReceiver>,
     /// Update checker sender — allows re-checking when channel changes.
@@ -625,7 +627,9 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "automation" | "autonomy" => {
             crate::settings::AutomationLevel::parse(args).map(CanonicalSlashCommand::AutomationSet)
         }
-        "permissions" | "permission" if args.is_empty() || args == "status" || args == "list" => {
+        "permissions" | "permission"
+            if args.is_empty() || args == "status" || args == "list" || args == "keys" =>
+        {
             Some(CanonicalSlashCommand::PermissionsView)
         }
         "permissions" | "permission" | "trust" => {
@@ -1458,6 +1462,7 @@ impl App {
             tutorial: None,
             tutorial_overlay: None,
             pending_permission: None,
+            pending_permission_context: None,
             update_rx: None,
             update_tx: None,
             awaiting_continuation: false,
@@ -1814,6 +1819,11 @@ impl App {
             || lower.contains("permission denied")
         {
             return "Permission denied. Check file permissions or API access scope.";
+        }
+        if lower.contains("supported source types")
+            || (tool_name == Some("validate") && lower.contains("unsupported"))
+        {
+            return "Validation skipped one or more paths. Check the rejected path in the tool output, then run a project-specific test or validator for that file type.";
         }
         // Timeout
         if lower.contains("timeout") || lower.contains("timed out") {
@@ -3117,8 +3127,9 @@ impl App {
         let preview = Self::queue_prompt_preview(&text, &attachments);
         self.queued_prompts.push_back((text, attachments));
         let queued = self.queued_prompts.len();
-        self.conversation
-            .push_system(&format!("⏳ Queued [{queued}]: {preview}"));
+        self.conversation.push_system(&format!(
+            "⏳ Queued [{queued}]: {preview}\n   It will run after the active turn ends. Press Esc/Ctrl+C to interrupt the active turn."
+        ));
     }
 
     async fn submit_editor_buffer(&mut self, command_tx: &mpsc::Sender<TuiCommand>) {
@@ -4793,13 +4804,13 @@ impl App {
         ("prefs", "alias for /preferences", &[]),
         (
             "permissions",
-            "view and manage operator permission grants",
-            &["list", "add", "remove"],
+            "view grants and always-allow persistence",
+            &["list", "add", "remove", "keys"],
         ),
         (
             "automation",
-            "tune whether the agent asks before proceeding",
-            &["ask", "guarded", "flow", "autonomous"],
+            "tune ask/proceed gates without changing permissions",
+            &["status", "ask", "guarded", "flow", "autonomous"],
         ),
         (
             "autonomy",
@@ -4985,8 +4996,8 @@ impl App {
                     SlashResult::Handled
                 } else {
                     SlashResult::Display(
-                        "Usage: /automation [ask|guarded|flow|autonomous]\n\
-                         Alias: /autonomy [ask|guarded|flow|autonomous]"
+                        "Usage: /automation [status|ask|guarded|flow|autonomous]\n\
+                         Alias: /autonomy [status|ask|guarded|flow|autonomous]"
                             .into(),
                     )
                 }
@@ -6614,14 +6625,15 @@ impl App {
                 // Show a blocking permission prompt in the TUI.
                 // Render inline as a system notification with key hints.
                 let prompt_text = format!(
-                    "🔒 {tool_name} wants to access: {path}\n   \
-                     [y] allow once   [a] always allow (save)   [n/Esc] deny"
+                    "🔒 Permission required\n   Tool: {tool_name}\n   Path: {path}\n   \
+                     [y] allow once   [a] always allow + save to project profile   [n/Esc] deny"
                 );
                 self.conversation.push_system(&prompt_text);
 
                 // Store the responder — the next key event (y/a/n) will
                 // resolve it. See handle_permission_key below.
                 self.pending_permission = Some(respond.clone());
+                self.pending_permission_context = Some((tool_name, path));
             }
             AgentEvent::ToolEnd {
                 id,
@@ -8142,6 +8154,7 @@ pub async fn run_tui(
                             _ => None, // ignore other keys
                         };
                         if let Some(resp) = response {
+                            let context = app.pending_permission_context.take();
                             if let Some(respond) = app.pending_permission.take()
                                 && let Ok(mut slot) = respond.lock()
                                 && let Some(tx) = slot.take()
@@ -8153,11 +8166,16 @@ pub async fn run_tui(
                                     "allowed (this session)"
                                 }
                                 omegon_traits::PermissionResponse::AlwaysAllow => {
-                                    "always allowed — persisted to project permissions"
+                                    "always allowed - persisted to project permissions"
                                 }
                                 omegon_traits::PermissionResponse::Deny => "denied",
                             };
-                            app.conversation.push_system(&format!("→ {label}"));
+                            if let Some((tool, path)) = context {
+                                app.conversation
+                                    .push_system(&format!("→ {label}: {tool} {path}"));
+                            } else {
+                                app.conversation.push_system(&format!("→ {label}"));
+                            }
                         }
                         continue; // don't process key further
                     }
@@ -8851,6 +8869,16 @@ mod auspex_copy_tests {
         assert!(auspex.1.contains("Auspex"));
         assert!(auspex.1.contains("open"));
     }
+
+    #[test]
+    fn validate_errors_get_actionable_recovery_hint() {
+        let hint = App::recovery_hint(
+            Some("validate"),
+            "supported source types: rust python typescript; unsupported file docs/readme.md",
+        );
+        assert!(hint.contains("project-specific test"));
+        assert!(!hint.is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -8928,6 +8956,10 @@ mod slash_command_parsing_tests {
     fn permissions_commands_parse() {
         assert_eq!(
             canonical_slash_command("permissions", ""),
+            Some(CanonicalSlashCommand::PermissionsView)
+        );
+        assert_eq!(
+            canonical_slash_command("permissions", "keys"),
             Some(CanonicalSlashCommand::PermissionsView)
         );
         assert_eq!(
