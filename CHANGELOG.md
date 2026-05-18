@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.22.4] - 2026-05-18
+
+### Fixed
+
+- **TUI update checks recover after release asset delays** — `/update` and `/update install` now force fresh checks when needed, avoid caching incomplete GitHub release metadata, distinguish published-but-not-yet-downloadable releases, and keep periodic polling aligned with the active update channel.
+
 ## [0.22.3] - 2026-05-18
 
 ### Added
