@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
+- **ACP workspace mutations** — ACP clients can now call the same workspace lifecycle mutation surface as the TUI, including create, destroy, adopt, release, archive, prune, bind, role, and kind operations through `control/workspace_*` methods.
 - **Clickable terminal links** — assistant, operator, system, and tool-card text now render bare `http://`, `https://`, and `file://` URLs as OSC 8 hyperlinks, and file tool summary rows normalize relative paths into clickable `file://` targets.
 - **Profile-backed automation policy** — added `/automation` and `/autonomy` controls for choosing `ask`, `guarded`, `flow`, or `autonomous` continuation behavior, persisted through the project profile while keeping permission, security, plan, interrupt, and max-turn gates as hard boundaries.
 - **Unified `/permissions` operator surface** — added `/permissions list|add|remove` as the canonical permission-grant control surface, with `/trust` retained as an alias so TUI and ACP/control callers share the same persisted profile permissions path.

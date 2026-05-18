@@ -581,33 +581,77 @@ pub async fn execute_control(
         ControlRequest::StatusView => {
             status_view_response(ctx.runtime_state, ctx.shared_settings).await
         }
-        ControlRequest::WorkspaceStatusView => workspace_status_view_response(ctx.agent).await,
-        ControlRequest::WorkspaceListView => workspace_list_view_response(ctx.agent).await,
-        ControlRequest::WorkspaceNew { label } => workspace_new_response(ctx.agent, &label).await,
-        ControlRequest::WorkspaceDestroy { target } => {
-            workspace_destroy_response(ctx.agent, &target).await
+        ControlRequest::WorkspaceStatusView => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_status_view_response(&workspace_ctx)
         }
-        ControlRequest::WorkspaceAdopt => workspace_adopt_response(ctx.agent).await,
-        ControlRequest::WorkspaceRelease => workspace_release_response(ctx.agent).await,
-        ControlRequest::WorkspaceArchive => workspace_archive_response(ctx.agent).await,
-        ControlRequest::WorkspacePrune => workspace_prune_response(ctx.agent).await,
+        ControlRequest::WorkspaceListView => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_list_view_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspaceNew { label } => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_new_response(&workspace_ctx, &label)
+        }
+        ControlRequest::WorkspaceDestroy { target } => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_destroy_response(&workspace_ctx, &target)
+        }
+        ControlRequest::WorkspaceAdopt => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_adopt_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspaceRelease => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_release_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspaceArchive => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_archive_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspacePrune => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_prune_response(&workspace_ctx)
+        }
         ControlRequest::WorkspaceBindMilestone { milestone_id } => {
-            workspace_bind_milestone_response(ctx.agent, &milestone_id).await
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_bind_milestone_response(
+                &workspace_ctx,
+                &milestone_id,
+            )
         }
         ControlRequest::WorkspaceBindNode { design_node_id } => {
-            workspace_bind_node_response(ctx.agent, &design_node_id).await
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_bind_node_response(&workspace_ctx, &design_node_id)
         }
-        ControlRequest::WorkspaceBindClear => workspace_bind_clear_response(ctx.agent).await,
-        ControlRequest::WorkspaceRoleView => workspace_role_view_response(ctx.agent).await,
+        ControlRequest::WorkspaceBindClear => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_bind_clear_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspaceRoleView => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_role_view_response(&workspace_ctx)
+        }
         ControlRequest::WorkspaceRoleSet { role } => {
-            workspace_role_set_response(ctx.agent, role).await
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_role_set_response(&workspace_ctx, role)
         }
-        ControlRequest::WorkspaceRoleClear => workspace_role_clear_response(ctx.agent).await,
-        ControlRequest::WorkspaceKindView => workspace_kind_view_response(ctx.agent).await,
+        ControlRequest::WorkspaceRoleClear => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_role_clear_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspaceKindView => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_kind_view_response(&workspace_ctx)
+        }
         ControlRequest::WorkspaceKindSet { kind } => {
-            workspace_kind_set_response(ctx.agent, kind).await
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_kind_set_response(&workspace_ctx, kind)
         }
-        ControlRequest::WorkspaceKindClear => workspace_kind_clear_response(ctx.agent).await,
+        ControlRequest::WorkspaceKindClear => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_kind_clear_response(&workspace_ctx)
+        }
         ControlRequest::SessionStatsView => {
             session_stats_view_response(ctx.runtime_state, ctx.shared_settings, ctx.agent).await
         }
@@ -1212,918 +1256,117 @@ pub async fn status_view_response(
     }
 }
 
+fn workspace_control_context(
+    agent: &InteractiveAgentHost,
+) -> crate::workspace::control::WorkspaceControlContext<'_> {
+    crate::workspace::control::WorkspaceControlContext::new(
+        &agent.cwd,
+        &agent.session_id,
+        &agent.instance_id,
+    )
+}
+
 pub async fn workspace_status_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let lease = crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten();
-    let registry = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten();
-
-    let Some(lease) = lease else {
-        return SlashCommandResponse {
-            accepted: true,
-            output: Some("Workspace: no local runtime metadata yet.".into()),
-        };
-    };
-
-    let occupancy = registry
-        .as_ref()
-        .map(|registry| registry.workspaces.len())
-        .unwrap_or(1);
-    let owner = lease.owner_session_id.as_deref().unwrap_or("(none)");
-    let milestone = lease.bindings.milestone_id.as_deref().unwrap_or("(none)");
-    let node = lease.bindings.design_node_id.as_deref().unwrap_or("(none)");
-    let change = lease
-        .bindings
-        .openspec_change
-        .as_deref()
-        .unwrap_or("(none)");
-    let text = format!(
-        "Workspace\n  ID:           {}\n  Label:        {}\n  Project:      {}\n  Path:         {}\n  Backend:      {}\n  Branch:       {}\n  Role:         {:?}\n  Kind:         {:?}\n  Mutability:   {:?}\n  Owner:        {}\n  Source:       {}\n  Milestone:    {}\n  Design Node:  {}\n  OpenSpec:     {}\n  Local Views:  {}",
-        lease.workspace_id,
-        lease.label,
-        lease.project_id,
-        lease.path,
-        lease.backend_kind.as_str(),
-        lease.branch,
-        lease.role,
-        lease.workspace_kind,
-        lease.mutability,
-        owner,
-        lease.source,
-        milestone,
-        node,
-        change,
-        occupancy,
-    );
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(text),
-    }
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_status_view_response(&ctx)
 }
 
-pub async fn workspace_role_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let lease = crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten();
-    let Some(lease) = lease else {
-        return SlashCommandResponse {
-            accepted: true,
-            output: Some("Workspace role: no lease metadata yet.".into()),
-        };
-    };
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Workspace Role\n  Current:      {}",
-            lease.role.as_str(),
-        )),
-    }
-}
-
-pub async fn workspace_role_set_response(
-    agent: &InteractiveAgentHost,
-    role: crate::workspace::types::WorkspaceRole,
-) -> SlashCommandResponse {
-    let mut lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace role cannot be set before workspace metadata exists.".into(),
-                ),
-            };
-        }
-    };
-    lease.role = role;
-    if let Err(err) =
-        crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-    {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to update workspace lease: {err}")),
-        };
-    }
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.path == lease.path {
-                workspace.role = role;
-            }
-        }
-        let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!("Workspace role set to {}.", role.as_str())),
-    }
-}
-
-pub async fn workspace_role_clear_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let mut lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace role cannot be cleared before workspace metadata exists.".into(),
-                ),
-            };
-        }
-    };
-    lease.role = crate::workspace::types::WorkspaceRole::Primary;
-    if let Err(err) =
-        crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-    {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to update workspace lease: {err}")),
-        };
-    }
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.path == lease.path {
-                workspace.role = crate::workspace::types::WorkspaceRole::Primary;
-            }
-        }
-        let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some("Workspace role reset to primary.".into()),
-    }
-}
-
-pub async fn workspace_kind_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let lease = crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten();
-    let inferred = crate::workspace::infer::infer_workspace_kind(&agent.cwd);
-    let Some(lease) = lease else {
-        return SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Workspace kind: no lease metadata yet. Inferred kind would be {}.",
-                inferred.as_str()
-            )),
-        };
-    };
-    let declared = lease.workspace_kind;
-    let source = if declared == inferred {
-        "inferred/default"
-    } else {
-        "operator-declared"
-    };
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Workspace Kind\n  Current:      {}\n  Inferred:     {}\n  Source:       {}",
-            declared.as_str(),
-            inferred.as_str(),
-            source,
-        )),
-    }
-}
-
-fn find_workspace_target(
-    registry: &crate::workspace::types::WorkspaceRegistry,
-    target: &str,
-) -> Result<crate::workspace::types::WorkspaceSummary, String> {
-    if let Some(workspace) = registry
-        .workspaces
-        .iter()
-        .find(|workspace| workspace.workspace_id == target)
-    {
-        return Ok(workspace.clone());
-    }
-
-    let matches = registry
-        .workspaces
-        .iter()
-        .filter(|workspace| workspace.label == target)
-        .cloned()
-        .collect::<Vec<_>>();
-    match matches.len() {
-        0 => Err(format!("Workspace '{target}' not found in local registry.")),
-        1 => Ok(matches.into_iter().next().unwrap()),
-        _ => Err(format!(
-            "Workspace label '{target}' is ambiguous; use workspace_id instead."
-        )),
-    }
-}
-
-fn safe_remove_workspace_dir(
-    current_cwd: &Path,
-    repo_root: &Path,
-    workspace_path: &Path,
-) -> Result<(), String> {
-    if workspace_path == current_cwd {
-        return Err("Refusing to destroy the current active workspace path.".into());
-    }
-    if workspace_path == repo_root {
-        return Err("Refusing to destroy the project root workspace.".into());
-    }
-    if workspace_path.exists() {
-        std::fs::remove_dir_all(workspace_path)
-            .map_err(|err| format!("Failed to remove workspace directory: {err}"))?;
-    }
-    Ok(())
-}
-
-pub async fn workspace_destroy_response(
-    agent: &InteractiveAgentHost,
-    target: &str,
-) -> SlashCommandResponse {
-    let registry = match crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(registry) => registry,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some("Workspace destroy requires existing local registry metadata.".into()),
-            };
-        }
-    };
-    let workspace = match find_workspace_target(&registry, target) {
-        Ok(workspace) => workspace,
-        Err(message) => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(message),
-            };
-        }
-    };
-    if workspace.path == agent.cwd.display().to_string() {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some("Refusing to destroy the current active workspace.".into()),
-        };
-    }
-    if workspace.role == crate::workspace::types::WorkspaceRole::Primary {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some("Refusing to destroy the primary workspace.".into()),
-        };
-    }
-    if workspace.owner_session_id.is_some() {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some("Workspace must be released before it can be destroyed.".into()),
-        };
-    }
-    if !workspace.archived {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some("Workspace must be archived before it can be destroyed.".into()),
-        };
-    }
-
-    let repo_root = Path::new(&registry.repo_root);
-    let workspace_path = Path::new(&workspace.path);
-    let removal = match workspace.backend_kind {
-        crate::workspace::types::WorkspaceBackendKind::GitWorktree
-        | crate::workspace::types::WorkspaceBackendKind::JjCheckout => {
-            omegon_git::worktree::remove_smart(repo_root, &workspace.label, workspace_path)
-                .map_err(|err| format!("Failed to remove workspace backend: {err}"))
-        }
-        crate::workspace::types::WorkspaceBackendKind::LocalDir
-        | crate::workspace::types::WorkspaceBackendKind::GitClone => {
-            safe_remove_workspace_dir(&agent.cwd, repo_root, workspace_path)
-        }
-        crate::workspace::types::WorkspaceBackendKind::RemoteDir
-        | crate::workspace::types::WorkspaceBackendKind::PodVolume => Err(
-            "Workspace destroy is not yet implemented for remote-dir/pod-volume backends.".into(),
-        ),
-    };
-    if let Err(message) = removal {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        };
-    }
-
-    let mut updated = registry.clone();
-    updated
-        .workspaces
-        .retain(|entry| entry.workspace_id != workspace.workspace_id);
-    if let Err(err) = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &updated) {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!(
-                "Destroyed workspace but failed to update registry: {err}"
-            )),
-        };
-    }
-
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Destroyed archived workspace {} ({}).",
-            workspace.workspace_id, workspace.label
-        )),
-    }
-}
-
-pub async fn workspace_adopt_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let mut lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some("Workspace adopt requires existing local workspace metadata.".into()),
-            };
-        }
-    };
-    let heartbeat = crate::workspace::runtime::heartbeat_epoch_secs(&lease.last_heartbeat);
-    let now_epoch = chrono::Utc::now().timestamp();
-    let request = crate::workspace::types::WorkspaceAdmissionRequest {
-        requested_role: lease.role,
-        requested_kind: lease.workspace_kind,
-        requested_mutability: lease.mutability,
-        session_id: Some(agent.session_id.clone()),
-        action: crate::workspace::types::WorkspaceActionKind::SessionStart,
-    };
-    let outcome = crate::workspace::admission::classify_admission(
-        Some(&lease),
-        &request,
-        now_epoch,
-        heartbeat,
-    );
-    if !matches!(
-        outcome,
-        crate::workspace::types::AdmissionOutcome::ConflictStaleLeaseAdoptable { .. }
-    ) {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!(
-                "Workspace adopt is only allowed for stale leases. Current admission state: {:?}",
-                outcome
-            )),
-        };
-    }
-    lease.owner_session_id = Some(agent.session_id.clone());
-    lease.owner_agent_id = Some("omegon-local".into());
-    lease.last_heartbeat = crate::workspace::runtime::current_timestamp();
-    if let Err(err) =
-        crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-    {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to adopt workspace lease: {err}")),
-        };
-    }
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.workspace_id == lease.workspace_id {
-                workspace.owner_session_id = lease.owner_session_id.clone();
-                workspace.last_heartbeat = lease.last_heartbeat.clone();
-                workspace.stale = false;
-            }
-        }
-        let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Adopted stale workspace lease for {} ({}).",
-            lease.workspace_id, lease.label
-        )),
-    }
-}
-
-fn rewrite_current_workspace<F>(
-    agent: &InteractiveAgentHost,
-    mutator: F,
-) -> Result<crate::workspace::types::WorkspaceLease, String>
-where
-    F: FnOnce(&mut crate::workspace::types::WorkspaceLease),
-{
-    let mut lease = crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .map_err(|err| format!("Failed to read workspace lease: {err}"))?
-        .ok_or_else(|| "Workspace metadata does not exist yet.".to_string())?;
-    mutator(&mut lease);
-    crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-        .map_err(|err| format!("Failed to update workspace lease: {err}"))?;
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .map_err(|err| format!("Failed to read workspace registry: {err}"))?
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.path == lease.path {
-                workspace.bindings = lease.bindings.clone();
-                workspace.role = lease.role;
-                workspace.workspace_kind = lease.workspace_kind;
-                workspace.owner_session_id = lease.owner_session_id.clone();
-                workspace.last_heartbeat = lease.last_heartbeat.clone();
-                workspace.archived = lease.archived;
-                workspace.archived_at = lease.archived_at.clone();
-                workspace.archive_reason = lease.archive_reason.clone();
-            }
-        }
-        crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry)
-            .map_err(|err| format!("Failed to update workspace registry: {err}"))?;
-    }
-    Ok(lease)
-}
-
-pub async fn workspace_release_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace release requires existing local workspace metadata.".into(),
-                ),
-            };
-        }
-    };
-    if lease.owner_session_id.as_deref() != Some(agent.session_id.as_str()) {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!(
-                "Workspace release requires current ownership. Current owner: {}",
-                lease.owner_session_id.as_deref().unwrap_or("(none)")
-            )),
-        };
-    }
-    match rewrite_current_workspace(agent, |lease| {
-        lease.owner_session_id = None;
-        lease.owner_agent_id = None;
-    }) {
-        Ok(lease) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Released workspace {} ({}). It remains registered but is no longer owned.",
-                lease.workspace_id, lease.label
-            )),
-        },
-        Err(message) => SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        },
-    }
-}
-
-pub async fn workspace_archive_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace archive requires existing local workspace metadata.".into(),
-                ),
-            };
-        }
-    };
-    if lease.owner_session_id.is_some() {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some("Workspace must be released before it can be archived.".into()),
-        };
-    }
-    match rewrite_current_workspace(agent, |lease| {
-        lease.archived = true;
-        lease.archived_at = Some(crate::workspace::runtime::current_timestamp());
-        lease.archive_reason = Some("operator".into());
-    }) {
-        Ok(lease) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Archived workspace {} ({}). It remains on disk but is retired from active use.",
-                lease.workspace_id, lease.label
-            )),
-        },
-        Err(message) => SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        },
-    }
-}
-
-pub async fn workspace_prune_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let mut registry = match crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(registry) => registry,
-        None => {
-            return SlashCommandResponse {
-                accepted: true,
-                output: Some("Workspace registry: nothing to prune.".into()),
-            };
-        }
-    };
-    let before = registry.workspaces.len();
-    registry.workspaces.retain(|workspace| {
-        let path = Path::new(&workspace.path);
-        path.exists() || !workspace.archived
-    });
-    let removed = before.saturating_sub(registry.workspaces.len());
-    if let Err(err) = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry) {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to write workspace registry: {err}")),
-        };
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!("Pruned {} workspace registry entries.", removed)),
-    }
-}
-
-pub async fn workspace_bind_milestone_response(
-    agent: &InteractiveAgentHost,
-    milestone_id: &str,
-) -> SlashCommandResponse {
-    match rewrite_current_workspace(agent, |lease| {
-        lease.bindings.milestone_id = Some(milestone_id.to_string());
-    }) {
-        Ok(lease) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Workspace {} ({}) bound to milestone {}.",
-                lease.workspace_id, lease.label, milestone_id
-            )),
-        },
-        Err(message) => SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        },
-    }
-}
-
-pub async fn workspace_bind_node_response(
-    agent: &InteractiveAgentHost,
-    design_node_id: &str,
-) -> SlashCommandResponse {
-    match rewrite_current_workspace(agent, |lease| {
-        lease.bindings.design_node_id = Some(design_node_id.to_string());
-    }) {
-        Ok(lease) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Workspace {} ({}) bound to design node {}.",
-                lease.workspace_id, lease.label, design_node_id
-            )),
-        },
-        Err(message) => SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        },
-    }
-}
-
-pub async fn workspace_bind_clear_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    match rewrite_current_workspace(agent, |lease| {
-        lease.bindings = crate::workspace::types::WorkspaceBindings::default();
-    }) {
-        Ok(lease) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Workspace {} ({}) lifecycle bindings cleared.",
-                lease.workspace_id, lease.label
-            )),
-        },
-        Err(message) => SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        },
-    }
+pub async fn workspace_list_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_list_view_response(&ctx)
 }
 
 pub async fn workspace_new_response(
     agent: &InteractiveAgentHost,
     label: &str,
 ) -> SlashCommandResponse {
-    let project_root = crate::setup::find_project_root(&agent.cwd);
-    let parent = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace creation requires existing local workspace metadata.".into(),
-                ),
-            };
-        }
-    };
-    let sanitized = label
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_lowercase();
-    if sanitized.is_empty() {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(
-                "Workspace label must contain at least one alphanumeric character.".into(),
-            ),
-        };
-    }
-    let workspace_path = project_root
-        .parent()
-        .unwrap_or(project_root.as_path())
-        .join(format!(
-            "{}-{}",
-            project_root
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("workspace"),
-            sanitized
-        ));
-    let branch = format!("workspace/{}", sanitized);
-    let info = match omegon_git::worktree::create_smart(
-        &project_root,
-        &workspace_path,
-        &sanitized,
-        &branch,
-    ) {
-        Ok(info) => info,
-        Err(err) => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(format!("Failed to create sibling workspace: {err}")),
-            };
-        }
-    };
-    let backend_kind = match info.backend {
-        "jj" => crate::workspace::types::WorkspaceBackendKind::JjCheckout,
-        _ => crate::workspace::types::WorkspaceBackendKind::GitWorktree,
-    };
-    let now = crate::workspace::runtime::current_timestamp();
-    let new_workspace_id = crate::workspace::runtime::workspace_id_from_path(&workspace_path);
-    let new_lease = crate::workspace::types::WorkspaceLease {
-        project_id: parent.project_id.clone(),
-        workspace_id: new_workspace_id.clone(),
-        label: sanitized.clone(),
-        path: workspace_path.display().to_string(),
-        backend_kind,
-        vcs_ref: Some(crate::workspace::types::WorkspaceVcsRef {
-            vcs: if info.backend == "jj" {
-                "jj".into()
-            } else {
-                "git".into()
-            },
-            branch: Some(info.branch.clone()),
-            revision: None,
-            remote: Some("origin".into()),
-        }),
-        bindings: parent.bindings.clone(),
-        branch: info.branch.clone(),
-        role: crate::workspace::types::WorkspaceRole::Feature,
-        workspace_kind: parent.workspace_kind,
-        mutability: crate::workspace::types::Mutability::Mutable,
-        owner_session_id: None,
-        owner_agent_id: None,
-        created_at: now.clone(),
-        last_heartbeat: now.clone(),
-        archived: false,
-        archived_at: None,
-        archive_reason: None,
-        parent_workspace_id: Some(parent.workspace_id.clone()),
-        source: "operator".into(),
-    };
-    if let Err(err) = crate::workspace::runtime::write_workspace_lease(
-        &workspace_path,
-        &agent.instance_id,
-        &new_lease,
-    ) {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!(
-                "Created workspace but failed to write lease metadata: {err}"
-            )),
-        };
-    }
-    let mut registry = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-        .unwrap_or(crate::workspace::types::WorkspaceRegistry {
-            project_id: parent.project_id.clone(),
-            repo_root: project_root.display().to_string(),
-            workspaces: vec![],
-        });
-    registry
-        .workspaces
-        .retain(|ws| ws.workspace_id != new_workspace_id);
-    registry
-        .workspaces
-        .push(crate::workspace::types::WorkspaceSummary {
-            workspace_id: new_lease.workspace_id.clone(),
-            label: new_lease.label.clone(),
-            path: new_lease.path.clone(),
-            backend_kind: new_lease.backend_kind,
-            vcs_ref: new_lease.vcs_ref.clone(),
-            bindings: new_lease.bindings.clone(),
-            branch: new_lease.branch.clone(),
-            role: new_lease.role,
-            workspace_kind: new_lease.workspace_kind,
-            mutability: new_lease.mutability,
-            owner_session_id: new_lease.owner_session_id.clone(),
-            last_heartbeat: new_lease.last_heartbeat.clone(),
-            archived: new_lease.archived,
-            archived_at: new_lease.archived_at.clone(),
-            archive_reason: new_lease.archive_reason.clone(),
-            stale: false,
-        });
-    let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    let _ = crate::workspace::runtime::write_workspace_registry(&workspace_path, &registry);
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Created sibling workspace '{}' at {} using {}.",
-            sanitized,
-            workspace_path.display(),
-            backend_kind.as_str()
-        )),
-    }
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_new_response(&ctx, label)
 }
 
-pub async fn workspace_list_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let registry = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten();
-    let Some(registry) = registry else {
-        return SlashCommandResponse {
-            accepted: true,
-            output: Some("Workspace registry: no local runtime metadata yet.".into()),
-        };
-    };
-    if registry.workspaces.is_empty() {
-        return SlashCommandResponse {
-            accepted: true,
-            output: Some("Workspace registry is empty.".into()),
-        };
-    }
-    let mut lines = vec![format!(
-        "Workspaces\n  Project:      {}\n  Repo Root:    {}\n  Count:        {}\n",
-        registry.project_id,
-        registry.repo_root,
-        registry.workspaces.len()
-    )];
-    for workspace in registry.workspaces {
-        let owner = workspace.owner_session_id.as_deref().unwrap_or("(none)");
-        let milestone = workspace
-            .bindings
-            .milestone_id
-            .as_deref()
-            .unwrap_or("(none)");
-        let node = workspace
-            .bindings
-            .design_node_id
-            .as_deref()
-            .unwrap_or("(none)");
-        let archive = if workspace.archived {
-            format!(
-                "archived at {} ({})",
-                workspace.archived_at.as_deref().unwrap_or("unknown"),
-                workspace.archive_reason.as_deref().unwrap_or("no reason")
-            )
-        } else {
-            "active".to_string()
-        };
-        lines.push(format!(
-            "- {} ({})\n    path: {}\n    backend: {}\n    branch: {}\n    role/kind: {:?} / {:?}\n    milestone/node: {} / {}\n    mutability: {:?}\n    owner: {}\n    archive: {}\n    stale: {}",
-            workspace.workspace_id,
-            workspace.label,
-            workspace.path,
-            workspace.backend_kind.as_str(),
-            workspace.branch,
-            workspace.role,
-            workspace.workspace_kind,
-            milestone,
-            node,
-            workspace.mutability,
-            owner,
-            archive,
-            workspace.stale,
-        ));
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(lines.join("\n")),
-    }
+pub async fn workspace_destroy_response(
+    agent: &InteractiveAgentHost,
+    target: &str,
+) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_destroy_response(&ctx, target)
+}
+
+pub async fn workspace_adopt_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_adopt_response(&ctx)
+}
+
+pub async fn workspace_release_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_release_response(&ctx)
+}
+
+pub async fn workspace_archive_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_archive_response(&ctx)
+}
+
+pub async fn workspace_prune_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_prune_response(&ctx)
+}
+
+pub async fn workspace_bind_milestone_response(
+    agent: &InteractiveAgentHost,
+    milestone_id: &str,
+) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_bind_milestone_response(&ctx, milestone_id)
+}
+
+pub async fn workspace_bind_node_response(
+    agent: &InteractiveAgentHost,
+    design_node_id: &str,
+) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_bind_node_response(&ctx, design_node_id)
+}
+
+pub async fn workspace_bind_clear_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_bind_clear_response(&ctx)
+}
+
+pub async fn workspace_role_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_role_view_response(&ctx)
+}
+
+pub async fn workspace_role_set_response(
+    agent: &InteractiveAgentHost,
+    role: crate::workspace::types::WorkspaceRole,
+) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_role_set_response(&ctx, role)
+}
+
+pub async fn workspace_role_clear_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_role_clear_response(&ctx)
+}
+
+pub async fn workspace_kind_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_kind_view_response(&ctx)
 }
 
 pub async fn workspace_kind_set_response(
     agent: &InteractiveAgentHost,
     kind: crate::workspace::types::WorkspaceKind,
 ) -> SlashCommandResponse {
-    let mut lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace kind cannot be set before workspace metadata exists.".into(),
-                ),
-            };
-        }
-    };
-    lease.workspace_kind = kind;
-    if let Err(err) =
-        crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-    {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to update workspace lease: {err}")),
-        };
-    }
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.path == lease.path {
-                workspace.workspace_kind = kind;
-            }
-        }
-        let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!("Workspace kind set to {}.", kind.as_str())),
-    }
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_kind_set_response(&ctx, kind)
 }
 
 pub async fn workspace_kind_clear_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let mut lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace kind cannot be cleared before workspace metadata exists.".into(),
-                ),
-            };
-        }
-    };
-    let inferred = crate::workspace::infer::infer_workspace_kind(&agent.cwd);
-    lease.workspace_kind = inferred;
-    if let Err(err) =
-        crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-    {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to update workspace lease: {err}")),
-        };
-    }
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.path == lease.path {
-                workspace.workspace_kind = inferred;
-            }
-        }
-        let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Workspace kind reset to inferred value {}.",
-            inferred.as_str()
-        )),
-    }
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_kind_clear_response(&ctx)
 }
 
 pub async fn session_stats_view_response(
