@@ -269,6 +269,20 @@ fn non_image_attachment_summary(attachments: &[std::path::PathBuf]) -> Option<St
     }
 }
 
+fn is_plan_progress_notification(text: &str) -> bool {
+    matches!(
+        text.lines().next().unwrap_or_default(),
+        "Plan set"
+            | "Plan progress"
+            | "Plan item skipped"
+            | "Plan approved"
+            | "Plan executing"
+            | "Plan cleared"
+            | "Plan status"
+            | "Plan updated"
+    )
+}
+
 impl ConversationView {
     pub fn new() -> Self {
         Self {
@@ -334,6 +348,23 @@ impl ConversationView {
     }
 
     pub fn push_system(&mut self, text: &str) {
+        if is_plan_progress_notification(text)
+            && let Some(existing) = self
+                .segments
+                .iter_mut()
+                .rev()
+                .filter_map(|segment| match &mut segment.content {
+                    SegmentContent::SystemNotification { text } => Some(text),
+                    _ => None,
+                })
+                .find(|existing| is_plan_progress_notification(existing))
+        {
+            *existing = text.to_string();
+            self.conv_state.invalidate();
+            self.conv_state.auto_scroll_to_bottom();
+            return;
+        }
+
         // Merge consecutive system notifications into a single card to avoid
         // excessive vertical padding (each card has border overhead).
         if let Some(last) = self.segments.last_mut()
@@ -914,6 +945,65 @@ mod tests {
     use super::*;
     use crate::tui::theme::Alpharius;
     use ratatui::prelude::*;
+
+    #[test]
+    fn plan_progress_notifications_replace_latest_snapshot_across_tool_cards() {
+        let mut cv = ConversationView::new();
+        cv.push_system("Plan progress\nPlan mode: executing\nProgress: 2/6\n\n1. ● A\n2. ◐ B");
+        cv.push_tool_start(
+            "plan-1",
+            "plan",
+            Some("{\"action\":\"complete\",\"index\":2}"),
+            Some("complete 2"),
+        );
+        cv.push_tool_end("plan-1", false, Some("Marked item 2 complete."));
+        cv.push_system(
+            "Plan progress\nPlan mode: executing\nProgress: 3/6\n\n1. ● A\n2. ● B\n3. ◐ C",
+        );
+
+        let plan_segments: Vec<&str> = cv
+            .segments
+            .iter()
+            .filter_map(|segment| match &segment.content {
+                SegmentContent::SystemNotification { text }
+                    if is_plan_progress_notification(text) =>
+                {
+                    Some(text.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(plan_segments.len(), 1);
+        assert!(plan_segments[0].contains("Progress: 3/6"));
+        assert!(!plan_segments[0].contains("Progress: 2/6"));
+        assert!(
+            cv.segments
+                .iter()
+                .any(|segment| matches!(segment.content, SegmentContent::ToolCard { .. })),
+            "tool card should remain available for audit/detail"
+        );
+    }
+
+    #[test]
+    fn non_plan_system_notifications_still_append_after_tool_cards() {
+        let mut cv = ConversationView::new();
+        cv.push_system("First notice");
+        cv.push_tool_start("t1", "read", Some("README.md"), Some("README.md"));
+        cv.push_tool_end("t1", false, Some("contents"));
+        cv.push_system("Second notice");
+
+        let system_segments: Vec<&str> = cv
+            .segments
+            .iter()
+            .filter_map(|segment| match &segment.content {
+                SegmentContent::SystemNotification { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(system_segments, vec!["First notice", "Second notice"]);
+    }
 
     #[test]
     fn stamp_turn_tokens_walks_back_and_stamps_matching_segments() {
