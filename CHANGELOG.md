@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-05-18
+
 ### Added
 
 - **ACP workspace mutations** — ACP clients can now call the same workspace lifecycle mutation surface as the TUI, including create, destroy, adopt, release, archive, prune, bind, role, and kind operations through `control/workspace_*` methods.
