@@ -1063,5 +1063,14 @@
     "opened": "2026-05-18T21:25:19Z",
     "released": "2026-05-18T21:25:19Z",
     "notes": []
+  },
+  "0.22.4": {
+    "status": "released",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": true,
+    "opened": "2026-05-18T23:56:13Z",
+    "released": "2026-05-18T23:56:13Z",
+    "notes": []
   }
 }
