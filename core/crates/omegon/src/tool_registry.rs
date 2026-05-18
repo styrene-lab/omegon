@@ -30,6 +30,7 @@ pub mod core {
     pub const SERVE: &str = "serve";
     pub const TRUST_DIRECTORY: &str = "trust_directory";
     pub const PLAN: &str = "plan";
+    pub const WAIT_FOR_OPERATOR: &str = "wait_for_operator";
 }
 
 /// View tool — owned by `tools::view::ViewProvider`
@@ -165,11 +166,11 @@ pub mod mutation {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 63;
+pub const TOOL_COUNT: usize = 64;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
-        // core (9)
+        // core (13)
         core::BASH,
         core::READ,
         core::WRITE,
@@ -182,6 +183,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         core::SERVE,
         core::TRUST_DIRECTORY,
         core::PLAN,
+        core::WAIT_FOR_OPERATOR,
         // view (1)
         view::VIEW,
         // render (1)
@@ -252,7 +254,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         mutation::MUTATION_REJECT,
         mutation::MUTATION_STATS,
     ]
-    // Total: 62
+    // Total: 64
 }
 
 #[cfg(test)]

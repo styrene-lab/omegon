@@ -215,6 +215,7 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
         | AgentEvent::MessageAbort { .. }
         | AgentEvent::ContextUpdated { .. }
         | AgentEvent::WebDashboardStarted { .. }
+        | AgentEvent::OperatorWaitRequest { .. }
         | AgentEvent::PermissionRequest { .. } => None,
     }
 }

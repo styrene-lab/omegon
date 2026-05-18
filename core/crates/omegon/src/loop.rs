@@ -24,7 +24,7 @@ use futures_util::stream::{self, StreamExt};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
@@ -2368,6 +2368,143 @@ async fn execute_tool_invocation(
     // when a host context is present, or fall back to the TUI blocking prompt.
     let (result, is_error) = match first_result {
         Ok(result) => (result, false),
+        Err(e)
+            if e.downcast_ref::<crate::tools::OperatorWaitRequired>()
+                .is_some() =>
+        {
+            let wait = e
+                .downcast::<crate::tools::OperatorWaitRequired>()
+                .expect("checked OperatorWaitRequired downcast");
+
+            if host_context.is_some() {
+                (
+                    omegon_traits::ToolResult {
+                        content: vec![ContentBlock::Text {
+                            text: "Manual action required, but interactive operator confirmation is only available in the TUI right now.".into(),
+                        }],
+                        details: serde_json::json!({
+                            "is_error": true,
+                            "status": "unsupported_surface",
+                            "reason": "operator_wait_requires_tui",
+                            "prompt": wait.prompt,
+                            "timeoutSecs": wait.timeout_secs,
+                        }),
+                    },
+                    true,
+                )
+            } else {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let respond = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+                let (ack_tx, ack_rx) = std::sync::mpsc::channel();
+                let acknowledge = std::sync::Arc::new(std::sync::Mutex::new(Some(ack_tx)));
+                let _ = events.send(AgentEvent::OperatorWaitRequest {
+                    prompt: wait.prompt.clone(),
+                    timeout_secs: wait.timeout_secs,
+                    acknowledge,
+                    respond,
+                });
+
+                let acknowledged = tokio::task::spawn_blocking(move || {
+                    ack_rx.recv_timeout(Duration::from_secs(2)).is_ok()
+                })
+                .await
+                .unwrap_or(false);
+                if !acknowledged {
+                    return (
+                        omegon_traits::ToolResult {
+                            content: vec![ContentBlock::Text {
+                                text: "Manual action required, but no interactive operator surface acknowledged the wait request.".into(),
+                            }],
+                            details: serde_json::json!({
+                                "is_error": true,
+                                "status": "unsupported_surface",
+                                "reason": "operator_wait_not_acknowledged",
+                                "prompt": wait.prompt,
+                                "timeoutSecs": wait.timeout_secs,
+                            }),
+                        },
+                        true,
+                    );
+                }
+
+                let start = Instant::now();
+                let mut initial = omegon_traits::PartialToolResult::content(
+                    format!(
+                        "Manual action required:\n{}\n\nWaiting for operator confirmation. Timeout: {} seconds.",
+                        wait.prompt, wait.timeout_secs
+                    ),
+                    0,
+                );
+                initial.progress.phase = Some("waiting_for_operator".into());
+                initial.details = serde_json::json!({
+                    "status": "waiting",
+                    "prompt": wait.prompt,
+                    "timeoutSecs": wait.timeout_secs,
+                });
+                sink.send(initial);
+
+                let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
+                tokio::task::spawn_blocking(move || {
+                    let _ = notify_tx.send(rx.recv());
+                });
+
+                let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
+                heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                let timeout = tokio::time::sleep(Duration::from_secs(wait.timeout_secs));
+                tokio::pin!(timeout);
+
+                let status = loop {
+                    tokio::select! {
+                        _ = cancel.cancelled() => {
+                            break "cancelled";
+                        }
+                        _ = &mut timeout => {
+                            break "timed_out";
+                        }
+                        response = notify_rx.recv() => {
+                            match response {
+                                Some(Ok(omegon_traits::OperatorWaitResponse::Completed)) => break "completed",
+                                Some(Ok(omegon_traits::OperatorWaitResponse::Cancelled)) => break "cancelled",
+                                _ => break "cancelled",
+                            }
+                        }
+                        _ = heartbeat.tick() => {
+                            let mut partial = omegon_traits::PartialToolResult::heartbeat(
+                                start.elapsed().as_millis() as u64,
+                            );
+                            partial.progress.phase = Some("waiting_for_operator".into());
+                            partial.details = serde_json::json!({
+                                "status": "waiting",
+                                "elapsedSecs": start.elapsed().as_secs(),
+                                "timeoutSecs": wait.timeout_secs,
+                            });
+                            sink.send(partial);
+                        }
+                    }
+                };
+
+                let elapsed_secs = start.elapsed().as_secs();
+                let is_error = status != "completed";
+                let text = match status {
+                    "completed" => format!("Manual action completed after {elapsed_secs}s."),
+                    "timed_out" => format!(
+                        "Manual action timed out after {elapsed_secs}s without operator confirmation."
+                    ),
+                    _ => format!("Manual action cancelled after {elapsed_secs}s."),
+                };
+                (
+                    omegon_traits::ToolResult {
+                        content: vec![ContentBlock::Text { text }],
+                        details: serde_json::json!({
+                            "status": status,
+                            "elapsedSecs": elapsed_secs,
+                            "timeoutSecs": wait.timeout_secs,
+                        }),
+                    },
+                    is_error,
+                )
+            }
+        }
         Err(e)
             if e.downcast_ref::<crate::tools::PathPermissionError>()
                 .is_some() =>

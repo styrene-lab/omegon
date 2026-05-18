@@ -1489,6 +1489,15 @@ pub enum PermissionResponse {
     Deny,
 }
 
+/// Response to a manual-action wait prompt from the TUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorWaitResponse {
+    /// The operator completed the requested physical/manual action.
+    Completed,
+    /// The operator cancelled the manual wait.
+    Cancelled,
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Lifecycle phase
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1931,6 +1940,16 @@ pub enum AgentEvent {
         path: String,
         respond:
             std::sync::Arc<std::sync::Mutex<Option<std::sync::mpsc::Sender<PermissionResponse>>>>,
+    },
+    /// The agent is blocked waiting for a physical/manual operator action.
+    /// The TUI renders a blocking prompt and sends the response when the
+    /// operator confirms completion or cancels.
+    OperatorWaitRequest {
+        prompt: String,
+        timeout_secs: u64,
+        acknowledge: std::sync::Arc<std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>>,
+        respond:
+            std::sync::Arc<std::sync::Mutex<Option<std::sync::mpsc::Sender<OperatorWaitResponse>>>>,
     },
     TurnEnd(Box<AgentEventTurnEnd>),
     AgentEnd,

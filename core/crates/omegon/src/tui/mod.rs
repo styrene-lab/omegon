@@ -394,6 +394,14 @@ pub struct App {
     >,
     /// Human-readable context for the pending permission prompt.
     pending_permission_context: Option<(String, String)>,
+    /// Pending manual-action wait prompt — waiting for operator confirmation.
+    pending_operator_wait: Option<
+        std::sync::Arc<
+            std::sync::Mutex<Option<std::sync::mpsc::Sender<omegon_traits::OperatorWaitResponse>>>,
+        >,
+    >,
+    /// Human-readable context for the pending manual-action wait prompt.
+    pending_operator_wait_context: Option<String>,
     /// Update checker — receives notification when a newer version is available.
     update_rx: Option<crate::update::UpdateReceiver>,
     /// Update checker sender — allows re-checking when channel changes.
@@ -1463,6 +1471,8 @@ impl App {
             tutorial_overlay: None,
             pending_permission: None,
             pending_permission_context: None,
+            pending_operator_wait: None,
+            pending_operator_wait_context: None,
             update_rx: None,
             update_tx: None,
             awaiting_continuation: false,
@@ -6635,12 +6645,37 @@ impl App {
                 self.pending_permission = Some(respond.clone());
                 self.pending_permission_context = Some((tool_name, path));
             }
+            AgentEvent::OperatorWaitRequest {
+                prompt,
+                timeout_secs,
+                acknowledge,
+                respond,
+            } => {
+                let prompt_text = format!(
+                    "Manual action required\n   {prompt}\n   [Enter/Space/d] done   [c/Esc] cancel   safety timeout: {timeout_secs}s"
+                );
+                self.conversation.push_system(&prompt_text);
+                if let Ok(mut slot) = acknowledge.lock()
+                    && let Some(tx) = slot.take()
+                {
+                    let _ = tx.send(());
+                }
+                self.pending_operator_wait = Some(respond.clone());
+                self.pending_operator_wait_context = Some(prompt);
+            }
             AgentEvent::ToolEnd {
                 id,
                 name,
                 result,
                 is_error,
             } => {
+                if name == crate::tool_registry::core::WAIT_FOR_OPERATOR
+                    && self.pending_operator_wait.is_some()
+                {
+                    self.pending_operator_wait = None;
+                    self.pending_operator_wait_context = None;
+                }
+
                 let text_blocks: Vec<&str> = result
                     .content
                     .iter()
@@ -8136,6 +8171,46 @@ pub async fn run_tui(
                 }
                 Event::Key(key) => {
                     if app.should_discard_key_after_interrupt(&key) {
+                        continue;
+                    }
+
+                    // ── Manual-action prompt intercepts completion keys ─
+                    if app.pending_operator_wait.is_some() {
+                        let response = match key.code {
+                            KeyCode::Enter
+                            | KeyCode::Char(' ')
+                            | KeyCode::Char('d')
+                            | KeyCode::Char('D') => {
+                                Some(omegon_traits::OperatorWaitResponse::Completed)
+                            }
+                            KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Esc => {
+                                Some(omegon_traits::OperatorWaitResponse::Cancelled)
+                            }
+                            _ => None,
+                        };
+                        if let Some(resp) = response {
+                            let context = app.pending_operator_wait_context.take();
+                            if let Some(respond) = app.pending_operator_wait.take()
+                                && let Ok(mut slot) = respond.lock()
+                                && let Some(tx) = slot.take()
+                            {
+                                let _ = tx.send(resp);
+                            }
+                            let label = match resp {
+                                omegon_traits::OperatorWaitResponse::Completed => {
+                                    "manual action completed"
+                                }
+                                omegon_traits::OperatorWaitResponse::Cancelled => {
+                                    "manual action cancelled"
+                                }
+                            };
+                            if let Some(prompt) = context {
+                                app.conversation
+                                    .push_system(&format!("-> {label}: {prompt}"));
+                            } else {
+                                app.conversation.push_system(&format!("-> {label}"));
+                            }
+                        }
                         continue;
                     }
 

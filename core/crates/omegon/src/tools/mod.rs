@@ -61,6 +61,29 @@ impl std::fmt::Display for PathPermissionError {
 
 impl std::error::Error for PathPermissionError {}
 
+pub const OPERATOR_WAIT_DEFAULT_SECS: u64 = 30 * 60;
+pub const OPERATOR_WAIT_MAX_SECS: u64 = 6 * 60 * 60;
+
+/// Error returned by `wait_for_operator`. The dispatch layer intercepts this
+/// typed error and owns the interactive wait/confirmation lifecycle.
+#[derive(Debug, Clone)]
+pub struct OperatorWaitRequired {
+    pub prompt: String,
+    pub timeout_secs: u64,
+}
+
+impl std::fmt::Display for OperatorWaitRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Manual action required: {} (timeout: {}s)",
+            self.prompt, self.timeout_secs
+        )
+    }
+}
+
+impl std::error::Error for OperatorWaitRequired {}
+
 // ── Workspace boundary ──────────────────────────────────────────────────
 
 /// Filesystem boundary enforcer — shared by all tools that touch the filesystem.
@@ -601,6 +624,31 @@ impl ToolProvider for CoreTools {
                 capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
+                name: reg::WAIT_FOR_OPERATOR.into(),
+                label: reg::WAIT_FOR_OPERATOR.into(),
+                description: "Pause the agent while the operator performs a physical/manual \
+                    action, then resume when the operator confirms completion. Use this when \
+                    real-world work is required before the next agent step, such as adjusting \
+                    hardware, testing an instrument, moving a device, or observing a live \
+                    system. The wait is bounded by a safety timeout."
+                    .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Clear instruction for the operator describing the physical/manual action to perform"
+                        },
+                        "timeout": {
+                            "type": "number",
+                            "description": "Safety timeout in seconds. Defaults to 1800 and is capped at 21600."
+                        }
+                    },
+                    "required": ["prompt"]
+                }),
+                capabilities: vec![omegon_traits::ToolCapability::ProgressBoundary],
+            },
+            ToolDefinition {
                 name: reg::WHOAMI.into(),
                 label: reg::WHOAMI.into(),
                 description: "Check authentication status across development tools \
@@ -1000,6 +1048,23 @@ impl ToolProvider for CoreTools {
                     details: Value::Null,
                 })
             }
+            reg::WAIT_FOR_OPERATOR => {
+                let prompt = args["prompt"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("missing 'prompt' argument"))?;
+                let timeout_secs = args["timeout"]
+                    .as_u64()
+                    .unwrap_or(OPERATOR_WAIT_DEFAULT_SECS)
+                    .clamp(1, OPERATOR_WAIT_MAX_SECS);
+
+                Err(OperatorWaitRequired {
+                    prompt: prompt.to_string(),
+                    timeout_secs,
+                }
+                .into())
+            }
             reg::WHOAMI => whoami::execute().await,
             reg::CHRONOS => {
                 let sub = args["subcommand"].as_str().unwrap_or("week");
@@ -1328,6 +1393,31 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn wait_for_operator_returns_typed_wait_request() {
+        let tools = CoreTools::new(PathBuf::from("/tmp/workspace"));
+        let err = tools
+            .execute(
+                reg::WAIT_FOR_OPERATOR,
+                "test",
+                serde_json::json!({
+                    "prompt": "Strike the snare once and confirm when the monitor captures it.",
+                    "timeout": OPERATOR_WAIT_MAX_SECS + 100,
+                }),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        let wait = err
+            .downcast_ref::<OperatorWaitRequired>()
+            .expect("wait_for_operator should return OperatorWaitRequired");
+        assert_eq!(
+            wait.prompt,
+            "Strike the snare once and confirm when the monitor captures it."
+        );
+        assert_eq!(wait.timeout_secs, OPERATOR_WAIT_MAX_SECS);
+    }
+
     #[test]
     fn lexical_normalize_resolves_dotdot() {
         let result = lexical_normalize(Path::new("/a/b/../c"));
@@ -1361,6 +1451,7 @@ mod tests {
         // Utility tools
         assert!(tool_names.contains("whoami"));
         assert!(tool_names.contains("chronos"));
+        assert!(tool_names.contains("wait_for_operator"));
 
         // view, web_search, local_inference tools are provided
         // by dedicated providers, NOT by CoreTools (to avoid duplicates).
@@ -1370,13 +1461,13 @@ mod tests {
         assert!(!tool_names.contains("list_local_models"));
         assert!(!tool_names.contains("manage_ollama"));
 
-        // 11 registered core tools. trust_directory is internal-only and not in
+        // 12 registered core tools. trust_directory is internal-only and not in
         // tool_defs; change is registered for harness batching but hidden from
         // the model-facing tool surface by EventBus filtering.
         assert_eq!(
             tool_names.len(),
-            11,
-            "Expected 11 registered core tools, got {}",
+            12,
+            "Expected 12 registered core tools, got {}",
             tool_names.len()
         );
     }
