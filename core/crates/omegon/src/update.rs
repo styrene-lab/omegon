@@ -21,6 +21,14 @@ pub struct UpdateInfo {
     pub is_newer: bool,
 }
 
+impl UpdateInfo {
+    pub fn has_downloadable_archive(&self) -> bool {
+        !self.download_url.is_empty()
+            && !self.signature_url.is_empty()
+            && !self.certificate_url.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateChannel {
     Stable,
@@ -107,7 +115,7 @@ pub fn read_cache(channel: UpdateChannel) -> Option<UpdateInfo> {
         return None;
     }
 
-    Some(UpdateInfo {
+    let info = UpdateInfo {
         current: current.to_string(),
         latest,
         download_url: cached["download_url"].as_str().unwrap_or("").to_string(),
@@ -115,11 +123,16 @@ pub fn read_cache(channel: UpdateChannel) -> Option<UpdateInfo> {
         certificate_url: cached["certificate_url"].as_str().unwrap_or("").to_string(),
         release_notes: cached["release_notes"].as_str().unwrap_or("").to_string(),
         is_newer: true,
-    })
+    };
+    info.has_downloadable_archive().then_some(info)
 }
 
 /// Write the update check result to cache.
 fn write_cache(info: &UpdateInfo, channel: UpdateChannel) {
+    if !info.has_downloadable_archive() {
+        clear_cache();
+        return;
+    }
     let Some(path) = cache_path() else { return };
     let cached = serde_json::json!({
         "channel": channel.as_str(),
@@ -139,9 +152,20 @@ fn write_cache(info: &UpdateInfo, channel: UpdateChannel) {
     );
 }
 
-pub fn spawn_check_with_delay(tx: UpdateSender, channel: UpdateChannel, delay: Duration) {
+fn clear_cache() {
+    if let Some(path) = cache_path() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn spawn_check_with_options(
+    tx: UpdateSender,
+    channel: UpdateChannel,
+    delay: Duration,
+    use_cache: bool,
+) {
     // Check cache first — avoid a GitHub API call if we checked recently.
-    if let Some(cached) = read_cache(channel) {
+    if use_cache && let Some(cached) = read_cache(channel) {
         tracing::debug!(
             latest = %cached.latest,
             "update check: using cached result (< 24h old)"
@@ -180,16 +204,32 @@ pub fn spawn_check_with_delay(tx: UpdateSender, channel: UpdateChannel, delay: D
     });
 }
 
+pub fn spawn_check_with_delay(tx: UpdateSender, channel: UpdateChannel, delay: Duration) {
+    spawn_check_with_options(tx, channel, delay, true);
+}
+
 /// Spawn the background update check.
 pub fn spawn_check(tx: UpdateSender, channel: UpdateChannel) {
     spawn_check_with_delay(tx, channel, Duration::from_secs(5));
 }
 
+/// Spawn an update check that bypasses the cache. Used for explicit operator
+/// `/update` requests so a release first observed before assets were uploaded
+/// cannot stay stuck as "not downloadable" for the cache TTL.
+pub fn spawn_check_now(tx: UpdateSender, channel: UpdateChannel) {
+    spawn_check_with_options(tx, channel, Duration::from_secs(0), false);
+}
+
 /// Poll for updates periodically so long-running TUI sessions notice new releases.
-pub fn spawn_polling(tx: UpdateSender, channel: UpdateChannel) {
+pub fn spawn_polling(tx: UpdateSender, settings: crate::settings::SharedSettings) {
     crate::task_spawn::spawn_best_effort("update-poller", async move {
         loop {
             tokio::time::sleep(Duration::from_secs(300)).await;
+            let channel = settings
+                .lock()
+                .ok()
+                .and_then(|s| UpdateChannel::parse(&s.update_channel))
+                .unwrap_or(UpdateChannel::Stable);
             spawn_check_with_delay(tx.clone(), channel, Duration::from_secs(0));
         }
     });
@@ -578,6 +618,23 @@ mod tests {
         assert!(!is_homebrew_managed(Path::new(
             "/tmp/omegon-release-ws/core/target/release/omegon"
         )));
+    }
+
+    #[test]
+    fn update_info_requires_signed_archive_sidecars() {
+        let mut info = UpdateInfo {
+            current: "0.22.2".into(),
+            latest: "0.22.3".into(),
+            download_url: "https://example.invalid/omegon.tar.gz".into(),
+            signature_url: "https://example.invalid/omegon.tar.gz.sig".into(),
+            certificate_url: "https://example.invalid/omegon.tar.gz.pem".into(),
+            release_notes: String::new(),
+            is_newer: true,
+        };
+        assert!(info.has_downloadable_archive());
+
+        info.signature_url.clear();
+        assert!(!info.has_downloadable_archive());
     }
 
     #[test]

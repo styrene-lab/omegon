@@ -1871,7 +1871,8 @@ fn slash_update_without_update_still_shows_channel_help() {
     let tx = test_tx();
     let result = app.handle_slash_command("/update", &tx);
     if let SlashResult::Display(text) = result {
-        assert!(text.contains("You're up to date"), "{text}");
+        assert!(text.contains("No update is currently cached"), "{text}");
+        assert!(text.contains("Checking GitHub now"), "{text}");
         assert!(text.contains("/update channel nightly"), "{text}");
         assert!(text.contains("/update channel stable"), "{text}");
         // RC is no longer listed — only stable and nightly
@@ -1890,10 +1891,7 @@ fn slash_update_install_requires_update_info() {
     let tx = test_tx();
     let result = app.handle_slash_command("/update install", &tx);
     if let SlashResult::Display(text) = result {
-        assert!(
-            text.contains("No update information") || text.contains("No downloadable update"),
-            "{text}"
-        );
+        assert!(text.contains("Checking for updates now"), "{text}");
     } else {
         panic!("expected Display result");
     }

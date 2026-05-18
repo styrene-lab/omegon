@@ -2398,7 +2398,7 @@ impl App {
                 if let Some(channel) = crate::update::UpdateChannel::parse(&value) {
                     self.update_settings(|s| s.update_channel = channel.as_str().to_string());
                     if let Some(tx) = self.update_tx.clone() {
-                        crate::update::spawn_check(tx, channel);
+                        crate::update::spawn_check_now(tx, channel);
                     }
                     Some(format!(
                         "Update channel set to {}. Rechecking for updates now.",
@@ -5540,7 +5540,7 @@ impl App {
                 if trimmed == "install" {
                     let info = self.update_rx.as_ref().and_then(|rx| rx.borrow().clone());
                     match info {
-                        Some(info) if info.is_newer && !info.download_url.is_empty() => {
+                        Some(info) if info.is_newer && info.has_downloadable_archive() => {
                             let args: Vec<String> = std::env::args().skip(1).collect();
                             let keyboard_enhancement = self.keyboard_enhancement;
                             let latest = info.latest.clone();
@@ -5549,9 +5549,11 @@ impl App {
                                     Ok(binary) => {
                                         #[cfg(unix)]
                                         {
-                                            let _ = io::stdout().execute(crossterm::event::DisableMouseCapture);
+                                            let _ = io::stdout()
+                                                .execute(crossterm::event::DisableMouseCapture);
                                             if keyboard_enhancement {
-                                                let _ = io::stdout().execute(PopKeyboardEnhancementFlags);
+                                                let _ = io::stdout()
+                                                    .execute(PopKeyboardEnhancementFlags);
                                             }
                                             let _ = disable_raw_mode();
                                             let _ = io::stdout().execute(LeaveAlternateScreen);
@@ -5566,8 +5568,35 @@ impl App {
                                 latest
                             ))
                         }
-                        Some(_) => SlashResult::Display("No downloadable update is available for this platform.".into()),
-                        None => SlashResult::Display("No update information available yet. Run `/update` after the background check completes.".into()),
+                        Some(info) if info.is_newer => {
+                            if let Some(tx) = self.update_tx.clone() {
+                                let channel = crate::update::UpdateChannel::parse(
+                                    &self.settings().update_channel,
+                                )
+                                .unwrap_or(crate::update::UpdateChannel::Stable);
+                                crate::update::spawn_check_now(tx, channel);
+                            }
+                            SlashResult::Display(format!(
+                                "v{} is published, but the signed archive for this platform is not available yet. Rechecking now; run `/update install` again after the release assets finish publishing.",
+                                info.latest
+                            ))
+                        }
+                        Some(_) => SlashResult::Display(
+                            "No downloadable update is available for this platform.".into(),
+                        ),
+                        None => {
+                            if let Some(tx) = self.update_tx.clone() {
+                                let channel = crate::update::UpdateChannel::parse(
+                                    &self.settings().update_channel,
+                                )
+                                .unwrap_or(crate::update::UpdateChannel::Stable);
+                                crate::update::spawn_check_now(tx, channel);
+                            }
+                            SlashResult::Display(
+                                "Checking for updates now. Run `/update install` again once the check completes."
+                                    .into(),
+                            )
+                        }
                     }
                 } else if let Some(channel_arg) = trimmed.strip_prefix("channel") {
                     let channel_arg = channel_arg.trim();
@@ -5577,7 +5606,7 @@ impl App {
                     } else if let Some(channel) = crate::update::UpdateChannel::parse(channel_arg) {
                         self.update_settings(|s| s.update_channel = channel.as_str().to_string());
                         if let Some(tx) = self.update_tx.clone() {
-                            crate::update::spawn_check(tx, channel);
+                            crate::update::spawn_check_now(tx, channel);
                         }
                         SlashResult::Display(format!(
                             "Update channel set to {}. Rechecking for updates now.",
@@ -5604,15 +5633,33 @@ impl App {
                                     .collect::<Vec<_>>()
                                     .join("\n")
                             },
-                            if info.download_url.is_empty() {
-                                String::from("No binary available for this platform")
+                            if !info.has_downloadable_archive() {
+                                if let Some(tx) = self.update_tx.clone() {
+                                    let channel = crate::update::UpdateChannel::parse(
+                                        &self.settings().update_channel,
+                                    )
+                                    .unwrap_or(crate::update::UpdateChannel::Stable);
+                                    crate::update::spawn_check_now(tx, channel);
+                                }
+                                String::from(
+                                    "Release assets for this platform are not available yet. Rechecking now.",
+                                )
                             } else {
                                 String::from("Run `/update install` to download and restart")
                             },
                         )),
-                        _ => SlashResult::Display(format!(
-                            "✓ You're up to date on the {channel} channel.\n\nCommands:\n  /update channel stable  — stable releases only\n  /update channel nightly — nightly builds from main\n  /update channel         — show current channel"
-                        )),
+                        _ => {
+                            if let Some(tx) = self.update_tx.clone() {
+                                let channel = crate::update::UpdateChannel::parse(
+                                    &self.settings().update_channel,
+                                )
+                                .unwrap_or(crate::update::UpdateChannel::Stable);
+                                crate::update::spawn_check_now(tx, channel);
+                            }
+                            SlashResult::Display(format!(
+                                "✓ No update is currently cached for the {channel} channel. Checking GitHub now.\n\nCommands:\n  /update install         — install a discovered update\n  /update channel stable  — stable releases only\n  /update channel nightly — nightly builds from main\n  /update channel         — show current channel"
+                            ))
+                        }
                     }
                 }
             }
@@ -7747,7 +7794,7 @@ pub async fn run_tui(
     crate::update::spawn_check(update_tx.clone(), channel);
     app.update_rx = Some(update_rx);
     app.update_tx = Some(update_tx.clone());
-    crate::update::spawn_polling(update_tx, channel);
+    crate::update::spawn_polling(update_tx, app.settings.clone());
     app.login_prompt_tx = config.login_prompt_tx;
 
     // Default to slim/conversation-first startup. Operators can elevate
