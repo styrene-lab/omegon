@@ -188,7 +188,15 @@ async fn worker_loop(
     let agent_setup =
         match crate::setup::AgentSetup::new(&cwd, None, Some(shared_settings.clone())).await {
             Ok(mut setup) => {
+                let setup_instance_id = setup.instance_id.clone();
                 setup.instance_id = crate::paths::instance_id("acp");
+                setup.workspace_state.lease.owner_agent_id = Some("omegon-acp".into());
+                let _ = crate::workspace::runtime::write_workspace_lease(
+                    &cwd,
+                    &setup.instance_id,
+                    &setup.workspace_state.lease,
+                );
+                crate::workspace::runtime::cleanup_instance(&cwd, &setup_instance_id);
                 setup
             }
             Err(e) => {
@@ -197,6 +205,8 @@ async fn worker_loop(
             }
         };
 
+    let session_id = agent_setup.session_id.clone();
+    let instance_id = agent_setup.instance_id.clone();
     let mut bus = agent_setup.bus;
     let mut context_manager = agent_setup.context_manager;
     let mut conversation = agent_setup.conversation;
@@ -443,7 +453,7 @@ async fn worker_loop(
                     &conversation,
                     &shared_settings,
                     &secrets,
-                    &cwd,
+                    workspace_ctx(&cwd, &session_id, &instance_id),
                     &mut bus,
                 )
                 .await;
@@ -527,9 +537,10 @@ async fn handle_control_request(
     conversation: &crate::conversation::ConversationState,
     shared_settings: &crate::settings::SharedSettings,
     secrets: &std::sync::Arc<omegon_secrets::SecretsManager>,
-    cwd: &std::path::Path,
+    workspace_ctx: crate::workspace::control::WorkspaceControlContext<'_>,
     bus: &mut crate::bus::EventBus,
 ) -> String {
+    let cwd = workspace_ctx.cwd;
     let parts: Vec<&str> = command.splitn(2, char::is_whitespace).collect();
     let cmd = parts[0];
     let args = parts.get(1).unwrap_or(&"").trim();
@@ -830,48 +841,97 @@ async fn handle_control_request(
         }
 
         // ── Workspace ────────────────────────────────────
-        "workspace_status" => {
-            use crate::workspace::runtime::{read_workspace_lease, read_workspace_registry};
-            match read_workspace_lease(cwd).ok().flatten() {
-                Some(lease) => {
-                    let occupancy = read_workspace_registry(cwd)
-                        .ok()
-                        .flatten()
-                        .map(|r| r.workspaces.len())
-                        .unwrap_or(1);
-                    format!(
-                        "Workspace\n  ID: {}\n  Label: {}\n  Path: {}\n  Backend: {}\n  Branch: {}\n  Role: {:?}\n  Kind: {:?}\n  Mutability: {:?}\n  Local views: {}",
-                        lease.workspace_id,
-                        lease.label,
-                        lease.path,
-                        lease.backend_kind.as_str(),
-                        lease.branch,
-                        lease.role,
-                        lease.workspace_kind,
-                        lease.mutability,
-                        occupancy,
-                    )
-                }
-                None => "Workspace: no local runtime metadata yet.".into(),
+        "workspace_status" => workspace_response_text(
+            crate::workspace::control::workspace_status_view_response(&workspace_ctx),
+        ),
+        "workspace_list" => workspace_response_text(
+            crate::workspace::control::workspace_list_view_response(&workspace_ctx),
+        ),
+        "workspace_new" => {
+            if args.is_empty() {
+                "Usage: workspace_new <label>".into()
+            } else {
+                workspace_response_text(crate::workspace::control::workspace_new_response(
+                    &workspace_ctx,
+                    args,
+                ))
             }
         }
-
-        "workspace_list" => {
-            use crate::workspace::runtime::read_workspace_registry;
-            match read_workspace_registry(cwd).ok().flatten() {
-                Some(registry) => {
-                    let mut out = format!("Workspaces ({}):\n", registry.workspaces.len());
-                    for ws in &registry.workspaces {
-                        out.push_str(&format!(
-                            "  {} — {} ({:?})\n",
-                            ws.workspace_id, ws.label, ws.role
-                        ));
-                    }
-                    out
-                }
-                None => "No workspace registry found.".into(),
+        "workspace_destroy" => {
+            if args.is_empty() {
+                "Usage: workspace_destroy <workspace_id|label>".into()
+            } else {
+                workspace_response_text(crate::workspace::control::workspace_destroy_response(
+                    &workspace_ctx,
+                    args,
+                ))
             }
         }
+        "workspace_adopt" => workspace_response_text(
+            crate::workspace::control::workspace_adopt_response(&workspace_ctx),
+        ),
+        "workspace_release" => workspace_response_text(
+            crate::workspace::control::workspace_release_response(&workspace_ctx),
+        ),
+        "workspace_archive" => workspace_response_text(
+            crate::workspace::control::workspace_archive_response(&workspace_ctx),
+        ),
+        "workspace_prune" => workspace_response_text(
+            crate::workspace::control::workspace_prune_response(&workspace_ctx),
+        ),
+        "workspace_bind_milestone" => {
+            if args.is_empty() {
+                "Usage: workspace_bind_milestone <milestone_id>".into()
+            } else {
+                workspace_response_text(crate::workspace::control::workspace_bind_milestone_response(
+                    &workspace_ctx,
+                    args,
+                ))
+            }
+        }
+        "workspace_bind_node" => {
+            if args.is_empty() {
+                "Usage: workspace_bind_node <design_node_id>".into()
+            } else {
+                workspace_response_text(crate::workspace::control::workspace_bind_node_response(
+                    &workspace_ctx,
+                    args,
+                ))
+            }
+        }
+        "workspace_bind_clear" => workspace_response_text(
+            crate::workspace::control::workspace_bind_clear_response(&workspace_ctx),
+        ),
+        "workspace_role" => workspace_response_text(
+            crate::workspace::control::workspace_role_view_response(&workspace_ctx),
+        ),
+        "workspace_role_set" => match crate::workspace::types::WorkspaceRole::parse(args) {
+            Some(role) => workspace_response_text(
+                crate::workspace::control::workspace_role_set_response(
+                    &workspace_ctx,
+                    role,
+                ),
+            ),
+            None => "Usage: workspace_role_set <primary|feature|cleave-child|benchmark|release|exploratory|read-only>".into(),
+        },
+        "workspace_role_clear" => workspace_response_text(
+            crate::workspace::control::workspace_role_clear_response(&workspace_ctx),
+        ),
+        "workspace_kind" => workspace_response_text(
+            crate::workspace::control::workspace_kind_view_response(&workspace_ctx),
+        ),
+        "workspace_kind_set" => match crate::workspace::types::WorkspaceKind::parse(args) {
+            Some(kind) => workspace_response_text(
+                crate::workspace::control::workspace_kind_set_response(
+                    &workspace_ctx,
+                    kind,
+                ),
+            ),
+            None => "Usage: workspace_kind_set <code|vault|knowledge|spec|mixed|generic>".into(),
+        },
+        "workspace_kind_clear" => workspace_response_text(
+            crate::workspace::control::workspace_kind_clear_response(&workspace_ctx),
+        ),
 
         // ── Design tree ────────────────────────────────
         "tree_view" => match bus.dispatch_command("design", args) {
@@ -928,6 +988,25 @@ async fn handle_control_request(
 
         _ => format!("Unknown control request: {command}"),
     }
+}
+
+fn workspace_ctx<'a>(
+    cwd: &'a std::path::Path,
+    session_id: &'a str,
+    instance_id: &'a str,
+) -> crate::workspace::control::WorkspaceControlContext<'a> {
+    crate::workspace::control::WorkspaceControlContext::new(cwd, session_id, instance_id)
+        .with_owner_agent_id("omegon-acp")
+}
+
+fn workspace_response_text(response: omegon_traits::SlashCommandResponse) -> String {
+    response.output.unwrap_or_else(|| {
+        if response.accepted {
+            "Workspace command accepted.".into()
+        } else {
+            "Workspace command rejected.".into()
+        }
+    })
 }
 
 /// Convert raw agent loop errors into actionable messages for the user.

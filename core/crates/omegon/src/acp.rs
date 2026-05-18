@@ -1916,14 +1916,29 @@ impl OmegonAcpAgent {
             | "control/notes_clear"
             | "control/workspace_status"
             | "control/workspace_list"
+            | "control/workspace_new"
+            | "control/workspace_destroy"
+            | "control/workspace_adopt"
+            | "control/workspace_release"
+            | "control/workspace_archive"
+            | "control/workspace_prune"
+            | "control/workspace_bind_milestone"
+            | "control/workspace_bind_node"
+            | "control/workspace_bind_clear"
+            | "control/workspace_role"
+            | "control/workspace_role_set"
+            | "control/workspace_role_clear"
+            | "control/workspace_kind"
+            | "control/workspace_kind_set"
+            | "control/workspace_kind_clear"
             | "control/tree_view"
             | "control/provider_status" => {
                 let control_cmd = method.strip_prefix("control/").unwrap_or(method);
-                let arg = params.get("args").and_then(|v| v.as_str()).unwrap_or("");
+                let arg = control_request_args(method, &params);
                 let full_cmd = if arg.is_empty() {
                     control_cmd.to_string()
                 } else {
-                    format!("{control_cmd} {arg}")
+                    format!("{control_cmd} {}", arg.trim())
                 };
 
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -1935,7 +1950,14 @@ impl OmegonAcpAgent {
                             response_tx: tx,
                         })
                         .await;
-                    match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+                    let timeout_secs = if control_cmd.starts_with("workspace_") {
+                        60
+                    } else {
+                        5
+                    };
+                    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx)
+                        .await
+                    {
                         Ok(Ok(resp)) => Ok(serde_json::json!({
                             "text": resp.text,
                             "error": resp.error,
@@ -2076,6 +2098,30 @@ impl OmegonAcpAgent {
             _ => format!("Unknown: {cmd}. Type /help"),
         }
     }
+}
+
+fn control_request_args(method: &str, params: &serde_json::Value) -> String {
+    if let Some(args) = params.get("args").and_then(|v| v.as_str()) {
+        return args.to_string();
+    }
+
+    let key = match method {
+        "control/workspace_new" => Some("label"),
+        "control/workspace_destroy" => Some("target"),
+        "control/workspace_bind_milestone" => Some("milestone_id"),
+        "control/workspace_bind_node" => Some("design_node_id"),
+        "control/workspace_role_set" => Some("role"),
+        "control/workspace_kind_set" => Some("kind"),
+        "control/note_add" => Some("text"),
+        "control/persona_switch" => Some("name"),
+        "control/profile_extension_allow" | "control/profile_extension_deny" => Some("name"),
+        "control/profile_persona" | "control/profile_tone" => Some("name"),
+        _ => None,
+    };
+
+    key.and_then(|key| params.get(key).and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string()
 }
 
 // ── ACP → internal MCP server conversion ──────────────────────────────
@@ -2318,6 +2364,49 @@ mod tests {
         let (name, config) = convert_acp_mcp_server(server).expect("should convert");
         assert_eq!(name, "sse-server");
         assert_eq!(config.url.as_deref(), Some("https://mcp.example.com/sse"));
+    }
+
+    #[test]
+    fn control_request_args_accepts_workspace_specific_fields() {
+        assert_eq!(
+            control_request_args(
+                "control/workspace_new",
+                &serde_json::json!({ "label": "feature-a" })
+            ),
+            "feature-a"
+        );
+        assert_eq!(
+            control_request_args(
+                "control/workspace_destroy",
+                &serde_json::json!({ "target": "workspace-1" })
+            ),
+            "workspace-1"
+        );
+        assert_eq!(
+            control_request_args(
+                "control/workspace_role_set",
+                &serde_json::json!({ "role": "release" })
+            ),
+            "release"
+        );
+        assert_eq!(
+            control_request_args(
+                "control/workspace_kind_set",
+                &serde_json::json!({ "kind": "spec" })
+            ),
+            "spec"
+        );
+    }
+
+    #[test]
+    fn control_request_args_prefers_legacy_args_field() {
+        assert_eq!(
+            control_request_args(
+                "control/workspace_new",
+                &serde_json::json!({ "args": "from-args", "label": "from-label" })
+            ),
+            "from-args"
+        );
     }
 
     #[test]
