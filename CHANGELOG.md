@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.22.3] - 2026-05-18
+
 ### Added
 
 - **Manual operator wait tool** — added `wait_for_operator` so agents can pause for explicit physical/manual operator action with TUI confirmation, cancellation, live heartbeats, and a bounded safety timeout.
