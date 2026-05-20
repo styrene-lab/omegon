@@ -452,6 +452,152 @@ fn tool_has_expandable_detail(
         || live_partial.is_some_and(|partial| !partial.tail.trim().is_empty())
 }
 
+fn slim_tool_summary_cells(
+    name: &str,
+    detail_args: Option<&str>,
+    detail_result: Option<&str>,
+    complete: bool,
+    live_partial: Option<&omegon_traits::PartialToolResult>,
+    started_at: Option<std::time::Instant>,
+    duration_ms: Option<u64>,
+) -> Vec<String> {
+    let mut cells = Vec::new();
+    if let Some(summary) = summarize_tool_args(name, detail_args) {
+        cells.push(summary);
+    }
+    if complete {
+        if let Some(summary) = summarize_tool_result(name, detail_result) {
+            cells.push(summary);
+        }
+        if let Some(ms) = duration_ms {
+            cells.push(format_duration_compact(ms));
+        }
+    } else {
+        cells.push(summarize_live_tool_progress(live_partial, started_at));
+    }
+    if tool_has_expandable_detail(detail_args, detail_result, live_partial) {
+        cells.push("Ctrl+O details".to_string());
+    }
+    cells
+}
+
+fn slim_tool_detail_lines(width: u16, cells: &[String]) -> Vec<String> {
+    if cells.is_empty() {
+        return vec![String::new()];
+    }
+
+    let one_line_budget = width.saturating_sub(16) as usize;
+    let joined = cells.join(" · ");
+    if UnicodeWidthStr::width(joined.as_str()) <= one_line_budget {
+        return vec![crate::util::truncate(&joined, one_line_budget)];
+    }
+
+    let row_budget = width.saturating_sub(16) as usize;
+    let max_rows = 4usize;
+    let mut rows = Vec::new();
+    rows.push(crate::util::truncate(&cells[0], row_budget));
+
+    let remaining = &cells[1..];
+    for (idx, cell) in remaining
+        .iter()
+        .take(max_rows.saturating_sub(1))
+        .enumerate()
+    {
+        let is_last_visible = idx + 1 == remaining.len().min(max_rows.saturating_sub(1));
+        let marker = if is_last_visible { "  └ " } else { "  ├ " };
+        rows.push(format!(
+            "{marker}{}",
+            crate::util::truncate(cell, row_budget.saturating_sub(marker.len()))
+        ));
+    }
+
+    if remaining.len() > max_rows.saturating_sub(1)
+        && let Some(last) = rows.last_mut()
+    {
+        *last = format!(
+            "  └ +{} more · Ctrl+O details",
+            remaining.len() - max_rows.saturating_sub(1)
+        );
+    }
+
+    rows
+}
+
+fn subtle_tool_row_bg(bg: Color) -> Color {
+    match bg {
+        Color::Rgb(r, g, b) => Color::Rgb(
+            r.saturating_add(3),
+            g.saturating_add(5),
+            b.saturating_add(8),
+        ),
+        other => other,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_slim_tool_summary_rows(
+    area: Rect,
+    buf: &mut Buffer,
+    t: &dyn Theme,
+    bg: Color,
+    status_icon: &str,
+    status_color: Color,
+    display_name: &str,
+    detail_rows: &[String],
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let child_bg = subtle_tool_row_bg(bg);
+    let visible_rows = detail_rows.len().min(area.height as usize);
+    let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible_rows.max(1));
+
+    for (idx, detail) in detail_rows.iter().take(visible_rows).enumerate() {
+        let row_bg = if idx == 0 { bg } else { child_bg };
+        apply_rows_bg(area, idx as u16, 1, row_bg, buf);
+        if idx == 0 {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{status_icon} "),
+                    Style::default()
+                        .fg(status_color)
+                        .bg(row_bg)
+                        .add_modifier(Modifier::DIM),
+                ),
+                Span::styled(
+                    format!("{display_name} "),
+                    Style::default()
+                        .fg(status_color)
+                        .bg(row_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("· ", Style::default().fg(t.dim()).bg(row_bg)),
+                Span::styled(detail.clone(), Style::default().fg(t.muted()).bg(row_bg)),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(t.dim()).bg(row_bg)),
+                Span::styled(detail.clone(), Style::default().fg(t.dim()).bg(row_bg)),
+            ]));
+        }
+    }
+
+    Paragraph::new(lines.clone())
+        .style(Style::default().bg(bg))
+        .render(area, buf);
+    apply_rendered_links(
+        area,
+        &lines,
+        buf,
+        Style::default()
+            .fg(t.accent_muted())
+            .bg(bg)
+            .add_modifier(Modifier::UNDERLINED),
+        area.height,
+    );
+}
+
 fn apply_rows_bg(area: Rect, start_row: u16, row_count: u16, bg: Color, buf: &mut Buffer) {
     let end_row = start_row.saturating_add(row_count).min(area.height);
     for row in start_row..end_row {
@@ -1243,8 +1389,27 @@ impl Segment {
                 wrapped_rows(text, width.saturating_sub(3)) + thinking_rows + 4 + meta_line
             }
             ToolCard {
-                is_error, expanded, ..
-            } if matches!(mode, SegmentRenderMode::Slim) && !*is_error && !*expanded => 1,
+                name,
+                detail_args,
+                detail_result,
+                is_error,
+                expanded,
+                complete,
+                live_partial,
+                started_at,
+                ..
+            } if matches!(mode, SegmentRenderMode::Slim) && !*is_error && !*expanded => {
+                let cells = slim_tool_summary_cells(
+                    name,
+                    detail_args.as_deref(),
+                    detail_result.as_deref(),
+                    *complete,
+                    live_partial.as_deref(),
+                    *started_at,
+                    self.meta.duration_ms,
+                );
+                slim_tool_detail_lines(width, &cells).len().max(1) as u16
+            }
             ToolCard {
                 name,
                 detail_args,
@@ -1953,102 +2118,49 @@ fn render_tool_card(
     };
 
     if matches!(mode, SegmentRenderMode::Slim) && !complete && !is_error && !expanded {
-        let mut cells: Vec<String> = Vec::new();
-        if let Some(summary) = summarize_tool_args(name, detail_args) {
-            cells.push(summary);
-        }
-        cells.push(summarize_live_tool_progress(live_partial, started_at));
-        if tool_has_expandable_detail(detail_args, detail_result, live_partial) {
-            cells.push("Ctrl+O details".to_string());
-        }
-
-        let detail = cells.join(" · ");
-        let text_budget = area.width.saturating_sub(3) as usize;
-        let detail = crate::util::truncate(&detail, text_budget);
-        let line = Line::from(vec![
-            Span::styled(
-                format!("{status_icon} "),
-                Style::default()
-                    .fg(status_color)
-                    .bg(bg)
-                    .add_modifier(Modifier::DIM),
-            ),
-            Span::styled(
-                format!("{display_name} "),
-                Style::default()
-                    .fg(status_color)
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("· ", Style::default().fg(t.dim()).bg(bg)),
-            Span::styled(detail, Style::default().fg(t.muted()).bg(bg)),
-        ]);
-        let lines = vec![line];
-        Paragraph::new(lines.clone())
-            .style(Style::default().bg(bg))
-            .render(area, buf);
-        apply_rendered_links(
+        let cells = slim_tool_summary_cells(
+            name,
+            detail_args,
+            detail_result,
+            complete,
+            live_partial,
+            started_at,
+            meta.duration_ms,
+        );
+        let detail_rows = slim_tool_detail_lines(area.width, &cells);
+        render_slim_tool_summary_rows(
             area,
-            &lines,
             buf,
-            Style::default()
-                .fg(t.accent_muted())
-                .bg(bg)
-                .add_modifier(Modifier::UNDERLINED),
-            area.height,
+            t,
+            bg,
+            status_icon,
+            status_color,
+            &display_name,
+            &detail_rows,
         );
         return;
     }
 
     if matches!(mode, SegmentRenderMode::Slim) && complete && !is_error && !expanded {
-        let mut cells: Vec<String> = Vec::new();
-        if let Some(summary) = summarize_tool_args(name, detail_args) {
-            cells.push(summary);
-        }
-        if let Some(summary) = summarize_tool_result(name, detail_result) {
-            cells.push(summary);
-        }
-        if let Some(ms) = meta.duration_ms {
-            cells.push(format_duration_compact(ms));
-        }
-        if tool_has_expandable_detail(detail_args, detail_result, live_partial) {
-            cells.push("Ctrl+O details".to_string());
-        }
-
-        let detail = cells.join(" · ");
-        let text_budget = area.width.saturating_sub(3) as usize;
-        let detail = crate::util::truncate(&detail, text_budget);
-        let line = Line::from(vec![
-            Span::styled(
-                format!("{status_icon} "),
-                Style::default()
-                    .fg(status_color)
-                    .bg(bg)
-                    .add_modifier(Modifier::DIM),
-            ),
-            Span::styled(
-                format!("{display_name} "),
-                Style::default()
-                    .fg(status_color)
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("· ", Style::default().fg(t.dim()).bg(bg)),
-            Span::styled(detail, Style::default().fg(t.muted()).bg(bg)),
-        ]);
-        let lines = vec![line];
-        Paragraph::new(lines.clone())
-            .style(Style::default().bg(bg))
-            .render(area, buf);
-        apply_rendered_links(
+        let cells = slim_tool_summary_cells(
+            name,
+            detail_args,
+            detail_result,
+            complete,
+            live_partial,
+            started_at,
+            meta.duration_ms,
+        );
+        let detail_rows = slim_tool_detail_lines(area.width, &cells);
+        render_slim_tool_summary_rows(
             area,
-            &lines,
             buf,
-            Style::default()
-                .fg(t.accent_muted())
-                .bg(bg)
-                .add_modifier(Modifier::UNDERLINED),
-            area.height,
+            t,
+            bg,
+            status_icon,
+            status_color,
+            &display_name,
+            &detail_rows,
         );
         return;
     }
@@ -3428,6 +3540,43 @@ mod tests {
         assert!(text.contains("git"), "{text}");
         assert!(text.contains("git status --short"), "{text}");
         assert!(text.contains("2 lines · M src/tui/segments.rs"), "{text}");
+        assert!(text.contains("Ctrl+O details"), "{text}");
+    }
+
+    #[test]
+    fn slim_completed_tool_card_splits_long_payload_into_indented_rows() {
+        let mut seg = Segment::tool_card("tool-1", "bash");
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_args,
+            detail_result,
+            ..
+        } = &mut seg.content
+        {
+            *complete = true;
+            *detail_args =
+                Some("git -C /Users/wilson/workspace/styrene-labs/eidolon status --short".into());
+            *detail_result = Some(
+                " M crates/eidolon-core/src/lib.rs\n M crates/eidolon-parser/src/lib.rs\n".into(),
+            );
+        }
+
+        let height = seg.height_in_mode(72, &Alpharius, SegmentRenderMode::Slim);
+        assert!(height > 1, "expected long slim tool summary to split");
+
+        let (area, mut buf) = make_buf(72, height);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("git"), "{text}");
+        assert!(text.contains("git -C /Users/wilson/workspace"), "{text}");
+        assert!(text.contains("├") || text.contains("└"), "{text}");
+        assert!(text.contains("2 lines"), "{text}");
         assert!(text.contains("Ctrl+O details"), "{text}");
     }
 
