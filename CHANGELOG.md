@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-05-20
+
 ### Added
 
 - **Interactive background terminal tool** — added a first-class PTY-backed `terminal` core tool with `start`, `send`, `read`, `stop`, and `list` actions for session-scoped interactive processes, including transcript files, stdin/exit audit markers, output tails, TUI shutdown cleanup, and the same workspace-boundary permission scan used by `bash`.
