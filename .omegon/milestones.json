@@ -1074,12 +1074,12 @@
     "notes": []
   },
   "0.23.0": {
-    "status": "open",
+    "status": "released",
     "channel": "stable",
     "nodes": [],
-    "frozen": false,
+    "frozen": true,
     "opened": "2026-05-20T00:00:00Z",
-    "released": null,
+    "released": "2026-05-20T21:29:32Z",
     "notes": []
   }
 }
