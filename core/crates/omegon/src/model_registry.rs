@@ -302,6 +302,7 @@ mod tests {
     fn default_model_lookup() {
         let reg = ModelRegistry::global();
         assert_eq!(reg.default_model("openai"), Some("gpt-5.5"));
+        assert_eq!(reg.default_model("openai-codex"), Some("gpt-5.5"));
         assert_eq!(reg.default_model("anthropic"), Some("claude-sonnet-4-6"));
         assert_eq!(reg.default_model("nonexistent"), None);
     }

@@ -559,8 +559,8 @@ pub fn read_external_credentials(provider: &str) -> Option<OAuthCredentials> {
             // Codex CLI stores last_refresh as unix seconds; tokens typically last 1 hour
             let last_refresh = data
                 .get("last_refresh")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0) as u64;
+                .and_then(codex_cli_last_refresh_secs)
+                .unwrap_or(0);
             let expires = if last_refresh > 0 {
                 (last_refresh + 3600) * 1000 // 1 hour from last refresh, in ms
             } else {
@@ -643,6 +643,32 @@ pub fn read_external_credentials(provider: &str) -> Option<OAuthCredentials> {
                 refresh: String::new(),
                 expires: u64::MAX, // long-lived personal access token
             })
+        }
+        _ => None,
+    }
+}
+
+fn codex_cli_last_refresh_secs(value: &Value) -> Option<u64> {
+    value.as_u64().or_else(|| {
+        value.as_str().and_then(|raw| {
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .ok()
+                .and_then(|dt| u64::try_from(dt.timestamp()).ok())
+        })
+    })
+}
+
+fn read_external_credential_extra(provider: &str, field: &str) -> Option<String> {
+    let home = dirs::home_dir()?;
+    match (provider, field) {
+        ("openai-codex", "accountId") => {
+            let data: Value =
+                serde_json::from_str(&std::fs::read_to_string(home.join(".codex/auth.json")).ok()?)
+                    .ok()?;
+            data.pointer("/tokens/account_id")
+                .and_then(|v| v.as_str())
+                .filter(|value| !value.is_empty())
+                .map(String::from)
         }
         _ => None,
     }
@@ -740,7 +766,13 @@ async fn probe_provider(provider: &str) -> ProviderInfo {
     // Check stored credentials
     let auth_key = auth_json_key(provider);
     if let Some(creds) = read_credentials(auth_key) {
-        let status = if creds.is_expired() {
+        let status = if creds.cred_type == "oauth" && creds.is_expired() {
+            if resolve_with_refresh(provider).await.is_some() {
+                ProviderAuthStatus::Authenticated
+            } else {
+                ProviderAuthStatus::Expired
+            }
+        } else if creds.is_expired() {
             ProviderAuthStatus::Expired
         } else {
             ProviderAuthStatus::Authenticated
@@ -751,6 +783,22 @@ async fn probe_provider(provider: &str) -> ProviderInfo {
             status,
             is_oauth: creds.cred_type == "oauth",
             details: Some("stored".to_string()),
+        };
+    }
+
+    if provider_by_id(provider).is_some_and(|p| p.auth_method == AuthMethod::OAuth)
+        && read_external_credentials(auth_key).is_some()
+    {
+        let status = if resolve_with_refresh(provider).await.is_some() {
+            ProviderAuthStatus::Authenticated
+        } else {
+            ProviderAuthStatus::Expired
+        };
+        return ProviderInfo {
+            name: provider.to_string(),
+            status,
+            is_oauth: true,
+            details: Some("external".to_string()),
         };
     }
 
@@ -844,9 +892,22 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
     let mut creds = match read_credentials(auth_key) {
         Some(c) => c,
         None => {
-            // 3. Fallback: adopt Claude Code credentials from ~/.claude.json
+            // 3. Fallback: adopt credentials from supported external tools.
             if let Some(c) = read_external_credentials(auth_key) {
                 tracing::info!(provider, "Adopted credentials from external tool");
+                let persist_result = if auth_key == "openai-codex" {
+                    let account_id = read_external_credential_extra(auth_key, "accountId");
+                    write_credentials_with_extra(auth_key, &c, account_id.as_deref())
+                } else {
+                    write_credentials(auth_key, &c)
+                };
+                if let Err(e) = persist_result {
+                    tracing::warn!(
+                        provider = auth_key,
+                        error = %auth_write_failure_operator_message(&e),
+                        "adopted provider credential could not be persisted"
+                    );
+                }
                 c
             } else {
                 return None;
@@ -1904,8 +1965,11 @@ mod tests {
 
     static AUTH_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
-    fn with_auth_json_path_env<T>(path: Option<&Path>, f: impl FnOnce() -> T) -> T {
-        let _guard = AUTH_ENV_LOCK.lock().unwrap();
+    fn with_auth_json_path_env<T>(
+        path: Option<&Path>,
+        f: impl FnOnce() -> T + std::panic::UnwindSafe,
+    ) -> T {
+        let _guard = AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
         unsafe {
             match path {
@@ -1913,14 +1977,17 @@ mod tests {
                 None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
             }
         }
-        let result = f();
+        let result = std::panic::catch_unwind(f);
         unsafe {
             match original {
                 Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
                 None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
             }
         }
-        result
+        match result {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     }
 
     #[test]
@@ -2223,6 +2290,17 @@ mod tests {
         assert_eq!(entry["access"], "not-a-jwt");
         assert_eq!(entry["refresh"], "new-refresh");
         assert_eq!(entry["accountId"], "acct_123");
+    }
+
+    #[test]
+    fn codex_cli_last_refresh_accepts_rfc3339_timestamps() {
+        let parsed = codex_cli_last_refresh_secs(&json!("2026-05-11T02:34:22.555736Z"))
+            .expect("timestamp should parse");
+        assert_eq!(parsed, 1_778_466_862);
+        assert_eq!(
+            codex_cli_last_refresh_secs(&json!(1_778_466_862)),
+            Some(1_778_466_862)
+        );
     }
 
     #[test]

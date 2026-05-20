@@ -699,6 +699,7 @@ pub async fn execute_control(
                 ctx.login_prompt_tx,
                 ctx.events_tx,
                 ctx.cli,
+                &ctx.agent.cwd,
                 &provider,
             )
             .await
@@ -1943,6 +1944,7 @@ pub async fn auth_login_response(
     login_prompt_tx: &std::sync::Arc<tokio::sync::Mutex<Option<oneshot::Sender<String>>>>,
     events_tx: &broadcast::Sender<AgentEvent>,
     cli: &CliRuntimeView<'_>,
+    cwd: &Path,
     provider: &str,
 ) -> SlashCommandResponse {
     let provider = provider.trim();
@@ -1977,6 +1979,7 @@ pub async fn auth_login_response(
         .ok()
         .map(|s| s.model.clone())
         .unwrap_or_else(|| cli.model.to_string());
+    let cwd_for_profile = cwd.to_path_buf();
     let settings_for_login = shared_settings.clone();
     tokio::spawn(async move {
         let progress: auth::LoginProgress = Box::new(move |msg| {
@@ -2060,6 +2063,9 @@ pub async fn auth_login_response(
                     s.set_model(&effective_model);
                     s.provider_connected =
                         crate::auth::provider_connected_for_model(&effective_model);
+                    let mut profile = settings::Profile::load(&cwd_for_profile);
+                    profile.capture_from(&s);
+                    let _ = profile.save(&cwd_for_profile);
                 }
                 let _ = events_tx_clone.send(AgentEvent::SystemNotification {
                     message: auth::operator_provider_connected_message(&effective_model),
@@ -2592,10 +2598,9 @@ pub async fn permissions_view_response(
                     "commands": [
                         "/permissions list",
                         "/permissions add <path>",
-                        "/permissions remove <path>",
-                        "/trust add <path>",
-                        "/trust remove <path>"
+                        "/permissions remove <path>"
                     ],
+                    "aliases": ["/trust add <path>", "/trust remove <path>"],
                     "promptKeys": {
                         "y": "allow once for this session",
                         "a": "always allow and save to project profile permissions",
@@ -3825,6 +3830,36 @@ mod tests {
         );
         let profile = crate::settings::Profile::load(tmp.path());
         assert!(profile.effective_trusted_directories().is_empty());
+    }
+
+    #[tokio::test]
+    async fn permissions_view_prefers_canonical_permissions_commands() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("AGENTS.md"), "instructions").unwrap();
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+
+        let view = permissions_view_response(&settings, tmp.path()).await;
+        let output = view.output.expect("permissions view output");
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let commands = json["permissions"]["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>();
+        assert!(commands.contains(&"/permissions add <path>"), "{output}");
+        assert!(!commands.contains(&"/trust add <path>"), "{output}");
+        let aliases = json["permissions"]["aliases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>();
+        assert!(aliases.contains(&"/trust add <path>"), "{output}");
+        assert!(
+            output.contains("profile.permissions.trustedDirectories"),
+            "{output}"
+        );
     }
 
     #[tokio::test]

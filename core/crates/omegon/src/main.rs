@@ -3934,9 +3934,11 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 respond_to,
             } => {
                 let response = execute_plan_slash_command(&mut runtime_state, command);
+                let snapshot_json = runtime_state.conversation.intent.work_plan_snapshot_json();
                 if let Some(output) = response.output.clone() {
                     let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
                 }
+                let _ = events_tx.send(AgentEvent::PlanUpdated { snapshot_json });
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
                         accepted: response.accepted,
@@ -4407,6 +4409,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         no_session: cli.no_session,
                         model: &cli.model,
                     },
+                    &agent.cwd,
                     &provider,
                 )
                 .await;
@@ -4696,6 +4699,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 .ok()
                                 .map(|s| s.model.clone())
                                 .unwrap_or_else(|| cli.model.clone());
+                            let cwd_for_profile = agent.cwd.clone();
                             let settings_for_login = shared_settings.clone();
                             crate::task_spawn::spawn_operator_task(
                                 "interactive-auth-login",
@@ -4762,11 +4766,15 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                         .send(AgentEvent::SystemNotification { message });
 
                                     if result.is_ok() {
-                                        let effective_model = providers::resolve_execution_model_spec(
-                                            &model_for_redetect,
-                                        )
-                                        .await
-                                        .unwrap_or(model_for_redetect.clone());
+                                        let login_provider_model =
+                                            providers::default_model_for_provider(&provider_clone)
+                                                .unwrap_or(model_for_redetect.clone());
+                                        let effective_model =
+                                            providers::resolve_execution_model_spec(
+                                                &login_provider_model,
+                                            )
+                                            .await
+                                            .unwrap_or(login_provider_model);
                                         if let Some(new_bridge) =
                                             providers::auto_detect_bridge(&effective_model).await
                                         {
@@ -4775,6 +4783,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                             if let Ok(mut s) = settings_for_login.lock() {
                                                 s.set_model(&effective_model);
                                                 s.provider_connected = auth::provider_connected_for_model(&effective_model);
+                                                let mut profile = settings::Profile::load(&cwd_for_profile);
+                                                profile.capture_from(&s);
+                                                let _ = profile.save(&cwd_for_profile);
                                             }
                                             tracing::info!("bridge hot-swapped after successful login");
                                             let _ =
