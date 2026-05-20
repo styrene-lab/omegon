@@ -161,6 +161,33 @@ The `runner` field distinguishes script-backed from HTTP-backed:
 - No `runner` + `endpoint = "..."` → HTTP call (existing behavior)
 - `runner = "wasm"` + `module = "..."` → future WASM execution
 
+### Validator plugins
+
+Functional plugins can declare validator routing metadata for file types the built-in `validate` tool does not understand. A validator declaration points at a normal tool from the same manifest:
+
+```toml
+[[tools]]
+name = "validate_docs"
+description = "Validate Markdown documentation"
+runner = "bash"
+script = "tools/validate-docs.sh"
+parameters = { type = "object", properties = { paths = { type = "array", items = { type = "string" } } }, required = ["paths"] }
+
+[[validators]]
+name = "markdown"
+tool = "validate_docs"
+extensions = ["md", "mdx"]
+globs = ["docs/**/*.md"]
+description = "Markdown documentation validation"
+```
+
+The validator tool uses the same JSON stdin/stdout contract as every other Armory tool. `[[validators]]` does two things:
+
+- Marks the referenced tool as validation-capable in Omegon's tool metadata.
+- Lets the built-in `validate` tool recommend installed Armory validators when it skips unsupported paths instead of repeatedly retrying a validator that cannot apply.
+
+This keeps simple validators small: a docs plugin can ship a `markdownlint`, `mdbook test`, schema check, or project-specific shell script without adding another core language validator to Omegon.
+
 ### OCI containers as a tool runner — answering deps and sandboxing
 
 OCI containers solve both open questions:

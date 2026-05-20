@@ -355,6 +355,9 @@ fn validation_recommendation(
         lines.push(format!(
             "  - For this file type, use a project-specific check such as `git diff --check -- {quoted_paths}` or the repo's docs/config validator if one exists."
         ));
+        for recommendation in discover_armory_validator_recommendations(paths, cwd) {
+            lines.push(format!("  - {recommendation}"));
+        }
         if paths.iter().any(|path| is_markdown_path(path)) {
             lines.push(
                 "  - For Markdown/docs, prefer the repo's documentation build or linter when present (`just docs`, `mdbook test`, `markdownlint`, etc.).".to_string(),
@@ -376,6 +379,70 @@ fn validation_recommendation(
     );
 
     lines.join("\n")
+}
+
+fn discover_armory_validator_recommendations(paths: &[PathBuf], cwd: &Path) -> Vec<String> {
+    let mut recommendations = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for manifest_path in armory_plugin_manifest_paths(cwd) {
+        let Ok(content) = std::fs::read_to_string(&manifest_path) else {
+            continue;
+        };
+        let Ok(manifest) = crate::plugins::armory::ArmoryManifest::parse(&content) else {
+            continue;
+        };
+        for validator in &manifest.validators {
+            if !paths.iter().any(|path| validator.matches_path(path)) {
+                continue;
+            }
+            let key = format!("{}:{}", manifest.plugin.id, validator.tool);
+            if !seen.insert(key) {
+                continue;
+            }
+            let extensions = if validator.extensions.is_empty() {
+                "declared files".to_string()
+            } else {
+                validator
+                    .extensions
+                    .iter()
+                    .map(|ext| format!(".{}", ext.trim_start_matches('.')))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            recommendations.push(format!(
+                "Installed Armory validator `{}` from `{}` handles {extensions}; call that tool with the rejected path set.",
+                validator.tool, manifest.plugin.name
+            ));
+        }
+    }
+
+    recommendations
+}
+
+fn armory_plugin_manifest_paths(cwd: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(home) = crate::paths::omegon_home() {
+        roots.push(home.join("plugins"));
+    }
+    roots.push(cwd.join(".omegon").join("plugins"));
+    if let Ok(dir) = std::env::var("OMEGON_PLUGIN_DIR") {
+        roots.push(PathBuf::from(dir));
+    }
+
+    let mut manifests = Vec::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path().join("plugin.toml");
+            if path.exists() {
+                manifests.push(path);
+            }
+        }
+    }
+    manifests
 }
 
 fn shell_quote_path(path: &Path, cwd: &Path) -> String {
@@ -607,6 +674,54 @@ mod tests {
         assert!(message.contains("Do not retry `validate`"));
         assert_eq!(result.details["validators_run"], 0);
         assert_eq!(result.details["validation_skipped"], true);
+    }
+
+    #[tokio::test]
+    async fn validate_recommends_installed_armory_validator() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join(".omegon/plugins/docs-validator");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.toml"),
+            r#"
+            [plugin]
+            type = "extension"
+            id = "dev.example.docs-validator"
+            name = "Docs Validator"
+            version = "1.0.0"
+            description = "Validate Markdown docs"
+
+            [[tools]]
+            name = "validate_docs"
+            description = "Validate docs"
+            runner = "bash"
+            script = "tools/validate-docs.sh"
+
+            [[validators]]
+            name = "markdown"
+            tool = "validate_docs"
+            extensions = ["md"]
+        "#,
+        )
+        .unwrap();
+        let path = dir.path().join("README.md");
+        std::fs::write(&path, "# docs").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("Installed Armory validator `validate_docs` from `Docs Validator`"),
+            "{message}"
+        );
+        assert!(message.contains("handles .md"), "{message}");
     }
 
     #[tokio::test]
