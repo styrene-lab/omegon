@@ -1368,12 +1368,13 @@ impl Segment {
         let estimate = match &self.content {
             UserPrompt { text } => wrapped_rows(text, width.saturating_sub(4)) + 2,
             AssistantText { text, thinking, .. } if matches!(mode, SegmentRenderMode::Slim) => {
-                let thinking_rows = if thinking.is_empty() {
+                let thinking_rows = if thinking.is_empty() { 0 } else { 1 };
+                let text_rows = if text.is_empty() {
                     0
                 } else {
-                    wrapped_rows(thinking, width.saturating_sub(2)).min(8) + 1
+                    wrapped_rows(text, width).max(1)
                 };
-                wrapped_rows(text, width).max(1) + thinking_rows
+                (text_rows + thinking_rows).max(1)
             }
             AssistantText { text, thinking, .. } => {
                 let meta_line = if self.meta.model_id.is_some() || self.meta.provider.is_some() {
@@ -1872,44 +1873,77 @@ fn render_assistant_text(
     // Reasoning block — stream full reasoning live, collapse after completion.
     if !thinking.is_empty() {
         let think_lines: Vec<&str> = split_trimmed_trailing_empty_lines(thinking);
-        let show = if complete {
-            think_lines.len().min(6)
+        if matches!(mode, SegmentRenderMode::Slim) {
+            let row_bg = subtle_tool_row_bg(bg);
+            apply_rows_bg(inner, lines.len() as u16, 1, row_bg, buf);
+            let preview = think_lines
+                .iter()
+                .map(|line| clean_inline_text(line.trim()))
+                .find(|line| !line.is_empty())
+                .unwrap_or_else(|| "thinking".to_string());
+            let budget = inner.width.saturating_sub(24) as usize;
+            lines.push(Line::from(vec![
+                Span::styled("◌ ", Style::default().fg(t.border()).bg(row_bg)),
+                Span::styled(
+                    "reasoning ",
+                    Style::default()
+                        .fg(t.dim())
+                        .bg(row_bg)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+                Span::styled(
+                    format!("({} lines)", think_lines.len()),
+                    Style::default().fg(t.border_dim()).bg(row_bg),
+                ),
+                Span::styled(" · ", Style::default().fg(t.border_dim()).bg(row_bg)),
+                Span::styled(
+                    crate::util::truncate(&preview, budget),
+                    Style::default()
+                        .fg(t.border())
+                        .bg(row_bg)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+            ]));
         } else {
-            think_lines.len()
-        };
-        lines.push(Line::from(vec![
-            Span::styled("◌ ", Style::default().fg(t.border()).bg(bg)),
-            Span::styled(
-                "reasoning ",
-                Style::default()
-                    .fg(t.dim())
-                    .bg(bg)
-                    .add_modifier(Modifier::ITALIC),
-            ),
-            Span::styled(
-                format!("({} lines)", think_lines.len()),
-                Style::default().fg(t.border_dim()).bg(bg),
-            ),
-        ]));
-        for line in think_lines.iter().take(show) {
+            let show = if complete {
+                think_lines.len().min(6)
+            } else {
+                think_lines.len()
+            };
+            lines.push(Line::from(vec![
+                Span::styled("◌ ", Style::default().fg(t.border()).bg(bg)),
+                Span::styled(
+                    "reasoning ",
+                    Style::default()
+                        .fg(t.dim())
+                        .bg(bg)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+                Span::styled(
+                    format!("({} lines)", think_lines.len()),
+                    Style::default().fg(t.border_dim()).bg(bg),
+                ),
+            ]));
+            for line in think_lines.iter().take(show) {
+                lines.push(Line::from(Span::styled(
+                    format!("  {line}"),
+                    Style::default()
+                        .fg(t.border())
+                        .bg(bg)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            }
+            if complete && think_lines.len() > show {
+                lines.push(Line::from(Span::styled(
+                    format!("  ⋯ {} more", think_lines.len() - show),
+                    Style::default().fg(t.border_dim()).bg(bg),
+                )));
+            }
             lines.push(Line::from(Span::styled(
-                format!("  {line}"),
-                Style::default()
-                    .fg(t.border())
-                    .bg(bg)
-                    .add_modifier(Modifier::ITALIC),
+                "  ─ ─ ─",
+                Style::default().fg(t.border_dim()).bg(bg),
             )));
         }
-        if complete && think_lines.len() > show {
-            lines.push(Line::from(Span::styled(
-                format!("  ⋯ {} more", think_lines.len() - show),
-                Style::default().fg(t.border_dim()).bg(bg),
-            )));
-        }
-        lines.push(Line::from(Span::styled(
-            "  ─ ─ ─",
-            Style::default().fg(t.border_dim()).bg(bg),
-        )));
     }
 
     if !text.is_empty() && !matches!(mode, SegmentRenderMode::Slim) {
@@ -3491,6 +3525,38 @@ mod tests {
         assert!(text.contains("Plain response text."), "{text}");
         assert!(!text.contains("answer"), "{text}");
         assert!(!text.contains("omegon"), "{text}");
+    }
+
+    #[test]
+    fn slim_assistant_reasoning_collapses_to_single_status_row() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::AssistantText {
+                text: String::new(),
+                thinking: "**Considering documentation needs**\n\nI need to modify documents and inspect templates before editing.".into(),
+                complete: false,
+            },
+        };
+        assert_eq!(
+            seg.height_in_mode(80, &Alpharius, SegmentRenderMode::Slim),
+            1
+        );
+
+        let (area, mut buf) = make_buf(80, 4);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("reasoning (3 lines)"), "{text}");
+        assert!(text.contains("Considering documentation needs"), "{text}");
+        assert!(
+            !text.contains("I need to modify documents"),
+            "slim mode should not dump full reasoning prose between tool rows: {text}"
+        );
     }
 
     #[test]
