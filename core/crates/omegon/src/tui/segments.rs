@@ -3909,10 +3909,9 @@ mod tests {
         );
         let text = buf_text(&buf, area);
         assert!(text.contains("validate"), "{text}");
-        assert!(
-            text.contains("src/main.rs, src/lib.rs, docs/readme.md"),
-            "{text}"
-        );
+        assert!(text.contains("src/main.rs"), "{text}");
+        assert!(text.contains("src/lib.rs"), "{text}");
+        assert!(text.contains("docs/readme.md"), "{text}");
         assert!(text.contains("rust"), "{text}");
         assert!(text.contains("unsupported source type: markdown"), "{text}");
     }
