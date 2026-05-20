@@ -512,7 +512,9 @@ impl ToolProvider for CoreTools {
                 name: reg::VALIDATE.into(),
                 label: reg::VALIDATE.into(),
                 description: "Run narrow project validation for specific paths. Use this after edits \
-                    instead of shelling out through bash for standard typecheck/lint/test validation."
+                    instead of shelling out through bash for standard typecheck/lint/test validation. \
+                    If the result reports validation_skipped, do not retry validate for the same path set; \
+                    use the recommended project-specific command or a validator plugin instead."
                     .into(),
                 parameters: json!({
                     "type": "object",
