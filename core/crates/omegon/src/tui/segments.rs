@@ -523,6 +523,59 @@ fn slim_tool_detail_lines(width: u16, cells: &[String]) -> Vec<String> {
     rows
 }
 
+fn slim_tool_collapsed_line(width: u16, cells: &[String]) -> String {
+    let budget = width.saturating_sub(16) as usize;
+    if cells.is_empty() {
+        String::new()
+    } else {
+        crate::util::truncate(&cells.join(" · "), budget)
+    }
+}
+
+fn slim_tool_live_rows(width: u16, cells: &[String]) -> Vec<String> {
+    if cells.is_empty() {
+        return vec![String::new()];
+    }
+
+    let row_budget = width.saturating_sub(8) as usize;
+    let mut rows = Vec::new();
+    let progress_idx = cells
+        .iter()
+        .position(|cell| cell.contains("running") || cell.contains("idle") || cell.contains('%'))
+        .unwrap_or_else(|| cells.len().saturating_sub(1));
+    rows.push(crate::util::truncate(&cells[progress_idx], row_budget));
+
+    let detail_cells = cells
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, cell)| (idx != progress_idx).then_some(cell))
+        .collect::<Vec<_>>();
+    let max_detail_rows = 4usize;
+    for (idx, cell) in detail_cells.iter().take(max_detail_rows).enumerate() {
+        let is_last_visible = idx + 1 == detail_cells.len().min(max_detail_rows);
+        let marker = if is_last_visible {
+            "    └ "
+        } else {
+            "    ├ "
+        };
+        rows.push(format!(
+            "{marker}{}",
+            crate::util::truncate(cell, row_budget.saturating_sub(marker.len()))
+        ));
+    }
+
+    if detail_cells.len() > max_detail_rows
+        && let Some(last) = rows.last_mut()
+    {
+        *last = format!(
+            "    └ +{} more · Ctrl+O details",
+            detail_cells.len() - max_detail_rows
+        );
+    }
+
+    rows
+}
+
 fn subtle_tool_row_bg(bg: Color) -> Color {
     match bg {
         Color::Rgb(r, g, b) => Color::Rgb(
@@ -580,6 +633,70 @@ fn render_slim_tool_summary_rows(
                 Span::styled("  ", Style::default().fg(t.dim()).bg(row_bg)),
                 Span::styled(detail.clone(), Style::default().fg(t.dim()).bg(row_bg)),
             ]));
+        }
+    }
+
+    Paragraph::new(lines.clone())
+        .style(Style::default().bg(bg))
+        .render(area, buf);
+    apply_rendered_links(
+        area,
+        &lines,
+        buf,
+        Style::default()
+            .fg(t.accent_muted())
+            .bg(bg)
+            .add_modifier(Modifier::UNDERLINED),
+        area.height,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_slim_tool_live_rows(
+    area: Rect,
+    buf: &mut Buffer,
+    t: &dyn Theme,
+    bg: Color,
+    status_icon: &str,
+    status_color: Color,
+    display_name: &str,
+    rows: &[String],
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let child_bg = subtle_tool_row_bg(bg);
+    let visible_rows = rows.len().min(area.height as usize);
+    let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible_rows.max(1));
+
+    for (idx, row) in rows.iter().take(visible_rows).enumerate() {
+        let row_bg = if idx == 0 { bg } else { child_bg };
+        apply_rows_bg(area, idx as u16, 1, row_bg, buf);
+        if idx == 0 {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{status_icon} "),
+                    Style::default()
+                        .fg(status_color)
+                        .bg(row_bg)
+                        .add_modifier(Modifier::DIM),
+                ),
+                Span::styled(
+                    format!("{display_name} "),
+                    Style::default()
+                        .fg(status_color)
+                        .bg(row_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("· ", Style::default().fg(t.dim()).bg(row_bg)),
+                Span::styled(row.clone(), Style::default().fg(t.muted()).bg(row_bg)),
+            ]));
+        } else {
+            lines.push(Line::from(Span::styled(
+                row.clone(),
+                Style::default().fg(t.dim()).bg(row_bg),
+            )));
         }
     }
 
@@ -1409,7 +1526,11 @@ impl Segment {
                     *started_at,
                     self.meta.duration_ms,
                 );
-                slim_tool_detail_lines(width, &cells).len().max(1) as u16
+                if *complete {
+                    1
+                } else {
+                    slim_tool_live_rows(width, &cells).len().max(1) as u16
+                }
             }
             ToolCard {
                 name,
@@ -2161,8 +2282,8 @@ fn render_tool_card(
             started_at,
             meta.duration_ms,
         );
-        let detail_rows = slim_tool_detail_lines(area.width, &cells);
-        render_slim_tool_summary_rows(
+        let detail_rows = slim_tool_live_rows(area.width, &cells);
+        render_slim_tool_live_rows(
             area,
             buf,
             t,
@@ -2185,7 +2306,7 @@ fn render_tool_card(
             started_at,
             meta.duration_ms,
         );
-        let detail_rows = slim_tool_detail_lines(area.width, &cells);
+        let detail_rows = vec![slim_tool_collapsed_line(area.width, &cells)];
         render_slim_tool_summary_rows(
             area,
             buf,
@@ -3610,7 +3731,50 @@ mod tests {
     }
 
     #[test]
-    fn slim_completed_tool_card_splits_long_payload_into_indented_rows() {
+    fn slim_running_tool_card_uses_indented_live_rows() {
+        let mut seg = Segment::tool_card("tool-1", "bash");
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_args,
+            live_partial,
+            started_at,
+            ..
+        } = &mut seg.content
+        {
+            *complete = false;
+            *detail_args =
+                Some("git -C /Users/wilson/workspace/styrene-labs/eidolon status --short".into());
+            *live_partial = Some(Box::new(omegon_traits::PartialToolResult::content(
+                " M crates/eidolon-core/src/lib.rs\n M crates/eidolon-parser/src/lib.rs\n",
+                1_200,
+            )));
+            *started_at = Some(std::time::Instant::now());
+        }
+
+        let height = seg.height_in_mode(72, &Alpharius, SegmentRenderMode::Slim);
+        assert!(
+            height > 1,
+            "expected running slim tool to show live detail rows"
+        );
+
+        let (area, mut buf) = make_buf(72, height);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("git"), "{text}");
+        assert!(text.contains("running"), "{text}");
+        assert!(text.contains("├") || text.contains("└"), "{text}");
+        assert!(text.contains("git -C /Users/wilson/workspace"), "{text}");
+        assert!(text.contains("Ctrl+O details"), "{text}");
+    }
+
+    #[test]
+    fn slim_completed_tool_card_collapses_long_payload_to_one_row() {
         let mut seg = Segment::tool_card("tool-1", "bash");
         if let SegmentContent::ToolCard {
             complete,
@@ -3627,10 +3791,12 @@ mod tests {
             );
         }
 
-        let height = seg.height_in_mode(72, &Alpharius, SegmentRenderMode::Slim);
-        assert!(height > 1, "expected long slim tool summary to split");
+        assert_eq!(
+            seg.height_in_mode(72, &Alpharius, SegmentRenderMode::Slim),
+            1
+        );
 
-        let (area, mut buf) = make_buf(72, height);
+        let (area, mut buf) = make_buf(72, 1);
         seg.render(
             area,
             &mut buf,
@@ -3640,10 +3806,11 @@ mod tests {
         );
         let text = buf_text(&buf, area);
         assert!(text.contains("git"), "{text}");
-        assert!(text.contains("git -C /Users/wilson/workspace"), "{text}");
-        assert!(text.contains("├") || text.contains("└"), "{text}");
-        assert!(text.contains("2 lines"), "{text}");
-        assert!(text.contains("Ctrl+O details"), "{text}");
+        assert!(!text.contains("├") && !text.contains("└"), "{text}");
+        assert!(
+            text.contains("Ctrl+O details") || text.contains("…"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -3784,7 +3951,7 @@ mod tests {
     }
 
     #[test]
-    fn slim_running_tool_card_renders_live_evidence_on_one_row() {
+    fn slim_running_tool_card_renders_live_evidence_as_indented_rows() {
         let partial = omegon_traits::PartialToolResult {
             tail: "downloading NixOS minimal ISO...\ncopying closure paths...\nbundle ready".into(),
             progress: omegon_traits::ToolProgress {
@@ -3815,11 +3982,9 @@ mod tests {
             *started_at = None;
         }
 
-        assert_eq!(
-            seg.height_in_mode(120, &Alpharius, SegmentRenderMode::Slim),
-            1
-        );
-        let (area, mut buf) = make_buf(140, 1);
+        let height = seg.height_in_mode(120, &Alpharius, SegmentRenderMode::Slim);
+        assert!(height > 1, "running tool should show live child rows");
+        let (area, mut buf) = make_buf(140, height);
         seg.render(
             area,
             &mut buf,
@@ -3833,6 +3998,7 @@ mod tests {
         assert!(text.contains("2/3 steps"), "{text}");
         assert!(text.contains("11.4s"), "{text}");
         assert!(text.contains("bundle ready"), "{text}");
+        assert!(text.contains("├") || text.contains("└"), "{text}");
         assert!(text.contains("Ctrl+O details"), "{text}");
     }
 
