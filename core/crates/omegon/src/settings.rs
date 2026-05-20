@@ -372,6 +372,12 @@ pub struct Settings {
     #[serde(default)]
     pub sandbox: bool,
 
+    /// Enable the interactive PTY-backed terminal tool. This is useful for
+    /// local/debuggable agents and should usually be disabled for hardened
+    /// headless OCI profiles that lack `/dev/pts` or writable config storage.
+    #[serde(default = "default_terminal_tool")]
+    pub terminal_tool: bool,
+
     /// How long clipboard pastes are retained on disk before automatic
     /// deletion at session start, in hours. Default 24h. Set to 0 to
     /// disable automatic deletion entirely. The setting also feeds the
@@ -596,6 +602,10 @@ fn default_mouse() -> bool {
     true
 }
 
+fn default_terminal_tool() -> bool {
+    true
+}
+
 // ─── Selector Policy ─────────────────────────────────────────────────────────
 
 /// Derived per-turn context assembly policy.
@@ -653,6 +663,7 @@ impl Default for Settings {
             provider_is_oauth: false,
             mouse: true,
             sandbox: false,
+            terminal_tool: true,
             clipboard_retention_hours: default_clipboard_retention_hours(),
             posture_disabled_tools: Vec::new(),
             posture_enabled_tools: Vec::new(),
@@ -1067,6 +1078,11 @@ pub struct Profile {
     /// Sandbox isolation for delegate/cleave children.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<bool>,
+    /// Enable the interactive PTY-backed terminal tool for this profile.
+    /// Set false for hardened/headless OCI agents that should use `bash`,
+    /// `serve`, or workload controllers instead of interactive sessions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_tool: Option<bool>,
 
     // ── Persona / Tone ──
     /// Active persona name. Restored on next session start.
@@ -1340,6 +1356,9 @@ impl Profile {
         if let Some(s) = self.sandbox {
             settings.sandbox = s;
         }
+        if let Some(enabled) = self.terminal_tool {
+            settings.terminal_tool = enabled;
+        }
         // persona and tone are restored by the plugin system at session start,
         // not by Settings.apply_to — Profile stores the name for resumption.
     }
@@ -1382,25 +1401,44 @@ impl Profile {
         });
         self.thinking_level = Some(settings.thinking.as_str().to_string());
         self.max_turns = Some(settings.max_turns);
-        self.automation.level = Some(settings.automation_level);
-        if !settings.provider_order.is_empty() {
-            self.provider_order = settings.provider_order.clone();
+        if settings.automation_level != AutomationLevel::default()
+            || self.automation.level.is_some()
+        {
+            self.automation.level = Some(settings.automation_level);
+        } else {
+            self.automation.level = None;
         }
+        self.provider_order = settings.provider_order.clone();
         self.set_trusted_directories(settings.trusted_directories.clone());
         if settings.update_channel != "stable" {
             self.update_channel = Some(settings.update_channel.clone());
+        } else {
+            self.update_channel = None;
         }
         if settings.auto_update {
             self.auto_update = Some(true);
+        } else {
+            self.auto_update = None;
         }
         if settings.tool_detail != ToolDetail::Detailed {
             self.tool_detail = Some(settings.tool_detail.as_str().to_string());
+        } else {
+            self.tool_detail = None;
         }
         if !settings.mouse {
             self.mouse = Some(false);
+        } else {
+            self.mouse = None;
         }
         if settings.sandbox {
             self.sandbox = Some(true);
+        } else {
+            self.sandbox = None;
+        }
+        if !settings.terminal_tool {
+            self.terminal_tool = Some(false);
+        } else {
+            self.terminal_tool = None;
         }
     }
 }
@@ -2097,6 +2135,45 @@ mod tests {
         settings.automation_level = AutomationLevel::Autonomous;
         captured.capture_from(&settings);
         assert_eq!(captured.automation.level, Some(AutomationLevel::Autonomous));
+
+        let mut default_capture = Profile::default();
+        default_capture.capture_from(&Settings::default());
+        assert_eq!(default_capture.automation.level, None);
+
+        let mut explicit_default_capture =
+            serde_json::from_str::<Profile>(r#"{"automation":{"level":"guarded"}}"#).unwrap();
+        explicit_default_capture.capture_from(&Settings::default());
+        assert_eq!(
+            explicit_default_capture.automation.level,
+            Some(AutomationLevel::Guarded)
+        );
+    }
+
+    #[test]
+    fn profile_terminal_tool_applies_and_only_captures_false() {
+        let profile: Profile = serde_json::from_str(r#"{"terminalTool":false}"#).unwrap();
+        let mut settings = Settings::default();
+        profile.apply_to(&mut settings);
+        assert!(!settings.terminal_tool);
+
+        let mut captured = Profile::default();
+        captured.capture_from(&settings);
+        assert_eq!(captured.terminal_tool, Some(false));
+
+        settings.terminal_tool = true;
+        let mut default_capture = Profile::default();
+        default_capture.capture_from(&settings);
+        assert_eq!(default_capture.terminal_tool, None);
+
+        let mut restored_capture = Profile {
+            terminal_tool: Some(false),
+            ..Profile::default()
+        };
+        restored_capture.capture_from(&settings);
+        assert_eq!(restored_capture.terminal_tool, None);
+
+        let json = serde_json::to_value(Profile::default()).unwrap();
+        assert!(json.get("terminalTool").is_none());
     }
 
     #[test]

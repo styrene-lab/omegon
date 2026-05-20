@@ -18,6 +18,7 @@ pub(crate) mod output_filter;
 pub mod read;
 pub mod render;
 pub mod serve;
+pub mod terminal;
 pub mod validate;
 pub mod view;
 pub mod web_search;
@@ -317,6 +318,7 @@ pub struct CoreTools {
     repo_model: Option<std::sync::Arc<omegon_git::RepoModel>>,
     /// Workspace boundary enforcer — shared with other tool providers.
     boundary: WorkspaceBoundary,
+    terminal_tool_enabled: bool,
 }
 
 impl CoreTools {
@@ -326,6 +328,7 @@ impl CoreTools {
             cwd,
             repo_model: None,
             boundary,
+            terminal_tool_enabled: true,
         }
     }
 
@@ -339,11 +342,13 @@ impl CoreTools {
             cwd,
             repo_model: Some(repo_model),
             boundary,
+            terminal_tool_enabled: true,
         }
     }
 
     /// Attach shared settings for trusted directory resolution.
     pub fn with_settings(mut self, settings: crate::settings::SharedSettings) -> Self {
+        self.terminal_tool_enabled = settings.lock().map(|s| s.terminal_tool).unwrap_or(true);
         self.boundary = self.boundary.with_settings(settings);
         self
     }
@@ -740,6 +745,58 @@ impl ToolProvider for CoreTools {
                 }),
                 capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
+            ToolDefinition {
+                name: reg::TERMINAL.into(),
+                label: reg::TERMINAL.into(),
+                description: "Manage interactive background terminal sessions. Use this for \
+                    long-running commands that need later input or monitoring. Sessions are \
+                    created through the same workspace permission checks as bash and are \
+                    cleaned up on session exit unless stopped sooner.\n\nActions:\n- start: \
+                    Launch an interactive terminal command (command required, name optional)\n- \
+                    send: Send stdin to a session\n- read: Read recent output/tail from a session\n- \
+                    stop: Stop a session\n- list: Show active sessions"
+                    .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["start", "send", "read", "stop", "list"],
+                            "description": "Action to perform"
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "Command to run (for 'start')"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Human-readable session name"
+                        },
+                        "session_id": {
+                            "type": "string",
+                            "description": "Terminal session id returned by start"
+                        },
+                        "input": {
+                            "type": "string",
+                            "description": "Text to send to stdin (for 'send')"
+                        },
+                        "newline": {
+                            "type": "boolean",
+                            "description": "Append a newline to input if missing (default: true)"
+                        },
+                        "max_bytes": {
+                            "type": "number",
+                            "description": "Maximum tail bytes to return (for 'read')"
+                        },
+                        "force": {
+                            "type": "boolean",
+                            "description": "Force kill instead of graceful terminate (for 'stop')"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
+            },
             // trust_directory is NOT in the tool schema — it's internal harness
             // plumbing called via bus.execute_internal() by the permission
             // dispatch layer. The handler is in CoreTools::execute().
@@ -1085,6 +1142,24 @@ impl ToolProvider for CoreTools {
                     .ok_or_else(|| anyhow::anyhow!("missing 'action' argument"))?;
                 serve::execute(action, &args, &self.cwd).await
             }
+            reg::TERMINAL => {
+                if !self.terminal_tool_enabled {
+                    return Ok(ToolResult {
+                        content: vec![omegon_traits::ContentBlock::Text {
+                            text: "Terminal tool is disabled by the active profile.".into(),
+                        }],
+                        details: json!({
+                            "is_error": true,
+                            "blocked": true,
+                            "reason": "terminal_tool_disabled_by_profile",
+                        }),
+                    });
+                }
+                let action = args["action"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'action' argument"))?;
+                terminal::execute(action, &args, &self.cwd, Some(self.boundary.clone())).await
+            }
             reg::TRUST_DIRECTORY => {
                 let path_str = args["path"]
                     .as_str()
@@ -1418,6 +1493,31 @@ mod tests {
         assert_eq!(wait.timeout_secs, OPERATOR_WAIT_MAX_SECS);
     }
 
+    #[tokio::test]
+    async fn terminal_tool_profile_disable_blocks_direct_execution() {
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+        settings.lock().unwrap().terminal_tool = false;
+        let tools = CoreTools::new(PathBuf::from("/tmp/workspace")).with_settings(settings);
+        let result = tools
+            .execute(
+                reg::TERMINAL,
+                "terminal-disabled-test",
+                serde_json::json!({"action": "list"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.details.get("blocked").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            result.details.get("reason").and_then(|v| v.as_str()),
+            Some("terminal_tool_disabled_by_profile")
+        );
+    }
+
     #[test]
     fn lexical_normalize_resolves_dotdot() {
         let result = lexical_normalize(Path::new("/a/b/../c"));
@@ -1451,6 +1551,7 @@ mod tests {
         // Utility tools
         assert!(tool_names.contains("whoami"));
         assert!(tool_names.contains("chronos"));
+        assert!(tool_names.contains("terminal"));
         assert!(tool_names.contains("wait_for_operator"));
 
         // view, web_search, local_inference tools are provided
@@ -1461,13 +1562,13 @@ mod tests {
         assert!(!tool_names.contains("list_local_models"));
         assert!(!tool_names.contains("manage_ollama"));
 
-        // 12 registered core tools. trust_directory is internal-only and not in
+        // 13 registered core tools. trust_directory is internal-only and not in
         // tool_defs; change is registered for harness batching but hidden from
         // the model-facing tool surface by EventBus filtering.
         assert_eq!(
             tool_names.len(),
-            12,
-            "Expected 12 registered core tools, got {}",
+            13,
+            "Expected 13 registered core tools, got {}",
             tool_names.len()
         );
     }

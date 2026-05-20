@@ -87,6 +87,7 @@ Omegon instances are workload-polymorphic: the same binary and manifest format r
 | K3 | Health probes | `/api/healthz` and `/api/readyz` endpoints on serve mode | `done` | C2 | HTTP health probes with state machine (starting/ready/degraded/failed) |
 | K4 | Graceful shutdown | SIGTERM → finish current turn → save session → exit | `done` | — | `shutdown` command via IPC/WebSocket; SIGHUP reload |
 | K5 | Resource limits | Recommended CPU/memory requests and limits per workload type | `--` | K1 | Needs benchmarking |
+| K6 | PTY terminal capability | Interactive `terminal` tool in containers | `partial` | K1 | Requires `/dev/pts` and writable config/transcript storage. Set profile `terminalTool: false` or `OMEGON_TERMINAL_TOOL=0` for hardened/headless pods. Bootstrap auto-hides the tool when PTY allocation or transcript storage is unavailable. |
 
 ### Pipeline & Orchestration
 
@@ -111,7 +112,7 @@ Omegon instances are workload-polymorphic: the same binary and manifest format r
 ## Implementation Priority
 
 ### Phase 1: Bounded Worker (Job/CronJob)
-C1, IO1, IO2, IO3, B2, B3, K1
+C1, IO1, IO2, IO3, B2, B3, K1, K6 profile default decision
 
 ### Phase 2: Manifest-Driven Daemon (Deployment/StatefulSet)
 C2→C3, F1, F2, F3, F4, F5, K3, K4

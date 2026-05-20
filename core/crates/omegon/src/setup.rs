@@ -757,18 +757,29 @@ impl AgentSetup {
 
         // ─── Default tool profile — disable rarely-used tools ───────────
         {
-            let (slim_mode, posture_disabled, posture_enabled) = settings
-                .as_ref()
-                .and_then(|s| {
-                    s.lock().ok().map(|g| {
-                        (
-                            g.is_slim(),
-                            g.posture_disabled_tools.clone(),
-                            g.posture_enabled_tools.clone(),
-                        )
+            let (slim_mode, mut posture_disabled, posture_enabled, profile_terminal_tool) =
+                settings
+                    .as_ref()
+                    .and_then(|s| {
+                        s.lock().ok().map(|g| {
+                            (
+                                g.is_slim(),
+                                g.posture_disabled_tools.clone(),
+                                g.posture_enabled_tools.clone(),
+                                g.terminal_tool,
+                            )
+                        })
                     })
-                })
-                .unwrap_or_default();
+                    .unwrap_or_else(|| (false, Vec::new(), Vec::new(), true));
+            if !profile_terminal_tool {
+                posture_disabled.push(crate::tool_registry::core::TERMINAL.into());
+            } else if let Err(reason) = crate::tools::terminal::runtime_available() {
+                tracing::warn!(
+                    reason,
+                    "terminal tool unavailable; disabling model-facing terminal tool"
+                );
+                posture_disabled.push(crate::tool_registry::core::TERMINAL.into());
+            }
             bus.apply_operator_tool_profile(slim_mode, &posture_disabled, &posture_enabled);
             let mut disabled = disabled_handle.lock().unwrap();
             tracing::info!(
@@ -1168,22 +1179,27 @@ impl AgentSetup {
 /// the wrong tree.
 pub fn find_project_root(cwd: &Path) -> PathBuf {
     let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
-    if has_explicit_project_marker(&cwd) {
+    if has_hard_project_marker(&cwd) {
         return cwd;
     }
 
     let mut dir = cwd.clone();
+    let mut nearest_marker = if has_explicit_project_marker(&cwd) {
+        Some(cwd.clone())
+    } else {
+        None
+    };
     loop {
         let git_path = dir.join(".git");
         if git_path.is_dir() {
             if is_home_ancestor_repo(&dir, &cwd) {
-                return cwd;
+                return nearest_marker.unwrap_or(cwd);
             }
             return dir;
         }
         if git_path.is_file() {
             if is_home_ancestor_repo(&dir, &cwd) {
-                return cwd;
+                return nearest_marker.unwrap_or(cwd);
             }
             if let Ok(content) = std::fs::read_to_string(&git_path)
                 && let Some(gitdir) = content.strip_prefix("gitdir: ")
@@ -1204,11 +1220,14 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
             }
             return dir;
         }
+        if nearest_marker.is_none() && has_explicit_project_marker(&dir) {
+            nearest_marker = Some(dir.clone());
+        }
         if !dir.pop() {
             break;
         }
     }
-    cwd.to_path_buf()
+    nearest_marker.unwrap_or(cwd)
 }
 
 pub fn git_ceiling_directory(cwd: &Path) -> Option<PathBuf> {
@@ -1216,21 +1235,23 @@ pub fn git_ceiling_directory(cwd: &Path) -> Option<PathBuf> {
 }
 
 fn has_explicit_project_marker(dir: &Path) -> bool {
-    [
-        ".git",
-        ".jj",
-        ".omegon",
-        ".codex",
-        "AGENTS.md",
-        "Cargo.toml",
-        "package.json",
-        "pyproject.toml",
-        "go.mod",
-        "Justfile",
-        "justfile",
-    ]
-    .iter()
-    .any(|marker| dir.join(marker).exists())
+    has_hard_project_marker(dir)
+        || [
+            "Cargo.toml",
+            "package.json",
+            "pyproject.toml",
+            "go.mod",
+            "Justfile",
+            "justfile",
+        ]
+        .iter()
+        .any(|marker| dir.join(marker).exists())
+}
+
+fn has_hard_project_marker(dir: &Path) -> bool {
+    [".git", ".jj", ".codex", "AGENTS.md"]
+        .iter()
+        .any(|marker| dir.join(marker).exists())
 }
 
 fn is_home_ancestor_repo(repo_root: &Path, cwd: &Path) -> bool {
@@ -1625,6 +1646,34 @@ mod tests {
 
         assert_eq!(
             find_project_root(&child),
+            dir.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn git_repo_wins_over_nested_build_manifest_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let member = dir.path().join("core/crates/omegon");
+        std::fs::create_dir_all(&member).unwrap();
+        std::fs::write(member.join("Cargo.toml"), "[package]\nname = \"omegon\"\n").unwrap();
+
+        assert_eq!(
+            find_project_root(&member),
+            dir.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn git_repo_wins_over_nested_omegon_state_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let member = dir.path().join("core");
+        std::fs::create_dir_all(member.join(".omegon")).unwrap();
+        std::fs::write(member.join(".omegon/profile.json"), "{}").unwrap();
+
+        assert_eq!(
+            find_project_root(&member),
             dir.path().canonicalize().unwrap()
         );
     }

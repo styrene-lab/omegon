@@ -216,6 +216,15 @@ impl WorkItemStatus {
             Self::Skipped => "⊘",
         }
     }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Pending => "todo",
+            Self::Active => "active",
+            Self::Done => "done",
+            Self::Skipped => "skipped",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -519,6 +528,32 @@ impl IntentDocument {
             ));
         }
         lines.join("\n")
+    }
+
+    pub fn work_plan_snapshot_json(&self) -> serde_json::Value {
+        let done = self
+            .work_plan
+            .iter()
+            .filter(|w| matches!(w.status, WorkItemStatus::Done))
+            .count();
+        let items: Vec<serde_json::Value> = self
+            .work_plan
+            .iter()
+            .map(|item| {
+                serde_json::json!({
+                    "description": item.description,
+                    "status": item.status.label(),
+                })
+            })
+            .collect();
+
+        serde_json::json!({
+            "mode": self.plan_mode.label(),
+            "guidance": self.plan_mode.guidance(),
+            "completed": done,
+            "total": self.work_plan.len(),
+            "items": items,
+        })
     }
 }
 
@@ -1438,6 +1473,27 @@ impl ConversationState {
                     format!("[bash{ctx_suffix}{exit_hint}: {text}]")
                 } else {
                     format!("[bash{ctx_suffix}: {lines} lines{exit_hint}. Tail:\n{tail_str}]")
+                }
+            }
+            "terminal" => {
+                let lines = text.lines().count();
+                let transcript = text
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Transcript: "))
+                    .unwrap_or("");
+                let tail: Vec<&str> = text.lines().rev().take(bash_tail_lines).collect();
+                let tail_str = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+                let transcript_suffix = if transcript.is_empty() {
+                    String::new()
+                } else {
+                    format!(" Transcript: {transcript}.")
+                };
+                if lines <= 5 {
+                    format!("[terminal{ctx_suffix}: {text}]")
+                } else {
+                    format!(
+                        "[terminal{ctx_suffix}: {lines} lines.{transcript_suffix} Tail:\n{tail_str}]"
+                    )
                 }
             }
             "edit" => {
@@ -2704,6 +2760,39 @@ mod tests {
             );
             assert!(content.contains("line 20"), "should preserve tail");
             assert!(!content.contains("line 5"), "should strip middle");
+        }
+    }
+
+    #[test]
+    fn decay_terminal_preserves_transcript_path_and_tail() {
+        let mut conv = ConversationState::new();
+        conv.decay_window = 0;
+
+        push_matching_assistant(&mut conv, "t1");
+        let output = "Terminal 'watch' (abc) — exited\nTranscript: /tmp/omegon-terminal.log\n\nline 1\nline 2\nline 3\nline 4\nline 5";
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "t1".into(),
+            tool_name: "terminal".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: output.into(),
+            }],
+            is_error: false,
+            args_summary: Some("read: abc".into()),
+        });
+        conv.intent.stats.turns = 1;
+
+        let view = conv.build_llm_view();
+        if let LlmMessage::ToolResult { content, .. } = &view[1] {
+            assert!(
+                content.contains("Transcript: /tmp/omegon-terminal.log"),
+                "terminal decay must preserve transcript path: {content}"
+            );
+            assert!(
+                content.contains("line 5"),
+                "terminal decay should preserve tail"
+            );
+        } else {
+            panic!("Expected ToolResult message");
         }
     }
 

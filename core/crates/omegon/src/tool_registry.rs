@@ -28,6 +28,7 @@ pub mod core {
     pub const WHOAMI: &str = "whoami";
     pub const CHRONOS: &str = "chronos";
     pub const SERVE: &str = "serve";
+    pub const TERMINAL: &str = "terminal";
     pub const TRUST_DIRECTORY: &str = "trust_directory";
     pub const PLAN: &str = "plan";
     pub const WAIT_FOR_OPERATOR: &str = "wait_for_operator";
@@ -166,11 +167,11 @@ pub mod mutation {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 64;
+pub const TOOL_COUNT: usize = 65;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
-        // core (13)
+        // core (14)
         core::BASH,
         core::READ,
         core::WRITE,
@@ -181,6 +182,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         core::WHOAMI,
         core::CHRONOS,
         core::SERVE,
+        core::TERMINAL,
         core::TRUST_DIRECTORY,
         core::PLAN,
         core::WAIT_FOR_OPERATOR,

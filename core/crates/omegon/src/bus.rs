@@ -42,6 +42,7 @@ fn is_core_tool(name: &str) -> bool {
             | reg::core::EDIT
             | reg::core::VALIDATE
             | reg::core::COMMIT
+            | reg::core::TERMINAL
             | reg::codescan::CODEBASE_SEARCH
             | reg::context::CONTEXT_STATUS
             | reg::context::REQUEST_CONTEXT

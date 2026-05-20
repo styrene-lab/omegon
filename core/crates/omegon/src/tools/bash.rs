@@ -302,7 +302,7 @@ pub async fn execute_streaming(
     })
 }
 
-fn git_discovery_env(cwd: &Path) -> Vec<(&'static str, String)> {
+pub(crate) fn git_discovery_env(cwd: &Path) -> Vec<(&'static str, String)> {
     crate::setup::git_ceiling_directory(cwd)
         .map(|ceiling| vec![("GIT_CEILING_DIRECTORIES", ceiling.display().to_string())])
         .unwrap_or_default()
@@ -451,7 +451,7 @@ async fn read_lossy_line<R: tokio::io::AsyncBufRead + Unpin>(
 ///
 /// We preserve SGR (Select Graphic Rendition, ending with 'm') because
 /// the TUI renderer converts those to styled spans via `ansi_to_tui`.
-fn strip_terminal_noise(input: &str) -> String {
+pub(crate) fn strip_terminal_noise(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let bytes = input.as_bytes();
     let len = bytes.len();
@@ -584,7 +584,7 @@ const ALLOWED_PATHS: &[&str] = &[
 
 /// Scan a bash command for filesystem write patterns targeting paths
 /// outside the workspace boundary. Returns a list of violating paths.
-fn scan_boundary_violations(
+pub(crate) fn scan_boundary_violations(
     command: &str,
     boundary: &super::WorkspaceBoundary,
     cwd: &Path,
