@@ -6,8 +6,10 @@
 use super::conv_widget::ConvState;
 use super::image::ImageCache;
 use super::segments::{
-    Segment, SegmentContent, SegmentExportMode, SegmentMeta, TokenUsage, is_plan_progress_text,
+    Segment, SegmentContent, SegmentExportMode, SegmentMeta, SegmentRenderMode, TokenUsage,
+    is_plan_progress_text,
 };
+use super::theme::Theme;
 
 /// Tab variant — conversation or extension widget
 #[derive(Debug, Clone)]
@@ -645,11 +647,14 @@ impl ConversationView {
         self.conv_state.auto_scroll_to_bottom();
     }
 
-    pub fn maybe_scroll_latest_assistant_to_start(&mut self, viewport_height: u16) -> bool {
-        if viewport_height == 0
-            || self.conv_state.user_scrolled
-            || self.conv_state.heights.len() != self.segments.len()
-        {
+    pub fn maybe_scroll_latest_assistant_to_start(
+        &mut self,
+        viewport_width: u16,
+        viewport_height: u16,
+        theme: &dyn Theme,
+        mode: SegmentRenderMode,
+    ) -> bool {
+        if viewport_width == 0 || viewport_height == 0 || self.conv_state.user_scrolled {
             return false;
         }
 
@@ -673,18 +678,24 @@ impl ConversationView {
             return false;
         };
 
-        let segment_height = self.conv_state.heights[idx];
+        let heights = self
+            .segments
+            .iter()
+            .map(|segment| segment.height_in_mode(viewport_width, theme, mode))
+            .collect::<Vec<_>>();
+
+        let segment_height = heights[idx];
         if segment_height <= viewport_height.saturating_mul(3) / 2 {
             return false;
         }
 
-        let total_height: u16 = self.conv_state.heights.iter().copied().sum();
+        let total_height: u16 = heights.iter().copied().sum();
         let max_scroll = total_height.saturating_sub(viewport_height);
         if max_scroll == 0 {
             return false;
         }
 
-        let segment_top: u16 = self.conv_state.heights[..idx].iter().copied().sum();
+        let segment_top: u16 = heights[..idx].iter().copied().sum();
         let desired_scroll = total_height
             .saturating_sub(viewport_height)
             .saturating_sub(segment_top)
@@ -695,6 +706,8 @@ impl ConversationView {
 
         self.conv_state.scroll_offset = desired_scroll;
         self.conv_state.user_scrolled = true;
+        self.conv_state.heights = heights;
+        self.conv_state.invalidate();
         self.selected_segment = Some(idx);
         true
     }
@@ -1536,14 +1549,51 @@ mod tests {
     fn long_completed_assistant_response_can_pin_viewport_to_start() {
         let mut cv = ConversationView::new();
         cv.push_system("older context");
-        cv.append_streaming("long answer");
+        cv.append_streaming(&format!(
+            "{}\n{}",
+            "long answer",
+            "wrapped response line with enough detail to require many rendered terminal rows"
+                .repeat(20)
+        ));
         cv.finalize_message();
-        cv.conv_state.heights = vec![2, 30];
 
-        assert!(cv.maybe_scroll_latest_assistant_to_start(10));
+        assert!(cv.maybe_scroll_latest_assistant_to_start(
+            40,
+            10,
+            &Alpharius,
+            SegmentRenderMode::Full,
+        ));
         assert!(cv.conv_state.user_scrolled);
         assert_eq!(cv.selected_segment, Some(1));
-        assert_eq!(cv.conv_state.scroll_offset, 20);
+        assert!(cv.conv_state.scroll_offset > 0);
+    }
+
+    #[test]
+    fn long_completed_assistant_pin_ignores_stale_cached_height() {
+        let mut cv = ConversationView::new();
+        cv.append_streaming(
+            "heading\n\n\
+             This answer has enough wrapped prose to exceed the viewport by a wide margin. \
+             It should be measured from the completed text, not from whatever short height \
+             was cached while the response was still streaming.\n\n\
+             - first item\n\
+             - second item\n\
+             - third item\n",
+        );
+        cv.finalize_message();
+        cv.conv_state.heights = vec![1];
+
+        assert!(cv.maybe_scroll_latest_assistant_to_start(
+            24,
+            4,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+        ));
+        assert!(cv.conv_state.user_scrolled);
+        assert!(
+            cv.conv_state.heights[0] > 1,
+            "pinning must refresh stale completed assistant heights"
+        );
     }
 
     #[test]
@@ -1553,7 +1603,12 @@ mod tests {
         cv.finalize_message();
         cv.conv_state.heights = vec![8];
 
-        assert!(!cv.maybe_scroll_latest_assistant_to_start(10));
+        assert!(!cv.maybe_scroll_latest_assistant_to_start(
+            40,
+            10,
+            &Alpharius,
+            SegmentRenderMode::Full,
+        ));
         assert!(!cv.conv_state.user_scrolled);
         assert_eq!(cv.conv_state.scroll_offset, 0);
     }

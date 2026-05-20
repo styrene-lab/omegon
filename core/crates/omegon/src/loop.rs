@@ -2927,6 +2927,12 @@ fn should_continue_text_only_turn(
     if looks_like_blocked_response(assistant) || looks_like_completion(assistant) {
         return false;
     }
+    if looks_like_incomplete_structured_answer(assistant) {
+        return matches!(
+            automation_level,
+            crate::settings::AutomationLevel::Flow | crate::settings::AutomationLevel::Autonomous
+        ) || user_prompt_is_continue_or_proceed(user_prompt);
+    }
     if looks_like_continuation_request(assistant) {
         return true;
     }
@@ -2938,6 +2944,49 @@ fn should_continue_text_only_turn(
         return looks_like_plan_or_future_action(assistant) || !prior_tool_activity;
     }
     user_prompt_expects_concrete_action(user_prompt) && looks_like_plan_or_future_action(assistant)
+}
+
+fn looks_like_incomplete_structured_answer(text: &str) -> bool {
+    let trimmed = text.trim();
+    let fence_count = trimmed
+        .lines()
+        .filter(|line| line.trim_start().starts_with("```"))
+        .count();
+    if fence_count % 2 == 1 {
+        return true;
+    }
+    if trimmed.len() < 120 {
+        return false;
+    }
+
+    let nonempty = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let Some(last) = nonempty.last().copied() else {
+        return false;
+    };
+    let lower = trimmed.to_ascii_lowercase();
+    let last_lower = last.to_ascii_lowercase();
+    let last_is_list_item = last_lower.starts_with("- ")
+        || last_lower.starts_with("* ")
+        || last_lower
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_digit())
+            && last_lower.contains(". ");
+    let last_has_terminal_punctuation = last.ends_with('.')
+        || last.ends_with('!')
+        || last.ends_with('?')
+        || last.ends_with(')')
+        || last.ends_with(']')
+        || last.ends_with('`');
+
+    last_is_list_item
+        && !last_has_terminal_punctuation
+        && (lower.contains("phase 1") || lower.contains("roadmap") || lower.contains("plan"))
+        && !lower.contains("phase 2")
 }
 
 fn looks_like_continuation_request(text: &str) -> bool {
@@ -4390,6 +4439,65 @@ mod tests {
             crate::settings::AutomationLevel::Flow,
             "continue",
             "I'll inspect the relevant files and then make the change.",
+            true
+        ));
+    }
+
+    #[test]
+    fn incomplete_structured_answers_continue_in_flow_mode() {
+        let reply = r#"What Flynt should not copy directly
+
+Recommended Flynt roadmap from Zotero research
+
+Phase 1 - Source note foundation
+
+Low cost, high leverage.
+
+- Define kind = "source" frontmatter schema.
+- Add source-specific note rendering.
+- Add source lens/query presets:
+  - all sources
+  - unread
+  - annotated"#;
+
+        assert!(looks_like_incomplete_structured_answer(reply));
+        assert!(should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
+            "perform research and give me the roadmap",
+            reply,
+            true
+        ));
+    }
+
+    #[test]
+    fn complete_structured_answers_do_not_continue() {
+        let reply = r#"Recommended roadmap
+
+Phase 1 - Source note foundation
+
+- all sources
+- unread
+- annotated
+
+This is the right first slice."#;
+
+        assert!(!looks_like_incomplete_structured_answer(reply));
+        assert!(!should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
+            "perform research and give me the roadmap",
+            reply,
+            true
+        ));
+    }
+
+    #[test]
+    fn open_code_fence_answers_continue_in_flow_mode() {
+        let reply = "Here is the config:\n\n```json\n{\"phase\": 1}";
+        assert!(looks_like_incomplete_structured_answer(reply));
+        assert!(should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
+            "show the json",
+            reply,
             true
         ));
     }

@@ -104,10 +104,27 @@ impl ConvState {
             self.cached_count = segments.len();
         }
 
-        // Recompute the last segment only when the viewport is attached to the live tail.
-        // When manually detached, the streaming tail is often off-screen, and remeasuring
-        // it on every chunk creates avoidable scroll jank.
-        if !segments.is_empty() && self.cached_count == segments.len() && !user_scrolled {
+        // Recompute the last segment while attached, and always once it is
+        // no longer live. Detached streaming tails intentionally keep their
+        // cached height to preserve the operator's scroll anchor; completed
+        // tails must be measured again or a final assistant response can look
+        // hard-truncated after the turn is marked done.
+        let last_is_live = segments.last().is_some_and(|segment| {
+            matches!(
+                segment.content,
+                SegmentContent::AssistantText {
+                    complete: false,
+                    ..
+                } | SegmentContent::ToolCard {
+                    complete: false,
+                    ..
+                }
+            )
+        });
+        if !segments.is_empty()
+            && self.cached_count == segments.len()
+            && (!user_scrolled || !last_is_live)
+        {
             let last = segments.len() - 1;
             self.heights[last] = segments[last].height_in_mode(width, t, mode);
         }
@@ -503,6 +520,37 @@ mod tests {
         assert_eq!(
             state.heights[0], 7,
             "detached viewport should preserve cached tail height instead of remeasuring it"
+        );
+    }
+
+    #[test]
+    fn detached_scroll_remeasures_completed_last_segment() {
+        let segments = vec![Segment {
+            meta: Default::default(),
+            content: SegmentContent::AssistantText {
+                text: "completed tail now has enough content to wrap across several terminal rows"
+                    .into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        }];
+        let mut state = ConvState::new();
+        state.heights = vec![1];
+        state.cached_count = segments.len();
+        state.cached_width = 20;
+        state.cached_mode = Some(SegmentRenderMode::Slim);
+        state.user_scrolled = true;
+
+        state.ensure_heights_with_scroll_state(
+            &segments,
+            20,
+            &Alpharius,
+            true,
+            SegmentRenderMode::Slim,
+        );
+        assert!(
+            state.heights[0] > 1,
+            "completed detached tail must be remeasured so it cannot look truncated"
         );
     }
 

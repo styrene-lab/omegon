@@ -7418,9 +7418,19 @@ impl App {
                     && !self.focus_mode
                     && had_streaming_message
                     && let Some(area) = self.conversation_area
-                    && self
-                        .conversation
-                        .maybe_scroll_latest_assistant_to_start(area.height)
+                    && {
+                        let mode = if self.ui_surfaces.is_compact() {
+                            SegmentRenderMode::Slim
+                        } else {
+                            SegmentRenderMode::Full
+                        };
+                        self.conversation.maybe_scroll_latest_assistant_to_start(
+                            area.width,
+                            area.height,
+                            self.theme.as_ref(),
+                            mode,
+                        )
+                    }
                 {
                     self.show_toast(
                         "Long response pinned at start; End jumps to the live tail",
