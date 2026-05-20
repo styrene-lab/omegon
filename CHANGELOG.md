@@ -16,6 +16,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- **Interactive background terminal tool** — added a first-class PTY-backed `terminal` core tool with `start`, `send`, `read`, `stop`, and `list` actions for session-scoped interactive processes, including transcript files, stdin/exit audit markers, output tails, TUI shutdown cleanup, and the same workspace-boundary permission scan used by `bash`.
+- **Slim operator contract** — documented the `om` UX contract for rendering existing harness state through compact tool evidence, pinned plan state, consequence-complete permission prompts, contextual footer hints, and shared ACP/TUI persistence paths without introducing shadow control planes.
+- **OCI-safe terminal profile control** — added profile/env controls for the PTY-backed `terminal` tool so hardened k8s/OCI agents can disable it with `terminalTool: false` or `OMEGON_TERMINAL_TOOL=0`, while bootstrap auto-hides the tool when `/dev/pts` or transcript storage is unavailable.
+
+### Fixed
+
+- **Slim-mode long responses are easier to read** — provider stop reasons from OpenAI-compatible and Anthropic streams are now surfaced when output may be incomplete, and Slim mode pins very long completed assistant replies at their beginning instead of leaving operators at the tail.
+- **Slim-mode transcript chrome is lower noise** — assistant prose now renders without response headers, completed successful tool cards collapse to one-line timeline markers that still show command/path/output summaries, and active plan progress is pinned above the composer instead of reappearing as scrollback cards.
+- **Slim-mode operator contract is visible in the UI** — pinned plan rows now render from structured session plan snapshots with `done`/`active`/`skipped`/`todo` labels and `+N more` overflow, the status line shows contextual plan/copy/transcript/automation hints, and permission prompts use the consequence-complete tool/target/reason/persist/key-map shape.
+- **Slim-mode tool rows carry operational evidence** — compact completed tool rows now extract targets from JSON arguments, show shell commands instead of opaque wrapper names, summarize validation scope, and report output line counts plus the first useful result line.
+- **Slim-mode terminal rows identify their target** — PTY terminal actions now summarize start/send/read/stop/list targets, session ids, bounded read sizes, useful output tails, and transcript paths instead of collapsing to opaque action names.
+- **Slim-mode tool expansion is discoverable** — compact tool rows that have captured arguments, results, or live output now advertise `Ctrl+O details`, reusing the existing selected/nearest tool expansion path without adding another operator surface.
+- **Slim-mode running tools show live evidence** — in-flight tool cards now collapse to a one-line Slim row with the target command/path, live phase, progress units, elapsed time, idle heartbeat marker, and latest output tail when available.
+- **Slim-mode turn completion is explicit** — the status line now carries a turn-state field (`ready`, `thinking`, `responding`, `running <tool>`, `turn done`, `turn continuing`, `turn cancelled`) so operators do not have to infer whether a turn is still active or finished from scrollback shape.
+- **Slim-mode footer hints prioritize blocking action** — permission prompts, manual waits, terminal-copy mode, plan controls, and default copy/transcript affordances now share one ordered status-line hint path so the operator sees the most urgent available action first.
+- **Permissions cleanup prefers the canonical operator surface** — denial recovery text, preferences output, trait docs, and Slim contract examples now point at `/permissions` and `profile.permissions.trustedDirectories`, with `/trust` presented only as a compatibility alias.
+- **Stuck-loop recovery no longer ends the turn before recovery** — repeated-tool escalation now injects corrective guidance and clears the detector window so the model can take the next concrete action, instead of force-breaking into a summary while valid work remains.
+- **Codex login and model selection persist across restarts** — successful OpenAI/Codex login now stores the provider default model in the project profile, external Codex CLI auth adoption persists into Omegon auth storage with account identity, and project-root discovery prefers the repo root over nested build manifests so model defaults are not written into split profile files.
+- **Nested Omegon state no longer shadows global model defaults** — project-root discovery now treats nested `.omegon/` directories as state rather than hard workspace boundaries inside an existing Git checkout, preventing stale subdirectory profiles from forcing Anthropic/Sonnet over a global OpenAI Codex/GPT selection.
+- **Profile capture no longer leaves stale non-default toggles** — provider/login persistence now saves through the active workspace root and clears defaulted profile fields such as update channel, mouse mode, sandbox, and terminal-tool enablement when settings return to defaults.
+- **Session plan updates are structured across surfaces** — plan changes now emit a `plan.updated` event for TUI, IPC, MQTT, and WebSocket consumers so operator surfaces no longer need to parse human-readable plan notifications for live state.
+- **Slim-mode detached scroll state is visible** — the status line now shows when the conversation viewport is detached from the live tail, making auto-pinned long responses distinguishable from truncated turns.
+- **Slim-mode detached pages no longer look truncated** — detached conversation viewports now render an inline `more below · End to tail` marker at the bottom of the transcript pane, so fenced blocks and long answers do not appear to end mid-response without explanation.
+- **Clean transcript copy paths are available** — `/copy latest` copies the latest assistant response from semantic segment text, and `/transcript` writes a deduplicated Markdown transcript with a clickable `.md` file link; `/transcript scrollback` keeps the native scrollback export available explicitly.
+- **Spinner tests no longer race shared state** — global spinner counter tests now serialize access and assert against the active verb list, preventing parallel test flakes after startup initializes shuffled verbs.
+- **Background terminal security posture is tighter** — PTY sessions now reject credential-prompt commands, cap command/input/session/transcript growth, write transcripts with owner-only permissions on Unix, and strip terminal control sequences before output is returned or audited.
+
 ## [0.22.4] - 2026-05-18
 
 ### Fixed
