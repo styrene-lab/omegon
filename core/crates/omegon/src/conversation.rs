@@ -434,9 +434,7 @@ impl IntentDocument {
             {
                 next.status = WorkItemStatus::Active;
             }
-            if self.work_plan_complete() {
-                self.plan_mode = PlanMode::Complete;
-            }
+            self.clear_if_work_plan_complete();
         }
     }
 
@@ -457,9 +455,7 @@ impl IntentDocument {
         {
             next.status = WorkItemStatus::Active;
         }
-        if self.work_plan_complete() {
-            self.plan_mode = PlanMode::Complete;
-        }
+        self.clear_if_work_plan_complete();
     }
 
     /// Skip the current active item and activate the next.
@@ -475,9 +471,13 @@ impl IntentDocument {
             {
                 next.status = WorkItemStatus::Active;
             }
-            if self.work_plan_complete() {
-                self.plan_mode = PlanMode::Complete;
-            }
+            self.clear_if_work_plan_complete();
+        }
+    }
+
+    fn clear_if_work_plan_complete(&mut self) {
+        if self.work_plan_complete() {
+            self.clear_work_plan();
         }
     }
 
@@ -3664,8 +3664,8 @@ mod tests {
 
         intent.advance_work_plan();
         intent.advance_work_plan();
-        assert!(intent.work_plan_complete());
-        assert_eq!(intent.plan_mode, PlanMode::Complete);
+        assert!(intent.work_plan.is_empty());
+        assert_eq!(intent.plan_mode, PlanMode::Off);
     }
 
     #[test]
@@ -3701,6 +3701,10 @@ mod tests {
         intent.complete_work_item(0);
         assert_eq!(intent.work_plan[0].status, WorkItemStatus::Done);
         assert_eq!(intent.work_plan[2].status, WorkItemStatus::Active);
+
+        intent.complete_work_item(2);
+        assert!(intent.work_plan.is_empty());
+        assert_eq!(intent.plan_mode, PlanMode::Off);
     }
 
     #[test]
@@ -3714,7 +3718,8 @@ mod tests {
         assert!(intent.work_plan[0].status != WorkItemStatus::Done);
 
         intent.advance_work_plan();
-        assert!(intent.work_plan_complete());
+        assert!(intent.work_plan.is_empty());
+        assert_eq!(intent.plan_mode, PlanMode::Off);
     }
 
     #[test]

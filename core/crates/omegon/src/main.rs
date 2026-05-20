@@ -6427,6 +6427,12 @@ fn execute_plan_slash_command(
     use omegon_traits::SlashCommandResponse;
 
     let intent = &mut runtime_state.conversation.intent;
+    let clears_completed_plan = matches!(
+        command,
+        CanonicalSlashCommand::PlanAdvance
+            | CanonicalSlashCommand::PlanSkip
+            | CanonicalSlashCommand::PlanClear
+    );
     match command {
         CanonicalSlashCommand::PlanView => {}
         CanonicalSlashCommand::PlanSet(items) => intent.set_work_plan(items),
@@ -6445,7 +6451,11 @@ fn execute_plan_slash_command(
 
     SlashCommandResponse {
         accepted: true,
-        output: Some(intent.render_work_plan()),
+        output: Some(if clears_completed_plan && intent.work_plan.is_empty() {
+            format!("Plan cleared\n{}", intent.render_work_plan())
+        } else {
+            intent.render_work_plan()
+        }),
     }
 }
 

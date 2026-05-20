@@ -1449,15 +1449,21 @@ fn plan_status_notification(calls: &[ToolCall], intent: &IntentDocument) -> Opti
         .get("action")
         .and_then(|value| value.as_str())
         .unwrap_or("status");
-    let heading = match action {
-        "set" => "Plan set",
-        "advance" | "complete" => "Plan progress",
-        "skip" => "Plan item skipped",
-        "approve" => "Plan approved",
-        "execute" => "Plan executing",
-        "clear" => "Plan cleared",
-        "status" => "Plan status",
-        _ => "Plan updated",
+    let heading = if intent.work_plan.is_empty()
+        && matches!(action, "advance" | "complete" | "skip" | "clear")
+    {
+        "Plan cleared"
+    } else {
+        match action {
+            "set" => "Plan set",
+            "advance" | "complete" => "Plan progress",
+            "skip" => "Plan item skipped",
+            "approve" => "Plan approved",
+            "execute" => "Plan executing",
+            "clear" => "Plan cleared",
+            "status" => "Plan status",
+            _ => "Plan updated",
+        }
     };
     Some(format!("{heading}\n{}", intent.render_work_plan()))
 }
@@ -3949,6 +3955,24 @@ mod tests {
         assert!(notification.contains("Progress: 1/2"));
         assert!(notification.contains("● Inspect plan rendering"));
         assert!(notification.contains("◐ Patch TUI"));
+    }
+
+    #[test]
+    fn completing_plan_tool_clears_operator_checklist_snapshot() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Only item".into()]);
+        intent.advance_work_plan();
+        let calls = vec![ToolCall {
+            id: "plan-1".into(),
+            name: crate::tool_registry::core::PLAN.into(),
+            arguments: serde_json::json!({"action": "advance"}),
+        }];
+
+        let notification = plan_status_notification(&calls, &intent).unwrap();
+
+        assert!(notification.starts_with("Plan cleared"));
+        assert!(notification.contains("Plan mode: off"));
+        assert_eq!(intent.work_plan_snapshot_json()["total"], 0);
     }
 
     #[test]
