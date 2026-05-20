@@ -77,6 +77,381 @@ fn split_trimmed_trailing_empty_lines(text: &str) -> Vec<&str> {
     lines
 }
 
+fn clean_inline_text(text: &str) -> String {
+    text.chars()
+        .filter(|ch| !ch.is_control() || *ch == '\t')
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn first_arg_line(args: &str) -> String {
+    clean_inline_text(args.lines().next().unwrap_or(args))
+}
+
+fn json_arg(args: &str) -> Option<serde_json::Value> {
+    serde_json::from_str::<serde_json::Value>(args).ok()
+}
+
+fn json_string_field<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(|v| v.as_str()))
+}
+
+fn summarize_json_paths(value: &serde_json::Value) -> Option<String> {
+    let paths = value.get("paths")?.as_array()?;
+    let rendered = paths
+        .iter()
+        .filter_map(|path| path.as_str())
+        .take(3)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if rendered.is_empty() {
+        return None;
+    }
+    let suffix = if paths.len() > rendered.len() {
+        format!(" +{} more", paths.len() - rendered.len())
+    } else {
+        String::new()
+    };
+    let joined = rendered.join(", ");
+    Some(format!("{joined}{suffix}"))
+}
+
+fn shell_command_from_args(args: &str) -> Option<String> {
+    if let Some(value) = json_arg(args)
+        && let Some(command) = json_string_field(&value, &["command", "cmd"])
+    {
+        return Some(clean_inline_text(command));
+    }
+    let raw = first_arg_line(args);
+    (!raw.is_empty()).then_some(raw)
+}
+
+fn summarize_change_args(args: &str) -> Option<String> {
+    let v = serde_json::from_str::<serde_json::Value>(args).ok()?;
+
+    if let Some(edits) = v.get("edits").and_then(|e| e.as_array()) {
+        let mut files: Vec<&str> = edits
+            .iter()
+            .filter_map(|edit| edit.get("file").and_then(|f| f.as_str()))
+            .collect();
+        files.dedup();
+        return match files.as_slice() {
+            [] => Some(format!("{} edits", edits.len())),
+            [only] => Some(format!(
+                "{only} · {} edit{}",
+                edits.len(),
+                if edits.len() == 1 { "" } else { "s" }
+            )),
+            [first, second, ..] => Some(format!("{first}, {second} · {} edits", edits.len())),
+        };
+    }
+
+    let path = v
+        .get("file")
+        .or(v.get("path"))
+        .and_then(|f| f.as_str())
+        .unwrap_or("(unknown file)");
+    let old_len = v
+        .get("oldText")
+        .and_then(|s| s.as_str())
+        .map(|s| s.lines().count())
+        .unwrap_or(0);
+    let new_len = v
+        .get("newText")
+        .and_then(|s| s.as_str())
+        .map(|s| s.lines().count())
+        .unwrap_or(0);
+    Some(format!("{path} · {old_len}→{new_len} lines"))
+}
+
+fn summarize_tool_args(tool_name: &str, args: Option<&str>) -> Option<String> {
+    let args = args?;
+    let fallback = || Some(crate::util::truncate(&first_arg_line(args), 96));
+
+    match tool_name {
+        "edit" => json_arg(args)
+            .map(|v| {
+                let path = json_string_field(&v, &["file", "path"]).unwrap_or("(unknown file)");
+                let old_len = v
+                    .get("oldText")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.lines().count())
+                    .unwrap_or(0);
+                let new_len = v
+                    .get("newText")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.lines().count())
+                    .unwrap_or(0);
+                format!("{path} · {old_len}→{new_len} lines")
+            })
+            .or_else(fallback),
+        "change" => summarize_change_args(args).or_else(fallback),
+        "bash" => shell_command_from_args(args).map(|cmd| crate::util::truncate(&cmd, 120)),
+        "read" | "view" => {
+            if let Some(value) = json_arg(args) {
+                let path = json_string_field(&value, &["path", "file", "url"])
+                    .map(str::to_string)
+                    .or_else(|| summarize_json_paths(&value));
+                if let Some(path) = path {
+                    let mut extras = Vec::new();
+                    if let Some(offset) = value.get("offset").and_then(|v| v.as_u64()) {
+                        extras.push(format!("@{offset}"));
+                    }
+                    if let Some(limit) = value.get("limit").and_then(|v| v.as_u64()) {
+                        extras.push(format!("limit {limit}"));
+                    }
+                    return if extras.is_empty() {
+                        Some(path)
+                    } else {
+                        Some(format!("{path} · {}", extras.join(" · ")))
+                    };
+                }
+            }
+            fallback()
+        }
+        "write" => {
+            if let Some(value) = json_arg(args)
+                && let Some(path) = json_string_field(&value, &["path", "file"])
+            {
+                let bytes = value
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .map(|content| format!(" · {} bytes", content.len()))
+                    .unwrap_or_default();
+                return Some(format!("{path}{bytes}"));
+            }
+            fallback()
+        }
+        "validate" => {
+            if let Some(value) = json_arg(args) {
+                if let Some(paths) = summarize_json_paths(&value) {
+                    let source_type = json_string_field(&value, &["source_type", "language"])
+                        .map(|s| format!(" · {s}"))
+                        .unwrap_or_default();
+                    return Some(format!("{paths}{source_type}"));
+                }
+                if let Some(path) = json_string_field(&value, &["path", "file"]) {
+                    return Some(path.to_string());
+                }
+            }
+            fallback()
+        }
+        "wait_for_operator" => {
+            if let Some(value) = json_arg(args) {
+                let prompt = json_string_field(&value, &["prompt", "message", "reason"])
+                    .map(clean_inline_text)
+                    .unwrap_or_else(|| "manual confirmation".to_string());
+                let timeout = value
+                    .get("timeout_secs")
+                    .or_else(|| value.get("timeout"))
+                    .and_then(|v| v.as_u64())
+                    .map(|secs| format!(" · {secs}s timeout"))
+                    .unwrap_or_default();
+                return Some(format!("{}{timeout}", crate::util::truncate(&prompt, 96)));
+            }
+            fallback()
+        }
+        "terminal" => {
+            if let Some(value) = json_arg(args) {
+                let action = json_string_field(&value, &["action"]).unwrap_or("terminal");
+                return match action {
+                    "start" => json_string_field(&value, &["command", "cmd"])
+                        .map(clean_inline_text)
+                        .map(|cmd| format!("start · {}", crate::util::truncate(&cmd, 96)))
+                        .or_else(|| Some("start".to_string())),
+                    "send" => {
+                        let target = json_string_field(&value, &["session_id", "id", "name"])
+                            .unwrap_or("(session)");
+                        let bytes = value
+                            .get("input")
+                            .and_then(|v| v.as_str())
+                            .map(|input| format!(" · {} bytes", input.len()))
+                            .unwrap_or_default();
+                        Some(format!("send · {target}{bytes}"))
+                    }
+                    "read" => {
+                        let target = json_string_field(&value, &["session_id", "id", "name"])
+                            .unwrap_or("(session)");
+                        let max_bytes = value
+                            .get("max_bytes")
+                            .and_then(|v| v.as_u64())
+                            .map(|bytes| format!(" · {bytes} bytes"))
+                            .unwrap_or_default();
+                        Some(format!("read · {target}{max_bytes}"))
+                    }
+                    "stop" => {
+                        let target = json_string_field(&value, &["session_id", "id", "name"])
+                            .unwrap_or("(session)");
+                        let force = value
+                            .get("force")
+                            .and_then(|v| v.as_bool())
+                            .is_some_and(|force| force);
+                        Some(format!(
+                            "stop · {target}{}",
+                            if force { " · force" } else { "" }
+                        ))
+                    }
+                    "list" => Some("list sessions".to_string()),
+                    other => Some(other.to_string()),
+                };
+            }
+            fallback()
+        }
+        "plan" => {
+            if let Some(value) = json_arg(args)
+                && let Some(action) = json_string_field(&value, &["action"])
+            {
+                let index = value
+                    .get("index")
+                    .and_then(|v| v.as_u64())
+                    .map(|idx| format!(" #{idx}"))
+                    .unwrap_or_default();
+                return Some(format!("{action}{index}"));
+            }
+            fallback()
+        }
+        _ => json_arg(args)
+            .and_then(|v| {
+                if let Some(paths) = summarize_json_paths(&v) {
+                    return Some(paths);
+                }
+                let obj = v.as_object()?;
+                for key in ["path", "file", "command", "query", "name", "key", "url"] {
+                    if let Some(value) = obj.get(key) {
+                        let rendered = value
+                            .as_str()
+                            .map(clean_inline_text)
+                            .unwrap_or_else(|| clean_inline_text(&value.to_string()));
+                        return Some(format!("{key}: {rendered}"));
+                    }
+                }
+                obj.iter().next().map(|(key, value)| {
+                    let rendered = value
+                        .as_str()
+                        .map(clean_inline_text)
+                        .unwrap_or_else(|| clean_inline_text(&value.to_string()));
+                    format!("{key}: {rendered}")
+                })
+            })
+            .or_else(fallback),
+    }
+}
+
+fn summarize_tool_result(tool_name: &str, result: Option<&str>) -> Option<String> {
+    let result = result?;
+    if tool_name == "terminal" {
+        let lines = split_trimmed_trailing_empty_lines(result);
+        let status = lines
+            .iter()
+            .find(|line| line.starts_with("Terminal "))
+            .map(|line| clean_inline_text(line))
+            .unwrap_or_else(|| "terminal".to_string());
+        let transcript = lines
+            .iter()
+            .find_map(|line| line.strip_prefix("Transcript: "))
+            .map(str::trim)
+            .filter(|line| !line.is_empty());
+        let tail = lines
+            .iter()
+            .rev()
+            .map(|line| clean_inline_text(line.trim()))
+            .find(|line| {
+                !line.is_empty()
+                    && !line.starts_with("Terminal ")
+                    && !line.starts_with("Transcript:")
+            });
+        let mut parts = vec![crate::util::truncate(&status, 72)];
+        if let Some(tail) = tail {
+            parts.push(crate::util::truncate(&tail, 48));
+        }
+        if let Some(transcript) = transcript {
+            parts.push(crate::util::truncate(transcript, 48));
+        }
+        return Some(parts.join(" · "));
+    }
+
+    let lines = split_trimmed_trailing_empty_lines(result);
+    let line_count = if result.is_empty() { 0 } else { lines.len() };
+    let first_non_empty = lines
+        .iter()
+        .map(|line| clean_inline_text(line.trim()))
+        .find(|line| !line.is_empty());
+
+    match (line_count, first_non_empty) {
+        (0, _) => Some("ok".to_string()),
+        (1, Some(line)) => Some(crate::util::truncate(&line, 96)),
+        (count, Some(line)) if matches!(tool_name, "read" | "view") => Some(format!(
+            "{count} lines · {}",
+            crate::util::truncate(&line, 72)
+        )),
+        (count, Some(line)) => Some(format!(
+            "{count} lines · {}",
+            crate::util::truncate(&line, 72)
+        )),
+        (count, None) if count > 0 => Some(format!("{count} blank line(s)")),
+        _ => Some("ok".to_string()),
+    }
+}
+
+fn summarize_live_tool_progress(
+    live_partial: Option<&omegon_traits::PartialToolResult>,
+    started_at: Option<std::time::Instant>,
+) -> String {
+    let mut parts = Vec::new();
+    let phase = live_partial
+        .and_then(|partial| partial.progress.phase.as_deref())
+        .unwrap_or("running");
+    parts.push(phase.to_string());
+
+    if let Some(partial) = live_partial {
+        if let Some(units) = &partial.progress.units {
+            let label = match units.total {
+                Some(total) => format!("{}/{} {}", units.current, total, units.unit),
+                None => format!("{} {}", units.current, units.unit),
+            };
+            parts.push(label);
+        }
+        if partial.progress.heartbeat {
+            parts.push("idle".to_string());
+        }
+    }
+
+    let elapsed_ms = started_at
+        .map(|started| started.elapsed().as_millis() as u64)
+        .or_else(|| live_partial.map(|partial| partial.progress.elapsed_ms))
+        .filter(|ms| *ms > 0);
+    if let Some(ms) = elapsed_ms {
+        parts.push(format_duration_compact(ms));
+    }
+
+    if let Some(partial) = live_partial
+        && !partial.tail.is_empty()
+        && let Some(line) = partial
+            .tail
+            .lines()
+            .rev()
+            .map(|line| clean_inline_text(line.trim()))
+            .find(|line| !line.is_empty())
+    {
+        parts.push(crate::util::truncate(&line, 72));
+    }
+
+    parts.join(" · ")
+}
+
+fn tool_has_expandable_detail(
+    detail_args: Option<&str>,
+    detail_result: Option<&str>,
+    live_partial: Option<&omegon_traits::PartialToolResult>,
+) -> bool {
+    detail_args.is_some_and(|args| !args.trim().is_empty())
+        || detail_result.is_some_and(|result| !result.trim().is_empty())
+        || live_partial.is_some_and(|partial| !partial.tail.trim().is_empty())
+}
+
 fn apply_rows_bg(area: Rect, start_row: u16, row_count: u16, bg: Color, buf: &mut Buffer) {
     let end_row = start_row.saturating_add(row_count).min(area.height);
     for row in start_row..end_row {
@@ -150,6 +525,55 @@ fn detect_links(text: &str) -> Vec<RenderedLink> {
             });
         }
         cursor = end.max(after_scheme);
+    }
+
+    let mut token_start = None;
+    for (idx, ch) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), ' ')))
+    {
+        if ch.is_whitespace() {
+            if let Some(start) = token_start.take() {
+                let raw = &text[start..idx];
+                let leading = raw
+                    .char_indices()
+                    .find(|(_, ch)| !matches!(ch, '<' | '(' | '[' | '"' | '\''))
+                    .map(|(idx, _)| idx)
+                    .unwrap_or(raw.len());
+                let mut end = raw.len();
+                while end > leading {
+                    let Some(ch) = raw[..end].chars().next_back() else {
+                        break;
+                    };
+                    if matches!(
+                        ch,
+                        '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '>' | '"'
+                    ) {
+                        end -= ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+
+                if leading < end {
+                    let label = &raw[leading..end];
+                    let looks_like_path = (label.contains('/') || label.starts_with('.'))
+                        && label.ends_with(".md")
+                        && !SCHEMES.iter().any(|scheme| label.starts_with(scheme));
+                    if looks_like_path && let Some(url) = file_url_for_path(label) {
+                        let absolute_start = start + leading;
+                        let start_col = UnicodeWidthStr::width(&text[..absolute_start]) as u16;
+                        links.push(RenderedLink {
+                            start_col,
+                            label: label.to_string(),
+                            url,
+                        });
+                    }
+                }
+            }
+        } else if token_start.is_none() {
+            token_start = Some(idx);
+        }
     }
     links
 }
@@ -469,6 +893,20 @@ pub enum SegmentContent {
     TurnSeparator,
 }
 
+pub(crate) fn is_plan_progress_text(text: &str) -> bool {
+    matches!(
+        text.lines().next().unwrap_or_default(),
+        "Plan set"
+            | "Plan progress"
+            | "Plan item skipped"
+            | "Plan approved"
+            | "Plan executing"
+            | "Plan cleared"
+            | "Plan status"
+            | "Plan updated"
+    )
+}
+
 /// Convenience constructors — build Segment with default (empty) metadata.
 /// Call sites that have model info should set meta fields after construction.
 impl Segment {
@@ -761,6 +1199,10 @@ impl Segment {
     /// Renders into a temp buffer to get the exact height — matches
     /// Paragraph's word-aware wrapping precisely.
     pub fn height(&self, width: u16, t: &dyn Theme) -> u16 {
+        self.height_in_mode(width, t, SegmentRenderMode::Full)
+    }
+
+    pub fn height_in_mode(&self, width: u16, t: &dyn Theme, mode: SegmentRenderMode) -> u16 {
         if width == 0 {
             return 1;
         }
@@ -779,6 +1221,14 @@ impl Segment {
         // buffer clips content and the cached height becomes permanently wrong.
         let estimate = match &self.content {
             UserPrompt { text } => wrapped_rows(text, width.saturating_sub(4)) + 2,
+            AssistantText { text, thinking, .. } if matches!(mode, SegmentRenderMode::Slim) => {
+                let thinking_rows = if thinking.is_empty() {
+                    0
+                } else {
+                    wrapped_rows(thinking, width.saturating_sub(2)).min(8) + 1
+                };
+                wrapped_rows(text, width).max(1) + thinking_rows
+            }
             AssistantText { text, thinking, .. } => {
                 let meta_line = if self.meta.model_id.is_some() || self.meta.provider.is_some() {
                     1u16
@@ -792,6 +1242,9 @@ impl Segment {
                 };
                 wrapped_rows(text, width.saturating_sub(3)) + thinking_rows + 4 + meta_line
             }
+            ToolCard {
+                is_error, expanded, ..
+            } if matches!(mode, SegmentRenderMode::Slim) && !*is_error && !*expanded => 1,
             ToolCard {
                 name,
                 detail_args,
@@ -880,19 +1333,35 @@ impl Segment {
                     + result_separator_rows
                     + 4
             }
+            SystemNotification { text } if matches!(mode, SegmentRenderMode::Slim) => {
+                if is_plan_progress_text(text) {
+                    0
+                } else {
+                    wrapped_rows(text, width).max(1)
+                }
+            }
             SystemNotification { text } => wrapped_rows(text, width.saturating_sub(4)) + 2,
             _ => 4,
         };
 
-        // Render into temp buffer — cap at 400 rows to avoid absurd allocations
-        let h = estimate.clamp(4, 400);
+        // Render into temp buffer — cap at 400 rows to avoid absurd allocations.
+        // Slim mode can intentionally hide segments such as pinned plan snapshots
+        // from the scrollback, so allow a zero-height estimate there.
+        let h = if matches!(mode, SegmentRenderMode::Slim) {
+            estimate.min(400)
+        } else {
+            estimate.clamp(4, 400)
+        };
+        if h == 0 {
+            return 0;
+        }
         let temp_area = Rect::new(0, 0, width, h);
         let mut temp_buf = Buffer::empty(temp_area);
         self.render(
             temp_area,
             &mut temp_buf,
             t,
-            SegmentRenderMode::Full,
+            mode,
             crate::settings::ToolDetail::Detailed,
         );
 
@@ -907,8 +1376,16 @@ impl Segment {
         for y in (0..h).rev() {
             let mut has_content = false;
             // Check interior columns only (skip first 2 and last 2 for borders + padding)
-            let x_start = 2.min(width);
-            let x_end = width.saturating_sub(2).max(x_start);
+            let x_start = if matches!(mode, SegmentRenderMode::Slim) {
+                0
+            } else {
+                2.min(width)
+            };
+            let x_end = if matches!(mode, SegmentRenderMode::Slim) {
+                width
+            } else {
+                width.saturating_sub(2).max(x_start)
+            };
             for x in x_start..x_end {
                 let cell = &temp_buf[(x, y)];
                 let sym = cell.symbol();
@@ -1200,16 +1677,20 @@ fn render_assistant_text(
     let mut lines: Vec<Line<'_>> = Vec::new();
 
     // Assistant identity line — identify the source, not the current phase.
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!("{} ", presentation.sigil),
-            Style::default()
-                .fg(border_color)
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("omegon", Style::default().fg(t.border_dim()).bg(bg)),
-    ]));
+    // Slim mode deliberately omits this chrome so prose remains easy to select
+    // and copy like a normal terminal transcript.
+    if !matches!(mode, SegmentRenderMode::Slim) {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", presentation.sigil),
+                Style::default()
+                    .fg(border_color)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("omegon", Style::default().fg(t.border_dim()).bg(bg)),
+        ]));
+    }
 
     // Meta tag line: model / provider / tier — dim secondary header.
     // Hidden in slim mode to reduce visual noise.
@@ -1266,7 +1747,7 @@ fn render_assistant_text(
         )));
     }
 
-    if !text.is_empty() {
+    if !text.is_empty() && !matches!(mode, SegmentRenderMode::Slim) {
         lines.push(Line::from(vec![
             Span::styled("◎ ", Style::default().fg(t.accent()).bg(bg)),
             Span::styled(
@@ -1371,81 +1852,12 @@ fn render_tool_card(
     mode: SegmentRenderMode,
     density: crate::settings::ToolDetail,
 ) {
-    let summarize_change_args = |args: &str| -> Option<String> {
-        let v = serde_json::from_str::<serde_json::Value>(args).ok()?;
-
-        if let Some(edits) = v.get("edits").and_then(|e| e.as_array()) {
-            let mut files: Vec<&str> = edits
-                .iter()
-                .filter_map(|edit| edit.get("file").and_then(|f| f.as_str()))
-                .collect();
-            files.dedup();
-            return match files.as_slice() {
-                [] => Some(format!("{} edits", edits.len())),
-                [only] => Some(format!(
-                    "{only} · {} edit{}",
-                    edits.len(),
-                    if edits.len() == 1 { "" } else { "s" }
-                )),
-                [first, second, ..] => Some(format!("{first}, {second} · {} edits", edits.len())),
-            };
-        }
-
-        let path = v
-            .get("file")
-            .or(v.get("path"))
-            .and_then(|f| f.as_str())
-            .unwrap_or("(unknown file)");
-        let old_len = v
-            .get("oldText")
-            .and_then(|s| s.as_str())
-            .map(|s| s.lines().count())
-            .unwrap_or(0);
-        let new_len = v
-            .get("newText")
-            .and_then(|s| s.as_str())
-            .map(|s| s.lines().count())
-            .unwrap_or(0);
-        Some(format!("{path} · {old_len}→{new_len} lines"))
-    };
-
-    let summarize_args = |tool_name: &str, args: Option<&str>| -> Option<String> {
-        let args = args?;
-        match tool_name {
-            "edit" => serde_json::from_str::<serde_json::Value>(args)
-                .ok()
-                .map(|v| {
-                    let path = v
-                        .get("file")
-                        .or(v.get("path"))
-                        .and_then(|f| f.as_str())
-                        .unwrap_or("(unknown file)");
-                    let old_len = v
-                        .get("oldText")
-                        .and_then(|s| s.as_str())
-                        .map(|s| s.lines().count())
-                        .unwrap_or(0);
-                    let new_len = v
-                        .get("newText")
-                        .and_then(|s| s.as_str())
-                        .map(|s| s.lines().count())
-                        .unwrap_or(0);
-                    format!("{path} · {old_len}→{new_len} lines")
-                })
-                .or_else(|| Some(crate::util::truncate(args, 80))),
-            "change" => {
-                summarize_change_args(args).or_else(|| Some(crate::util::truncate(args, 80)))
-            }
-            "read" | "write" | "view" | "bash" => {
-                Some(args.lines().next().unwrap_or(args).to_string())
-            }
-            _ => None,
-        }
-    };
-
     let display_name = if name == "bash" {
         if let Some(args) = detail_args {
-            let cmd = args.lines().next().unwrap_or(args);
+            let command = shell_command_from_args(args);
+            let cmd = command
+                .as_deref()
+                .unwrap_or(args.lines().next().unwrap_or(args));
             let first_word = cmd.split_whitespace().next().unwrap_or("bash");
             match first_word {
                 "grep" | "rg" => "search".to_string(),
@@ -1540,6 +1952,107 @@ fn render_tool_card(
         spans
     };
 
+    if matches!(mode, SegmentRenderMode::Slim) && !complete && !is_error && !expanded {
+        let mut cells: Vec<String> = Vec::new();
+        if let Some(summary) = summarize_tool_args(name, detail_args) {
+            cells.push(summary);
+        }
+        cells.push(summarize_live_tool_progress(live_partial, started_at));
+        if tool_has_expandable_detail(detail_args, detail_result, live_partial) {
+            cells.push("Ctrl+O details".to_string());
+        }
+
+        let detail = cells.join(" · ");
+        let text_budget = area.width.saturating_sub(3) as usize;
+        let detail = crate::util::truncate(&detail, text_budget);
+        let line = Line::from(vec![
+            Span::styled(
+                format!("{status_icon} "),
+                Style::default()
+                    .fg(status_color)
+                    .bg(bg)
+                    .add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                format!("{display_name} "),
+                Style::default()
+                    .fg(status_color)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("· ", Style::default().fg(t.dim()).bg(bg)),
+            Span::styled(detail, Style::default().fg(t.muted()).bg(bg)),
+        ]);
+        let lines = vec![line];
+        Paragraph::new(lines.clone())
+            .style(Style::default().bg(bg))
+            .render(area, buf);
+        apply_rendered_links(
+            area,
+            &lines,
+            buf,
+            Style::default()
+                .fg(t.accent_muted())
+                .bg(bg)
+                .add_modifier(Modifier::UNDERLINED),
+            area.height,
+        );
+        return;
+    }
+
+    if matches!(mode, SegmentRenderMode::Slim) && complete && !is_error && !expanded {
+        let mut cells: Vec<String> = Vec::new();
+        if let Some(summary) = summarize_tool_args(name, detail_args) {
+            cells.push(summary);
+        }
+        if let Some(summary) = summarize_tool_result(name, detail_result) {
+            cells.push(summary);
+        }
+        if let Some(ms) = meta.duration_ms {
+            cells.push(format_duration_compact(ms));
+        }
+        if tool_has_expandable_detail(detail_args, detail_result, live_partial) {
+            cells.push("Ctrl+O details".to_string());
+        }
+
+        let detail = cells.join(" · ");
+        let text_budget = area.width.saturating_sub(3) as usize;
+        let detail = crate::util::truncate(&detail, text_budget);
+        let line = Line::from(vec![
+            Span::styled(
+                format!("{status_icon} "),
+                Style::default()
+                    .fg(status_color)
+                    .bg(bg)
+                    .add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                format!("{display_name} "),
+                Style::default()
+                    .fg(status_color)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("· ", Style::default().fg(t.dim()).bg(bg)),
+            Span::styled(detail, Style::default().fg(t.muted()).bg(bg)),
+        ]);
+        let lines = vec![line];
+        Paragraph::new(lines.clone())
+            .style(Style::default().bg(bg))
+            .render(area, buf);
+        apply_rendered_links(
+            area,
+            &lines,
+            buf,
+            Style::default()
+                .fg(t.accent_muted())
+                .bg(bg)
+                .add_modifier(Modifier::UNDERLINED),
+            area.height,
+        );
+        return;
+    }
+
     let card_block = if matches!(mode, SegmentRenderMode::Slim) {
         // Slim: top border only, no side borders — maximizes terminal
         // text selection width and avoids │ chars in copied text.
@@ -1581,7 +2094,7 @@ fn render_tool_card(
     let result_budget = effective.result_budget();
     let tail_budget = effective.tail_budget();
 
-    if let Some(summary) = summarize_args(name, detail_args) {
+    if let Some(summary) = summarize_tool_args(name, detail_args) {
         lines.push(Line::from(vec![
             Span::styled("▸ ", Style::default().fg(t.accent_muted()).bg(bg)),
             Span::styled(summary, Style::default().fg(t.fg()).bg(bg)),
@@ -2799,6 +3312,14 @@ mod tests {
     }
 
     #[test]
+    fn detects_markdown_file_paths_as_clickable_file_links() {
+        let links = detect_links("Transcript: /tmp/omegon-transcript-20260519.md.");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].label, "/tmp/omegon-transcript-20260519.md");
+        assert_eq!(links[0].url, "file:///tmp/omegon-transcript-20260519.md");
+    }
+
+    #[test]
     fn file_tool_links_resolve_relative_paths_to_file_urls() {
         let url = file_url_for_path("Cargo.toml").expect("relative path should resolve");
         assert!(
@@ -2833,6 +3354,279 @@ mod tests {
         assert!(
             text.contains("for details."),
             "link overlay must not clear the suffix after the URL: {text}"
+        );
+    }
+
+    #[test]
+    fn slim_assistant_text_renders_without_copy_hostile_headers() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::AssistantText {
+                text: "Plain response text.".into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        };
+        let (area, mut buf) = make_buf(60, 4);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Detailed,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("Plain response text."), "{text}");
+        assert!(!text.contains("answer"), "{text}");
+        assert!(!text.contains("omegon"), "{text}");
+    }
+
+    #[test]
+    fn slim_completed_tool_card_collapses_to_single_line() {
+        let mut seg = Segment::tool_card("tool-1", "bash");
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_args,
+            detail_result,
+            ..
+        } = &mut seg.content
+        {
+            *complete = true;
+            *detail_args = Some("cargo test".into());
+            *detail_result = Some("ok\nmore output".into());
+        }
+        assert_eq!(
+            seg.height_in_mode(80, &Alpharius, SegmentRenderMode::Slim),
+            1
+        );
+    }
+
+    #[test]
+    fn slim_completed_tool_card_renders_compact_payload() {
+        let mut seg = Segment::tool_card("tool-1", "bash");
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_args,
+            detail_result,
+            ..
+        } = &mut seg.content
+        {
+            *complete = true;
+            *detail_args = Some("git status --short".into());
+            *detail_result = Some(" M src/tui/segments.rs\n M CHANGELOG.md".into());
+        }
+
+        let (area, mut buf) = make_buf(100, 1);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("git"), "{text}");
+        assert!(text.contains("git status --short"), "{text}");
+        assert!(text.contains("2 lines · M src/tui/segments.rs"), "{text}");
+        assert!(text.contains("Ctrl+O details"), "{text}");
+    }
+
+    #[test]
+    fn slim_completed_tool_card_extracts_json_shell_command() {
+        let mut seg = Segment::tool_card("tool-1", "bash");
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_args,
+            detail_result,
+            ..
+        } = &mut seg.content
+        {
+            *complete = true;
+            *detail_args = Some(r#"{"command":"diskutil list /dev/disk4"}"#.into());
+            *detail_result = Some("/dev/disk4 external physical\n62.9 GB\nRemovable".into());
+        }
+
+        let (area, mut buf) = make_buf(120, 1);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("diskutil"), "{text}");
+        assert!(text.contains("diskutil list /dev/disk4"), "{text}");
+        assert!(
+            text.contains("3 lines · /dev/disk4 external physical"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn slim_completed_tool_card_summarizes_read_target_and_output() {
+        let mut seg = Segment::tool_card("tool-1", "read");
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_args,
+            detail_result,
+            ..
+        } = &mut seg.content
+        {
+            *complete = true;
+            *detail_args = Some(
+                r#"{"path":"/Users/wilson/project/src/ops/forge.rs","offset":40,"limit":20}"#
+                    .into(),
+            );
+            *detail_result = Some("fn forge() {}\nlet disk = target;\nwrite_bundle();".into());
+        }
+
+        let (area, mut buf) = make_buf(140, 1);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(
+            text.contains("/Users/wilson/project/src/ops/forge.rs"),
+            "{text}"
+        );
+        assert!(text.contains("@40"), "{text}");
+        assert!(text.contains("limit 20"), "{text}");
+        assert!(text.contains("3 lines · fn forge() {}"), "{text}");
+    }
+
+    #[test]
+    fn slim_completed_tool_card_summarizes_validate_scope() {
+        let mut seg = Segment::tool_card("tool-1", "validate");
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_args,
+            detail_result,
+            ..
+        } = &mut seg.content
+        {
+            *complete = true;
+            *detail_args = Some(
+                r#"{"paths":["src/main.rs","src/lib.rs","docs/readme.md"],"source_type":"rust"}"#
+                    .into(),
+            );
+            *detail_result = Some("unsupported source type: markdown".into());
+        }
+
+        let (area, mut buf) = make_buf(120, 1);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("validate"), "{text}");
+        assert!(
+            text.contains("src/main.rs, src/lib.rs, docs/readme.md"),
+            "{text}"
+        );
+        assert!(text.contains("rust"), "{text}");
+        assert!(text.contains("unsupported source type: markdown"), "{text}");
+    }
+
+    #[test]
+    fn slim_completed_tool_card_summarizes_terminal_target() {
+        let mut seg = Segment::tool_card("tool-1", "terminal");
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_args,
+            detail_result,
+            ..
+        } = &mut seg.content
+        {
+            *complete = true;
+            *detail_args =
+                Some(r#"{"action":"read","session_id":"forge-build","max_bytes":4096}"#.into());
+            *detail_result = Some(
+                "Terminal 'forge-build' (abc) — running\nTranscript: /tmp/t.log\n\nready".into(),
+            );
+        }
+
+        let (area, mut buf) = make_buf(140, 1);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("terminal"), "{text}");
+        assert!(text.contains("read · forge-build · 4096 bytes"), "{text}");
+        assert!(text.contains("ready"), "{text}");
+        assert!(text.contains("/tmp/t.log"), "{text}");
+    }
+
+    #[test]
+    fn slim_running_tool_card_renders_live_evidence_on_one_row() {
+        let partial = omegon_traits::PartialToolResult {
+            tail: "downloading NixOS minimal ISO...\ncopying closure paths...\nbundle ready".into(),
+            progress: omegon_traits::ToolProgress {
+                elapsed_ms: 11_400,
+                heartbeat: false,
+                phase: Some("bundling".into()),
+                units: Some(omegon_traits::ProgressUnits {
+                    current: 2,
+                    total: Some(3),
+                    unit: "steps".into(),
+                }),
+                tally: None,
+            },
+            details: serde_json::json!(null),
+        };
+        let mut seg = Segment::tool_card("tool-1", "bash");
+        if let SegmentContent::ToolCard {
+            complete,
+            detail_args,
+            live_partial,
+            started_at,
+            ..
+        } = &mut seg.content
+        {
+            *complete = false;
+            *detail_args = Some(r#"{"command":"nex forge --disk /dev/disk4"}"#.into());
+            *live_partial = Some(Box::new(partial));
+            *started_at = None;
+        }
+
+        assert_eq!(
+            seg.height_in_mode(120, &Alpharius, SegmentRenderMode::Slim),
+            1
+        );
+        let (area, mut buf) = make_buf(140, 1);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("nex forge --disk /dev/disk4"), "{text}");
+        assert!(text.contains("bundling"), "{text}");
+        assert!(text.contains("2/3 steps"), "{text}");
+        assert!(text.contains("11.4s"), "{text}");
+        assert!(text.contains("bundle ready"), "{text}");
+        assert!(text.contains("Ctrl+O details"), "{text}");
+    }
+
+    #[test]
+    fn slim_plan_progress_has_zero_scrollback_height() {
+        let seg = Segment::system("Plan progress\nProgress: 1/2\n\n1. ◐ Do it");
+        assert_eq!(
+            seg.height_in_mode(80, &Alpharius, SegmentRenderMode::Slim),
+            0
         );
     }
 

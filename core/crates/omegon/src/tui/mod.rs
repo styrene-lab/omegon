@@ -354,6 +354,10 @@ pub struct App {
     plugin_registry: Option<crate::plugins::registry::PluginRegistry>,
     /// Slim-mode status line — persistent telemetry bar.
     status_line: statusline::StatusLine,
+    /// Structured session plan snapshot for the pinned Slim plan panel.
+    slim_plan_snapshot: Option<PlanDisplaySnapshot>,
+    /// Explicit Slim turn state rendered in the status line.
+    slim_turn_state: SlimTurnState,
     /// Visual effects manager (tachyonfx).
     effects: effects::Effects,
     /// Command definitions from bus features.
@@ -1265,6 +1269,308 @@ fn editor_height_for(editor: &Editor, main_area: Rect) -> u16 {
     (editor_rows + 2).clamp(3, max_editor) // +2 for border
 }
 
+fn slim_plan_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> u16 {
+    if width == 0 || snapshot.items.is_empty() {
+        return 0;
+    }
+    let item_count = snapshot.items.len() as u16;
+    // Rule/header + compact task rows, capped so the plan never crowds out the transcript.
+    (1 + item_count.min(6)).clamp(2, 8)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlanDisplaySnapshot {
+    mode: String,
+    completed: usize,
+    total: usize,
+    items: Vec<PlanDisplayItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlanDisplayItem {
+    status: PlanDisplayStatus,
+    description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlanDisplayRow {
+    text: String,
+    status: Option<PlanDisplayStatus>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlanDisplayStatus {
+    Done,
+    Active,
+    Skipped,
+    Todo,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum SlimTurnState {
+    #[default]
+    Ready,
+    Running,
+    Thinking,
+    Responding,
+    Tool(String),
+    Finished(&'static str),
+}
+
+impl SlimTurnState {
+    fn label(&self) -> String {
+        match self {
+            Self::Ready => "ready".to_string(),
+            Self::Running => "turn running".to_string(),
+            Self::Thinking => "thinking".to_string(),
+            Self::Responding => "responding".to_string(),
+            Self::Tool(name) => format!("running {name}"),
+            Self::Finished(reason) => format!("turn {reason}"),
+        }
+    }
+}
+
+impl PlanDisplayStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Done => "done",
+            Self::Active => "active",
+            Self::Skipped => "skipped",
+            Self::Todo => "todo",
+        }
+    }
+
+    fn from_label(value: &str) -> Self {
+        match value {
+            "done" | "completed" => Self::Done,
+            "active" | "in_progress" | "executing" => Self::Active,
+            "skipped" | "skip" => Self::Skipped,
+            _ => Self::Todo,
+        }
+    }
+
+    fn style(self, t: &dyn theme::Theme, bg: ratatui::style::Color) -> Style {
+        let color = match self {
+            Self::Done => t.success(),
+            Self::Active => t.warning(),
+            Self::Skipped => t.dim(),
+            Self::Todo => t.accent_muted(),
+        };
+        let style = Style::default().fg(color).bg(bg);
+        if matches!(self, Self::Done | Self::Active) {
+            style.add_modifier(Modifier::BOLD)
+        } else {
+            style
+        }
+    }
+}
+
+impl PlanDisplaySnapshot {
+    fn from_json(value: serde_json::Value) -> Option<Self> {
+        let mode = value.get("mode")?.as_str()?.to_string();
+        let total = value.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        if total == 0 {
+            return None;
+        }
+        let completed = value.get("completed").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let items = value
+            .get("items")?
+            .as_array()?
+            .iter()
+            .filter_map(|item| {
+                let description = item.get("description")?.as_str()?.trim();
+                if description.is_empty() {
+                    return None;
+                }
+                let status = item
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .map(PlanDisplayStatus::from_label)
+                    .unwrap_or(PlanDisplayStatus::Todo);
+                Some(PlanDisplayItem {
+                    status,
+                    description: description.to_string(),
+                })
+            })
+            .collect::<Vec<_>>();
+        if items.is_empty() {
+            return None;
+        }
+        Some(Self {
+            mode,
+            completed,
+            total,
+            items,
+        })
+    }
+
+    fn from_legacy_text(text: &str) -> Option<Self> {
+        if text.lines().next() == Some("Plan cleared") {
+            return None;
+        }
+        let mut mode = "unknown".to_string();
+        let mut completed = 0usize;
+        let mut total = 0usize;
+        let mut items = Vec::new();
+        for line in text.lines() {
+            if let Some(value) = line.strip_prefix("Plan mode:") {
+                mode = value
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("unknown")
+                    .to_string();
+            } else if let Some(value) = line.strip_prefix("Progress:") {
+                if let Some((done, count)) = value.trim().split_once('/') {
+                    completed = done.trim().parse().unwrap_or(0);
+                    total = count.trim().parse().unwrap_or(0);
+                }
+            } else if let Some((description, status)) = legacy_plan_item(line) {
+                items.push(PlanDisplayItem {
+                    status,
+                    description,
+                });
+            }
+        }
+        if total == 0 {
+            total = items.len();
+        }
+        (!items.is_empty()).then_some(Self {
+            mode,
+            completed,
+            total,
+            items,
+        })
+    }
+
+    fn summary(&self) -> String {
+        format!("plan {}/{} · {}", self.completed, self.total, self.mode)
+    }
+}
+
+fn slim_plan_rows(snapshot: &PlanDisplaySnapshot, width: u16, height: u16) -> Vec<PlanDisplayRow> {
+    let max_items = height.saturating_sub(1) as usize;
+    if max_items == 0 {
+        return Vec::new();
+    }
+    let hidden = snapshot.items.len().saturating_sub(max_items);
+    let visible_items = if hidden > 0 {
+        max_items.saturating_sub(1)
+    } else {
+        max_items
+    };
+    let text_budget = width.saturating_sub(2) as usize;
+    let mut rows = Vec::new();
+    for (idx, item) in snapshot.items.iter().take(visible_items).enumerate() {
+        let label = item.status.label();
+        let line = format!("{}. {label:<7} {}", idx + 1, item.description);
+        rows.push(PlanDisplayRow {
+            text: crate::util::truncate(&line, text_budget),
+            status: Some(item.status),
+        });
+    }
+    if hidden > 0 {
+        rows.push(PlanDisplayRow {
+            text: format!("+{hidden} more"),
+            status: None,
+        });
+    }
+    rows
+}
+
+fn legacy_plan_item(raw: &str) -> Option<(String, PlanDisplayStatus)> {
+    let trimmed = raw.trim_start();
+    if !trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    if let Some((_, rest)) = trimmed.split_once('●') {
+        Some((rest.trim().to_string(), PlanDisplayStatus::Done))
+    } else if let Some((_, rest)) = trimmed.split_once('◐') {
+        Some((rest.trim().to_string(), PlanDisplayStatus::Active))
+    } else if let Some((_, rest)) = trimmed.split_once('⊘') {
+        Some((rest.trim().to_string(), PlanDisplayStatus::Skipped))
+    } else if let Some((_, rest)) = trimmed.split_once('○') {
+        Some((rest.trim().to_string(), PlanDisplayStatus::Todo))
+    } else {
+        let (_, text) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
+        Some((text.trim().to_string(), PlanDisplayStatus::Todo))
+    }
+}
+
+fn slim_operator_hint(
+    pending_permission: bool,
+    pending_operator_wait: bool,
+    terminal_copy_mode: bool,
+    has_plan: bool,
+    automation: &str,
+) -> String {
+    if pending_permission {
+        "permission · y once · a always · n deny".to_string()
+    } else if pending_operator_wait {
+        "manual wait · Enter done · Esc cancel".to_string()
+    } else if terminal_copy_mode {
+        "copy mode · select text · /mouse on exits".to_string()
+    } else if has_plan {
+        format!("/plan advance · /plan skip · auto: {automation}")
+    } else {
+        format!("/copy latest · /transcript · auto: {automation}")
+    }
+}
+
+fn render_slim_plan_panel(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    snapshot: &PlanDisplaySnapshot,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let bg = t.surface_bg();
+    let mut lines: Vec<Line<'_>> = Vec::new();
+    let summary = snapshot.summary();
+    let rule_width = area.width.saturating_sub(summary.len() as u16 + 4) as usize;
+    lines.push(Line::from(vec![
+        Span::styled("─ ", Style::default().fg(t.border_dim()).bg(bg)),
+        Span::styled(
+            summary,
+            Style::default()
+                .fg(t.accent_muted())
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {}", "─".repeat(rule_width)),
+            Style::default().fg(t.border_dim()).bg(bg),
+        ),
+    ]));
+
+    for row in slim_plan_rows(snapshot, area.width, area.height) {
+        let style = row
+            .status
+            .map(|status| status.style(t, bg))
+            .unwrap_or_else(|| Style::default().fg(t.dim()).bg(bg));
+        lines.push(Line::from(Span::styled(row.text, style)));
+    }
+
+    Paragraph::new(lines)
+        .style(Style::default().bg(bg))
+        .wrap(Wrap { trim: false })
+        .render(area, frame.buffer_mut());
+}
+
+fn format_permission_prompt(tool_name: &str, path: &str) -> String {
+    format!(
+        "Permission required\n\
+         Tool: {tool_name}\n\
+         Target: {path}\n\
+         Reason: grant required for this operation\n\
+         Persist: project profile permissions for always-allow\n\n\
+         [y] once   [a] always + save   [n/Esc] deny"
+    )
+}
+
 /// Compact one-line tool summary for focus mode headers.
 /// "cargo test" for bash, "src/main.rs · 4→6 lines" for edit, etc.
 fn focus_tool_summary(name: &str, detail_args: Option<&str>) -> String {
@@ -1453,6 +1759,8 @@ impl App {
                 crate::prompt::load_lex_imperialis(),
             )),
             status_line: statusline::StatusLine::default(),
+            slim_plan_snapshot: None,
+            slim_turn_state: SlimTurnState::Ready,
             effects: effects::Effects::new(),
             bus_commands: Vec::new(),
             dashboard_handles: dashboard::DashboardHandles::default(),
@@ -1930,8 +2238,8 @@ impl App {
                 active: false,
             },
             selector::SelectOption {
-                value: "trust".into(),
-                label: "Trusted Directories".into(),
+                value: "permissions".into(),
+                label: "Permissions".into(),
                 description: format!("Configured: {dirs}"),
                 active: false,
             },
@@ -2461,14 +2769,17 @@ impl App {
                         self.open_tone_selector();
                         None
                     }
-                    "trust" => {
+                    "permissions" | "trust" => {
                         let s = self.settings();
                         if s.trusted_directories.is_empty() {
-                            Some("No trusted directories. Use /trust add <path> to add one.".into())
+                            Some(
+                                "No trusted directories. Use /permissions add <path> to add one."
+                                    .into(),
+                            )
                         } else {
                             let list = s.trusted_directories.join("\n  ");
                             Some(format!(
-                                "Trusted directories:\n  {list}\n\nUse /trust add|remove <path> to manage."
+                                "Trusted directories:\n  {list}\n\nUse /permissions add|remove <path> to manage."
                             ))
                         }
                     }
@@ -3487,17 +3798,31 @@ impl App {
 
         let is_slim = self.ui_surfaces.is_compact() && !self.focus_mode;
         let status_height = if is_slim { 1u16 } else { 0 };
+        let slim_plan_snapshot = if is_slim {
+            self.slim_plan_snapshot.clone().or_else(|| {
+                self.conversation
+                    .latest_plan_progress()
+                    .and_then(PlanDisplaySnapshot::from_legacy_text)
+            })
+        } else {
+            None
+        };
+        let slim_plan_height = slim_plan_snapshot
+            .as_ref()
+            .map(|snapshot| slim_plan_snapshot_height(snapshot, main_area.width))
+            .unwrap_or(0);
 
-        // Slim layout: conversation → editor → status+footer (editor above footer).
+        // Slim layout: conversation → pinned plan → editor → status+footer.
         // Full layout: conversation → status → editor → footer (status between).
         let chunks = if is_slim {
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Min(3),                // [0] conversation
-                    Constraint::Length(editor_height), // [1] editor
-                    Constraint::Length(status_height), // [2] status line
-                    Constraint::Length(footer_height), // [3] footer
+                    Constraint::Min(3),                   // [0] conversation
+                    Constraint::Length(slim_plan_height), // [1] pinned plan
+                    Constraint::Length(editor_height),    // [2] editor
+                    Constraint::Length(status_height),    // [3] status line
+                    Constraint::Length(footer_height),    // [4] footer
                 ])
                 .split(main_area)
         } else {
@@ -3505,18 +3830,20 @@ impl App {
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Min(3),                // [0] conversation
-                    Constraint::Length(0),             // [1] (no status in Full)
+                    Constraint::Length(0),             // [1] (no pinned plan in Full)
                     Constraint::Length(editor_height), // [2] editor
-                    Constraint::Length(footer_height), // [3] footer
+                    Constraint::Length(status_height), // [3] (no status in Full)
+                    Constraint::Length(footer_height), // [4] footer
                 ])
                 .split(main_area)
         };
 
         // Logical zone indices — consistent regardless of layout order.
         let conversation_area = chunks[0];
-        let editor_area = if is_slim { chunks[1] } else { chunks[2] };
-        let status_area = if is_slim { chunks[2] } else { chunks[1] };
-        let footer_area = chunks[3];
+        let slim_plan_area = chunks[1];
+        let editor_area = chunks[2];
+        let status_area = chunks[3];
+        let footer_area = chunks[4];
 
         // Render tab bar + conversation/widget content
         let t = &self.theme;
@@ -3569,9 +3896,32 @@ impl App {
         self.conversation_area = Some(conversation_area);
         self.editor_area = Some(editor_area);
 
+        if let Some(snapshot) = slim_plan_snapshot.as_ref()
+            && slim_plan_area.height > 0
+        {
+            render_slim_plan_panel(slim_plan_area, frame, self.theme.as_ref(), snapshot);
+        }
+
         // ── Status line (slim mode only) ────────────────────────
         if status_height > 0 {
             self.status_line.sync_from_footer(&self.footer_data);
+            self.status_line.viewport_hint = if self.conversation.conv_state.scroll_offset > 0 {
+                Some(format!(
+                    "view detached ↑{} · End tail",
+                    self.conversation.conv_state.scroll_offset
+                ))
+            } else {
+                None
+            };
+            self.status_line.turn_state = Some(self.slim_turn_state.label());
+            let automation = self.settings().automation_level.as_str();
+            self.status_line.operator_hint = Some(slim_operator_hint(
+                self.pending_permission.is_some(),
+                self.pending_operator_wait.is_some(),
+                self.terminal_copy_mode,
+                slim_plan_snapshot.is_some(),
+                automation,
+            ));
             self.status_line
                 .render(status_area, frame, self.theme.as_ref());
         }
@@ -4504,11 +4854,41 @@ impl App {
         self.copy_selected_conversation_segment_with_mode(SegmentExportMode::Raw);
     }
 
-    fn copy_full_session(&mut self) {
+    fn copy_latest_assistant_response(&mut self, mode: SegmentExportMode) {
+        let Some(text) = self.conversation.latest_assistant_text_with_mode(mode) else {
+            self.show_toast(
+                "No assistant response to copy",
+                ratatui_toaster::ToastType::Warning,
+            );
+            return;
+        };
+        if self.copy_text_to_clipboard(&text) {
+            let label = match mode {
+                SegmentExportMode::Raw => "Copied latest assistant response",
+                SegmentExportMode::Plaintext => "Copied latest assistant response as plaintext",
+            };
+            self.show_toast(label, ratatui_toaster::ToastType::Success);
+        } else {
+            self.show_toast(
+                "Clipboard unavailable — use /transcript for terminal-native selection",
+                ratatui_toaster::ToastType::Warning,
+            );
+        }
+    }
+
+    fn build_session_transcript(&self, mode: SegmentExportMode) -> String {
         let segments = self.conversation.segments();
         let mut parts: Vec<String> = Vec::new();
+        if let Some(plan) = self.conversation.latest_plan_progress() {
+            parts.push(format!("## Plan\n\n{}", plan.trim_end()));
+        }
         for segment in segments {
             if matches!(segment.content, SegmentContent::TurnSeparator) {
+                continue;
+            }
+            if let SegmentContent::SystemNotification { text } = &segment.content
+                && segments::is_plan_progress_text(text)
+            {
                 continue;
             }
             let role = match segment.role() {
@@ -4520,12 +4900,90 @@ impl App {
                 segments::SegmentRole::Media => "## Media",
                 segments::SegmentRole::Separator => continue,
             };
-            let text = segment.export_text(SegmentExportMode::Raw);
+            let text = segment.export_text(mode);
             if !text.trim().is_empty() {
                 parts.push(format!("{role}\n\n{text}"));
             }
         }
-        let full = parts.join("\n\n---\n\n");
+        parts.join("\n\n---\n\n")
+    }
+
+    fn restore_tui_after_native_scrollback(
+        out: &mut io::Stdout,
+        keyboard_enhancement: bool,
+        mouse_capture: bool,
+    ) -> std::io::Result<()> {
+        out.execute(EnterAlternateScreen)?;
+        enable_raw_mode()?;
+        if keyboard_enhancement {
+            let _ = out.execute(PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+            ));
+        }
+        if mouse_capture {
+            let _ = out.execute(EnableMouseCapture);
+        }
+        Ok(())
+    }
+
+    fn write_session_transcript_markdown_to_dir(
+        &self,
+        dir: &std::path::Path,
+    ) -> std::io::Result<std::path::PathBuf> {
+        let transcript = self.build_session_transcript(SegmentExportMode::Raw);
+        if transcript.trim().is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "empty transcript",
+            ));
+        }
+
+        std::fs::create_dir_all(dir)?;
+        let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S%.3f");
+        let path = dir.join(format!("omegon-transcript-{timestamp}.md"));
+        let generated_at = chrono::Local::now().to_rfc3339();
+        let body = format!("# Omegon transcript\n\nGenerated: {generated_at}\n\n{transcript}\n");
+        std::fs::write(&path, body)?;
+        Ok(path)
+    }
+
+    fn write_session_transcript_markdown(&self) -> std::io::Result<std::path::PathBuf> {
+        let cwd = std::env::current_dir()?;
+        let project_root = crate::setup::find_project_root(&cwd);
+        self.write_session_transcript_markdown_to_dir(
+            &project_root.join(".omegon").join("transcripts"),
+        )
+    }
+
+    fn export_session_transcript_markdown(&mut self) {
+        match self.write_session_transcript_markdown() {
+            Ok(path) => {
+                self.conversation.push_system(&format!(
+                    "✓ Transcript written\n  {}\n  Open the linked .md file from your terminal.",
+                    path.display()
+                ));
+                self.show_toast(
+                    "Transcript written to Markdown",
+                    ratatui_toaster::ToastType::Success,
+                );
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::InvalidInput => {
+                self.show_toast(
+                    "No conversation transcript to write",
+                    ratatui_toaster::ToastType::Warning,
+                );
+            }
+            Err(err) => {
+                self.show_toast(
+                    &format!("Could not write transcript: {err}"),
+                    ratatui_toaster::ToastType::Warning,
+                );
+            }
+        }
+    }
+
+    fn copy_full_session(&mut self) {
+        let full = self.build_session_transcript(SegmentExportMode::Raw);
         if full.is_empty() {
             self.show_toast(
                 "No conversation to copy",
@@ -4553,13 +5011,62 @@ impl App {
         }
 
         if self.copy_text_to_clipboard(&full) {
-            let segment_count = parts.len();
+            let segment_count = full.split("\n\n---\n\n").count();
             self.show_toast(
                 &format!("Copied full session ({segment_count} segments, {size_label})"),
                 ratatui_toaster::ToastType::Success,
             );
         } else {
             self.show_toast("Clipboard unavailable", ratatui_toaster::ToastType::Warning);
+        }
+    }
+
+    fn print_transcript_to_native_scrollback(&mut self) {
+        let transcript = self.build_session_transcript(SegmentExportMode::Raw);
+        if transcript.trim().is_empty() {
+            self.show_toast(
+                "No conversation transcript to print",
+                ratatui_toaster::ToastType::Warning,
+            );
+            return;
+        }
+
+        let mouse_capture = self.mouse_capture_enabled;
+        let keyboard_enhancement = self.keyboard_enhancement;
+        let result = (|| -> std::io::Result<()> {
+            use std::io::Write;
+            let mut out = io::stdout();
+            let _ = disable_raw_mode();
+            let _ = out.execute(DisableMouseCapture);
+            if keyboard_enhancement {
+                let _ = out.execute(PopKeyboardEnhancementFlags);
+            }
+            out.execute(LeaveAlternateScreen)?;
+            writeln!(out)?;
+            writeln!(out, "----- Omegon transcript -----")?;
+            writeln!(out, "{transcript}")?;
+            writeln!(out, "----- End Omegon transcript -----")?;
+            writeln!(out)?;
+            out.flush()?;
+            Self::restore_tui_after_native_scrollback(&mut out, keyboard_enhancement, mouse_capture)
+        })();
+
+        if result.is_ok() {
+            self.show_toast(
+                "Transcript printed to native scrollback",
+                ratatui_toaster::ToastType::Success,
+            );
+        } else {
+            let mut out = io::stdout();
+            let _ = Self::restore_tui_after_native_scrollback(
+                &mut out,
+                keyboard_enhancement,
+                mouse_capture,
+            );
+            self.show_toast(
+                "Could not print transcript to native scrollback",
+                ratatui_toaster::ToastType::Warning,
+            );
         }
     }
 
@@ -4586,8 +5093,13 @@ impl App {
         ("help", "show available commands", &[]),
         (
             "copy",
-            "copy selected segment or session",
-            &["raw", "plain", "session"],
+            "copy selected segment, latest response, or session",
+            &["raw", "plain", "latest", "session"],
+        ),
+        (
+            "transcript",
+            "write a clean clickable Markdown transcript",
+            &["file", "open", "scrollback"],
         ),
         (
             "mouse",
@@ -5850,6 +6362,14 @@ impl App {
                     self.copy_selected_conversation_segment_with_mode(SegmentExportMode::Raw);
                     SlashResult::Handled
                 }
+                "latest" | "response" | "assistant" => {
+                    self.copy_latest_assistant_response(SegmentExportMode::Raw);
+                    SlashResult::Handled
+                }
+                "latest plain" | "latest plaintext" | "response plain" | "assistant plain" => {
+                    self.copy_latest_assistant_response(SegmentExportMode::Plaintext);
+                    SlashResult::Handled
+                }
                 "plain" | "plaintext" => {
                     self.copy_selected_conversation_segment_with_mode(SegmentExportMode::Plaintext);
                     SlashResult::Handled
@@ -5858,8 +6378,27 @@ impl App {
                     self.copy_full_session();
                     SlashResult::Handled
                 }
-                _ => SlashResult::Display("Usage: /copy [raw|plain|session]".into()),
+                _ => SlashResult::Display(
+                    "Usage: /copy [raw|plain|latest|latest plain|session]".into(),
+                ),
             },
+
+            "transcript" => {
+                match args {
+                    "" | "open" | "file" | "md" | "markdown" => {
+                        self.export_session_transcript_markdown();
+                    }
+                    "scrollback" | "native" => {
+                        self.print_transcript_to_native_scrollback();
+                    }
+                    _ => {
+                        self.conversation.push_system(
+                            "Usage: /transcript [file|scrollback]\n  file: write a clickable Markdown transcript\n  scrollback: print transcript to native terminal scrollback",
+                        );
+                    }
+                }
+                SlashResult::Handled
+            }
 
             "tree" => {
                 if let Some(command) = canonical_slash_command("tree", args)
@@ -6496,6 +7035,7 @@ impl App {
         match event {
             AgentEvent::TurnStart { turn } => {
                 self.agent_active = true;
+                self.slim_turn_state = SlimTurnState::Running;
                 if let Ok(mut ss) = self.dashboard_handles.session.lock() {
                     ss.busy = true;
                 }
@@ -6506,6 +7046,12 @@ impl App {
             }
             AgentEvent::TurnEnd(te) => {
                 self.turn = te.turn;
+                self.slim_turn_state = SlimTurnState::Finished(match te.turn_end_reason {
+                    omegon_traits::TurnEndReason::AssistantCompleted => "done",
+                    omegon_traits::TurnEndReason::ToolContinuation => "continuing",
+                    omegon_traits::TurnEndReason::ProgressNudge => "nudged",
+                    omegon_traits::TurnEndReason::Cancelled => "cancelled",
+                });
                 // Update status line with behavioral signals
                 self.status_line.phase = te.dominant_phase;
                 self.status_line.drift = te.drift_kind;
@@ -6583,6 +7129,7 @@ impl App {
                 self.detect_continuation_request();
             }
             AgentEvent::MessageChunk { text } => {
+                self.slim_turn_state = SlimTurnState::Responding;
                 let was_streaming = self.conversation.is_streaming();
                 self.conversation.append_streaming(&text);
                 if !was_streaming {
@@ -6591,6 +7138,7 @@ impl App {
                 }
             }
             AgentEvent::ThinkingChunk { text } => {
+                self.slim_turn_state = SlimTurnState::Thinking;
                 self.instrument_panel.note_thinking_activity();
                 let was_streaming = self.conversation.is_streaming();
                 self.conversation.append_thinking(&text);
@@ -6601,6 +7149,7 @@ impl App {
             AgentEvent::ToolStart { id, name, args } => {
                 self.working_verb = spinner::next_verb();
                 self.instrument_panel.tool_started(&name);
+                self.slim_turn_state = SlimTurnState::Tool(name.replace('_', " "));
                 let args_summary = crate::r#loop::summarize_tool_args(&name, &args);
                 // Full args for detailed view
                 let detail_args = match name.as_str() {
@@ -6679,12 +7228,10 @@ impl App {
                 path,
                 respond,
             } => {
+                self.slim_turn_state = SlimTurnState::Finished("blocked");
                 // Show a blocking permission prompt in the TUI.
                 // Render inline as a system notification with key hints.
-                let prompt_text = format!(
-                    "🔒 Permission required\n   Tool: {tool_name}\n   Path: {path}\n   \
-                     [y] allow once   [a] always allow + save to project profile   [n/Esc] deny"
-                );
+                let prompt_text = format_permission_prompt(&tool_name, &path);
                 self.conversation.push_system(&prompt_text);
 
                 // Store the responder — the next key event (y/a/n) will
@@ -6698,6 +7245,7 @@ impl App {
                 acknowledge,
                 respond,
             } => {
+                self.slim_turn_state = SlimTurnState::Finished("waiting");
                 let prompt_text = format!(
                     "Manual action required\n   {prompt}\n   [Enter/Space/d] done   [c/Esc] cancel   safety timeout: {timeout_secs}s"
                 );
@@ -6847,9 +7395,15 @@ impl App {
                 self.instrument_panel
                     .tool_finished(completed_name, is_error);
                 self.completed_tool_name = self.last_tool_name.take().or(Some(name));
+                if self.agent_active {
+                    self.slim_turn_state = SlimTurnState::Running;
+                }
             }
             AgentEvent::AgentEnd => {
                 self.agent_active = false;
+                if !matches!(self.slim_turn_state, SlimTurnState::Finished(_)) {
+                    self.slim_turn_state = SlimTurnState::Ready;
+                }
                 if self.interrupt_pending {
                     self.editor.clear_line();
                     self.interrupt_pending = false;
@@ -6858,7 +7412,21 @@ impl App {
                 if let Ok(mut ss) = self.dashboard_handles.session.lock() {
                     ss.busy = false;
                 }
+                let had_streaming_message = self.conversation.is_streaming();
                 self.conversation.finalize_message();
+                if self.ui_surfaces.is_compact()
+                    && !self.focus_mode
+                    && had_streaming_message
+                    && let Some(area) = self.conversation_area
+                    && self
+                        .conversation
+                        .maybe_scroll_latest_assistant_to_start(area.height)
+                {
+                    self.show_toast(
+                        "Long response pinned at start; End jumps to the live tail",
+                        ratatui_toaster::ToastType::Info,
+                    );
+                }
                 self.effects.stop_spinner_glow();
                 self.effects.stop_border_pulse();
                 self.effects.sweep_turn_complete();
@@ -6915,8 +7483,12 @@ impl App {
                     self.conversation.push_system(&message);
                 }
             }
+            AgentEvent::PlanUpdated { snapshot_json } => {
+                self.slim_plan_snapshot = PlanDisplaySnapshot::from_json(snapshot_json);
+            }
             AgentEvent::SessionReset => {
                 self.conversation = ConversationView::new();
+                self.slim_plan_snapshot = None;
                 self.turn = 0;
                 self.tool_calls = 0;
                 self.last_tool_name = None;
@@ -8952,8 +9524,9 @@ pub async fn run_tui(
         }
     }
 
-    // Stop non-persist background services
+    // Stop session-scoped background processes
     crate::tools::serve::cleanup_session_services();
+    crate::tools::terminal::cleanup_session_terminals();
 
     // Save history before restoring terminal
     app.save_history();
@@ -9010,9 +9583,117 @@ mod slash_command_parsing_tests {
     use super::SlashResult;
     use super::TuiCommand;
     use super::canonical_slash_command;
+    use super::{
+        PlanDisplaySnapshot, PlanDisplayStatus, format_permission_prompt, slim_operator_hint,
+        slim_plan_rows,
+    };
     use tokio::sync::mpsc;
 
     // ── Profile ───────────────────────────────────────────
+
+    #[test]
+    fn slim_plan_contract_renders_structured_snapshot() {
+        let snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
+            "mode": "executing",
+            "completed": 2,
+            "total": 4,
+            "items": [
+                {"description": "Inspect repo", "status": "done"},
+                {"description": "Patch UI", "status": "active"},
+                {"description": "Skip old path", "status": "skipped"},
+                {"description": "Validate", "status": "todo"}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(snapshot.summary(), "plan 2/4 · executing");
+        let rows = slim_plan_rows(&snapshot, 80, 5);
+        assert_eq!(
+            rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
+            vec![
+                "1. done    Inspect repo",
+                "2. active  Patch UI",
+                "3. skipped Skip old path",
+                "4. todo    Validate"
+            ]
+        );
+        assert_eq!(rows[2].status, Some(PlanDisplayStatus::Skipped));
+    }
+
+    #[test]
+    fn slim_plan_contract_marks_hidden_rows() {
+        let snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
+            "mode": "executing",
+            "completed": 1,
+            "total": 8,
+            "items": (0..8).map(|idx| serde_json::json!({
+                "description": format!("Step {idx}"),
+                "status": if idx == 0 { "done" } else { "todo" },
+            })).collect::<Vec<_>>()
+        }))
+        .unwrap();
+        let rows = slim_plan_rows(&snapshot, 40, 4);
+        assert_eq!(
+            rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
+            vec!["1. done    Step 0", "2. todo    Step 1", "+5 more"]
+        );
+    }
+
+    #[test]
+    fn permission_prompt_contract_is_neutral_and_complete() {
+        let prompt = format_permission_prompt("read", "/tmp/outside");
+        assert!(prompt.contains("Tool: read"));
+        assert!(prompt.contains("Target: /tmp/outside"));
+        assert!(prompt.contains("Reason: grant required for this operation"));
+        assert!(prompt.contains("Persist: project profile permissions"));
+        assert!(prompt.contains("[y] once"));
+        assert!(prompt.contains("[a] always + save"));
+        assert!(!prompt.contains("outside trusted workspace"));
+    }
+
+    #[test]
+    fn slim_plan_legacy_text_remains_fallback_only() {
+        let snapshot = PlanDisplaySnapshot::from_legacy_text(
+            "Plan progress\nPlan mode: executing\nProgress: 2/3\n\n1. ● Inspect\n2. ◐ Patch\n3. ⊘ Skip",
+        )
+        .unwrap();
+        assert_eq!(snapshot.summary(), "plan 2/3 · executing");
+        assert_eq!(
+            snapshot
+                .items
+                .iter()
+                .map(|item| item.status)
+                .collect::<Vec<_>>(),
+            vec![
+                PlanDisplayStatus::Done,
+                PlanDisplayStatus::Active,
+                PlanDisplayStatus::Skipped
+            ]
+        );
+    }
+
+    #[test]
+    fn slim_operator_hint_prioritizes_blocking_prompts() {
+        assert_eq!(
+            slim_operator_hint(true, true, true, true, "assistive"),
+            "permission · y once · a always · n deny"
+        );
+        assert_eq!(
+            slim_operator_hint(false, true, true, true, "assistive"),
+            "manual wait · Enter done · Esc cancel"
+        );
+        assert_eq!(
+            slim_operator_hint(false, false, true, true, "assistive"),
+            "copy mode · select text · /mouse on exits"
+        );
+        assert_eq!(
+            slim_operator_hint(false, false, false, true, "assistive"),
+            "/plan advance · /plan skip · auto: assistive"
+        );
+        assert_eq!(
+            slim_operator_hint(false, false, false, false, "assistive"),
+            "/copy latest · /transcript · auto: assistive"
+        );
+    }
 
     #[test]
     fn profile_commands_parse() {

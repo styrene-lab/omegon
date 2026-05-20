@@ -405,18 +405,21 @@ pub async fn run(
             );
             if warning.consecutive >= 3 {
                 tracing::warn!(
-                    "Stuck detector escalation — force-breaking agent loop after {} consecutive warnings",
+                    "Stuck detector escalation — injecting recovery guidance after {} consecutive warnings",
                     warning.consecutive
                 );
                 conversation.push_user(
                     "[System: STUCK LOOP DETECTED. You have been repeating the same \
-                     actions for multiple turns despite warnings. Stop using tools. \
-                     Summarize what you know so far and respond to the user.]"
+                     actions for multiple turns despite warnings. Do not repeat the \
+                     same failing tool call. If a concrete next action is available, \
+                     take it now with a different tool or corrected arguments. If no \
+                     concrete action is possible, state the blocker plainly and stop.]"
                         .to_string(),
                 );
-                break;
+                stuck_detector.reset_after_escalation();
+            } else {
+                conversation.push_user(format!("[System: {}]", warning.message));
             }
-            conversation.push_user(format!("[System: {}]", warning.message));
         }
 
         // If context is getting large, try LLM-driven compaction.
@@ -672,6 +675,17 @@ pub async fn run(
         // Real provider token counts for this turn (0 if provider didn't report them)
         let (act_in, act_out, act_cr, act_cc) = assistant_msg.provider_tokens;
         let provider_telemetry = assistant_msg.provider_telemetry.clone();
+        let active_provider = crate::providers::infer_provider_id(&active_model).to_string();
+        if let Some(reason) = provider_stop_reason(&assistant_msg.raw)
+            && let Some(message) = provider_stop_notice(&active_provider, reason)
+        {
+            tracing::warn!(
+                provider = active_provider.as_str(),
+                stop_reason = reason,
+                "provider ended response abnormally"
+            );
+            let _ = events.send(AgentEvent::SystemNotification { message });
+        }
 
         let captured =
             crate::lifecycle::capture::parse_ambient_blocks(assistant_msg.text_content());
@@ -1068,6 +1082,9 @@ pub async fn run(
 
         if let Some(message) = plan_status_notification(dispatch_calls, &conversation.intent) {
             let _ = events.send(AgentEvent::SystemNotification { message });
+            let _ = events.send(AgentEvent::PlanUpdated {
+                snapshot_json: conversation.intent.work_plan_snapshot_json(),
+            });
         }
 
         let dominant_phase = classify_turn_phase(&tool_catalog, dispatch_calls, &results);
@@ -1750,6 +1767,43 @@ pub(crate) fn is_upstream_exhausted(err: &anyhow::Error) -> bool {
     err.to_string()
         .to_lowercase()
         .contains("upstream exhausted:")
+}
+
+fn provider_stop_reason(raw: &serde_json::Value) -> Option<&str> {
+    raw.get("provider_stop_reason")
+        .and_then(|reason| reason.as_str())
+        .filter(|reason| !reason.trim().is_empty())
+}
+
+fn is_abnormal_provider_stop(provider: &str, reason: &str) -> bool {
+    match provider {
+        "openai" | "openrouter" | "openai-compatible" => {
+            !matches!(reason, "stop" | "tool_calls" | "function_call")
+        }
+        "anthropic" => !matches!(reason, "end_turn" | "tool_use" | "stop_sequence"),
+        _ => matches!(
+            reason,
+            "length" | "max_tokens" | "content_filter" | "safety" | "incomplete"
+        ),
+    }
+}
+
+fn provider_stop_notice(provider: &str, reason: &str) -> Option<String> {
+    if !is_abnormal_provider_stop(provider, reason) {
+        return None;
+    }
+    let hint = match reason {
+        "length" | "max_tokens" => {
+            "The provider stopped because the output limit was reached; the visible answer may be incomplete."
+        }
+        "content_filter" | "safety" => {
+            "The provider stopped because safety/content filtering intervened; the visible answer may be incomplete."
+        }
+        _ => "The provider ended the response abnormally; the visible answer may be incomplete.",
+    };
+    Some(format!(
+        "Provider stop: {provider}/{reason}\n{hint}\nUse a continuation prompt or retry with a larger output budget if needed."
+    ))
 }
 
 /// Consume LlmEvents from the bridge, build an AssistantMessage.
@@ -2640,7 +2694,7 @@ async fn execute_tool_invocation(
                                 text: format!(
                                     "BLOCKED: '{}' is outside the workspace. \
                                      This operation was denied by the permission system. \
-                                     The operator must run /trust add {} to allow \
+                                     The operator can run /permissions add {} to allow \
                                      access to this directory, then re-run the task.",
                                     perm_err.requested_path, perm_err.directory,
                                 ),
@@ -3114,6 +3168,12 @@ impl StuckDetector {
         }
     }
 
+    fn reset_after_escalation(&mut self) {
+        self.recent.clear();
+        self.recent_file_accesses.clear();
+        self.consecutive_warnings = 0;
+    }
+
     /// Record a tool call for pattern analysis.
     ///
     /// For read-like tools we hash only the file path, ignoring offset/limit,
@@ -3309,6 +3369,35 @@ pub fn summarize_tool_args(tool_name: &str, args: &Value) -> Option<String> {
                 clean.to_string()
             };
             Some(short)
+        }
+        "terminal" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("status");
+            match action {
+                "start" => args
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .map(|cmd| format!("start: {}", crate::util::truncate(cmd, 60))),
+                "send" => args
+                    .get("session_id")
+                    .or_else(|| args.get("name"))
+                    .and_then(|v| v.as_str())
+                    .map(|id| format!("send: {id}")),
+                "read" => args
+                    .get("session_id")
+                    .or_else(|| args.get("name"))
+                    .and_then(|v| v.as_str())
+                    .map(|id| format!("read: {id}")),
+                "stop" => args
+                    .get("session_id")
+                    .or_else(|| args.get("name"))
+                    .and_then(|v| v.as_str())
+                    .map(|id| format!("stop: {id}")),
+                "list" => Some("list".into()),
+                other => Some(other.to_string()),
+            }
         }
         "change" => {
             let edits = args.get("edits").and_then(|v| v.as_array())?;
@@ -5820,6 +5909,30 @@ mod tests {
     }
 
     #[test]
+    fn stuck_detector_escalation_reset_allows_recovery_turn() {
+        let mut detector = StuckDetector::new();
+        for i in 0..10 {
+            detector.record(
+                &test_tool_catalog(),
+                &ToolCall {
+                    id: format!("{i}"),
+                    name: "bash".into(),
+                    arguments: serde_json::json!({"command": "false"}),
+                },
+                true,
+            );
+        }
+
+        assert!(detector.check(&test_tool_catalog()).is_some());
+        detector.reset_after_escalation();
+
+        assert!(
+            detector.check(&test_tool_catalog()).is_none(),
+            "recovery guidance must reach the model instead of immediately re-triggering"
+        );
+    }
+
+    #[test]
     fn exhaustion_advice_distinguishes_provider_outage_from_rate_limit() {
         assert!(
             exhaustion_advice(Some(TransientFailureKind::Upstream5xx), false, false)
@@ -5845,5 +5958,18 @@ mod tests {
             exhaustion_advice(Some(TransientFailureKind::StalledStream), false, true)
                 .contains("stream is unresponsive")
         );
+    }
+
+    #[test]
+    fn provider_stop_notice_only_surfaces_abnormal_stops() {
+        assert!(provider_stop_notice("openai", "stop").is_none());
+        assert!(provider_stop_notice("openai", "tool_calls").is_none());
+        let notice = provider_stop_notice("openai", "length").expect("length should warn");
+        assert!(notice.contains("output limit"), "{notice}");
+
+        assert!(provider_stop_notice("anthropic", "end_turn").is_none());
+        let notice =
+            provider_stop_notice("anthropic", "max_tokens").expect("max_tokens should warn");
+        assert!(notice.contains("output limit"), "{notice}");
     }
 }

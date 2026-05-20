@@ -2142,6 +2142,11 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
                 })).collect::<Vec<_>>(),
             },
         }),
+        AgentEvent::PlanUpdated { snapshot_json } => json!({
+            "type": "plan_updated",
+            "event_name": "plan.updated",
+            "snapshot": snapshot_json,
+        }),
         AgentEvent::SystemNotification { message } => json!({
             "type": "system_notification",
             "event_name": "system.notification",
@@ -2690,6 +2695,7 @@ mod tests {
             AgentEvent::DecompositionChildCompleted { .. } => {}
             AgentEvent::DecompositionCompleted { .. } => {}
             AgentEvent::FamilyVitalSignsUpdated { .. } => {}
+            AgentEvent::PlanUpdated { .. } => {}
             AgentEvent::SystemNotification { .. } => {}
             AgentEvent::HarnessStatusChanged { .. } => {}
             AgentEvent::WebDashboardStarted { .. } => {}
@@ -2789,6 +2795,17 @@ mod tests {
                     }],
                 },
             },
+            AgentEvent::PlanUpdated {
+                snapshot_json: serde_json::json!({
+                    "mode": "executing",
+                    "completed": 1,
+                    "total": 2,
+                    "items": [
+                        {"description": "Read", "status": "done"},
+                        {"description": "Patch", "status": "active"}
+                    ]
+                }),
+            },
             AgentEvent::SystemNotification {
                 message: "test".into(),
             },
@@ -2833,8 +2850,8 @@ mod tests {
         }
         assert_eq!(
             events.len(),
-            21,
-            "should cover all 21 AgentEvent variants — see _exhaustive_agent_event_serialization_coverage"
+            22,
+            "should cover all 22 AgentEvent variants — see _exhaustive_agent_event_serialization_coverage"
         );
     }
 

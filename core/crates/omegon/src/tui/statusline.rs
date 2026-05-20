@@ -30,6 +30,9 @@ pub struct StatusLine {
     pub phase: Option<OodaPhase>,
     pub drift: Option<DriftKind>,
     pub persona: Option<String>,
+    pub viewport_hint: Option<String>,
+    pub turn_state: Option<String>,
+    pub operator_hint: Option<String>,
 }
 
 impl StatusLine {
@@ -83,6 +86,43 @@ impl StatusLine {
         ];
 
         let mut used: usize = spans.iter().map(|s| s.width()).sum();
+
+        // Detached conversation viewport. This is deliberately near the left
+        // pinned fields: when Slim auto-pins a long answer at its start, the
+        // operator must be able to tell that more transcript exists below.
+        if let Some(ref hint) = self.viewport_hint {
+            let field = Span::styled(hint.clone(), Style::default().fg(t.warning()));
+            let cost = sect.width() + field.width();
+            if used + cost < w {
+                spans.push(sect.clone());
+                spans.push(field);
+                used += cost;
+            }
+        }
+
+        // Explicit turn state: makes "done vs still running vs waiting"
+        // visible without requiring the operator to infer it from scrollback.
+        if let Some(ref state) = self.turn_state {
+            let field = Span::styled(state.clone(), Style::default().fg(t.warning()));
+            let cost = sect.width() + field.width();
+            if used + cost < w {
+                spans.push(sect.clone());
+                spans.push(field);
+                used += cost;
+            }
+        }
+
+        // Contextual operator hint. This is fed from real session/profile state
+        // in the TUI draw pass and sheds before workspace metadata.
+        if let Some(ref hint) = self.operator_hint {
+            let field = Span::styled(hint.clone(), Style::default().fg(t.accent_muted()));
+            let cost = sect.width() + field.width();
+            if used + cost < w {
+                spans.push(sect.clone());
+                spans.push(field);
+                used += cost;
+            }
+        }
 
         // ── Responsive fields (shed right-to-left) ──────────────
 
@@ -224,5 +264,8 @@ mod tests {
         assert_eq!(sl.context_percent, 0.0);
         assert!(sl.phase.is_none());
         assert!(sl.drift.is_none());
+        assert!(sl.viewport_hint.is_none());
+        assert!(sl.turn_state.is_none());
+        assert!(sl.operator_hint.is_none());
     }
 }

@@ -5,7 +5,9 @@
 
 use super::conv_widget::ConvState;
 use super::image::ImageCache;
-use super::segments::{Segment, SegmentContent, SegmentExportMode, SegmentMeta, TokenUsage};
+use super::segments::{
+    Segment, SegmentContent, SegmentExportMode, SegmentMeta, TokenUsage, is_plan_progress_text,
+};
 
 /// Tab variant — conversation or extension widget
 #[derive(Debug, Clone)]
@@ -269,20 +271,6 @@ fn non_image_attachment_summary(attachments: &[std::path::PathBuf]) -> Option<St
     }
 }
 
-fn is_plan_progress_notification(text: &str) -> bool {
-    matches!(
-        text.lines().next().unwrap_or_default(),
-        "Plan set"
-            | "Plan progress"
-            | "Plan item skipped"
-            | "Plan approved"
-            | "Plan executing"
-            | "Plan cleared"
-            | "Plan status"
-            | "Plan updated"
-    )
-}
-
 impl ConversationView {
     pub fn new() -> Self {
         Self {
@@ -348,7 +336,7 @@ impl ConversationView {
     }
 
     pub fn push_system(&mut self, text: &str) {
-        if is_plan_progress_notification(text)
+        if is_plan_progress_text(text)
             && let Some(existing) = self
                 .segments
                 .iter_mut()
@@ -357,7 +345,7 @@ impl ConversationView {
                     SegmentContent::SystemNotification { text } => Some(text),
                     _ => None,
                 })
-                .find(|existing| is_plan_progress_notification(existing))
+                .find(|existing| is_plan_progress_text(existing))
         {
             *existing = text.to_string();
             self.conv_state.invalidate();
@@ -657,6 +645,75 @@ impl ConversationView {
         self.conv_state.auto_scroll_to_bottom();
     }
 
+    pub fn maybe_scroll_latest_assistant_to_start(&mut self, viewport_height: u16) -> bool {
+        if viewport_height == 0
+            || self.conv_state.user_scrolled
+            || self.conv_state.heights.len() != self.segments.len()
+        {
+            return false;
+        }
+
+        let Some(idx) = self
+            .segments
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, segment)| {
+                matches!(
+                    segment.content,
+                    SegmentContent::AssistantText {
+                        ref text,
+                        complete: true,
+                        ..
+                    } if !text.trim().is_empty()
+                )
+            })
+            .map(|(idx, _)| idx)
+        else {
+            return false;
+        };
+
+        let segment_height = self.conv_state.heights[idx];
+        if segment_height <= viewport_height.saturating_mul(3) / 2 {
+            return false;
+        }
+
+        let total_height: u16 = self.conv_state.heights.iter().copied().sum();
+        let max_scroll = total_height.saturating_sub(viewport_height);
+        if max_scroll == 0 {
+            return false;
+        }
+
+        let segment_top: u16 = self.conv_state.heights[..idx].iter().copied().sum();
+        let desired_scroll = total_height
+            .saturating_sub(viewport_height)
+            .saturating_sub(segment_top)
+            .min(max_scroll);
+        if desired_scroll == 0 {
+            return false;
+        }
+
+        self.conv_state.scroll_offset = desired_scroll;
+        self.conv_state.user_scrolled = true;
+        self.selected_segment = Some(idx);
+        true
+    }
+
+    pub fn latest_plan_progress(&self) -> Option<&str> {
+        for segment in self.segments.iter().rev() {
+            if let SegmentContent::SystemNotification { text } = &segment.content
+                && is_plan_progress_text(text)
+            {
+                return if text.lines().next() == Some("Plan cleared") {
+                    None
+                } else {
+                    Some(text.as_str())
+                };
+            }
+        }
+        None
+    }
+
     pub fn abort_streaming(&mut self) {
         self.streaming = false;
         self.conv_state.invalidate();
@@ -865,6 +922,21 @@ impl ConversationView {
             .map(|segment| segment.export_text(mode))
     }
 
+    pub fn latest_assistant_text_with_mode(&self, mode: SegmentExportMode) -> Option<String> {
+        self.segments.iter().rev().find_map(|segment| {
+            if matches!(segment.content, SegmentContent::AssistantText { .. }) {
+                let text = segment.export_text(mode);
+                if text.trim().is_empty() {
+                    None
+                } else {
+                    Some(text)
+                }
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn move_selected_segment_prev(&mut self) -> Option<usize> {
         let start = self
             .selected_or_focused_segment()
@@ -965,9 +1037,7 @@ mod tests {
             .segments
             .iter()
             .filter_map(|segment| match &segment.content {
-                SegmentContent::SystemNotification { text }
-                    if is_plan_progress_notification(text) =>
-                {
+                SegmentContent::SystemNotification { text } if is_plan_progress_text(text) => {
                     Some(text.as_str())
                 }
                 _ => None,
@@ -1460,6 +1530,32 @@ mod tests {
             assert_eq!(text, "Hello world");
             assert!(complete);
         }
+    }
+
+    #[test]
+    fn long_completed_assistant_response_can_pin_viewport_to_start() {
+        let mut cv = ConversationView::new();
+        cv.push_system("older context");
+        cv.append_streaming("long answer");
+        cv.finalize_message();
+        cv.conv_state.heights = vec![2, 30];
+
+        assert!(cv.maybe_scroll_latest_assistant_to_start(10));
+        assert!(cv.conv_state.user_scrolled);
+        assert_eq!(cv.selected_segment, Some(1));
+        assert_eq!(cv.conv_state.scroll_offset, 20);
+    }
+
+    #[test]
+    fn short_completed_assistant_response_stays_at_tail() {
+        let mut cv = ConversationView::new();
+        cv.append_streaming("short answer");
+        cv.finalize_message();
+        cv.conv_state.heights = vec![8];
+
+        assert!(!cv.maybe_scroll_latest_assistant_to_start(10));
+        assert!(!cv.conv_state.user_scrolled);
+        assert_eq!(cv.conv_state.scroll_offset, 0);
     }
 
     #[test]

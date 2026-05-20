@@ -915,6 +915,11 @@ pub enum IpcEventPayload {
     #[serde(rename = "family.vital_signs")]
     FamilyVitalSignsUpdated { signs: FamilyVitalSigns },
 
+    // ── Plan ────────────────────────────────────────────────────────────────
+    /// Structured current session plan snapshot.
+    #[serde(rename = "plan.updated")]
+    PlanUpdated { snapshot: Value },
+
     // ── Harness ────────────────────────────────────────────────────────────
     /// Harness state changed. Call `get_state` to refresh the `harness` section.
     #[serde(rename = "harness.changed")]
@@ -1308,13 +1313,13 @@ pub enum BusEvent {
 
     // ── Permission ──────────────────────────────────────────────────
     /// The agent wants to access a path outside the workspace.
-    /// The TUI should display a blocking prompt and send the response
-    /// via the oneshot sender inside the Arc<Mutex<Option<...>>>.
+    /// The operator surface should display a blocking prompt and send a
+    /// `PermissionResponse` via the sender inside the Arc<Mutex<Option<...>>>.
     PermissionRequest {
         tool_name: String,
         path: String,
-        /// Response channel. The TUI takes the sender via `.lock().unwrap().take()`
-        /// and sends `true` (approved) or `false` (denied). Wrapped in Arc<Mutex>
+        /// Response channel. The UI takes the sender via `.lock().unwrap().take()`
+        /// and sends allow-once, always-allow, or deny. Wrapped in Arc<Mutex>
         /// because AgentEvent must be Clone for broadcast channels.
         respond:
             std::sync::Arc<std::sync::Mutex<Option<std::sync::mpsc::Sender<PermissionResponse>>>>,
@@ -1478,12 +1483,12 @@ pub enum NotifyLevel {
     Error,
 }
 
-/// Response to a permission request from the TUI.
+/// Response to a permission request from an operator surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionResponse {
     /// Allow this one operation.
     Allow,
-    /// Allow all operations in this directory for the session.
+    /// Allow operations in this directory and persist the grant to project permissions.
     AlwaysAllow,
     /// Deny the operation.
     Deny,
@@ -1933,8 +1938,8 @@ pub enum AgentEvent {
         is_error: bool,
     },
     /// The agent wants to access a path outside the workspace.
-    /// The TUI renders a blocking permission prompt and sends the
-    /// response via the channel inside the Arc<Mutex<Option<...>>>.
+    /// The operator surface renders a blocking permission prompt and sends
+    /// the response via the channel inside the Arc<Mutex<Option<...>>>.
     PermissionRequest {
         tool_name: String,
         path: String,
@@ -1975,6 +1980,11 @@ pub enum AgentEvent {
     /// System notification — displayed in TUI but not sent to the LLM.
     SystemNotification {
         message: String,
+    },
+    /// Structured session plan snapshot. Renderers should prefer this over
+    /// reparsing human-readable plan notifications.
+    PlanUpdated {
+        snapshot_json: Value,
     },
     /// Harness status changed — persona switch, MCP connect, secret unlock, etc.
     /// Serialized HarnessStatus JSON. Web dashboard renders the snapshot.
