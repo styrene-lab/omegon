@@ -9328,9 +9328,10 @@ pub async fn run_tui(
                             app.editor.move_word_forward();
                         }
 
-                        // Ctrl+O: toggle pin/expand on nearest tool card
+                        // Ctrl+O: toggle pin/expand on nearest visible tool card
                         (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
-                            app.conversation.toggle_pin();
+                            let viewport_height = app.conversation_area.map(|area| area.height);
+                            app.conversation.toggle_pin_in_viewport(viewport_height);
                         }
 
                         // Ctrl+F: toggle focus mode (copy-first selected segment view)

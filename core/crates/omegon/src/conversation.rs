@@ -477,7 +477,7 @@ impl IntentDocument {
 
     fn clear_if_work_plan_complete(&mut self) {
         if self.work_plan_complete() {
-            self.clear_work_plan();
+            self.plan_mode = PlanMode::Complete;
         }
     }
 
@@ -808,6 +808,12 @@ impl ConversationState {
                 intent.plan_mode.label(),
                 intent.plan_mode.guidance()
             ));
+            if intent.plan_mode == PlanMode::Executing {
+                lines.push(
+                    "Plan execution contract: when the active item is completed, call the `plan` tool with action `advance` or `complete` before continuing."
+                        .to_string(),
+                );
+            }
             for item in &items {
                 lines.push(format!("  {item}"));
             }
@@ -3664,8 +3670,9 @@ mod tests {
 
         intent.advance_work_plan();
         intent.advance_work_plan();
-        assert!(intent.work_plan.is_empty());
-        assert_eq!(intent.plan_mode, PlanMode::Off);
+        assert_eq!(intent.work_plan.len(), 3);
+        assert!(intent.work_plan_complete());
+        assert_eq!(intent.plan_mode, PlanMode::Complete);
     }
 
     #[test]
@@ -3703,8 +3710,9 @@ mod tests {
         assert_eq!(intent.work_plan[2].status, WorkItemStatus::Active);
 
         intent.complete_work_item(2);
-        assert!(intent.work_plan.is_empty());
-        assert_eq!(intent.plan_mode, PlanMode::Off);
+        assert_eq!(intent.work_plan.len(), 3);
+        assert!(intent.work_plan_complete());
+        assert_eq!(intent.plan_mode, PlanMode::Complete);
     }
 
     #[test]
@@ -3718,8 +3726,9 @@ mod tests {
         assert!(intent.work_plan[0].status != WorkItemStatus::Done);
 
         intent.advance_work_plan();
-        assert!(intent.work_plan.is_empty());
-        assert_eq!(intent.plan_mode, PlanMode::Off);
+        assert_eq!(intent.work_plan.len(), 2);
+        assert!(intent.work_plan_complete());
+        assert_eq!(intent.plan_mode, PlanMode::Complete);
     }
 
     #[test]
@@ -3733,6 +3742,14 @@ mod tests {
         assert!(rendered.contains("Plan mode: planning"));
         assert!(rendered.contains("◐ Read"));
         assert!(rendered.contains("○ Write"));
+        assert!(!rendered.contains("Plan execution contract:"));
+
+        conv.intent.execute_work_plan();
+        let rendered = conv.render_intent_for_injection();
+        assert!(rendered.contains("Plan mode: executing"));
+        assert!(rendered.contains("Plan execution contract:"));
+        assert!(rendered.contains("`plan` tool"));
+        assert!(rendered.contains("action `advance` or `complete`"));
 
         conv.intent.advance_work_plan();
         let rendered = conv.render_intent_for_injection();

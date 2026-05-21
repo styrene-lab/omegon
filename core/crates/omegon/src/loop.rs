@@ -1076,14 +1076,18 @@ pub async fn run(
         for result in &results {
             conversation.push_tool_result(result.clone());
         }
+        let plan_snapshot_before = conversation.intent.work_plan_snapshot_json();
         conversation
             .intent
             .update_from_tools(dispatch_calls, &results);
+        let plan_snapshot_after = conversation.intent.work_plan_snapshot_json();
 
         if let Some(message) = plan_status_notification(dispatch_calls, &conversation.intent) {
             let _ = events.send(AgentEvent::SystemNotification { message });
+        }
+        if work_plan_snapshot_changed(&plan_snapshot_before, &plan_snapshot_after) {
             let _ = events.send(AgentEvent::PlanUpdated {
-                snapshot_json: conversation.intent.work_plan_snapshot_json(),
+                snapshot_json: plan_snapshot_after,
             });
         }
 
@@ -1466,6 +1470,10 @@ fn plan_status_notification(calls: &[ToolCall], intent: &IntentDocument) -> Opti
         }
     };
     Some(format!("{heading}\n{}", intent.render_work_plan()))
+}
+
+fn work_plan_snapshot_changed(before: &serde_json::Value, after: &serde_json::Value) -> bool {
+    before != after
 }
 
 /// Request an LLM-driven compaction summary for old conversation messages.
@@ -3958,7 +3966,7 @@ mod tests {
     }
 
     #[test]
-    fn completing_plan_tool_clears_operator_checklist_snapshot() {
+    fn completing_plan_tool_preserves_operator_checklist_snapshot() {
         let mut intent = IntentDocument::default();
         intent.set_work_plan(vec!["Only item".into()]);
         intent.advance_work_plan();
@@ -3970,9 +3978,12 @@ mod tests {
 
         let notification = plan_status_notification(&calls, &intent).unwrap();
 
-        assert!(notification.starts_with("Plan cleared"));
-        assert!(notification.contains("Plan mode: off"));
-        assert_eq!(intent.work_plan_snapshot_json()["total"], 0);
+        assert!(notification.starts_with("Plan progress"));
+        assert!(notification.contains("Plan mode: complete"));
+        assert!(notification.contains("Progress: 1/1"));
+        assert!(notification.contains("● Only item"));
+        assert_eq!(intent.work_plan_snapshot_json()["total"], 1);
+        assert_eq!(intent.work_plan_snapshot_json()["mode"], "complete");
     }
 
     #[test]
@@ -3984,6 +3995,33 @@ mod tests {
         }];
 
         assert!(plan_status_notification(&calls, &IntentDocument::default()).is_none());
+    }
+
+    #[test]
+    fn work_plan_snapshot_changes_only_for_plan_state_mutations() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Inspect".into(), "Patch".into()]);
+        intent.execute_work_plan();
+        let before = intent.work_plan_snapshot_json();
+
+        let read_calls = vec![ToolCall {
+            id: "read-1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "src/main.rs"}),
+        }];
+        intent.update_from_tools(&read_calls, &[]);
+        let after_read = intent.work_plan_snapshot_json();
+        assert!(!work_plan_snapshot_changed(&before, &after_read));
+
+        let plan_calls = vec![ToolCall {
+            id: "plan-1".into(),
+            name: crate::tool_registry::core::PLAN.into(),
+            arguments: serde_json::json!({"action": "advance"}),
+        }];
+        intent.update_from_tools(&plan_calls, &[]);
+        let after_plan = intent.work_plan_snapshot_json();
+        assert!(work_plan_snapshot_changed(&after_read, &after_plan));
+        assert_eq!(after_plan["completed"], 1);
     }
 
     #[tokio::test]

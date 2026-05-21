@@ -16,6 +16,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- **Session plans are coupled to execution state** — the agent loop now broadcasts structured plan snapshots whenever work-plan state changes, while execution-mode intent injection explicitly instructs agents to call the `plan` tool when active items complete so the pinned operator checklist stays synchronized with real progress.
+- **Completed session plans remain visible** — automatic completion now marks the plan `complete` without erasing its item snapshot, while explicit plan clears and newly set plans still replace the displayed checklist.
+- **Slim-mode Ctrl+O targets the visible tool card** — detail expansion now uses the actual conversation viewport height so Ctrl+O expands the bottom/visible segment instead of repeatedly expanding the top cached segment.
+- **Slim-mode tool errors use compact rows** — failed tool calls now follow the same compact Slim rendering path as successful tools, preserving the red error status without expanding into full bordered cards.
+
 ## [0.23.1] - 2026-05-20
 
 ### Fixed

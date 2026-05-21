@@ -1524,7 +1524,7 @@ impl Segment {
                 live_partial,
                 started_at,
                 ..
-            } if matches!(mode, SegmentRenderMode::Slim) && !*is_error && !*expanded => {
+            } if matches!(mode, SegmentRenderMode::Slim) && !*expanded => {
                 let cells = slim_tool_summary_cells(
                     name,
                     detail_args.as_deref(),
@@ -2306,7 +2306,7 @@ fn render_tool_card(
         spans
     };
 
-    if matches!(mode, SegmentRenderMode::Slim) && !complete && !is_error && !expanded {
+    if matches!(mode, SegmentRenderMode::Slim) && !complete && !expanded {
         let cells = slim_tool_summary_cells(
             name,
             detail_args,
@@ -2330,7 +2330,7 @@ fn render_tool_card(
         return;
     }
 
-    if matches!(mode, SegmentRenderMode::Slim) && complete && !is_error && !expanded {
+    if matches!(mode, SegmentRenderMode::Slim) && complete && !expanded {
         let cells = slim_tool_summary_cells(
             name,
             detail_args,
@@ -3772,6 +3772,44 @@ mod tests {
     }
 
     #[test]
+    fn slim_completed_error_tool_card_collapses_to_single_line() {
+        let mut seg = Segment::tool_card("tool-1", "edit");
+        if let SegmentContent::ToolCard {
+            complete,
+            is_error,
+            detail_args,
+            detail_result,
+            ..
+        } = &mut seg.content
+        {
+            *complete = true;
+            *is_error = true;
+            *detail_args = Some("core/crates/omegon/src/tui/segments.rs".into());
+            *detail_result = Some("Found 2 occurrences of the text. The text must be unique.".into());
+        }
+
+        assert_eq!(
+            seg.height_in_mode(80, &Alpharius, SegmentRenderMode::Slim),
+            1
+        );
+
+        let (area, mut buf) = make_buf(100, 1);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("✗"), "should preserve error status: {text}");
+        assert!(text.contains("edit"), "should name the tool: {text}");
+        assert!(
+            !text.contains("─"),
+            "slim error cards should not render full bordered cards: {text}"
+        );
+    }
+
     fn slim_completed_tool_card_renders_compact_payload() {
         let mut seg = Segment::tool_card("tool-1", "bash");
         if let SegmentContent::ToolCard {
