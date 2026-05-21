@@ -1081,5 +1081,23 @@
     "opened": "2026-05-20T00:00:00Z",
     "released": "2026-05-20T21:29:32Z",
     "notes": []
+  },
+  "0.24.0": {
+    "status": "open",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": false,
+    "opened": "2026-05-21T00:00:00Z",
+    "released": null,
+    "rc_count": 0,
+    "notes": [
+      "Target: cleanup, refinement, and reduction of cruft/slop across Omegon.",
+      "First cleanup target: replace hard-coded ACP model dropdown options with registry/provider-driven model selection.",
+      "Solidify ACP prompt content handling: ResourceLink and embedded Resource blocks must not be silently dropped.",
+      "ACP canonical integration contract documented in docs/acp-surface.md for Zed-primary/Flynt-adopting/external-client semantics.",
+      "ACP tool-call display contract: collapsed tool rows should use compact redacted labels while preserving raw_input for details.",
+      "ACP client expansion affordance documented: clients should expose raw_input/raw_output/content details instead of relying on agents to flood collapsed rows.",
+      "docs: codify ACP as canonical external integration surface for Zed, Flynt, and future clients"
+    ]
   }
 }

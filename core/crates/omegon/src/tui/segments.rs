@@ -481,6 +481,17 @@ fn slim_tool_summary_cells(
     cells
 }
 
+fn slim_tool_overflow_hint(hidden_count: usize, hidden_cells: &[&String]) -> String {
+    let has_expandable_hidden_cell = hidden_cells
+        .iter()
+        .any(|cell| cell.contains("Ctrl+O details"));
+    if has_expandable_hidden_cell {
+        format!("+{hidden_count} more · Ctrl+O details")
+    } else {
+        format!("+{hidden_count} more")
+    }
+}
+
 fn slim_tool_detail_lines(width: u16, cells: &[String]) -> Vec<String> {
     if cells.is_empty() {
         return vec![String::new()];
@@ -514,10 +525,9 @@ fn slim_tool_detail_lines(width: u16, cells: &[String]) -> Vec<String> {
     if remaining.len() > max_rows.saturating_sub(1)
         && let Some(last) = rows.last_mut()
     {
-        *last = format!(
-            "  └ +{} more · Ctrl+O details",
-            remaining.len() - max_rows.saturating_sub(1)
-        );
+        let hidden_start = max_rows.saturating_sub(1);
+        let hidden_cells = remaining[hidden_start..].iter().collect::<Vec<_>>();
+        *last = format!("  └ {}", slim_tool_overflow_hint(hidden_cells.len(), &hidden_cells));
     }
 
     rows
@@ -567,10 +577,8 @@ fn slim_tool_live_rows(width: u16, cells: &[String]) -> Vec<String> {
     if detail_cells.len() > max_detail_rows
         && let Some(last) = rows.last_mut()
     {
-        *last = format!(
-            "    └ +{} more · Ctrl+O details",
-            detail_cells.len() - max_detail_rows
-        );
+        let hidden_cells = detail_cells[max_detail_rows..].to_vec();
+        *last = format!("    └ {}", slim_tool_overflow_hint(hidden_cells.len(), &hidden_cells));
     }
 
     rows
@@ -1634,10 +1642,22 @@ impl Segment {
         // Render into temp buffer — cap at 400 rows to avoid absurd allocations.
         // Slim mode can intentionally hide segments such as pinned plan snapshots
         // from the scrollback, so allow a zero-height estimate there.
-        let h = if matches!(mode, SegmentRenderMode::Slim) {
-            estimate.min(400)
-        } else {
-            estimate.clamp(4, 400)
+        let h = match (&self.content, mode) {
+            // Assistant markdown rendering performs structural transforms (code fences,
+            // tables, inline highlighting) before Ratatui wraps the final Line values.
+            // The raw-text estimate above can be too small for narrow viewports; if the
+            // temporary buffer clips, the last-used-row scan records a permanently short
+            // height and the conversation tail appears truncated behind the composer.
+            // Add slack only for structurally-marked markdown and let the scan trim
+            // unused rows. Plain short prose should keep the old tight estimate.
+            (AssistantText { text, thinking, .. }, SegmentRenderMode::Slim) => estimate
+                .saturating_add(assistant_measurement_slack(text, thinking))
+                .min(400),
+            (AssistantText { text, thinking, .. }, _) => estimate
+                .saturating_add(assistant_measurement_slack(text, thinking))
+                .clamp(4, 400),
+            (_, SegmentRenderMode::Slim) => estimate.min(400),
+            _ => estimate.clamp(4, 400),
         };
         if h == 0 {
             return 0;
@@ -1705,6 +1725,20 @@ fn dim_color(color: Color, factor: f32) -> Color {
         ),
         other => other,
     }
+}
+
+fn assistant_measurement_slack(text: &str, thinking: &str) -> u16 {
+    let structural = text.contains("```")
+        || thinking.contains("```")
+        || text.lines().any(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with('#')
+                || trimmed.starts_with('-')
+                || trimmed.starts_with('*')
+                || trimmed.starts_with('>')
+                || trimmed.contains("| ")
+        });
+    if structural { 12 } else { 0 }
 }
 
 fn wrapped_rows(text: &str, width: u16) -> u16 {
@@ -3566,6 +3600,43 @@ mod tests {
             }
         }
         None
+    }
+
+    #[test]
+    fn slim_tool_overflow_hint_does_not_advertise_details_without_expandable_cell() {
+        let cells = vec![
+            "alpha running".to_string(),
+            "beta".to_string(),
+            "gamma".to_string(),
+            "delta".to_string(),
+            "epsilon".to_string(),
+            "zeta".to_string(),
+        ];
+
+        let detail_rows = slim_tool_detail_lines(42, &cells);
+        let live_rows = slim_tool_live_rows(12, &cells);
+
+        assert_eq!(slim_tool_overflow_hint(1, &[]), "+1 more");
+        assert!(!detail_rows.iter().any(|row| row.contains("Ctrl+O details")));
+        assert!(!live_rows.iter().any(|row| row.contains("Ctrl+O details")));
+    }
+
+    #[test]
+    fn slim_tool_overflow_hint_keeps_details_when_expandable_cell_is_hidden() {
+        let cells = vec![
+            "alpha running".to_string(),
+            "beta".to_string(),
+            "gamma".to_string(),
+            "delta".to_string(),
+            "epsilon".to_string(),
+            "Ctrl+O details".to_string(),
+        ];
+
+        let _detail_rows = slim_tool_detail_lines(42, &cells);
+        let live_rows = slim_tool_live_rows(12, &cells);
+
+        assert_eq!(slim_tool_overflow_hint(1, &[&cells[5]]), "+1 more · Ctrl+O details");
+        assert!(live_rows.iter().any(|row| row.contains("+1 more · Ctrl+O details")));
     }
 
     #[test]
@@ -5744,6 +5815,45 @@ mod tests {
             !text.contains("◇ read"),
             "conversation view should not stack a second tool icon after the running indicator: {text}"
         );
+    }
+
+    #[test]
+    fn assistant_height_preserves_tail_after_narrow_code_fence() {
+        let body = "Expected:
+
+- no `openai:gpt-5.5` unless OpenAI API credentials exist
+- if stale current model is OpenAI:
+```text
+openai:gpt-5.5 (current, unavailable)
+gpt-5.5
+```
+After fence text.
+";
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::AssistantText {
+                text: body.into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        };
+
+        let height = seg.height_in_mode(72, &Alpharius, SegmentRenderMode::Slim);
+        let (area, mut buf) = make_buf(72, height);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Detailed,
+        );
+        let text = buf_text(&buf, area);
+
+        assert!(
+            text.contains("openai:gpt-5.5 (current, unavailable)"),
+            "{text}"
+        );
+        assert!(text.contains("After fence text."), "{text}");
     }
 
     #[test]

@@ -181,8 +181,11 @@ async fn worker_loop(
     // thread reads them when rebuilding ConfigOption lists.
     if let Ok(mut s) = shared_settings.lock() {
         let profile = crate::settings::Profile::load(&cwd);
+        let has_profile_model = profile.last_used_model.is_some();
         profile.apply_to_with_posture(&mut s, &cwd);
-        s.set_model(&model);
+        if !has_profile_model {
+            s.set_model(&model);
+        }
     }
 
     let agent_setup =
@@ -409,6 +412,9 @@ async fn worker_loop(
             WorkerRequest::SetModel { value, ack } => {
                 if let Ok(mut s) = shared_settings.lock() {
                     s.set_model(&value);
+                    let mut profile = crate::settings::Profile::load(&cwd);
+                    profile.capture_from(&s);
+                    let _ = profile.save(&cwd);
                 }
                 if let Some(tx) = ack {
                     let _ = tx.send(());
@@ -420,6 +426,9 @@ async fn worker_loop(
                     && let Ok(mut s) = shared_settings.lock()
                 {
                     s.thinking = l;
+                    let mut profile = crate::settings::Profile::load(&cwd);
+                    profile.capture_from(&s);
+                    let _ = profile.save(&cwd);
                 }
                 if let Some(tx) = ack {
                     let _ = tx.send(());
@@ -438,6 +447,9 @@ async fn worker_loop(
                     && let Ok(mut s) = shared_settings.lock()
                 {
                     s.set_posture(p);
+                    let mut profile = crate::settings::Profile::load(&cwd);
+                    profile.capture_from(&s);
+                    let _ = profile.save(&cwd);
                 }
                 if let Some(tx) = ack {
                     let _ = tx.send(());

@@ -1033,6 +1033,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "content_inspector"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7bda66e858c683005a53a9a60c69a4aca7eeaa45d124526e389f7aec8e62f38"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4807,7 +4816,7 @@ dependencies = [
 
 [[package]]
 name = "omegon"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "agent-client-protocol",
  "ansi-to-tui",
@@ -4817,6 +4826,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "content_inspector",
  "cron",
  "crossterm",
  "dirs",
@@ -4835,6 +4845,7 @@ dependencies = [
  "indexmap 2.14.0",
  "insta",
  "libc",
+ "mime_guess",
  "ndarray",
  "notify",
  "omegon-codescan",
@@ -4897,7 +4908,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-codescan"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "anyhow",
  "git2",
@@ -4921,7 +4932,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-extension"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4937,7 +4948,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-git"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -4950,7 +4961,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-memory"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4969,7 +4980,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-opsx"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "libc",
  "serde",
@@ -4981,7 +4992,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-secrets"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -5011,7 +5022,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-traits"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5024,7 +5035,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-web"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

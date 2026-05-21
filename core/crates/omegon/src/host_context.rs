@@ -281,11 +281,15 @@ pub fn spawn_proxy_pump(
 
             match req {
                 HostProxyRequest::ReadTextFile { path, reply } => {
-                    let r = ReadTextFileRequest::new(session_id.clone(), path);
+                    let r = ReadTextFileRequest::new(session_id.clone(), path.clone());
                     let result = client.read_text_file(r).await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp.content),
-                        Err(e) => Err(anyhow::anyhow!("host read_text_file: {}", e.message)),
+                        Err(e) => Err(anyhow::anyhow!(
+                            "host read_text_file {}: {}",
+                            path.display(),
+                            e.message
+                        )),
                     });
                 }
                 HostProxyRequest::WriteTextFile {
@@ -293,11 +297,15 @@ pub fn spawn_proxy_pump(
                     content,
                     reply,
                 } => {
-                    let r = WriteTextFileRequest::new(session_id.clone(), path, content);
+                    let r = WriteTextFileRequest::new(session_id.clone(), path.clone(), content);
                     let result = client.write_text_file(r).await;
                     let _ = reply.send(match result {
                         Ok(_) => Ok(()),
-                        Err(e) => Err(anyhow::anyhow!("host write_text_file: {}", e.message)),
+                        Err(e) => Err(anyhow::anyhow!(
+                            "host write_text_file {}: {}",
+                            path.display(),
+                            e.message
+                        )),
                     });
                 }
                 HostProxyRequest::CreateTerminal {
@@ -470,9 +478,18 @@ async fn delegate_read(
     offset: Option<usize>,
     limit: Option<usize>,
 ) -> anyhow::Result<ToolResult> {
-    // Read the entire file from the host — we do all slicing locally to
-    // match the exact output format the local read tool produces.
-    let content = ctx.proxy.read_text_file(path).await?;
+    // Prefer the host when available so editor clients can apply their own
+    // workspace/security semantics. If the host rejects a normal local file,
+    // fall back to local read instead of making ACP-host flakiness break tools.
+    let content = match ctx.proxy.read_text_file(path.clone()).await {
+        Ok(content) => content,
+        Err(host_err) if path.is_file() => std::fs::read_to_string(&path).map_err(|local_err| {
+            anyhow::anyhow!(
+                "host read failed for {path_str}: {host_err}; local fallback failed: {local_err}"
+            )
+        })?,
+        Err(host_err) => return Err(host_err),
+    };
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();
 
@@ -517,7 +534,39 @@ async fn delegate_write(
     path_str: &str,
     content: &str,
 ) -> anyhow::Result<ToolResult> {
-    ctx.proxy.write_text_file(path, content.to_string()).await?;
+    let permission = ctx
+        .proxy
+        .request_permission(
+            format!("write:{}", path.display()),
+            "write".to_string(),
+            path_str.to_string(),
+        )
+        .await?;
+    if !matches!(
+        permission,
+        RequestPermissionOutcome::Selected(sel) if sel.option_id.0.as_ref() == "allow_once" || sel.option_id.0.as_ref() == "allow_always"
+    ) {
+        anyhow::bail!("write denied by ACP host for {path_str}");
+    }
+
+    let host_result = ctx
+        .proxy
+        .write_text_file(path.clone(), content.to_string())
+        .await;
+    if let Err(host_err) = host_result {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|local_err| {
+                anyhow::anyhow!(
+                    "host write failed for {path_str}: {host_err}; local parent creation failed: {local_err}"
+                )
+            })?;
+        }
+        std::fs::write(&path, content).map_err(|local_err| {
+            anyhow::anyhow!(
+                "host write failed for {path_str}: {host_err}; local fallback failed: {local_err}"
+            )
+        })?;
+    }
 
     let line_count = content.lines().count();
     let byte_count = content.len();

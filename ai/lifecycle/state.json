@@ -859,7 +859,59 @@
       "updated_at": "2026-04-12T18:11:22Z"
     }
   ],
-  "changes": [],
+  "changes": [
+    {
+      "name": "knowledge-quadrant-lifecycle",
+      "title": "knowledge-quadrant-lifecycle",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 8,
+      "tasks_done": 0,
+      "created_at": "2026-05-21T20:14:08Z",
+      "updated_at": "2026-05-21T20:32:06Z"
+    },
+    {
+      "name": "omega-daemon-runtime-v1",
+      "title": "omega-daemon-runtime-v1",
+      "state": "specced",
+      "bound_node": null,
+      "specs": [
+        "runtime-security",
+        "runtime"
+      ],
+      "test_files": [],
+      "tasks_total": 0,
+      "tasks_done": 0,
+      "created_at": "2026-05-21T20:14:08Z",
+      "updated_at": "2026-05-21T20:32:06Z"
+    },
+    {
+      "name": "splash-systems-integration",
+      "title": "splash-systems-integration",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 29,
+      "tasks_done": 0,
+      "created_at": "2026-05-21T20:14:08Z",
+      "updated_at": "2026-05-21T20:32:06Z"
+    },
+    {
+      "name": "styrene-identity-secrets",
+      "title": "styrene-identity-secrets",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 3,
+      "tasks_done": 0,
+      "created_at": "2026-05-21T20:14:08Z",
+      "updated_at": "2026-05-21T20:32:06Z"
+    }
+  ],
   "milestones": [],
   "audit_log": [
     {
@@ -1912,6 +1964,51 @@
       "entity_id": "runner-execution-plane-and-update-nudges",
       "from_state": "(new)",
       "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-21T20:14:08Z",
+      "entity_type": "change",
+      "entity_id": "knowledge-quadrant-lifecycle",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-21T20:14:08Z",
+      "entity_type": "change",
+      "entity_id": "omega-daemon-runtime-v1",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-21T20:14:08Z",
+      "entity_type": "change",
+      "entity_id": "omega-daemon-runtime-v1",
+      "from_state": "proposed",
+      "to_state": "specced",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-21T20:14:08Z",
+      "entity_type": "change",
+      "entity_id": "splash-systems-integration",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-21T20:14:08Z",
+      "entity_type": "change",
+      "entity_id": "styrene-identity-secrets",
+      "from_state": "(new)",
+      "to_state": "proposed",
       "reason": null,
       "forced": false
     }

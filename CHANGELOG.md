@@ -16,6 +16,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-05-20
+
+### Fixed
+
+- **ACP Zed compatibility is release-ready** — ACP now treats prompt resources as the canonical external integration surface, including Zed `@file`, `@selection`, and `@directory` mentions, embedded text resources, ecosystem text files, line slicing, bounded directory listings, binary-resource suppression, root containment, and symlink escape rejection.
+- **ACP model controls respect configured providers** — the ACP model dropdown now filters registry models by exact provider availability, distinguishes OpenAI API credentials from Codex OAuth, labels stale unavailable current models, and persists model/thinking/posture changes across ACP sessions.
+- **ACP host writes are permission-gated and recoverable** — delegated host writes now request ACP permission before mutation, include failed paths in diagnostics, and fall back to local writes only after permission is granted.
+- **TUI tool overflow hints are scoped to real expansion targets** — Slim-mode tool overflow rows now advertise `Ctrl+O details` only when the hidden cells include expandable detail content, avoiding stale hints on non-addressable summary overflow.
+- **TUI tool interaction stays live while tools run** — global conversation keys such as `Ctrl+O`, `PageUp`, `PageDown`, `Home`, and `End` are handled before input suppression, and `Ctrl+O` targets the latest running tool card when no explicit selection exists.
+- **TUI assistant replies no longer clip markdown tails** — assistant response height measurement now over-allocates the temporary render buffer before trimming, preventing narrow fenced-code responses from appearing truncated above the composer.
+
 ## [0.23.0] - 2026-05-20
 
 ### Added

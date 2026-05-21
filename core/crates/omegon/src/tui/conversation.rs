@@ -818,6 +818,7 @@ impl ConversationView {
                     Some(SegmentContent::ToolCard { .. })
                 )
             })
+            .or_else(|| self.latest_running_tool_card())
             .or_else(|| self.focused_tool_card());
 
         if let Some(idx) = target {
@@ -839,6 +840,18 @@ impl ConversationView {
         if let Some(pinned) = self.pinned_segment.take() {
             self.toggle_expand(pinned);
         }
+    }
+
+    fn latest_running_tool_card(&self) -> Option<usize> {
+        self.segments.iter().rposition(|s| {
+            matches!(
+                s.content,
+                SegmentContent::ToolCard {
+                    complete: false,
+                    ..
+                }
+            )
+        })
     }
 
     /// Find the nearest tool card segment visible in the viewport.
@@ -1654,6 +1667,27 @@ mod tests {
         assert!(cv.pinned_segment.is_none());
         if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[idx].content {
             assert!(!expanded, "unpinned card should be collapsed");
+        }
+    }
+
+    #[test]
+    fn toggle_pin_prefers_latest_running_tool_card() {
+        let mut cv = ConversationView::new();
+        cv.push_tool_start("done", "read", Some("old"), Some("old"));
+        cv.push_tool_end("done", false, Some("old result"));
+        cv.push_tool_start("running", "codebase_search", Some("query"), Some("query"));
+
+        cv.toggle_pin();
+
+        assert_eq!(cv.pinned_segment, Some(1));
+        if let SegmentContent::ToolCard {
+            expanded, complete, ..
+        } = &cv.segments[1].content
+        {
+            assert!(!complete, "test target should still be running");
+            assert!(expanded, "running card should expand before ToolEnd");
+        } else {
+            panic!("expected running tool card");
         }
     }
 

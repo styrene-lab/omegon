@@ -15,6 +15,19 @@ use anyhow::Context;
 use crate::acp_worker::{self, WorkerEvent, WorkerHandle, WorkerRequest};
 use crate::host_context::{self, HostCapabilities, HostContext, HostProxySender};
 
+#[path = "acp/labels.rs"]
+mod labels;
+#[path = "acp/model_options.rs"]
+mod model_options;
+#[path = "acp/resource_context.rs"]
+mod resource_context;
+
+use labels::compact_tool_call_label;
+use model_options::{
+    acp_model_provider_available, compact_model_label, unavailable_current_model_label,
+};
+use resource_context::prompt_blocks_to_text;
+
 pub struct OmegonAcpAgent {
     model: String,
     worker: RefCell<Option<WorkerHandle>>,
@@ -101,14 +114,26 @@ impl OmegonAcpAgent {
             }
         }
 
-        for (id, name) in [
-            ("anthropic:claude-opus-4-7", "Claude Opus 4.7"),
-            ("anthropic:claude-sonnet-4-7", "Claude Sonnet 4.7"),
-            ("anthropic:claude-opus-4-6", "Claude Opus 4.6"),
-            ("anthropic:claude-sonnet-4-6", "Claude Sonnet 4.6"),
-            ("openai:gpt-5.4", "GPT-5.4"),
-        ] {
-            model_options.push(SessionConfigSelectOption::new(id, name));
+        let registry = crate::model_registry::ModelRegistry::global();
+        let mut registry_models: Vec<_> = registry.all_models().collect();
+        registry_models.sort_by(|a, b| {
+            a.provider
+                .cmp(&b.provider)
+                .then_with(|| a.cost_tier.cmp(&b.cost_tier))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        for model in registry_models {
+            let id = format!("{}:{}", model.provider, model.id);
+            if model_options.iter().any(|o| o.value.0.as_ref() == id) {
+                continue;
+            }
+            if !acp_model_provider_available(&model.provider) {
+                continue;
+            }
+            model_options.push(SessionConfigSelectOption::new(
+                id,
+                compact_model_label(&model.name, &model.provider),
+            ));
         }
 
         if !model_options
@@ -119,7 +144,7 @@ impl OmegonAcpAgent {
                 0,
                 SessionConfigSelectOption::new(
                     current_model.to_string(),
-                    current_model.to_string(),
+                    unavailable_current_model_label(current_model),
                 ),
             );
         }
@@ -281,7 +306,7 @@ impl Agent for OmegonAcpAgent {
             Some(Implementation::new("omegon", env!("CARGO_PKG_VERSION")).title("Omegon Agent"));
         response.agent_capabilities = AgentCapabilities::default()
             .load_session(true)
-            .prompt_capabilities(PromptCapabilities::new().image(true))
+            .prompt_capabilities(PromptCapabilities::new().embedded_context(true))
             .session_capabilities(
                 SessionCapabilities::new()
                     .list(SessionListCapabilities::new())
@@ -398,19 +423,11 @@ impl Agent for OmegonAcpAgent {
         let cwd = std::env::current_dir().unwrap_or_default();
         self.ensure_worker(&cwd);
 
-        // Extract user text
-        let user_text: String = args
-            .prompt
-            .iter()
-            .filter_map(|block| {
-                if let ContentBlock::Text(text) = block {
-                    Some(text.text.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        // Extract user text and referenced context. ACP requires agents to
+        // support ResourceLink prompt blocks, and Resource blocks are allowed
+        // when embedded_context is advertised. Do not silently drop non-text
+        // blocks; Zed sends @file mentions through this surface.
+        let user_text = prompt_blocks_to_text(&args.prompt, &cwd);
 
         // Handle slash commands locally (no worker round-trip)
         if user_text.starts_with('/') {
@@ -501,8 +518,9 @@ impl Agent for OmegonAcpAgent {
                                 let s = redact(&a.to_string());
                                 serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))
                             });
+                            let display_name = compact_tool_call_label(&name, args.as_ref());
                             if let Some(c) = conn.borrow().as_ref() {
-                                let mut tc = ToolCall::new(ToolCallId::new(id), name);
+                                let mut tc = ToolCall::new(ToolCallId::new(id), display_name);
                                 tc.status = ToolCallStatus::InProgress;
                                 tc.raw_input = args;
                                 let _ = c

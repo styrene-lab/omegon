@@ -8799,6 +8799,35 @@ pub async fn run_tui(
                     }
                 }
                 Event::Key(key) => {
+                    // Global conversation controls must remain live while the
+                    // agent/tool loop is active. Handle them before editor,
+                    // selector, permission, or interrupt-debounce paths can
+                    // consume the key event.
+                    match (key.code, key.modifiers) {
+                        (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
+                            app.conversation.toggle_pin();
+                            continue;
+                        }
+                        (KeyCode::PageUp, _) => {
+                            app.conversation.scroll_up(20);
+                            continue;
+                        }
+                        (KeyCode::PageDown, _) => {
+                            app.conversation.scroll_down(20);
+                            continue;
+                        }
+                        (KeyCode::Home, _) => {
+                            app.conversation.conv_state.scroll_offset = u16::MAX;
+                            app.conversation.conv_state.user_scrolled = true;
+                            continue;
+                        }
+                        (KeyCode::End, _) => {
+                            app.conversation.scroll_down(u16::MAX);
+                            continue;
+                        }
+                        _ => {}
+                    }
+
                     if app.should_discard_key_after_interrupt(&key) {
                         continue;
                     }
