@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- **ACP plan updates use Zed native plan UI** — ordinary `plan` tool snapshots now flow through ACP `SessionUpdate::Plan`, not only cleave/decomposition progress, so Zed can track agent work-plan state directly.
+
 ## [0.23.1] - 2026-05-20
 
 ### Changed

@@ -328,6 +328,11 @@ async fn worker_loop(
                                 // forwarder will emit the full snapshot.
                                 None
                             }
+                            omegon_traits::AgentEvent::PlanUpdated { snapshot_json } => {
+                                let entries =
+                                    crate::acp::plan_entries_from_snapshot_json(&snapshot_json);
+                                Some(WorkerEvent::PlanUpdate { entries })
+                            }
                             omegon_traits::AgentEvent::SystemNotification { message } => {
                                 Some(WorkerEvent::StatusUpdate(message))
                             }

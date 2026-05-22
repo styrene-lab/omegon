@@ -28,6 +28,86 @@ use model_options::{
 };
 use resource_context::prompt_blocks_to_text;
 
+pub(crate) fn plan_entries_from_snapshot_json(
+    snapshot_json: &serde_json::Value,
+) -> Vec<acp_worker::PlanEntryData> {
+    snapshot_json
+        .get("items")
+        .and_then(|items| items.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let content = item
+                        .get("description")
+                        .and_then(|value| value.as_str())
+                        .map(str::trim)
+                        .filter(|description| !description.is_empty())?;
+                    let status = match item
+                        .get("status")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("todo")
+                    {
+                        "active" | "in_progress" => acp_worker::PlanEntryState::InProgress,
+                        "done" | "completed" => acp_worker::PlanEntryState::Completed,
+                        "skipped" | "failed" => acp_worker::PlanEntryState::Failed,
+                        _ => acp_worker::PlanEntryState::Pending,
+                    };
+                    Some(acp_worker::PlanEntryData {
+                        content: content.to_string(),
+                        status,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn merge_plan_entries(
+    plan_state: &mut Vec<acp_worker::PlanEntryData>,
+    entries: Vec<acp_worker::PlanEntryData>,
+) {
+    if entries.is_empty() {
+        plan_state.clear();
+    } else if entries.len() > 1 || plan_state.is_empty() {
+        *plan_state = entries;
+    } else {
+        for update in entries {
+            if let Some(existing) = plan_state
+                .iter_mut()
+                .find(|entry| entry.content == update.content)
+            {
+                existing.status = update.status;
+            } else {
+                plan_state.push(update);
+            }
+        }
+    }
+}
+
+fn acp_plan_entry_status(status: acp_worker::PlanEntryState) -> PlanEntryStatus {
+    match status {
+        acp_worker::PlanEntryState::Pending => PlanEntryStatus::Pending,
+        acp_worker::PlanEntryState::InProgress => PlanEntryStatus::InProgress,
+        acp_worker::PlanEntryState::Completed | acp_worker::PlanEntryState::Failed => {
+            PlanEntryStatus::Completed
+        }
+    }
+}
+
+fn acp_plan_entries(entries: &[acp_worker::PlanEntryData]) -> Vec<PlanEntry> {
+    entries
+        .iter()
+        .map(|entry| {
+            PlanEntry::new(
+                &entry.content,
+                PlanEntryPriority::Medium,
+                acp_plan_entry_status(entry.status),
+            )
+        })
+        .collect()
+}
+
 pub struct OmegonAcpAgent {
     model: String,
     worker: RefCell<Option<WorkerHandle>>,
@@ -590,49 +670,8 @@ impl Agent for OmegonAcpAgent {
                                 // DecompositionStarted sends the full initial set;
                                 // subsequent updates send single-entry patches.
                                 // We maintain the full plan and re-emit it.
-                                if !entries.is_empty() {
-                                    if entries.len() > 1 {
-                                        // Multi-entry = fresh decomposition plan
-                                        plan_state = entries.clone();
-                                    } else if plan_state.is_empty() {
-                                        // Single entry, no existing plan — initialize
-                                        plan_state = entries.clone();
-                                    } else {
-                                        // Single entry status update — merge into existing
-                                        for update in &entries {
-                                            if let Some(existing) = plan_state
-                                                .iter_mut()
-                                                .find(|e| e.content == update.content)
-                                            {
-                                                existing.status = update.status;
-                                            }
-                                        }
-                                    }
-                                }
-                                let plan_entries: Vec<PlanEntry> = plan_state
-                                    .iter()
-                                    .map(|e| {
-                                        let status = match e.status {
-                                            acp_worker::PlanEntryState::Pending => {
-                                                PlanEntryStatus::Pending
-                                            }
-                                            acp_worker::PlanEntryState::InProgress => {
-                                                PlanEntryStatus::InProgress
-                                            }
-                                            acp_worker::PlanEntryState::Completed => {
-                                                PlanEntryStatus::Completed
-                                            }
-                                            acp_worker::PlanEntryState::Failed => {
-                                                PlanEntryStatus::Completed
-                                            }
-                                        };
-                                        PlanEntry::new(
-                                            &e.content,
-                                            PlanEntryPriority::Medium,
-                                            status,
-                                        )
-                                    })
-                                    .collect();
+                                merge_plan_entries(&mut plan_state, entries);
+                                let plan_entries = acp_plan_entries(&plan_state);
                                 let _ = c
                                     .session_notification(SessionNotification::new(
                                         stream_sid.clone(),
@@ -2444,25 +2483,45 @@ mod tests {
                 content: "Step 3".into(),
                 status: PlanEntryState::Pending,
             },
+            PlanEntryData {
+                content: "Step 4".into(),
+                status: PlanEntryState::Failed,
+            },
         ];
 
-        let plan_entries: Vec<PlanEntry> = entries
-            .iter()
-            .map(|e| {
-                let status = match e.status {
-                    PlanEntryState::Pending => PlanEntryStatus::Pending,
-                    PlanEntryState::InProgress => PlanEntryStatus::InProgress,
-                    PlanEntryState::Completed => PlanEntryStatus::Completed,
-                    PlanEntryState::Failed => PlanEntryStatus::Completed,
-                };
-                PlanEntry::new(&e.content, PlanEntryPriority::Medium, status)
-            })
-            .collect();
+        let plan_entries = acp_plan_entries(&entries);
 
-        assert_eq!(plan_entries.len(), 3);
+        assert_eq!(plan_entries.len(), 4);
         assert_eq!(plan_entries[0].status, PlanEntryStatus::Completed);
         assert_eq!(plan_entries[1].status, PlanEntryStatus::InProgress);
         assert_eq!(plan_entries[2].status, PlanEntryStatus::Pending);
+        assert_eq!(plan_entries[3].status, PlanEntryStatus::Completed);
+    }
+
+    #[test]
+    fn plan_snapshot_json_maps_work_plan_items() {
+        use crate::acp_worker::PlanEntryState;
+
+        let snapshot = serde_json::json!({
+            "mode": "executing",
+            "completed": 1,
+            "total": 4,
+            "items": [
+                { "description": "Inspect", "status": "done" },
+                { "description": "Patch", "status": "active" },
+                { "description": "Validate", "status": "todo" },
+                { "description": "Deferred", "status": "skipped" }
+            ]
+        });
+
+        let entries = plan_entries_from_snapshot_json(&snapshot);
+
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[0].content, "Inspect");
+        assert_eq!(entries[0].status, PlanEntryState::Completed);
+        assert_eq!(entries[1].status, PlanEntryState::InProgress);
+        assert_eq!(entries[2].status, PlanEntryState::Pending);
+        assert_eq!(entries[3].status, PlanEntryState::Failed);
     }
 
     #[test]
@@ -2501,9 +2560,7 @@ mod tests {
                 status: PlanEntryState::Pending,
             },
         ];
-        if entries.len() > 1 {
-            plan_state = entries.clone();
-        }
+        merge_plan_entries(&mut plan_state, entries);
         assert_eq!(plan_state.len(), 3);
 
         // Single entry update merges
@@ -2511,11 +2568,7 @@ mod tests {
             content: "B".into(),
             status: PlanEntryState::Completed,
         }];
-        for u in &update {
-            if let Some(existing) = plan_state.iter_mut().find(|e| e.content == u.content) {
-                existing.status = u.status;
-            }
-        }
+        merge_plan_entries(&mut plan_state, update);
         assert_eq!(plan_state[0].status, PlanEntryState::Pending);
         assert_eq!(plan_state[1].status, PlanEntryState::Completed);
         assert_eq!(plan_state[2].status, PlanEntryState::Pending);
@@ -2532,9 +2585,7 @@ mod tests {
             content: "Solo".into(),
             status: PlanEntryState::Pending,
         }];
-        if entries.len() > 1 || plan_state.is_empty() {
-            plan_state = entries.clone();
-        }
+        merge_plan_entries(&mut plan_state, entries);
         assert_eq!(plan_state.len(), 1);
         assert_eq!(plan_state[0].content, "Solo");
     }
@@ -2565,9 +2616,7 @@ mod tests {
                 status: PlanEntryState::Pending,
             },
         ];
-        if new_entries.len() > 1 {
-            plan_state = new_entries.clone();
-        }
+        merge_plan_entries(&mut plan_state, new_entries);
         assert_eq!(plan_state.len(), 2);
         assert_eq!(plan_state[0].content, "New X");
     }
