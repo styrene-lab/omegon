@@ -804,54 +804,6 @@ fn detect_links(text: &str) -> Vec<RenderedLink> {
         cursor = end.max(after_scheme);
     }
 
-    let mut token_start = None;
-    for (idx, ch) in text
-        .char_indices()
-        .chain(std::iter::once((text.len(), ' ')))
-    {
-        if ch.is_whitespace() {
-            if let Some(start) = token_start.take() {
-                let raw = &text[start..idx];
-                let leading = raw
-                    .char_indices()
-                    .find(|(_, ch)| !matches!(ch, '<' | '(' | '[' | '"' | '\''))
-                    .map(|(idx, _)| idx)
-                    .unwrap_or(raw.len());
-                let mut end = raw.len();
-                while end > leading {
-                    let Some(ch) = raw[..end].chars().next_back() else {
-                        break;
-                    };
-                    if matches!(
-                        ch,
-                        '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '>' | '"'
-                    ) {
-                        end -= ch.len_utf8();
-                    } else {
-                        break;
-                    }
-                }
-
-                if leading < end {
-                    let label = &raw[leading..end];
-                    let looks_like_path = (label.contains('/') || label.starts_with('.'))
-                        && label.ends_with(".md")
-                        && !SCHEMES.iter().any(|scheme| label.starts_with(scheme));
-                    if looks_like_path && let Some(url) = file_url_for_path(label) {
-                        let absolute_start = start + leading;
-                        let start_col = UnicodeWidthStr::width(&text[..absolute_start]) as u16;
-                        links.push(RenderedLink {
-                            start_col,
-                            label: label.to_string(),
-                            url,
-                        });
-                    }
-                }
-            }
-        } else if token_start.is_none() {
-            token_start = Some(idx);
-        }
-    }
     links
 }
 
@@ -3663,11 +3615,12 @@ mod tests {
     }
 
     #[test]
-    fn detects_markdown_file_paths_as_clickable_file_links() {
+    fn does_not_autolink_bare_markdown_file_paths() {
         let links = detect_links("Transcript: /tmp/omegon-transcript-20260519.md.");
-        assert_eq!(links.len(), 1);
-        assert_eq!(links[0].label, "/tmp/omegon-transcript-20260519.md");
-        assert_eq!(links[0].url, "file:///tmp/omegon-transcript-20260519.md");
+        assert!(
+            links.is_empty(),
+            "bare markdown paths should stay plain text; terminal file links show misleading cursor affordances"
+        );
     }
 
     #[test]
