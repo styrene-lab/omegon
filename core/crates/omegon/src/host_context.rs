@@ -4,7 +4,7 @@
 //! advertise capabilities for file I/O, terminal execution, and permission
 //! mediation. This module captures those capabilities and provides a
 //! channel-based proxy so the worker thread can call host methods without
-//! holding a reference to the !Send `AgentSideConnection`.
+//! holding a reference to the !Send ACP client connection.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -224,7 +224,7 @@ pub struct HostContext {
 
 // ---------------------------------------------------------------------------
 // ACP-thread pump — receives HostProxyRequests and executes them on the
-// AgentSideConnection (which implements Client).
+// ACP client connection.
 //
 // The pump borrows conn across .await just like the existing event
 // forwarder in acp.rs (which has #[allow(clippy::await_holding_refcell_ref)]
@@ -237,7 +237,7 @@ pub struct HostContext {
 #[allow(clippy::await_holding_refcell_ref)]
 pub fn spawn_proxy_pump(
     mut rx: mpsc::Receiver<HostProxyRequest>,
-    conn: std::rc::Rc<std::cell::RefCell<Option<AgentSideConnection>>>,
+    conn: crate::acp::SharedAcpClientConnection,
     session_id: SessionId,
 ) {
     tokio::task::spawn_local(async move {
