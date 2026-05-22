@@ -3491,19 +3491,56 @@ fn render_image_placeholder(
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(t.accent_muted()))
+        .border_type(BorderType::Plain)
+        .border_style(Style::default().fg(t.accent()))
         .title(Span::styled(
             label,
             Style::default()
-                .fg(t.accent_muted())
+                .fg(t.accent_bright())
                 .add_modifier(Modifier::BOLD),
         ))
-        .style(Style::default().bg(t.surface_bg()));
+        .style(Style::default().bg(t.bg()));
 
     // The block is the placeholder — the actual image is rendered on top
     // of this area in a second pass by the ConversationWidget (ratatui-image).
+    // Repaint the full segment with the main background first so any old
+    // card chrome at the edges is replaced by a crisp high-contrast edge.
+    apply_rows_bg(area, 0, area.height, t.bg(), buf);
     block.render(area, buf);
+
+    let line = Line::from(Span::styled(
+        path_str.clone(),
+        Style::default()
+            .fg(t.accent_muted())
+            .bg(t.bg())
+            .add_modifier(Modifier::UNDERLINED),
+    ));
+    if let Some(url) = file_url_for_path(&path_str) {
+        let caption_area = Rect {
+            x: area.x.saturating_add(1),
+            y: area.bottom().saturating_sub(1),
+            width: area.width.saturating_sub(2),
+            height: 1,
+        };
+        hyperrat::Link::new(path_str, url)
+            .style(
+                Style::default()
+                    .fg(t.accent_muted())
+                    .bg(t.bg())
+                    .add_modifier(Modifier::UNDERLINED),
+            )
+            .render(caption_area, buf);
+    } else if area.height > 1 {
+        Paragraph::new(line).render(
+            Rect {
+                x: area.x.saturating_add(1),
+                y: area.bottom().saturating_sub(1),
+                width: area.width.saturating_sub(2),
+                height: 1,
+            },
+            buf,
+        );
+    }
 }
 
 fn render_separator(area: Rect, buf: &mut Buffer, t: &dyn Theme) {
@@ -4528,11 +4565,11 @@ mod tests {
             "image segment must not use the emoji paperclip glyph"
         );
 
-        // Doubled-line frame characters (BorderType::Double) for visual
-        // separation from the image content composited in pass two.
+        // Plain high-contrast edge keeps the segment slim while separating
+        // it from image content composited in pass two.
         assert!(
-            text.contains('╔') || text.contains('╗') || text.contains('═'),
-            "image segment should use a doubled-line frame for visual contrast: {text}"
+            text.contains('┌') || text.contains('┐') || text.contains('─'),
+            "image segment should use a crisp plain frame for visual contrast: {text}"
         );
 
         // Single-cell crosshatch glyph in the title prefix, in place of

@@ -183,15 +183,15 @@ impl ConvState {
             if matches!(segment.content, SegmentContent::Image { .. }) && seg_top >= top_offset {
                 let render_y = viewport.y + (seg_top - top_offset);
                 let available_height = viewport.bottom().saturating_sub(render_y);
-                if available_height > 2 {
-                    // Leave 2 rows for border top/bottom, render image inside
+                if available_height > 3 {
+                    // Leave a one-cell blue edge and the bottom caption row.
                     result.push((
                         i,
                         Rect {
-                            x: viewport.x + 1,
-                            y: render_y + 1, // skip top border
+                            x: viewport.x.saturating_add(1),
+                            y: render_y.saturating_add(1),
                             width: viewport.width.saturating_sub(2),
-                            height: seg_height.saturating_sub(3).min(available_height - 2),
+                            height: seg_height.saturating_sub(3).min(available_height - 3),
                         },
                     ));
                 }

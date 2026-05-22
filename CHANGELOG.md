@@ -20,6 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - **ACP plan updates use Zed native plan UI** — ordinary `plan` tool snapshots now flow through ACP `SessionUpdate::Plan`, not only cleave/decomposition progress, so Zed can track agent work-plan state directly.
 - **Slim tool rows no longer fake-link Markdown paths** — bare `.md` paths in expanded tool summaries now render as plain text instead of terminal hyperlinks that show a hand cursor without opening.
+- **Image previews use a crisp high-contrast edge** — inline image placeholders now use a slim accent border, clear background fill, and explicit `file://` caption link so rendered images do not blend into surrounding chrome.
 
 ## [0.23.1] - 2026-05-20
 
