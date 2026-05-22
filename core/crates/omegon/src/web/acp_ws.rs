@@ -261,7 +261,7 @@ async fn run_acp_session(
     });
 
     let agent_clone = agent.clone();
-    let (conn, io_task) = agent_client_protocol::AgentSideConnection::new(
+    let (conn, io_task) = crate::acp::connect_acp_agent(
         agent_clone,
         write_server.compat_write(),
         read_client.compat(),

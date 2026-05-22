@@ -40,6 +40,24 @@ pub(crate) async fn send_session_update(
         .await
 }
 
+pub(crate) fn connect_acp_agent<AgentHandler, Outgoing, Incoming, SpawnFn>(
+    agent: AgentHandler,
+    outgoing: Outgoing,
+    incoming: Incoming,
+    spawn: SpawnFn,
+) -> (
+    AcpClientConnection,
+    impl std::future::Future<Output = agent_client_protocol::Result<()>>,
+)
+where
+    AgentHandler: Agent + 'static,
+    Outgoing: futures::AsyncWrite + Unpin + 'static,
+    Incoming: futures::AsyncRead + Unpin + 'static,
+    SpawnFn: Fn(futures::future::LocalBoxFuture<'static, ()>) + 'static,
+{
+    AgentSideConnection::new(agent, outgoing, incoming, spawn)
+}
+
 pub(crate) fn plan_entries_from_snapshot_json(
     snapshot_json: &serde_json::Value,
 ) -> Vec<acp_worker::PlanEntryData> {
@@ -2278,7 +2296,7 @@ pub async fn run(model: &str, agent_id: Option<&str>, cwd: &std::path::Path) -> 
     let stdin = tokio::io::stdin().compat();
 
     let agent_clone = agent.clone();
-    let (conn, io_task) = AgentSideConnection::new(agent_clone, stdout, stdin, |fut| {
+    let (conn, io_task) = connect_acp_agent(agent_clone, stdout, stdin, |fut| {
         tokio::task::spawn_local(fut);
     });
 
