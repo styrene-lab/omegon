@@ -814,16 +814,17 @@ impl ConversationView {
             return;
         }
 
+        let selected_tool = self.selected_segment.filter(|&idx| {
+            matches!(
+                self.segments.get(idx).map(|s| &s.content),
+                Some(SegmentContent::ToolCard { .. })
+            )
+        });
+        let visible_tool = self.focused_tool_card_in_viewport(viewport_height);
         let target = self
-            .selected_segment
-            .filter(|&idx| {
-                matches!(
-                    self.segments.get(idx).map(|s| &s.content),
-                    Some(SegmentContent::ToolCard { .. })
-                )
-            })
-            .or_else(|| self.latest_running_tool_card())
-            .or_else(|| self.focused_tool_card_in_viewport(viewport_height));
+            .latest_running_tool_card()
+            .or(visible_tool)
+            .or(selected_tool);
 
         if let Some(idx) = target {
             // Pin: expand and lock focus
@@ -865,24 +866,33 @@ impl ConversationView {
     }
 
     pub fn focused_tool_card_in_viewport(&self, viewport_height: Option<u16>) -> Option<usize> {
+        self.visible_tool_cards(viewport_height)
+            .last()
+            .copied()
+            .or_else(|| {
+                self.segments
+                    .iter()
+                    .rposition(|s| matches!(s.content, SegmentContent::ToolCard { .. }))
+            })
+    }
+
+    pub fn visible_tool_cards(&self, viewport_height: Option<u16>) -> Vec<usize> {
         let heights = &self.conv_state.heights;
         if heights.len() != self.segments.len() {
-            return self
-                .segments
-                .iter()
-                .rposition(|s| matches!(s.content, SegmentContent::ToolCard { .. }));
+            return Vec::new();
         }
 
         let total: u16 = heights.iter().sum();
         let viewport_height = viewport_height.unwrap_or(total).min(total);
         let max_scroll = total.saturating_sub(viewport_height);
         let scroll_offset = self.conv_state.scroll_offset.min(max_scroll);
-        let viewport_top = total.saturating_sub(viewport_height).saturating_sub(scroll_offset);
+        let viewport_top = total
+            .saturating_sub(viewport_height)
+            .saturating_sub(scroll_offset);
         let viewport_bottom = viewport_top.saturating_add(viewport_height);
 
         let mut y: u16 = 0;
-        let mut first_visible_tool = None;
-        let mut last_visible_tool = None;
+        let mut visible = Vec::new();
         for (i, seg) in self.segments.iter().enumerate() {
             let seg_top = y;
             let seg_bottom = seg_top.saturating_add(heights[i]);
@@ -895,16 +905,65 @@ impl ConversationView {
                 break;
             }
             if matches!(seg.content, SegmentContent::ToolCard { .. }) {
-                first_visible_tool.get_or_insert(i);
-                last_visible_tool = Some(i);
+                visible.push(i);
             }
         }
+        visible
+    }
 
-        last_visible_tool.or(first_visible_tool).or_else(|| {
-            self.segments
-                .iter()
-                .rposition(|s| matches!(s.content, SegmentContent::ToolCard { .. }))
-        })
+    pub fn select_latest_visible_tool_card(
+        &mut self,
+        viewport_height: Option<u16>,
+    ) -> Option<usize> {
+        let idx = self.focused_tool_card_in_viewport(viewport_height)?;
+        self.selected_segment = Some(idx);
+        Some(idx)
+    }
+
+    pub fn select_next_visible_tool_card(&mut self, viewport_height: Option<u16>) -> Option<usize> {
+        let visible = self.visible_tool_cards(viewport_height);
+        if visible.is_empty() {
+            return None;
+        }
+        let selected = self.selected_segment;
+        let idx = selected
+            .and_then(|selected| visible.iter().position(|&idx| idx == selected))
+            .map(|pos| visible[(pos + 1) % visible.len()])
+            .unwrap_or_else(|| *visible.last().expect("visible is not empty"));
+        self.selected_segment = Some(idx);
+        Some(idx)
+    }
+
+    pub fn select_prev_visible_tool_card(&mut self, viewport_height: Option<u16>) -> Option<usize> {
+        let visible = self.visible_tool_cards(viewport_height);
+        if visible.is_empty() {
+            return None;
+        }
+        let selected = self.selected_segment;
+        let idx = selected
+            .and_then(|selected| visible.iter().position(|&idx| idx == selected))
+            .map(|pos| visible[(pos + visible.len() - 1) % visible.len()])
+            .unwrap_or_else(|| *visible.last().expect("visible is not empty"));
+        self.selected_segment = Some(idx);
+        Some(idx)
+    }
+
+    pub fn expand_visible_tool_cards(&mut self, viewport_height: Option<u16>) -> usize {
+        let visible = self.visible_tool_cards(viewport_height);
+        let mut changed = 0;
+        for idx in visible {
+            if let Some(seg) = self.segments.get_mut(idx)
+                && let SegmentContent::ToolCard { expanded, .. } = &mut seg.content
+                && !*expanded
+            {
+                *expanded = true;
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.conv_state.invalidate();
+        }
+        changed
     }
 
     pub fn select_segment(&mut self, idx: usize) {
@@ -1697,13 +1756,11 @@ mod tests {
     fn toggle_pin_uses_visible_viewport_not_top_segment() {
         let mut cv = ConversationView::new();
         for idx in 0..5 {
-            cv.push_tool_start(
-                format!("t{idx}"),
-                "read",
-                Some(&format!("file{idx}.rs")),
-                Some(&format!("file{idx}.rs")),
-            );
-            cv.push_tool_end(format!("t{idx}"), false, Some("result"));
+            let id = format!("t{idx}");
+            let path = format!("file{idx}.rs");
+            let name = format!("read{idx}");
+            cv.push_tool_start(&id, &name, Some(&path), Some(&path));
+            cv.push_tool_end(&id, false, Some("result"));
         }
         cv.conv_state.heights = vec![2; 5];
         cv.conv_state.scroll_offset = 0;
@@ -1717,9 +1774,72 @@ mod tests {
             panic!("expected tool card");
         }
         if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[0].content {
-            assert!(!expanded, "top tool card must not be expanded from bottom viewport");
+            assert!(
+                !expanded,
+                "top tool card must not be expanded from bottom viewport"
+            );
         }
     }
+
+    #[test]
+    fn toggle_pin_ignores_stale_selected_tool_for_new_visible_set() {
+        let mut cv = ConversationView::new();
+        for idx in 0..8 {
+            let id = format!("t{idx}");
+            let path = format!("file{idx}.rs");
+            let name = format!("read{idx}");
+            cv.push_tool_start(&id, &name, Some(&path), Some(&path));
+            cv.push_tool_end(&id, false, Some("result"));
+        }
+        cv.conv_state.heights = vec![1; 8];
+        cv.conv_state.scroll_offset = 0;
+        cv.selected_segment = Some(2);
+
+        cv.toggle_pin_in_viewport(Some(3));
+
+        assert_eq!(cv.pinned_segment, Some(7));
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[7].content {
+            assert!(expanded, "most recent visible tool card should expand");
+        } else {
+            panic!("expected tool card");
+        }
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[2].content {
+            assert!(
+                !expanded,
+                "stale selected tool from previous set must not expand"
+            );
+        }
+    }
+    #[test]
+    fn visible_tool_focus_cycles_and_expands_current_viewport() {
+        let mut cv = ConversationView::new();
+        for idx in 0..8 {
+            let id = format!("t{idx}");
+            let path = format!("file{idx}.rs");
+            let name = format!("read{idx}");
+            cv.push_tool_start(&id, &name, Some(&path), Some(&path));
+            cv.push_tool_end(&id, false, Some("result"));
+        }
+        cv.conv_state.heights = vec![1; 8];
+        cv.conv_state.scroll_offset = 0;
+        cv.selected_segment = Some(2);
+
+        assert_eq!(cv.visible_tool_cards(Some(3)), vec![5, 6, 7]);
+        assert_eq!(cv.select_latest_visible_tool_card(Some(3)), Some(7));
+        assert_eq!(cv.select_next_visible_tool_card(Some(3)), Some(5));
+        assert_eq!(cv.select_prev_visible_tool_card(Some(3)), Some(7));
+
+        assert_eq!(cv.expand_visible_tool_cards(Some(3)), 3);
+        for idx in [5, 6, 7] {
+            if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[idx].content {
+                assert!(*expanded, "visible tool card {idx} should expand");
+            }
+        }
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[2].content {
+            assert!(!expanded, "non-visible stale selection must stay collapsed");
+        }
+    }
+
     #[test]
     fn toggle_pin_prefers_latest_running_tool_card() {
         let mut cv = ConversationView::new();

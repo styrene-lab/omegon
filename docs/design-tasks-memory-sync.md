@@ -132,3 +132,25 @@ This gives live sync without the "delete with no record" problem, and uses memor
 Option D is the right default. It closes the "removal with no record" gap (the primary failure mode) while keeping the memory integration lightweight and confirmatory rather than autonomous. The semantic matching in Option C is genuinely compelling for cross-node research surfacing — worth adding as an enhancement, but not as the gating mechanism.
 
 The memory system as research tracking layer is a real architectural insight. Even without full semantic matching as the completion gate, emitting open questions as memory facts makes them searchable across sessions and projects via `memory_recall`. An agent working on a different node that encounters a relevant finding can surface it via memory search. That's additive value with low risk.
+
+---
+
+## 2026-05-21 Update — Recursive tasking and memory supersession
+
+The memory-integrated question lifecycle is one layer of the same recursive tasking system now being unified across Slim plans, IntentDocument work plans, design nodes, OpenSpec tasks, and cleave decomposition. Open questions are tasking items whose completion evidence may be memory facts; execution slices are lower-level tasking items whose durable conclusions may become memory facts.
+
+### Decision: Memory stores durable tasking transitions, not transient checklist state
+
+**Status:** decided
+**Rationale:** Memory should capture decisions, supersession rationale, recurring blockers, recovery paths, and resumable suspended-work pointers. It should not store every Slim checklist item or every active step.
+
+### Decision: Superseding a task can require superseding memory facts
+
+**Status:** decided
+**Rationale:** If a new tasking slice replaces an old approach, any stored memory fact that asserts the old approach as current must be superseded. The tasking event should link old execution state, new execution state, stale memory fact IDs, and replacement rationale.
+
+### Open Questions
+
+- Should tasking-to-memory updates be emitted by a dedicated `TaskingMemoryBridge`, or folded into existing ambient capture/lifecycle emitters?
+- What confidence/approval threshold should be required before semantic matching closes a task/question or supersedes a memory fact automatically?
+- How should suspended execution slices be represented in memory: as full facts, compact pointers to lifecycle artifacts, or both?

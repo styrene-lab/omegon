@@ -527,7 +527,10 @@ fn slim_tool_detail_lines(width: u16, cells: &[String]) -> Vec<String> {
     {
         let hidden_start = max_rows.saturating_sub(1);
         let hidden_cells = remaining[hidden_start..].iter().collect::<Vec<_>>();
-        *last = format!("  └ {}", slim_tool_overflow_hint(hidden_cells.len(), &hidden_cells));
+        *last = format!(
+            "  └ {}",
+            slim_tool_overflow_hint(hidden_cells.len(), &hidden_cells)
+        );
     }
 
     rows
@@ -578,7 +581,10 @@ fn slim_tool_live_rows(width: u16, cells: &[String]) -> Vec<String> {
         && let Some(last) = rows.last_mut()
     {
         let hidden_cells = detail_cells[max_detail_rows..].to_vec();
-        *last = format!("    └ {}", slim_tool_overflow_hint(hidden_cells.len(), &hidden_cells));
+        *last = format!(
+            "    └ {}",
+            slim_tool_overflow_hint(hidden_cells.len(), &hidden_cells)
+        );
     }
 
     rows
@@ -3635,8 +3641,15 @@ mod tests {
         let _detail_rows = slim_tool_detail_lines(42, &cells);
         let live_rows = slim_tool_live_rows(12, &cells);
 
-        assert_eq!(slim_tool_overflow_hint(1, &[&cells[5]]), "+1 more · Ctrl+O details");
-        assert!(live_rows.iter().any(|row| row.contains("+1 more · Ctrl+O details")));
+        assert_eq!(
+            slim_tool_overflow_hint(1, &[&cells[5]]),
+            "+1 more · Ctrl+O details"
+        );
+        assert!(
+            live_rows
+                .iter()
+                .any(|row| row.contains("+1 more · Ctrl+O details"))
+        );
     }
 
     #[test]
@@ -3785,7 +3798,8 @@ mod tests {
             *complete = true;
             *is_error = true;
             *detail_args = Some("core/crates/omegon/src/tui/segments.rs".into());
-            *detail_result = Some("Found 2 occurrences of the text. The text must be unique.".into());
+            *detail_result =
+                Some("Found 2 occurrences of the text. The text must be unique.".into());
         }
 
         assert_eq!(

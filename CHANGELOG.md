@@ -16,17 +16,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-05-20
+
+### Changed
+
+- **Slim status hints are meaning-first** — the footer now distinguishes active, completed, and absent plan state with concise operator hints, and file activity uses semantic `files: … touched/changed/read` labels instead of opaque `r/w` shorthand.
+- **Recursive tasking design is unified** — documented Slim plans, IntentDocument work plans, design/OpenSpec tasking, cleave decomposition, and memory-backed supersession as projections of one recursive tasking system with suspend/block/resume/supersede lifecycle semantics.
+
 ### Fixed
 
+- **Slim-mode focus navigation targets visible tools** — empty-editor `Tab` enters/cycles visible tool focus, `Shift+Tab` cycles backward, `a` expands visible tool cards, and `Ctrl+O` prefers current running/visible tool cards over stale selections.
 - **Session plans are coupled to execution state** — the agent loop now broadcasts structured plan snapshots whenever work-plan state changes, while execution-mode intent injection explicitly instructs agents to call the `plan` tool when active items complete so the pinned operator checklist stays synchronized with real progress.
 - **Completed session plans remain visible** — automatic completion now marks the plan `complete` without erasing its item snapshot, while explicit plan clears and newly set plans still replace the displayed checklist.
 - **Slim-mode Ctrl+O targets the visible tool card** — detail expansion now uses the actual conversation viewport height so Ctrl+O expands the bottom/visible segment instead of repeatedly expanding the top cached segment.
 - **Slim-mode tool errors use compact rows** — failed tool calls now follow the same compact Slim rendering path as successful tools, preserving the red error status without expanding into full bordered cards.
-
-## [0.23.1] - 2026-05-20
-
-### Fixed
-
 - **ACP Zed compatibility is release-ready** — ACP now treats prompt resources as the canonical external integration surface, including Zed `@file`, `@selection`, and `@directory` mentions, embedded text resources, ecosystem text files, line slicing, bounded directory listings, binary-resource suppression, root containment, and symlink escape rejection.
 - **ACP model controls respect configured providers** — the ACP model dropdown now filters registry models by exact provider availability, distinguishes OpenAI API credentials from Codex OAuth, labels stale unavailable current models, and persists model/thinking/posture changes across ACP sessions.
 - **ACP host writes are permission-gated and recoverable** — delegated host writes now request ACP permission before mutation, include failed paths in diagnostics, and fall back to local writes only after permission is granted.

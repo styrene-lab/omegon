@@ -59,7 +59,7 @@ Slim is presentation, not policy. It must render existing state rather than inve
 
 | Operator surface | Source of truth |
 | --- | --- |
-| Plan progress | session intent/work-plan state |
+| Plan progress | IntentDocument recursive tasking state; Slim renders only the current execution-slice projection |
 | Tool rows | structured tool call/result segments |
 | Permissions | profile permissions, including trusted directories |
 | Automation/autonomy | profile-backed automation policy |
@@ -110,7 +110,7 @@ Rows must include enough information for the operator to understand what happene
 
 ### Pinned Plan
 
-The plan is a pinned operational object, not repeated transcript text. It renders from the session plan state and updates in place.
+The plan is a pinned operational object, not repeated transcript text. It renders from the current execution-slice projection of IntentDocument recursive tasking and updates in place. Slim must not maintain a second plan store; completed, blocked, suspended, and superseded states are semantic tasking states, not UI-only flags.
 
 The pinned plan should show:
 
@@ -118,8 +118,8 @@ The pinned plan should show:
 - completed count
 - active item
 - next item when useful
-- blocked or skipped state
-- relevant operator actions
+- blocked, suspended, skipped, complete, failed, or superseded state
+- relevant operator actions such as resume, suspend, clear, supersede, or retry
 
 Example:
 
@@ -141,7 +141,9 @@ Examples:
 
 ```text
 End tail · /copy latest · /transcript
-/plan advance · /plan skip · automation: guarded
+/plan advance · /plan skip · /plan suspend · automation: guarded
+plan blocked · /plan resume · /plan supersede
+plan complete · /plan clear
 view detached ↑42 · End tail
 permission pending · y once · a always · n deny
 ```

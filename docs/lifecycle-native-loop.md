@@ -602,6 +602,23 @@ CREATE TABLE spec_scenarios (
 **Status:** decided
 **Rationale:** The loop suggests lifecycle transitions but never blocks work. The human saying "just fix it" overrides any lifecycle phase. Simple tasks stay in Idle and never enter the lifecycle. This is a deliberate contrast with heavyweight process tools. The loop's lifecycle awareness provides value when work warrants it and stays invisible when it doesn't. Wrong phase inferences cause slightly wrong context injection, not blocked work — and self-correct when the agent's tool calls contradict the inferred phase.
 
+### Decision: Lifecycle tasking is recursive and suggestive at every layer
+
+**Status:** decided
+**Rationale:** The immediate Slim plan, IntentDocument work plan, design-tree questions/tasks, OpenSpec task groups, cleave child plans, and memory-backed research facts are recursive projections of the same tasking system. The loop should treat phase/tasking state as suggestive rather than coercive at every layer: wrong classification or a suspended slice changes context and UI hints, not tool availability.
+
+### Decision: Execution slices can be suspended or blocked without ending the parent intent
+
+**Status:** decided
+**Rationale:** Runtime and upstream failures require preserving in-flight execution state for recovery. A blocked slice records blocker kind, evidence, retryability, and recovery hints; a suspended slice preserves incomplete state while freeing the operator to redirect conversation. Neither state should be confused with completion or clearing.
+
+### Decision: Superseded tasking updates memory and lifecycle artifacts
+
+**Status:** decided
+**Rationale:** When an execution slice or higher-level task is superseded, the old state remains audit history and any durable memory/design claims it invalidates must be superseded with the new rationale. This prevents post-compaction or cross-session agents from reviving obsolete approaches.
+
 ## Open Questions
 
-*No open questions.*
+- What minimum revision/projection protocol is needed so TUI, ACP, IPC, MQTT, and WebSocket consumers can render tasking without owning stale state?
+- How should blocker evidence be classified and surfaced so environmental/upstream failures do not look like agent task failure?
+- How should suspended execution slices be persisted across compaction/session boundaries: IntentDocument only, memory pointer, lifecycle artifact, or all three?

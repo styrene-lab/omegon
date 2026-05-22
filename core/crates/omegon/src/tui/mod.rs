@@ -1445,6 +1445,14 @@ impl PlanDisplaySnapshot {
     fn summary(&self) -> String {
         format!("plan {}/{} · {}", self.completed, self.total, self.mode)
     }
+
+    fn hint_state(&self) -> SlimPlanHintState {
+        if self.mode == "complete" || self.completed >= self.total {
+            SlimPlanHintState::Complete
+        } else {
+            SlimPlanHintState::Active
+        }
+    }
 }
 
 fn slim_plan_rows(snapshot: &PlanDisplaySnapshot, width: u16, height: u16) -> Vec<PlanDisplayRow> {
@@ -1497,11 +1505,18 @@ fn legacy_plan_item(raw: &str) -> Option<(String, PlanDisplayStatus)> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SlimPlanHintState {
+    None,
+    Active,
+    Complete,
+}
+
 fn slim_operator_hint(
     pending_permission: bool,
     pending_operator_wait: bool,
     terminal_copy_mode: bool,
-    has_plan: bool,
+    plan_state: SlimPlanHintState,
     automation: &str,
 ) -> String {
     if pending_permission {
@@ -1510,10 +1525,12 @@ fn slim_operator_hint(
         "manual wait · Enter done · Esc cancel".to_string()
     } else if terminal_copy_mode {
         "copy mode · select text · /mouse on exits".to_string()
-    } else if has_plan {
-        format!("/plan advance · /plan skip · auto: {automation}")
     } else {
-        format!("/copy latest · /transcript · auto: {automation}")
+        match plan_state {
+            SlimPlanHintState::Active => format!("plan: next · skip · {automation}"),
+            SlimPlanHintState::Complete => "plan done · clear".to_string(),
+            SlimPlanHintState::None => format!("copy · transcript · {automation}"),
+        }
     }
 }
 
@@ -1910,7 +1927,14 @@ impl App {
             // selection remains latched from earlier mouse/keyboard navigation,
             // preserving it here makes focus mode appear off-by-one (or more)
             // relative to the latest assistant turn.
-            let focus_idx = self.conversation.last_selectable_segment();
+            let focus_idx = self
+                .conversation
+                .select_latest_visible_tool_card(self.conversation_area.map(|area| area.height))
+                .or_else(|| {
+                    self.conversation.last_selectable_segment().inspect(|&idx| {
+                        self.conversation.select_segment(idx);
+                    })
+                });
             if let Some(idx) = focus_idx {
                 self.conversation.select_segment(idx);
             }
@@ -1918,7 +1942,7 @@ impl App {
             self.terminal_copy_mode = false;
             self.set_mouse_capture(false);
             self.show_toast(
-                "Focus mode — arrows navigate, c copies segment, Esc exits",
+                "Focus mode — Tab/Shift+Tab tools, Ctrl+O details, a expands visible, Esc exits",
                 ratatui_toaster::ToastType::Info,
             );
         } else {
@@ -3915,11 +3939,15 @@ impl App {
             };
             self.status_line.turn_state = Some(self.slim_turn_state.label());
             let automation = self.settings().automation_level.as_str();
+            let plan_state = slim_plan_snapshot
+                .as_ref()
+                .map(PlanDisplaySnapshot::hint_state)
+                .unwrap_or(SlimPlanHintState::None);
             self.status_line.operator_hint = Some(slim_operator_hint(
                 self.pending_permission.is_some(),
                 self.pending_operator_wait.is_some(),
                 self.terminal_copy_mode,
-                slim_plan_snapshot.is_some(),
+                plan_state,
                 automation,
             ));
             self.status_line
@@ -9360,7 +9388,7 @@ pub async fn run_tui(
                             }
                         }
 
-                        // Tab: command completion, @-picker insertion, or toggle tool card expansion
+                        // Tab: command completion, @-picker insertion, or tool-focus traversal.
                         (KeyCode::Tab, _) => {
                             let text = app.editor.render_text().to_string();
                             if let Some(ref picker) = app.at_picker {
@@ -9375,11 +9403,26 @@ pub async fn run_tui(
                                     let cmd = format!("/{}", matches[0].0);
                                     app.editor.set_text(&cmd);
                                 }
-                            } else if text.is_empty()
-                                && let Some(idx) = app.conversation.focused_tool_card()
-                            {
-                                app.conversation.toggle_expand(idx);
+                            } else if text.is_empty() {
+                                let viewport_height = app.conversation_area.map(|area| area.height);
+                                if app.focus_mode {
+                                    app.conversation
+                                        .select_next_visible_tool_card(viewport_height);
+                                } else if app
+                                    .conversation
+                                    .select_latest_visible_tool_card(viewport_height)
+                                    .is_some()
+                                {
+                                    app.set_focus_mode(true);
+                                }
                             }
+                        }
+
+                        // Shift+Tab: previous visible tool card in focus mode.
+                        (KeyCode::BackTab, _) if app.focus_mode => {
+                            let viewport_height = app.conversation_area.map(|area| area.height);
+                            app.conversation
+                                .select_prev_visible_tool_card(viewport_height);
                         }
 
                         // Alt+N: next conversation tab
@@ -9410,6 +9453,14 @@ pub async fn run_tui(
                             if let Some(idx) = app.conversation.timeline_focused_segment() {
                                 app.conversation.toggle_timeline_expanded_segment(idx);
                             }
+                        }
+
+                        // `a` in focus mode expands all visible tool cards.
+                        (KeyCode::Char('a'), mods)
+                            if app.focus_mode && !mods.contains(KeyModifiers::CONTROL) =>
+                        {
+                            let viewport_height = app.conversation_area.map(|area| area.height);
+                            app.conversation.expand_visible_tool_cards(viewport_height);
                         }
 
                         // `c` in focus mode copies the focused segment to clipboard.
@@ -9624,8 +9675,8 @@ mod slash_command_parsing_tests {
     use super::TuiCommand;
     use super::canonical_slash_command;
     use super::{
-        PlanDisplaySnapshot, PlanDisplayStatus, format_permission_prompt, slim_operator_hint,
-        slim_plan_rows,
+        PlanDisplaySnapshot, PlanDisplayStatus, SlimPlanHintState, format_permission_prompt,
+        slim_operator_hint, slim_plan_rows,
     };
     use tokio::sync::mpsc;
 
@@ -9714,24 +9765,34 @@ mod slash_command_parsing_tests {
     #[test]
     fn slim_operator_hint_prioritizes_blocking_prompts() {
         assert_eq!(
-            slim_operator_hint(true, true, true, true, "assistive"),
+            slim_operator_hint(true, true, true, SlimPlanHintState::Active, "assistive"),
             "permission · y once · a always · n deny"
         );
         assert_eq!(
-            slim_operator_hint(false, true, true, true, "assistive"),
+            slim_operator_hint(false, true, true, SlimPlanHintState::Active, "assistive"),
             "manual wait · Enter done · Esc cancel"
         );
         assert_eq!(
-            slim_operator_hint(false, false, true, true, "assistive"),
+            slim_operator_hint(false, false, true, SlimPlanHintState::Active, "assistive"),
             "copy mode · select text · /mouse on exits"
         );
         assert_eq!(
-            slim_operator_hint(false, false, false, true, "assistive"),
-            "/plan advance · /plan skip · auto: assistive"
+            slim_operator_hint(false, false, false, SlimPlanHintState::Active, "assistive"),
+            "plan: next · skip · assistive"
         );
         assert_eq!(
-            slim_operator_hint(false, false, false, false, "assistive"),
-            "/copy latest · /transcript · auto: assistive"
+            slim_operator_hint(
+                false,
+                false,
+                false,
+                SlimPlanHintState::Complete,
+                "assistive"
+            ),
+            "plan done · clear"
+        );
+        assert_eq!(
+            slim_operator_hint(false, false, false, SlimPlanHintState::None, "assistive"),
+            "copy · transcript · assistive"
         );
     }
 

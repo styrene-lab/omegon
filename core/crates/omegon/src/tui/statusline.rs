@@ -150,12 +150,12 @@ impl StatusLine {
             }
         }
 
-        // Files r/w (≥75)
+        // File activity (≥75). Keep the default Slim wording semantic; the
+        // older "12r 4w" shorthand was compact but opaque (r = read, w =
+        // written/modified), especially next to git branch metadata.
         if w >= 75 && (self.files_read > 0 || self.files_modified > 0) {
-            let field = Span::styled(
-                format!("{}r {}w", self.files_read, self.files_modified),
-                Style::default().fg(t.muted()),
-            );
+            let label = file_activity_label(self.files_read, self.files_modified, w);
+            let field = Span::styled(label, Style::default().fg(t.muted()));
             let cost = sep.width() + field.width();
             if used + cost < w {
                 spans.push(sep.clone());
@@ -244,6 +244,17 @@ fn fmt_tokens(count: u64) -> String {
     widgets::format_tokens_compact(count as usize)
 }
 
+fn file_activity_label(read: usize, modified: usize, width: usize) -> String {
+    let total = read + modified;
+    if width >= 115 && read > 0 && modified > 0 {
+        format!("files: {total} touched · {modified} changed · {read} read")
+    } else if modified > 0 {
+        format!("files: {total} touched · {modified} changed")
+    } else {
+        format!("files: {read} read")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +278,18 @@ mod tests {
         assert!(sl.viewport_hint.is_none());
         assert!(sl.turn_state.is_none());
         assert!(sl.operator_hint.is_none());
+    }
+
+    #[test]
+    fn file_activity_label_is_semantic() {
+        assert_eq!(
+            file_activity_label(12, 4, 120),
+            "files: 16 touched · 4 changed · 12 read"
+        );
+        assert_eq!(
+            file_activity_label(12, 4, 90),
+            "files: 16 touched · 4 changed"
+        );
+        assert_eq!(file_activity_label(12, 0, 90), "files: 12 read");
     }
 }
