@@ -198,6 +198,20 @@ mod tests {
     }
 
     #[test]
+    fn test_capabilities_deserialize_legacy_payload_defaults_host_actions_off() {
+        let caps: Capabilities = serde_json::from_value(serde_json::json!({
+            "tools": true,
+            "streaming": true
+        }))
+        .unwrap();
+
+        assert!(caps.tools);
+        assert!(caps.streaming);
+        assert!(!caps.host_actions);
+        assert!(!caps.host_action_execution);
+    }
+
+    #[test]
     fn test_initialize_params_roundtrip() {
         let params = InitializeParams {
             protocol_version: PROTOCOL_VERSION,

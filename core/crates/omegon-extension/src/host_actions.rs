@@ -164,6 +164,21 @@ mod tests {
     }
 
     #[test]
+    fn host_action_outcome_acceptance_example_round_trips() {
+        let json = serde_json::json!({
+            "action_id": "open-reader",
+            "status": "completed",
+            "result": {
+                "terminal_id": "term_123",
+                "backend": "zellij"
+            }
+        });
+
+        let outcome: HostActionOutcome = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(outcome).unwrap(), json);
+    }
+
+    #[test]
     fn tool_result_carries_actions() {
         let action = HostAction::new(
             "open-reader",
