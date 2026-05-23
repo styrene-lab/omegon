@@ -51,4 +51,4 @@
 - [x] 6.2 Run `cargo test -p omegon`.
 - [x] 6.3 Run `cargo check -p omegon`.
 - [x] 6.4 Run `just link` if installing locally.
-- [ ] 6.5 Post acceptance trace to issue #75 and close only after all criteria map to code/tests.
+- [x] 6.5 Post acceptance trace to issue #75 and close only after all criteria map to code/tests.
