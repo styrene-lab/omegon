@@ -91,6 +91,12 @@ impl HostActionExecutorRegistry {
         }
     }
 
+    pub fn with_real_terminal_backend(workspace_cwd: impl Into<std::path::PathBuf>) -> Self {
+        Self::with_terminal_backend(Box::new(RealTerminalCreateBackend {
+            workspace_cwd: workspace_cwd.into(),
+        }))
+    }
+
     fn supports(&self, action_type: &str) -> bool {
         self.supported_types.iter().any(|ty| ty == action_type)
     }
@@ -111,7 +117,9 @@ pub(super) fn process_native_extension_action_execute(
             action_id: "<pending-parse>".to_string(),
         },
         &RuntimeHostActionPolicy::default(),
-        &HostActionExecutorRegistry::default_supported(),
+        &HostActionExecutorRegistry::with_real_terminal_backend(
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+        ),
     )
 }
 
@@ -243,7 +251,9 @@ pub(super) fn process_declarative_host_actions(
                 manifest,
                 scoped,
                 &RuntimeHostActionPolicy::default(),
-                &HostActionExecutorRegistry::default_supported(),
+                &HostActionExecutorRegistry::with_real_terminal_backend(
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                ),
             );
             serde_json::to_value(outcome).unwrap_or_else(|err| {
                 serde_json::json!({
@@ -289,6 +299,28 @@ impl TerminalCreateBackend for FakeTerminalCreateBackend {
         _plan: TerminalCreateLaunchPlan,
     ) -> Result<omegon_extension::actions::terminal::TerminalCreateResult, String> {
         Ok(self.result.clone())
+    }
+}
+
+pub(super) struct RealTerminalCreateBackend {
+    pub workspace_cwd: std::path::PathBuf,
+}
+
+impl TerminalCreateBackend for RealTerminalCreateBackend {
+    fn create(
+        &self,
+        plan: TerminalCreateLaunchPlan,
+    ) -> Result<omegon_extension::actions::terminal::TerminalCreateResult, String> {
+        let request = terminal_backend_request_from_plan(plan, &self.workspace_cwd, None);
+        let response = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(terminal::start_host_terminal(request))
+        })?;
+        Ok(omegon_extension::actions::terminal::TerminalCreateResult {
+            terminal_id: response.terminal_id,
+            backend: response.backend,
+            actual_placement: response.actual_placement,
+            warnings: response.warnings,
+        })
     }
 }
 
@@ -890,6 +922,13 @@ allowed = [{allowed}]
             outcome.result.as_ref().unwrap()["warnings"][0],
             "placement degraded"
         );
+    }
+
+    #[test]
+    fn production_registry_installs_real_terminal_backend() {
+        let registry = HostActionExecutorRegistry::with_real_terminal_backend("/workspace");
+        assert!(registry.supports("terminal.create@1"));
+        assert!(registry.terminal_create_backend.is_some());
     }
 
     #[test]
