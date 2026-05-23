@@ -1,0 +1,35 @@
+# terminal.create@1 Tasks
+
+## 1. Policy validation before spawn
+<!-- specs: extensions/terminal-create -->
+
+- [ ] 1.1 Add failing tests for command allowlist denial.
+- [ ] 1.2 Add failing tests for env deny-by-default and allowlist pass.
+- [ ] 1.3 Add failing tests for cwd root denial.
+- [ ] 1.4 Add failing tests proving argv command vectors are generated without shell strings.
+- [ ] 1.5 Implement terminal.create policy validation helpers.
+
+## 2. Backend adapter
+<!-- specs: extensions/terminal-create -->
+
+- [ ] 2.1 Add failing tests for unsupported PTY backend outcomes.
+- [ ] 2.2 Add failing tests for completed result shape from a fake adapter.
+- [ ] 2.3 Extract argv-based terminal start adapter from existing terminal machinery.
+- [ ] 2.4 Preserve existing terminal tool shell-string behavior only for the direct `terminal` tool.
+
+## 3. Pipeline integration
+<!-- specs: extensions/terminal-create -->
+
+- [ ] 3.1 Add failing tests proving declarative terminal.create reaches executor after policy.
+- [ ] 3.2 Add failing tests proving actions/execute reaches the same executor.
+- [ ] 3.3 Wire terminal.create executor into HostAction registry.
+- [ ] 3.4 Return terminal_id/backend/actual_placement/warnings in HostActionOutcome.result.
+
+## 4. Validation and upstream closure
+<!-- specs: extensions/terminal-create -->
+
+- [ ] 4.1 Run `cargo test -p omegon`.
+- [ ] 4.2 Run `cargo test -p omegon-extension`.
+- [ ] 4.3 Run `cargo check -p omegon`.
+- [ ] 4.4 Run `just link`.
+- [ ] 4.5 Post acceptance trace to #76 and close only after criteria map to tests/code.
