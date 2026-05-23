@@ -3,11 +3,11 @@
 ## 1. Policy validation before spawn
 <!-- specs: extensions/terminal-create -->
 
-- [ ] 1.1 Add failing tests for command allowlist denial.
-- [ ] 1.2 Add failing tests for env deny-by-default and allowlist pass.
-- [ ] 1.3 Add failing tests for cwd root denial.
-- [ ] 1.4 Add failing tests proving argv command vectors are generated without shell strings.
-- [ ] 1.5 Implement terminal.create policy validation helpers.
+- [x] 1.1 Add failing tests for command allowlist denial.
+- [x] 1.2 Add failing tests for env deny-by-default and allowlist pass.
+- [x] 1.3 Add failing tests for cwd root denial.
+- [x] 1.4 Add failing tests proving argv command vectors are generated without shell strings.
+- [x] 1.5 Implement terminal.create policy validation helpers.
 
 ## 2. Backend adapter
 <!-- specs: extensions/terminal-create -->

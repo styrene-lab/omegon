@@ -229,6 +229,101 @@ pub(super) fn process_declarative_host_actions(
         .collect()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TerminalCreateLaunchPlan {
+    pub command: String,
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+    pub env: Vec<(String, String)>,
+}
+
+pub(super) fn validate_terminal_create_policy(
+    action: &HostAction,
+    manifest: &ExtensionManifest,
+) -> Result<TerminalCreateLaunchPlan, HostActionOutcome> {
+    let params: omegon_extension::actions::terminal::TerminalCreateParams =
+        serde_json::from_value(action.params.clone()).map_err(|err| {
+            outcome(
+                action.id.clone(),
+                HostActionStatus::Invalid,
+                "invalid_terminal_create_params",
+                format!("terminal.create@1 params failed validation: {err}"),
+            )
+        })?;
+
+    let policy = &manifest.permissions.host_actions.terminal_create;
+    if !policy
+        .allowed_commands
+        .iter()
+        .any(|allowed| allowed == &params.command)
+    {
+        return Err(outcome(
+            action.id.clone(),
+            HostActionStatus::Denied,
+            "terminal_command_denied",
+            format!(
+                "terminal command '{}' is not allowed by manifest policy",
+                params.command
+            ),
+        ));
+    }
+
+    for key in params.env.keys() {
+        if !policy.allow_env.iter().any(|allowed| allowed == key) {
+            return Err(outcome(
+                action.id.clone(),
+                HostActionStatus::Denied,
+                "terminal_env_denied",
+                format!("terminal env key '{key}' is not allowed by manifest policy"),
+            ));
+        }
+    }
+
+    if let Some(cwd) = &params.cwd {
+        validate_terminal_cwd(cwd, &policy.allowed_cwd_roots).map_err(|message| {
+            outcome(
+                action.id.clone(),
+                HostActionStatus::Denied,
+                "terminal_cwd_denied",
+                message,
+            )
+        })?;
+    }
+
+    Ok(TerminalCreateLaunchPlan {
+        command: params.command,
+        args: params.args,
+        cwd: params.cwd,
+        env: params.env.into_iter().collect(),
+    })
+}
+
+fn validate_terminal_cwd(cwd: &str, allowed_roots: &[String]) -> Result<(), String> {
+    if allowed_roots.is_empty() {
+        return Err(format!(
+            "terminal cwd '{cwd}' was requested but no cwd roots are allowed by manifest policy"
+        ));
+    }
+
+    let cwd_path = std::path::Path::new(cwd);
+    for root in allowed_roots {
+        if root == "${workspace}" {
+            if cwd_path.is_relative() {
+                return Ok(());
+            }
+            continue;
+        }
+        let root_path = std::path::Path::new(root);
+        if cwd_path.starts_with(root_path) {
+            return Ok(());
+        }
+    }
+
+    Err(format!(
+        "terminal cwd '{cwd}' is outside allowed manifest roots"
+    ))
+}
+
 fn audited_outcome(
     scoped_id: &ScopedHostActionId,
     action_type: Option<&str>,
@@ -446,6 +541,110 @@ allowed = [{allowed}]
         assert_eq!(outcomes[0]["action_id"], "open-reader");
         assert_eq!(outcomes[0]["status"], "denied");
         assert_eq!(outcomes[0]["error"]["code"], "manifest_denied");
+    }
+
+    fn terminal_manifest(
+        allowed_commands: &[&str],
+        allowed_roots: &[&str],
+        allow_env: &[&str],
+    ) -> ExtensionManifest {
+        let mut manifest = manifest(&["terminal.create@1"]);
+        manifest
+            .permissions
+            .host_actions
+            .terminal_create
+            .allowed_commands = allowed_commands
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+        manifest
+            .permissions
+            .host_actions
+            .terminal_create
+            .allowed_cwd_roots = allowed_roots
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+        manifest.permissions.host_actions.terminal_create.allow_env =
+            allow_env.iter().map(|value| value.to_string()).collect();
+        manifest
+    }
+
+    fn terminal_action(params: serde_json::Value) -> HostAction {
+        HostAction::new("open-reader", "terminal.create@1", params).unwrap()
+    }
+
+    #[test]
+    fn terminal_create_policy_allows_manifest_command() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let action = terminal_action(json!({"command": "bookokrat", "args": ["/books/a.epub"]}));
+
+        let plan = validate_terminal_create_policy(&action, &manifest).unwrap();
+
+        assert_eq!(plan.command, "bookokrat");
+        assert_eq!(plan.args, vec!["/books/a.epub"]);
+    }
+
+    #[test]
+    fn terminal_create_policy_denies_disallowed_command_before_spawn() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let action = terminal_action(json!({"command": "sh", "args": ["-c", "echo no"]}));
+
+        let outcome = validate_terminal_create_policy(&action, &manifest).unwrap_err();
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "terminal_command_denied");
+    }
+
+    #[test]
+    fn terminal_create_policy_denies_env_by_default() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let action = terminal_action(json!({
+            "command": "bookokrat",
+            "env": {"BOOKOKRAT_THEME": "dark"}
+        }));
+
+        let outcome = validate_terminal_create_policy(&action, &manifest).unwrap_err();
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "terminal_env_denied");
+    }
+
+    #[test]
+    fn terminal_create_policy_allows_allowlisted_env() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &["BOOKOKRAT_THEME"]);
+        let action = terminal_action(json!({
+            "command": "bookokrat",
+            "env": {"BOOKOKRAT_THEME": "dark"}
+        }));
+
+        let plan = validate_terminal_create_policy(&action, &manifest).unwrap();
+
+        assert_eq!(
+            plan.env,
+            vec![("BOOKOKRAT_THEME".to_string(), "dark".to_string())]
+        );
+    }
+
+    #[test]
+    fn terminal_create_policy_denies_cwd_outside_allowed_roots() {
+        let manifest = terminal_manifest(&["bookokrat"], &["/workspace/books"], &[]);
+        let action = terminal_action(json!({"command": "bookokrat", "cwd": "/tmp"}));
+
+        let outcome = validate_terminal_create_policy(&action, &manifest).unwrap_err();
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "terminal_cwd_denied");
+    }
+
+    #[test]
+    fn terminal_create_policy_accepts_relative_workspace_cwd_token() {
+        let manifest = terminal_manifest(&["bookokrat"], &["${workspace}"], &[]);
+        let action = terminal_action(json!({"command": "bookokrat", "cwd": "books"}));
+
+        let plan = validate_terminal_create_policy(&action, &manifest).unwrap();
+
+        assert_eq!(plan.cwd.as_deref(), Some("books"));
     }
 
     #[test]
