@@ -126,7 +126,10 @@ pub use host_actions::{
     HostAction, HostActionError, HostActionExecution, HostActionOutcome, HostActionStatus,
     ToolContent, ToolResult,
 };
-pub use manifest::{ConfigField, ConfigFieldType, ExtensionManifest, ManifestError};
+pub use manifest::{
+    ConfigField, ConfigFieldType, ExtensionManifest, HostActionPermissions, ManifestError,
+    ManifestPermissions, TerminalCreatePermissions,
+};
 pub use mind::{
     AddFactResponse, Episode, Fact, FactOpResponse, GetMindResponse, LoadMindResponse,
     MindMetadata, StoreMindResponse,

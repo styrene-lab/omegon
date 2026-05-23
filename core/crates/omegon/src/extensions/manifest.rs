@@ -52,6 +52,19 @@ pub struct ExtensionManifest {
     /// Parsed from `[config.<field_name>]` tables in manifest.toml.
     #[serde(default)]
     pub config: std::collections::HashMap<String, omegon_extension::ConfigField>,
+    #[serde(default)]
+    pub capabilities: omegon_extension::Capabilities,
+    #[serde(default)]
+    pub permissions: omegon_extension::ManifestPermissions,
+}
+
+impl ExtensionManifest {
+    /// Return true when manifest HostAction permissions allow this action type.
+    pub fn allows_host_action_type(&self, action_type: &str) -> bool {
+        self.permissions
+            .host_actions
+            .allows_action_type(action_type)
+    }
 }
 
 /// Extension metadata.

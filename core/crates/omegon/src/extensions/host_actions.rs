@@ -1,4 +1,5 @@
-use omegon_extension::{ExtensionManifest, HostAction, HostActionOutcome, HostActionStatus};
+use super::manifest::ExtensionManifest;
+use omegon_extension::{HostAction, HostActionOutcome, HostActionStatus};
 use serde_json::Value;
 
 /// Host-attached origin for an untrusted HostAction candidate.
@@ -74,9 +75,32 @@ impl HostActionExecutorRegistry {
         }
     }
 
+    pub fn default_supported() -> Self {
+        Self::with_supported_types(["terminal.create@1"])
+    }
+
     fn supports(&self, action_type: &str) -> bool {
         self.supported_types.iter().any(|ty| ty == action_type)
     }
+}
+
+pub(super) fn process_native_extension_action_execute(
+    action: Value,
+    manifest: &ExtensionManifest,
+    extension_name: &str,
+) -> HostActionOutcome {
+    process_host_action_candidate(
+        action,
+        manifest,
+        ScopedHostActionId {
+            origin: HostActionOrigin::native_extension(extension_name),
+            session_id: "extension-rpc".to_string(),
+            tool_call_id: "actions/execute".to_string(),
+            action_id: "<pending-parse>".to_string(),
+        },
+        &RuntimeHostActionPolicy::default(),
+        &HostActionExecutorRegistry::default_supported(),
+    )
 }
 
 pub(super) fn process_host_action_candidate(
@@ -207,7 +231,7 @@ allowed = [{allowed}]
     }
 
     fn registry() -> HostActionExecutorRegistry {
-        HostActionExecutorRegistry::with_supported_types(["terminal.create@1"])
+        HostActionExecutorRegistry::default_supported()
     }
 
     #[test]
@@ -283,6 +307,41 @@ allowed = [{allowed}]
 
         assert_eq!(outcome.status, HostActionStatus::Denied);
         assert_eq!(outcome.error.unwrap().code, "auto_not_allowed");
+    }
+
+    #[test]
+    fn imperative_action_execute_uses_same_manifest_denial_policy() {
+        let outcome = process_native_extension_action_execute(
+            json!({"id": "open-file", "type": "file.open@1", "params": {}}),
+            &manifest(&["terminal.create@1"]),
+            "reader",
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Unsupported);
+        assert_eq!(outcome.error.unwrap().code, "unsupported_action");
+    }
+
+    #[test]
+    fn imperative_action_execute_returns_invalid_outcome() {
+        let outcome = process_native_extension_action_execute(
+            json!({"id": "broken", "params": {}}),
+            &manifest(&["terminal.create@1"]),
+            "reader",
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Invalid);
+    }
+
+    #[test]
+    fn imperative_action_execute_returns_denied_for_supported_but_manifest_denied() {
+        let outcome = process_native_extension_action_execute(
+            json!({"id": "open-reader", "type": "terminal.create@1", "params": {}}),
+            &manifest(&[]),
+            "reader",
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "manifest_denied");
     }
 
     #[test]

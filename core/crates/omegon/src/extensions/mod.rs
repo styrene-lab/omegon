@@ -1003,6 +1003,8 @@ binary = "flaky-extension.sh"
             secrets: manifest::SecretsConfig::default(),
             mcp: None,
             config,
+            capabilities: omegon_extension::Capabilities::default(),
+            permissions: omegon_extension::ManifestPermissions::default(),
         }
     }
 }

@@ -32,8 +32,8 @@
 ## 4. Imperative `actions/execute` route
 <!-- specs: extensions/host-actions-runtime -->
 
-- [ ] 4.1 Add failing tests proving `actions/execute` uses the same pipeline as declarative actions.
-- [ ] 4.2 Add failing tests for denied/invalid/unsupported imperative outcomes.
+- [x] 4.1 Add failing tests proving `actions/execute` uses the same pipeline as declarative actions.
+- [x] 4.2 Add failing tests for denied/invalid/unsupported imperative outcomes.
 - [ ] 4.3 Implement extension host request routing for `actions/execute` without a bypass path.
 
 ## 5. Rendering/headless result exposure
