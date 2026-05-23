@@ -21,6 +21,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Side-process substrate design docs** — documented extension-facing side-process pane APIs, backend capability negotiation, manifest policy, terminal compatibility matrices, and macOS/Linux backend posture for Zellij, Cockpit/par-term, Kitty, and fallback reader workflows.
 - **Managed reader workspace research** — captured reader workspace design nodes, Zellij/Cockpit/par-term spike plans, Bookokrat side-pane contracts, and par-term graphics prototype evidence for embedded reader-pane evaluation.
 
+## [0.23.3] - 2026-05-23
+
 ### Fixed
 
 - **Slim completed responses stay at the live tail** — completed assistant turns no longer rewind compact sessions to the start of long responses, and the conversation renderer reserves a one-column edge gutter to avoid right-edge rendering pressure.
