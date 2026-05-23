@@ -42,6 +42,8 @@ Issue #75 must land as a sequence of red-green commits. Each phase introduces fa
 
 - Backward compatibility is proven by tests.
 - Declarative HostActions are detectable without executing anything.
+- Malformed `content` arrays fall back to visible legacy text instead of producing empty output.
+- Image content accepts both SDK/internal `media_type` and MCP-style `mediaType`.
 
 ## Phase C — Validation and policy pipeline
 

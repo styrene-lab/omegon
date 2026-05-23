@@ -17,15 +17,17 @@
 - [x] 2.3 Add failing tests for valid `actions` extraction separate from content.
 - [x] 2.4 Add failing tests proving malformed actions preserve content and produce invalid/ignored outcomes.
 - [x] 2.5 Implement envelope parser and wire it into `ExtensionFeature::execute`.
+- [x] 2.6 Harden envelope parsing so malformed content falls back to visible legacy text.
+- [x] 2.7 Accept both `media_type` and `mediaType` image content fields.
 
 ## 3. Validation and policy pipeline
 <!-- specs: extensions/host-actions-runtime -->
 
-- [ ] 3.1 Add failing tests for invalid action candidates.
-- [ ] 3.2 Add failing tests for unsupported action type/version outcomes.
-- [ ] 3.3 Add failing tests for manifest-denied action outcomes.
-- [ ] 3.4 Add failing tests for conservative `auto_if_allowed` behavior.
-- [ ] 3.5 Implement origin/scoped identity model, policy checks, typed outcomes, and audit hook.
+- [x] 3.1 Add failing tests for invalid action candidates.
+- [x] 3.2 Add failing tests for unsupported action type/version outcomes.
+- [x] 3.3 Add failing tests for manifest-denied action outcomes.
+- [x] 3.4 Add failing tests for conservative `auto_if_allowed` behavior.
+- [x] 3.5 Implement origin/scoped identity model, policy checks, typed outcomes, and audit hook.
 
 ## 4. Imperative `actions/execute` route
 <!-- specs: extensions/host-actions-runtime -->
