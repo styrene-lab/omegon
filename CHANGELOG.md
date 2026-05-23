@@ -22,6 +22,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Managed reader workspace research** — captured reader workspace design nodes, Zellij/Cockpit/par-term spike plans, Bookokrat side-pane contracts, and par-term graphics prototype evidence for embedded reader-pane evaluation.
 - **Scratch probe cleanup** — moved useful `.tmp` par-term/Cockpit evidence into design nodes and removed stale local probe/build artifacts.
 
+### Fixed
+
+- **Zed ACP plan presentation** — plan status updates now render as concise plain text while native ACP plan updates own the checklist, avoiding raw plan receipts and markdown underscore artifacts in Zed.
+
+
 ## [0.23.3] - 2026-05-23
 
 ### Fixed

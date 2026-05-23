@@ -138,6 +138,43 @@ fn acp_plan_entries(entries: &[acp_worker::PlanEntryData]) -> Vec<PlanEntry> {
         .collect()
 }
 
+fn acp_status_message_text(msg: &str) -> Option<String> {
+    let trimmed = msg.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if trimmed.contains("Plan mode:") || trimmed.starts_with("Plan ") {
+        let mode = trimmed
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("Plan mode:"))
+            .map(str::trim)
+            .unwrap_or("");
+
+        let text = if trimmed.starts_with("Plan set") && mode == "planning" {
+            "Planning mode — edits blocked until approval.".to_string()
+        } else if trimmed.starts_with("Plan approved") || mode == "approved" {
+            "Plan approved — execution may proceed.".to_string()
+        } else if trimmed.starts_with("Plan executing") || mode == "executing" {
+            "Plan executing.".to_string()
+        } else if trimmed.starts_with("Plan cleared") || mode == "off" {
+            "Plan cleared.".to_string()
+        } else if trimmed.starts_with("Plan item skipped") {
+            "Plan item skipped.".to_string()
+        } else if trimmed.starts_with("Plan progress") || mode == "complete" {
+            "Plan progress updated.".to_string()
+        } else if trimmed.starts_with("Plan status") || trimmed.starts_with("Plan updated") {
+            "Plan updated.".to_string()
+        } else {
+            "Plan updated.".to_string()
+        };
+
+        return Some(text);
+    }
+
+    Some(trimmed.to_string())
+}
+
 pub struct OmegonAcpAgent {
     model: String,
     worker: RefCell<Option<WorkerHandle>>,
@@ -640,13 +677,16 @@ impl Agent for OmegonAcpAgent {
                         }
                         Ok(WorkerEvent::StatusUpdate(msg)) => {
                             let msg = redact(&msg);
+                            let Some(msg) = acp_status_message_text(&msg) else {
+                                continue;
+                            };
                             if let Some(c) = conn.borrow().as_ref() {
                                 let _ = send_session_update(
                                     c,
                                     stream_sid.clone(),
                                     SessionUpdate::AgentMessageChunk(ContentChunk::new(
                                         ContentBlock::Text(TextContent::new(format!(
-                                            "_{msg}_\n\n"
+                                            "{msg}\n\n"
                                         ))),
                                     )),
                                 )
@@ -2547,6 +2587,61 @@ mod tests {
         assert_eq!(entries[1].status, PlanEntryState::InProgress);
         assert_eq!(entries[2].status, PlanEntryState::Pending);
         assert_eq!(entries[3].status, PlanEntryState::Failed);
+    }
+
+
+    #[test]
+    fn plan_snapshot_json_empty_items_clears_state() {
+        let snapshot = serde_json::json!({
+            "mode": "off",
+            "completed": 0,
+            "total": 0,
+            "items": []
+        });
+
+        let entries = plan_entries_from_snapshot_json(&snapshot);
+
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn acp_status_compresses_plan_set_receipt() {
+        let raw = "Plan set
+Plan mode: planning
+Planning gate active: keep work to read/search/design until /plan approve.
+Progress: 0/4
+
+1. ◐ Inventory docs";
+
+        assert_eq!(
+            acp_status_message_text(raw).as_deref(),
+            Some("Planning mode — edits blocked until approval.")
+        );
+    }
+
+    #[test]
+    fn acp_status_compresses_plan_approval_and_progress() {
+        assert_eq!(
+            acp_status_message_text("Plan approved
+Plan mode: approved
+Progress: 0/2").as_deref(),
+            Some("Plan approved — execution may proceed.")
+        );
+        assert_eq!(
+            acp_status_message_text("Plan progress
+Plan mode: executing
+Progress: 1/2").as_deref(),
+            Some("Plan executing.")
+        );
+    }
+
+    #[test]
+    fn acp_status_preserves_non_plan_messages_plainly() {
+        assert_eq!(
+            acp_status_message_text("  Request aborted  ").as_deref(),
+            Some("Request aborted")
+        );
+        assert_eq!(acp_status_message_text("   "), None);
     }
 
     #[test]
