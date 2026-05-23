@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 par-term-emu-core-rust = { version = "0.42.1", default-features = false, features = ["rust-only"] }
 anyhow = "1"
+base64 = "0.22"
