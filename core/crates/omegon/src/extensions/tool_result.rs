@@ -69,7 +69,10 @@ fn parse_content(content: Option<&Value>) -> Option<Vec<ContentBlock>> {
             }
             Some("image") => {
                 let url = block.get("url")?.as_str()?;
-                let media_type = block.get("media_type")?.as_str()?;
+                let media_type = block
+                    .get("media_type")
+                    .or_else(|| block.get("mediaType"))?
+                    .as_str()?;
                 Some(ContentBlock::Image {
                     url: url.to_string(),
                     media_type: media_type.to_string(),
@@ -78,7 +81,11 @@ fn parse_content(content: Option<&Value>) -> Option<Vec<ContentBlock>> {
             _ => None,
         })
         .collect();
-    Some(blocks)
+    if blocks.is_empty() {
+        None
+    } else {
+        Some(blocks)
+    }
 }
 
 fn partition_actions(actions: &Value) -> (Vec<Value>, Vec<Value>) {
@@ -142,6 +149,31 @@ mod tests {
         }));
         assert_eq!(text(&result), "hello");
         assert_eq!(result.details, json!({}));
+    }
+
+    #[test]
+    fn malformed_content_array_falls_back_to_legacy_text() {
+        let output = json!({
+            "content": [{"type": "text"}],
+            "metadata": {"source": "test"}
+        });
+        let result = parse_extension_tool_result(output.clone());
+        assert_eq!(text(&result), output.to_string());
+        assert_eq!(result.details["metadata"], json!({"source": "test"}));
+    }
+
+    #[test]
+    fn image_content_accepts_camel_case_media_type() {
+        let result = parse_extension_tool_result(json!({
+            "content": [{"type": "image", "url": "file:///tmp/a.png", "mediaType": "image/png"}]
+        }));
+        match &result.content[0] {
+            ContentBlock::Image { url, media_type } => {
+                assert_eq!(url, "file:///tmp/a.png");
+                assert_eq!(media_type, "image/png");
+            }
+            ContentBlock::Text { .. } => panic!("expected image"),
+        }
     }
 
     #[test]
