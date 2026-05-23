@@ -20,10 +20,10 @@
 ## 3. Pipeline integration
 <!-- specs: extensions/terminal-create -->
 
-- [ ] 3.1 Add failing tests proving declarative terminal.create reaches executor after policy.
-- [ ] 3.2 Add failing tests proving actions/execute reaches the same executor.
-- [ ] 3.3 Wire terminal.create executor into HostAction registry.
-- [ ] 3.4 Return terminal_id/backend/actual_placement/warnings in HostActionOutcome.result.
+- [x] 3.1 Add failing tests proving declarative terminal.create reaches executor after policy.
+- [x] 3.2 Add failing tests proving actions/execute reaches the same executor.
+- [x] 3.3 Wire terminal.create executor into HostAction registry.
+- [x] 3.4 Return terminal_id/backend/actual_placement/warnings in HostActionOutcome.result.
 
 ## 4. Validation and upstream closure
 <!-- specs: extensions/terminal-create -->

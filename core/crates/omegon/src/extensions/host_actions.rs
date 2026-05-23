@@ -64,20 +64,31 @@ pub(super) struct RuntimeHostActionPolicy {
 
 /// Minimal executor registry seam for Phase C. Issue #76 registers real
 /// `terminal.create@1` execution later.
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub(super) struct HostActionExecutorRegistry {
     supported_types: Vec<String>,
+    terminal_create_backend: Option<Box<dyn TerminalCreateBackend + Send + Sync>>,
 }
 
 impl HostActionExecutorRegistry {
     pub fn with_supported_types(types: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
             supported_types: types.into_iter().map(Into::into).collect(),
+            terminal_create_backend: None,
         }
     }
 
     pub fn default_supported() -> Self {
         Self::with_supported_types(["terminal.create@1"])
+    }
+
+    pub fn with_terminal_backend(backend: Box<dyn TerminalCreateBackend + Send + Sync>) -> Self {
+        Self {
+            supported_types: vec![
+                omegon_extension::actions::terminal::TERMINAL_CREATE_V1.to_string(),
+            ],
+            terminal_create_backend: Some(backend),
+        }
     }
 
     fn supports(&self, action_type: &str) -> bool {
@@ -179,13 +190,31 @@ pub(super) fn process_host_action_candidate(
         );
     }
 
+    if action.action_type == omegon_extension::actions::terminal::TERMINAL_CREATE_V1 {
+        if let Some(backend) = executors.terminal_create_backend.as_deref() {
+            let outcome = execute_terminal_create_with_backend(&action, manifest, backend);
+            audit_host_action_outcome(
+                &scoped_id,
+                Some(&action.action_type),
+                &outcome.action_id,
+                &outcome.status,
+                outcome
+                    .error
+                    .as_ref()
+                    .map(|error| error.code.as_str())
+                    .unwrap_or("completed"),
+            );
+            return outcome;
+        }
+    }
+
     audited_outcome(
         &scoped_id,
         Some(&action.action_type),
         action.id,
         HostActionStatus::Unsupported,
         "executor_unavailable",
-        "HostAction executor registry seam is present, but no executor ran in Phase C",
+        "HostAction executor registry seam is present, but no executor is configured",
     )
 }
 
@@ -795,6 +824,72 @@ allowed = [{allowed}]
         let plan = validate_terminal_create_policy(&action, &manifest).unwrap();
 
         assert_eq!(plan.cwd.as_deref(), Some("books"));
+    }
+
+    #[test]
+    fn declarative_terminal_create_reaches_executor_after_policy() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let registry = HostActionExecutorRegistry::with_terminal_backend(Box::new(
+            FakeTerminalCreateBackend {
+                result: omegon_extension::actions::terminal::TerminalCreateResult {
+                    terminal_id: "term_decl".to_string(),
+                    backend: "fake".to_string(),
+                    actual_placement: "background_session".to_string(),
+                    warnings: Vec::new(),
+                },
+            },
+        ));
+
+        let outcome = process_host_action_candidate(
+            json!({"id": "open-reader", "type": "terminal.create@1", "params": {"command": "bookokrat"}}),
+            &manifest,
+            ScopedHostActionId {
+                origin: HostActionOrigin::native_extension("reader"),
+                session_id: "tool-result".to_string(),
+                tool_call_id: "call-1".to_string(),
+                action_id: "open-reader".to_string(),
+            },
+            &RuntimeHostActionPolicy::default(),
+            &registry,
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        assert_eq!(outcome.result.as_ref().unwrap()["terminal_id"], "term_decl");
+    }
+
+    #[test]
+    fn imperative_terminal_create_reaches_same_executor_path() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let registry = HostActionExecutorRegistry::with_terminal_backend(Box::new(
+            FakeTerminalCreateBackend {
+                result: omegon_extension::actions::terminal::TerminalCreateResult {
+                    terminal_id: "term_rpc".to_string(),
+                    backend: "fake".to_string(),
+                    actual_placement: "background_session".to_string(),
+                    warnings: vec!["placement degraded".to_string()],
+                },
+            },
+        ));
+
+        let outcome = process_host_action_candidate(
+            json!({"id": "open-reader", "type": "terminal.create@1", "params": {"command": "bookokrat"}}),
+            &manifest,
+            ScopedHostActionId {
+                origin: HostActionOrigin::native_extension("reader"),
+                session_id: "extension-rpc".to_string(),
+                tool_call_id: "actions/execute".to_string(),
+                action_id: "open-reader".to_string(),
+            },
+            &RuntimeHostActionPolicy::default(),
+            &registry,
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        assert_eq!(outcome.result.as_ref().unwrap()["terminal_id"], "term_rpc");
+        assert_eq!(
+            outcome.result.as_ref().unwrap()["warnings"][0],
+            "placement degraded"
+        );
     }
 
     #[test]
