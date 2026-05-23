@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Added `omegon-extension` HostAction SDK types, host action capabilities, typed `ToolResult` actions, `HostProxy::execute_action()`, and `terminal.create@1` protocol structs for extension-side host side-effect declarations.
+
 ## [0.23.9] - 2026-05-25
 
 ### Fixed

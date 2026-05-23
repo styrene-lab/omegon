@@ -50,6 +50,14 @@ pub struct Capabilities {
     /// Extension supports streaming tool responses (progress with content).
     #[serde(default)]
     pub streaming: bool,
+
+    /// Extension can return declarative host action requests in tool results.
+    #[serde(default)]
+    pub host_actions: bool,
+
+    /// Extension can imperatively request host action execution.
+    #[serde(default)]
+    pub host_action_execution: bool,
 }
 
 fn default_true() -> bool {
@@ -68,6 +76,8 @@ impl Default for Capabilities {
             sampling: false,
             elicitation: false,
             streaming: false,
+            host_actions: false,
+            host_action_execution: false,
         }
     }
 }
@@ -85,6 +95,8 @@ impl Capabilities {
             sampling: true,
             elicitation: true,
             streaming: true,
+            host_actions: true,
+            host_action_execution: true,
         }
     }
 
@@ -101,6 +113,8 @@ impl Capabilities {
             sampling: self.sampling && other.sampling,
             elicitation: self.elicitation && other.elicitation,
             streaming: self.streaming && other.streaming,
+            host_actions: self.host_actions && other.host_actions,
+            host_action_execution: self.host_action_execution && other.host_action_execution,
         }
     }
 }
@@ -150,6 +164,8 @@ mod tests {
         assert!(caps.tools);
         assert!(!caps.widgets);
         assert!(!caps.sampling);
+        assert!(!caps.host_actions);
+        assert!(!caps.host_action_execution);
     }
 
     #[test]
@@ -159,6 +175,8 @@ mod tests {
         assert!(caps.widgets);
         assert!(caps.sampling);
         assert!(caps.elicitation);
+        assert!(caps.host_actions);
+        assert!(caps.host_action_execution);
     }
 
     #[test]
@@ -175,6 +193,8 @@ mod tests {
         assert!(active.widgets);
         assert!(!active.mind);
         assert!(!active.sampling);
+        assert!(!active.host_actions);
+        assert!(!active.host_action_execution);
     }
 
     #[test]
@@ -193,6 +213,8 @@ mod tests {
         assert_eq!(parsed.protocol_version, 2);
         assert_eq!(parsed.host_info.name, "omegon");
         assert!(parsed.capabilities.sampling);
+        assert!(parsed.capabilities.host_actions);
+        assert!(parsed.capabilities.host_action_execution);
     }
 
     #[test]

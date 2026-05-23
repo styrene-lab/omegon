@@ -100,10 +100,12 @@
 //! }
 //! ```
 
+pub mod actions;
 mod capabilities;
 mod elicitation;
 mod error;
 mod extension;
+mod host_actions;
 mod manifest;
 pub mod mcp_shim;
 mod mind;
@@ -120,6 +122,10 @@ pub use elicitation::{ElicitationAction, ElicitationParams, ElicitationResult, E
 pub use error::{Error, ErrorCode, Result};
 pub use extension::{Extension, HostProxy};
 use extension::{ExtensionServe, MessageRouter};
+pub use host_actions::{
+    HostAction, HostActionError, HostActionExecution, HostActionOutcome, HostActionStatus,
+    ToolContent, ToolResult,
+};
 pub use manifest::{ConfigField, ConfigFieldType, ExtensionManifest, ManifestError};
 pub use mind::{
     AddFactResponse, Episode, Fact, FactOpResponse, GetMindResponse, LoadMindResponse,
