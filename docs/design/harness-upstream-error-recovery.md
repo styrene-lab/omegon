@@ -11,6 +11,12 @@ visibility = "private"
 
 # Harness upstream error recovery and fallback signaling
 
+## Disposition — 2026-05-23
+
+**Status: current concept / stale implementation scope.** Structured provider-error classification and bounded recovery remain active concerns, and current Rust code includes upstream error classification in `core/crates/omegon/src/upstream_errors.rs` plus model switching in `core/crates/omegon/src/features/model_budget.rs`. The implementation notes below refer to absent TypeScript extension files and should be treated as historical planning, not current file scope.
+
+Use the decisions and constraints as design intent. Reconcile all code references with Rust upstream-error, settings, model-registry, and TUI status surfaces before making implementation changes.
+
 ## Overview
 
 Surface upstream driver/provider failures to the agent and operator, classify obvious transient failures for bounded retry, and route sustained usage/limit/backoff issues into intelligent model or driver fallback.

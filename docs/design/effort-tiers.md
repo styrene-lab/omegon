@@ -11,6 +11,12 @@ visibility = "private"
 
 # Effort Tiers — Global Inference Cost Control (Servitor → Omnissiah)
 
+## Disposition — 2026-05-23
+
+**Status: partially superseded / stale implementation scope.** This node describes a TypeScript `extensions/effort/` control plane and seven named tiers. The current Rust-native model budget feature lives in `core/crates/omegon/src/features/model_budget.rs` and uses the current tier vocabulary `Local`, `Retribution`, `Victory`, and `Gloriana`; the referenced `extensions/effort/*`, `extensions/model-budget.ts`, and `project-memory/*` paths are absent.
+
+Keep this document for the durable idea of a global cost/capability knob and operator-visible ceilings. Reconcile against `codex-tier-routing.md`, `provider-neutral-model-controls.md`, and the Rust model registry before using any tier names, file scope, or cloud/local percentages as current behavior.
+
 ## Overview
 
 A single global knob controlling the ratio of local-vs-cloud inference across the entire harness. Seven named tiers inspired by Space Marine 2 difficulty levels and 40K threat designations. From fully local (Servitor) to all-opus-all-the-time (Omnissiah). Replaces the current patchwork of per-extension model selection with a unified control plane.

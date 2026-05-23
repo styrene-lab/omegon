@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use tempfile::TempDir;
 
-const PROVIDER_CONTRACTS_JSON: &str = include_str!("../../../../.pi/provider-contracts.json");
+const PROVIDER_CONTRACTS_JSON: &str = include_str!("fixtures/provider-contracts.json");
 
 #[derive(Debug, Deserialize)]
 struct ProviderContracts {

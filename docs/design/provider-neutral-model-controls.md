@@ -11,6 +11,12 @@ visibility = "private"
 
 # Provider-neutral model controls and driver persistence
 
+## Disposition — 2026-05-23
+
+**Status: partially implemented concept / stale file scope.** Provider-neutral model control remains relevant, but the implementation paths listed here are from the older TypeScript extension architecture. Current model controls and provider registry behavior are Rust-native (`core/crates/omegon/src/features/model_budget.rs`, `core/crates/omegon/src/model_registry.rs`, TUI model catalog/footer code, and settings/profile handling).
+
+Use this document for constraints and behavior intent only. Do not treat `extensions/model-budget.ts`, `extensions/effort/index.ts`, or `extensions/dashboard/footer.ts` as current implementation paths.
+
 ## Overview
 
 Track the implementation that makes model controls provider-neutral in operator-facing UX and persists the last-used concrete driver model across sessions.

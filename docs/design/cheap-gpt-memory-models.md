@@ -11,6 +11,12 @@ visibility = "private"
 
 # Use cheap GPT models for memory extraction and embeddings
 
+## Disposition — 2026-05-23
+
+**Status: partially superseded / stale implementation scope.** The durable decision that background memory work should prefer cheap reliable cloud paths over heavyweight defaults remains relevant. The implementation notes are stale: the referenced `extensions/project-memory/*` TypeScript files are absent, while current memory and embedding behavior lives in Rust under `core/crates/omegon-memory/` and `core/crates/omegon/src/features/memory.rs`, `embedding.rs`, and optional `local_embedding.rs`.
+
+Use this document for policy direction only. Reconcile extraction/embedding defaults against the Rust memory implementation before treating any file scope or cloud-first embedding detail as current behavior.
+
 ## Overview
 
 Track the change that moves project-memory to cheap GPT-class cloud defaults for background extraction and semantic embeddings while preserving graceful degradation.
