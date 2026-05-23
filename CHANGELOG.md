@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.23.5] - 2026-05-23
+
+### Fixed
+
+- **OpenSpec archive crash recovery** — archive operations now write a repo-local transaction journal, recover interrupted moves before lifecycle doctor/archive runs, complete content-moved archives by marking lifecycle state archived, clean journals after successful rollback, and report ambiguous archive conflicts without deleting content.
+
 ## [0.23.4] - 2026-05-23
 
 ### Added
