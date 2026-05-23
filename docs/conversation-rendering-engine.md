@@ -14,7 +14,7 @@ visibility = "private"
 [data]
 dependencies = []
 open_questions = []
-related = ["conversation-widget", "inline-image-rendering", "display-tool-artifacts", "embedded-web-dashboard", "native-plan-mode"]
+related = ["conversation-widget", "inline-image-rendering", "display-tool-artifacts", "embedded-web-dashboard", "native-plan-mode", "managed-reader-workspace"]
 +++
 
 # Conversation Rendering Engine

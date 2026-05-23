@@ -16,6 +16,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- **Side-process substrate design docs** — documented extension-facing side-process pane APIs, backend capability negotiation, manifest policy, terminal compatibility matrices, and macOS/Linux backend posture for Zellij, Cockpit/par-term, Kitty, and fallback reader workflows.
+- **Managed reader workspace research** — captured reader workspace design nodes, Zellij/Cockpit/par-term spike plans, Bookokrat side-pane contracts, and par-term graphics prototype evidence for embedded reader-pane evaluation.
+
 ## [0.23.2] - 2026-05-22
 
 ### Fixed
