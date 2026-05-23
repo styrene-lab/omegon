@@ -1,5 +1,6 @@
 //! Manifest validation — caught at extension installation time.
 
+use crate::Capabilities;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -40,6 +41,45 @@ pub struct ExtensionManifest {
     pub mind: MindConfig,
     #[serde(default)]
     pub config: HashMap<String, ConfigField>,
+    #[serde(default)]
+    pub capabilities: Capabilities,
+    #[serde(default)]
+    pub permissions: ManifestPermissions,
+}
+
+/// Permission declarations from manifest.toml.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ManifestPermissions {
+    #[serde(default)]
+    pub host_actions: HostActionPermissions,
+}
+
+/// HostAction permission declarations.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HostActionPermissions {
+    /// Versioned action types the extension may request.
+    #[serde(default)]
+    pub allowed: Vec<String>,
+    /// Policy for `terminal.create@1` requests.
+    #[serde(default)]
+    pub terminal_create: TerminalCreatePermissions,
+}
+
+/// Manifest policy for `terminal.create@1`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TerminalCreatePermissions {
+    /// Whether interactive terminal actions are permitted.
+    #[serde(default)]
+    pub interactive: bool,
+    /// Allowed executable names. Empty means no commands are allowed by manifest policy.
+    #[serde(default)]
+    pub allowed_commands: Vec<String>,
+    /// Allowed cwd roots. Values may include host-expanded tokens such as `${workspace}`.
+    #[serde(default)]
+    pub allowed_cwd_roots: Vec<String>,
+    /// Environment variable names the extension may pass through.
+    #[serde(default)]
+    pub allow_env: Vec<String>,
 }
 
 /// A declared configuration field in the extension manifest.
@@ -345,6 +385,8 @@ mod tests {
             widgets: HashMap::new(),
             mind: MindConfig::default(),
             config: HashMap::new(),
+            capabilities: Capabilities::default(),
+            permissions: ManifestPermissions::default(),
         };
 
         assert!(manifest.validate().is_ok());
@@ -366,6 +408,8 @@ mod tests {
             widgets: HashMap::new(),
             mind: MindConfig::default(),
             config: HashMap::new(),
+            capabilities: Capabilities::default(),
+            permissions: ManifestPermissions::default(),
         };
 
         assert!(manifest.validate().is_err());
@@ -387,6 +431,8 @@ mod tests {
             widgets: HashMap::new(),
             mind: MindConfig::default(),
             config: HashMap::new(),
+            capabilities: Capabilities::default(),
+            permissions: ManifestPermissions::default(),
         };
 
         // Exact match
@@ -395,6 +441,78 @@ mod tests {
         assert!(manifest.check_sdk_version("0.15.6-rc.1").is_ok());
         // Mismatch
         assert!(manifest.check_sdk_version("0.16.0").is_err());
+    }
+
+    #[test]
+    fn test_host_action_capabilities_default_false_for_legacy_manifest() {
+        let toml_str = r#"
+[extension]
+name = "reader"
+version = "0.1.0"
+
+[runtime]
+type = "native"
+binary = "target/release/reader"
+"#;
+
+        let manifest: ExtensionManifest = toml::from_str(toml_str).unwrap();
+        assert!(!manifest.capabilities.host_actions);
+        assert!(!manifest.capabilities.host_action_execution);
+        assert!(manifest.permissions.host_actions.allowed.is_empty());
+    }
+
+    #[test]
+    fn test_host_action_capabilities_parse_from_toml() {
+        let toml_str = r#"
+[extension]
+name = "reader"
+version = "0.1.0"
+
+[runtime]
+type = "native"
+binary = "target/release/reader"
+
+[capabilities]
+host_actions = true
+host_action_execution = true
+"#;
+
+        let manifest: ExtensionManifest = toml::from_str(toml_str).unwrap();
+        assert!(manifest.capabilities.host_actions);
+        assert!(manifest.capabilities.host_action_execution);
+    }
+
+    #[test]
+    fn test_host_action_permissions_parse_from_toml() {
+        let toml_str = r#"
+[extension]
+name = "reader"
+version = "0.1.0"
+
+[runtime]
+type = "native"
+binary = "target/release/reader"
+
+[permissions.host_actions]
+allowed = ["terminal.create@1"]
+
+[permissions.host_actions.terminal_create]
+interactive = true
+allowed_commands = ["bookokrat"]
+allowed_cwd_roots = ["${workspace}"]
+allow_env = []
+"#;
+
+        let manifest: ExtensionManifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            manifest.permissions.host_actions.allowed,
+            vec!["terminal.create@1"]
+        );
+        let terminal = &manifest.permissions.host_actions.terminal_create;
+        assert!(terminal.interactive);
+        assert_eq!(terminal.allowed_commands, vec!["bookokrat"]);
+        assert_eq!(terminal.allowed_cwd_roots, vec!["${workspace}"]);
+        assert!(terminal.allow_env.is_empty());
     }
 
     #[test]
@@ -476,6 +594,8 @@ default = "gmail"
                     values: vec![],
                 },
             )]),
+            capabilities: Capabilities::default(),
+            permissions: ManifestPermissions::default(),
         };
 
         let err = manifest.validate().unwrap_err();

@@ -3,10 +3,10 @@
 ## 1. Manifest and capability substrate
 <!-- specs: extensions/host-actions-runtime -->
 
-- [ ] 1.1 Add failing manifest tests for HostAction capability flags defaulting false and parsing true.
-- [ ] 1.2 Add failing manifest tests for `[permissions.host_actions] allowed` parsing.
-- [ ] 1.3 Add failing manifest tests for `[permissions.host_actions.terminal_create]` constraints.
-- [ ] 1.4 Implement manifest structs and serde defaults without breaking existing manifests.
+- [x] 1.1 Add failing manifest tests for HostAction capability flags defaulting false and parsing true.
+- [x] 1.2 Add failing manifest tests for `[permissions.host_actions] allowed` parsing.
+- [x] 1.3 Add failing manifest tests for `[permissions.host_actions.terminal_create]` constraints.
+- [x] 1.4 Implement manifest structs and serde defaults without breaking existing manifests.
 - [ ] 1.5 Expose loaded manifest HostAction permissions to extension runtime context.
 
 ## 2. Structured tool-result envelope extraction
