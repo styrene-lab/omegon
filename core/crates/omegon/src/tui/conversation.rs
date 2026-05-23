@@ -1641,7 +1641,7 @@ mod tests {
     }
 
     #[test]
-    fn long_completed_assistant_response_can_pin_viewport_to_start() {
+    fn completed_assistant_response_stays_at_tail() {
         let mut cv = ConversationView::new();
         cv.push_system("older context");
         cv.append_streaming(&format!(
@@ -1652,15 +1652,8 @@ mod tests {
         ));
         cv.finalize_message();
 
-        assert!(cv.maybe_scroll_latest_assistant_to_start(
-            40,
-            10,
-            &Alpharius,
-            SegmentRenderMode::Full,
-        ));
-        assert!(cv.conv_state.user_scrolled);
-        assert_eq!(cv.selected_segment, Some(1));
-        assert!(cv.conv_state.scroll_offset > 0);
+        assert!(!cv.conv_state.user_scrolled);
+        assert_eq!(cv.conv_state.scroll_offset, 0);
     }
 
     #[test]

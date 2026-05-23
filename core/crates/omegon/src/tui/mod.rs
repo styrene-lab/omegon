@@ -4452,6 +4452,7 @@ impl App {
         self.dashboard_area = None;
 
         let viewport_height = area.height.saturating_sub(1);
+        let content_width = area.width.saturating_sub(1).max(1);
         let selected = self.conversation.selected_or_focused_segment();
 
         let mut lines: Vec<Line<'static>> = Vec::new();
@@ -4485,7 +4486,7 @@ impl App {
                             Style::default().fg(ctx_color),
                         ));
                     }
-                    let fill_width = area.width.saturating_sub(40) as usize;
+                    let fill_width = content_width.saturating_sub(40) as usize;
                     turn_spans.push(Span::styled(
                         format!(" {}", "─".repeat(fill_width)),
                         Style::default().fg(self.theme.border_dim()),
@@ -4660,7 +4661,7 @@ impl App {
         let text_area = Rect {
             x: area.x,
             y: area.y,
-            width: area.width,
+            width: content_width,
             height: viewport_height,
         };
         frame.render_widget(paragraph, text_area);
@@ -7440,31 +7441,11 @@ impl App {
                 if let Ok(mut ss) = self.dashboard_handles.session.lock() {
                     ss.busy = false;
                 }
-                let had_streaming_message = self.conversation.is_streaming();
                 self.conversation.finalize_message();
-                if self.ui_surfaces.is_compact()
-                    && !self.focus_mode
-                    && had_streaming_message
-                    && let Some(area) = self.conversation_area
-                    && {
-                        let mode = if self.ui_surfaces.is_compact() {
-                            SegmentRenderMode::Slim
-                        } else {
-                            SegmentRenderMode::Full
-                        };
-                        self.conversation.maybe_scroll_latest_assistant_to_start(
-                            area.width,
-                            area.height,
-                            self.theme.as_ref(),
-                            mode,
-                        )
-                    }
-                {
-                    self.show_toast(
-                        "Long response pinned at start; End jumps to the live tail",
-                        ratatui_toaster::ToastType::Info,
-                    );
-                }
+                // Keep completed turns anchored at the live tail. The old long-response
+                // pinning heuristic rewound compact sessions to the start of the final
+                // assistant segment, which made every completed GPT-5.5 turn land tens
+                // of lines above the composer and forced a manual End/scroll recovery.
                 self.effects.stop_spinner_glow();
                 self.effects.stop_border_pulse();
                 self.effects.sweep_turn_complete();
