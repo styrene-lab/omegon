@@ -47,8 +47,8 @@
 ## 6. Validation and upstream closure
 <!-- specs: extensions/host-actions-runtime -->
 
-- [ ] 6.1 Run `cargo test -p omegon-extension`.
-- [ ] 6.2 Run `cargo test -p omegon`.
-- [ ] 6.3 Run `cargo check -p omegon`.
-- [ ] 6.4 Run `just link` if installing locally.
+- [x] 6.1 Run `cargo test -p omegon-extension`.
+- [x] 6.2 Run `cargo test -p omegon`.
+- [x] 6.3 Run `cargo check -p omegon`.
+- [x] 6.4 Run `just link` if installing locally.
 - [ ] 6.5 Post acceptance trace to issue #75 and close only after all criteria map to code/tests.
