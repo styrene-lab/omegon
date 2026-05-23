@@ -1,0 +1,11 @@
+[package]
+name = "par-term-probe"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+par-term-emu-core-rust = { version = "0.42.1", default-features = false, features = ["rust-only"] }
+anyhow = "1"
+base64 = "0.22"
