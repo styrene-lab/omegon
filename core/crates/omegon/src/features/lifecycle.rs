@@ -124,8 +124,8 @@ impl LifecycleFeature {
         };
 
         let mut recovered = Vec::new();
-        for entry in entries.flatten() {
-            let path = entry.path();
+        for entry in entries {
+            let path = entry?.path();
             if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                 continue;
             }
@@ -1331,6 +1331,8 @@ impl LifecycleFeature {
                     let tx_from_state =
                         Self::opsx_change_state(&opsx, name).unwrap_or(OpsxChangeState::Verifying);
                     let tx_name_for_archive = name.to_string();
+                    let tx_repo_for_rollback = self.repo_path.clone();
+                    let tx_name_for_rollback = name.to_string();
                     let change_dir_for_rollback = change_dir.clone();
                     let archive_dir_for_rollback = archive_dir.clone();
                     opsx.archive_change_with(
@@ -1385,6 +1387,12 @@ impl LifecycleFeature {
                                     )
                                 })?;
                             }
+                            Self::remove_archive_tx(&tx_repo_for_rollback, &tx_name_for_rollback)
+                                .map_err(|err| {
+                                OpsxError::StoreError(format!(
+                                    "remove archive transaction after rollback: {err}"
+                                ))
+                            })?;
                             Ok(())
                         },
                     )?;
@@ -2290,6 +2298,39 @@ mod tests {
     }
 
     #[test]
+    fn archive_recovery_removes_journal_after_state_already_saved() {
+        let (_dir, repo) = setup_test_repo();
+        let archive_dir = repo.join("openspec/archive/state-saved");
+        fs::create_dir_all(&archive_dir).unwrap();
+        fs::write(archive_dir.join("proposal.md"), "# State Saved\n").unwrap();
+        write_archive_tx_for_test(&repo, "state-saved", "content_moved");
+
+        let feature = LifecycleFeature::new(&repo);
+        feature
+            .opsx
+            .lock()
+            .unwrap()
+            .create_change("state-saved", "State Saved", None)
+            .unwrap();
+        feature
+            .opsx
+            .lock()
+            .unwrap()
+            .force_transition_change("state-saved", OpsxChangeState::Archived, "test setup")
+            .unwrap();
+        let audit_len_before = feature.opsx.lock().unwrap().state().audit_log.len();
+
+        let recovered = feature.recover_archive_transactions().unwrap();
+
+        assert!(recovered[0].contains("completed interrupted archive"));
+        assert!(!LifecycleFeature::archive_tx_path(&repo, "state-saved").exists());
+        assert_eq!(
+            feature.opsx.lock().unwrap().state().audit_log.len(),
+            audit_len_before
+        );
+    }
+
+    #[test]
     fn archive_recovery_reports_conflict_when_both_dirs_exist() {
         let (_dir, repo) = setup_test_repo();
         fs::create_dir_all(repo.join("openspec/changes/conflict")).unwrap();
@@ -2303,6 +2344,20 @@ mod tests {
             .to_string();
 
         assert!(err.contains("both"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn archive_recovery_reports_conflict_when_neither_dir_exists() {
+        let (_dir, repo) = setup_test_repo();
+        write_archive_tx_for_test(&repo, "missing", "content_moved");
+
+        let feature = LifecycleFeature::new(&repo);
+        let err = feature
+            .recover_archive_transactions()
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("neither"), "unexpected error: {err}");
     }
 
     #[test]
