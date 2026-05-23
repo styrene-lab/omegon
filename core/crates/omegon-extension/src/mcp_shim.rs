@@ -163,9 +163,16 @@ async fn handle_tools_call<E: Extension>(ext: &E, params: &Value) -> Result<Valu
             .map_err(|e| (e.code().numeric(), e.message().to_string()))?,
     };
 
-    // Convert to MCP content format.
+    // Convert to MCP content format. HostActions remain useful to
+    // Omegon-aware MCP clients via namespaced metadata while ordinary
+    // content stays readable for generic MCP clients.
     let content = extract_mcp_content(&result);
-    Ok(json!({ "content": content, "isError": false }))
+    let host_actions = extract_host_actions_meta(&result);
+    let mut out = json!({ "content": content, "isError": false });
+    if let Some(actions) = host_actions {
+        out["_meta"] = json!({ "omegon/hostActions": actions });
+    }
+    Ok(out)
 }
 
 async fn handle_resources_list<E: Extension>(
@@ -330,6 +337,15 @@ fn extract_mcp_content(result: &Value) -> Vec<Value> {
         "type": "text",
         "text": serde_json::to_string(result).unwrap_or_default()
     })]
+}
+
+/// Extract HostActions for Omegon-aware MCP clients.
+fn extract_host_actions_meta(result: &Value) -> Option<Value> {
+    let actions = result.get("actions")?;
+    match actions.as_array() {
+        Some(array) if !array.is_empty() => Some(Value::Array(array.clone())),
+        _ => None,
+    }
 }
 
 /// Build an MCP error response.
@@ -649,6 +665,49 @@ mod tests {
 
         assert_eq!(result["isError"], false);
         assert_eq!(result["content"][0]["text"], "called search");
+    }
+
+    #[tokio::test]
+    async fn test_tools_call_maps_actions_to_omegon_meta() {
+        use async_trait::async_trait;
+
+        #[derive(Default)]
+        struct ActionExt;
+
+        #[async_trait]
+        impl Extension for ActionExt {
+            fn name(&self) -> &str {
+                "action-ext"
+            }
+            fn version(&self) -> &str {
+                "0.1.0"
+            }
+            async fn handle_rpc(&self, method: &str, _params: Value) -> crate::Result<Value> {
+                match method {
+                    "tools/call" => Ok(json!({
+                        "content": [{"type": "text", "text": "open reader"}],
+                        "actions": [{
+                            "id": "open-reader",
+                            "type": "terminal.create@1",
+                            "execution": "auto_if_allowed",
+                            "params": {"command": "bookokrat"}
+                        }]
+                    })),
+                    _ => Err(crate::Error::method_not_found(method)),
+                }
+            }
+        }
+
+        let ext = ActionExt;
+        let result = handle_tools_call(&ext, &json!({"name": "reader"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result["content"][0]["text"], "open reader");
+        assert_eq!(
+            result["_meta"]["omegon/hostActions"][0]["id"],
+            "open-reader"
+        );
     }
 
     // ─── Integration: resources/list strips fields ────────────────────

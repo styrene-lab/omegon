@@ -23,7 +23,7 @@ use tokio::sync::{Mutex, broadcast};
 use tokio_util::sync::CancellationToken;
 
 pub mod config_store;
-mod host_actions;
+pub(crate) mod host_actions;
 pub mod manifest;
 pub mod mind;
 pub mod state;

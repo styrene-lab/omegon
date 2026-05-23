@@ -22,7 +22,7 @@ use rmcp::{
     transport::{StreamableHttpClientTransport, TokioChildProcess},
 };
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -926,7 +926,7 @@ impl Feature for McpFeature {
         };
 
         let mut params = CallToolRequestParams::default();
-        params.name = mcp_name.into();
+        params.name = mcp_name.clone().into();
         params.arguments = arguments;
 
         // If a consumer is attached, mint a progress token, register the
@@ -967,6 +967,7 @@ impl Feature for McpFeature {
         // Convert MCP content to Omegon content blocks
         let content: Vec<ContentBlock> = result
             .content
+            .clone()
             .into_iter()
             .filter_map(|c| match c.raw {
                 RawContent::Text(t) => Some(ContentBlock::Text {
@@ -980,11 +981,79 @@ impl Feature for McpFeature {
             })
             .collect();
 
-        Ok(ToolResult {
-            content,
-            details: Value::Null,
-        })
+        let details = mcp_tool_result_details(&server_name, &mcp_name, &result);
+
+        Ok(ToolResult { content, details })
     }
+}
+
+fn mcp_tool_result_details(server_name: &str, tool_name: &str, result: &CallToolResult) -> Value {
+    let Some(meta) = result.meta.as_ref() else {
+        return Value::Null;
+    };
+    let Some(actions) = meta.get("omegon/hostActions") else {
+        return Value::Null;
+    };
+
+    let manifest = mcp_host_action_manifest();
+    let outcomes = match actions.as_array() {
+        Some(actions) => actions
+            .iter()
+            .enumerate()
+            .map(|(idx, action)| {
+                let scoped = crate::extensions::host_actions::ScopedHostActionId {
+                    origin: crate::extensions::host_actions::HostActionOrigin::mcp(server_name),
+                    session_id: "mcp-tool-result".to_string(),
+                    tool_call_id: tool_name.to_string(),
+                    action_id: action
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| format!("<pending-parse-{idx}>")),
+                };
+                let outcome = crate::extensions::host_actions::process_host_action_candidate(
+                    action.clone(),
+                    &manifest,
+                    scoped,
+                    &crate::extensions::host_actions::RuntimeHostActionPolicy::default(),
+                    &crate::extensions::host_actions::HostActionExecutorRegistry::default_supported(
+                    ),
+                );
+                serde_json::to_value(outcome).unwrap_or_else(|err| {
+                    json!({
+                        "action_id": "<serialization-error>",
+                        "status": "invalid",
+                        "error": {"code": "serialization_error", "message": err.to_string()}
+                    })
+                })
+            })
+            .collect(),
+        None => vec![json!({
+            "action_id": "omegon/hostActions",
+            "status": "invalid",
+            "error": {"code": "invalid_action", "message": "_meta[\"omegon/hostActions\"] must be an array"}
+        })],
+    };
+
+    json!({"host_action_outcomes": outcomes})
+}
+
+fn mcp_host_action_manifest() -> crate::extensions::manifest::ExtensionManifest {
+    toml::from_str(
+        r#"
+[extension]
+name = "mcp"
+version = "0.0.0"
+
+[runtime]
+type = "native"
+binary = "mcp"
+
+[permissions.host_actions]
+allowed = ["terminal.create@1"]
+"#,
+    )
+    .expect("static MCP HostAction manifest is valid")
 }
 
 /// RAII guard that removes a progress-token registration when dropped.
@@ -1244,6 +1313,35 @@ mod tests {
     fn resolve_env_template_missing_var() {
         let result = resolve_env_template("{NONEXISTENT_VAR_12345}", None);
         assert_eq!(result, "");
+    }
+
+    #[test]
+    fn mcp_tool_result_details_marks_mcp_actions_invalid_without_breaking_content() {
+        let mut meta = rmcp::model::Meta::new();
+        meta.insert(
+            "omegon/hostActions".to_string(),
+            json!([{
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "execution": "auto_if_allowed",
+                "params": {"command": "bookokrat"}
+            }]),
+        );
+        let mut result =
+            CallToolResult::success(vec![rmcp::model::Content::text("still readable")]);
+        result.meta = Some(meta);
+
+        let details = mcp_tool_result_details("reader", "open", &result);
+
+        assert_eq!(
+            details["host_action_outcomes"][0]["action_id"],
+            "open-reader"
+        );
+        assert_eq!(details["host_action_outcomes"][0]["status"], "denied");
+        assert_eq!(
+            details["host_action_outcomes"][0]["error"]["message"],
+            "auto_if_allowed requires manifest, project, runtime, origin, and operator approval"
+        );
     }
 
     #[test]

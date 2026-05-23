@@ -5,7 +5,7 @@ use serde_json::Value;
 
 /// Host-attached origin for an untrusted HostAction candidate.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum HostActionOriginKind {
+pub(crate) enum HostActionOriginKind {
     NativeExtension,
     Mcp,
     Internal,
@@ -13,7 +13,7 @@ pub(super) enum HostActionOriginKind {
 
 /// Trusted runtime origin attached by Omegon before policy evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct HostActionOrigin {
+pub(crate) struct HostActionOrigin {
     pub kind: HostActionOriginKind,
     pub identity: String,
 }
@@ -46,7 +46,7 @@ impl HostActionOrigin {
 /// Session/tool-call scoped action identity. Extension-provided action ids are
 /// local labels only; this type is the runtime identity used for policy/audit.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ScopedHostActionId {
+pub(crate) struct ScopedHostActionId {
     pub origin: HostActionOrigin,
     pub session_id: String,
     pub tool_call_id: String,
@@ -55,7 +55,7 @@ pub(super) struct ScopedHostActionId {
 
 /// Policy gates that are external to the extension manifest.
 #[derive(Debug, Clone, Default)]
-pub(super) struct RuntimeHostActionPolicy {
+pub(crate) struct RuntimeHostActionPolicy {
     pub project_allows_auto: bool,
     pub runtime_allows_auto: bool,
     pub origin_trusted_for_auto: bool,
@@ -65,7 +65,7 @@ pub(super) struct RuntimeHostActionPolicy {
 /// Minimal executor registry seam for Phase C. Issue #76 registers real
 /// `terminal.create@1` execution later.
 #[derive(Default)]
-pub(super) struct HostActionExecutorRegistry {
+pub(crate) struct HostActionExecutorRegistry {
     supported_types: Vec<String>,
     terminal_create_backend: Option<Box<dyn TerminalCreateBackend + Send + Sync>>,
 }
@@ -82,7 +82,9 @@ impl HostActionExecutorRegistry {
         Self::with_supported_types(["terminal.create@1"])
     }
 
-    pub fn with_terminal_backend(backend: Box<dyn TerminalCreateBackend + Send + Sync>) -> Self {
+    pub(super) fn with_terminal_backend(
+        backend: Box<dyn TerminalCreateBackend + Send + Sync>,
+    ) -> Self {
         Self {
             supported_types: vec![
                 omegon_extension::actions::terminal::TERMINAL_CREATE_V1.to_string(),
@@ -123,7 +125,7 @@ pub(super) fn process_native_extension_action_execute(
     )
 }
 
-pub(super) fn process_host_action_candidate(
+pub(crate) fn process_host_action_candidate(
     candidate: Value,
     manifest: &ExtensionManifest,
     scoped_id: ScopedHostActionId,

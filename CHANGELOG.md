@@ -19,6 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 
 - Added `omegon-extension` HostAction SDK types, host action capabilities, typed `ToolResult` actions, `HostProxy::execute_action()`, and `terminal.create@1` protocol structs for extension-side host side-effect declarations.
+- Preserve HostActions across MCP metadata using `_meta["omegon/hostActions"]` for native extension MCP exposure and MCP-origin tool results.
 
 ## [0.23.9] - 2026-05-25
 
