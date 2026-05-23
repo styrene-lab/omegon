@@ -201,7 +201,8 @@ fn host_action_execute_response_example_decodes_to_typed_outcome() {
         "status": "completed",
         "result": {
             "terminal_id": "term_123",
-            "backend": "zellij"
+            "backend": "zellij",
+                    "actual_placement": "background_session"
         }
     }))
     .expect("outcome response decodes");

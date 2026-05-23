@@ -45,6 +45,136 @@ struct TerminalSession {
     transcript_truncated: Mutex<bool>,
 }
 
+/// Input for host-action terminal creation. Unlike the direct terminal tool,
+/// this is argv-based and never routes through `bash -lc`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostTerminalCreateRequest {
+    pub command: String,
+    pub args: Vec<String>,
+    pub cwd: PathBuf,
+    pub env: Vec<(String, String)>,
+    pub name: Option<String>,
+}
+
+/// Result of a host-action terminal creation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostTerminalCreateResponse {
+    pub terminal_id: String,
+    pub backend: String,
+    pub actual_placement: String,
+    pub warnings: Vec<String>,
+}
+
+pub fn host_terminal_runtime_available() -> Result<(), String> {
+    runtime_available()
+}
+
+pub async fn start_host_terminal(
+    request: HostTerminalCreateRequest,
+) -> Result<HostTerminalCreateResponse, String> {
+    if let Err(err) = runtime_available() {
+        return Err(err);
+    }
+
+    let name = request
+        .name
+        .as_deref()
+        .map(sanitize_name)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| slugify_command(&request.command));
+
+    prune_exited_named(&name);
+
+    if running_session_count() >= MAX_SESSIONS {
+        return Err(format!(
+            "too many terminal sessions are open (max {MAX_SESSIONS})"
+        ));
+    }
+
+    if find_session(&name).is_some() {
+        return Err(format!(
+            "terminal '{name}' already exists; stop it before reusing the name"
+        ));
+    }
+
+    let transcript_dir = terminal_dir();
+    std::fs::create_dir_all(&transcript_dir).map_err(|err| err.to_string())?;
+    secure_dir_permissions(&transcript_dir).map_err(|err| err.to_string())?;
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let transcript_path = transcript_dir.join(format!("{name}-{id}.log"));
+    std::fs::write(
+        &transcript_path,
+        format!(
+            "$ {} {}\n# cwd: {}\n# started: {}\n\n",
+            request.command,
+            request.args.join(" "),
+            request.cwd.display(),
+            chrono::Utc::now().to_rfc3339()
+        ),
+    )
+    .map_err(|err| err.to_string())?;
+    secure_file_permissions(&transcript_path).map_err(|err| err.to_string())?;
+
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 120,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|err| format!("failed to allocate terminal pty: {err}"))?;
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|err| format!("failed to clone terminal pty reader: {err}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|err| format!("failed to take terminal pty writer: {err}"))?;
+
+    let mut cmd = CommandBuilder::new(&request.command);
+    cmd.args(request.args.iter().map(String::as_str));
+    cmd.cwd(request.cwd.as_os_str());
+    for (key, value) in request.env {
+        cmd.env(key, value);
+    }
+
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|err| format!("failed to start terminal command: {err}"))?;
+    let pid = child.process_id().unwrap_or(0);
+    drop(pair.slave);
+
+    let session = Arc::new(TerminalSession {
+        id: id.clone(),
+        name: name.clone(),
+        command: format!("{} {}", request.command, request.args.join(" ")),
+        cwd: request.cwd,
+        pid,
+        started: Instant::now(),
+        transcript_path,
+        child: Mutex::new(child),
+        writer: Mutex::new(writer),
+        _master: Mutex::new(pair.master),
+        tail: Mutex::new(String::new()),
+        exit_recorded: Mutex::new(false),
+        transcript_truncated: Mutex::new(false),
+    });
+
+    spawn_reader(session.clone(), reader);
+    registry().lock().unwrap().insert(id.clone(), session);
+
+    Ok(HostTerminalCreateResponse {
+        terminal_id: id,
+        backend: "portable_pty".to_string(),
+        actual_placement: "background_session".to_string(),
+        warnings: Vec::new(),
+    })
+}
+
 pub async fn execute(
     action: &str,
     args: &serde_json::Value,
@@ -1146,6 +1276,21 @@ mod tests {
     }
 
     #[test]
+    fn host_terminal_request_is_argv_based() {
+        let request = HostTerminalCreateRequest {
+            command: "bookokrat".to_string(),
+            args: vec!["/books/a.epub".to_string()],
+            cwd: PathBuf::from("/workspace"),
+            env: Vec::new(),
+            name: None,
+        };
+
+        assert_eq!(request.command, "bookokrat");
+        assert_eq!(request.args, vec!["/books/a.epub"]);
+        assert_ne!(request.command, "bash");
+        assert!(!request.args.iter().any(|arg| arg == "-lc"));
+    }
+
     fn slugify_command_falls_back_when_command_has_no_safe_chars() {
         assert_eq!(slugify_command("!!!"), "terminal");
     }

@@ -1,4 +1,5 @@
 use super::manifest::ExtensionManifest;
+use crate::tools::terminal;
 use omegon_extension::{HostAction, HostActionOutcome, HostActionStatus};
 use serde_json::Value;
 
@@ -227,6 +228,92 @@ pub(super) fn process_declarative_host_actions(
             })
         })
         .collect()
+}
+
+pub(super) trait TerminalCreateBackend {
+    fn create(
+        &self,
+        plan: TerminalCreateLaunchPlan,
+    ) -> Result<omegon_extension::actions::terminal::TerminalCreateResult, String>;
+}
+
+pub(super) struct UnavailableTerminalCreateBackend {
+    pub reason: String,
+}
+
+impl TerminalCreateBackend for UnavailableTerminalCreateBackend {
+    fn create(
+        &self,
+        _plan: TerminalCreateLaunchPlan,
+    ) -> Result<omegon_extension::actions::terminal::TerminalCreateResult, String> {
+        Err(self.reason.clone())
+    }
+}
+
+pub(super) struct FakeTerminalCreateBackend {
+    pub result: omegon_extension::actions::terminal::TerminalCreateResult,
+}
+
+impl TerminalCreateBackend for FakeTerminalCreateBackend {
+    fn create(
+        &self,
+        _plan: TerminalCreateLaunchPlan,
+    ) -> Result<omegon_extension::actions::terminal::TerminalCreateResult, String> {
+        Ok(self.result.clone())
+    }
+}
+
+pub(super) fn execute_terminal_create_with_backend(
+    action: &HostAction,
+    manifest: &ExtensionManifest,
+    backend: &dyn TerminalCreateBackend,
+) -> HostActionOutcome {
+    let plan = match validate_terminal_create_policy(action, manifest) {
+        Ok(plan) => plan,
+        Err(outcome) => return outcome,
+    };
+
+    match backend.create(plan) {
+        Ok(result) => HostActionOutcome {
+            action_id: action.id.clone(),
+            status: HostActionStatus::Completed,
+            result: Some(serde_json::to_value(result).unwrap_or(Value::Null)),
+            error: None,
+        },
+        Err(reason) => outcome(
+            action.id.clone(),
+            HostActionStatus::Unsupported,
+            "terminal_backend_unavailable",
+            reason,
+        ),
+    }
+}
+
+pub(super) fn terminal_backend_request_from_plan(
+    plan: TerminalCreateLaunchPlan,
+    workspace_cwd: &std::path::Path,
+    name: Option<String>,
+) -> terminal::HostTerminalCreateRequest {
+    let cwd = plan
+        .cwd
+        .as_deref()
+        .map(|cwd| {
+            let path = std::path::Path::new(cwd);
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                workspace_cwd.join(path)
+            }
+        })
+        .unwrap_or_else(|| workspace_cwd.to_path_buf());
+
+    terminal::HostTerminalCreateRequest {
+        command: plan.command,
+        args: plan.args,
+        cwd,
+        env: plan.env,
+        name,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -541,6 +628,69 @@ allowed = [{allowed}]
         assert_eq!(outcomes[0]["action_id"], "open-reader");
         assert_eq!(outcomes[0]["status"], "denied");
         assert_eq!(outcomes[0]["error"]["code"], "manifest_denied");
+    }
+
+    #[test]
+    fn terminal_create_backend_unavailable_returns_unsupported() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let action = terminal_action(json!({"command": "bookokrat"}));
+        let backend = UnavailableTerminalCreateBackend {
+            reason: "PTY unavailable".to_string(),
+        };
+
+        let outcome = execute_terminal_create_with_backend(&action, &manifest, &backend);
+
+        assert_eq!(outcome.status, HostActionStatus::Unsupported);
+        assert_eq!(outcome.error.unwrap().code, "terminal_backend_unavailable");
+    }
+
+    #[test]
+    fn terminal_create_fake_backend_returns_completed_result_shape() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let action = terminal_action(json!({"command": "bookokrat"}));
+        let backend = FakeTerminalCreateBackend {
+            result: omegon_extension::actions::terminal::TerminalCreateResult {
+                terminal_id: "term_123".to_string(),
+                backend: "fake".to_string(),
+                actual_placement: "background_session".to_string(),
+                warnings: vec!["placement degraded".to_string()],
+            },
+        };
+
+        let outcome = execute_terminal_create_with_backend(&action, &manifest, &backend);
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        assert_eq!(outcome.result.as_ref().unwrap()["terminal_id"], "term_123");
+        assert_eq!(outcome.result.as_ref().unwrap()["backend"], "fake");
+        assert_eq!(
+            outcome.result.as_ref().unwrap()["actual_placement"],
+            "background_session"
+        );
+        assert_eq!(
+            outcome.result.as_ref().unwrap()["warnings"][0],
+            "placement degraded"
+        );
+    }
+
+    #[test]
+    fn terminal_backend_request_from_plan_preserves_argv_without_shell() {
+        let request = terminal_backend_request_from_plan(
+            TerminalCreateLaunchPlan {
+                command: "bookokrat".to_string(),
+                args: vec!["/books/a.epub".to_string()],
+                cwd: Some("books".to_string()),
+                env: vec![("BOOKOKRAT_THEME".to_string(), "dark".to_string())],
+            },
+            std::path::Path::new("/workspace"),
+            Some("reader".to_string()),
+        );
+
+        assert_eq!(request.command, "bookokrat");
+        assert_eq!(request.args, vec!["/books/a.epub"]);
+        assert_eq!(request.cwd, std::path::PathBuf::from("/workspace/books"));
+        assert_eq!(request.name.as_deref(), Some("reader"));
+        assert_ne!(request.command, "bash");
+        assert!(!request.args.iter().any(|arg| arg == "-lc"));
     }
 
     fn terminal_manifest(

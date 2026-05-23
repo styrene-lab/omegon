@@ -12,10 +12,10 @@
 ## 2. Backend adapter
 <!-- specs: extensions/terminal-create -->
 
-- [ ] 2.1 Add failing tests for unsupported PTY backend outcomes.
-- [ ] 2.2 Add failing tests for completed result shape from a fake adapter.
-- [ ] 2.3 Extract argv-based terminal start adapter from existing terminal machinery.
-- [ ] 2.4 Preserve existing terminal tool shell-string behavior only for the direct `terminal` tool.
+- [x] 2.1 Add failing tests for unsupported PTY backend outcomes.
+- [x] 2.2 Add failing tests for completed result shape from a fake adapter.
+- [x] 2.3 Extract argv-based terminal start adapter from existing terminal machinery.
+- [x] 2.4 Preserve existing terminal tool shell-string behavior only for the direct `terminal` tool.
 
 ## 3. Pipeline integration
 <!-- specs: extensions/terminal-create -->

@@ -606,7 +606,8 @@ mod tests {
                 "status": "completed",
                 "result": {
                     "terminal_id": "term_123",
-                    "backend": "zellij"
+                    "backend": "zellij",
+                    "actual_placement": "background_session"
                 }
             }),
         );

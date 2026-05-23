@@ -73,6 +73,8 @@ pub struct TerminalCreateResult {
     pub terminal_id: String,
     /// Backend that satisfied the request, for example `zellij`.
     pub backend: String,
+    /// Actual placement chosen by the host. Requested placement is advisory.
+    pub actual_placement: String,
     /// Optional warnings/degradations when creation succeeded with caveats.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
@@ -106,6 +108,7 @@ mod tests {
         let result = TerminalCreateResult {
             terminal_id: "term_123".to_string(),
             backend: "zellij".to_string(),
+            actual_placement: "background_session".to_string(),
             warnings: vec!["placement degraded".to_string()],
         };
         let json = serde_json::to_value(&result).unwrap();
