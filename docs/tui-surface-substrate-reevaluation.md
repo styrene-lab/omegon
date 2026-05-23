@@ -99,6 +99,7 @@ Known evidence so far:
 - A scratch prototype hosted `vi` successfully.
 - A two-column prototype hosted Bookokrat EPUB text successfully.
 - `par-term-emu-core-rust` appears more relevant than Cockpit for deeper graphical terminal behavior.
+- A local par-term probe proved partial embedded-terminal evidence: `PtySession` can spawn shell/Bookokrat text children, and a direct synthetic Sixel sequence is exposed as a `TerminalGraphic` RGBA payload.
 - Half-block fallback is not equivalent to actual terminal image/graphics protocol rendering.
 
 ## Evaluation dimensions

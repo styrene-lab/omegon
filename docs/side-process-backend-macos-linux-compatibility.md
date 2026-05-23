@@ -159,6 +159,17 @@ macOS/Linux:
   mouse_passthrough: unknown
 ```
 
+### par-term local graphics probe — 2026-05-23
+
+The `.tmp/par-term-probe` scratch harness moved par-term from a claimed-capability research target to a partially validated one:
+
+- `par-term-emu-core-rust = 0.42.1` compiled on macOS with `default-features = false` and `features = ["rust-only"]`.
+- `PtySession` spawned `/bin/sh` and Bookokrat EPUB `--zen-mode`, then captured text output in the `Terminal` model.
+- A direct synthetic Sixel byte sequence produced `graphics_count=1` with protocol `Sixel`, dimensions `6x12`, and an RGBA pixel payload (`288` bytes) available through `Terminal::all_graphics()`.
+- A synthetic iTerm2 inline PNG sequence produced `graphics_count=0`; treat iTerm2 as still unverified, not rejected.
+
+The important boundary is that par-term can expose at least some terminal graphics as pixel payloads. That is not yet the same as rendering Bookokrat PDF/image mode inside Omegon. The remaining gates are valid Kitty graphics fixtures, real Bookokrat image/PDF output, mouse routing, and a rendering strategy for any captured payloads.
+
 ### par-term direct embedded backend
 
 This is separate from Cockpit. Cockpit may be the pane manager; par-term may be the terminal emulator/rendering core.

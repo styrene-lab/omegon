@@ -66,13 +66,24 @@ Operator validation summary:
 
 > all works fine, I'd say success
 
-Evidence files/commands:
+Evidence files/commands captured before `.tmp` cleanup:
 
 ```text
 .tmp/cockpit-probe
 cargo run -- /usr/bin/vi /tmp/cockpit-probe-manual.txt
 cargo run -- /usr/bin/vi ./cockpit-probe-noninteractive.log
 ```
+
+The scratch probe was temporary and has been removed. Useful implementation facts from its source:
+
+- The probe used a standalone Cargo package with `cockpit`, `tokio`, `ratatui`, and `crossterm` dependencies.
+- `PaneManager::new()` owned child panes.
+- `manager.set_terminal_size(...)` propagated resize information.
+- `manager.spawn(SpawnConfig::new_command(cmd).args(args))` launched the child without shell interpolation in the Rust API shape.
+- `manager.set_focus(child_id)` selected the embedded child.
+- `manager.route_key(key).await` forwarded focused keyboard input.
+- `PaneWidget::new(handle).focused(reader_focused).block(...)` rendered the child inside an Omegon-shaped Ratatui region.
+- The two-column prototype compensated for Cockpit 0.2.2's internal first-quarter pane allocation by rendering only one `PaneWidget`, expanding pane 0 vertically, and giving Cockpit a virtual width four times the visible reader width.
 
 The smoke test resolves the broad assumption that embedded PTY hosting is too complex to validate quickly. Cockpit is credible enough for a dedicated embedded-reader branch. It does not yet prove Bookokrat compatibility, image/PDF behavior, mouse behavior, or a clean Omegon-shaped two-region layout.
 
@@ -96,13 +107,18 @@ Validation results:
 - Upstream docs identify `--zen-mode` as the content-only mode that hides the sidebar. Running Bookokrat with `--zen-mode` makes the EPUB reader use the full embedded PTY width.
 - The Cockpit prototype also needed to avoid Cockpit's stock internal 4-slot sizing. The scratch probe currently uses the local Cockpit clone and a virtual-width workaround so the first internal pane receives the visible right-pane width.
 
-Validated command shapes:
+Validated command shapes captured before `.tmp` cleanup:
 
 ```bash
 cd .tmp/cockpit-probe
 cargo run -- bookokrat $(pwd)/../cockpit-test-assets/pride-and-prejudice.epub
 cargo run -- bookokrat --zen-mode $(pwd)/../cockpit-test-assets/pride-and-prejudice.epub
 ```
+
+Scratch test assets removed during cleanup:
+
+- `pride-and-prejudice.epub` — Project Gutenberg EPUB no-images edition, Jane Austen, public domain. Source: `https://www.gutenberg.org/ebooks/1342`.
+- `dummy.pdf` — W3C WAI test dummy PDF. Source: `https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf`.
 
 This resolves the EPUB/text compatibility and right-pane width gates for the Cockpit branch at smoke-test level. The next unresolved gates are PDF/image behavior, Bookokrat navigation ergonomics, mouse routing, and production integration with Omegon's TUI event/layout model.
 
