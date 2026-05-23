@@ -176,6 +176,47 @@ pub(super) fn process_host_action_candidate(
     )
 }
 
+pub(super) fn process_declarative_host_actions(
+    actions: Vec<Value>,
+    manifest: &ExtensionManifest,
+    extension_name: &str,
+    tool_call_id: &str,
+) -> Vec<Value> {
+    actions
+        .into_iter()
+        .enumerate()
+        .map(|(idx, action)| {
+            let scoped = ScopedHostActionId {
+                origin: HostActionOrigin::native_extension(extension_name),
+                session_id: "tool-result".to_string(),
+                tool_call_id: tool_call_id.to_string(),
+                action_id: action
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| format!("<pending-parse-{idx}>")),
+            };
+            let outcome = process_host_action_candidate(
+                action,
+                manifest,
+                scoped,
+                &RuntimeHostActionPolicy::default(),
+                &HostActionExecutorRegistry::default_supported(),
+            );
+            serde_json::to_value(outcome).unwrap_or_else(|err| {
+                serde_json::json!({
+                    "action_id": "<serialization-error>",
+                    "status": "invalid",
+                    "error": {
+                        "code": "serialization_error",
+                        "message": err.to_string()
+                    }
+                })
+            })
+        })
+        .collect()
+}
+
 fn outcome(
     action_id: impl Into<String>,
     status: HostActionStatus,
@@ -342,6 +383,20 @@ allowed = [{allowed}]
 
         assert_eq!(outcome.status, HostActionStatus::Denied);
         assert_eq!(outcome.error.unwrap().code, "manifest_denied");
+    }
+
+    #[test]
+    fn declarative_actions_produce_deterministic_outcomes_for_headless_details() {
+        let outcomes = process_declarative_host_actions(
+            vec![json!({"id": "open-reader", "type": "terminal.create@1", "params": {}})],
+            &manifest(&[]),
+            "reader",
+            "call-1",
+        );
+
+        assert_eq!(outcomes[0]["action_id"], "open-reader");
+        assert_eq!(outcomes[0]["status"], "denied");
+        assert_eq!(outcomes[0]["error"]["code"], "manifest_denied");
     }
 
     #[test]

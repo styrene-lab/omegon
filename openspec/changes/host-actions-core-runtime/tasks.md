@@ -39,10 +39,10 @@
 ## 5. Rendering/headless result exposure
 <!-- specs: extensions/host-actions-runtime -->
 
-- [ ] 5.1 Add failing tests for host action details/outcomes separate from ordinary content.
-- [ ] 5.2 Add failing tests for headless deterministic result details.
-- [ ] 5.3 Implement minimal rendering/detail schema for declarative actions and outcomes.
-- [ ] 5.4 Defer rich TUI/ACP action cards unless required by acceptance review.
+- [x] 5.1 Add failing tests for host action details/outcomes separate from ordinary content.
+- [x] 5.2 Add failing tests for headless deterministic result details.
+- [x] 5.3 Implement minimal rendering/detail schema for declarative actions and outcomes.
+- [x] 5.4 Defer rich TUI/ACP action cards unless required by acceptance review.
 
 ## 6. Validation and upstream closure
 <!-- specs: extensions/host-actions-runtime -->

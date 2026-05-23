@@ -1,11 +1,45 @@
 use omegon_traits::{ContentBlock, ToolResult};
 use serde_json::{Value, json};
 
-/// Parse an extension RPC result into Omegon's tool result shape while preserving
+#[derive(Debug, Clone)]
+pub(super) struct ParsedExtensionToolResult {
+    pub content: Vec<ContentBlock>,
+    pub structured: Option<Value>,
+    pub metadata: Option<Value>,
+    pub host_actions: Vec<Value>,
+    pub host_action_outcomes: Vec<Value>,
+}
+
+impl ParsedExtensionToolResult {
+    pub fn into_tool_result(self) -> ToolResult {
+        let mut details = serde_json::Map::new();
+        if let Some(structured) = self.structured {
+            details.insert("structured".to_string(), structured);
+        }
+        if let Some(metadata) = self.metadata {
+            details.insert("metadata".to_string(), metadata);
+        }
+        if !self.host_actions.is_empty() {
+            details.insert("host_actions".to_string(), Value::Array(self.host_actions));
+        }
+        if !self.host_action_outcomes.is_empty() {
+            details.insert(
+                "host_action_outcomes".to_string(),
+                Value::Array(self.host_action_outcomes),
+            );
+        }
+        ToolResult {
+            content: self.content,
+            details: Value::Object(details),
+        }
+    }
+}
+
+/// Parse an extension RPC result into a structured envelope while preserving
 /// backward compatibility with legacy extensions that returned arbitrary JSON.
-pub(super) fn parse_extension_tool_result(output: Value) -> ToolResult {
+pub(super) fn parse_extension_tool_envelope(output: Value) -> ParsedExtensionToolResult {
     let Some(obj) = output.as_object() else {
-        return legacy_result(output);
+        return legacy_envelope(output);
     };
 
     let has_envelope_fields = obj.contains_key("content")
@@ -13,7 +47,7 @@ pub(super) fn parse_extension_tool_result(output: Value) -> ToolResult {
         || obj.contains_key("metadata")
         || obj.contains_key("actions");
     if !has_envelope_fields {
-        return legacy_result(output);
+        return legacy_envelope(output);
     }
 
     let content = parse_content(obj.get("content")).unwrap_or_else(|| {
@@ -22,35 +56,35 @@ pub(super) fn parse_extension_tool_result(output: Value) -> ToolResult {
         }]
     });
 
-    let mut details = serde_json::Map::new();
-    if let Some(structured) = obj.get("structured") {
-        details.insert("structured".to_string(), structured.clone());
-    }
-    if let Some(metadata) = obj.get("metadata") {
-        details.insert("metadata".to_string(), metadata.clone());
-    }
-    if let Some(actions) = obj.get("actions") {
-        let (valid, invalid) = partition_actions(actions);
-        if !valid.is_empty() {
-            details.insert("host_actions".to_string(), Value::Array(valid));
-        }
-        if !invalid.is_empty() {
-            details.insert("host_action_outcomes".to_string(), Value::Array(invalid));
-        }
-    }
+    let (host_actions, host_action_outcomes) = obj
+        .get("actions")
+        .map(partition_actions)
+        .unwrap_or_default();
 
-    ToolResult {
+    ParsedExtensionToolResult {
         content,
-        details: Value::Object(details),
+        structured: obj.get("structured").cloned(),
+        metadata: obj.get("metadata").cloned(),
+        host_actions,
+        host_action_outcomes,
     }
 }
 
-fn legacy_result(output: Value) -> ToolResult {
-    ToolResult {
+/// Parse an extension RPC result into Omegon's tool result shape while preserving
+/// backward compatibility with legacy extensions that returned arbitrary JSON.
+pub(super) fn parse_extension_tool_result(output: Value) -> ToolResult {
+    parse_extension_tool_envelope(output).into_tool_result()
+}
+
+fn legacy_envelope(output: Value) -> ParsedExtensionToolResult {
+    ParsedExtensionToolResult {
         content: vec![ContentBlock::Text {
             text: output.to_string(),
         }],
-        details: json!({}),
+        structured: None,
+        metadata: None,
+        host_actions: Vec::new(),
+        host_action_outcomes: Vec::new(),
     }
 }
 

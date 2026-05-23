@@ -278,6 +278,21 @@ impl ExtensionFeature {
         }
     }
 
+    fn extension_tool_result(&self, output: Value, call_id: &str) -> ToolResult {
+        let mut envelope = tool_result::parse_extension_tool_envelope(output);
+        if !envelope.host_actions.is_empty() {
+            let outcomes = host_actions::process_declarative_host_actions(
+                envelope.host_actions,
+                &self.runtime.manifest,
+                &self.runtime.name,
+                call_id,
+            );
+            envelope.host_actions = Vec::new();
+            envelope.host_action_outcomes.extend(outcomes);
+        }
+        envelope.into_tool_result()
+    }
+
     async fn respawn_after_transport_error(&self, cause: &anyhow::Error) -> Result<()> {
         let mut guard = self.handles.lock().await;
         if let Some(mut stale) = guard.take() {
@@ -458,7 +473,7 @@ impl Feature for ExtensionFeature {
             .rpc_call("execute_tool", json!({ "name": tool_name, "args": args }))
             .await
         {
-            Ok(output) => Ok(tool_result::parse_extension_tool_result(output)),
+            Ok(output) => Ok(self.extension_tool_result(output, _call_id)),
             Err(e) if is_extension_transport_error(&e) => {
                 self.record_error(format!("transport failure: {e}")).await;
                 self.respawn_after_transport_error(&e).await?;
@@ -472,7 +487,7 @@ impl Feature for ExtensionFeature {
                             tool_name
                         )
                     })?;
-                let mut result = tool_result::parse_extension_tool_result(output);
+                let mut result = self.extension_tool_result(output, _call_id);
                 result.details = match result.details {
                     Value::Object(mut details) => {
                         details.insert("extension_reconnected".to_string(), Value::Bool(true));
@@ -1079,6 +1094,37 @@ binary = "flaky-extension.sh"
             host_rpc_response_for_extension_request(&manifest, "test-extension", &request).unwrap();
         assert_eq!(response["result"]["status"], "denied");
         assert_eq!(response["result"]["error"]["code"], "manifest_denied");
+    }
+
+    #[test]
+    fn declarative_host_actions_render_as_outcomes_separate_from_content() {
+        let mut envelope = tool_result::parse_extension_tool_envelope(json!({
+            "content": [{"type": "text", "text": "Opening reader"}],
+            "actions": [{"id": "open-reader", "type": "terminal.create@1", "params": {}}]
+        }));
+        let actions = std::mem::take(&mut envelope.host_actions);
+        let outcomes = host_actions::process_declarative_host_actions(
+            actions,
+            &test_manifest(HashMap::new()),
+            "reader",
+            "call-1",
+        );
+        envelope.host_action_outcomes.extend(outcomes);
+        let result = envelope.into_tool_result();
+
+        match &result.content[0] {
+            ContentBlock::Text { text } => assert_eq!(text, "Opening reader"),
+            ContentBlock::Image { .. } => panic!("expected text"),
+        }
+        assert!(result.details.get("host_actions").is_none());
+        assert_eq!(
+            result.details["host_action_outcomes"][0]["status"],
+            "denied"
+        );
+        assert_eq!(
+            result.details["host_action_outcomes"][0]["error"]["code"],
+            "manifest_denied"
+        );
     }
 
     fn config_field(
