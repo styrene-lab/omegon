@@ -133,6 +133,46 @@ impl ProcessHandles {
     }
 }
 
+fn host_rpc_response_for_extension_request(
+    manifest: &ExtensionManifest,
+    extension_name: &str,
+    request: &omegon_extension::RpcRequest,
+) -> Option<Value> {
+    match request.method.as_str() {
+        "actions/execute" => {
+            let action = request.params.get("action").cloned().unwrap_or(Value::Null);
+            let outcome = host_actions::process_native_extension_action_execute(
+                action,
+                manifest,
+                extension_name,
+            );
+            let result = serde_json::to_value(outcome).unwrap_or_else(|err| {
+                json!({
+                    "action_id": "<serialization-error>",
+                    "status": "invalid",
+                    "error": {
+                        "code": "serialization_error",
+                        "message": err.to_string()
+                    }
+                })
+            });
+            Some(json!({
+                "jsonrpc": "2.0",
+                "id": request.id.clone(),
+                "result": result
+            }))
+        }
+        _ => Some(json!({
+            "jsonrpc": "2.0",
+            "id": request.id.clone(),
+            "error": {
+                "code": -32601,
+                "message": format!("unknown host request method '{}'", request.method)
+            }
+        })),
+    }
+}
+
 #[derive(Clone)]
 struct ExtensionRuntimeContext {
     name: String,
@@ -210,6 +250,22 @@ impl ExtensionFeature {
                 continue;
             }
             let resp: Value = serde_json::from_str(trimmed)?;
+            if let Ok(omegon_extension::RpcIncoming::Request(req)) =
+                omegon_extension::RpcIncoming::parse(trimmed)
+            {
+                let response = host_rpc_response_for_extension_request(
+                    &self.runtime.manifest,
+                    &self.runtime.name,
+                    &req,
+                )
+                .ok_or_else(|| anyhow!("host request produced no response"))?;
+                handles
+                    .stdin
+                    .write_all(format!("{}\n", response).as_bytes())
+                    .await?;
+                handles.stdin.flush().await?;
+                continue;
+            }
             if resp.get("id").and_then(|v| v.as_u64()) == Some(id) {
                 return if let Some(result) = resp.get("result") {
                     Ok(result.clone())
@@ -350,6 +406,24 @@ impl ExtensionPollingHandle {
                 continue;
             }
             let resp: Value = serde_json::from_str(trimmed)?;
+            if let Ok(omegon_extension::RpcIncoming::Request(req)) =
+                omegon_extension::RpcIncoming::parse(trimmed)
+            {
+                let response = json!({
+                    "jsonrpc": "2.0",
+                    "id": req.id,
+                    "error": {
+                        "code": -32601,
+                        "message": format!("host request method '{}' is unavailable on polling handles", req.method)
+                    }
+                });
+                handles
+                    .stdin
+                    .write_all(format!("{}\n", response).as_bytes())
+                    .await?;
+                handles.stdin.flush().await?;
+                continue;
+            }
             if resp.get("id").and_then(|v| v.as_u64()) == Some(id) {
                 return if let Some(result) = resp.get("result") {
                     Ok(result.clone())
@@ -969,6 +1043,42 @@ binary = "flaky-extension.sh"
             .await
             .unwrap();
         assert_eq!(second.details["extension_reconnected"], true);
+    }
+
+    #[test]
+    fn host_rpc_actions_execute_routes_to_policy_pipeline() {
+        let manifest = test_manifest(HashMap::new());
+        let request = omegon_extension::RpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!("ext-1")),
+            method: "actions/execute".to_string(),
+            params: json!({
+                "action": {"id": "broken", "params": {}}
+            }),
+        };
+
+        let response =
+            host_rpc_response_for_extension_request(&manifest, "test-extension", &request).unwrap();
+        assert_eq!(response["id"], "ext-1");
+        assert_eq!(response["result"]["status"], "invalid");
+    }
+
+    #[test]
+    fn host_rpc_actions_execute_cannot_bypass_manifest_policy() {
+        let manifest = test_manifest(HashMap::new());
+        let request = omegon_extension::RpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!("ext-2")),
+            method: "actions/execute".to_string(),
+            params: json!({
+                "action": {"id": "open-reader", "type": "terminal.create@1", "params": {}}
+            }),
+        };
+
+        let response =
+            host_rpc_response_for_extension_request(&manifest, "test-extension", &request).unwrap();
+        assert_eq!(response["result"]["status"], "denied");
+        assert_eq!(response["result"]["error"]["code"], "manifest_denied");
     }
 
     fn config_field(
