@@ -32,4 +32,4 @@
 - [x] 4.2 Run `cargo test -p omegon-extension`.
 - [x] 4.3 Run `cargo check -p omegon`.
 - [x] 4.4 Run `just link`.
-- [ ] 4.5 Post acceptance trace to #76 and close only after criteria map to tests/code.
+- [x] 4.5 Post acceptance trace to #76 and close only after criteria map to tests/code.
