@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.23.4] - 2026-05-23
+
 ### Added
 
 - **Side-process substrate design docs** — documented extension-facing side-process pane APIs, backend capability negotiation, manifest policy, terminal compatibility matrices, and macOS/Linux backend posture for Zellij, Cockpit/par-term, Kitty, and fallback reader workflows.
@@ -26,7 +28,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - **Zed ACP plan presentation** — plan status updates now render as concise plain text while native ACP plan updates own the checklist, avoiding raw plan receipts and markdown underscore artifacts in Zed.
-
 
 ## [0.23.3] - 2026-05-23
 
