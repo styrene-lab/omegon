@@ -106,14 +106,16 @@ pub(super) fn process_native_extension_action_execute(
 pub(super) fn process_host_action_candidate(
     candidate: Value,
     manifest: &ExtensionManifest,
-    _scoped_id: ScopedHostActionId,
+    scoped_id: ScopedHostActionId,
     runtime_policy: &RuntimeHostActionPolicy,
     executors: &HostActionExecutorRegistry,
 ) -> HostActionOutcome {
     let action: HostAction = match serde_json::from_value(candidate) {
         Ok(action) => action,
         Err(err) => {
-            return outcome(
+            return audited_outcome(
+                &scoped_id,
+                None,
                 "<invalid>",
                 HostActionStatus::Invalid,
                 "invalid_action",
@@ -123,7 +125,9 @@ pub(super) fn process_host_action_candidate(
     };
 
     if !action.action_type.contains('@') {
-        return outcome(
+        return audited_outcome(
+            &scoped_id,
+            Some(&action.action_type),
             action.id,
             HostActionStatus::Invalid,
             "invalid_action_type",
@@ -132,7 +136,9 @@ pub(super) fn process_host_action_candidate(
     }
 
     if !executors.supports(&action.action_type) {
-        return outcome(
+        return audited_outcome(
+            &scoped_id,
+            Some(&action.action_type),
             action.id,
             HostActionStatus::Unsupported,
             "unsupported_action",
@@ -141,7 +147,9 @@ pub(super) fn process_host_action_candidate(
     }
 
     if !manifest.allows_host_action_type(&action.action_type) {
-        return outcome(
+        return audited_outcome(
+            &scoped_id,
+            Some(&action.action_type),
             action.id,
             HostActionStatus::Denied,
             "manifest_denied",
@@ -160,7 +168,9 @@ pub(super) fn process_host_action_candidate(
         && runtime_policy.origin_trusted_for_auto
         && runtime_policy.operator_approved)
     {
-        return outcome(
+        return audited_outcome(
+            &scoped_id,
+            Some(&action.action_type),
             action.id,
             HostActionStatus::Denied,
             "auto_not_allowed",
@@ -168,7 +178,9 @@ pub(super) fn process_host_action_candidate(
         );
     }
 
-    outcome(
+    audited_outcome(
+        &scoped_id,
+        Some(&action.action_type),
         action.id,
         HostActionStatus::Unsupported,
         "executor_unavailable",
@@ -215,6 +227,43 @@ pub(super) fn process_declarative_host_actions(
             })
         })
         .collect()
+}
+
+fn audited_outcome(
+    scoped_id: &ScopedHostActionId,
+    action_type: Option<&str>,
+    action_id: impl Into<String>,
+    status: HostActionStatus,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> HostActionOutcome {
+    let code = code.into();
+    let message = message.into();
+    let action_id = action_id.into();
+    audit_host_action_outcome(scoped_id, action_type, &action_id, &status, &code);
+    outcome(action_id, status, code, message)
+}
+
+fn audit_host_action_outcome(
+    scoped_id: &ScopedHostActionId,
+    action_type: Option<&str>,
+    action_id: &str,
+    status: &HostActionStatus,
+    code: &str,
+) {
+    tracing::info!(
+        target: "omegon::host_actions",
+        origin_kind = ?scoped_id.origin.kind,
+        origin_identity = %scoped_id.origin.identity,
+        session_id = %scoped_id.session_id,
+        tool_call_id = %scoped_id.tool_call_id,
+        local_action_id = %scoped_id.action_id,
+        action_id = %action_id,
+        action_type = action_type.unwrap_or("<invalid>"),
+        status = ?status,
+        error_code = %code,
+        "host action outcome"
+    );
 }
 
 fn outcome(
@@ -397,6 +446,27 @@ allowed = [{allowed}]
         assert_eq!(outcomes[0]["action_id"], "open-reader");
         assert_eq!(outcomes[0]["status"], "denied");
         assert_eq!(outcomes[0]["error"]["code"], "manifest_denied");
+    }
+
+    #[test]
+    fn audited_outcomes_preserve_scoped_identity_inputs() {
+        let scoped = ScopedHostActionId {
+            origin: HostActionOrigin::native_extension("reader"),
+            session_id: "session-a".to_string(),
+            tool_call_id: "call-a".to_string(),
+            action_id: "local-a".to_string(),
+        };
+        let outcome = process_host_action_candidate(
+            json!({"id": "open-reader", "type": "terminal.create@1", "params": {}}),
+            &manifest(&[]),
+            scoped,
+            &RuntimeHostActionPolicy::default(),
+            &registry(),
+        );
+
+        assert_eq!(outcome.action_id, "open-reader");
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "manifest_denied");
     }
 
     #[test]
