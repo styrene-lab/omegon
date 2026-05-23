@@ -710,6 +710,11 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_extract_host_actions_meta_omits_empty_actions() {
+        assert!(extract_host_actions_meta(&json!({"actions": []})).is_none());
+    }
+
     // ─── Integration: resources/list strips fields ────────────────────
 
     #[tokio::test]

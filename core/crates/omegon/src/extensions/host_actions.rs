@@ -5,7 +5,7 @@ use serde_json::Value;
 
 /// Host-attached origin for an untrusted HostAction candidate.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum HostActionOriginKind {
+pub(super) enum HostActionOriginKind {
     NativeExtension,
     Mcp,
     Internal,
@@ -13,7 +13,7 @@ pub(crate) enum HostActionOriginKind {
 
 /// Trusted runtime origin attached by Omegon before policy evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct HostActionOrigin {
+pub(super) struct HostActionOrigin {
     pub kind: HostActionOriginKind,
     pub identity: String,
 }
@@ -46,7 +46,7 @@ impl HostActionOrigin {
 /// Session/tool-call scoped action identity. Extension-provided action ids are
 /// local labels only; this type is the runtime identity used for policy/audit.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ScopedHostActionId {
+pub(super) struct ScopedHostActionId {
     pub origin: HostActionOrigin,
     pub session_id: String,
     pub tool_call_id: String,
@@ -55,7 +55,7 @@ pub(crate) struct ScopedHostActionId {
 
 /// Policy gates that are external to the extension manifest.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct RuntimeHostActionPolicy {
+pub(super) struct RuntimeHostActionPolicy {
     pub project_allows_auto: bool,
     pub runtime_allows_auto: bool,
     pub origin_trusted_for_auto: bool,
@@ -65,7 +65,7 @@ pub(crate) struct RuntimeHostActionPolicy {
 /// Minimal executor registry seam for Phase C. Issue #76 registers real
 /// `terminal.create@1` execution later.
 #[derive(Default)]
-pub(crate) struct HostActionExecutorRegistry {
+pub(super) struct HostActionExecutorRegistry {
     supported_types: Vec<String>,
     terminal_create_backend: Option<Box<dyn TerminalCreateBackend + Send + Sync>>,
 }
@@ -125,7 +125,7 @@ pub(super) fn process_native_extension_action_execute(
     )
 }
 
-pub(crate) fn process_host_action_candidate(
+pub(super) fn process_host_action_candidate(
     candidate: Value,
     manifest: &ExtensionManifest,
     scoped_id: ScopedHostActionId,
@@ -269,6 +269,85 @@ pub(super) fn process_declarative_host_actions(
             })
         })
         .collect()
+}
+
+pub(crate) fn process_mcp_host_actions(
+    actions: &Value,
+    server_name: &str,
+    tool_name: &str,
+) -> Vec<Value> {
+    let Some(actions) = actions.as_array() else {
+        let scoped = ScopedHostActionId {
+            origin: HostActionOrigin::mcp(server_name),
+            session_id: "mcp-tool-result".to_string(),
+            tool_call_id: tool_name.to_string(),
+            action_id: "omegon/hostActions".to_string(),
+        };
+        let outcome = audited_outcome(
+            &scoped,
+            None,
+            "omegon/hostActions",
+            HostActionStatus::Invalid,
+            "invalid_host_actions_metadata",
+            "_meta[\"omegon/hostActions\"] must be an array",
+        );
+        return vec![serde_json::to_value(outcome).unwrap_or_else(serialization_error_outcome)];
+    };
+
+    let manifest = mcp_deny_by_default_manifest();
+    actions
+        .iter()
+        .enumerate()
+        .map(|(idx, action)| {
+            let scoped = ScopedHostActionId {
+                origin: HostActionOrigin::mcp(server_name),
+                session_id: "mcp-tool-result".to_string(),
+                tool_call_id: tool_name.to_string(),
+                action_id: action
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| format!("<pending-parse-{idx}>")),
+            };
+            let outcome = process_host_action_candidate(
+                action.clone(),
+                &manifest,
+                scoped,
+                &RuntimeHostActionPolicy::default(),
+                &HostActionExecutorRegistry::default_supported(),
+            );
+            serde_json::to_value(outcome).unwrap_or_else(serialization_error_outcome)
+        })
+        .collect()
+}
+
+fn mcp_deny_by_default_manifest() -> ExtensionManifest {
+    toml::from_str(
+        r#"
+[extension]
+name = "mcp"
+version = "0.0.0"
+
+[runtime]
+type = "native"
+binary = "mcp"
+
+[permissions.host_actions]
+allowed = []
+"#,
+    )
+    .expect("static MCP HostAction manifest is valid")
+}
+
+fn serialization_error_outcome(err: serde_json::Error) -> Value {
+    serde_json::json!({
+        "action_id": "<serialization-error>",
+        "status": "invalid",
+        "error": {
+            "code": "serialization_error",
+            "message": err.to_string()
+        }
+    })
 }
 
 pub(super) trait TerminalCreateBackend {
@@ -689,6 +768,65 @@ allowed = [{allowed}]
         );
 
         assert_eq!(outcomes[0]["action_id"], "open-reader");
+        assert_eq!(outcomes[0]["status"], "denied");
+        assert_eq!(outcomes[0]["error"]["code"], "manifest_denied");
+    }
+
+    #[test]
+    fn mcp_non_array_metadata_returns_invalid_outcome() {
+        let outcomes = process_mcp_host_actions(&json!("bad"), "server", "tool");
+
+        assert_eq!(outcomes[0]["action_id"], "omegon/hostActions");
+        assert_eq!(outcomes[0]["status"], "invalid");
+        assert_eq!(
+            outcomes[0]["error"]["code"],
+            "invalid_host_actions_metadata"
+        );
+    }
+
+    #[test]
+    fn mcp_malformed_action_returns_invalid_outcome() {
+        let outcomes =
+            process_mcp_host_actions(&json!([{ "id": "broken", "params": {} }]), "server", "tool");
+
+        assert_eq!(outcomes[0]["status"], "invalid");
+        assert_eq!(outcomes[0]["error"]["code"], "invalid_action");
+    }
+
+    #[test]
+    fn mcp_unsupported_action_returns_unsupported_outcome() {
+        let outcomes = process_mcp_host_actions(
+            &json!([{ "id": "open-file", "type": "file.open@1", "params": {} }]),
+            "server",
+            "tool",
+        );
+
+        assert_eq!(outcomes[0]["action_id"], "open-file");
+        assert_eq!(outcomes[0]["status"], "unsupported");
+        assert_eq!(outcomes[0]["error"]["code"], "unsupported_action");
+    }
+
+    #[test]
+    fn mcp_supported_action_is_denied_by_default_policy() {
+        let outcomes = process_mcp_host_actions(
+            &json!([{ "id": "open-reader", "type": "terminal.create@1", "params": {"command": "bookokrat"} }]),
+            "server",
+            "tool",
+        );
+
+        assert_eq!(outcomes[0]["action_id"], "open-reader");
+        assert_eq!(outcomes[0]["status"], "denied");
+        assert_eq!(outcomes[0]["error"]["code"], "manifest_denied");
+    }
+
+    #[test]
+    fn mcp_auto_if_allowed_is_denied_before_execution() {
+        let outcomes = process_mcp_host_actions(
+            &json!([{ "id": "open-reader", "type": "terminal.create@1", "execution": "auto_if_allowed", "params": {"command": "bookokrat"} }]),
+            "server",
+            "tool",
+        );
+
         assert_eq!(outcomes[0]["status"], "denied");
         assert_eq!(outcomes[0]["error"]["code"], "manifest_denied");
     }

@@ -995,65 +995,9 @@ fn mcp_tool_result_details(server_name: &str, tool_name: &str, result: &CallTool
         return Value::Null;
     };
 
-    let manifest = mcp_host_action_manifest();
-    let outcomes = match actions.as_array() {
-        Some(actions) => actions
-            .iter()
-            .enumerate()
-            .map(|(idx, action)| {
-                let scoped = crate::extensions::host_actions::ScopedHostActionId {
-                    origin: crate::extensions::host_actions::HostActionOrigin::mcp(server_name),
-                    session_id: "mcp-tool-result".to_string(),
-                    tool_call_id: tool_name.to_string(),
-                    action_id: action
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .map(ToString::to_string)
-                        .unwrap_or_else(|| format!("<pending-parse-{idx}>")),
-                };
-                let outcome = crate::extensions::host_actions::process_host_action_candidate(
-                    action.clone(),
-                    &manifest,
-                    scoped,
-                    &crate::extensions::host_actions::RuntimeHostActionPolicy::default(),
-                    &crate::extensions::host_actions::HostActionExecutorRegistry::default_supported(
-                    ),
-                );
-                serde_json::to_value(outcome).unwrap_or_else(|err| {
-                    json!({
-                        "action_id": "<serialization-error>",
-                        "status": "invalid",
-                        "error": {"code": "serialization_error", "message": err.to_string()}
-                    })
-                })
-            })
-            .collect(),
-        None => vec![json!({
-            "action_id": "omegon/hostActions",
-            "status": "invalid",
-            "error": {"code": "invalid_action", "message": "_meta[\"omegon/hostActions\"] must be an array"}
-        })],
-    };
-
+    let outcomes =
+        crate::extensions::host_actions::process_mcp_host_actions(actions, server_name, tool_name);
     json!({"host_action_outcomes": outcomes})
-}
-
-fn mcp_host_action_manifest() -> crate::extensions::manifest::ExtensionManifest {
-    toml::from_str(
-        r#"
-[extension]
-name = "mcp"
-version = "0.0.0"
-
-[runtime]
-type = "native"
-binary = "mcp"
-
-[permissions.host_actions]
-allowed = ["terminal.create@1"]
-"#,
-    )
-    .expect("static MCP HostAction manifest is valid")
 }
 
 /// RAII guard that removes a progress-token registration when dropped.
@@ -1339,8 +1283,34 @@ mod tests {
         );
         assert_eq!(details["host_action_outcomes"][0]["status"], "denied");
         assert_eq!(
-            details["host_action_outcomes"][0]["error"]["message"],
-            "auto_if_allowed requires manifest, project, runtime, origin, and operator approval"
+            details["host_action_outcomes"][0]["error"]["code"],
+            "manifest_denied"
+        );
+    }
+
+    #[test]
+    fn mcp_tool_result_details_without_metadata_is_null() {
+        let result = CallToolResult::success(vec![rmcp::model::Content::text("plain")]);
+
+        assert_eq!(
+            mcp_tool_result_details("server", "tool", &result),
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn mcp_tool_result_details_reports_non_array_metadata() {
+        let mut meta = rmcp::model::Meta::new();
+        meta.insert("omegon/hostActions".to_string(), json!("bad"));
+        let mut result = CallToolResult::success(vec![rmcp::model::Content::text("plain")]);
+        result.meta = Some(meta);
+
+        let details = mcp_tool_result_details("server", "tool", &result);
+
+        assert_eq!(details["host_action_outcomes"][0]["status"], "invalid");
+        assert_eq!(
+            details["host_action_outcomes"][0]["error"]["code"],
+            "invalid_host_actions_metadata"
         );
     }
 
