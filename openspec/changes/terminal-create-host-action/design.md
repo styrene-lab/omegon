@@ -40,3 +40,9 @@ Implementation:
 - Default env is empty/deny.
 - Reuse keys must include origin identity/session.
 - Placement warnings are structured, not prose-only.
+
+## Async executor follow-up
+
+The current production `terminal.create@1` backend bridges from the synchronous HostAction executor trait into the async PTY terminal adapter with `tokio::task::block_in_place` plus `Handle::block_on`. This is acceptable for the current multi-thread Omegon runtime, but it is intentionally documented as a future refactor point.
+
+Future work should make the HostAction executor path async end-to-end so terminal creation can await directly and so current-thread runtimes or alternate hosts do not depend on `block_in_place` availability. Until then, this backend must remain bounded to Omegon runtime contexts that provide a Tokio runtime capable of `block_in_place`.

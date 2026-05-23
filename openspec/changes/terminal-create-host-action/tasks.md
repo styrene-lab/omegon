@@ -28,8 +28,8 @@
 ## 4. Validation and upstream closure
 <!-- specs: extensions/terminal-create -->
 
-- [ ] 4.1 Run `cargo test -p omegon`.
-- [ ] 4.2 Run `cargo test -p omegon-extension`.
-- [ ] 4.3 Run `cargo check -p omegon`.
-- [ ] 4.4 Run `just link`.
+- [x] 4.1 Run `cargo test -p omegon`.
+- [x] 4.2 Run `cargo test -p omegon-extension`.
+- [x] 4.3 Run `cargo check -p omegon`.
+- [x] 4.4 Run `just link`.
 - [ ] 4.5 Post acceptance trace to #76 and close only after criteria map to tests/code.
