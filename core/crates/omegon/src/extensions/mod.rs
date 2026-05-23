@@ -26,6 +26,7 @@ pub mod config_store;
 pub mod manifest;
 pub mod mind;
 pub mod state;
+mod tool_result;
 pub mod vox_bridge;
 pub mod widgets;
 pub use manifest::{
@@ -382,12 +383,7 @@ impl Feature for ExtensionFeature {
             .rpc_call("execute_tool", json!({ "name": tool_name, "args": args }))
             .await
         {
-            Ok(output) => Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: output.to_string(),
-                }],
-                details: json!({}),
-            }),
+            Ok(output) => Ok(tool_result::parse_extension_tool_result(output)),
             Err(e) if is_extension_transport_error(&e) => {
                 self.record_error(format!("transport failure: {e}")).await;
                 self.respawn_after_transport_error(&e).await?;
@@ -401,12 +397,15 @@ impl Feature for ExtensionFeature {
                             tool_name
                         )
                     })?;
-                Ok(ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: output.to_string(),
-                    }],
-                    details: json!({"extension_reconnected": true}),
-                })
+                let mut result = tool_result::parse_extension_tool_result(output);
+                result.details = match result.details {
+                    Value::Object(mut details) => {
+                        details.insert("extension_reconnected".to_string(), Value::Bool(true));
+                        Value::Object(details)
+                    }
+                    other => json!({"extension_reconnected": true, "extension_details": other}),
+                };
+                Ok(result)
             }
             Err(e) => {
                 let msg = e.to_string();

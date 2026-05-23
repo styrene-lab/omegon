@@ -82,6 +82,13 @@ pub struct TerminalCreatePermissions {
     pub allow_env: Vec<String>,
 }
 
+impl HostActionPermissions {
+    /// Return true when the manifest allows the given versioned HostAction type.
+    pub fn allows_action_type(&self, action_type: &str) -> bool {
+        self.allowed.iter().any(|allowed| allowed == action_type)
+    }
+}
+
 /// A declared configuration field in the extension manifest.
 ///
 /// Extensions declare their config requirements in `[config.<field_name>]`
@@ -222,6 +229,18 @@ pub struct MindConfig {
 }
 
 impl ExtensionManifest {
+    /// Return true when manifest HostAction permissions allow this action type.
+    pub fn allows_host_action_type(&self, action_type: &str) -> bool {
+        self.permissions
+            .host_actions
+            .allows_action_type(action_type)
+    }
+
+    /// Manifest policy for `terminal.create@1` actions.
+    pub fn terminal_create_permissions(&self) -> &TerminalCreatePermissions {
+        &self.permissions.host_actions.terminal_create
+    }
+
     /// Load and validate manifest from TOML file.
     pub fn from_file(path: &Path) -> Result<Self, ManifestError> {
         let content = std::fs::read_to_string(path)
@@ -513,6 +532,38 @@ allow_env = []
         assert_eq!(terminal.allowed_commands, vec!["bookokrat"]);
         assert_eq!(terminal.allowed_cwd_roots, vec!["${workspace}"]);
         assert!(terminal.allow_env.is_empty());
+    }
+
+    #[test]
+    fn test_host_action_permission_helpers_expose_runtime_policy() {
+        let toml_str = r#"
+[extension]
+name = "reader"
+version = "0.1.0"
+
+[runtime]
+type = "native"
+binary = "target/release/reader"
+
+[permissions.host_actions]
+allowed = ["terminal.create@1"]
+
+[permissions.host_actions.terminal_create]
+interactive = true
+allowed_commands = ["bookokrat"]
+allowed_cwd_roots = ["${workspace}"]
+allow_env = ["BOOKOKRAT_THEME"]
+"#;
+
+        let manifest: ExtensionManifest = toml::from_str(toml_str).unwrap();
+        assert!(manifest.allows_host_action_type("terminal.create@1"));
+        assert!(!manifest.allows_host_action_type("file.open@1"));
+
+        let terminal = manifest.terminal_create_permissions();
+        assert!(terminal.interactive);
+        assert_eq!(terminal.allowed_commands, vec!["bookokrat"]);
+        assert_eq!(terminal.allowed_cwd_roots, vec!["${workspace}"]);
+        assert_eq!(terminal.allow_env, vec!["BOOKOKRAT_THEME"]);
     }
 
     #[test]

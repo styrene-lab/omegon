@@ -7,16 +7,16 @@
 - [x] 1.2 Add failing manifest tests for `[permissions.host_actions] allowed` parsing.
 - [x] 1.3 Add failing manifest tests for `[permissions.host_actions.terminal_create]` constraints.
 - [x] 1.4 Implement manifest structs and serde defaults without breaking existing manifests.
-- [ ] 1.5 Expose loaded manifest HostAction permissions to extension runtime context.
+- [x] 1.5 Expose loaded manifest HostAction permissions to extension runtime context.
 
 ## 2. Structured tool-result envelope extraction
 <!-- specs: extensions/host-actions-runtime -->
 
-- [ ] 2.1 Add failing tests for legacy raw JSON/string result compatibility.
-- [ ] 2.2 Add failing tests for `{content:[...]}` extraction to ordinary `ContentBlock`s.
-- [ ] 2.3 Add failing tests for valid `actions` extraction separate from content.
-- [ ] 2.4 Add failing tests proving malformed actions preserve content and produce invalid/ignored outcomes.
-- [ ] 2.5 Implement envelope parser and wire it into `ExtensionFeature::execute`.
+- [x] 2.1 Add failing tests for legacy raw JSON/string result compatibility.
+- [x] 2.2 Add failing tests for `{content:[...]}` extraction to ordinary `ContentBlock`s.
+- [x] 2.3 Add failing tests for valid `actions` extraction separate from content.
+- [x] 2.4 Add failing tests proving malformed actions preserve content and produce invalid/ignored outcomes.
+- [x] 2.5 Implement envelope parser and wire it into `ExtensionFeature::execute`.
 
 ## 3. Validation and policy pipeline
 <!-- specs: extensions/host-actions-runtime -->
