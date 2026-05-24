@@ -824,6 +824,46 @@ mod tests {
             .join("\n")
     }
 
+    async fn wait_for_terminal_text(cwd: &Path, session_id: &str, needle: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut observed = String::new();
+        while Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let read_result = execute("read", &json!({"session_id": session_id}), cwd, None)
+                .await
+                .unwrap();
+            observed = text(&read_result);
+            if observed.contains(needle) {
+                break;
+            }
+        }
+        observed
+    }
+
+    async fn wait_for_file_text(path: &Path, needle: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut observed = String::new();
+        while Instant::now() < deadline {
+            observed = std::fs::read_to_string(path).unwrap_or_default();
+            if observed.contains(needle) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        observed
+    }
+
+    async fn wait_for_session_exit(session_id: &str) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if !session_alive(&requested_session(&json!({"session_id": session_id})).unwrap()) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        false
+    }
+
     #[tokio::test]
     async fn terminal_can_send_input_and_read_output() {
         let cwd = tempfile::tempdir().unwrap();
@@ -850,20 +890,10 @@ mod tests {
         .await
         .unwrap();
 
-        let mut observed = String::new();
-        for _ in 0..20 {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let read_result = execute("read", &json!({"session_id": id}), cwd.path(), None)
-                .await
-                .unwrap();
-            observed = text(&read_result);
-            if observed.contains("got:hello") {
-                break;
-            }
-        }
+        let observed = wait_for_terminal_text(cwd.path(), &id, "got:hello").await;
 
         assert!(observed.contains("got:hello"), "output was: {observed}");
-        let transcript_text = std::fs::read_to_string(&transcript).unwrap();
+        let transcript_text = wait_for_file_text(Path::new(&transcript), "omegon: sent").await;
         assert!(
             transcript_text.contains("omegon: sent"),
             "transcript should include stdin audit marker: {transcript_text}"
@@ -887,17 +917,7 @@ mod tests {
         .unwrap();
         let id = result.details["session_id"].as_str().unwrap().to_string();
 
-        let mut observed = String::new();
-        for _ in 0..20 {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let read_result = execute("read", &json!({"session_id": id}), cwd.path(), None)
-                .await
-                .unwrap();
-            observed = text(&read_result);
-            if observed.contains("tty:yes") || observed.contains("tty:no") {
-                break;
-            }
-        }
+        let observed = wait_for_terminal_text(cwd.path(), &id, "tty:").await;
 
         assert!(
             observed.contains("tty:yes"),
@@ -923,12 +943,10 @@ mod tests {
         .unwrap();
         let first_id = first.details["session_id"].as_str().unwrap().to_string();
 
-        for _ in 0..20 {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            if !session_alive(&requested_session(&json!({"session_id": first_id})).unwrap()) {
-                break;
-            }
-        }
+        assert!(
+            wait_for_session_exit(&first_id).await,
+            "first terminal session should exit before name reuse"
+        );
 
         let second = execute(
             "start",
