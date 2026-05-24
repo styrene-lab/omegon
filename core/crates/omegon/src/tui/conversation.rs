@@ -879,7 +879,7 @@ impl ConversationView {
     pub fn visible_tool_cards(&self, viewport_height: Option<u16>) -> Vec<usize> {
         let heights = &self.conv_state.heights;
         if heights.len() != self.segments.len() {
-            return Vec::new();
+            return self.recent_tool_cards(viewport_height);
         }
 
         let total: u16 = heights.iter().sum();
@@ -908,7 +908,27 @@ impl ConversationView {
                 visible.push(i);
             }
         }
-        visible
+        if visible.is_empty() {
+            self.recent_tool_cards(Some(viewport_height))
+        } else {
+            visible
+        }
+    }
+
+    fn recent_tool_cards(&self, viewport_height: Option<u16>) -> Vec<usize> {
+        let limit = viewport_height.unwrap_or(3).clamp(1, 6) as usize;
+        let mut recent: Vec<usize> = self
+            .segments
+            .iter()
+            .enumerate()
+            .rev()
+            .filter_map(|(idx, segment)| {
+                matches!(segment.content, SegmentContent::ToolCard { .. }).then_some(idx)
+            })
+            .take(limit)
+            .collect();
+        recent.reverse();
+        recent
     }
 
     pub fn select_latest_visible_tool_card(
@@ -1830,6 +1850,28 @@ mod tests {
         }
         if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[2].content {
             assert!(!expanded, "non-visible stale selection must stay collapsed");
+        }
+    }
+
+    #[test]
+    fn visible_tool_cards_falls_back_to_recent_when_height_cache_is_stale() {
+        let mut cv = ConversationView::new();
+        for idx in 0..8 {
+            let id = format!("t{idx}");
+            let path = format!("file{idx}.rs");
+            let name = format!("read{idx}");
+            cv.push_tool_start(&id, &name, Some(&path), Some(&path));
+            cv.push_tool_end(&id, false, Some("result"));
+        }
+        cv.conv_state.heights.clear();
+
+        assert_eq!(cv.visible_tool_cards(Some(3)), vec![5, 6, 7]);
+        cv.toggle_pin_in_viewport(Some(3));
+        assert_eq!(cv.pinned_segment, Some(7));
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[7].content {
+            assert!(expanded, "recent fallback target should expand");
+        } else {
+            panic!("expected tool card");
         }
     }
 
