@@ -685,9 +685,7 @@ impl Agent for OmegonAcpAgent {
                                     c,
                                     stream_sid.clone(),
                                     SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                                        ContentBlock::Text(TextContent::new(format!(
-                                            "{msg}\n\n"
-                                        ))),
+                                        ContentBlock::Text(TextContent::new(format!("{msg}\n\n"))),
                                     )),
                                 )
                                 .await;
@@ -2589,7 +2587,6 @@ mod tests {
         assert_eq!(entries[3].status, PlanEntryState::Failed);
     }
 
-
     #[test]
     fn plan_snapshot_json_empty_items_clears_state() {
         let snapshot = serde_json::json!({
@@ -2622,15 +2619,21 @@ Progress: 0/4
     #[test]
     fn acp_status_compresses_plan_approval_and_progress() {
         assert_eq!(
-            acp_status_message_text("Plan approved
+            acp_status_message_text(
+                "Plan approved
 Plan mode: approved
-Progress: 0/2").as_deref(),
+Progress: 0/2"
+            )
+            .as_deref(),
             Some("Plan approved — execution may proceed.")
         );
         assert_eq!(
-            acp_status_message_text("Plan progress
+            acp_status_message_text(
+                "Plan progress
 Plan mode: executing
-Progress: 1/2").as_deref(),
+Progress: 1/2"
+            )
+            .as_deref(),
             Some("Plan executing.")
         );
     }
