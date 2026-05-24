@@ -4042,16 +4042,11 @@ impl App {
         let is_slim = self.ui_surfaces.is_compact() && !self.focus_mode;
         let status_height = if is_slim { 1u16 } else { 0 };
         let slim_plan_snapshot = if is_slim {
-            self.slim_plan_snapshot
-                .as_ref()
-                .filter(|snapshot| !snapshot.is_complete())
-                .cloned()
-                .or_else(|| {
-                    self.conversation
-                        .latest_plan_progress()
-                        .and_then(PlanDisplaySnapshot::from_legacy_text)
-                        .filter(|snapshot| !snapshot.is_complete())
-                })
+            self.slim_plan_snapshot.as_ref().cloned().or_else(|| {
+                self.conversation
+                    .latest_plan_progress()
+                    .and_then(PlanDisplaySnapshot::from_legacy_text)
+            })
         } else {
             None
         };
@@ -4155,6 +4150,7 @@ impl App {
         if self.conversation.tabs.is_conversation_active() {
             // Render conversation widget (can mutate conv_state via frame.render_stateful_widget)
             let density = self.settings().tool_detail;
+            let pinned_segment = self.conversation.timeline_expanded_segment();
             let (segments, conv_state) = self.conversation.segments_and_state();
             let conv_widget = conv_widget::ConversationWidget::new(segments, t.as_ref())
                 .with_mode(if self.ui_surfaces.is_compact() {
@@ -4162,7 +4158,8 @@ impl App {
                 } else {
                     SegmentRenderMode::Full
                 })
-                .with_density(density);
+                .with_density(density)
+                .with_pinned_segment(pinned_segment);
             frame.render_stateful_widget(conv_widget, content_area, conv_state);
         } else {
             // Render extension widget with schema-aware formatting
@@ -10113,7 +10110,7 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn completed_plan_snapshot_is_not_pinned() {
+    fn completed_plan_snapshot_is_complete_but_remains_displayable() {
         let snapshot = PlanDisplaySnapshot {
             mode: "complete".to_string(),
             completed: 2,
@@ -10135,7 +10132,7 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn completed_legacy_plan_snapshot_is_not_pinnable() {
+    fn completed_legacy_plan_snapshot_is_complete_but_displayable() {
         let snapshot = PlanDisplaySnapshot::from_legacy_text(
             "Plan progress\nPlan mode: complete\nProgress: 2/2\n\n1. ● A\n2. ● B",
         )

@@ -213,6 +213,7 @@ pub struct ConversationWidget<'a> {
     theme: &'a dyn Theme,
     mode: SegmentRenderMode,
     density: crate::settings::ToolDetail,
+    pinned_segment: Option<usize>,
 }
 
 impl<'a> ConversationWidget<'a> {
@@ -222,6 +223,7 @@ impl<'a> ConversationWidget<'a> {
             theme,
             mode: SegmentRenderMode::Full,
             density: crate::settings::ToolDetail::Detailed,
+            pinned_segment: None,
         }
     }
 
@@ -232,6 +234,11 @@ impl<'a> ConversationWidget<'a> {
 
     pub fn with_density(mut self, density: crate::settings::ToolDetail) -> Self {
         self.density = density;
+        self
+    }
+
+    pub fn with_pinned_segment(mut self, pinned_segment: Option<usize>) -> Self {
+        self.pinned_segment = pinned_segment;
         self
     }
 }
@@ -319,7 +326,14 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                     width: area.width,
                     height: seg_height.min(available_height),
                 };
-                segment.render(seg_area, buf, self.theme, self.mode, self.density);
+                segment.render_with_pinned(
+                    seg_area,
+                    buf,
+                    self.theme,
+                    self.mode,
+                    self.density,
+                    self.pinned_segment == Some(i),
+                );
             } else {
                 // Segment starts ABOVE the viewport — partially visible.
                 // Render into a temp buffer at full size, then copy the
@@ -343,12 +357,13 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                         cell.set_fg(fg);
                     }
                 }
-                segment.render(
+                segment.render_with_pinned(
                     temp_area,
                     &mut temp_buf,
                     self.theme,
                     self.mode,
                     self.density,
+                    self.pinned_segment == Some(i),
                 );
 
                 // Copy the visible portion from temp_buf to main buf

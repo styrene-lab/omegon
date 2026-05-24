@@ -611,6 +611,7 @@ fn render_slim_tool_summary_rows(
     status_color: Color,
     display_name: &str,
     detail_rows: &[String],
+    pinned: bool,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -633,7 +634,11 @@ fn render_slim_tool_summary_rows(
                         .add_modifier(Modifier::DIM),
                 ),
                 Span::styled(
-                    format!("{display_name} "),
+                    if pinned {
+                        format!("{display_name} · pinned ")
+                    } else {
+                        format!("{display_name} ")
+                    },
                     Style::default()
                         .fg(status_color)
                         .bg(row_bg)
@@ -675,6 +680,7 @@ fn render_slim_tool_live_rows(
     status_color: Color,
     display_name: &str,
     rows: &[String],
+    pinned: bool,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -697,7 +703,11 @@ fn render_slim_tool_live_rows(
                         .add_modifier(Modifier::DIM),
                 ),
                 Span::styled(
-                    format!("{display_name} "),
+                    if pinned {
+                        format!("{display_name} · pinned ")
+                    } else {
+                        format!("{display_name} ")
+                    },
                     Style::default()
                         .fg(status_color)
                         .bg(row_bg)
@@ -1365,6 +1375,18 @@ impl Segment {
         mode: SegmentRenderMode,
         density: crate::settings::ToolDetail,
     ) {
+        self.render_with_pinned(area, buf, t, mode, density, false);
+    }
+
+    pub fn render_with_pinned(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        t: &dyn Theme,
+        mode: SegmentRenderMode,
+        density: crate::settings::ToolDetail,
+        pinned: bool,
+    ) {
         use SegmentContent::*;
         let presentation = self.presentation();
         match &self.content {
@@ -1415,6 +1437,7 @@ impl Segment {
                     t,
                     mode,
                     density,
+                    pinned,
                 );
             }
             SystemNotification { text } => render_system(text, area, buf, t, mode),
@@ -1868,6 +1891,7 @@ fn tool_title_line(
     display_name: &str,
     area_width: u16,
     timestamp: Option<&str>,
+    pinned: bool,
 ) -> Line<'static> {
     let timestamp_width = timestamp.map(UnicodeWidthStr::width).unwrap_or(0);
     let reserved_right = if timestamp_width > 0 {
@@ -1882,7 +1906,12 @@ fn tool_title_line(
     let status_prefix = format!(" {status_icon} ");
     let prefix_width = UnicodeWidthStr::width(status_prefix.as_str());
     let name_budget = left_budget.saturating_sub(prefix_width).max(1);
-    let title_name = crate::util::truncate(display_name, name_budget);
+    let title_label = if pinned {
+        format!("{display_name} · pinned")
+    } else {
+        display_name.to_string()
+    };
+    let title_name = crate::util::truncate(&title_label, name_budget);
     let title_text = format!("{status_prefix}{title_name} ");
     let used_width = UnicodeWidthStr::width(title_text.as_str());
     let pad = left_budget.saturating_sub(used_width);
@@ -2163,6 +2192,7 @@ fn render_tool_card(
     t: &dyn Theme,
     mode: SegmentRenderMode,
     density: crate::settings::ToolDetail,
+    pinned: bool,
 ) {
     let display_name = if name == "bash" {
         if let Some(args) = detail_args {
@@ -2233,6 +2263,7 @@ fn render_tool_card(
         &display_name,
         area.width,
         timestamp.as_deref(),
+        pinned,
     );
 
     // Right-aligned title: duration · ↑1.2k ↓340 · 14:32
@@ -2284,6 +2315,7 @@ fn render_tool_card(
             status_color,
             &display_name,
             &detail_rows,
+            pinned,
         );
         return;
     }
@@ -2308,6 +2340,7 @@ fn render_tool_card(
             status_color,
             &display_name,
             &detail_rows,
+            pinned,
         );
         return;
     }
@@ -6356,6 +6389,72 @@ After fence text.
         assert!(
             h_expanded > h_collapsed,
             "expanded ({h_expanded}) should be taller than collapsed ({h_collapsed})"
+        );
+    }
+
+    #[test]
+    fn slim_collapsed_tool_card_marks_pinned_state() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "t1".into(),
+                name: "bash".into(),
+                args_summary: Some("echo hi".into()),
+                detail_args: Some("echo hi".into()),
+                result_summary: None,
+                detail_result: Some("hi".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+                live_partial: None,
+                started_at: None,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 3);
+        seg.render_with_pinned(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Detailed,
+            true,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("pinned"), "pinned marker missing: {text}");
+    }
+
+    #[test]
+    fn slim_expanded_tool_card_shows_detail_rows() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "t1".into(),
+                name: "bash".into(),
+                args_summary: Some("printf smoke".into()),
+                detail_args: Some("printf smoke".into()),
+                result_summary: None,
+                detail_result: Some("smoke-detail-line".into()),
+                is_error: false,
+                complete: true,
+                expanded: true,
+                live_partial: None,
+                started_at: None,
+            },
+        };
+        let (area, mut buf) = make_buf(80, 12);
+        seg.render_with_pinned(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Lean,
+            true,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("pinned"), "pinned marker missing: {text}");
+        assert!(
+            text.contains("smoke-detail-line"),
+            "expanded slim card should render result detail: {text}"
         );
     }
 

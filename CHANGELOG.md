@@ -23,7 +23,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - **Slim tool expansion has a recent-card fallback** — Ctrl+O/Tab/a no longer depend solely on a fresh render-height cache; if the viewport cache is stale or no card intersects it, Slim falls back to the most recent tool cards so recent compressed calls can still be expanded on demand.
-- **Slim bottom UX starts separating live state from history** — the slim footer now avoids duplicate `plan: next` text when the pinned plan already shows the next item, running tools maintain a display-only active stream above the pinned plan without entering the conversation focus ring, completed plan snapshots detach from the pinned panel into durable history instead of lingering at the bottom, permission prompts use a pinned decision lane with Shift+A required for persistent grants, and constrained layouts compact live tool/plan panels before crowding out the conversation.
+- **Slim plan and tool pinning stay visually verifiable** — completed plan snapshots now remain in the pinned Slim plan lane until explicitly cleared, pinned tool cards render a visible `pinned` marker, and expanded Slim tool cards render their result details so Ctrl+O has an observable effect.
+- **Slim bottom UX starts separating live state from history** — the slim footer now avoids duplicate `plan: next` text when the pinned plan already shows the next item, running tools maintain a display-only active stream above the pinned plan without entering the conversation focus ring, permission prompts use a pinned decision lane with Shift+A required for persistent grants, and constrained layouts compact live tool/plan panels before crowding out the conversation.
 
 ## [0.23.5] - 2026-05-23
 
