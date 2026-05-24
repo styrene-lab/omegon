@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.23.7] - 2026-05-24
+
+### Fixed
+
+- **Terminal PTY tests tolerate CI scheduling latency** — terminal send/read, TTY detection, and name-reuse tests now use deadline-based polling so GitHub-hosted PTY startup and transcript writes do not fail on a one-second race.
+
 ## [0.23.6] - 2026-05-24
 
 ### Added
