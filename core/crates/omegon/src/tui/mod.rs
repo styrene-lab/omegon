@@ -1485,6 +1485,25 @@ impl PlanDisplaySnapshot {
         format!("plan {}/{} · {}", self.completed, self.total, self.mode)
     }
 
+    fn system_notification_text(&self, heading: &str) -> String {
+        let mut lines = vec![
+            heading.to_string(),
+            format!("Plan mode: {}", self.mode),
+            format!("Progress: {}/{}", self.completed, self.total),
+            String::new(),
+        ];
+        for (idx, item) in self.items.iter().enumerate() {
+            let icon = match item.status {
+                PlanDisplayStatus::Done => '●',
+                PlanDisplayStatus::Active => '◐',
+                PlanDisplayStatus::Skipped => '⊘',
+                PlanDisplayStatus::Todo => '○',
+            };
+            lines.push(format!("{}. {icon} {}", idx + 1, item.description));
+        }
+        lines.join("\n")
+    }
+
     fn is_complete(&self) -> bool {
         self.mode == "complete" || self.completed >= self.total
     }
@@ -4036,12 +4055,12 @@ impl App {
         } else {
             None
         };
-        let slim_plan_height = slim_plan_snapshot
-            .as_ref()
-            .map(|snapshot| slim_plan_snapshot_height(snapshot, main_area.width))
-            .unwrap_or(0);
-
-        let active_tool_stream_height = if is_slim {
+        let permission_lane_height = if is_slim && self.pending_permission.is_some() {
+            2
+        } else {
+            0
+        };
+        let mut active_tool_stream_height = if is_slim {
             self.active_tool_stream
                 .as_ref()
                 .map(ActiveToolStream::height)
@@ -4049,11 +4068,29 @@ impl App {
         } else {
             0
         };
-        let permission_lane_height = if is_slim && self.pending_permission.is_some() {
-            2
-        } else {
-            0
-        };
+        let mut slim_plan_height = slim_plan_snapshot
+            .as_ref()
+            .map(|snapshot| slim_plan_snapshot_height(snapshot, main_area.width))
+            .unwrap_or(0);
+        if permission_lane_height > 0 {
+            active_tool_stream_height = active_tool_stream_height.min(6);
+            slim_plan_height = slim_plan_height.min(4);
+        }
+        let fixed_without_conversation = editor_height
+            .saturating_add(status_height)
+            .saturating_add(footer_height)
+            .saturating_add(permission_lane_height);
+        let bottom_budget = main_area
+            .height
+            .saturating_sub(fixed_without_conversation)
+            .saturating_sub(3);
+        if active_tool_stream_height.saturating_add(slim_plan_height) > bottom_budget {
+            let plan_budget =
+                bottom_budget.saturating_sub(active_tool_stream_height.min(bottom_budget));
+            slim_plan_height = slim_plan_height.min(plan_budget);
+            let stream_budget = bottom_budget.saturating_sub(slim_plan_height);
+            active_tool_stream_height = active_tool_stream_height.min(stream_budget);
+        }
 
         // Slim layout: conversation → active tool stream → permission → pinned plan → editor → status+footer.
         // Full layout: conversation → status → editor → footer (status between).
@@ -7767,10 +7804,18 @@ impl App {
             }
             AgentEvent::PlanUpdated { snapshot_json } => {
                 let snapshot = PlanDisplaySnapshot::from_json(snapshot_json);
-                if snapshot
-                    .as_ref()
-                    .is_some_and(PlanDisplaySnapshot::is_complete)
+                if let Some(snapshot) = snapshot.as_ref()
+                    && snapshot.is_complete()
                 {
+                    let latest_is_complete = self
+                        .conversation
+                        .latest_plan_progress()
+                        .and_then(PlanDisplaySnapshot::from_legacy_text)
+                        .is_some_and(|latest| latest.is_complete());
+                    if !latest_is_complete {
+                        self.conversation
+                            .push_system(&snapshot.system_notification_text("Plan progress"));
+                    }
                     self.slim_plan_snapshot = None;
                 } else {
                     self.slim_plan_snapshot = snapshot;
@@ -10097,6 +10142,30 @@ mod slash_command_parsing_tests {
         .unwrap();
 
         assert!(snapshot.is_complete());
+    }
+
+    #[test]
+    fn completed_plan_snapshot_renders_durable_history_text() {
+        let snapshot = PlanDisplaySnapshot {
+            mode: "complete".to_string(),
+            completed: 2,
+            total: 2,
+            items: vec![
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "one".to_string(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "two".to_string(),
+                },
+            ],
+        };
+        let text = snapshot.system_notification_text("Plan progress");
+        assert!(text.contains("Plan mode: complete"), "{text}");
+        assert!(text.contains("Progress: 2/2"), "{text}");
+        assert!(text.contains("1. ● one"), "{text}");
+        assert!(text.contains("2. ● two"), "{text}");
     }
 
     #[test]
