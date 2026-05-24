@@ -200,22 +200,22 @@ pub(super) fn process_host_action_candidate(
         );
     }
 
-    if action.action_type == omegon_extension::actions::terminal::TERMINAL_CREATE_V1 {
-        if let Some(backend) = executors.terminal_create_backend.as_deref() {
-            let outcome = execute_terminal_create_with_backend(&action, manifest, backend);
-            audit_host_action_outcome(
-                &scoped_id,
-                Some(&action.action_type),
-                &outcome.action_id,
-                &outcome.status,
-                outcome
-                    .error
-                    .as_ref()
-                    .map(|error| error.code.as_str())
-                    .unwrap_or("completed"),
-            );
-            return outcome;
-        }
+    if action.action_type == omegon_extension::actions::terminal::TERMINAL_CREATE_V1
+        && let Some(backend) = executors.terminal_create_backend.as_deref()
+    {
+        let outcome = execute_terminal_create_with_backend(&action, manifest, backend);
+        audit_host_action_outcome(
+            &scoped_id,
+            Some(&action.action_type),
+            &outcome.action_id,
+            &outcome.status,
+            outcome
+                .error
+                .as_ref()
+                .map(|error| error.code.as_str())
+                .unwrap_or("completed"),
+        );
+        return outcome;
     }
 
     audited_outcome(

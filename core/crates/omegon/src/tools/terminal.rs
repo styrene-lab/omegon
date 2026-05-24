@@ -72,9 +72,7 @@ pub fn host_terminal_runtime_available() -> Result<(), String> {
 pub async fn start_host_terminal(
     request: HostTerminalCreateRequest,
 ) -> Result<HostTerminalCreateResponse, String> {
-    if let Err(err) = runtime_available() {
-        return Err(err);
-    }
+    runtime_available()?;
 
     let name = request
         .name
