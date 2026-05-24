@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- **Repo dirty-tree hygiene report** — `just dirty-report` now classifies working-tree changes into lifecycle state, source, release memory, tooling, and other buckets so runtime lifecycle churn and unrelated formatter drift are easier to split from scoped commits.
+
 ### Fixed
 
 - **Slim bottom UX starts separating live state from history** — the slim footer now avoids duplicate `plan: next` text when the pinned plan already shows the next item, running tools maintain a display-only active stream above the pinned plan without entering the conversation focus ring, completed plan snapshots detach from the pinned panel into durable history instead of lingering at the bottom, permission prompts use a pinned decision lane with Shift+A required for persistent grants, and constrained layouts compact live tool/plan panels before crowding out the conversation.

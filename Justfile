@@ -17,6 +17,12 @@ default:
 bootstrap *args:
     ./scripts/bootstrap.sh {{args}}
 
+# ─── Hygiene ─────────────────────────────────────────
+
+# Classify dirty tracked/runtime files before making scoped commits.
+dirty-report:
+    python3 scripts/dirty_report.py
+
 # ─── Rust ────────────────────────────────────────────
 
 # Run all Rust tests
