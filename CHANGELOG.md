@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.23.6] - 2026-05-24
+
 ### Added
 
 - **Repo dirty-tree hygiene report** — `just dirty-report` now classifies working-tree changes into lifecycle state, source, release memory, tooling, and other buckets so runtime lifecycle churn and unrelated formatter drift are easier to split from scoped commits.
@@ -25,6 +27,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Slim tool expansion has a recent-card fallback** — Ctrl+O/Tab/a no longer depend solely on a fresh render-height cache; if the viewport cache is stale or no card intersects it, Slim falls back to the most recent tool cards so recent compressed calls can still be expanded on demand.
 - **Slim plan and tool pinning stay visually verifiable** — completed plan snapshots now remain in the pinned Slim plan lane until explicitly cleared, pinned tool cards render a visible `pinned` marker, and expanded Slim tool cards render their result details so Ctrl+O has an observable effect.
 - **Slim bottom UX starts separating live state from history** — the slim footer now avoids duplicate `plan: next` text when the pinned plan already shows the next item, running tools maintain a display-only active stream above the pinned plan without entering the conversation focus ring, permission prompts use a pinned decision lane with Shift+A required for persistent grants, and constrained layouts compact live tool/plan panels before crowding out the conversation.
+- **ACP plan status lint gate** — redundant plan-status formatting branch removed so the release Clippy gate passes without changing user-visible ACP status text.
 
 ## [0.23.5] - 2026-05-23
 
