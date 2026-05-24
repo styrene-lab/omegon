@@ -399,6 +399,8 @@ pub struct App {
     >,
     /// Human-readable context for the pending permission prompt.
     pending_permission_context: Option<(String, String)>,
+    /// True when the pinned permission lane was visibly rendered on the last draw.
+    permission_lane_visible: bool,
     /// Pending manual-action wait prompt — waiting for operator confirmation.
     pending_operator_wait: Option<
         std::sync::Arc<
@@ -1681,6 +1683,98 @@ fn render_slim_plan_panel(
         .render(area, frame.buffer_mut());
 }
 
+fn permission_persist_scope_label(tool_name: &str) -> &'static str {
+    match tool_name {
+        "bash" | "terminal" => "always for this command",
+        "read" | "view" => "always for this file",
+        "edit" | "write" | "change" => "always for this path",
+        _ => "always for this operation",
+    }
+}
+
+fn permission_response_for_key(
+    code: KeyCode,
+    modifiers: KeyModifiers,
+    lane_visible: bool,
+) -> Option<omegon_traits::PermissionResponse> {
+    if !lane_visible {
+        return None;
+    }
+    match code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => Some(omegon_traits::PermissionResponse::Allow),
+        KeyCode::Char('A') => Some(omegon_traits::PermissionResponse::AlwaysAllow),
+        KeyCode::Char('a') if modifiers.contains(KeyModifiers::SHIFT) => {
+            Some(omegon_traits::PermissionResponse::AlwaysAllow)
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            Some(omegon_traits::PermissionResponse::Deny)
+        }
+        _ => None,
+    }
+}
+
+fn render_permission_lane(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    tool_name: &str,
+    target: &str,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let bg = t.surface_bg();
+    let text_budget = area.width.saturating_sub(2) as usize;
+    let scope = permission_persist_scope_label(tool_name);
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            "permission required · ",
+            Style::default()
+                .fg(t.warning())
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(tool_name, Style::default().fg(t.accent()).bg(bg)),
+        Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)),
+        Span::styled(
+            crate::util::truncate(target, text_budget.saturating_sub(tool_name.len() + 24)),
+            Style::default().fg(t.fg()).bg(bg),
+        ),
+    ])];
+    if area.height > 1 {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "y",
+                Style::default()
+                    .fg(t.warning())
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" once · ", Style::default().fg(t.dim()).bg(bg)),
+            Span::styled(
+                "n",
+                Style::default()
+                    .fg(t.warning())
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" deny · ", Style::default().fg(t.dim()).bg(bg)),
+            Span::styled(
+                "Shift+A",
+                Style::default()
+                    .fg(t.warning())
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!(" {scope}"), Style::default().fg(t.dim()).bg(bg)),
+        ]));
+    }
+    Paragraph::new(lines)
+        .style(Style::default().bg(bg))
+        .wrap(Wrap { trim: false })
+        .render(area, frame.buffer_mut());
+}
+
 fn format_permission_prompt(tool_name: &str, path: &str) -> String {
     format!(
         "Permission required\n\
@@ -1688,7 +1782,7 @@ fn format_permission_prompt(tool_name: &str, path: &str) -> String {
          Target: {path}\n\
          Reason: grant required for this operation\n\
          Persist: project profile permissions for always-allow\n\n\
-         [y] once   [a] always + save   [n/Esc] deny"
+         [y] once   [Shift+A] always + save   [n/Esc] deny"
     )
 }
 
@@ -1901,6 +1995,7 @@ impl App {
             tutorial_overlay: None,
             pending_permission: None,
             pending_permission_context: None,
+            permission_lane_visible: false,
             pending_operator_wait: None,
             pending_operator_wait_context: None,
             update_rx: None,
@@ -3954,8 +4049,13 @@ impl App {
         } else {
             0
         };
+        let permission_lane_height = if is_slim && self.pending_permission.is_some() {
+            2
+        } else {
+            0
+        };
 
-        // Slim layout: conversation → active tool stream → pinned plan → editor → status+footer.
+        // Slim layout: conversation → active tool stream → permission → pinned plan → editor → status+footer.
         // Full layout: conversation → status → editor → footer (status between).
         let chunks = if is_slim {
             Layout::default()
@@ -3963,10 +4063,11 @@ impl App {
                 .constraints([
                     Constraint::Min(3),                            // [0] conversation
                     Constraint::Length(active_tool_stream_height), // [1] active tool stream
-                    Constraint::Length(slim_plan_height),          // [2] pinned plan
-                    Constraint::Length(editor_height),             // [3] editor
-                    Constraint::Length(status_height),             // [4] status line
-                    Constraint::Length(footer_height),             // [5] footer
+                    Constraint::Length(permission_lane_height),    // [2] permission lane
+                    Constraint::Length(slim_plan_height),          // [3] pinned plan
+                    Constraint::Length(editor_height),             // [4] editor
+                    Constraint::Length(status_height),             // [5] status line
+                    Constraint::Length(footer_height),             // [6] footer
                 ])
                 .split(main_area)
         } else {
@@ -3975,10 +4076,11 @@ impl App {
                 .constraints([
                     Constraint::Min(3),                // [0] conversation
                     Constraint::Length(0),             // [1] (no active tool stream in Full)
-                    Constraint::Length(0),             // [2] (no pinned plan in Full)
-                    Constraint::Length(editor_height), // [3] editor
-                    Constraint::Length(status_height), // [4] (no status in Full)
-                    Constraint::Length(footer_height), // [5] footer
+                    Constraint::Length(0),             // [2] (no permission lane in Full)
+                    Constraint::Length(0),             // [3] (no pinned plan in Full)
+                    Constraint::Length(editor_height), // [4] editor
+                    Constraint::Length(status_height), // [5] (no status in Full)
+                    Constraint::Length(footer_height), // [6] footer
                 ])
                 .split(main_area)
         };
@@ -3986,10 +4088,11 @@ impl App {
         // Logical zone indices — consistent regardless of layout order.
         let conversation_area = chunks[0];
         let active_tool_stream_area = chunks[1];
-        let slim_plan_area = chunks[2];
-        let editor_area = chunks[3];
-        let status_area = chunks[4];
-        let footer_area = chunks[5];
+        let permission_lane_area = chunks[2];
+        let slim_plan_area = chunks[3];
+        let editor_area = chunks[4];
+        let status_area = chunks[5];
+        let footer_area = chunks[6];
 
         // Render tab bar + conversation/widget content
         let t = &self.theme;
@@ -4055,6 +4158,21 @@ impl App {
                 self.theme.as_ref(),
                 stream,
             );
+        }
+
+        self.permission_lane_visible = false;
+        if let Some((tool_name, target)) = self.pending_permission_context.as_ref()
+            && self.pending_permission.is_some()
+            && permission_lane_area.height > 0
+        {
+            render_permission_lane(
+                permission_lane_area,
+                frame,
+                self.theme.as_ref(),
+                tool_name,
+                target,
+            );
+            self.permission_lane_visible = true;
         }
 
         if let Some(snapshot) = slim_plan_snapshot.as_ref()
@@ -9040,22 +9158,18 @@ pub async fn run_tui(
                         continue;
                     }
 
-                    // ── Permission prompt intercepts y/a/n when pending ─
-                    if app.pending_permission.is_some() {
-                        let response = match key.code {
-                            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                                Some(omegon_traits::PermissionResponse::Allow)
-                            }
-                            KeyCode::Char('a') | KeyCode::Char('A') => {
-                                Some(omegon_traits::PermissionResponse::AlwaysAllow)
-                            }
-                            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                                Some(omegon_traits::PermissionResponse::Deny)
-                            }
-                            _ => None, // ignore other keys
-                        };
+                    // ── Permission prompt shortcuts are active only while the pinned
+                    // lane is visibly rendered. Lowercase 'a' intentionally remains normal
+                    // editor input; persistent grants require Shift+A / uppercase A.
+                    if app.pending_permission.is_some() && app.permission_lane_visible {
+                        let response = permission_response_for_key(
+                            key.code,
+                            key.modifiers,
+                            app.permission_lane_visible,
+                        );
                         if let Some(resp) = response {
                             let context = app.pending_permission_context.take();
+                            app.permission_lane_visible = false;
                             if let Some(respond) = app.pending_permission.take()
                                 && let Ok(mut slot) = respond.lock()
                                 && let Some(tx) = slot.take()
@@ -9077,8 +9191,8 @@ pub async fn run_tui(
                             } else {
                                 app.conversation.push_system(&format!("→ {label}"));
                             }
+                            continue;
                         }
-                        continue; // don't process key further
                     }
 
                     // ── Selector popup intercepts all keys when open ────
@@ -9816,8 +9930,10 @@ mod slash_command_parsing_tests {
     use super::canonical_slash_command;
     use super::{
         ActiveToolStream, PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus,
-        SlimPlanHintState, format_permission_prompt, slim_operator_hint, slim_plan_rows,
+        SlimPlanHintState, format_permission_prompt, permission_persist_scope_label,
+        permission_response_for_key, slim_operator_hint, slim_plan_rows,
     };
+    use crossterm::event::{KeyCode, KeyModifiers};
     use tokio::sync::mpsc;
 
     // ── Profile ───────────────────────────────────────────
@@ -9877,8 +9993,57 @@ mod slash_command_parsing_tests {
         assert!(prompt.contains("Reason: grant required for this operation"));
         assert!(prompt.contains("Persist: project profile permissions"));
         assert!(prompt.contains("[y] once"));
-        assert!(prompt.contains("[a] always + save"));
+        assert!(prompt.contains("[Shift+A] always + save"));
+        assert!(!prompt.contains("[a] always + save"));
         assert!(!prompt.contains("outside trusted workspace"));
+    }
+
+    #[test]
+    fn permission_scope_labels_are_specific() {
+        assert_eq!(
+            permission_persist_scope_label("read"),
+            "always for this file"
+        );
+        assert_eq!(
+            permission_persist_scope_label("edit"),
+            "always for this path"
+        );
+        assert_eq!(
+            permission_persist_scope_label("bash"),
+            "always for this command"
+        );
+    }
+
+    #[test]
+    fn permission_shortcuts_require_visible_lane_and_shift_for_persist() {
+        assert_eq!(
+            permission_response_for_key(KeyCode::Char('y'), KeyModifiers::empty(), true),
+            Some(omegon_traits::PermissionResponse::Allow)
+        );
+        assert_eq!(
+            permission_response_for_key(KeyCode::Char('n'), KeyModifiers::empty(), true),
+            Some(omegon_traits::PermissionResponse::Deny)
+        );
+        assert_eq!(
+            permission_response_for_key(KeyCode::Char('a'), KeyModifiers::empty(), true),
+            None
+        );
+        assert_eq!(
+            permission_response_for_key(KeyCode::Char('A'), KeyModifiers::SHIFT, true),
+            Some(omegon_traits::PermissionResponse::AlwaysAllow)
+        );
+        assert_eq!(
+            permission_response_for_key(KeyCode::Char('a'), KeyModifiers::SHIFT, true),
+            Some(omegon_traits::PermissionResponse::AlwaysAllow)
+        );
+        assert_eq!(
+            permission_response_for_key(KeyCode::Char('y'), KeyModifiers::empty(), false),
+            None
+        );
+        assert_eq!(
+            permission_response_for_key(KeyCode::Char('A'), KeyModifiers::SHIFT, false),
+            None
+        );
     }
 
     #[test]
