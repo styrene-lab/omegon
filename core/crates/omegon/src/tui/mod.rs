@@ -356,6 +356,7 @@ pub struct App {
     status_line: statusline::StatusLine,
     /// Structured session plan snapshot for the pinned Slim plan panel.
     slim_plan_snapshot: Option<PlanDisplaySnapshot>,
+    active_tool_stream: Option<ActiveToolStream>,
     /// Explicit Slim turn state rendered in the status line.
     slim_turn_state: SlimTurnState,
     /// Visual effects manager (tachyonfx).
@@ -1279,6 +1280,42 @@ fn slim_plan_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> u16 
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveToolStream {
+    id: String,
+    name: String,
+    lines: Vec<String>,
+}
+
+impl ActiveToolStream {
+    fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            lines: Vec::new(),
+        }
+    }
+
+    fn update(&mut self, partial: &omegon_traits::PartialToolResult) {
+        if partial.tail.trim().is_empty() {
+            return;
+        }
+        self.lines = partial.tail.lines().map(str::to_string).collect();
+    }
+
+    fn visible_lines(&self, max_lines: usize) -> &[String] {
+        let start = self.lines.len().saturating_sub(max_lines);
+        &self.lines[start..]
+    }
+
+    fn height(&self) -> u16 {
+        // Reserve the header immediately on ToolStart so operators can see
+        // that the running tool has a live region even before the first
+        // stdout/stderr partial arrives.
+        1 + (self.lines.len() as u16).min(15)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PlanDisplaySnapshot {
     mode: String,
     completed: usize,
@@ -1446,12 +1483,35 @@ impl PlanDisplaySnapshot {
         format!("plan {}/{} · {}", self.completed, self.total, self.mode)
     }
 
-    fn hint_state(&self) -> SlimPlanHintState {
-        if self.mode == "complete" || self.completed >= self.total {
+    fn is_complete(&self) -> bool {
+        self.mode == "complete" || self.completed >= self.total
+    }
+
+    fn hint_state(&self, plan_area_height: u16) -> SlimPlanHintState {
+        if self.is_complete() {
             SlimPlanHintState::Complete
         } else {
-            SlimPlanHintState::Active
+            SlimPlanHintState::Active {
+                next_visible: self.next_item_visible(plan_area_height),
+            }
         }
+    }
+
+    fn next_item_visible(&self, plan_area_height: u16) -> bool {
+        let max_items = plan_area_height.saturating_sub(1) as usize;
+        if max_items == 0 {
+            return false;
+        }
+        let hidden = self.items.len().saturating_sub(max_items);
+        let visible_items = if hidden > 0 {
+            max_items.saturating_sub(1)
+        } else {
+            max_items
+        };
+        self.items
+            .iter()
+            .position(|item| matches!(item.status, PlanDisplayStatus::Todo))
+            .is_some_and(|idx| idx < visible_items)
     }
 }
 
@@ -1508,7 +1568,7 @@ fn legacy_plan_item(raw: &str) -> Option<(String, PlanDisplayStatus)> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SlimPlanHintState {
     None,
-    Active,
+    Active { next_visible: bool },
     Complete,
 }
 
@@ -1527,11 +1587,55 @@ fn slim_operator_hint(
         "copy mode · select text · /mouse on exits".to_string()
     } else {
         match plan_state {
-            SlimPlanHintState::Active => format!("plan: next · skip · {automation}"),
+            SlimPlanHintState::Active { next_visible: true } => {
+                format!("plan active · advance · suspend · {automation}")
+            }
+            SlimPlanHintState::Active {
+                next_visible: false,
+            } => {
+                format!("plan: next · advance · {automation}")
+            }
             SlimPlanHintState::Complete => "plan done · clear".to_string(),
             SlimPlanHintState::None => format!("copy · transcript · {automation}"),
         }
     }
+}
+
+fn render_active_tool_stream_panel(
+    area: Rect,
+    frame: &mut Frame,
+    t: &dyn theme::Theme,
+    stream: &ActiveToolStream,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let bg = t.surface_bg();
+    let mut lines = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled("─ active tool ", Style::default().fg(t.border_dim()).bg(bg)),
+        Span::styled(
+            stream.name.as_str(),
+            Style::default()
+                .fg(t.accent())
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    let max_tail = area.height.saturating_sub(1) as usize;
+    let text_budget = area.width.saturating_sub(2) as usize;
+    for line in stream.visible_lines(max_tail) {
+        lines.push(Line::from(Span::styled(
+            crate::util::truncate(line, text_budget),
+            Style::default().fg(t.fg()).bg(bg),
+        )));
+    }
+
+    Paragraph::new(lines)
+        .style(Style::default().bg(bg))
+        .wrap(Wrap { trim: false })
+        .render(area, frame.buffer_mut());
 }
 
 fn render_slim_plan_panel(
@@ -1777,6 +1881,7 @@ impl App {
             )),
             status_line: statusline::StatusLine::default(),
             slim_plan_snapshot: None,
+            active_tool_stream: None,
             slim_turn_state: SlimTurnState::Ready,
             effects: effects::Effects::new(),
             bus_commands: Vec::new(),
@@ -3823,11 +3928,16 @@ impl App {
         let is_slim = self.ui_surfaces.is_compact() && !self.focus_mode;
         let status_height = if is_slim { 1u16 } else { 0 };
         let slim_plan_snapshot = if is_slim {
-            self.slim_plan_snapshot.clone().or_else(|| {
-                self.conversation
-                    .latest_plan_progress()
-                    .and_then(PlanDisplaySnapshot::from_legacy_text)
-            })
+            self.slim_plan_snapshot
+                .as_ref()
+                .filter(|snapshot| !snapshot.is_complete())
+                .cloned()
+                .or_else(|| {
+                    self.conversation
+                        .latest_plan_progress()
+                        .and_then(PlanDisplaySnapshot::from_legacy_text)
+                        .filter(|snapshot| !snapshot.is_complete())
+                })
         } else {
             None
         };
@@ -3836,17 +3946,27 @@ impl App {
             .map(|snapshot| slim_plan_snapshot_height(snapshot, main_area.width))
             .unwrap_or(0);
 
-        // Slim layout: conversation → pinned plan → editor → status+footer.
+        let active_tool_stream_height = if is_slim {
+            self.active_tool_stream
+                .as_ref()
+                .map(ActiveToolStream::height)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        // Slim layout: conversation → active tool stream → pinned plan → editor → status+footer.
         // Full layout: conversation → status → editor → footer (status between).
         let chunks = if is_slim {
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Min(3),                   // [0] conversation
-                    Constraint::Length(slim_plan_height), // [1] pinned plan
-                    Constraint::Length(editor_height),    // [2] editor
-                    Constraint::Length(status_height),    // [3] status line
-                    Constraint::Length(footer_height),    // [4] footer
+                    Constraint::Min(3),                            // [0] conversation
+                    Constraint::Length(active_tool_stream_height), // [1] active tool stream
+                    Constraint::Length(slim_plan_height),          // [2] pinned plan
+                    Constraint::Length(editor_height),             // [3] editor
+                    Constraint::Length(status_height),             // [4] status line
+                    Constraint::Length(footer_height),             // [5] footer
                 ])
                 .split(main_area)
         } else {
@@ -3854,20 +3974,22 @@ impl App {
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Min(3),                // [0] conversation
-                    Constraint::Length(0),             // [1] (no pinned plan in Full)
-                    Constraint::Length(editor_height), // [2] editor
-                    Constraint::Length(status_height), // [3] (no status in Full)
-                    Constraint::Length(footer_height), // [4] footer
+                    Constraint::Length(0),             // [1] (no active tool stream in Full)
+                    Constraint::Length(0),             // [2] (no pinned plan in Full)
+                    Constraint::Length(editor_height), // [3] editor
+                    Constraint::Length(status_height), // [4] (no status in Full)
+                    Constraint::Length(footer_height), // [5] footer
                 ])
                 .split(main_area)
         };
 
         // Logical zone indices — consistent regardless of layout order.
         let conversation_area = chunks[0];
-        let slim_plan_area = chunks[1];
-        let editor_area = chunks[2];
-        let status_area = chunks[3];
-        let footer_area = chunks[4];
+        let active_tool_stream_area = chunks[1];
+        let slim_plan_area = chunks[2];
+        let editor_area = chunks[3];
+        let status_area = chunks[4];
+        let footer_area = chunks[5];
 
         // Render tab bar + conversation/widget content
         let t = &self.theme;
@@ -3920,6 +4042,21 @@ impl App {
         self.conversation_area = Some(conversation_area);
         self.editor_area = Some(editor_area);
 
+        if let Some(stream) = self.active_tool_stream.as_ref()
+            && active_tool_stream_area.height > 0
+        {
+            // The active tool stream is a transient projection of the canonical
+            // tool card. It is not inserted into conversation segments or the
+            // focus ring, so Ctrl+O/Tab/Enter inspection still targets the
+            // canonical tool card only.
+            render_active_tool_stream_panel(
+                active_tool_stream_area,
+                frame,
+                self.theme.as_ref(),
+                stream,
+            );
+        }
+
         if let Some(snapshot) = slim_plan_snapshot.as_ref()
             && slim_plan_area.height > 0
         {
@@ -3941,7 +4078,7 @@ impl App {
             let automation = self.settings().automation_level.as_str();
             let plan_state = slim_plan_snapshot
                 .as_ref()
-                .map(PlanDisplaySnapshot::hint_state)
+                .map(|snapshot| snapshot.hint_state(slim_plan_area.height))
                 .unwrap_or(SlimPlanHintState::None);
             self.status_line.operator_hint = Some(slim_operator_hint(
                 self.pending_permission.is_some(),
@@ -7242,6 +7379,7 @@ impl App {
                     | "lifecycle_doctor" => None,
                     _ => Some(serde_json::to_string_pretty(&args).unwrap_or_default()),
                 };
+                self.active_tool_stream = Some(ActiveToolStream::new(id.clone(), name.clone()));
                 self.conversation.push_tool_start(
                     &id,
                     &name,
@@ -7424,6 +7562,13 @@ impl App {
                 self.instrument_panel
                     .tool_finished(completed_name, is_error);
                 self.completed_tool_name = self.last_tool_name.take().or(Some(name));
+                if self
+                    .active_tool_stream
+                    .as_ref()
+                    .is_some_and(|stream| stream.id == id)
+                {
+                    self.active_tool_stream = None;
+                }
                 if self.agent_active {
                     self.slim_turn_state = SlimTurnState::Running;
                 }
@@ -7503,11 +7648,20 @@ impl App {
                 }
             }
             AgentEvent::PlanUpdated { snapshot_json } => {
-                self.slim_plan_snapshot = PlanDisplaySnapshot::from_json(snapshot_json);
+                let snapshot = PlanDisplaySnapshot::from_json(snapshot_json);
+                if snapshot
+                    .as_ref()
+                    .is_some_and(PlanDisplaySnapshot::is_complete)
+                {
+                    self.slim_plan_snapshot = None;
+                } else {
+                    self.slim_plan_snapshot = snapshot;
+                }
             }
             AgentEvent::SessionReset => {
                 self.conversation = ConversationView::new();
                 self.slim_plan_snapshot = None;
+                self.active_tool_stream = None;
                 self.turn = 0;
                 self.tool_calls = 0;
                 self.last_tool_name = None;
@@ -7579,6 +7733,11 @@ impl App {
                 // picks it up via `live_partial` and displays the live
                 // tail / progress / heartbeat in place of the empty
                 // result section while the tool is still in flight.
+                if let Some(stream) = self.active_tool_stream.as_mut()
+                    && stream.id == id
+                {
+                    stream.update(&partial);
+                }
                 self.conversation.push_tool_update(&id, partial);
             }
             _ => {}
@@ -9656,8 +9815,8 @@ mod slash_command_parsing_tests {
     use super::TuiCommand;
     use super::canonical_slash_command;
     use super::{
-        PlanDisplaySnapshot, PlanDisplayStatus, SlimPlanHintState, format_permission_prompt,
-        slim_operator_hint, slim_plan_rows,
+        ActiveToolStream, PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus,
+        SlimPlanHintState, format_permission_prompt, slim_operator_hint, slim_plan_rows,
     };
     use tokio::sync::mpsc;
 
@@ -9744,22 +9903,123 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn slim_operator_hint_prioritizes_blocking_prompts() {
+    fn completed_plan_snapshot_is_not_pinned() {
+        let snapshot = PlanDisplaySnapshot {
+            mode: "complete".to_string(),
+            completed: 2,
+            total: 2,
+            items: vec![
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "one".to_string(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "two".to_string(),
+                },
+            ],
+        };
+
+        assert!(snapshot.is_complete());
+        assert_eq!(snapshot.hint_state(4), SlimPlanHintState::Complete);
+    }
+
+    #[test]
+    fn completed_legacy_plan_snapshot_is_not_pinnable() {
+        let snapshot = PlanDisplaySnapshot::from_legacy_text(
+            "Plan progress\nPlan mode: complete\nProgress: 2/2\n\n1. ● A\n2. ● B",
+        )
+        .unwrap();
+
+        assert!(snapshot.is_complete());
+    }
+
+    #[test]
+    fn active_tool_stream_reserves_header_and_caps_tail() {
+        let mut stream = ActiveToolStream::new("tool-1", "bash");
+        assert_eq!(stream.height(), 1);
+
+        let tail = (0..20)
+            .map(|idx| format!("line {idx}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        stream.update(&omegon_traits::PartialToolResult::content(tail, 100));
+
+        assert_eq!(stream.height(), 16);
+        let visible = stream.visible_lines(15);
+        assert_eq!(visible.len(), 15);
+        assert_eq!(visible.first().map(String::as_str), Some("line 5"));
+        assert_eq!(visible.last().map(String::as_str), Some("line 19"));
+    }
+
+    #[test]
+    fn slim_plan_hint_matches_actually_visible_next_row() {
+        let snapshot = PlanDisplaySnapshot {
+            mode: "executing".to_string(),
+            completed: 1,
+            total: 4,
+            items: vec![
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "done".to_string(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Active,
+                    description: "active".to_string(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Todo,
+                    description: "next".to_string(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Todo,
+                    description: "later".to_string(),
+                },
+            ],
+        };
+
         assert_eq!(
-            slim_operator_hint(true, true, true, SlimPlanHintState::Active, "assistive"),
+            snapshot.hint_state(5),
+            SlimPlanHintState::Active { next_visible: true }
+        );
+        assert_eq!(
+            snapshot.hint_state(4),
+            SlimPlanHintState::Active {
+                next_visible: false
+            }
+        );
+    }
+
+    #[test]
+    fn slim_operator_hint_prioritizes_blocking_prompts() {
+        let active = SlimPlanHintState::Active { next_visible: true };
+        assert_eq!(
+            slim_operator_hint(true, true, true, active, "assistive"),
             "permission · y once · a always · n deny"
         );
         assert_eq!(
-            slim_operator_hint(false, true, true, SlimPlanHintState::Active, "assistive"),
+            slim_operator_hint(false, true, true, active, "assistive"),
             "manual wait · Enter done · Esc cancel"
         );
         assert_eq!(
-            slim_operator_hint(false, false, true, SlimPlanHintState::Active, "assistive"),
+            slim_operator_hint(false, false, true, active, "assistive"),
             "copy mode · select text · /mouse on exits"
         );
         assert_eq!(
-            slim_operator_hint(false, false, false, SlimPlanHintState::Active, "assistive"),
-            "plan: next · skip · assistive"
+            slim_operator_hint(false, false, false, active, "assistive"),
+            "plan active · advance · suspend · assistive"
+        );
+        assert_eq!(
+            slim_operator_hint(
+                false,
+                false,
+                false,
+                SlimPlanHintState::Active {
+                    next_visible: false
+                },
+                "assistive"
+            ),
+            "plan: next · advance · assistive"
         );
         assert_eq!(
             slim_operator_hint(
