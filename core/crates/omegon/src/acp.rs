@@ -163,8 +163,6 @@ fn acp_status_message_text(msg: &str) -> Option<String> {
             "Plan item skipped.".to_string()
         } else if trimmed.starts_with("Plan progress") || mode == "complete" {
             "Plan progress updated.".to_string()
-        } else if trimmed.starts_with("Plan status") || trimmed.starts_with("Plan updated") {
-            "Plan updated.".to_string()
         } else {
             "Plan updated.".to_string()
         };
