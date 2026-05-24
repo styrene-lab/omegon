@@ -1099,5 +1099,14 @@
       "ACP client expansion affordance documented: clients should expose raw_input/raw_output/content details instead of relying on agents to flood collapsed rows.",
       "docs: codify ACP as canonical external integration surface for Zed, Flynt, and future clients"
     ]
+  },
+  "0.23.6": {
+    "status": "released",
+    "channel": "stable",
+    "nodes": [],
+    "frozen": true,
+    "opened": "2026-05-24T19:30:42Z",
+    "released": "2026-05-24T19:30:42Z",
+    "notes": []
   }
 }
