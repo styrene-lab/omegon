@@ -17,7 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ## [Unreleased]
 
 ### Added
-- Started the plan-refinement lifecycle: small work plans now have a compatibility wrapper, central mutation action API, session-scoped visible plan projection metadata, read-only `/plan list` surfaces for operators and agents, and initial registry projection types while preserving existing `/plan` snapshot fields.
+- Started the plan-refinement lifecycle: small work plans now have a compatibility wrapper, central mutation action API, session-scoped visible plan projection metadata, read-only `/plan list` surfaces for operators and agents, initial registry projection types, and OpenSpec-owned task checkbox status updates while preserving existing `/plan` snapshot fields.
 
 ## [0.24.0] - 2026-05-25
 

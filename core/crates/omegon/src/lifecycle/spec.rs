@@ -582,6 +582,141 @@ pub fn add_spec(
     Ok(spec_path)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskCheckboxStatus {
+    Pending,
+    Done,
+}
+
+impl TaskCheckboxStatus {
+    fn marker(self) -> &'static str {
+        match self {
+            Self::Pending => "[ ]",
+            Self::Done => "[x]",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskWriteReport {
+    pub path: PathBuf,
+    pub line: usize,
+    pub change: String,
+    pub group: String,
+    pub task_id: String,
+    pub previous_done: bool,
+    pub new_done: bool,
+    pub description: String,
+}
+
+pub fn set_task_checkbox_status(
+    repo_path: &Path,
+    change_name: &str,
+    group_title: &str,
+    task_id: &str,
+    status: TaskCheckboxStatus,
+) -> anyhow::Result<TaskWriteReport> {
+    let path = repo_path
+        .join("openspec/changes")
+        .join(change_name)
+        .join("tasks.md");
+    let content = fs::read_to_string(&path)?;
+    let newline = if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut lines: Vec<String> = content
+        .split_inclusive(['\n'])
+        .map(|line| line.trim_end_matches(['\r', '\n']).to_string())
+        .collect();
+    if content.ends_with(newline) && lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+
+    let mut current_group: Option<String> = None;
+    let mut group_matches = 0usize;
+    let mut task_matches = Vec::new();
+
+    for (idx, line) in lines.iter().enumerate() {
+        if let Some(title) = markdown_heading_title(line) {
+            current_group = Some(title.to_string());
+            if title == group_title {
+                group_matches += 1;
+            }
+            continue;
+        }
+        if current_group.as_deref() != Some(group_title) {
+            continue;
+        }
+        if let Some((done, id, description, marker_start, marker_end)) =
+            parse_task_line_for_write(line)
+            && id == task_id
+        {
+            task_matches.push((idx, done, description, marker_start, marker_end));
+        }
+    }
+
+    if group_matches == 0 {
+        anyhow::bail!("OpenSpec task group '{group_title}' not found in change '{change_name}'");
+    }
+    if group_matches > 1 {
+        anyhow::bail!("OpenSpec task group '{group_title}' is ambiguous in change '{change_name}'");
+    }
+    if task_matches.is_empty() {
+        anyhow::bail!("OpenSpec task id '{task_id}' not found in group '{group_title}'");
+    }
+    if task_matches.len() > 1 {
+        anyhow::bail!("OpenSpec task id '{task_id}' is ambiguous in group '{group_title}'");
+    }
+
+    let (idx, previous_done, description, marker_start, marker_end) = task_matches.remove(0);
+    let new_done = matches!(status, TaskCheckboxStatus::Done);
+    lines[idx].replace_range(marker_start..marker_end, status.marker());
+    fs::write(&path, lines.join(newline) + newline)?;
+
+    Ok(TaskWriteReport {
+        path,
+        line: idx + 1,
+        change: change_name.to_string(),
+        group: group_title.to_string(),
+        task_id: task_id.to_string(),
+        previous_done,
+        new_done,
+        description,
+    })
+}
+
+fn markdown_heading_title(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("##")?;
+    if rest.starts_with('#') {
+        return None;
+    }
+    Some(rest.trim())
+}
+
+fn parse_task_line_for_write(line: &str) -> Option<(bool, String, String, usize, usize)> {
+    let marker_start = line
+        .find("[ ")
+        .or_else(|| line.find("[x]"))
+        .or_else(|| line.find("[X]"))?;
+    let marker = line.get(marker_start..marker_start + 3)?;
+    let done = matches!(marker, "[x]" | "[X]");
+    let after = line.get(marker_start + 3..)?.trim_start();
+    let (id, description) = after.split_once(' ')?;
+    if !id.chars().all(|c| c.is_ascii_digit() || c == '.') || !id.contains('.') {
+        return None;
+    }
+    Some((
+        done,
+        id.to_string(),
+        description.trim().to_string(),
+        marker_start,
+        marker_start + 3,
+    ))
+}
+
 /// Archive a change by moving it to openspec/archive/.
 pub fn archive_change(repo_path: &Path, change_name: &str) -> anyhow::Result<()> {
     let change_dir = repo_path.join("openspec/changes").join(change_name);
@@ -667,6 +802,66 @@ Then sharedState.cleave.children[i].status becomes running
         assert_eq!(groups[0].tasks[0].id, "done-task");
         assert_eq!(groups[0].tasks[1].description, "Pending task");
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_task_checkbox_status_updates_single_numeric_task() {
+        let dir =
+            std::env::temp_dir().join(format!("omegon-test-task-write-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let change_dir = dir.join("openspec/changes/example");
+        fs::create_dir_all(&change_dir).unwrap();
+        fs::write(
+            change_dir.join("tasks.md"),
+            "# Tasks\n\n## 1. Runtime\n- [ ] 1.1 Pending task\n- [x] 1.2 Done task\n",
+        )
+        .unwrap();
+
+        let report = set_task_checkbox_status(
+            &dir,
+            "example",
+            "1. Runtime",
+            "1.1",
+            TaskCheckboxStatus::Done,
+        )
+        .unwrap();
+
+        assert_eq!(report.line, 4);
+        assert!(!report.previous_done);
+        assert!(report.new_done);
+        let content = fs::read_to_string(change_dir.join("tasks.md")).unwrap();
+        assert!(content.contains("- [x] 1.1 Pending task"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn set_task_checkbox_status_refuses_duplicate_task_id() {
+        let dir = std::env::temp_dir().join(format!(
+            "omegon-test-task-write-dupe-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let change_dir = dir.join("openspec/changes/example");
+        fs::create_dir_all(&change_dir).unwrap();
+        fs::write(
+            change_dir.join("tasks.md"),
+            "# Tasks\n\n## 1. Runtime\n- [ ] 1.1 A\n- [ ] 1.1 B\n",
+        )
+        .unwrap();
+
+        let err = set_task_checkbox_status(
+            &dir,
+            "example",
+            "1. Runtime",
+            "1.1",
+            TaskCheckboxStatus::Done,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("ambiguous"), "{err}");
         let _ = fs::remove_dir_all(&dir);
     }
 

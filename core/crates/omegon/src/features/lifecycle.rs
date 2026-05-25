@@ -1260,6 +1260,55 @@ impl LifecycleFeature {
                 )))
             }
 
+            "set_task_status" => {
+                let name = args["change_name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("change_name required"))?;
+                let group = args["group"]
+                    .as_str()
+                    .or_else(|| args["group_title"].as_str())
+                    .ok_or_else(|| anyhow::anyhow!("group required"))?;
+                let task_id = args["task_id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("task_id required"))?;
+                let status = match args["status"].as_str().unwrap_or("done") {
+                    "done" | "complete" | "completed" => spec::TaskCheckboxStatus::Done,
+                    "pending" | "open" | "reopen" => spec::TaskCheckboxStatus::Pending,
+                    other => {
+                        anyhow::bail!("unsupported task status '{other}'; expected done or pending")
+                    }
+                };
+                let report =
+                    spec::set_task_checkbox_status(&self.repo_path, name, group, task_id, status)?;
+                {
+                    let mut opsx = self.opsx.lock().unwrap();
+                    let change = Self::sync_opsx_change_by_name(&mut opsx, &self.repo_path, name)?;
+                    opsx.update_change_progress(name, change.total_tasks, change.done_tasks)?;
+                }
+                self.provider.lock().unwrap().refresh();
+                Ok(text_result(&format!(
+                    "Updated OpenSpec task:
+- change: {}
+- group: {}
+- task: {}
+- file: {}:{}
+- status: {} -> {}
+- description: {}",
+                    report.change,
+                    report.group,
+                    report.task_id,
+                    report.path.display(),
+                    report.line,
+                    if report.previous_done {
+                        "done"
+                    } else {
+                        "pending"
+                    },
+                    if report.new_done { "done" } else { "pending" },
+                    report.description
+                )))
+            }
+
             "register_test_file" => {
                 let name = args["change_name"]
                     .as_str()
@@ -1403,7 +1452,7 @@ impl LifecycleFeature {
             }
 
             _ => anyhow::bail!(
-                "Unknown action: {action}. Valid: status, get, propose, add_spec, register_tasks, register_test_file, archive"
+                "Unknown action: {action}. Valid: status, get, propose, add_spec, register_tasks, set_task_status, register_test_file, archive"
             ),
         }
     }
@@ -1500,11 +1549,11 @@ impl Feature for LifecycleFeature {
             ToolDefinition {
                 name: crate::tool_registry::lifecycle::OPENSPEC_MANAGE.into(),
                 label: "openspec_manage".into(),
-                description: "Manage OpenSpec changes: list status, get details, propose changes, add specs, register tasks/test files, archive.".into(),
+                description: "Manage OpenSpec changes: list status, get details, propose changes, add specs, register tasks/test files, set task checkbox status, archive.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "action": { "type": "string", "enum": ["status", "get", "propose", "add_spec", "register_tasks", "register_test_file", "archive"] },
+                        "action": { "type": "string", "enum": ["status", "get", "propose", "add_spec", "register_tasks", "set_task_status", "register_test_file", "archive"] },
                         "change_name": { "type": "string" },
                         "name": { "type": "string" },
                         "title": { "type": "string" },
@@ -1512,7 +1561,11 @@ impl Feature for LifecycleFeature {
                         "domain": { "type": "string" },
                         "spec_content": { "type": "string" },
                         "path": { "type": "string", "description": "Test file path for register_test_file." },
-                        "test_file": { "type": "string", "description": "Alias for path." }
+                        "test_file": { "type": "string", "description": "Alias for path." },
+                        "group": { "type": "string", "description": "OpenSpec task group title for set_task_status." },
+                        "group_title": { "type": "string", "description": "Alias for group." },
+                        "task_id": { "type": "string", "description": "Stable numeric task id for set_task_status, such as 2.5." },
+                        "status": { "type": "string", "enum": ["done", "pending"], "description": "Target task checkbox status for set_task_status." }
                     },
                     "required": ["action"]
                 }),
