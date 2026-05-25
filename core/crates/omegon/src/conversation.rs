@@ -151,6 +151,8 @@ pub struct IntentDocument {
     pub completed_work_plans: Vec<CompletedWorkPlan>,
     #[serde(default)]
     pub plan_mode: PlanMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible_plan: Option<VisiblePlanState>,
 
     pub constraints_discovered: Vec<String>,
     pub failed_approaches: Vec<FailedApproach>,
@@ -169,6 +171,162 @@ pub struct WorkItem {
 pub struct CompletedWorkPlan {
     pub items: Vec<WorkItem>,
     pub completed_turn: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct VisiblePlanState {
+    pub plan_id: String,
+    pub scope: PlanScope,
+    pub source: PlanSource,
+    pub binding: PlanBinding,
+    pub mode: PlanMode,
+    pub items: Vec<WorkItem>,
+}
+
+impl Default for VisiblePlanState {
+    fn default() -> Self {
+        Self {
+            plan_id: "session:current".to_string(),
+            scope: PlanScope::Session,
+            source: PlanSource::Ephemeral,
+            binding: PlanBinding::default(),
+            mode: PlanMode::Off,
+            items: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanScope {
+    #[default]
+    Session,
+    Repo,
+}
+
+impl PlanScope {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::Repo => "repo",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanSource {
+    #[default]
+    Ephemeral,
+    Design,
+    OpenSpec,
+    Branch,
+    Hybrid,
+}
+
+impl PlanSource {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Ephemeral => "session",
+            Self::Design => "design",
+            Self::OpenSpec => "openspec",
+            Self::Branch => "branch",
+            Self::Hybrid => "hybrid",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanBinding {
+    pub design_node_id: Option<String>,
+    pub openspec_change: Option<String>,
+    pub openspec_task_group: Option<String>,
+    pub branch: Option<String>,
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanStatus {
+    #[default]
+    Active,
+    Backgrounded,
+    Blocked,
+    Completed,
+    Detached,
+    Archived,
+    Stale,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskIntent {
+    #[default]
+    Unspecified,
+    Research,
+    Design,
+    Spec,
+    Implementation,
+    Validation,
+    Documentation,
+    Operations,
+    Review,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct ProgressSummary {
+    pub completed: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanRegistryEntry {
+    pub plan_id: String,
+    pub title: String,
+    pub scope: PlanScope,
+    pub source: PlanSource,
+    pub status: PlanStatus,
+    pub binding: PlanBinding,
+    pub progress: ProgressSummary,
+    pub resume_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct PlanItemProjection {
+    pub id: String,
+    pub label: String,
+    pub status: WorkItemStatus,
+    pub intent: TaskIntent,
+    pub writable: bool,
+}
+
+impl Default for PlanItemProjection {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            label: String::new(),
+            status: WorkItemStatus::Pending,
+            intent: TaskIntent::Unspecified,
+            writable: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlanAction {
+    View,
+    Set { items: Vec<String> },
+    Approve,
+    Execute,
+    Advance,
+    Complete { index: usize },
+    Skip,
+    Clear,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -308,22 +466,22 @@ impl IntentDocument {
                                 })
                                 .unwrap_or_default();
                             if !items.is_empty() {
-                                self.set_work_plan(items);
+                                self.apply_plan_action(PlanAction::Set { items });
                             }
                         }
-                        "advance" => self.advance_work_plan(),
-                        "approve" => self.approve_work_plan(),
-                        "execute" => self.execute_work_plan(),
+                        "advance" => self.apply_plan_action(PlanAction::Advance),
+                        "approve" => self.apply_plan_action(PlanAction::Approve),
+                        "execute" => self.apply_plan_action(PlanAction::Execute),
                         "complete" => {
-                            let idx = call
+                            let index = call
                                 .arguments
                                 .get("index")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0) as usize;
-                            self.complete_work_item(idx);
+                            self.apply_plan_action(PlanAction::Complete { index });
                         }
-                        "skip" => self.skip_work_item(),
-                        "clear" => self.clear_work_plan(),
+                        "skip" => self.apply_plan_action(PlanAction::Skip),
+                        "clear" => self.apply_plan_action(PlanAction::Clear),
                         _ => {}
                     }
                 }
@@ -380,6 +538,27 @@ impl IntentDocument {
 
     /// Set the work plan, replacing any existing plan.
     pub fn set_work_plan(&mut self, items: Vec<String>) {
+        self.apply_plan_action(PlanAction::Set { items });
+    }
+
+    pub fn apply_plan_action(&mut self, action: PlanAction) {
+        match action {
+            PlanAction::View => self.normalize_visible_plan(),
+            PlanAction::Set { items } => self.set_work_plan_inner(items),
+            PlanAction::Approve => self.approve_work_plan_inner(),
+            PlanAction::Execute => self.execute_work_plan_inner(),
+            PlanAction::Advance => self.advance_work_plan_inner(),
+            PlanAction::Complete { index } => self.complete_work_item_inner(index),
+            PlanAction::Skip => self.skip_work_item_inner(),
+            PlanAction::Clear => {
+                self.clear_work_plan_inner();
+                return;
+            }
+        }
+        self.sync_visible_plan_from_legacy();
+    }
+
+    fn set_work_plan_inner(&mut self, items: Vec<String>) {
         self.work_plan = items
             .into_iter()
             .filter_map(|desc| {
@@ -401,6 +580,10 @@ impl IntentDocument {
 
     /// Approve the current work plan without starting execution.
     pub fn approve_work_plan(&mut self) {
+        self.apply_plan_action(PlanAction::Approve);
+    }
+
+    fn approve_work_plan_inner(&mut self) {
         if !self.work_plan.is_empty() && !self.work_plan_complete() {
             self.plan_mode = PlanMode::Approved;
         }
@@ -408,6 +591,10 @@ impl IntentDocument {
 
     /// Move an approved plan into execution.
     pub fn execute_work_plan(&mut self) {
+        self.apply_plan_action(PlanAction::Execute);
+    }
+
+    fn execute_work_plan_inner(&mut self) {
         if !self.work_plan.is_empty() && !self.work_plan_complete() {
             self.plan_mode = PlanMode::Executing;
             if !self
@@ -426,12 +613,21 @@ impl IntentDocument {
 
     /// Clear the active work plan and disable the plan gate.
     pub fn clear_work_plan(&mut self) {
+        self.apply_plan_action(PlanAction::Clear);
+    }
+
+    fn clear_work_plan_inner(&mut self) {
         self.work_plan.clear();
         self.plan_mode = PlanMode::Off;
+        self.visible_plan = None;
     }
 
     /// Advance the work plan: mark the current active item done and activate the next.
     pub fn advance_work_plan(&mut self) {
+        self.apply_plan_action(PlanAction::Advance);
+    }
+
+    fn advance_work_plan_inner(&mut self) {
         let active_idx = self
             .work_plan
             .iter()
@@ -449,6 +645,10 @@ impl IntentDocument {
 
     /// Mark a specific work item by index as done.
     pub fn complete_work_item(&mut self, index: usize) {
+        self.apply_plan_action(PlanAction::Complete { index });
+    }
+
+    fn complete_work_item_inner(&mut self, index: usize) {
         if let Some(item) = self.work_plan.get_mut(index) {
             item.status = WorkItemStatus::Done;
         }
@@ -469,6 +669,10 @@ impl IntentDocument {
 
     /// Skip the current active item and activate the next.
     pub fn skip_work_item(&mut self) {
+        self.apply_plan_action(PlanAction::Skip);
+    }
+
+    fn skip_work_item_inner(&mut self) {
         let active_idx = self
             .work_plan
             .iter()
@@ -489,6 +693,36 @@ impl IntentDocument {
             self.record_completed_work_plan();
             self.plan_mode = PlanMode::Complete;
         }
+    }
+
+    fn normalize_visible_plan(&mut self) {
+        self.sync_visible_plan_from_legacy();
+    }
+
+    fn sync_visible_plan_from_legacy(&mut self) {
+        if self.work_plan.is_empty() {
+            if self.plan_mode == PlanMode::Off {
+                self.visible_plan = None;
+            }
+            return;
+        }
+
+        self.visible_plan = Some(VisiblePlanState {
+            plan_id: self
+                .visible_plan
+                .as_ref()
+                .map(|plan| plan.plan_id.clone())
+                .unwrap_or_else(|| "session:current".to_string()),
+            scope: PlanScope::Session,
+            source: PlanSource::Ephemeral,
+            binding: self
+                .visible_plan
+                .as_ref()
+                .map(|plan| plan.binding.clone())
+                .unwrap_or_default(),
+            mode: self.plan_mode,
+            items: self.work_plan.clone(),
+        });
     }
 
     fn record_completed_work_plan(&mut self) {
@@ -612,7 +846,80 @@ impl IntentDocument {
             "completed": done,
             "total": self.work_plan.len(),
             "items": items,
+            "plan_id": self
+                .visible_plan
+                .as_ref()
+                .map(|plan| plan.plan_id.as_str())
+                .unwrap_or("session:current"),
+            "scope": self
+                .visible_plan
+                .as_ref()
+                .map(|plan| plan.scope.label())
+                .unwrap_or("session"),
+            "source": self
+                .visible_plan
+                .as_ref()
+                .map(|plan| plan.source.label())
+                .unwrap_or("session"),
         })
+    }
+
+    pub fn visible_plan_registry_entry(&self) -> Option<PlanRegistryEntry> {
+        let plan = self.visible_plan.as_ref()?;
+        let completed = plan
+            .items
+            .iter()
+            .filter(|item| matches!(item.status, WorkItemStatus::Done))
+            .count();
+        let status = if plan.mode == PlanMode::Complete {
+            PlanStatus::Completed
+        } else {
+            PlanStatus::Active
+        };
+
+        Some(PlanRegistryEntry {
+            plan_id: plan.plan_id.clone(),
+            title: plan
+                .items
+                .iter()
+                .find(|item| item.status == WorkItemStatus::Active)
+                .or_else(|| plan.items.first())
+                .map(|item| item.description.clone())
+                .unwrap_or_else(|| "Session plan".to_string()),
+            scope: plan.scope,
+            source: plan.source,
+            status,
+            binding: plan.binding.clone(),
+            progress: ProgressSummary {
+                completed,
+                total: plan.items.len(),
+            },
+            resume_hint: Some(format!(
+                "{} · {}/{}",
+                plan.source.label(),
+                completed,
+                plan.items.len()
+            )),
+        })
+    }
+
+    pub fn visible_plan_items(&self) -> Vec<PlanItemProjection> {
+        self.visible_plan
+            .as_ref()
+            .map(|plan| {
+                plan.items
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, item)| PlanItemProjection {
+                        id: format!("{}:{}", plan.plan_id, idx + 1),
+                        label: item.description.clone(),
+                        status: item.status,
+                        intent: TaskIntent::Unspecified,
+                        writable: plan.scope == PlanScope::Session,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -3953,6 +4260,92 @@ mod tests {
         assert_eq!(loaded.work_plan.len(), 2);
         assert_eq!(loaded.work_plan[0].status, WorkItemStatus::Done);
         assert_eq!(loaded.work_plan[1].status, WorkItemStatus::Active);
+        assert_eq!(
+            loaded.visible_plan.as_ref().unwrap().scope,
+            PlanScope::Session
+        );
+        assert_eq!(
+            loaded.visible_plan.as_ref().unwrap().source,
+            PlanSource::Ephemeral
+        );
+    }
+
+    #[test]
+    fn legacy_work_plan_snapshot_normalizes_to_visible_plan() {
+        let json = r#"{
+            "work_plan": [
+                {"description":"Legacy step","status":"active"}
+            ],
+            "plan_mode":"executing"
+        }"#;
+        let mut intent: IntentDocument = serde_json::from_str(json).unwrap();
+
+        intent.apply_plan_action(PlanAction::View);
+
+        let visible = intent.visible_plan.as_ref().unwrap();
+        assert_eq!(visible.plan_id, "session:current");
+        assert_eq!(visible.scope, PlanScope::Session);
+        assert_eq!(visible.source, PlanSource::Ephemeral);
+        assert_eq!(visible.mode, PlanMode::Executing);
+        assert_eq!(visible.items[0].description, "Legacy step");
+
+        let snapshot = intent.work_plan_snapshot_json();
+        assert_eq!(snapshot["mode"], "executing");
+        assert_eq!(snapshot["plan_id"], "session:current");
+        assert_eq!(snapshot["scope"], "session");
+        assert_eq!(snapshot["source"], "session");
+    }
+
+    #[test]
+    fn plan_action_clear_removes_visible_plan() {
+        let mut intent = IntentDocument::default();
+        intent.apply_plan_action(PlanAction::Set {
+            items: vec!["A".into()],
+        });
+        assert!(intent.visible_plan.is_some());
+
+        intent.apply_plan_action(PlanAction::Clear);
+
+        assert!(intent.work_plan.is_empty());
+        assert_eq!(intent.plan_mode, PlanMode::Off);
+        assert!(intent.visible_plan.is_none());
+    }
+
+    #[test]
+    fn visible_plan_registry_entry_projects_session_plan() {
+        let mut intent = IntentDocument::default();
+        intent.apply_plan_action(PlanAction::Set {
+            items: vec!["Read".into(), "Patch".into()],
+        });
+        intent.apply_plan_action(PlanAction::Advance);
+
+        let entry = intent.visible_plan_registry_entry().unwrap();
+        assert_eq!(entry.plan_id, "session:current");
+        assert_eq!(entry.scope, PlanScope::Session);
+        assert_eq!(entry.source, PlanSource::Ephemeral);
+        assert_eq!(entry.status, PlanStatus::Active);
+        assert_eq!(entry.progress.completed, 1);
+        assert_eq!(entry.progress.total, 2);
+
+        let items = intent.visible_plan_items();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].id, "session:current:1");
+        assert_eq!(items[0].intent, TaskIntent::Unspecified);
+        assert!(items[0].writable);
+    }
+
+    #[test]
+    fn completed_visible_plan_projects_completed_registry_status() {
+        let mut intent = IntentDocument::default();
+        intent.apply_plan_action(PlanAction::Set {
+            items: vec!["Only".into()],
+        });
+        intent.apply_plan_action(PlanAction::Advance);
+
+        let entry = intent.visible_plan_registry_entry().unwrap();
+        assert_eq!(entry.status, PlanStatus::Completed);
+        assert_eq!(entry.progress.completed, 1);
+        assert_eq!(entry.progress.total, 1);
     }
 
     #[test]

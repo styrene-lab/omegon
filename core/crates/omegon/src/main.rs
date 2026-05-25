@@ -6,6 +6,7 @@
 //! Phase 2: Native TUI rendering.
 //! Phase 3: Native LLM provider clients.
 
+use crate::conversation::PlanAction;
 use clap::{Args, Parser, Subcommand};
 use crossterm::ExecutableCommand;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
@@ -6456,13 +6457,15 @@ fn execute_plan_slash_command(
             | CanonicalSlashCommand::PlanClear
     );
     match command {
-        CanonicalSlashCommand::PlanView => {}
-        CanonicalSlashCommand::PlanSet(ref items) => intent.set_work_plan(items.clone()),
-        CanonicalSlashCommand::PlanApprove => intent.approve_work_plan(),
-        CanonicalSlashCommand::PlanExecute => intent.execute_work_plan(),
-        CanonicalSlashCommand::PlanAdvance => intent.advance_work_plan(),
-        CanonicalSlashCommand::PlanSkip => intent.skip_work_item(),
-        CanonicalSlashCommand::PlanClear => intent.clear_work_plan(),
+        CanonicalSlashCommand::PlanView => intent.apply_plan_action(PlanAction::View),
+        CanonicalSlashCommand::PlanSet(ref items) => intent.apply_plan_action(PlanAction::Set {
+            items: items.clone(),
+        }),
+        CanonicalSlashCommand::PlanApprove => intent.apply_plan_action(PlanAction::Approve),
+        CanonicalSlashCommand::PlanExecute => intent.apply_plan_action(PlanAction::Execute),
+        CanonicalSlashCommand::PlanAdvance => intent.apply_plan_action(PlanAction::Advance),
+        CanonicalSlashCommand::PlanSkip => intent.apply_plan_action(PlanAction::Skip),
+        CanonicalSlashCommand::PlanClear => intent.apply_plan_action(PlanAction::Clear),
         _ => {
             return SlashCommandResponse {
                 accepted: false,
