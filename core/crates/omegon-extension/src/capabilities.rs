@@ -51,6 +51,10 @@ pub struct Capabilities {
     #[serde(default)]
     pub streaming: bool,
 
+    /// Extension can push local voice notifications to the host.
+    #[serde(default)]
+    pub voice: bool,
+
     /// Extension can return declarative host action requests in tool results.
     #[serde(default)]
     pub host_actions: bool,
@@ -76,6 +80,7 @@ impl Default for Capabilities {
             sampling: false,
             elicitation: false,
             streaming: false,
+            voice: false,
             host_actions: false,
             host_action_execution: false,
         }
@@ -95,6 +100,7 @@ impl Capabilities {
             sampling: true,
             elicitation: true,
             streaming: true,
+            voice: true,
             host_actions: true,
             host_action_execution: true,
         }
@@ -113,6 +119,7 @@ impl Capabilities {
             sampling: self.sampling && other.sampling,
             elicitation: self.elicitation && other.elicitation,
             streaming: self.streaming && other.streaming,
+            voice: self.voice && other.voice,
             host_actions: self.host_actions && other.host_actions,
             host_action_execution: self.host_action_execution && other.host_action_execution,
         }
@@ -164,6 +171,7 @@ mod tests {
         assert!(caps.tools);
         assert!(!caps.widgets);
         assert!(!caps.sampling);
+        assert!(!caps.voice);
         assert!(!caps.host_actions);
         assert!(!caps.host_action_execution);
     }
@@ -175,6 +183,7 @@ mod tests {
         assert!(caps.widgets);
         assert!(caps.sampling);
         assert!(caps.elicitation);
+        assert!(caps.voice);
         assert!(caps.host_actions);
         assert!(caps.host_action_execution);
     }
@@ -193,6 +202,7 @@ mod tests {
         assert!(active.widgets);
         assert!(!active.mind);
         assert!(!active.sampling);
+        assert!(!active.voice);
         assert!(!active.host_actions);
         assert!(!active.host_action_execution);
     }
@@ -207,8 +217,21 @@ mod tests {
 
         assert!(caps.tools);
         assert!(caps.streaming);
+        assert!(!caps.voice);
         assert!(!caps.host_actions);
         assert!(!caps.host_action_execution);
+    }
+
+    #[test]
+    fn test_capabilities_deserialize_explicit_voice_true() {
+        let caps: Capabilities = serde_json::from_value(serde_json::json!({
+            "tools": true,
+            "voice": true
+        }))
+        .unwrap();
+
+        assert!(caps.tools);
+        assert!(caps.voice);
     }
 
     #[test]

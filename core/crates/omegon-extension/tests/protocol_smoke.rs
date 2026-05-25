@@ -225,6 +225,7 @@ fn legacy_capabilities_payload_defaults_host_action_capabilities_off() {
 
     assert!(caps.tools);
     assert!(caps.streaming);
+    assert!(!caps.voice);
     assert!(!caps.host_actions);
     assert!(!caps.host_action_execution);
 }
