@@ -34,10 +34,17 @@ The existing vox bridge polls `vox_route` every 500ms. That is acceptable for ch
 **Status:** decided
 **Rationale:** Voice input is the local operator speaking. It should not use the untrusted external-message containment used for Discord/Slack vox messages.
 
-### Decision: Implement transcription routing before voice state UI
+### Decision: Omegon owns voice state observability, extensions own capture semantics
 
 **Status:** decided
-**Rationale:** The release blocker is getting completed transcriptions into the agent loop. `voice/state` broadcast for mic indicators is useful but can be implemented after the prompt path is proven unless acceptance review requires it in the same slice.
+**Rationale:** Omegon should not encode OS-, backend-, USB-, hardware mute-, or privacy-indicator semantics. For 0.24.0, Omegon only accepts the extension-reported `voice/state` payload and surfaces the required TUI-observable lifecycle/mic-open indicator. Lower-level capture details remain the responsibility of voice extensions.
+
+Contract boundary:
+
+- Required host-visible fields: `state` and `mic_open`.
+- `mic_open` means the extension reports that an input capture session/stream is active.
+- `mic_open` does **not** assert physical USB LED state, hardware mute state, audio energy, OS permission state, or OS privacy-indicator visibility.
+- Optional fields such as `backend`, `device`, `permission`, `error`, or audio levels may be passed through later, but they are extension-owned metadata and are not required for 0.24.0.
 
 ## Implementation plan
 
@@ -46,10 +53,10 @@ The existing vox bridge polls `vox_route` every 500ms. That is acceptable for ch
 3. Add a notification dispatch seam to extension process handling so JSON-RPC notifications are not silently dropped.
 4. Add `extensions::voice_bridge` to convert `voice/transcription` notifications into `DaemonEventEnvelope` entries.
 5. Wire voice-capable extensions into daemon startup with the shared daemon event queue.
-6. Validate with `omegon-voice` end-to-end.
+6. Add minimal `voice/state` observability for the TUI mic indicator path.
+7. Validate with `omegon-voice` end-to-end.
 
 ## Open questions
 
 - [assumption] The installed `omegon-voice` extension declares or can be updated to declare `capabilities.voice = true` in its manifest/initialize payload.
 - [assumption] The daemon event queue used by the vox bridge is the correct initial injection target for voice events.
-- Should `voice/state` be included in the same PR or split after transcription routing?
