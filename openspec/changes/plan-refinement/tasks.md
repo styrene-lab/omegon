@@ -21,7 +21,7 @@
 ## 3. Lifecycle Projection
 <!-- specs: lifecycle/work-plan-threading -->
 
-- [ ] 3.1 Project OpenSpec task groups into compact plan items.
+- [x] 3.1 Project OpenSpec task groups into compact plan items.
 - [ ] 3.2 Surface design-tree focus/binding candidates in the plan projection.
 - [ ] 3.3 Expose source/binding through TUI, IPC, and web snapshots.
 
