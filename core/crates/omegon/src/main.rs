@@ -3647,45 +3647,38 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         .await
         .unwrap_or_else(|| requested_start_model.clone());
     if resolved_cli_model != requested_start_model {
-        tracing::info!(requested = %requested_start_model, resolved = %resolved_cli_model, "resolved startup model to executable provider");
-        if let Ok(mut s) = shared_settings.lock() {
-            s.set_model(&resolved_cli_model);
-        }
+        tracing::info!(requested = %requested_start_model, resolved = %resolved_cli_model, "resolved startup model to executable provider without changing selected model");
     }
 
-    let mut provider_connected = true;
-    // Try the resolved model first; if unavailable, auto-detect any working provider.
-    let (effective_model, bridge): (String, Box<dyn LlmBridge>) = match providers::auto_detect_bridge(&resolved_cli_model).await
-    {
-        Some(native) => {
-            tracing::info!("using native LLM provider");
-            (resolved_cli_model.clone(), native)
-        }
-        None => match providers::automation_safe_model() {
-            Some(safe) if providers::auto_detect_bridge(&safe).await.is_some() => {
-                tracing::info!(
-                    configured = %resolved_cli_model, resolved = %safe,
-                    "configured model unavailable — switching to detected provider"
-                );
-                if let Ok(mut s) = shared_settings.lock() {
-                    s.set_model(&safe);
-                }
-                let bridge = providers::auto_detect_bridge(&safe).await.unwrap();
-                (safe, bridge)
-            }
-            _ => {
-            tracing::warn!(
-                "no LLM provider available — run /login anthropic or `omegon auth login` to connect"
-            );
-            eprintln!("No LLM provider configured. Use /login <provider> in the TUI or run `omegon auth login` first.");
-            provider_connected = false;
-            (resolved_cli_model.clone(), Box::new(bridge::NullBridge) as Box<dyn LlmBridge>)
-        }
-        }
+    let resolved_bridge = providers::auto_detect_bridge(&resolved_cli_model).await;
+    let startup_decision = decide_interactive_startup_model(
+        &requested_start_model,
+        &resolved_cli_model,
+        resolved_bridge.is_some(),
+    );
+    let (_effective_model, bridge): (String, Box<dyn LlmBridge>) = if let Some(native) = resolved_bridge {
+        tracing::info!("using native LLM provider");
+        (startup_decision.bridge_model.clone(), native)
+    } else {
+        tracing::warn!(
+            selected = %startup_decision.selected_model,
+            bridge_model = %startup_decision.bridge_model,
+            "no LLM provider available for selected interactive model"
+        );
+        eprintln!(
+            "No LLM provider configured for {}. Use /login <provider> in the TUI or run `omegon auth login` first.",
+            startup_decision.selected_model
+        );
+        (
+            startup_decision.bridge_model.clone(),
+            Box::new(bridge::NullBridge) as Box<dyn LlmBridge>,
+        )
     };
-    // Update settings with provider status before TUI reads it
+    // Update settings with selected-model provider status before TUI reads it.
+    // Do not mutate s.model here: profile/CLI model selection is operator intent,
+    // while `effective_model` is only the bridge route for this startup.
     if let Ok(mut s) = shared_settings.lock() {
-        s.provider_connected = provider_connected || auth::provider_connected_for_model(&effective_model);
+        s.provider_connected = startup_decision.provider_connected;
     }
     let bridge: Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>> =
         Arc::new(tokio::sync::RwLock::new(bridge));
@@ -5391,6 +5384,27 @@ fn split_interactive_agent(
         conversation: agent.conversation,
     };
     (host, state)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InteractiveStartupModelDecision {
+    selected_model: String,
+    bridge_model: String,
+    provider_connected: bool,
+    use_null_bridge: bool,
+}
+
+fn decide_interactive_startup_model(
+    selected_model: &str,
+    resolved_model: &str,
+    resolved_available: bool,
+) -> InteractiveStartupModelDecision {
+    InteractiveStartupModelDecision {
+        selected_model: selected_model.to_string(),
+        bridge_model: resolved_model.to_string(),
+        provider_connected: resolved_available,
+        use_null_bridge: !resolved_available,
+    }
 }
 
 #[derive(Clone)]
@@ -8355,6 +8369,70 @@ mod tests {
         assert!(!auth::provider_connected_for_model(
             "nonexistent-provider:test-model"
         ));
+    }
+
+    #[test]
+    fn interactive_startup_uses_selected_model_when_available() {
+        let decision =
+            decide_interactive_startup_model("openai-codex:gpt-5.5", "openai-codex:gpt-5.5", true);
+
+        assert_eq!(decision.selected_model, "openai-codex:gpt-5.5");
+        assert_eq!(decision.bridge_model, "openai-codex:gpt-5.5");
+        assert!(decision.provider_connected);
+        assert!(!decision.use_null_bridge);
+    }
+
+    #[test]
+    fn interactive_startup_preserves_selected_model_when_route_resolves_differently() {
+        let decision =
+            decide_interactive_startup_model("openai:gpt-5.5", "openai-codex:gpt-5.5", true);
+
+        assert_eq!(decision.selected_model, "openai:gpt-5.5");
+        assert_eq!(decision.bridge_model, "openai-codex:gpt-5.5");
+        assert!(decision.provider_connected);
+        assert!(!decision.use_null_bridge);
+    }
+
+    #[test]
+    fn interactive_startup_does_not_replace_unavailable_profile_model_with_safe_fallback() {
+        let decision =
+            decide_interactive_startup_model("openai-codex:gpt-5.5", "openai-codex:gpt-5.5", false);
+
+        assert_eq!(decision.selected_model, "openai-codex:gpt-5.5");
+        assert_eq!(decision.bridge_model, "openai-codex:gpt-5.5");
+        assert!(!decision.provider_connected);
+        assert!(decision.use_null_bridge);
+    }
+
+    #[test]
+    fn interactive_loop_config_uses_selected_model_after_startup_resolution() {
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
+            "openai-codex:gpt-5.5",
+        )));
+        {
+            let mut s = shared_settings.lock().unwrap();
+            let decision = decide_interactive_startup_model(
+                "openai-codex:gpt-5.5",
+                "openai-codex:gpt-5.5",
+                false,
+            );
+            s.provider_connected = decision.provider_connected;
+        }
+        let secrets_dir = tempfile::tempdir().unwrap();
+        let runtime = InteractiveRuntimeResources {
+            cwd: PathBuf::from("."),
+            secrets: std::sync::Arc::new(
+                omegon_secrets::SecretsManager::new(secrets_dir.path()).unwrap(),
+            ),
+            context_metrics: crate::features::context::SharedContextMetrics::new(),
+        };
+        let pending_compact = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let loop_config =
+            build_interactive_loop_config(&runtime, &shared_settings, &pending_compact);
+
+        assert_eq!(loop_config.model, "openai-codex:gpt-5.5");
+        assert!(!shared_settings.lock().unwrap().provider_connected);
     }
 
     #[test]
