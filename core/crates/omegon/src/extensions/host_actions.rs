@@ -393,9 +393,15 @@ impl TerminalCreateBackend for RealTerminalCreateBackend {
         plan: TerminalCreateLaunchPlan,
     ) -> Result<omegon_extension::actions::terminal::TerminalCreateResult, String> {
         let request = terminal_backend_request_from_plan(plan, &self.workspace_cwd, None);
-        let response = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(terminal::start_host_terminal(request))
-        })?;
+        let response = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|err| format!("failed to create terminal backend runtime: {err}"))?;
+            runtime.block_on(terminal::start_host_terminal(request))
+        })
+        .join()
+        .map_err(|_| "terminal backend worker panicked".to_string())??;
         Ok(omegon_extension::actions::terminal::TerminalCreateResult {
             terminal_id: response.terminal_id,
             backend: response.backend,
