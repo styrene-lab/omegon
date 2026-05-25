@@ -70,4 +70,9 @@ jobs:
     uses: styrene-lab/lipstyk/.github/workflows/lipstyk.yml@main
     with:
       paths: "core/crates/"
-      threshold: 50
+      # The reusable workflow runs the full scan threshold before the PR diff
+      # gate. Keep the full scan report/SARIF useful without blocking every PR
+      # on existing repository-wide baseline debt; the diff threshold remains
+      # the merge gate for newly introduced findings.
+      threshold: 999999
+      diff-threshold: 15

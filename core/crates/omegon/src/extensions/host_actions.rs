@@ -62,19 +62,17 @@ pub(super) struct RuntimeHostActionPolicy {
     pub operator_approved: bool,
 }
 
-/// Minimal executor registry seam for Phase C. Issue #76 registers real
-/// `terminal.create@1` execution later.
 #[derive(Default)]
 pub(super) struct HostActionExecutorRegistry {
     supported_types: Vec<String>,
-    terminal_create_backend: Option<Box<dyn TerminalCreateBackend + Send + Sync>>,
+    terminal_create_registry: Option<TerminalBackendRegistry>,
 }
 
 impl HostActionExecutorRegistry {
     pub fn with_supported_types(types: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
             supported_types: types.into_iter().map(Into::into).collect(),
-            terminal_create_backend: None,
+            terminal_create_registry: None,
         }
     }
 
@@ -89,14 +87,27 @@ impl HostActionExecutorRegistry {
             supported_types: vec![
                 omegon_extension::actions::terminal::TERMINAL_CREATE_V1.to_string(),
             ],
-            terminal_create_backend: Some(backend),
+            terminal_create_registry: Some(TerminalBackendRegistry::new(vec![backend])),
         }
     }
 
     pub fn with_real_terminal_backend(workspace_cwd: impl Into<std::path::PathBuf>) -> Self {
-        Self::with_terminal_backend(Box::new(RealTerminalCreateBackend {
-            workspace_cwd: workspace_cwd.into(),
-        }))
+        Self::with_terminal_registry(TerminalBackendRegistry::new(vec![Box::new(
+            RealTerminalCreateBackend {
+                workspace_cwd: workspace_cwd.into(),
+            },
+        )]))
+    }
+
+    pub(super) fn with_terminal_registry(
+        terminal_create_registry: TerminalBackendRegistry,
+    ) -> Self {
+        Self {
+            supported_types: vec![
+                omegon_extension::actions::terminal::TERMINAL_CREATE_V1.to_string(),
+            ],
+            terminal_create_registry: Some(terminal_create_registry),
+        }
     }
 
     fn supports(&self, action_type: &str) -> bool {
@@ -201,9 +212,9 @@ pub(super) fn process_host_action_candidate(
     }
 
     if action.action_type == omegon_extension::actions::terminal::TERMINAL_CREATE_V1
-        && let Some(backend) = executors.terminal_create_backend.as_deref()
+        && let Some(registry) = executors.terminal_create_registry.as_ref()
     {
-        let outcome = execute_terminal_create_with_backend(&action, manifest, backend);
+        let outcome = execute_terminal_create_with_registry(&action, manifest, registry);
         audit_host_action_outcome(
             &scoped_id,
             Some(&action.action_type),
@@ -350,11 +361,59 @@ fn serialization_error_outcome(err: serde_json::Error) -> Value {
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TerminalPlacementCapability {
+    BackgroundSession,
+    SidePane,
+    BottomPane,
+    NewTab,
+}
+
+impl TerminalPlacementCapability {
+    fn as_result_str(self) -> &'static str {
+        match self {
+            Self::BackgroundSession => "background_session",
+            Self::SidePane => "side_pane",
+            Self::BottomPane => "bottom_pane",
+            Self::NewTab => "new_tab",
+        }
+    }
+}
+
 pub(super) trait TerminalCreateBackend {
+    fn name(&self) -> &'static str;
+
+    fn supports_placement(&self, placement: TerminalPlacementCapability) -> bool;
+
     fn create(
         &self,
         plan: TerminalCreateLaunchPlan,
     ) -> Result<omegon_extension::actions::terminal::TerminalCreateResult, String>;
+}
+
+pub(super) struct TerminalBackendRegistry {
+    backends: Vec<Box<dyn TerminalCreateBackend + Send + Sync>>,
+}
+
+impl TerminalBackendRegistry {
+    pub(super) fn new(backends: Vec<Box<dyn TerminalCreateBackend + Send + Sync>>) -> Self {
+        Self { backends }
+    }
+
+    fn select(
+        &self,
+        requested: TerminalPlacementCapability,
+    ) -> Option<&(dyn TerminalCreateBackend + Send + Sync)> {
+        self.backends
+            .iter()
+            .find(|backend| backend.supports_placement(requested))
+            .or_else(|| {
+                self.backends.iter().find(|backend| {
+                    backend.supports_placement(TerminalPlacementCapability::BackgroundSession)
+                })
+            })
+            .map(|backend| backend.as_ref())
+    }
 }
 
 pub(super) struct UnavailableTerminalCreateBackend {
@@ -362,6 +421,14 @@ pub(super) struct UnavailableTerminalCreateBackend {
 }
 
 impl TerminalCreateBackend for UnavailableTerminalCreateBackend {
+    fn name(&self) -> &'static str {
+        "unavailable"
+    }
+
+    fn supports_placement(&self, _placement: TerminalPlacementCapability) -> bool {
+        true
+    }
+
     fn create(
         &self,
         _plan: TerminalCreateLaunchPlan,
@@ -375,6 +442,14 @@ pub(super) struct FakeTerminalCreateBackend {
 }
 
 impl TerminalCreateBackend for FakeTerminalCreateBackend {
+    fn name(&self) -> &'static str {
+        "fake"
+    }
+
+    fn supports_placement(&self, _placement: TerminalPlacementCapability) -> bool {
+        true
+    }
+
     fn create(
         &self,
         _plan: TerminalCreateLaunchPlan,
@@ -388,6 +463,14 @@ pub(super) struct RealTerminalCreateBackend {
 }
 
 impl TerminalCreateBackend for RealTerminalCreateBackend {
+    fn name(&self) -> &'static str {
+        "portable_pty"
+    }
+
+    fn supports_placement(&self, placement: TerminalPlacementCapability) -> bool {
+        matches!(placement, TerminalPlacementCapability::BackgroundSession)
+    }
+
     fn create(
         &self,
         plan: TerminalCreateLaunchPlan,
@@ -414,20 +497,62 @@ impl TerminalCreateBackend for RealTerminalCreateBackend {
 pub(super) fn execute_terminal_create_with_backend(
     action: &HostAction,
     manifest: &ExtensionManifest,
-    backend: &dyn TerminalCreateBackend,
+    backend: &(dyn TerminalCreateBackend + Send + Sync),
+) -> HostActionOutcome {
+    let plan = match validate_terminal_create_policy(action, manifest) {
+        Ok(plan) => plan,
+        Err(outcome) => return outcome,
+    };
+    execute_terminal_create_plan(action, plan, backend)
+}
+
+pub(super) fn execute_terminal_create_with_registry(
+    action: &HostAction,
+    manifest: &ExtensionManifest,
+    registry: &TerminalBackendRegistry,
 ) -> HostActionOutcome {
     let plan = match validate_terminal_create_policy(action, manifest) {
         Ok(plan) => plan,
         Err(outcome) => return outcome,
     };
 
+    let requested = plan.requested_placement();
+    let Some(backend) = registry.select(requested) else {
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Unsupported,
+            "terminal_backend_unavailable",
+            "no terminal backend is available",
+        );
+    };
+    execute_terminal_create_plan(action, plan, backend)
+}
+
+fn execute_terminal_create_plan(
+    action: &HostAction,
+    plan: TerminalCreateLaunchPlan,
+    backend: &(dyn TerminalCreateBackend + Send + Sync),
+) -> HostActionOutcome {
+    let requested = plan.requested_placement();
+    let requested_placement = requested.as_result_str();
     match backend.create(plan) {
-        Ok(result) => HostActionOutcome {
-            action_id: action.id.clone(),
-            status: HostActionStatus::Completed,
-            result: Some(serde_json::to_value(result).unwrap_or(Value::Null)),
-            error: None,
-        },
+        Ok(mut result) => {
+            if result.actual_placement != requested_placement
+                && requested != TerminalPlacementCapability::BackgroundSession
+            {
+                result.warnings.push(format!(
+                    "requested {requested_placement} but backend '{}' provided {}; placement degraded",
+                    backend.name(),
+                    result.actual_placement
+                ));
+            }
+            HostActionOutcome {
+                action_id: action.id.clone(),
+                status: HostActionStatus::Completed,
+                result: Some(serde_json::to_value(result).unwrap_or(Value::Null)),
+                error: None,
+            }
+        }
         Err(reason) => outcome(
             action.id.clone(),
             HostActionStatus::Unsupported,
@@ -470,6 +595,26 @@ pub(super) struct TerminalCreateLaunchPlan {
     pub args: Vec<String>,
     pub cwd: Option<String>,
     pub env: Vec<(String, String)>,
+    pub placement: Option<omegon_extension::actions::terminal::TerminalPlacement>,
+}
+
+impl TerminalCreateLaunchPlan {
+    fn requested_placement(&self) -> TerminalPlacementCapability {
+        match self.placement {
+            Some(omegon_extension::actions::terminal::TerminalPlacement::SidePane) => {
+                TerminalPlacementCapability::SidePane
+            }
+            Some(omegon_extension::actions::terminal::TerminalPlacement::BottomPane) => {
+                TerminalPlacementCapability::BottomPane
+            }
+            Some(omegon_extension::actions::terminal::TerminalPlacement::NewTab) => {
+                TerminalPlacementCapability::NewTab
+            }
+            Some(omegon_extension::actions::terminal::TerminalPlacement::Default) | None => {
+                TerminalPlacementCapability::BackgroundSession
+            }
+        }
+    }
 }
 
 pub(super) fn validate_terminal_create_policy(
@@ -530,6 +675,7 @@ pub(super) fn validate_terminal_create_policy(
         args: params.args,
         cwd: params.cwd,
         env: params.env.into_iter().collect(),
+        placement: params.placement,
     })
 }
 
@@ -887,6 +1033,7 @@ allowed = [{allowed}]
                 args: vec!["/books/a.epub".to_string()],
                 cwd: Some("books".to_string()),
                 env: vec![("BOOKOKRAT_THEME".to_string(), "dark".to_string())],
+                placement: None,
             },
             std::path::Path::new("/workspace"),
             Some("reader".to_string()),
@@ -1070,11 +1217,133 @@ allowed = [{allowed}]
         );
     }
 
+    struct SelectiveFakeTerminalCreateBackend {
+        name: &'static str,
+        placement: TerminalPlacementCapability,
+        actual_placement: &'static str,
+    }
+
+    impl TerminalCreateBackend for SelectiveFakeTerminalCreateBackend {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn supports_placement(&self, placement: TerminalPlacementCapability) -> bool {
+            placement == self.placement
+        }
+
+        fn create(
+            &self,
+            _plan: TerminalCreateLaunchPlan,
+        ) -> Result<omegon_extension::actions::terminal::TerminalCreateResult, String> {
+            Ok(omegon_extension::actions::terminal::TerminalCreateResult {
+                terminal_id: format!("term-{}", self.name),
+                backend: self.name.to_string(),
+                actual_placement: self.actual_placement.to_string(),
+                warnings: Vec::new(),
+            })
+        }
+    }
+
+    struct CountingBackend {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl TerminalCreateBackend for CountingBackend {
+        fn name(&self) -> &'static str {
+            "counting"
+        }
+
+        fn supports_placement(&self, _placement: TerminalPlacementCapability) -> bool {
+            true
+        }
+
+        fn create(
+            &self,
+            _plan: TerminalCreateLaunchPlan,
+        ) -> Result<omegon_extension::actions::terminal::TerminalCreateResult, String> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(omegon_extension::actions::terminal::TerminalCreateResult {
+                terminal_id: "term-counting".to_string(),
+                backend: "counting".to_string(),
+                actual_placement: "side_pane".to_string(),
+                warnings: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    fn terminal_create_side_pane_degrades_to_background_when_no_visual_backend_exists() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let action = terminal_action(json!({"command": "bookokrat", "placement": "side_pane"}));
+        let registry =
+            TerminalBackendRegistry::new(vec![Box::new(SelectiveFakeTerminalCreateBackend {
+                name: "portable_pty",
+                placement: TerminalPlacementCapability::BackgroundSession,
+                actual_placement: "background_session",
+            })]);
+
+        let outcome = execute_terminal_create_with_registry(&action, &manifest, &registry);
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        let result = outcome.result.unwrap();
+        assert_eq!(result["backend"], "portable_pty");
+        assert_eq!(result["actual_placement"], "background_session");
+        assert!(
+            result["warnings"][0]
+                .as_str()
+                .unwrap()
+                .contains("requested side_pane")
+        );
+    }
+
+    #[test]
+    fn terminal_create_visual_backend_is_preferred_for_side_pane() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let action = terminal_action(json!({"command": "bookokrat", "placement": "side_pane"}));
+        let registry = TerminalBackendRegistry::new(vec![
+            Box::new(SelectiveFakeTerminalCreateBackend {
+                name: "flynt_side_pane",
+                placement: TerminalPlacementCapability::SidePane,
+                actual_placement: "side_pane",
+            }),
+            Box::new(SelectiveFakeTerminalCreateBackend {
+                name: "portable_pty",
+                placement: TerminalPlacementCapability::BackgroundSession,
+                actual_placement: "background_session",
+            }),
+        ]);
+
+        let outcome = execute_terminal_create_with_registry(&action, &manifest, &registry);
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        let result = outcome.result.unwrap();
+        assert_eq!(result["backend"], "flynt_side_pane");
+        assert_eq!(result["actual_placement"], "side_pane");
+        assert!(result["warnings"].as_array().is_none_or(Vec::is_empty));
+    }
+
+    #[test]
+    fn terminal_create_policy_denial_prevents_backend_execution() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let action = terminal_action(json!({"command": "sh", "placement": "side_pane"}));
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let registry = TerminalBackendRegistry::new(vec![Box::new(CountingBackend {
+            calls: calls.clone(),
+        })]);
+
+        let outcome = execute_terminal_create_with_registry(&action, &manifest, &registry);
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "terminal_command_denied");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
     #[test]
     fn production_registry_installs_real_terminal_backend() {
         let registry = HostActionExecutorRegistry::with_real_terminal_backend("/workspace");
         assert!(registry.supports("terminal.create@1"));
-        assert!(registry.terminal_create_backend.is_some());
+        assert!(registry.terminal_create_registry.is_some());
     }
 
     #[test]
