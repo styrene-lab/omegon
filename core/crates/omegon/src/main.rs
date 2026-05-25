@@ -6457,7 +6457,7 @@ fn execute_plan_slash_command(
     );
     match command {
         CanonicalSlashCommand::PlanView => {}
-        CanonicalSlashCommand::PlanSet(items) => intent.set_work_plan(items),
+        CanonicalSlashCommand::PlanSet(ref items) => intent.set_work_plan(items.clone()),
         CanonicalSlashCommand::PlanApprove => intent.approve_work_plan(),
         CanonicalSlashCommand::PlanExecute => intent.execute_work_plan(),
         CanonicalSlashCommand::PlanAdvance => intent.advance_work_plan(),
@@ -6471,13 +6471,33 @@ fn execute_plan_slash_command(
         }
     }
 
+    let output = match command {
+        CanonicalSlashCommand::PlanView if intent.work_plan.is_empty() => intent
+            .render_last_completed_work_plan()
+            .unwrap_or_else(|| intent.render_work_plan()),
+        _ if clears_completed_plan && intent.work_plan.is_empty() => {
+            let mut output = format!(
+                "Plan cleared
+{}",
+                intent.render_work_plan()
+            );
+            if let Some(completed) = intent.render_last_completed_work_plan() {
+                output.push_str(
+                    "
+
+Last completed plan
+",
+                );
+                output.push_str(&completed);
+            }
+            output
+        }
+        _ => intent.render_work_plan(),
+    };
+
     SlashCommandResponse {
         accepted: true,
-        output: Some(if clears_completed_plan && intent.work_plan.is_empty() {
-            format!("Plan cleared\n{}", intent.render_work_plan())
-        } else {
-            intent.render_work_plan()
-        }),
+        output: Some(output),
     }
 }
 
@@ -8442,6 +8462,31 @@ mod tests {
 
         assert_eq!(loop_config.model, "openai-codex:gpt-5.5");
         assert!(!shared_settings.lock().unwrap().provider_connected);
+    }
+
+    #[test]
+    fn plan_view_returns_last_completed_plan_when_no_active_plan_exists() {
+        let mut runtime_state = InteractiveAgentState {
+            bus: crate::bus::EventBus::new(),
+            context_manager: crate::context::ContextManager::new(String::new(), Vec::new()),
+            conversation: crate::conversation::ConversationState::new(),
+        };
+        runtime_state
+            .conversation
+            .intent
+            .set_work_plan(vec!["recover completed plan".into()]);
+        runtime_state.conversation.intent.advance_work_plan();
+        runtime_state.conversation.intent.clear_work_plan();
+
+        let response = execute_plan_slash_command(
+            &mut runtime_state,
+            crate::tui::CanonicalSlashCommand::PlanView,
+        );
+
+        assert!(response.accepted);
+        let output = response.output.unwrap();
+        assert!(output.contains("Plan mode: complete"), "{output}");
+        assert!(output.contains("recover completed plan"), "{output}");
     }
 
     #[test]

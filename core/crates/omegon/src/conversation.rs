@@ -147,6 +147,8 @@ pub struct IntentDocument {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub work_plan: Vec<WorkItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub completed_work_plans: Vec<CompletedWorkPlan>,
     #[serde(default)]
     pub plan_mode: PlanMode,
 
@@ -161,6 +163,12 @@ pub struct IntentDocument {
 pub struct WorkItem {
     pub description: String,
     pub status: WorkItemStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompletedWorkPlan {
+    pub items: Vec<WorkItem>,
+    pub completed_turn: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -478,8 +486,38 @@ impl IntentDocument {
 
     fn clear_if_work_plan_complete(&mut self) {
         if self.work_plan_complete() {
+            self.record_completed_work_plan();
             self.plan_mode = PlanMode::Complete;
         }
+    }
+
+    fn record_completed_work_plan(&mut self) {
+        if self.work_plan.is_empty() {
+            return;
+        }
+        if self
+            .completed_work_plans
+            .last()
+            .is_some_and(|record| record.items == self.work_plan)
+        {
+            return;
+        }
+        self.completed_work_plans.push(CompletedWorkPlan {
+            items: self.work_plan.clone(),
+            completed_turn: self.stats.turns,
+        });
+        const MAX_COMPLETED_WORK_PLANS: usize = 5;
+        let overflow = self
+            .completed_work_plans
+            .len()
+            .saturating_sub(MAX_COMPLETED_WORK_PLANS);
+        if overflow > 0 {
+            self.completed_work_plans.drain(0..overflow);
+        }
+    }
+
+    pub fn last_completed_work_plan(&self) -> Option<&CompletedWorkPlan> {
+        self.completed_work_plans.last()
     }
 
     /// True when all work items are terminal (done or skipped).
@@ -502,6 +540,26 @@ impl IntentDocument {
             .map(|w| format!("{} {}", w.status.icon(), w.description))
             .collect();
         Some(parts.join("  "))
+    }
+
+    /// Render the last completed work plan, if one exists.
+    pub fn render_last_completed_work_plan(&self) -> Option<String> {
+        let record = self.last_completed_work_plan()?;
+        let mut lines = vec![
+            "Plan mode: complete".to_string(),
+            "Last completed work plan.".to_string(),
+            format!("Progress: {}/{}", record.items.len(), record.items.len()),
+            String::new(),
+        ];
+        for (idx, item) in record.items.iter().enumerate() {
+            lines.push(format!(
+                "{}. {} {}",
+                idx + 1,
+                item.status.icon(),
+                item.description
+            ));
+        }
+        Some(lines.join("\n"))
     }
 
     /// Render the active work plan with mode and approval-gate guidance.
@@ -2366,6 +2424,78 @@ mod tests {
         assert_eq!(view.len(), 3); // user + assistant + tool_result
 
         // Cleanup
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn completed_work_plan_is_recorded_once_and_survives_new_plan() {
+        let mut intent = IntentDocument::default();
+        intent.stats.turns = 7;
+        intent.set_work_plan(vec!["one".into(), "two".into()]);
+        intent.execute_work_plan();
+
+        intent.advance_work_plan();
+        assert!(intent.completed_work_plans.is_empty());
+
+        intent.advance_work_plan();
+        assert_eq!(intent.plan_mode, PlanMode::Complete);
+        assert_eq!(intent.completed_work_plans.len(), 1);
+        assert_eq!(intent.completed_work_plans[0].completed_turn, 7);
+        assert_eq!(intent.completed_work_plans[0].items.len(), 2);
+
+        intent.advance_work_plan();
+        assert_eq!(intent.completed_work_plans.len(), 1);
+
+        intent.set_work_plan(vec!["new plan".into()]);
+        assert_eq!(intent.completed_work_plans.len(), 1);
+        assert_eq!(intent.work_plan[0].description, "new plan");
+        assert_eq!(intent.completed_work_plans[0].items[0].description, "one");
+    }
+
+    #[test]
+    fn completed_work_plan_history_is_bounded() {
+        let mut intent = IntentDocument::default();
+        for idx in 0..7 {
+            intent.stats.turns = idx;
+            intent.set_work_plan(vec![format!("plan {idx}")]);
+            intent.advance_work_plan();
+        }
+
+        assert_eq!(intent.completed_work_plans.len(), 5);
+        assert_eq!(
+            intent.completed_work_plans[0].items[0].description,
+            "plan 2"
+        );
+        assert_eq!(
+            intent.completed_work_plans[4].items[0].description,
+            "plan 6"
+        );
+    }
+
+    #[test]
+    fn completed_work_plan_survives_session_round_trip() {
+        let mut conv = ConversationState::new();
+        conv.intent.stats.turns = 3;
+        conv.intent
+            .set_work_plan(vec!["persist completed plan".into()]);
+        conv.intent.advance_work_plan();
+
+        let tmp = std::env::temp_dir().join("omegon-test-completed-plan-history.json");
+        let _ = std::fs::remove_file(&tmp);
+        conv.save_session(&tmp).unwrap();
+
+        let loaded = ConversationState::load_session(&tmp).unwrap();
+        let completed = loaded.intent.last_completed_work_plan().unwrap();
+        assert_eq!(completed.completed_turn, 3);
+        assert_eq!(completed.items[0].description, "persist completed plan");
+        assert!(
+            loaded
+                .intent
+                .render_last_completed_work_plan()
+                .unwrap()
+                .contains("persist completed plan")
+        );
+
         let _ = std::fs::remove_file(&tmp);
     }
 
