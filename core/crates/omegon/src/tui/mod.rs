@@ -1536,6 +1536,20 @@ impl PlanDisplaySnapshot {
     }
 }
 
+fn slim_pinned_plan_snapshot(
+    live_snapshot: Option<&PlanDisplaySnapshot>,
+    legacy_plan_text: Option<&str>,
+) -> Option<PlanDisplaySnapshot> {
+    live_snapshot
+        .filter(|snapshot| !snapshot.is_complete())
+        .cloned()
+        .or_else(|| {
+            legacy_plan_text
+                .and_then(PlanDisplaySnapshot::from_legacy_text)
+                .filter(|snapshot| !snapshot.is_complete())
+        })
+}
+
 fn slim_plan_rows(snapshot: &PlanDisplaySnapshot, width: u16, height: u16) -> Vec<PlanDisplayRow> {
     let max_items = height.saturating_sub(1) as usize;
     if max_items == 0 {
@@ -4035,11 +4049,10 @@ impl App {
         let is_slim = self.ui_surfaces.is_compact() && !self.focus_mode;
         let status_height = if is_slim { 1u16 } else { 0 };
         let slim_plan_snapshot = if is_slim {
-            self.slim_plan_snapshot.as_ref().cloned().or_else(|| {
-                self.conversation
-                    .latest_plan_progress()
-                    .and_then(PlanDisplaySnapshot::from_legacy_text)
-            })
+            slim_pinned_plan_snapshot(
+                self.slim_plan_snapshot.as_ref(),
+                self.conversation.latest_plan_progress(),
+            )
         } else {
             None
         };
@@ -7806,6 +7819,7 @@ impl App {
                         self.conversation
                             .push_system(&snapshot.system_notification_text("Plan progress"));
                     }
+                    self.conversation.snap_to_bottom();
                     self.slim_plan_snapshot = None;
                 } else {
                     self.slim_plan_snapshot = snapshot;
@@ -9966,7 +9980,7 @@ mod slash_command_parsing_tests {
     use super::{
         ActiveToolStream, PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus,
         SlimPlanHintState, format_permission_prompt, permission_persist_scope_label,
-        permission_response_for_key, slim_operator_hint, slim_plan_rows,
+        permission_response_for_key, slim_operator_hint, slim_pinned_plan_snapshot, slim_plan_rows,
     };
     use crossterm::event::{KeyCode, KeyModifiers};
     use tokio::sync::mpsc;
@@ -10132,6 +10146,43 @@ mod slash_command_parsing_tests {
         .unwrap();
 
         assert!(snapshot.is_complete());
+    }
+
+    #[test]
+    fn completed_legacy_plan_does_not_pin_in_slim() {
+        let pinned = slim_pinned_plan_snapshot(
+            None,
+            Some("Plan progress\nPlan mode: complete\nProgress: 2/2\n\n1. ● A\n2. ● B"),
+        );
+
+        assert!(pinned.is_none());
+    }
+
+    #[test]
+    fn active_legacy_plan_still_pins_in_slim() {
+        let pinned = slim_pinned_plan_snapshot(
+            None,
+            Some("Plan progress\nPlan mode: executing\nProgress: 1/2\n\n1. ● A\n2. ◐ B"),
+        )
+        .unwrap();
+
+        assert_eq!(pinned.summary(), "plan 1/2 · executing");
+        assert!(!pinned.is_complete());
+    }
+
+    #[test]
+    fn completed_live_plan_snapshot_does_not_pin_in_slim() {
+        let completed = PlanDisplaySnapshot {
+            mode: "complete".to_string(),
+            completed: 1,
+            total: 1,
+            items: vec![PlanDisplayItem {
+                status: PlanDisplayStatus::Done,
+                description: "A".to_string(),
+            }],
+        };
+
+        assert!(slim_pinned_plan_snapshot(Some(&completed), None).is_none());
     }
 
     #[test]

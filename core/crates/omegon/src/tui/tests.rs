@@ -1010,6 +1010,49 @@ fn slim_status_line_marks_detached_conversation_viewport() {
 }
 
 #[test]
+fn completed_plan_update_reattaches_detached_slim_viewport() {
+    let mut app = test_app();
+    app.conversation.conv_state.scroll_offset = 46;
+    app.conversation.conv_state.user_scrolled = true;
+    app.slim_plan_snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
+        "mode": "executing",
+        "completed": 1,
+        "total": 2,
+        "items": [
+            {"status": "done", "description": "one"},
+            {"status": "active", "description": "two"}
+        ]
+    }));
+
+    app.handle_agent_event(AgentEvent::PlanUpdated {
+        snapshot_json: serde_json::json!({
+            "mode": "complete",
+            "completed": 2,
+            "total": 2,
+            "items": [
+                {"status": "done", "description": "one"},
+                {"status": "done", "description": "two"}
+            ]
+        }),
+    });
+
+    assert_eq!(app.conversation.conv_state.scroll_offset, 0);
+    assert!(!app.conversation.conv_state.user_scrolled);
+    assert!(app.slim_plan_snapshot.is_none());
+    assert!(
+        app.conversation
+            .latest_plan_progress()
+            .is_some_and(|text| text.contains("Plan mode: complete")),
+        "completed plan should remain as transcript history"
+    );
+
+    let text = render_app_to_string(&mut app, 120, 18);
+    assert!(!text.contains("view detached"), "{text}");
+    assert!(!text.contains("more below · End to tail"), "{text}");
+    assert!(!text.contains("plan done · clear"), "{text}");
+}
+
+#[test]
 fn slim_status_line_marks_turn_state() {
     let mut app = test_app();
     app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });

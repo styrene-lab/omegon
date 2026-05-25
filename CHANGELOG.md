@@ -19,6 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - **Focus mode opens at the live tail** — entering focus mode now selects the latest readable conversation segment instead of anchoring to an older visible tool card when viewport height caches lag behind streaming output.
+- **Completed Slim plans detach into history** — plan completion now clears the pinned plan lane and reattaches the conversation viewport so completed plans scroll with the transcript instead of leaving stale `view detached` / `more below` hints above the composer.
 
 ## [0.23.7] - 2026-05-24
 
