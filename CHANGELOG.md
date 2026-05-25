@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.23.8] - 2026-05-25
+
+### Added
+
+- **Lifecycle runtime state split plan** — documented the Option C design for separating tracked lifecycle baseline artifacts from ignored mutable runtime state so release branches stop picking up lifecycle session churn.
+
 ### Fixed
 
 - **Focus mode opens at the live tail** — entering focus mode now selects the latest readable conversation segment instead of anchoring to an older visible tool card when viewport height caches lag behind streaming output.
