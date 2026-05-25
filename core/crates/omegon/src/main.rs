@@ -8552,6 +8552,39 @@ mod tests {
     }
 
     #[test]
+    fn plan_list_renders_visible_completed_and_openspec_sections() {
+        let cwd = tempfile::tempdir().unwrap();
+        let previous_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(cwd.path()).unwrap();
+        std::fs::create_dir_all("openspec/changes/example/specs/lifecycle").unwrap();
+        std::fs::write("openspec/changes/example/proposal.md", "# Example\n").unwrap();
+        std::fs::write(
+            "openspec/changes/example/tasks.md",
+            "# Tasks\n\n## 1. Runtime\n<!-- specs: lifecycle/example -->\n\n- [x] 1.1 Done\n- [ ] 1.2 Pending\n",
+        )
+        .unwrap();
+
+        let mut runtime_state = InteractiveAgentState {
+            bus: crate::bus::EventBus::new(),
+            context_manager: crate::context::ContextManager::new(String::new(), Vec::new()),
+            conversation: crate::conversation::ConversationState::new(),
+        };
+        runtime_state
+            .conversation
+            .intent
+            .set_work_plan(vec!["visible work".into()]);
+
+        let output = render_plan_list(&runtime_state);
+        std::env::set_current_dir(previous_cwd).unwrap();
+
+        assert!(output.contains("Visible"), "{output}");
+        assert!(output.contains("visible work"), "{output}");
+        assert!(output.contains("OpenSpec"), "{output}");
+        assert!(output.contains("example · proposed · 1/2"), "{output}");
+        assert!(output.contains("Runtime · 1/2"), "{output}");
+    }
+
+    #[test]
     fn embedded_command_parses_control_plane_flags() {
         let cli = Cli::try_parse_from(vec![
             "omegon",
