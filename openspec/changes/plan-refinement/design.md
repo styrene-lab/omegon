@@ -56,6 +56,10 @@ Actions:
 - clear: detach runtime view only
 - promote: create/spec OpenSpec change from design node when work becomes non-trivial
 
+- `openspec_manage` owns durable OpenSpec mutation. It is the only tool surface that should edit OpenSpec task checkboxes.
+- `/plan` and the `plan` tool project, list, navigate, and manage session-local plan state. They must not duplicate OpenSpec mutation actions.
+- A future ergonomic `/plan complete-backed` command may resolve a visible OpenSpec-backed item, but it must delegate to the same OpenSpec service function used by `openspec_manage`.
+
 ## Interaction principles
 
 - Never hide binding state.
