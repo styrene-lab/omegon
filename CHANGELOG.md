@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-05-25
+
 ### Added
 - Started the plan-refinement lifecycle: small work plans now have a compatibility wrapper, central mutation action API, session-scoped visible plan projection metadata, and initial registry projection types while preserving existing `/plan` snapshot fields.
 
