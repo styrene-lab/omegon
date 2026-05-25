@@ -6529,11 +6529,17 @@ fn render_plan_list(runtime_state: &InteractiveAgentState) -> String {
         ));
         let visible_items = intent.visible_plan_items();
         let visible_total = visible_items.len();
-        for item in visible_items.into_iter().take(5) {
+        for item in visible_items
+            .into_iter()
+            .take(crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT)
+        {
             lines.push(format!("  - {} {}", item.status.icon(), item.label));
         }
-        if visible_total > 5 {
-            lines.push(format!("  - … and {} more items", visible_total - 5));
+        if visible_total > crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT {
+            lines.push(format!(
+                "  - … and {} more items",
+                visible_total - crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT
+            ));
         }
     } else {
         lines.push("- none".to_string());
@@ -6551,42 +6557,8 @@ fn render_plan_list(runtime_state: &InteractiveAgentState) -> String {
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let repo_root = setup::find_project_root(&cwd);
-    let changes = lifecycle::spec::list_changes(&repo_root);
-    if changes.is_empty() {
-        lines.push(String::new());
-        lines.push("OpenSpec".to_string());
-        lines.push("- none".to_string());
-    } else {
-        lines.push(String::new());
-        lines.push("OpenSpec".to_string());
-        let change_total = changes.len();
-        for change in changes.iter().take(12) {
-            let status_label = change.stage.as_str();
-            lines.push(format!(
-                "- {} · {} · {}/{}",
-                change.name, status_label, change.done_tasks, change.total_tasks
-            ));
-            let group_total = change.task_groups.len();
-            for group in change.task_groups.iter().take(4) {
-                let done = group.tasks.iter().filter(|task| task.done).count();
-                lines.push(format!(
-                    "  - {} · {}/{}",
-                    group.title,
-                    done,
-                    group.tasks.len()
-                ));
-            }
-            if group_total > 4 {
-                lines.push(format!("  - … and {} more groups", group_total - 4));
-            }
-        }
-        if change_total > 12 {
-            lines.push(format!(
-                "- … and {} more OpenSpec changes",
-                change_total - 12
-            ));
-        }
-    }
+    lines.push(String::new());
+    lines.push(crate::tools::render_lifecycle_plan_list(&repo_root));
 
     lines.join("\n")
 }
