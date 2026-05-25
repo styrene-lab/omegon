@@ -536,6 +536,7 @@ pub enum CanonicalSlashCommand {
     SkillGet(String),
     SkillDelete(String),
     PlanView,
+    PlanList,
     PlanSet(Vec<String>),
     PlanApprove,
     PlanExecute,
@@ -806,8 +807,10 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             }
         }
         "plan" => {
-            if args.is_empty() || args == "status" || args == "list" {
+            if args.is_empty() || args == "status" {
                 Some(CanonicalSlashCommand::PlanView)
+            } else if args == "list" {
+                Some(CanonicalSlashCommand::PlanList)
             } else if let Some(raw_items) = args.strip_prefix("set ") {
                 let items = split_plan_items(raw_items);
                 (!items.is_empty()).then_some(CanonicalSlashCommand::PlanSet(items))
@@ -5491,7 +5494,7 @@ impl App {
             "plan",
             "manage session plan gate and progress",
             &[
-                "status", "set", "approve", "execute", "advance", "skip", "clear",
+                "status", "list", "set", "approve", "execute", "advance", "skip", "clear",
             ],
         ),
         ("sessions", "list saved sessions", &[]),
@@ -5896,11 +5899,11 @@ impl App {
             }
 
             "plan" => {
-                const USAGE: &str =
-                    "Usage: /plan [status|set <item> | <item>|approve|execute|advance|skip|clear]";
+                const USAGE: &str = "Usage: /plan [status|list|set <item> | <item>|approve|execute|advance|skip|clear]";
                 match canonical_slash_command("plan", args) {
                     Some(
                         command @ (CanonicalSlashCommand::PlanView
+                        | CanonicalSlashCommand::PlanList
                         | CanonicalSlashCommand::PlanSet(_)
                         | CanonicalSlashCommand::PlanApprove
                         | CanonicalSlashCommand::PlanExecute
@@ -10523,6 +10526,10 @@ mod slash_command_parsing_tests {
         assert!(matches!(
             canonical_slash_command("plan", "status"),
             Some(CanonicalSlashCommand::PlanView)
+        ));
+        assert!(matches!(
+            canonical_slash_command("plan", "list"),
+            Some(CanonicalSlashCommand::PlanList)
         ));
     }
 

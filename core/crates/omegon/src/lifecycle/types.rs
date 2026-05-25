@@ -261,7 +261,24 @@ pub struct ChangeInfo {
     pub has_tasks: bool,
     pub total_tasks: usize,
     pub done_tasks: usize,
+    pub task_groups: Vec<TaskGroup>,
     pub specs: Vec<SpecFile>,
+}
+
+/// A task group parsed from an OpenSpec tasks.md file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskGroup {
+    pub title: String,
+    pub specs: Vec<String>,
+    pub tasks: Vec<TaskLine>,
+}
+
+/// A single checkbox task parsed from an OpenSpec tasks.md file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskLine {
+    pub id: String,
+    pub description: String,
+    pub done: bool,
 }
 
 #[cfg(test)]

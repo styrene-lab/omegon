@@ -110,10 +110,17 @@ fn read_change(change_dir: &Path, name: &str) -> Option<ChangeInfo> {
     let tasks_path = change_dir.join("tasks.md");
     let has_tasks = tasks_path.exists();
 
-    let (total_tasks, done_tasks) = if has_tasks {
-        count_tasks(&tasks_path)
+    let (total_tasks, done_tasks, task_groups) = if has_tasks {
+        let task_groups = parse_task_groups(&tasks_path);
+        let total_tasks = task_groups.iter().map(|group| group.tasks.len()).sum();
+        let done_tasks = task_groups
+            .iter()
+            .flat_map(|group| &group.tasks)
+            .filter(|task| task.done)
+            .count();
+        (total_tasks, done_tasks, task_groups)
     } else {
-        (0, 0)
+        (0, 0, Vec::new())
     };
 
     let specs = if has_specs {
@@ -134,6 +141,7 @@ fn read_change(change_dir: &Path, name: &str) -> Option<ChangeInfo> {
         has_tasks,
         total_tasks,
         done_tasks,
+        task_groups,
         specs,
     })
 }
@@ -167,23 +175,97 @@ pub fn compute_stage(
 /// Count tasks in a tasks.md file.
 /// Tasks are lines matching `- [x]` (done) or `- [ ]` (pending).
 fn count_tasks(path: &Path) -> (usize, usize) {
+    let task_groups = parse_task_groups(path);
+    let total = task_groups.iter().map(|group| group.tasks.len()).sum();
+    let done = task_groups
+        .iter()
+        .flat_map(|group| &group.tasks)
+        .filter(|task| task.done)
+        .count();
+    (total, done)
+}
+
+/// Parse OpenSpec tasks.md into groups and checkbox task lines.
+pub fn parse_task_groups(path: &Path) -> Vec<TaskGroup> {
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
-        Err(_) => return (0, 0),
+        Err(_) => return Vec::new(),
     };
 
-    let mut total = 0;
-    let mut done = 0;
+    let mut groups = Vec::new();
+    let mut current: Option<TaskGroup> = None;
+
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") {
-            total += 1;
-            done += 1;
+        if let Some(title) = trimmed.strip_prefix("## ") {
+            if let Some(group) = current.take() {
+                groups.push(group);
+            }
+            current = Some(TaskGroup {
+                title: title.trim().to_string(),
+                specs: Vec::new(),
+                tasks: Vec::new(),
+            });
+            continue;
+        }
+
+        if let Some(specs) = trimmed
+            .strip_prefix("<!-- specs:")
+            .and_then(|rest| rest.strip_suffix("-->"))
+        {
+            if let Some(group) = current.as_mut() {
+                group.specs = specs
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect();
+            }
+            continue;
+        }
+
+        let done = if trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") {
+            Some(true)
         } else if trimmed.starts_with("- [ ]") {
-            total += 1;
+            Some(false)
+        } else {
+            None
+        };
+
+        if let Some(done) = done {
+            let description = trimmed
+                .strip_prefix("- [x]")
+                .or_else(|| trimmed.strip_prefix("- [X]"))
+                .or_else(|| trimmed.strip_prefix("- [ ]"))
+                .unwrap_or(trimmed)
+                .trim()
+                .to_string();
+            let id = description
+                .split_whitespace()
+                .next()
+                .filter(|token| token.chars().all(|ch| ch.is_ascii_digit() || ch == '.'))
+                .map(|token| token.trim_end_matches('.').to_string())
+                .unwrap_or_else(|| description.to_ascii_lowercase().replace(' ', "-"));
+            current.get_or_insert_with(|| TaskGroup {
+                title: "Tasks".to_string(),
+                specs: Vec::new(),
+                tasks: Vec::new(),
+            });
+            if let Some(group) = current.as_mut() {
+                group.tasks.push(TaskLine {
+                    id,
+                    description,
+                    done,
+                });
+            }
         }
     }
-    (total, done)
+
+    if let Some(group) = current {
+        groups.push(group);
+    }
+
+    groups
 }
 
 /// Parse all spec files in a specs/ directory.
@@ -465,6 +547,7 @@ pub fn propose_change(
         has_tasks: false,
         total_tasks: 0,
         done_tasks: 0,
+        task_groups: vec![],
         specs: vec![],
     })
 }
@@ -578,6 +661,11 @@ Then sharedState.cleave.children[i].status becomes running
         let (total, done) = count_tasks(&path);
         assert_eq!(total, 3);
         assert_eq!(done, 2);
+        let groups = parse_task_groups(&path);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].title, "Group 1");
+        assert_eq!(groups[0].tasks[0].id, "done-task");
+        assert_eq!(groups[0].tasks[1].description, "Pending task");
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -619,6 +707,7 @@ Then sharedState.cleave.children[i].status becomes running
             has_tasks: true,
             total_tasks: 10,
             done_tasks: 7,
+            task_groups: vec![],
             specs: vec![SpecFile {
                 domain: "auth".into(),
                 file_path: PathBuf::new(),

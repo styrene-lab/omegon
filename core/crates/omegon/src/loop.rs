@@ -1073,13 +1073,15 @@ pub async fn run(
         }
 
         // Push tool results to conversation and update intent
-        for result in &results {
-            conversation.push_tool_result(result.clone());
-        }
+        let mut results = results;
         let plan_snapshot_before = conversation.intent.work_plan_snapshot_json();
         conversation
             .intent
             .update_from_tools(dispatch_calls, &results);
+        enrich_plan_list_tool_results(&mut results, dispatch_calls, &conversation.intent);
+        for result in &results {
+            conversation.push_tool_result(result.clone());
+        }
         let plan_snapshot_after = conversation.intent.work_plan_snapshot_json();
 
         if let Some(message) = plan_status_notification(dispatch_calls, &conversation.intent) {
@@ -2284,6 +2286,72 @@ async fn dispatch_tools(
 
 fn is_parallel_safe_read_only_tool(name: &str) -> bool {
     matches!(name, "read" | "view" | "web_search" | "whoami" | "chronos")
+}
+
+fn enrich_plan_list_tool_results(
+    results: &mut [ToolResultEntry],
+    calls: &[ToolCall],
+    intent: &IntentDocument,
+) {
+    for (call, result) in calls.iter().zip(results.iter_mut()) {
+        if call.name != crate::tool_registry::core::PLAN {
+            continue;
+        }
+        let action = call
+            .arguments
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("status");
+        if action != "list" {
+            continue;
+        }
+        let mut text = String::from("Plans\n\nVisible\n");
+        if let Some(entry) = intent.visible_plan_registry_entry() {
+            text.push_str(&format!(
+                "- {} · {} · {} · {}/{}\n",
+                entry.plan_id,
+                entry.scope.label(),
+                entry.status.label(),
+                entry.progress.completed,
+                entry.progress.total
+            ));
+            let visible_items = intent.visible_plan_items();
+            let visible_total = visible_items.len();
+            for item in visible_items
+                .into_iter()
+                .take(crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT)
+            {
+                text.push_str(&format!("  - {} {}\n", item.status.icon(), item.label));
+            }
+            if visible_total > crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT {
+                text.push_str(&format!(
+                    "  - … and {} more items\n",
+                    visible_total - crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT
+                ));
+            }
+        } else {
+            text.push_str("- none\n");
+        }
+
+        if let Some(completed) = intent.last_completed_work_plan() {
+            text.push_str("\nCompleted\n");
+            text.push_str(&format!(
+                "- last session plan · {}/{}\n",
+                completed.items.len(),
+                completed.items.len()
+            ));
+        }
+
+        text.push('\n');
+        let existing = result
+            .content
+            .iter()
+            .filter_map(ContentBlock::as_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        text.push_str(&existing);
+        result.content = vec![ContentBlock::Text { text }];
+    }
 }
 
 async fn dispatch_single_tool(

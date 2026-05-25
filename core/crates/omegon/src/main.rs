@@ -6,6 +6,7 @@
 //! Phase 2: Native TUI rendering.
 //! Phase 3: Native LLM provider clients.
 
+use crate::conversation::PlanAction;
 use clap::{Args, Parser, Subcommand};
 use crossterm::ExecutableCommand;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
@@ -6430,6 +6431,7 @@ async fn execute_remote_slash_command(
         command,
         crate::tui::CanonicalSlashCommand::PlanView
             | crate::tui::CanonicalSlashCommand::PlanSet(_)
+            | crate::tui::CanonicalSlashCommand::PlanList
             | crate::tui::CanonicalSlashCommand::PlanApprove
             | crate::tui::CanonicalSlashCommand::PlanExecute
             | crate::tui::CanonicalSlashCommand::PlanAdvance
@@ -6455,6 +6457,14 @@ fn execute_plan_slash_command(
     use omegon_traits::SlashCommandResponse;
 
     let intent = &mut runtime_state.conversation.intent;
+    if matches!(command, CanonicalSlashCommand::PlanList) {
+        intent.apply_plan_action(PlanAction::View);
+        return SlashCommandResponse {
+            accepted: true,
+            output: Some(render_plan_list(runtime_state)),
+        };
+    }
+
     let clears_completed_plan = matches!(
         command,
         CanonicalSlashCommand::PlanAdvance
@@ -6462,13 +6472,15 @@ fn execute_plan_slash_command(
             | CanonicalSlashCommand::PlanClear
     );
     match command {
-        CanonicalSlashCommand::PlanView => {}
-        CanonicalSlashCommand::PlanSet(ref items) => intent.set_work_plan(items.clone()),
-        CanonicalSlashCommand::PlanApprove => intent.approve_work_plan(),
-        CanonicalSlashCommand::PlanExecute => intent.execute_work_plan(),
-        CanonicalSlashCommand::PlanAdvance => intent.advance_work_plan(),
-        CanonicalSlashCommand::PlanSkip => intent.skip_work_item(),
-        CanonicalSlashCommand::PlanClear => intent.clear_work_plan(),
+        CanonicalSlashCommand::PlanView => intent.apply_plan_action(PlanAction::View),
+        CanonicalSlashCommand::PlanSet(ref items) => intent.apply_plan_action(PlanAction::Set {
+            items: items.clone(),
+        }),
+        CanonicalSlashCommand::PlanApprove => intent.apply_plan_action(PlanAction::Approve),
+        CanonicalSlashCommand::PlanExecute => intent.apply_plan_action(PlanAction::Execute),
+        CanonicalSlashCommand::PlanAdvance => intent.apply_plan_action(PlanAction::Advance),
+        CanonicalSlashCommand::PlanSkip => intent.apply_plan_action(PlanAction::Skip),
+        CanonicalSlashCommand::PlanClear => intent.apply_plan_action(PlanAction::Clear),
         _ => {
             return SlashCommandResponse {
                 accepted: false,
@@ -6505,6 +6517,56 @@ Last completed plan
         accepted: true,
         output: Some(output),
     }
+}
+
+fn render_plan_list(runtime_state: &InteractiveAgentState) -> String {
+    let intent = &runtime_state.conversation.intent;
+    let mut lines = vec!["Plans".to_string(), String::new()];
+
+    lines.push("Visible".to_string());
+    if let Some(entry) = intent.visible_plan_registry_entry() {
+        lines.push(format!(
+            "- {} · {} · {} · {}/{}",
+            entry.plan_id,
+            entry.scope.label(),
+            entry.status.label(),
+            entry.progress.completed,
+            entry.progress.total
+        ));
+        let visible_items = intent.visible_plan_items();
+        let visible_total = visible_items.len();
+        for item in visible_items
+            .into_iter()
+            .take(crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT)
+        {
+            lines.push(format!("  - {} {}", item.status.icon(), item.label));
+        }
+        if visible_total > crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT {
+            lines.push(format!(
+                "  - … and {} more items",
+                visible_total - crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT
+            ));
+        }
+    } else {
+        lines.push("- none".to_string());
+    }
+
+    if let Some(completed) = intent.last_completed_work_plan() {
+        lines.push(String::new());
+        lines.push("Completed".to_string());
+        lines.push(format!(
+            "- last session plan · {}/{}",
+            completed.items.len(),
+            completed.items.len()
+        ));
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let repo_root = setup::find_project_root(&cwd);
+    lines.push(String::new());
+    lines.push(crate::tools::render_lifecycle_plan_list(&repo_root));
+
+    lines.join("\n")
 }
 
 async fn run_auth_login(provider: &str) -> anyhow::Result<()> {
@@ -8493,6 +8555,39 @@ mod tests {
         let output = response.output.unwrap();
         assert!(output.contains("Plan mode: complete"), "{output}");
         assert!(output.contains("recover completed plan"), "{output}");
+    }
+
+    #[test]
+    fn plan_list_renders_visible_completed_and_openspec_sections() {
+        let cwd = tempfile::tempdir().unwrap();
+        let previous_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(cwd.path()).unwrap();
+        std::fs::create_dir_all("openspec/changes/example/specs/lifecycle").unwrap();
+        std::fs::write("openspec/changes/example/proposal.md", "# Example\n").unwrap();
+        std::fs::write(
+            "openspec/changes/example/tasks.md",
+            "# Tasks\n\n## 1. Runtime\n<!-- specs: lifecycle/example -->\n\n- [x] 1.1 Done\n- [ ] 1.2 Pending\n",
+        )
+        .unwrap();
+
+        let mut runtime_state = InteractiveAgentState {
+            bus: crate::bus::EventBus::new(),
+            context_manager: crate::context::ContextManager::new(String::new(), Vec::new()),
+            conversation: crate::conversation::ConversationState::new(),
+        };
+        runtime_state
+            .conversation
+            .intent
+            .set_work_plan(vec!["visible work".into()]);
+
+        let output = render_plan_list(&runtime_state);
+        std::env::set_current_dir(previous_cwd).unwrap();
+
+        assert!(output.contains("Visible"), "{output}");
+        assert!(output.contains("visible work"), "{output}");
+        assert!(output.contains("OpenSpec"), "{output}");
+        assert!(output.contains("example · proposed · 1/2"), "{output}");
+        assert!(output.contains("Runtime · 1/2"), "{output}");
     }
 
     #[test]

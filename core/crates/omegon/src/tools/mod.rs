@@ -40,6 +40,53 @@ use tokio_util::sync::CancellationToken;
 
 use crate::tool_registry::core as reg;
 
+pub const PLAN_LIST_VISIBLE_ITEM_LIMIT: usize = 5;
+pub const PLAN_LIST_CHANGE_LIMIT: usize = 12;
+pub const PLAN_LIST_GROUP_LIMIT: usize = 4;
+
+pub fn render_lifecycle_plan_list(repo_root: &Path) -> String {
+    let changes = crate::lifecycle::spec::list_changes(repo_root);
+    let mut lines = vec!["OpenSpec".to_string()];
+    if changes.is_empty() {
+        lines.push("- none".to_string());
+        return lines.join("\n");
+    }
+
+    let change_total = changes.len();
+    for change in changes.iter().take(PLAN_LIST_CHANGE_LIMIT) {
+        lines.push(format!(
+            "- {} · {} · {}/{}",
+            change.name,
+            change.stage.as_str(),
+            change.done_tasks,
+            change.total_tasks
+        ));
+        let group_total = change.task_groups.len();
+        for group in change.task_groups.iter().take(PLAN_LIST_GROUP_LIMIT) {
+            let done = group.tasks.iter().filter(|task| task.done).count();
+            lines.push(format!(
+                "  - {} · {}/{}",
+                group.title,
+                done,
+                group.tasks.len()
+            ));
+        }
+        if group_total > PLAN_LIST_GROUP_LIMIT {
+            lines.push(format!(
+                "  - … and {} more groups",
+                group_total - PLAN_LIST_GROUP_LIMIT
+            ));
+        }
+    }
+    if change_total > PLAN_LIST_CHANGE_LIMIT {
+        lines.push(format!(
+            "- … and {} more OpenSpec changes",
+            change_total - PLAN_LIST_CHANGE_LIMIT
+        ));
+    }
+    lines.join("\n")
+}
+
 /// Error returned by `WorkspaceBoundary::check_path` when a path is outside
 /// the workspace and not in any trusted directory. The dispatch layer
 /// intercepts this to show an interactive permission prompt in the TUI.
@@ -602,18 +649,19 @@ impl ToolProvider for CoreTools {
                 name: reg::PLAN.into(),
                 label: reg::PLAN.into(),
                 description: "Manage the session work plan — a lightweight checklist for \
-                    tracking progress on the current request. Use 'set' to establish a plan \
-                    at the start of multi-step work, 'approve' to mark operator approval, \
-                    'execute' to start mutation work, 'advance' to mark progress, 'complete' \
-                    to mark a specific item done, 'skip' to skip an item, and 'clear' to \
-                    disable the plan gate."
+                    tracking progress on the current request. Use 'list' to inspect the \
+                    visible plan plus lifecycle/OpenSpec plan summaries, 'set' to establish \
+                    a plan at the start of multi-step work, 'approve' to mark operator \
+                    approval, 'execute' to start mutation work, 'advance' to mark progress, \
+                    'complete' to mark a specific item done, 'skip' to skip an item, and \
+                    'clear' to disable the plan gate."
                     .into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["set", "approve", "execute", "advance", "complete", "skip", "clear", "status"],
+                            "enum": ["set", "approve", "execute", "advance", "complete", "skip", "clear", "status", "list"],
                             "description": "Action to perform"
                         },
                         "items": {
@@ -1100,6 +1148,7 @@ impl ToolProvider for CoreTools {
                     "skip" => "Skipped current work item.".into(),
                     "clear" => "Cleared the active work plan.".into(),
                     "status" => "Work plan status rendered in context.".into(),
+                    "list" => render_lifecycle_plan_list(&self.cwd),
                     other => format!("Unknown plan action: {other}"),
                 };
                 Ok(ToolResult {

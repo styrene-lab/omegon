@@ -231,6 +231,7 @@ mod tests {
                 has_tasks: true,
                 total_tasks: 8,
                 done_tasks: 5,
+                task_groups: vec![],
                 specs: vec![],
             }],
             focused_node: None,
