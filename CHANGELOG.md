@@ -28,6 +28,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added an extension `voice` capability flag as the first substrate for push-based local voice notification routing.
 - Route voice-capable extension `voice/transcription` notifications into operator-trusted daemon prompt events.
 - Surface voice-capable extension `voice/state` notifications in harness status/footer summaries using extension-reported `state` and `mic_open` only.
+- Route `terminal.create@1` execution through a terminal backend registry so visual hosts can satisfy placement requests while portable PTY remains the background fallback.
 - Added host-side voice MVP integration coverage proving fake voice extensions route through the existing daemon event ingress rather than a parallel prompt stream.
 
 ### Fixed
