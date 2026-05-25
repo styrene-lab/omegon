@@ -27,6 +27,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added deny-by-default MCP HostAction metadata handling so MCP-origin actions are preserved, validated, surfaced as outcomes, and never auto-executed without a future explicit policy layer.
 - Added an extension `voice` capability flag as the first substrate for push-based local voice notification routing.
 - Route voice-capable extension `voice/transcription` notifications into operator-trusted daemon prompt events.
+- Surface voice-capable extension `voice/state` notifications in harness status/footer summaries using extension-reported `state` and `mic_open` only.
 - Added host-side voice MVP integration coverage proving fake voice extensions route through the existing daemon event ingress rather than a parallel prompt stream.
 
 ### Fixed

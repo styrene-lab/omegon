@@ -73,6 +73,18 @@ pub struct HarnessStatus {
     // ── Active delegates ─────────────────────────────────────
     /// Currently running delegate processes (cleave children).
     pub active_delegates: Vec<DelegateSummary>,
+
+    // ── Voice state ───────────────────────────────────────────
+    /// Latest voice extension lifecycle state reported through `voice/state`.
+    /// This is extension-reported capture state, not OS/device/hardware truth.
+    pub voice_state: Option<VoiceStateStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VoiceStateStatus {
+    pub extension: String,
+    pub state: String,
+    pub mic_open: bool,
 }
 
 /// Summary of an active delegate process.
@@ -284,6 +296,18 @@ impl HarnessStatus {
                 .map(|s| s.tool_count)
                 .sum();
             parts.push(format!("MCP:{mcp_connected}({total_tools}t)"));
+        }
+
+        if let Some(ref voice) = self.voice_state {
+            let label = match (voice.mic_open, voice.state.as_str()) {
+                (true, "listening") => "voice listening".to_string(),
+                (true, "processing") => "voice processing".to_string(),
+                (true, "speaking") => "voice speaking".to_string(),
+                (true, state) => format!("voice {state}"),
+                (false, "error") => "voice error".to_string(),
+                (false, state) => format!("voice {state}"),
+            };
+            parts.push(label);
         }
 
         parts.push(self.context_class.clone());
@@ -813,6 +837,7 @@ impl Default for HarnessStatus {
             mutation_learned_skills: 0,
             mutation_diagnostics: 0,
             active_delegates: vec![],
+            voice_state: None,
         }
     }
 }

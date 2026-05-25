@@ -2226,10 +2226,16 @@ async fn run_embedded_command(
         }
     }
 
+    let voice_status =
+        std::sync::Arc::new(std::sync::Mutex::new(agent.initial_harness_status.clone()));
     for rx in agent.voice_notification_receivers {
-        crate::extensions::voice_bridge::start_voice_bridge(
+        crate::extensions::voice_bridge::start_voice_bridge_with_status(
             rx,
             vox_daemon_events.clone(),
+            Some(crate::extensions::voice_bridge::VoiceStatusSink::new(
+                voice_status.clone(),
+                events_tx.clone(),
+            )),
             global_cancel.clone(),
         );
     }
