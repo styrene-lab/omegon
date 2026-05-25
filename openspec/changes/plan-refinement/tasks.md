@@ -23,7 +23,8 @@
 
 - [x] 3.1 Project OpenSpec task groups into compact plan items.
 - [ ] 3.2 Surface design-tree focus/binding candidates in the plan projection.
-- [ ] 3.3 Expose source/binding through TUI, IPC, and web snapshots.
+- [x] 3.3 Expose source/binding through TUI, IPC, and web snapshots.
+- [x] 3.4 Expose read-only `/plan list` for both operator slash UX and remote slash execution.
 
 ## 4. Write-through and Reconciliation
 <!-- specs: lifecycle/work-plan-threading -->

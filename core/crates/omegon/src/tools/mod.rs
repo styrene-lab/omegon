@@ -602,18 +602,19 @@ impl ToolProvider for CoreTools {
                 name: reg::PLAN.into(),
                 label: reg::PLAN.into(),
                 description: "Manage the session work plan — a lightweight checklist for \
-                    tracking progress on the current request. Use 'set' to establish a plan \
-                    at the start of multi-step work, 'approve' to mark operator approval, \
-                    'execute' to start mutation work, 'advance' to mark progress, 'complete' \
-                    to mark a specific item done, 'skip' to skip an item, and 'clear' to \
-                    disable the plan gate."
+                    tracking progress on the current request. Use 'list' to inspect the \
+                    visible plan plus lifecycle/OpenSpec plan summaries, 'set' to establish \
+                    a plan at the start of multi-step work, 'approve' to mark operator \
+                    approval, 'execute' to start mutation work, 'advance' to mark progress, \
+                    'complete' to mark a specific item done, 'skip' to skip an item, and \
+                    'clear' to disable the plan gate."
                     .into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["set", "approve", "execute", "advance", "complete", "skip", "clear", "status"],
+                            "enum": ["set", "approve", "execute", "advance", "complete", "skip", "clear", "status", "list"],
                             "description": "Action to perform"
                         },
                         "items": {

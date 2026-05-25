@@ -267,6 +267,36 @@ The slash-command UX should make scope and mutation explicit:
 - session plan: clear runtime state.
 - repo-bound plan: detach visible projection and report that durable artifacts are unchanged.
 
+### Read-only plan list
+
+`/plan list` is the first shared operator/harness registry surface. It does not mutate lifecycle artifacts and does not perform durable write-through. The output is intentionally plain text so it can serve both humans and remote slash execution:
+
+```text
+Plans
+
+Visible
+- session:current · session · Active · 1/3
+  - ● inspect current plan state
+  - ◐ wire list renderer
+
+Completed
+- last session plan · 2/2
+
+OpenSpec
+- plan-refinement · Implementing · 7/36
+  - UX and Binding Semantics · 0/4
+  - Runtime Model · 6/6
+  - Lifecycle Projection · 1/3
+```
+
+Acceptance criteria:
+
+- `/plan status` shows the foreground visible plan.
+- `/plan list` lists visible session state and OpenSpec task-group summaries.
+- `/plan list` is read-only: it may normalize legacy visible-plan state but must not edit OpenSpec task files.
+- Remote slash execution accepts `/plan list` and returns the same text surface.
+- OpenSpec task groups come from parsed `tasks.md`; no checkbox write-through is attempted.
+
 ## UX copy examples
 
 Foreground labels:

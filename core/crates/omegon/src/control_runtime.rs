@@ -348,6 +348,7 @@ pub fn control_request_from_slash(
             ControlRequest::SkillDelete { name: name.clone() }
         }
         crate::tui::CanonicalSlashCommand::PlanView
+        | crate::tui::CanonicalSlashCommand::PlanList
         | crate::tui::CanonicalSlashCommand::PlanSet(_)
         | crate::tui::CanonicalSlashCommand::PlanApprove
         | crate::tui::CanonicalSlashCommand::PlanExecute

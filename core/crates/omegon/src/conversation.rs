@@ -237,6 +237,20 @@ impl PlanSource {
     }
 }
 
+impl PlanStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Backgrounded => "backgrounded",
+            Self::Blocked => "blocked",
+            Self::Completed => "completed",
+            Self::Detached => "detached",
+            Self::Archived => "archived",
+            Self::Stale => "stale",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
 pub struct PlanBinding {
@@ -482,6 +496,7 @@ impl IntentDocument {
                         }
                         "skip" => self.apply_plan_action(PlanAction::Skip),
                         "clear" => self.apply_plan_action(PlanAction::Clear),
+                        "list" | "status" => self.apply_plan_action(PlanAction::View),
                         _ => {}
                     }
                 }
