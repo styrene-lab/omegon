@@ -19,6 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - **Interactive startup preserves model preferences** — launching the TUI no longer rewrites the selected/profile model to an automation-safe fallback such as Sonnet when the preferred provider is temporarily unavailable; unavailable providers now surface as disconnected instead of resetting the model.
+- **Operator-facing URLs render as explicit links** — base prompt behavior now instructs agents to format localhost/server/viewer URLs as Markdown links so validation endpoints are clickable in the TUI.
 
 ## [0.23.8] - 2026-05-25
 
