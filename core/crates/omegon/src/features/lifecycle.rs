@@ -2166,6 +2166,35 @@ mod tests {
     }
 
     #[test]
+    fn openspec_set_task_status_updates_tasks_file() {
+        let (_dir, repo) = setup_test_repo();
+        let feature = LifecycleFeature::new(&repo);
+        let change_dir = repo.join("openspec/changes/task-write");
+        fs::create_dir_all(&change_dir).unwrap();
+        fs::write(change_dir.join("proposal.md"), "# Task Write\n").unwrap();
+        fs::write(
+            change_dir.join("tasks.md"),
+            "# Tasks\n\n## 1. Runtime\n- [ ] 1.1 Pending task\n",
+        )
+        .unwrap();
+
+        let result = feature
+            .execute_openspec_manage(&json!({
+                "action": "set_task_status",
+                "change_name": "task-write",
+                "group": "1. Runtime",
+                "task_id": "1.1",
+                "status": "done",
+            }))
+            .unwrap();
+
+        let text = result.content[0].as_text().unwrap();
+        assert!(text.contains("status: pending -> done"), "{text}");
+        let content = fs::read_to_string(change_dir.join("tasks.md")).unwrap();
+        assert!(content.contains("- [x] 1.1 Pending task"));
+    }
+
+    #[test]
     fn openspec_add_spec() {
         let (_dir, repo) = setup_test_repo();
         let feature = LifecycleFeature::new(&repo);

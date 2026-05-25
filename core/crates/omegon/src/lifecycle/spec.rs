@@ -866,6 +866,37 @@ Then sharedState.cleave.children[i].status becomes running
     }
 
     #[test]
+    fn set_task_checkbox_status_preserves_crlf_newlines() {
+        let dir = std::env::temp_dir().join(format!(
+            "omegon-test-task-write-crlf-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let change_dir = dir.join("openspec/changes/example");
+        fs::create_dir_all(&change_dir).unwrap();
+        fs::write(
+            change_dir.join("tasks.md"),
+            "# Tasks\r\n\r\n## 1. Runtime\r\n- [ ] 1.1 Pending task\r\n",
+        )
+        .unwrap();
+
+        set_task_checkbox_status(
+            &dir,
+            "example",
+            "1. Runtime",
+            "1.1",
+            TaskCheckboxStatus::Done,
+        )
+        .unwrap();
+
+        let content = fs::read_to_string(change_dir.join("tasks.md")).unwrap();
+        assert!(content.contains("\r\n"));
+        assert!(content.lines().count() >= 3);
+        assert!(content.contains("- [x] 1.1 Pending task\r\n"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn compute_stage_progression() {
         assert_eq!(
             compute_stage(false, false, false, 0, 0),
