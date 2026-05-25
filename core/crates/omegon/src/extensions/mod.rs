@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 pub mod config_store;
@@ -67,6 +67,36 @@ const SAFE_INHERIT_ENVS: &[&str] = &[
     "FLYNT_VAULT",
     "CODEX_VAULT",
 ];
+
+#[derive(Debug, Clone)]
+pub struct ExtensionNotification {
+    pub extension_name: String,
+    pub method: String,
+    pub params: Value,
+}
+
+#[derive(Clone)]
+struct ExtensionNotificationSink {
+    extension_name: String,
+    tx: mpsc::UnboundedSender<ExtensionNotification>,
+}
+
+impl ExtensionNotificationSink {
+    fn send(&self, notification: omegon_extension::RpcNotification) {
+        let event = ExtensionNotification {
+            extension_name: self.extension_name.clone(),
+            method: notification.method,
+            params: notification.params,
+        };
+        if let Err(err) = self.tx.send(event) {
+            tracing::debug!(
+                extension = %self.extension_name,
+                error = %err,
+                "extension notification dropped because receiver is closed"
+            );
+        }
+    }
+}
 
 /// Handles for communicating with an extension process.
 pub struct ProcessHandles {
@@ -179,6 +209,7 @@ struct ExtensionRuntimeContext {
     ext_dir: PathBuf,
     manifest: ExtensionManifest,
     resolved_secrets: Vec<(String, String)>,
+    notification_sink: Option<ExtensionNotificationSink>,
 }
 
 /// Wrapper Feature for any extension (native or OCI).
@@ -250,21 +281,30 @@ impl ExtensionFeature {
                 continue;
             }
             let resp: Value = serde_json::from_str(trimmed)?;
-            if let Ok(omegon_extension::RpcIncoming::Request(req)) =
-                omegon_extension::RpcIncoming::parse(trimmed)
-            {
-                let response = host_rpc_response_for_extension_request(
-                    &self.runtime.manifest,
-                    &self.runtime.name,
-                    &req,
-                )
-                .ok_or_else(|| anyhow!("host request produced no response"))?;
-                handles
-                    .stdin
-                    .write_all(format!("{}\n", response).as_bytes())
-                    .await?;
-                handles.stdin.flush().await?;
-                continue;
+            if let Ok(incoming) = omegon_extension::RpcIncoming::parse(trimmed) {
+                match incoming {
+                    omegon_extension::RpcIncoming::Request(req) => {
+                        let response = host_rpc_response_for_extension_request(
+                            &self.runtime.manifest,
+                            &self.runtime.name,
+                            &req,
+                        )
+                        .ok_or_else(|| anyhow!("host request produced no response"))?;
+                        handles
+                            .stdin
+                            .write_all(format!("{}\n", response).as_bytes())
+                            .await?;
+                        handles.stdin.flush().await?;
+                        continue;
+                    }
+                    omegon_extension::RpcIncoming::Notification(notification) => {
+                        if let Some(sink) = &self.runtime.notification_sink {
+                            sink.send(notification);
+                        }
+                        continue;
+                    }
+                    omegon_extension::RpcIncoming::Response(_) => {}
+                }
             }
             if resp.get("id").and_then(|v| v.as_u64()) == Some(id) {
                 return if let Some(result) = resp.get("result") {
@@ -421,23 +461,29 @@ impl ExtensionPollingHandle {
                 continue;
             }
             let resp: Value = serde_json::from_str(trimmed)?;
-            if let Ok(omegon_extension::RpcIncoming::Request(req)) =
-                omegon_extension::RpcIncoming::parse(trimmed)
-            {
-                let response = json!({
-                    "jsonrpc": "2.0",
-                    "id": req.id,
-                    "error": {
-                        "code": -32601,
-                        "message": format!("host request method '{}' is unavailable on polling handles", req.method)
+            if let Ok(incoming) = omegon_extension::RpcIncoming::parse(trimmed) {
+                match incoming {
+                    omegon_extension::RpcIncoming::Request(req) => {
+                        let response = json!({
+                            "jsonrpc": "2.0",
+                            "id": req.id,
+                            "error": {
+                                "code": -32601,
+                                "message": format!("host request method '{}' is unavailable on polling handles", req.method)
+                            }
+                        });
+                        handles
+                            .stdin
+                            .write_all(format!("{}\n", response).as_bytes())
+                            .await?;
+                        handles.stdin.flush().await?;
+                        continue;
                     }
-                });
-                handles
-                    .stdin
-                    .write_all(format!("{}\n", response).as_bytes())
-                    .await?;
-                handles.stdin.flush().await?;
-                continue;
+                    omegon_extension::RpcIncoming::Notification(_) => {
+                        continue;
+                    }
+                    omegon_extension::RpcIncoming::Response(_) => {}
+                }
             }
             if resp.get("id").and_then(|v| v.as_u64()) == Some(id) {
                 return if let Some(result) = resp.get("result") {
@@ -525,6 +571,8 @@ pub struct SpawnedExtension {
     pub widget_rx: broadcast::Receiver<WidgetEvent>,
     /// Polling handle for extensions that provide `vox_route` (event bridge).
     pub vox_polling_handle: Option<ExtensionPollingHandle>,
+    /// Push notification receiver for voice-capable extensions.
+    pub voice_notification_rx: Option<mpsc::UnboundedReceiver<ExtensionNotification>>,
 }
 
 /// Spawn an extension from its manifest directory.
@@ -844,11 +892,25 @@ async fn spawn_native(
         "spawned native extension"
     );
 
+    let notification_pair = if manifest.capabilities.voice {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            Some(ExtensionNotificationSink {
+                extension_name: manifest.extension.name.clone(),
+                tx,
+            }),
+            Some(rx),
+        )
+    } else {
+        (None, None)
+    };
+
     let runtime = ExtensionRuntimeContext {
         name: manifest.extension.name.clone(),
         ext_dir: ext_dir.to_path_buf(),
         manifest: manifest.clone(),
         resolved_secrets: resolved_secrets.to_vec(),
+        notification_sink: notification_pair.0,
     };
 
     let (feature, widget_rx) =
@@ -887,6 +949,7 @@ async fn spawn_native(
         widgets: tab_widgets,
         widget_rx,
         vox_polling_handle,
+        voice_notification_rx: notification_pair.1,
     })
 }
 
@@ -911,11 +974,25 @@ async fn spawn_container(
         "spawned OCI extension"
     );
 
+    let notification_pair = if manifest.capabilities.voice {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            Some(ExtensionNotificationSink {
+                extension_name: manifest.extension.name.clone(),
+                tx,
+            }),
+            Some(rx),
+        )
+    } else {
+        (None, None)
+    };
+
     let runtime = ExtensionRuntimeContext {
         name: manifest.extension.name.clone(),
         ext_dir: ext_dir.to_path_buf(),
         manifest: manifest.clone(),
         resolved_secrets: resolved_secrets.to_vec(),
+        notification_sink: notification_pair.0,
     };
 
     let (feature, widget_rx) =
@@ -949,6 +1026,7 @@ async fn spawn_container(
         widgets: tab_widgets,
         widget_rx,
         vox_polling_handle,
+        voice_notification_rx: notification_pair.1,
     })
 }
 

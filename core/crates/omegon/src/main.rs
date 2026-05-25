@@ -7735,6 +7735,7 @@ mod tests {
             cleave_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
             delegate_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
             vox_polling_handles: vec![],
+            voice_notification_receivers: vec![],
         }
     }
 

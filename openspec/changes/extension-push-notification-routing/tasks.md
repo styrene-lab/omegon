@@ -11,7 +11,7 @@
 <!-- specs: extensions/push-notifications -->
 
 - [ ] 2.1 Add tests proving notifications do not break in-flight RPC response matching.
-- [ ] 2.2 Add a host-side notification representation/channel for extension processes.
+- [x] 2.2 Add a host-side notification representation/channel for extension processes.
 - [ ] 2.3 Route unknown notifications safely without daemon injection.
 
 ## 3. Voice bridge conversion

@@ -86,6 +86,9 @@ pub struct AgentSetup {
     /// Polling handles for extensions that provide `vox_route`.
     /// Used by the daemon to start the vox event bridge.
     pub vox_polling_handles: Vec<crate::extensions::ExtensionPollingHandle>,
+    /// Notification receivers for voice-capable extensions.
+    pub voice_notification_receivers:
+        Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
 }
 
 /// Pre-computed state gathered during setup for TUI initial display.
@@ -726,16 +729,22 @@ impl AgentSetup {
 
         // ─── Operator-installed extensions (RPC + OCI) ────────────────
         // All extensions, including bundled ones (scribe-rpc), are discovered here
-        let (extension_widgets, widget_receivers, vox_polling_handles) =
-            match discover_and_register_extensions(&cwd, &mut bus, std::sync::Arc::clone(&secrets))
-                .await
-            {
-                Ok((widgets, receivers, handles)) => (widgets, receivers, handles),
-                Err(e) => {
-                    tracing::warn!("extension discovery failed: {}", e);
-                    (vec![], vec![], vec![])
-                }
-            };
+        let (
+            extension_widgets,
+            widget_receivers,
+            vox_polling_handles,
+            voice_notification_receivers,
+        ) = match discover_and_register_extensions(&cwd, &mut bus, std::sync::Arc::clone(&secrets))
+            .await
+        {
+            Ok((widgets, receivers, handles, voice_receivers)) => {
+                (widgets, receivers, handles, voice_receivers)
+            }
+            Err(e) => {
+                tracing::warn!("extension discovery failed: {}", e);
+                (vec![], vec![], vec![], vec![])
+            }
+        };
 
         // ─── External plugins (TOML manifests) ────────────────────────
         let plugin_filter = crate::plugins::PluginSelectionFilter {
@@ -1143,6 +1152,7 @@ impl AgentSetup {
             cleave_event_slot,
             delegate_event_slot,
             vox_polling_handles,
+            voice_notification_receivers,
             skill_phases,
         })
     }
@@ -1463,12 +1473,13 @@ async fn discover_and_register_extensions(
     Vec<crate::extensions::ExtensionTabWidget>,
     Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
     Vec<crate::extensions::ExtensionPollingHandle>,
+    Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
 )> {
     let ext_dir = crate::paths::omegon_home()?.join("extensions");
 
     if !ext_dir.exists() {
         tracing::debug!("extension directory not found: {}", ext_dir.display());
-        return Ok((vec![], vec![], vec![]));
+        return Ok((vec![], vec![], vec![], vec![]));
     }
 
     let profile = crate::settings::Profile::load(cwd);
@@ -1478,6 +1489,7 @@ async fn discover_and_register_extensions(
     let mut extension_widgets = vec![];
     let mut widget_receivers = vec![];
     let mut vox_polling_handles = vec![];
+    let mut voice_notification_receivers = vec![];
     for entry in std::fs::read_dir(&ext_dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -1544,6 +1556,9 @@ async fn discover_and_register_extensions(
                 if let Some(handle) = spawned.vox_polling_handle {
                     vox_polling_handles.push(handle);
                 }
+                if let Some(rx) = spawned.voice_notification_rx {
+                    voice_notification_receivers.push(rx);
+                }
                 bus.register(spawned.feature);
                 // Collect widgets and receivers for TUI
                 extension_widgets.extend(spawned.widgets);
@@ -1569,7 +1584,12 @@ async fn discover_and_register_extensions(
         tracing::info!(count = count, "extension discovery complete");
     }
 
-    Ok((extension_widgets, widget_receivers, vox_polling_handles))
+    Ok((
+        extension_widgets,
+        widget_receivers,
+        vox_polling_handles,
+        voice_notification_receivers,
+    ))
 }
 
 fn extension_state_disabled(path: &Path) -> bool {
