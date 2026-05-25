@@ -16,8 +16,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-05-25
+
 ### Added
+
 - Started the plan-refinement lifecycle: small work plans now have a compatibility wrapper, central mutation action API, session-scoped visible plan projection metadata, read-only `/plan list` surfaces for operators and agents, and initial registry projection types while preserving existing `/plan` snapshot fields.
+- Surface voice-capable extension `voice/state` notifications in harness status/footer summaries using extension-reported `state` and `mic_open` only.
+- Route `terminal.create@1` execution through a terminal backend registry so visual hosts can satisfy placement requests while portable PTY remains the background fallback.
+
+### Fixed
+
+- Preserve voice transcription `utterance_id` metadata when routing voice-capable extension notifications into daemon prompt events.
 
 ## [0.24.0] - 2026-05-25
 
@@ -30,8 +39,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Added deny-by-default MCP HostAction metadata handling so MCP-origin actions are preserved, validated, surfaced as outcomes, and never auto-executed without a future explicit policy layer.
 - Added an extension `voice` capability flag as the first substrate for push-based local voice notification routing.
 - Route voice-capable extension `voice/transcription` notifications into operator-trusted daemon prompt events.
-- Surface voice-capable extension `voice/state` notifications in harness status/footer summaries using extension-reported `state` and `mic_open` only.
-- Route `terminal.create@1` execution through a terminal backend registry so visual hosts can satisfy placement requests while portable PTY remains the background fallback.
 - Added host-side voice MVP integration coverage proving fake voice extensions route through the existing daemon event ingress rather than a parallel prompt stream.
 
 ### Fixed
@@ -40,7 +47,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Normalize native extension SDK `get_tools` schemas that use `inputSchema` into Omegon's internal tool definitions so installed extensions advertise their tools instead of silently registering zero tools.
 - Harden extension tool-result envelope parsing and HostAction policy outcomes.
 - Avoid blocking-runtime panics when native HostAction terminal execution starts a local terminal backend from an interactive turn runtime.
-- Preserve voice transcription `utterance_id` metadata when routing voice-capable extension notifications into daemon prompt events.
 - **Completed plans surface in Slim** — completed plan updates now leave the active pinned plan lane clear while keeping a `plan done · view` affordance visible so the last completed plan can be recalled.
 - **Completed plans remain recoverable** — completed work plans are now recorded as bounded session state, survive save/resume, and `/plan view` can show the last completed plan even after the active plan has been cleared.
 
