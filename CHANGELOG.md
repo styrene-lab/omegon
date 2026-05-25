@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.23.9] - 2026-05-25
+
 ### Fixed
 
 - **Session persistence is atomic and versioned** — session snapshots and metadata now use locked atomic writes, snapshots are saved before listing metadata, and new snapshots include schema/version metadata for safer resume across upgrades.
