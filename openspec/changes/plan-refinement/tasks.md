@@ -29,10 +29,11 @@
 ## 4. Write-through and Reconciliation
 <!-- specs: lifecycle/work-plan-threading -->
 
-- [ ] 4.1 Keep OpenSpec/design projections read-only until stable task identity is defined and tested.
-- [ ] 4.2 Define stable OpenSpec task identity strategy before durable checkbox mutation.
-- [ ] 4.3 Implement explicit write-through for OpenSpec task completion only after identity support, or document why it is deferred.
-- [ ] 4.4 Ensure clear/detach does not delete durable lifecycle artifacts.
+- [x] 4.1 Keep OpenSpec/design projections read-only until stable task identity is defined and tested.
+- [x] 4.2 Define stable OpenSpec task identity strategy before durable checkbox mutation.
+- [x] 4.3 Implement explicit write-through through `openspec_manage` only; `/plan` must not gain duplicate OpenSpec mutation actions.
+- [x] 4.4 Add `openspec_manage` task-status mutation with strict numeric task-id matching and refusal on ambiguity.
+- [ ] 4.5 Ensure clear/detach does not delete durable lifecycle artifacts.
 - [ ] 4.5 Add lifecycle reconciliation checks for bound plan/task mismatches.
 
 ## 5. Plan Registry and Completion Ledger
