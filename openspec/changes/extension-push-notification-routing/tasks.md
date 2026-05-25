@@ -10,9 +10,9 @@
 ## 2. Notification dispatch seam
 <!-- specs: extensions/push-notifications -->
 
-- [ ] 2.1 Add tests proving notifications do not break in-flight RPC response matching.
+- [x] 2.1 Add tests proving notifications do not break in-flight RPC response matching.
 - [x] 2.2 Add a host-side notification representation/channel for extension processes.
-- [ ] 2.3 Route unknown notifications safely without daemon injection.
+- [x] 2.3 Route unknown notifications safely without daemon injection.
 
 ## 3. Voice bridge conversion
 <!-- specs: extensions/voice-transcription-routing -->

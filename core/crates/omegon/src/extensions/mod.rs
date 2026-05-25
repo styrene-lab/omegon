@@ -124,6 +124,15 @@ impl ProcessHandles {
     /// Send a JSON-RPC request and receive the response.
     /// Standalone so the handshake sequence can run before ExtensionFeature is constructed.
     async fn rpc_call(&mut self, method: &str, params: Value) -> Result<Value> {
+        self.rpc_call_with_notifications(method, params, None).await
+    }
+
+    async fn rpc_call_with_notifications(
+        &mut self,
+        method: &str,
+        params: Value,
+        notification_sink: Option<&ExtensionNotificationSink>,
+    ) -> Result<Value> {
         let id = self.next_id;
         self.next_id += 1;
 
@@ -150,6 +159,14 @@ impl ProcessHandles {
                 continue;
             }
             let resp: Value = serde_json::from_str(trimmed)?;
+            if let Ok(omegon_extension::RpcIncoming::Notification(notification)) =
+                omegon_extension::RpcIncoming::parse(trimmed)
+            {
+                if let Some(sink) = notification_sink {
+                    sink.send(notification);
+                }
+                continue;
+            }
             if resp.get("id").and_then(|v| v.as_u64()) == Some(id) {
                 return if let Some(result) = resp.get("result") {
                     Ok(result.clone())
@@ -354,6 +371,7 @@ impl ExtensionFeature {
             &self.runtime.manifest,
             &self.runtime.ext_dir,
             &self.runtime.resolved_secrets,
+            self.runtime.notification_sink.as_ref(),
         )
         .await
         .map_err(|err| {
@@ -695,11 +713,14 @@ async fn handshake(
     manifest: &ExtensionManifest,
     ext_dir: &Path,
     resolved_secrets: &[(String, String)],
+    notification_sink: Option<&ExtensionNotificationSink>,
 ) -> Result<Vec<ToolDefinition>> {
     let name = &manifest.extension.name;
 
     // 1. Discover tools
-    let tools_response = handles.rpc_call("get_tools", json!({})).await?;
+    let tools_response = handles
+        .rpc_call_with_notifications("get_tools", json!({}), notification_sink)
+        .await?;
     let tools = normalize_extension_tool_definitions(&tools_response).map_err(|err| {
         anyhow!(
             "extension '{}' returned invalid get_tools response: {err}",
@@ -714,7 +735,11 @@ async fn handshake(
             .map(|(k, v)| (k.clone(), Value::String(v.clone())))
             .collect();
         match handles
-            .rpc_call("bootstrap_secrets", Value::Object(secrets_map))
+            .rpc_call_with_notifications(
+                "bootstrap_secrets",
+                Value::Object(secrets_map),
+                notification_sink,
+            )
             .await
         {
             Ok(_) => tracing::debug!(
@@ -743,7 +768,11 @@ async fn handshake(
     let config = resolved_config(manifest, ext_dir)?;
     if !config.is_empty() {
         match handles
-            .rpc_call("bootstrap_config", Value::Object(config))
+            .rpc_call_with_notifications(
+                "bootstrap_config",
+                Value::Object(config),
+                notification_sink,
+            )
             .await
         {
             Ok(_) => tracing::debug!(extension = name, "bootstrap_config delivered"),
@@ -882,17 +911,6 @@ async fn spawn_native(
 ) -> Result<SpawnedExtension> {
     let mut handles = spawn_process_handles(manifest, ext_dir).await?;
 
-    let tools = handshake(&mut handles, manifest, ext_dir, resolved_secrets).await?;
-
-    tracing::info!(
-        name = %manifest.extension.name,
-        binary = %binary.display(),
-        tools = tools.len(),
-        widgets = widgets.len(),
-        secrets = resolved_secrets.len(),
-        "spawned native extension"
-    );
-
     let notification_pair = if manifest.capabilities.voice {
         let (tx, rx) = mpsc::unbounded_channel();
         (
@@ -905,6 +923,24 @@ async fn spawn_native(
     } else {
         (None, None)
     };
+
+    let tools = handshake(
+        &mut handles,
+        manifest,
+        ext_dir,
+        resolved_secrets,
+        notification_pair.0.as_ref(),
+    )
+    .await?;
+
+    tracing::info!(
+        name = %manifest.extension.name,
+        binary = %binary.display(),
+        tools = tools.len(),
+        widgets = widgets.len(),
+        secrets = resolved_secrets.len(),
+        "spawned native extension"
+    );
 
     let runtime = ExtensionRuntimeContext {
         name: manifest.extension.name.clone(),
@@ -964,17 +1000,6 @@ async fn spawn_container(
 ) -> Result<SpawnedExtension> {
     let mut handles = spawn_process_handles(manifest, ext_dir).await?;
 
-    let tools = handshake(&mut handles, manifest, ext_dir, resolved_secrets).await?;
-
-    tracing::info!(
-        name = %manifest.extension.name,
-        image = image,
-        tools = tools.len(),
-        widgets = widgets.len(),
-        secrets = resolved_secrets.len(),
-        "spawned OCI extension"
-    );
-
     let notification_pair = if manifest.capabilities.voice {
         let (tx, rx) = mpsc::unbounded_channel();
         (
@@ -987,6 +1012,24 @@ async fn spawn_container(
     } else {
         (None, None)
     };
+
+    let tools = handshake(
+        &mut handles,
+        manifest,
+        ext_dir,
+        resolved_secrets,
+        notification_pair.0.as_ref(),
+    )
+    .await?;
+
+    tracing::info!(
+        name = %manifest.extension.name,
+        image = image,
+        tools = tools.len(),
+        widgets = widgets.len(),
+        secrets = resolved_secrets.len(),
+        "spawned OCI extension"
+    );
 
     let runtime = ExtensionRuntimeContext {
         name: manifest.extension.name.clone(),
@@ -1247,6 +1290,76 @@ binary = "flaky-extension.sh"
         .unwrap_err();
 
         assert!(err.to_string().contains("missing non-empty name"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn voice_capable_extension_notification_does_not_break_get_tools_response_matching() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("voice-extension.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *get_tools*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"voice/transcription","params":{"text":"synthetic validation","duration_s":0.2}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":[{"name":"voice_status","description":"Voice status","inputSchema":{"type":"object","properties":{}}}]}'
+      ;;
+    *bootstrap_config*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"acknowledged":true}}'
+      ;;
+    *execute_tool*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"ok"}]}}'
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        std::fs::write(
+            temp.path().join("manifest.toml"),
+            r#"
+[extension]
+name = "voice-test"
+version = "0.1.0"
+description = "Voice test extension"
+
+[runtime]
+type = "native"
+binary = "voice-extension.sh"
+
+[capabilities]
+voice = true
+"#,
+        )
+        .unwrap();
+
+        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
+        let mut rx = spawned
+            .voice_notification_rx
+            .expect("voice-capable extension should expose notification receiver");
+        let names: Vec<String> = spawned
+            .feature
+            .tools()
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect();
+        assert_eq!(names, vec!["voice_status"]);
+
+        let notification = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("notification received")
+            .expect("notification channel open");
+        assert_eq!(notification.extension_name, "voice-test");
+        assert_eq!(notification.method, "voice/transcription");
+        assert_eq!(notification.params["text"], "synthetic validation");
     }
 
     #[test]
