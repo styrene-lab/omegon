@@ -9,6 +9,7 @@ use omegon_traits::LifecyclePhase;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A tool call extracted from an assistant message.
 #[derive(Debug, Clone)]
@@ -557,6 +558,16 @@ impl IntentDocument {
     }
 }
 
+const SESSION_SNAPSHOT_SCHEMA_VERSION: u16 = 1;
+
+fn current_session_saved_at() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("unix:{secs}")
+}
+
 /// Serializable session snapshot for save/resume.
 ///
 /// All fields use `#[serde(default)]` so that sessions saved by older versions
@@ -565,6 +576,9 @@ impl IntentDocument {
 #[serde(default)]
 #[derive(Default)]
 struct SessionSnapshot {
+    schema_version: u16,
+    omegon_version: String,
+    saved_at: String,
     messages: Vec<LlmMessage>,
     intent: IntentDocument,
     decay_window: usize,
@@ -1269,13 +1283,16 @@ impl ConversationState {
     pub fn save_session(&self, path: &Path) -> anyhow::Result<()> {
         let view = self.build_llm_view();
         let session = SessionSnapshot {
+            schema_version: SESSION_SNAPSHOT_SCHEMA_VERSION,
+            omegon_version: env!("CARGO_PKG_VERSION").to_string(),
+            saved_at: current_session_saved_at(),
             messages: view,
             intent: self.intent.clone(),
             decay_window: self.decay_window,
             compaction_summary: self.compaction_summary.clone(),
         };
         let json = serde_json::to_string_pretty(&session)?;
-        std::fs::write(path, json)?;
+        crate::filelock::atomic_write_locked(path, json.as_bytes())?;
         tracing::info!(path = %path.display(), turns = self.intent.stats.turns, "session saved");
         Ok(())
     }
@@ -1295,6 +1312,9 @@ impl ConversationState {
             path = %path.display(),
             turns = snapshot.intent.stats.turns,
             messages = snapshot.messages.len(),
+            schema_version = snapshot.schema_version,
+            omegon_version = %snapshot.omegon_version,
+            saved_at = %snapshot.saved_at,
             "session loaded"
         );
 
@@ -2346,6 +2366,28 @@ mod tests {
         assert_eq!(view.len(), 3); // user + assistant + tool_result
 
         // Cleanup
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn save_session_includes_snapshot_metadata_and_uses_atomic_temp_path() {
+        let mut conv = ConversationState::new();
+        conv.push_user("keep this across upgrades".into());
+
+        let tmp = std::env::temp_dir().join("omegon-test-versioned-session.json");
+        let _ = std::fs::remove_file(&tmp);
+        let _ = std::fs::remove_file(tmp.with_extension("tmp"));
+
+        conv.save_session(&tmp).unwrap();
+
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&tmp).unwrap()).unwrap();
+        assert_eq!(raw["schema_version"], SESSION_SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(raw["omegon_version"], env!("CARGO_PKG_VERSION"));
+        let saved_at = raw["saved_at"].as_str().unwrap();
+        assert!(saved_at.starts_with("unix:"), "saved_at was {saved_at}");
+        assert!(!tmp.with_extension("tmp").exists());
+
         let _ = std::fs::remove_file(&tmp);
     }
 

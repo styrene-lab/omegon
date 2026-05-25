@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- **Session persistence is atomic and versioned** — session snapshots and metadata now use locked atomic writes, snapshots are saved before listing metadata, and new snapshots include schema/version metadata for safer resume across upgrades.
 - **Interactive startup preserves model preferences** — launching the TUI no longer rewrites the selected/profile model to an automation-safe fallback such as Sonnet when the preferred provider is temporarily unavailable; unavailable providers now surface as disconnected instead of resetting the model.
 - **Operator-facing URLs render as explicit links** — base prompt behavior now instructs agents to format localhost/server/viewer URLs as Markdown links so validation endpoints are clickable in the TUI.
 
