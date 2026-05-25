@@ -30,6 +30,22 @@ The remaining gap is combined-path coverage: fake extension process → notifica
 
 ## Test design
 
+### Integration principle: one daemon ingress, not a second event system
+
+These tests must not introduce or bless a parallel event stream. `voice_notification_rx` is only an extension-transport adapter boundary: it captures JSON-RPC notifications from a single extension process because the process stdout is already owned by request/response RPC matching.
+
+The architectural contract is:
+
+```text
+extension stdout notification
+→ per-extension transport receiver (`voice_notification_rx`)
+→ voice_bridge adapter
+→ existing daemon event queue (`DaemonEventEnvelope`)
+→ ordinary agent prompt handling
+```
+
+There is no separate durable voice bus, no independent prompt dispatcher, and no voice-specific agent loop. Once the bridge converts a transcription, the event must be indistinguishable from other daemon prompt events except for its metadata (`source = "voice"`, `source_channel = "voice"`, trust/caller fields). Tests should assert this by reading from the same daemon event channel type used by the existing vox bridge.
+
 ### Test 1: fake voice extension injects daemon event through bridge
 
 Create a temporary native extension script with manifest:

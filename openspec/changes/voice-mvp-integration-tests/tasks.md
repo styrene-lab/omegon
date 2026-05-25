@@ -4,8 +4,9 @@
 <!-- specs: extensions/voice-mvp-tests -->
 
 - [ ] 1.1 Add fake native extension helper that can emit JSON-RPC notifications before `get_tools` response.
-- [ ] 1.2 Add test for voice-capable fake extension → `voice_notification_rx` → `voice_bridge` → daemon event.
+- [ ] 1.2 Add test for voice-capable fake extension → `voice_notification_rx` → `voice_bridge` → existing daemon event queue.
 - [ ] 1.3 Assert trusted local operator payload fields and source/caller metadata.
+- [ ] 1.4 Assert the bridge emits ordinary `DaemonEventEnvelope` values and does not create a parallel voice prompt stream.
 
 ## 2. Negative routing tests
 <!-- specs: extensions/voice-mvp-tests -->

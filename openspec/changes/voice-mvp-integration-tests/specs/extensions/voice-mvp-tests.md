@@ -2,6 +2,16 @@
 
 ## ADDED Requirements
 
+### Requirement: Voice notification routing uses the existing daemon ingress
+
+Omegon SHALL route voice transcription notifications through the existing daemon event queue rather than introducing a parallel voice prompt stream.
+
+#### Scenario: Voice bridge emits ordinary daemon envelope
+Given a voice-capable extension emits `voice/transcription`
+When the host voice bridge processes the notification
+Then the bridge sends a `DaemonEventEnvelope` on the same daemon event channel used by other extension bridges
+And no voice-specific agent loop or secondary prompt dispatcher is required.
+
 ### Requirement: Voice-capable extension notifications inject trusted daemon prompts
 
 Omegon SHALL test the complete fake extension notification path into the daemon event queue without microphone or model dependencies.
