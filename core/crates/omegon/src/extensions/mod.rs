@@ -650,12 +650,13 @@ async fn handshake(
     let name = &manifest.extension.name;
 
     // 1. Discover tools
-    let tools: Vec<ToolDefinition> = handles
-        .rpc_call("get_tools", json!({}))
-        .await
-        .ok()
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
+    let tools_response = handles.rpc_call("get_tools", json!({})).await?;
+    let tools = normalize_extension_tool_definitions(&tools_response).map_err(|err| {
+        anyhow!(
+            "extension '{}' returned invalid get_tools response: {err}",
+            name
+        )
+    })?;
 
     // 2. Deliver secrets over pipe — never via env var
     if !resolved_secrets.is_empty() {
@@ -708,6 +709,60 @@ async fn handshake(
     }
 
     Ok(tools)
+}
+
+fn normalize_extension_tool_definitions(value: &Value) -> Result<Vec<ToolDefinition>> {
+    let tools = value
+        .as_array()
+        .ok_or_else(|| anyhow!("get_tools result must be an array"))?;
+    tools
+        .iter()
+        .map(normalize_extension_tool_definition)
+        .collect()
+}
+
+fn normalize_extension_tool_definition(value: &Value) -> Result<ToolDefinition> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| anyhow!("tool definition must be an object"))?;
+    let name = obj
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| anyhow!("tool definition missing non-empty name"))?
+        .to_string();
+    let label = obj
+        .get("label")
+        .and_then(Value::as_str)
+        .filter(|label| !label.is_empty())
+        .unwrap_or(&name)
+        .to_string();
+    let description = obj
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let parameters = obj
+        .get("parameters")
+        .or_else(|| obj.get("inputSchema"))
+        .or_else(|| obj.get("input_schema"))
+        .cloned()
+        .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
+    let capabilities = obj
+        .get("capabilities")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|err| anyhow!("tool '{name}' has invalid capabilities: {err}"))?
+        .unwrap_or_default();
+
+    Ok(ToolDefinition {
+        name,
+        label,
+        description,
+        parameters,
+        capabilities,
+    })
 }
 
 fn resolved_config(
@@ -1058,6 +1113,61 @@ binary = "flaky-extension.sh"
             .await
             .unwrap();
         assert_eq!(second.details["extension_reconnected"], true);
+    }
+
+    #[test]
+    fn extension_sdk_tool_schema_normalizes_input_schema() {
+        let tools = normalize_extension_tool_definitions(&json!([
+            {
+                "name": "reader_doctor",
+                "description": "Diagnose Bookokrat availability and HostAction readiness",
+                "inputSchema": {"type": "object", "properties": {}}
+            },
+            {
+                "name": "reader_open",
+                "description": "Open a readable file",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"]
+                }
+            }
+        ]))
+        .unwrap();
+
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].name, "reader_doctor");
+        assert_eq!(tools[0].label, "reader_doctor");
+        assert_eq!(tools[0].parameters["type"], "object");
+        assert_eq!(tools[1].name, "reader_open");
+        assert_eq!(tools[1].parameters["required"][0], "path");
+    }
+
+    #[test]
+    fn extension_internal_tool_schema_still_accepts_parameters_and_label() {
+        let tools = normalize_extension_tool_definitions(&json!([
+            {
+                "name": "hello_extension",
+                "label": "Hello Extension",
+                "description": "Say hello",
+                "parameters": {"type": "object", "properties": {"name": {"type": "string"}}}
+            }
+        ]))
+        .unwrap();
+
+        assert_eq!(tools[0].name, "hello_extension");
+        assert_eq!(tools[0].label, "Hello Extension");
+        assert_eq!(tools[0].parameters["properties"]["name"]["type"], "string");
+    }
+
+    #[test]
+    fn extension_tool_schema_rejects_missing_name() {
+        let err = normalize_extension_tool_definitions(&json!([
+            {"description": "broken", "inputSchema": {"type": "object"}}
+        ]))
+        .unwrap_err();
+
+        assert!(err.to_string().contains("missing non-empty name"));
     }
 
     #[test]

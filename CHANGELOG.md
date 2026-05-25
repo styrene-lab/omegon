@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Fixed
 
 - Keep dynamically registered native extension tools visible in the lazy model tool surface after turn 1 so installed extension tools such as `reader_doctor` and `reader_open` can be discovered during an active session.
+- Normalize native extension SDK `get_tools` schemas that use `inputSchema` into Omegon's internal tool definitions so installed extensions advertise their tools instead of silently registering zero tools.
 
 ## [0.23.9] - 2026-05-25
 
