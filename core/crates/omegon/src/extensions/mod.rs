@@ -28,6 +28,7 @@ pub mod manifest;
 pub mod mind;
 pub mod state;
 mod tool_result;
+pub mod voice_bridge;
 pub mod vox_bridge;
 pub mod widgets;
 pub use manifest::{

@@ -2226,6 +2226,14 @@ async fn run_embedded_command(
         }
     }
 
+    for rx in agent.voice_notification_receivers {
+        crate::extensions::voice_bridge::start_voice_bridge(
+            rx,
+            vox_daemon_events.clone(),
+            global_cancel.clone(),
+        );
+    }
+
     let _daemon_checkpoint_task = checkpoint::spawn_checkpoint_subscriber(
         &events_tx,
         agent.session_id.clone(),

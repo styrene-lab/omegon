@@ -17,16 +17,16 @@
 ## 3. Voice bridge conversion
 <!-- specs: extensions/voice-transcription-routing -->
 
-- [ ] 3.1 Add `voice_bridge` tests for valid transcription conversion.
-- [ ] 3.2 Add tests for empty/malformed transcription handling.
-- [ ] 3.3 Implement `voice_bridge` conversion into `DaemonEventEnvelope`.
+- [x] 3.1 Add `voice_bridge` tests for valid transcription conversion.
+- [x] 3.2 Add tests for empty/malformed transcription handling.
+- [x] 3.3 Implement `voice_bridge` conversion into `DaemonEventEnvelope`.
 
 ## 4. Daemon wiring and validation
 <!-- specs: extensions/push-notifications, extensions/voice-transcription-routing -->
 
-- [ ] 4.1 Wire voice-capable extension notifications into the daemon event queue.
+- [x] 4.1 Wire voice-capable extension notifications into the daemon event queue.
 - [ ] 4.2 Validate `omegon-voice` transcription injection locally.
-- [ ] 4.3 Run `cargo test -p omegon-extension`.
-- [ ] 4.4 Run `cargo test -p omegon`.
-- [ ] 4.5 Run `just lint`.
+- [x] 4.3 Run `cargo test -p omegon-extension`.
+- [x] 4.4 Run `cargo test -p omegon`.
+- [x] 4.5 Run `just lint`.
 - [ ] 4.6 Post acceptance trace to #79 and close only after end-to-end validation.
