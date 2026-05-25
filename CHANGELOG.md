@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- **Focus mode opens at the live tail** — entering focus mode now selects the latest readable conversation segment instead of anchoring to an older visible tool card when viewport height caches lag behind streaming output.
+
 ## [0.23.7] - 2026-05-24
 
 ### Fixed

@@ -2146,14 +2146,7 @@ impl App {
             // selection remains latched from earlier mouse/keyboard navigation,
             // preserving it here makes focus mode appear off-by-one (or more)
             // relative to the latest assistant turn.
-            let focus_idx = self
-                .conversation
-                .select_latest_visible_tool_card(self.conversation_area.map(|area| area.height))
-                .or_else(|| {
-                    self.conversation.last_selectable_segment().inspect(|&idx| {
-                        self.conversation.select_segment(idx);
-                    })
-                });
+            let focus_idx = self.conversation.select_focus_entry_segment();
             if let Some(idx) = focus_idx {
                 self.conversation.select_segment(idx);
             }

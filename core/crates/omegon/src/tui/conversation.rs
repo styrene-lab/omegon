@@ -940,6 +940,19 @@ impl ConversationView {
         Some(idx)
     }
 
+    /// Select the segment focus mode should open on.
+    ///
+    /// Focus mode is a reading view, so entry should bias to the live tail of
+    /// the conversation. Tool-card viewport targeting is reserved for explicit
+    /// tool navigation actions like Tab/Ctrl+O; using it here can anchor focus
+    /// to an older visible tool when the viewport cache lags behind streaming
+    /// assistant output.
+    pub fn select_focus_entry_segment(&mut self) -> Option<usize> {
+        let idx = self.last_selectable_segment()?;
+        self.selected_segment = Some(idx);
+        Some(idx)
+    }
+
     pub fn select_next_visible_tool_card(&mut self, viewport_height: Option<u16>) -> Option<usize> {
         let visible = self.visible_tool_cards(viewport_height);
         if visible.is_empty() {
@@ -1823,6 +1836,37 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn focus_entry_prefers_live_tail_over_visible_tool_card() {
+        let mut cv = ConversationView::new();
+        for idx in 0..6 {
+            let id = format!("t{idx}");
+            let path = format!("file{idx}.rs");
+            let name = format!("read{idx}");
+            cv.push_tool_start(&id, &name, Some(&path), Some(&path));
+            cv.push_tool_end(&id, false, Some("result"));
+        }
+        cv.append_thinking("reasoning about the latest response");
+
+        // Simulate a stale/older viewport where the bottom visible rows still
+        // contain tool cards. Explicit tool navigation should continue to use
+        // the visible tool-card target, but entering focus mode must open at
+        // the live tail instead.
+        cv.conv_state.heights = vec![1; cv.segments.len()];
+        cv.conv_state.scroll_offset = 2;
+        cv.selected_segment = Some(1);
+
+        assert_eq!(cv.select_latest_visible_tool_card(Some(3)), Some(4));
+        assert_eq!(cv.selected_segment, Some(4));
+
+        assert_eq!(cv.select_focus_entry_segment(), Some(6));
+        assert_eq!(cv.selected_segment, Some(6));
+        assert!(matches!(
+            cv.segments[6].content,
+            SegmentContent::AssistantText { .. }
+        ));
+    }
+
     #[test]
     fn visible_tool_focus_cycles_and_expands_current_viewport() {
         let mut cv = ConversationView::new();
