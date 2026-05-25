@@ -1362,6 +1362,138 @@ voice = true
         assert_eq!(notification.params["text"], "synthetic validation");
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn voice_capable_extension_notification_reaches_daemon_queue_through_bridge() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("voice-extension.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *get_tools*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"voice/transcription","params":{"text":"summarize the current project","utterance_id":"test-u1","duration_s":1.2}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":[{"name":"voice_status","description":"Voice status","inputSchema":{"type":"object","properties":{}}}]}'
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        std::fs::write(
+            temp.path().join("manifest.toml"),
+            r#"
+[extension]
+name = "voice-test"
+version = "0.1.0"
+description = "Voice test extension"
+
+[runtime]
+type = "native"
+binary = "voice-extension.sh"
+
+[capabilities]
+voice = true
+"#,
+        )
+        .unwrap();
+
+        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
+        let rx = spawned
+            .voice_notification_rx
+            .expect("voice-capable extension should expose notification receiver");
+        let daemon_events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let cancel = tokio_util::sync::CancellationToken::new();
+        crate::extensions::voice_bridge::start_voice_bridge(
+            rx,
+            daemon_events.clone(),
+            cancel.clone(),
+        );
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if let Some(event) = daemon_events.lock().unwrap().first().cloned() {
+                    return event;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("voice bridge should inject daemon event");
+        cancel.cancel();
+
+        assert_eq!(event.source, "voice");
+        assert_eq!(event.trigger_kind, "prompt");
+        assert_eq!(event.source_channel.as_deref(), Some("voice"));
+        assert_eq!(event.caller_role.as_deref(), Some("edit"));
+        assert_eq!(event.payload["text"], "summarize the current project");
+        assert_eq!(event.payload["utterance_id"], "test-u1");
+        assert_eq!(event.payload["duration_s"], 1.2);
+        assert_eq!(event.payload["extension"], "voice-test");
+        assert_eq!(event.payload["trust_level"], "operator");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn non_voice_extension_does_not_get_voice_notification_receiver() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("voice-extension.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *get_tools*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"voice/transcription","params":{"text":"should not inject"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":[{"name":"status","description":"Status","inputSchema":{"type":"object","properties":{}}}]}'
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        std::fs::write(
+            temp.path().join("manifest.toml"),
+            r#"
+[extension]
+name = "not-voice"
+version = "0.1.0"
+description = "Non voice extension"
+
+[runtime]
+type = "native"
+binary = "voice-extension.sh"
+"#,
+        )
+        .unwrap();
+
+        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
+        assert!(
+            spawned.voice_notification_rx.is_none(),
+            "non-voice extension must not get a voice notification receiver"
+        );
+        let names: Vec<String> = spawned
+            .feature
+            .tools()
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect();
+        assert_eq!(names, vec!["status"]);
+    }
+
     #[test]
     fn host_rpc_actions_execute_routes_to_policy_pipeline() {
         let manifest = test_manifest(HashMap::new());

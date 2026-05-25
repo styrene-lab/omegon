@@ -76,6 +76,7 @@ fn transcription_params_to_event(
         payload: json!({
             "text": text,
             "duration_s": duration_s,
+            "utterance_id": utterance_id,
             "trust_level": "operator",
             "extension": extension_name,
         }),
@@ -111,6 +112,7 @@ mod tests {
         assert_eq!(event.trigger_kind, "prompt");
         assert_eq!(event.payload["text"], "open the reader");
         assert_eq!(event.payload["duration_s"], 1.9);
+        assert_eq!(event.payload["utterance_id"], "u1");
         assert_eq!(event.payload["trust_level"], "operator");
         assert_eq!(event.payload["extension"], "omegon-voice");
         assert_eq!(event.caller_role.as_deref(), Some("edit"));
