@@ -17,6 +17,12 @@ default:
 bootstrap *args:
     ./scripts/bootstrap.sh {{args}}
 
+# ─── Hygiene ─────────────────────────────────────────
+
+# Classify dirty tracked/runtime files before making scoped commits.
+dirty-report:
+    python3 scripts/dirty_report.py
+
 # ─── Rust ────────────────────────────────────────────
 
 # Run all Rust tests
@@ -154,7 +160,7 @@ build:
     {{cargo}} build --release -p omegon
 
 # Link the newest built binary onto $PATH so it can be run as `omegon` system-wide.
-# Prefers release over dev-release (just rc builds release; just update builds dev-release).
+# Prefers release over dev-release.
 # Resolution order: /usr/local/bin → ~/.local/bin
 link:
     #!/usr/bin/env bash
@@ -176,7 +182,7 @@ link:
     elif [ -f "$DEV" ]; then
         BINARY="$DEV"
     else
-        echo "No binary found — run 'just rc' or 'just update' first"
+        echo "No binary found — run 'just release' or 'just update' first"
         exit 1
     fi
 
@@ -267,7 +273,7 @@ update:
     {{cargo}} build --profile dev-release -p omegon
     @echo "Updated to $(./target/dev-release/omegon --version 2>/dev/null || echo 'build failed')"
 
-# Build and link a specific tagged RC/stable release into a durable local worktree.
+# Build and link a specific tagged stable release into a durable local worktree.
 # This is the supported way to pin the installed CLI to a release tag.
 link-tag tag:
     #!/usr/bin/env bash
@@ -275,7 +281,7 @@ link-tag tag:
 
     TAG="{{tag}}"
     if [ -z "$TAG" ]; then
-        echo "✗ Usage: just link-tag vX.Y.Z[-rc.N]"
+        echo "✗ Usage: just link-tag vX.Y.Z"
         exit 1
     fi
     case "$TAG" in
@@ -351,7 +357,7 @@ run *args:
 
 # ─── Release ─────────────────────────────────────────────────
 
-# Create and push the release/X.Y branch for the current RC line, then switch
+# Create and push the release/X.Y branch for the current stable line, then switch
 # the working copy to it. This is the branch-based release hardening entrypoint.
 branch-release:
     python3 scripts/release_branch.py branch-release
@@ -367,253 +373,8 @@ merge-release-forward branch='':
         python3 scripts/release_branch.py merge-forward
     fi
 
-# Developer-facing RC cut. Legacy mainline helper: validates main is clean and
-# pushed, creates a fresh release workspace from GitHub, runs `just rc` from
-# there, then pulls the resulting commit + tag back into local main.
-cut-rc:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    # 1. Must be on main
-    BRANCH=$(git branch --show-current)
-    if [ -z "$BRANCH" ]; then
-        echo "✗ Detached HEAD — check out main first"
-        exit 1
-    fi
-    if [ "$BRANCH" != "main" ]; then
-        echo "✗ Must be on main (currently on $BRANCH)"
-        exit 1
-    fi
-
-    # 2. Must be clean
-    if [ -n "$(git status --porcelain)" ]; then
-        echo "✗ Uncommitted changes — commit or stash first"
-        git status --short
-        exit 1
-    fi
-
-    # 3. Must be pushed
-    git fetch origin main --quiet
-    LOCAL=$(git rev-parse HEAD)
-    REMOTE=$(git rev-parse origin/main)
-    if [ "$LOCAL" != "$REMOTE" ]; then
-        echo "✗ Local main is ahead of origin — push first:"
-        echo "  git push origin main"
-        exit 1
-    fi
-
-    # 4. Fresh release workspace from GitHub — no stale state, correct origin
-    WSDIR=$(mktemp -d)/omegon-rc-workspace
-    echo "Cloning release workspace from GitHub..."
-    git clone https://github.com/styrene-lab/omegon.git "$WSDIR" --quiet
-
-    # 5. Write workspace.json so preflight accepts the role
-    CURRENT=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-    MILESTONE=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//' | sed 's/-nightly\.[0-9]*//')
-    mkdir -p "$WSDIR/.omegon/runtime"
-    CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    python3 scripts/make-release-workspace.py "$WSDIR" "$MILESTONE" "$CREATED"
-
-    # 6. Cut the RC from the release workspace
-    echo "Cutting RC from release workspace..."
-    just --justfile "$WSDIR/justfile" --working-directory "$WSDIR" rc
-
-    # 7. Pull the new commit + tag back into local main
-    echo "Pulling RC commit back into local main..."
-    git pull origin main --quiet
-    NEW_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-    echo ""
-    echo "✓ $NEW_VERSION — local main is up to date"
-
-# Cut a release candidate: bump rc.N, test, commit, tag, build, sign.
-# Run from main for the legacy flow or release/X.Y for branch-based hardening.
-rc-validate:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    ROOT=$(pwd)
-
-    echo "Release validation..."
-    echo "Rust warning gate..."
-    RUSTFLAGS="-D warnings" {{cargo}} check -p omegon -q
-    {{cargo}} test -p omegon 2>&1 | tail -3
-
-rc:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    BRANCH=$(git branch --show-current)
-    if [ -z "$BRANCH" ]; then
-        echo "✗ Detached HEAD. Check out main before cutting an RC."
-        exit 1
-    fi
-    if [ "$BRANCH" = "main" ]; then
-        # Reconcile jj+git colocated state for the legacy mainline flow.
-        ./scripts/sync-jj-to-git.sh
-        BRANCH=$(git branch --show-current)
-    fi
-    case "$BRANCH" in
-        main|release/*) ;;
-        *)
-            echo "✗ RC cuts must run from main or release/X.Y. Current branch: $BRANCH"
-            exit 1
-            ;;
-    esac
-    HEAD_SHA=$(git rev-parse HEAD)
-    BRANCH_SHA=$(git rev-parse "refs/heads/$BRANCH")
-    if [ "$HEAD_SHA" != "$BRANCH_SHA" ]; then
-        echo "✗ HEAD is not the tip of $BRANCH. Check out $BRANCH and retry."
-        exit 1
-    fi
-
-    # Refuse to run with uncommitted changes
-    DIRTY=$(git status --porcelain -- core/ Cargo.toml Cargo.lock .omegon/milestones.json)
-    if [ -n "$DIRTY" ]; then
-        echo "✗ Uncommitted changes. Commit or stash first."
-        echo "$DIRTY"
-        exit 1
-    fi
-
-    # Read current version and compute target RC version, but do not mutate yet.
-    CURRENT=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-    echo "Current version: $CURRENT"
-
-    if echo "$CURRENT" | grep -q '\-rc\.'; then
-        BASE=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//')
-        RC_NUM=$(echo "$CURRENT" | sed 's/.*-rc\.//')
-        NEW_RC=$((RC_NUM + 1))
-        NEW_VERSION="${BASE}-rc.${NEW_RC}"
-    else
-        # Current version is a stable release (no -rc.N suffix).  Bumping
-        # from here starts a NEW minor release line, which is almost never
-        # what you want when iterating on RCs.  Require explicit opt-in so
-        # an accidental `just rc` right after a stable cut can't push tags
-        # for a version that doesn't exist yet.
-        IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-        BASE="${MAJOR}.${MINOR}.$((PATCH + 1))"
-        NEW_VERSION="${BASE}-rc.1"
-        echo ""
-        echo "⚠  Current version ($CURRENT) is a stable release."
-        echo "   This will start a NEW release line: $NEW_VERSION"
-        echo ""
-        printf "   Type 'yes' to confirm, or Ctrl-C to abort: "
-        read CONFIRM
-        if [ "$CONFIRM" != "yes" ]; then
-            echo "✗ Aborted."
-            exit 1
-        fi
-    fi
-
-    echo "New version: $NEW_VERSION"
-
-    # Ensure this workspace presents release authority before preflight.
-    python3 scripts/release_preflight.py --ensure-release-workspace-role --repo-root .
-
-    # Preflight before any mutation.
-    echo "Release preflight..."
-    python3 scripts/release_preflight.py
-
-    # Audit lifecycle drift before cutting the RC, but without mutating milestone state.
-    # Scope blocking to the active milestone only when present.
-    echo "Lifecycle audit..."
-    if [ -f .omegon/milestones.json ]; then
-        MILESTONE_NODES=$(jq -r --arg base "$BASE" '.[$base].nodes[]? // empty' .omegon/milestones.json)
-    else
-        MILESTONE_NODES=""
-    fi
-    if [ -z "$MILESTONE_NODES" ]; then
-        echo "  ! No milestone-scoped design nodes for $BASE — skipping warning-only lifecycle doctor"
-    else
-        REPORT=$(mktemp)
-        NODES_FILE=$(mktemp)
-        printf '%s\n' "$MILESTONE_NODES" > "$NODES_FILE"
-        {{cargo}} run --quiet -p omegon -- doctor > "$REPORT"
-        BLOCKING_NODE=""
-        while IFS= read -r node; do
-            [ -n "$node" ] || continue
-            if rg -q "^- ${node} \[" "$REPORT"; then
-                BLOCKING_NODE="$node"
-                break
-            fi
-        done < "$NODES_FILE"
-        rm -f "$NODES_FILE"
-        if [ -n "$BLOCKING_NODE" ]; then
-            echo "✗ Lifecycle audit found milestone-scoped drift in node: $BLOCKING_NODE"
-            cat "$REPORT"
-            rm -f "$REPORT"
-            exit 1
-        fi
-        rm -f "$REPORT"
-    fi
-
-    echo "Note: full release validation is now split out of 'just rc'. Run 'just rc-validate' before cutting if you need local test confirmation."
-    echo "Rust warning gate..."
-    RUSTFLAGS="-D warnings" {{cargo}} check -p omegon -q
-
-    # From here on, rollback mutated files if anything fails before commit.
-    MUTATED=0
-    rollback() {
-        if [ "$MUTATED" = "1" ]; then
-            git checkout -- Cargo.toml Cargo.lock .omegon/milestones.json 2>/dev/null || true
-        fi
-    }
-    trap rollback ERR INT TERM
-
-    # Mutate version and milestone state only after validation passes.
-    {{sedi}} "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" Cargo.toml
-    ./scripts/milestone-update.sh rc "$NEW_VERSION"
-
-    # Refresh the lockfile before commit/tag so release steps do not dirty the
-    # tree after the RC is already cut.
-    echo "Refreshing lockfile..."
-    {{cargo}} check -p omegon -q
-    MUTATED=1
-
-    # Commit and tag BEFORE final build so the binary has the right sha
-    git add Cargo.toml Cargo.lock .omegon/milestones.json
-    git commit -m "chore(release): ${NEW_VERSION}"
-    git tag "v${NEW_VERSION}"
-    MUTATED=0
-    trap - ERR INT TERM
-
-    # Fast local validation build. CI produces the canonical distributable release artifacts.
-    echo "Building local validation binary..."
-    {{cargo}} build --profile dev-release -p omegon 2>&1 | tail -3
-
-    # Code sign the local validation binary when possible.
-    BINARY="target/dev-release/omegon"
-    if [ -n "${SMARTCARD_PIN:-}" ]; then
-        SCAN=$("$HOME/.cargo/bin/rcodesign" smartcard-scan 2>/dev/null || true)
-        if echo "$SCAN" | grep -q "Developer ID Application"; then
-            echo "Signing with Apple Developer ID (YubiKey)..."
-            echo "⚡ Touch YubiKey when it blinks"
-            "$HOME/.cargo/bin/rcodesign" sign \
-                --smartcard-slot 9c \
-                --smartcard-pin-env SMARTCARD_PIN \
-                --code-signature-flags runtime "$BINARY"
-            echo "Signed with Developer ID Application (YubiKey)"
-        fi
-    elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Omegon Local Dev"; then
-        codesign -f -s "Omegon Local Dev" --identifier "dev.styrene.omegon" "$BINARY"
-        echo "Signed with Omegon Local Dev certificate"
-    else
-        codesign -f -s - --identifier "dev.styrene.omegon" "$BINARY" 2>/dev/null || true
-        echo "Ad-hoc signed (run 'just sign' to sign with Developer ID)"
-    fi
-
-    echo "Linking freshly built RC into PATH..."
-    just link
-
-    echo "Pushing rc tag..."
-    git push origin "$BRANCH" "v${NEW_VERSION}"
-
-    echo ""
-    echo "✓ ${NEW_VERSION} — preflighted, committed, tagged, built, pushed."
-    echo "  Release publication now completes in CI after assets upload."
-    echo "  GitHub Release workflow will create/publish the prerelease and downstream packaging will follow from release artifacts."
-
 # Release preflight: verify repo is releasable BEFORE any version mutation.
-# Checks: on main or release/X.Y, clean tree, release line is an RC, changelog
+# Checks: on main or release/X.Y, clean tree, release line is stable, changelog
 # target exists, docs/install versioned examples are placeholders, and packaging
 # automation is consistently wired through the release manifest.
 # Called automatically by `just release`. Run manually: just preflight
@@ -625,7 +386,7 @@ preflight:
     fi
     python3 scripts/release_preflight.py
 
-# Cut a stable release: strip -rc.N, test, commit, tag, build.
+# Cut a stable release: test, commit milestone state if needed, tag, build.
 release:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -638,10 +399,12 @@ release:
     RUSTFLAGS="-D warnings" {{cargo}} check -p omegon -q
 
     CURRENT=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-    NEW_VERSION=$(echo "$CURRENT" | sed 's/-rc\.[0-9]*//')
-    echo "Releasing: $CURRENT → $NEW_VERSION"
-
-    {{sedi}} "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" Cargo.toml
+    if echo "$CURRENT" | grep -q '-'; then
+        echo "✗ Release version must be stable semver, got $CURRENT"
+        exit 1
+    fi
+    NEW_VERSION="$CURRENT"
+    echo "Releasing: $NEW_VERSION"
 
     # Mark milestone as released
     ./scripts/milestone-update.sh release "$NEW_VERSION"
@@ -661,37 +424,19 @@ release:
     echo "✓ ${NEW_VERSION} — tested, committed, tagged, built."
     BRANCH=$(git branch --show-current)
     echo "  To publish: git push origin ${BRANCH} v${NEW_VERSION}"
-
-    # Open the next RC cycle immediately so dev builds aren't mislabelled as the
-    # just-shipped stable release.  No rebuild needed — this is just a version bump.
-    IFS='.' read -r MAJOR MINOR PATCH <<< "$NEW_VERSION"
-    NEXT_PATCH="${MAJOR}.${MINOR}.$((PATCH + 1))"
-    NEXT_RC="${NEXT_PATCH}-rc.1"
-    echo ""
-    echo "Opening next cycle: $NEXT_RC"
-    {{sedi}} "s/^version = \"${NEW_VERSION}\"/version = \"${NEXT_RC}\"/" Cargo.toml
-
-    # Open next milestone
-    ./scripts/milestone-update.sh open "$NEXT_PATCH"
-
-    {{cargo}} check -p omegon -q 2>&1 | tail -1
-    git add Cargo.toml Cargo.lock .omegon/milestones.json
-    git commit -m "chore(release): ${NEXT_RC}"
-    echo "✓ Bumped to ${NEXT_RC} — branch is now open for the next cycle."
     echo ""
     echo "Stable release committed and tagged. Run 'just publish' to push and trigger CI."
-    echo "  (RC tag is created by 'just rc' when there's something to release)"
 # Sign the local macOS validation binary with Apple Developer ID (YubiKey).
 # Interactive — prompts for PIN and touch.
 # This signs the workstation build used for local validation; distributable
 # release artifacts are built and signed separately in CI after `just publish`.
-# Run after `just rc` if SMARTCARD_PIN wasn't set.
+# Run after `just release` if SMARTCARD_PIN wasn't set.
 sign:
     #!/usr/bin/env bash
     set -euo pipefail
-    BINARY="target/release/omegon"
+    BINARY="$(pwd)/target/release/omegon"
     if [ ! -f "$BINARY" ]; then
-        echo "✗ No binary at $BINARY — run 'just rc' first."
+        echo "✗ No binary at $BINARY — run 'just release' first."
         exit 1
     fi
 
@@ -758,7 +503,7 @@ sign:
     fi
 
 # One-time setup: create a self-signed code signing certificate.
-# Prevents macOS keychain permission prompts on every RC build.
+# Prevents macOS keychain permission prompts on local release builds.
 # Requires sudo (to add trusted cert to System keychain).
 setup-signing:
     #!/usr/bin/env bash
@@ -812,7 +557,7 @@ setup-signing:
 
     echo ""
     if security find-identity -v -p codesigning 2>/dev/null | grep -q "Omegon Local Dev"; then
-        echo "✓ Signing identity created. All future RC builds will be signed."
+        echo "✓ Signing identity created. Future local release builds can be signed."
         security find-identity -v -p codesigning | grep "Omegon"
     else
         echo "⚠ Certificate imported but not showing as valid signing identity."
@@ -824,23 +569,22 @@ setup-signing:
 # link the local binary, and run a smoke test.
 # Optional local YubiKey signing (`just sign`) is for workstation validation.
 # Downstream package surfaces consume CI-built release artifacts, not the local binary.
-# Flow: just rc → just sign (optional) → just publish
+# Flow: just release → just sign (optional) → just publish
 publish:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    BINARY="target/release/omegon"
+    BINARY="$(pwd)/target/release/omegon"
 
     # Read version from the built binary — not Cargo.toml.
-    # Cargo.toml may already be bumped to the next RC cycle (e.g. 0.15.6-rc.1)
-    # by the time publish runs, so the binary is the authoritative source of truth.
+    # The binary is the release artifact that was built and signed locally.
     if [ ! -f "$BINARY" ]; then
-        echo "✗ No binary at $BINARY — run 'just rc' or 'just release' first."
+        echo "✗ No binary at $BINARY — run 'just release' first."
         exit 1
     fi
     VERSION=$("$BINARY" --version 2>/dev/null | awk '{print $2}' | head -1)
     if [ -z "$VERSION" ]; then
-        echo "✗ Could not read version from binary. Rebuild with: just rc"
+        echo "✗ Could not read version from binary. Rebuild with: just release"
         exit 1
     fi
     TAG="v${VERSION}"
@@ -857,7 +601,7 @@ publish:
 
     # Verify tag exists
     if ! git tag --list "$TAG" | grep -q "$TAG"; then
-        echo "✗ Tag $TAG not found. Run 'just rc' or 'just release' first."
+        echo "✗ Tag $TAG not found. Run 'just release' first."
         exit 1
     fi
 
@@ -879,7 +623,7 @@ publish:
     fi
 
     # Push current release branch + the specific stable tag only.
-    # Do NOT use --tags: pushing many accumulated RC tags at once causes GitHub
+    # Do NOT use --tags: pushing many accumulated tags at once causes GitHub
     # Actions to silently drop workflow triggers beyond ~3 ref changes per push.
     git push origin "$BRANCH" "$TAG"
 
@@ -891,20 +635,18 @@ publish:
     # ── 3. Build docs site locally (verification) ─────────────
     echo ""
     echo "Building docs site locally..."
-    (
-        cd site
-        node scripts/build-design-tree.mjs 2>/dev/null
-        npx astro build 2>&1 | tail -5
-        PAGES=$(find dist -name '*.html' | wc -l | tr -d ' ')
-        echo "  Pages: $PAGES"
-    )
+    pushd site >/dev/null
+    node scripts/build-design-tree.mjs 2>/dev/null
+    npx astro build 2>&1 | tail -5
+    PAGES=$(find dist -name '*.html' | wc -l | tr -d ' ')
+    echo "  Pages: $PAGES"
+    popd >/dev/null
 
     # ── 4. Link the binary ────────────────────────────────────
     # Do NOT call `just link` here — it uses a newest-wins heuristic between
     # release and dev-release targets and may pick a dev build that was compiled
-    # after the release binary (e.g. the 0.15.6-rc.1 cargo check that runs at
-    # the end of `just release`). Link $BINARY directly so we always install
-    # exactly what was built and signed for this release.
+    # after the release binary. Link $BINARY directly so we always install
+    # exactly what was built for this release.
     echo ""
     if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
         DEST="/usr/local/bin/omegon"
@@ -1316,11 +1058,11 @@ smoke:
     FAIL=0
 
     # 1. Binary works — check the release binary directly, NOT cargo run.
-    # cargo run recompiles against the current Cargo.toml version (which is
-    # already bumped to the next RC), producing the wrong version string.
+    # cargo run recompiles against the current Cargo.toml version and can
+    # produce a different version string from the built release artifact.
     RELEASE_BIN="$(pwd)/target/release/omegon"
     if [ ! -f "$RELEASE_BIN" ]; then
-        echo "  ✗ No release binary at $RELEASE_BIN — run 'just rc' or 'just release' first"
+        echo "  ✗ No release binary at $RELEASE_BIN — run 'just release' first"
         FAIL=1
         VERSION="MISSING"
     else
@@ -1330,7 +1072,7 @@ smoke:
     [[ "$VERSION" == *"omegon"* ]] || { echo "  ✗ Binary doesn't produce version"; FAIL=1; }
 
     # 2. Test count doesn't drop below known floor
-    TEST_COUNT=$({{cargo}} test -p omegon 2>&1 | grep 'test result: ok' | awk '{print $4}')
+    TEST_COUNT=$({{cargo}} test -p omegon 2>&1 | awk '/test result: ok/ { sum += $4 } END { print sum + 0 }')
     echo "  Tests: $TEST_COUNT"
     if [ "$TEST_COUNT" -lt 850 ]; then
         echo "  ✗ Test count ($TEST_COUNT) below safety floor (850)"

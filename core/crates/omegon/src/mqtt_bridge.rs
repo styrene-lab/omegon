@@ -49,12 +49,30 @@ impl Default for MqttBridgeConfig {
 /// Start the MQTT bridge task.
 ///
 /// Connects to the Auspex-hosted MQTT broker as a TCP client. If the broker
-/// is unreachable, the task retries in the background with backoff.
+/// is unreachable, the task exits and Omegon continues without MQTT.
 pub fn start_mqtt_bridge(
     config: MqttBridgeConfig,
     events_tx: broadcast::Sender<AgentEvent>,
 ) -> MqttBridgeHandle {
     let task = tokio::spawn(async move {
+        let addr = format!("{}:{}", config.broker_host, config.broker_port);
+        match tokio::time::timeout(
+            Duration::from_millis(250),
+            tokio::net::TcpStream::connect(&addr),
+        )
+        .await
+        {
+            Ok(Ok(stream)) => drop(stream),
+            Ok(Err(e)) => {
+                tracing::debug!(broker = %addr, error = %e, "MQTT bridge broker unavailable");
+                return;
+            }
+            Err(_) => {
+                tracing::debug!(broker = %addr, "MQTT bridge broker connection timed out");
+                return;
+            }
+        }
+
         let identity = ServiceIdentity {
             operator_id: config.operator_id,
             service: "omegon".into(),
@@ -190,6 +208,9 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
                 signs: signs.clone(),
             })
         }
+        AgentEvent::PlanUpdated { snapshot_json } => Some(IpcEventPayload::PlanUpdated {
+            snapshot: snapshot_json.clone(),
+        }),
         AgentEvent::HarnessStatusChanged { .. } => Some(IpcEventPayload::HarnessChanged),
         AgentEvent::SessionReset => Some(IpcEventPayload::SessionReset),
         // Internal-only — not published to MQTT.
@@ -197,6 +218,7 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
         | AgentEvent::MessageAbort { .. }
         | AgentEvent::ContextUpdated { .. }
         | AgentEvent::WebDashboardStarted { .. }
+        | AgentEvent::OperatorWaitRequest { .. }
         | AgentEvent::PermissionRequest { .. } => None,
     }
 }
@@ -218,6 +240,7 @@ fn event_name(ev: &IpcEventPayload) -> &'static str {
         IpcEventPayload::DecompositionChildCompleted { .. } => "decomposition.child_completed",
         IpcEventPayload::DecompositionCompleted { .. } => "decomposition.completed",
         IpcEventPayload::FamilyVitalSignsUpdated { .. } => "family.vital_signs",
+        IpcEventPayload::PlanUpdated { .. } => "plan.updated",
         IpcEventPayload::HarnessChanged => "harness.changed",
         IpcEventPayload::StateChanged { .. } => "state.changed",
         IpcEventPayload::SystemNotification { .. } => "system.notification",

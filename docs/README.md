@@ -41,3 +41,5 @@ For user-facing docs, edit `site/src/pages/docs/` and the command snippets in `s
 - `ai/benchmarks/`: benchmark tasks and recorded runs.
 
 When adding a new long-lived document, prefer `docs/` and include frontmatter. When adding public-facing guidance, update the Astro page in `site/src/pages/docs/` and use snippets for commands that appear in more than one place.
+
+- `docs/acp-surface.md`: canonical ACP integration contract for Zed, Flynt, and external clients.

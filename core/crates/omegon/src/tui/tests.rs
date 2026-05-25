@@ -1000,6 +1000,123 @@ fn non_english_streaming_output_does_not_panic_at_char_boundaries() {
 }
 
 #[test]
+fn slim_status_line_marks_detached_conversation_viewport() {
+    let mut app = test_app();
+    app.conversation.conv_state.scroll_offset = 12;
+    app.conversation.conv_state.user_scrolled = true;
+
+    let text = render_app_to_string(&mut app, 120, 18);
+    assert!(text.contains("view detached ↑12 · End tail"), "{text}");
+}
+
+#[test]
+fn completed_plan_update_enables_done_view_hint_without_pinning() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::PlanUpdated {
+        snapshot_json: serde_json::json!({
+            "mode": "complete",
+            "completed": 1,
+            "total": 1,
+            "items": [{"status": "done", "description": "remember me"}]
+        }),
+    });
+
+    assert!(app.completed_plan_history_available);
+    assert!(app.slim_plan_snapshot.is_none());
+    let text = render_app_to_string(&mut app, 120, 18);
+    assert!(text.contains("plan done · view"), "{text}");
+    assert!(
+        !text.contains("remember me"),
+        "completed history should not pin active lane: {text}"
+    );
+}
+
+#[test]
+fn completed_plan_update_reattaches_detached_slim_viewport() {
+    let mut app = test_app();
+    app.conversation.conv_state.scroll_offset = 46;
+    app.conversation.conv_state.user_scrolled = true;
+    app.slim_plan_snapshot = PlanDisplaySnapshot::from_json(serde_json::json!({
+        "mode": "executing",
+        "completed": 1,
+        "total": 2,
+        "items": [
+            {"status": "done", "description": "one"},
+            {"status": "active", "description": "two"}
+        ]
+    }));
+
+    app.handle_agent_event(AgentEvent::PlanUpdated {
+        snapshot_json: serde_json::json!({
+            "mode": "complete",
+            "completed": 2,
+            "total": 2,
+            "items": [
+                {"status": "done", "description": "one"},
+                {"status": "done", "description": "two"}
+            ]
+        }),
+    });
+
+    assert_eq!(app.conversation.conv_state.scroll_offset, 0);
+    assert!(!app.conversation.conv_state.user_scrolled);
+    assert!(app.slim_plan_snapshot.is_none());
+    assert!(
+        app.conversation
+            .latest_plan_progress()
+            .is_some_and(|text| text.contains("Plan mode: complete")),
+        "completed plan should remain as transcript history"
+    );
+
+    let text = render_app_to_string(&mut app, 120, 18);
+    assert!(!text.contains("view detached"), "{text}");
+    assert!(!text.contains("more below · End to tail"), "{text}");
+    assert!(!text.contains("plan done · clear"), "{text}");
+}
+
+#[test]
+fn slim_status_line_marks_turn_state() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });
+    app.handle_agent_event(AgentEvent::ToolStart {
+        id: "tool-1".into(),
+        name: "bash".into(),
+        args: serde_json::json!({"command":"cargo test"}),
+    });
+    let running = render_app_to_string(&mut app, 140, 18);
+    assert!(running.contains("running bash"), "{running}");
+
+    app.handle_agent_event(AgentEvent::TurnEnd(Box::new(
+        omegon_traits::AgentEventTurnEnd {
+            turn: 1,
+            turn_end_reason: omegon_traits::TurnEndReason::AssistantCompleted,
+            model: Some("openai:gpt-5.4".into()),
+            provider: Some("openai".into()),
+            estimated_tokens: 0,
+            context_window: 0,
+            context_composition: omegon_traits::ContextComposition::default(),
+            actual_input_tokens: 0,
+            actual_output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            provider_telemetry: None,
+            dominant_phase: None,
+            drift_kind: None,
+            progress_nudge_reason: None,
+            intent_task: None,
+            intent_phase: None,
+            files_read_count: 0,
+            files_modified_count: 0,
+            stats_tool_calls: 0,
+            streaks: omegon_traits::ControllerStreaks::default(),
+        },
+    )));
+    app.handle_agent_event(AgentEvent::AgentEnd);
+    let done = render_app_to_string(&mut app, 140, 18);
+    assert!(done.contains("turn done"), "{done}");
+}
+
+#[test]
 fn conversation_scroll_does_not_recall_input_history() {
     let mut app = test_app();
     app.history = vec!["first".into(), "second".into(), "third".into()];
@@ -1170,6 +1287,59 @@ fn assistant_plaintext_export_strips_markdown_fences() {
         selected.as_deref(),
         Some("Run this:\n\ncargo test -q\n\nThen edit:\n\nfn main() {}")
     );
+}
+
+#[test]
+fn latest_assistant_copy_uses_semantic_text_not_selected_segment() {
+    let mut app = test_app();
+    app.conversation.push_user("operator prompt");
+    app.conversation.append_streaming("first answer");
+    app.conversation.finalize_message();
+    app.conversation.push_user("follow-up");
+    app.conversation.append_streaming("second answer");
+    app.conversation.finalize_message();
+    app.conversation.select_segment(0);
+
+    let latest = app
+        .conversation
+        .latest_assistant_text_with_mode(SegmentExportMode::Raw);
+    assert_eq!(latest.as_deref(), Some("second answer"));
+}
+
+#[test]
+fn transcript_export_deduplicates_pinned_plan_progress() {
+    let mut app = test_app();
+    app.conversation
+        .push_system("Plan progress\nPlan mode: executing\nProgress: 1/2\n\n1. ◐ Do it");
+    app.conversation.push_user("operator prompt");
+    app.conversation.append_streaming("assistant answer");
+    app.conversation.finalize_message();
+
+    let transcript = app.build_session_transcript(SegmentExportMode::Raw);
+    assert!(transcript.contains("## Plan"), "{transcript}");
+    assert!(transcript.contains("## Operator"), "{transcript}");
+    assert!(transcript.contains("## Assistant"), "{transcript}");
+    assert_eq!(transcript.matches("Plan progress").count(), 1);
+}
+
+#[test]
+fn transcript_markdown_export_writes_clickable_artifact() {
+    let mut app = test_app();
+    app.conversation.push_user("operator prompt");
+    app.conversation.append_streaming("assistant answer");
+    app.conversation.finalize_message();
+
+    let tmp = tempfile::tempdir().unwrap();
+    let path = app
+        .write_session_transcript_markdown_to_dir(tmp.path())
+        .expect("transcript should write");
+    assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("md"));
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(content.contains("# Omegon transcript"), "{content}");
+    assert!(content.contains("## Operator"), "{content}");
+    assert!(content.contains("## Assistant"), "{content}");
+    assert!(content.contains("assistant answer"), "{content}");
 }
 
 #[test]
@@ -1871,7 +2041,8 @@ fn slash_update_without_update_still_shows_channel_help() {
     let tx = test_tx();
     let result = app.handle_slash_command("/update", &tx);
     if let SlashResult::Display(text) = result {
-        assert!(text.contains("You're up to date"), "{text}");
+        assert!(text.contains("No update is currently cached"), "{text}");
+        assert!(text.contains("Checking GitHub now"), "{text}");
         assert!(text.contains("/update channel nightly"), "{text}");
         assert!(text.contains("/update channel stable"), "{text}");
         // RC is no longer listed — only stable and nightly
@@ -1890,10 +2061,7 @@ fn slash_update_install_requires_update_info() {
     let tx = test_tx();
     let result = app.handle_slash_command("/update install", &tx);
     if let SlashResult::Display(text) = result {
-        assert!(
-            text.contains("No update information") || text.contains("No downloadable update"),
-            "{text}"
-        );
+        assert!(text.contains("Checking for updates now"), "{text}");
     } else {
         panic!("expected Display result");
     }

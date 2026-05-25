@@ -387,6 +387,14 @@ impl IpcConnection {
                 | "set_max_turns"
                 | "profile_view"
                 | "profile_export"
+                | "profile_capture"
+                | "profile_apply"
+                | "profile_mqtt"
+                | "profile_extension_allow"
+                | "profile_extension_deny"
+                | "profile_extension_clear"
+                | "profile_persona"
+                | "profile_tone"
                 | "persona_list"
                 | "persona_switch" => {
                     let req = serde_json::from_value::<ControlRequest>(payload.clone())
@@ -614,6 +622,56 @@ impl IpcConnection {
                         "profile_view" => Some(crate::control_runtime::ControlRequest::ProfileView),
                         "profile_export" => {
                             Some(crate::control_runtime::ControlRequest::ProfileExport)
+                        }
+                        "profile_capture" => {
+                            Some(crate::control_runtime::ControlRequest::ProfileCapture)
+                        }
+                        "profile_apply" => {
+                            Some(crate::control_runtime::ControlRequest::ProfileApply)
+                        }
+                        "profile_mqtt" => {
+                            Some(crate::control_runtime::ControlRequest::ProfileSetMqtt {
+                                enabled: payload.get("enabled").and_then(|v| v.as_bool()),
+                            })
+                        }
+                        "profile_extension_allow" => payload
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|name| {
+                                crate::control_runtime::ControlRequest::ProfileExtensionAllow {
+                                    name: name.to_string(),
+                                }
+                            }),
+                        "profile_extension_deny" => payload
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|name| {
+                                crate::control_runtime::ControlRequest::ProfileExtensionDeny {
+                                    name: name.to_string(),
+                                }
+                            }),
+                        "profile_extension_clear" => {
+                            Some(crate::control_runtime::ControlRequest::ProfileExtensionClear)
+                        }
+                        "profile_persona" => {
+                            Some(crate::control_runtime::ControlRequest::ProfileSetPersona {
+                                name: payload
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .map(str::to_string)
+                                    .filter(|s| !s.is_empty()),
+                            })
+                        }
+                        "profile_tone" => {
+                            Some(crate::control_runtime::ControlRequest::ProfileSetTone {
+                                name: payload
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .map(str::to_string)
+                                    .filter(|s| !s.is_empty()),
+                            })
                         }
                         "persona_list" => Some(crate::control_runtime::ControlRequest::PersonaList),
                         "persona_switch" => payload
@@ -882,7 +940,7 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
                 },
             })
         }
-        AgentEvent::PermissionRequest { .. } => None, // handled by TUI, not IPC
+        AgentEvent::PermissionRequest { .. } | AgentEvent::OperatorWaitRequest { .. } => None, // handled by TUI, not IPC
         AgentEvent::AgentEnd => Some(IpcEventPayload::AgentCompleted),
         AgentEvent::PhaseChanged { phase } => Some(IpcEventPayload::PhaseChanged {
             phase: format!("{:?}", phase),
@@ -909,6 +967,9 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
                 signs: signs.clone(),
             })
         }
+        AgentEvent::PlanUpdated { snapshot_json } => Some(IpcEventPayload::PlanUpdated {
+            snapshot: snapshot_json.clone(),
+        }),
         AgentEvent::HarnessStatusChanged { .. } => Some(IpcEventPayload::HarnessChanged),
         AgentEvent::SessionReset => Some(IpcEventPayload::SessionReset),
         // Internal-only events — not projected to IPC
@@ -942,6 +1003,7 @@ fn event_name(ev: &IpcEventPayload) -> &'static str {
         IpcEventPayload::DecompositionChildCompleted { .. } => "decomposition.child_completed",
         IpcEventPayload::DecompositionCompleted { .. } => "decomposition.completed",
         IpcEventPayload::FamilyVitalSignsUpdated { .. } => "family.vital_signs",
+        IpcEventPayload::PlanUpdated { .. } => "plan.updated",
         IpcEventPayload::HarnessChanged => "harness.changed",
         IpcEventPayload::StateChanged { .. } => "state.changed",
         IpcEventPayload::SystemNotification { .. } => "system.notification",

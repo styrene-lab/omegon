@@ -341,10 +341,11 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    static GLITCH_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static SPINNER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn next_verb_cycles() {
+        let _guard = SPINNER_TEST_LOCK.lock().expect("spinner test lock");
         seed(0);
         let v1 = next_verb();
         let v2 = next_verb();
@@ -353,10 +354,12 @@ mod tests {
 
     #[test]
     fn next_verb_wraps() {
-        seed(BUILTIN_VERBS.len() - 1);
+        let _guard = SPINNER_TEST_LOCK.lock().expect("spinner test lock");
+        let verbs = active_verbs();
+        seed(verbs.len() - 1);
         let _ = next_verb(); // last
         let v = next_verb(); // wraps to 0
-        assert_eq!(v, BUILTIN_VERBS[0]);
+        assert_eq!(v, verbs[0]);
     }
 
     #[test]
@@ -421,7 +424,7 @@ mod tests {
 
     #[test]
     fn glitch_produces_visually_similar_output() {
-        let _guard = GLITCH_TEST_LOCK.lock().expect("glitch test lock");
+        let _guard = SPINNER_TEST_LOCK.lock().expect("spinner test lock");
         // Force the counter to a value that will trigger a glitch.
         // mixed = frame * 2654435761; we need mixed % 3600 == 0.
         // Brute-force find a triggering frame value.
@@ -454,7 +457,7 @@ mod tests {
 
     #[test]
     fn glitch_is_rare() {
-        let _guard = GLITCH_TEST_LOCK.lock().expect("glitch test lock");
+        let _guard = SPINNER_TEST_LOCK.lock().expect("spinner test lock");
         // Run 1000 frames, expect at most a handful of glitches.
         GLITCH_COUNTER.store(0, Ordering::Relaxed);
         let mut glitch_count = 0;

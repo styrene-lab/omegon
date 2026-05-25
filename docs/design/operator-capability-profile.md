@@ -11,6 +11,12 @@ visibility = "private"
 
 # Operator capability profile — provider login + local hardware assessment
 
+## Disposition — 2026-05-23
+
+**Status: current concept / stale implementation scope.** The separation between durable operator routing intent, volatile runtime availability, and guarded fallback policy remains important. The listed implementation files are stale: the TypeScript `extensions/lib/operator-profile.ts`, `extensions/bootstrap/*`, `extensions/effort/*`, and `extensions/model-budget.ts` paths are absent in the current Rust-native repository.
+
+Use this document as the conceptual model for future Rust implementation or reconciliation. Verify current behavior against `.omegon/profile.json`, Rust settings/auth/model registry code, `core/crates/omegon/src/features/model_budget.rs`, and `core/crates/omegon/src/upstream_errors.rs` before relying on any schema or file-scope details.
+
 ## Overview
 
 Add a durable operator capability profile so Omegon can choose models according to operator intent instead of falling back only on raw technical availability. The profile captures preferred candidates for public capability roles and the policy boundaries that determine whether cross-provider or cross-source fallback is allowed, confirmation-gated, or denied.

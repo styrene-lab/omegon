@@ -154,6 +154,7 @@ pub async fn execute_streaming(
     let mut cmd = Command::new("bash");
     cmd.args(["-c", command])
         .current_dir(cwd)
+        .envs(git_discovery_env(cwd))
         .stdin(std::process::Stdio::null()) // /dev/null — commands needing input fail fast
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -301,6 +302,12 @@ pub async fn execute_streaming(
     })
 }
 
+pub(crate) fn git_discovery_env(cwd: &Path) -> Vec<(&'static str, String)> {
+    crate::setup::git_ceiling_directory(cwd)
+        .map(|ceiling| vec![("GIT_CEILING_DIRECTORIES", ceiling.display().to_string())])
+        .unwrap_or_default()
+}
+
 fn blocked_interactive_result(command_name: &str) -> ToolResult {
     ToolResult {
         content: vec![ContentBlock::Text {
@@ -444,7 +451,7 @@ async fn read_lossy_line<R: tokio::io::AsyncBufRead + Unpin>(
 ///
 /// We preserve SGR (Select Graphic Rendition, ending with 'm') because
 /// the TUI renderer converts those to styled spans via `ansi_to_tui`.
-fn strip_terminal_noise(input: &str) -> String {
+pub(crate) fn strip_terminal_noise(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let bytes = input.as_bytes();
     let len = bytes.len();
@@ -562,11 +569,22 @@ fn truncate_tail(output: &str) -> Truncated {
 // - The Nex container sandbox is the security boundary
 
 /// Paths that are always allowed regardless of workspace boundary.
-const ALLOWED_PATHS: &[&str] = &["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin"];
+const ALLOWED_PATHS: &[&str] = &[
+    "/dev/null",
+    "/dev/stdin",
+    "/dev/stdout",
+    "/dev/stderr",
+    "/dev/fd/0",
+    "/dev/fd/1",
+    "/dev/fd/2",
+    "/proc/self/fd/0",
+    "/proc/self/fd/1",
+    "/proc/self/fd/2",
+];
 
 /// Scan a bash command for filesystem write patterns targeting paths
 /// outside the workspace boundary. Returns a list of violating paths.
-fn scan_boundary_violations(
+pub(crate) fn scan_boundary_violations(
     command: &str,
     boundary: &super::WorkspaceBoundary,
     cwd: &Path,
@@ -1046,6 +1064,31 @@ mod tests {
         assert!(result.content[0].as_text().unwrap().contains("hello"));
     }
 
+    #[tokio::test]
+    async fn bash_git_discovery_does_not_escape_marked_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+
+        let child = dir.path().join("child-workspace");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(child.join("AGENTS.md"), "instructions").unwrap();
+
+        let result = execute(
+            "git rev-parse --show-toplevel",
+            &child,
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+        assert_ne!(result.details["exitCode"], 0);
+    }
+
     // Output filter tests moved to tools/output_filter.rs
 
     // ── Boundary scanner tests ────────────────────────────────────────
@@ -1071,6 +1114,33 @@ mod tests {
         let b = test_boundary("/tmp/workspace");
         let v = scan_boundary_violations("command 2> /dev/null", &b, Path::new("/tmp/workspace"));
         assert!(v.is_empty(), "should allow /dev/null: {:?}", v);
+    }
+
+    #[test]
+    fn scanner_allows_standard_fd_redirects() {
+        let b = test_boundary("/tmp/workspace");
+        for path in [
+            "/dev/stdout",
+            "/dev/stderr",
+            "/dev/fd/1",
+            "/dev/fd/2",
+            "/proc/self/fd/1",
+            "/proc/self/fd/2",
+        ] {
+            let command = format!("echo data > {path}");
+            let v = scan_boundary_violations(&command, &b, Path::new("/tmp/workspace"));
+            assert!(v.is_empty(), "should allow {path}: {v:?}");
+        }
+    }
+
+    #[test]
+    fn scanner_blocks_unsafe_device_redirects() {
+        let b = test_boundary("/tmp/workspace");
+        for path in ["/dev/zero", "/dev/fd/3", "/proc/self/fd/3"] {
+            let command = format!("echo data > {path}");
+            let v = scan_boundary_violations(&command, &b, Path::new("/tmp/workspace"));
+            assert!(!v.is_empty(), "should block {path}");
+        }
     }
 
     #[test]

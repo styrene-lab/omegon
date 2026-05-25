@@ -26,8 +26,16 @@ maxTurns: Int(this > 0)?
 /// Default behavioral posture.
 defaultPosture: ("explorator"|"fabricator"|"architect"|"devastator")?
 
-/// Directories outside the workspace the agent can access without
-/// per-operation confirmation. Paths are expanded at runtime (~ → $HOME).
+class Permissions {
+  /// Directories outside the workspace the agent can access without
+  /// per-operation confirmation. Paths are expanded at runtime (~ → $HOME).
+  trustedDirectories: Listing<String>?
+}
+
+/// Unified operator permission policy.
+permissions: Permissions?
+
+/// Legacy compatibility alias for permissions.trustedDirectories.
 trustedDirectories: Listing<String>?
 
 /// Update channel for self-update.

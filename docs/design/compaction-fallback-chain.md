@@ -11,6 +11,12 @@ visibility = "private"
 
 # Intelligent Compaction Fallback Chain — Local → GPT-5.3 → Haiku
 
+## Disposition — 2026-05-23
+
+**Status: historical-decision / stale implementation scope.** This node describes compaction interception through the older TypeScript `extensions/project-memory/*` and `extensions/lib/model-routing.ts` architecture. Those paths are absent in the current Rust-native repository; current context compaction is implemented through Rust conversation/control-runtime paths such as `core/crates/omegon/src/conversation.rs` and `core/crates/omegon/src/control_runtime.rs`.
+
+Preserve the reliability principle: compaction handoff quality matters, local-only compaction can fail poorly, and fallback chains should be bounded. Do not use the `compactionLocalFirst`, `session_before_compact`, or TypeScript file-scope details as current implementation guidance without a Rust reconciliation pass.
+
 ## Overview
 
 Replace the current binary local/cloud compaction choice with an intelligent fallback chain that prioritizes quality and resilience. Local models timeout frequently; current cloud fallback uses whatever driver model is active. Instead: local → gpt-5.3-codex-spark → haiku → sonnet, with each step having appropriate timeouts and quality expectations.

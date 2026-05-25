@@ -133,11 +133,11 @@ pub fn save_session(
         last_prompt_snippet: truncate_snippet(conversation.last_user_prompt(), 80),
     };
 
+    conversation.save_session(&path)?;
+
     let meta_path = path.with_extension("meta.json");
     let meta_json = serde_json::to_string_pretty(&meta)?;
-    fs::write(&meta_path, &meta_json)?;
-
-    conversation.save_session(&path)?;
+    crate::filelock::atomic_write_locked(&meta_path, meta_json.as_bytes())?;
 
     tracing::info!(
         session_id,
@@ -309,6 +309,8 @@ mod tests {
         };
         let meta_path = path.with_extension("meta.json");
         fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap()).unwrap();
+        assert!(!path.with_extension("tmp").exists());
+        assert!(!path.with_extension("meta.tmp").exists());
 
         // Now list — we need to construct matching sessions_dir output
         let entries = list_from_dir(&dir);
@@ -344,6 +346,32 @@ mod tests {
             });
         }
         entries
+    }
+
+    #[test]
+    fn list_from_dir_ignores_orphan_metadata_without_snapshot() {
+        let tmp = std::env::temp_dir().join("omegon-session-test-orphan-meta");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let meta = SessionMeta {
+            session_id: "orphan".into(),
+            cwd: "/test".into(),
+            created_at: "2026-03-18 14:22:03".into(),
+            turns: 9,
+            tool_calls: 2,
+            last_prompt_snippet: "missing snapshot".into(),
+        };
+        fs::write(
+            tmp.join("orphan.meta.json"),
+            serde_json::to_string_pretty(&meta).unwrap(),
+        )
+        .unwrap();
+
+        let entries = list_from_dir(&tmp);
+        assert!(entries.is_empty());
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

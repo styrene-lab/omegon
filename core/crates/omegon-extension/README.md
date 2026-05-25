@@ -75,6 +75,87 @@ async fn main() {
 }
 ```
 
+## HostActions
+
+HostActions are the SDK contract for host-managed side effects. Extensions describe
+intent; Omegon validates every action, applies manifest/runtime/operator policy, and
+only then renders or executes it. Returning a HostAction does not make the effect run
+by itself.
+
+Use declarative actions in ordinary tool results when the host should present or queue
+a side effect with the tool response:
+
+```rust
+use omegon_extension::{HostAction, ToolResult};
+use omegon_extension::actions::terminal::{TERMINAL_CREATE_V1, TerminalCreateParams};
+
+let params = TerminalCreateParams::new("bookokrat")
+    .with_args(["/books/example.epub"]);
+let action = HostAction::new("open-reader", TERMINAL_CREATE_V1, params)?;
+let result = ToolResult::text("Opening reader").with_action(action);
+let value = serde_json::to_value(result)?;
+```
+
+The serialized tool result contains ordinary content plus an `actions` array:
+
+```json
+{
+  "content": [{"type": "text", "text": "Opening reader"}],
+  "actions": [{
+    "id": "open-reader",
+    "type": "terminal.create@1",
+    "params": {
+      "command": "bookokrat",
+      "args": ["/books/example.epub"]
+    }
+  }]
+}
+```
+
+Extensions that need the advanced imperative path can use `HostProxy` from `serve_v2()`.
+`execute_action()` sends JSON-RPC method `actions/execute` with params
+`{"action": <HostAction>}` and returns a full `HostActionOutcome`:
+
+```rust
+use omegon_extension::actions::terminal::TerminalCreateResult;
+
+let outcome = host.execute_action(action).await?;
+if let Some(result) = outcome.result {
+    let terminal: TerminalCreateResult = serde_json::from_value(result)?;
+    eprintln!("opened {} via {}", terminal.terminal_id, terminal.backend);
+}
+```
+
+The expected host response shape is:
+
+```json
+{
+  "action_id": "open-reader",
+  "status": "completed",
+  "result": {
+    "terminal_id": "term_123",
+    "backend": "zellij",
+                    "actual_placement": "background_session"
+  }
+}
+```
+
+To advertise support during `initialize`, set the capability flags relevant to the
+extension:
+
+```json
+{
+  "capabilities": {
+    "tools": true,
+    "host_actions": true,
+    "host_action_execution": true
+  }
+}
+```
+
+`terminal.create@1` is SDK/protocol foundation only. The host-side executor, policy
+engine, and real terminal process creation live in Omegon core, not in this crate.
+
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT License](LICENSE-MIT) at your option.

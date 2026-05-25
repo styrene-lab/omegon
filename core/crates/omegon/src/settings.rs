@@ -305,6 +305,12 @@ pub struct Settings {
     /// Maximum turns per agent invocation. 0 = no limit.
     pub max_turns: u32,
 
+    /// Operator-tuned continuation policy. This controls whether the agent
+    /// keeps driving after text-only "should I proceed?" style turns; it never
+    /// bypasses permission, plan, or security gates.
+    #[serde(default)]
+    pub automation_level: AutomationLevel,
+
     /// Context compaction threshold (fraction of context window).
     pub compaction_threshold: f32,
 
@@ -350,6 +356,12 @@ pub struct Settings {
     #[serde(skip)]
     pub provider_connected: bool,
 
+    /// Whether the active provider credential path is OAuth-backed. Updated
+    /// only when the model changes so rendering does not probe credential files
+    /// on every frame.
+    #[serde(skip)]
+    pub provider_is_oauth: bool,
+
     /// Enable mouse capture (pane clicks, wheel scroll, segment targeting).
     /// Defaults to true. Set to false to restore terminal-native text selection.
     #[serde(default = "default_mouse")]
@@ -359,6 +371,12 @@ pub struct Settings {
     /// OCI containers (podman/docker) with resource limits and network isolation.
     #[serde(default)]
     pub sandbox: bool,
+
+    /// Enable the interactive PTY-backed terminal tool. This is useful for
+    /// local/debuggable agents and should usually be disabled for hardened
+    /// headless OCI profiles that lack `/dev/pts` or writable config storage.
+    #[serde(default = "default_terminal_tool")]
+    pub terminal_tool: bool,
 
     /// How long clipboard pastes are retained on disk before automatic
     /// deletion at session start, in hours. Default 24h. Set to 0 to
@@ -584,6 +602,10 @@ fn default_mouse() -> bool {
     true
 }
 
+fn default_terminal_tool() -> bool {
+    true
+}
+
 // ─── Selector Policy ─────────────────────────────────────────────────────────
 
 /// Derived per-turn context assembly policy.
@@ -627,6 +649,7 @@ impl Default for Settings {
             posture: BehavioralPosture::fixed(PosturePreset::Architect),
             thinking: ThinkingLevel::Medium,
             max_turns: 50,
+            automation_level: AutomationLevel::default(),
             compaction_threshold: 0.75,
             context_window,
             context_class: ContextClass::from_tokens(context_window),
@@ -637,11 +660,53 @@ impl Default for Settings {
             auto_update: false,
             trusted_directories: Vec::new(),
             provider_connected: true, // optimistic default — set false when NullBridge
+            provider_is_oauth: false,
             mouse: true,
             sandbox: false,
+            terminal_tool: true,
             clipboard_retention_hours: default_clipboard_retention_hours(),
             posture_disabled_tools: Vec::new(),
             posture_enabled_tools: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationLevel {
+    Ask,
+    #[default]
+    Guarded,
+    Flow,
+    Autonomous,
+}
+
+impl AutomationLevel {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "ask" | "manual" | "confirm" => Some(Self::Ask),
+            "guarded" | "default" => Some(Self::Guarded),
+            "flow" | "proceed" => Some(Self::Flow),
+            "autonomous" | "auto" | "run" => Some(Self::Autonomous),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Guarded => "guarded",
+            Self::Flow => "flow",
+            Self::Autonomous => "autonomous",
+        }
+    }
+
+    pub fn summary(&self) -> &'static str {
+        match self {
+            Self::Ask => "ask before continuation",
+            Self::Guarded => "continue through low-risk stalls",
+            Self::Flow => "continue until task completion",
+            Self::Autonomous => "run to completion within hard gates",
         }
     }
 }
@@ -654,6 +719,7 @@ impl Settings {
             model: model.to_string(),
             context_window,
             context_class,
+            provider_is_oauth: crate::auth::provider_oauth_for_model(model),
             ..Default::default()
         }
     }
@@ -663,6 +729,7 @@ impl Settings {
         self.model = model.to_string();
         self.context_window = infer_context_window(model);
         self.context_class = ContextClass::from_tokens(self.context_window);
+        self.provider_is_oauth = crate::auth::provider_oauth_for_model(model);
     }
 
     /// The effective working-set policy class for this turn.
@@ -978,10 +1045,18 @@ pub struct Profile {
     pub default_posture: Option<String>,
 
     // ── Permissions ──
-    /// Directories outside the workspace that the agent can access without
-    /// per-operation confirmation. Paths are expanded at runtime (~ → $HOME).
+    /// Unified operator permission policy.
+    #[serde(default, skip_serializing_if = "ProfilePermissions::is_empty")]
+    pub permissions: ProfilePermissions,
+    /// Legacy compatibility alias for `permissions.trustedDirectories`.
+    /// New writes migrate this into the `permissions` object.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trusted_directories: Vec<String>,
+
+    // ── Automation ──
+    /// Operator continuation policy. Does not override permissions or plan gates.
+    #[serde(default, skip_serializing_if = "ProfileAutomation::is_empty")]
+    pub automation: ProfileAutomation,
 
     // ── Updates ──
     /// Update channel: "stable" or "nightly".
@@ -1003,6 +1078,11 @@ pub struct Profile {
     /// Sandbox isolation for delegate/cleave children.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<bool>,
+    /// Enable the interactive PTY-backed terminal tool for this profile.
+    /// Set false for hardened/headless OCI agents that should use `bash`,
+    /// `serve`, or workload controllers instead of interactive sessions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_tool: Option<bool>,
 
     // ── Persona / Tone ──
     /// Active persona name. Restored on next session start.
@@ -1011,6 +1091,31 @@ pub struct Profile {
     /// Active tone name. Restored on next session start.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tone: Option<String>,
+
+    // ── Optional integrations ──
+    /// Optional bridge integrations. Missing integrations stay disabled unless
+    /// explicitly enabled by project/global profile or environment.
+    #[serde(default, skip_serializing_if = "ProfileIntegrations::is_empty")]
+    pub integrations: ProfileIntegrations,
+
+    // ── Extension loading policy ──
+    /// Native extension loading policy for this profile. Empty policy preserves
+    /// existing behavior: installed enabled extensions are considered loadable.
+    #[serde(default, skip_serializing_if = "ProfileExtensions::is_empty")]
+    pub extensions: ProfileExtensions,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileAutomation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<AutomationLevel>,
+}
+
+impl ProfileAutomation {
+    pub fn is_empty(&self) -> bool {
+        self.level.is_none()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1018,6 +1123,108 @@ pub struct Profile {
 pub struct ProfileModel {
     pub provider: String,
     pub model_id: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfilePermissions {
+    /// Directories outside the workspace that the agent can access without
+    /// per-operation confirmation. Paths are expanded at runtime (~ → $HOME).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_directories: Vec<String>,
+}
+
+impl ProfilePermissions {
+    pub fn is_empty(&self) -> bool {
+        self.trusted_directories.is_empty()
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileIntegrations {
+    #[serde(default, skip_serializing_if = "ProfileMqttIntegration::is_empty")]
+    pub mqtt: ProfileMqttIntegration,
+}
+
+impl ProfileIntegrations {
+    pub fn is_empty(&self) -> bool {
+        self.mqtt.is_empty()
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileMqttIntegration {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker_host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker_port: Option<u16>,
+}
+
+impl ProfileMqttIntegration {
+    pub fn is_empty(&self) -> bool {
+        self.enabled.is_none() && self.broker_host.is_none() && self.broker_port.is_none()
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileExtensions {
+    /// When non-empty, only these native extension names may load.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enabled: Vec<String>,
+    /// Native extension names that must not load.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled: Vec<String>,
+}
+
+impl ProfileExtensions {
+    pub fn is_empty(&self) -> bool {
+        self.enabled.is_empty() && self.disabled.is_empty()
+    }
+
+    pub fn permits(
+        &self,
+        extension_name: &str,
+        env_enabled: &[String],
+        env_disabled: &[String],
+    ) -> bool {
+        let name = extension_name.to_ascii_lowercase();
+        let normalize = |s: &String| s.trim().to_ascii_lowercase();
+
+        if env_disabled
+            .iter()
+            .map(normalize)
+            .any(|disabled| disabled == name)
+            || self
+                .disabled
+                .iter()
+                .map(normalize)
+                .any(|disabled| disabled == name)
+        {
+            return false;
+        }
+
+        if !env_enabled.is_empty() {
+            return env_enabled
+                .iter()
+                .map(normalize)
+                .any(|enabled| enabled == name);
+        }
+
+        if !self.enabled.is_empty() {
+            return self
+                .enabled
+                .iter()
+                .map(normalize)
+                .any(|enabled| enabled == name);
+        }
+
+        true
+    }
 }
 
 impl Profile {
@@ -1050,7 +1257,9 @@ impl Profile {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let json = serde_json::to_string_pretty(self)?;
+        let mut profile = self.clone();
+        profile.normalize_permissions();
+        let json = serde_json::to_string_pretty(&profile)?;
         crate::filelock::atomic_write_locked(&path, json.as_bytes())?;
         tracing::debug!(path = %path.display(), "project profile saved");
         Ok(())
@@ -1061,10 +1270,50 @@ impl Profile {
         let path = global_profile_path()
             .ok_or_else(|| anyhow::anyhow!("Cannot determine config directory"))?;
         let _ = std::fs::create_dir_all(path.parent().unwrap());
-        let json = serde_json::to_string_pretty(self)?;
+        let mut profile = self.clone();
+        profile.normalize_permissions();
+        let json = serde_json::to_string_pretty(&profile)?;
         crate::filelock::atomic_write_locked(&path, json.as_bytes())?;
         tracing::debug!(path = %path.display(), "global profile saved");
         Ok(())
+    }
+
+    pub fn effective_trusted_directories(&self) -> Vec<String> {
+        let mut dirs = Vec::new();
+        for dir in self
+            .permissions
+            .trusted_directories
+            .iter()
+            .chain(self.trusted_directories.iter())
+        {
+            push_unique(&mut dirs, dir);
+        }
+        dirs
+    }
+
+    pub fn set_trusted_directories(&mut self, dirs: Vec<String>) {
+        self.permissions.trusted_directories.clear();
+        for dir in dirs {
+            push_unique(&mut self.permissions.trusted_directories, &dir);
+        }
+        self.trusted_directories.clear();
+    }
+
+    pub fn add_trusted_directory(&mut self, dir: String) {
+        let mut dirs = self.effective_trusted_directories();
+        push_unique(&mut dirs, &dir);
+        self.set_trusted_directories(dirs);
+    }
+
+    pub fn remove_trusted_directory(&mut self, dir: &str) {
+        let mut dirs = self.effective_trusted_directories();
+        retain_not_equal(&mut dirs, dir);
+        self.set_trusted_directories(dirs);
+    }
+
+    fn normalize_permissions(&mut self) {
+        let dirs = self.effective_trusted_directories();
+        self.set_trusted_directories(dirs);
     }
 
     /// Apply profile to settings (called at startup).
@@ -1080,11 +1329,15 @@ impl Profile {
         if let Some(turns) = self.max_turns {
             settings.max_turns = turns;
         }
+        if let Some(level) = self.automation.level {
+            settings.automation_level = level;
+        }
         if !self.provider_order.is_empty() {
             settings.provider_order = self.provider_order.clone();
         }
-        if !self.trusted_directories.is_empty() {
-            settings.trusted_directories = self.trusted_directories.clone();
+        let trusted_directories = self.effective_trusted_directories();
+        if !trusted_directories.is_empty() {
+            settings.trusted_directories = trusted_directories;
         }
         if let Some(ref ch) = self.update_channel {
             settings.update_channel = ch.clone();
@@ -1102,6 +1355,9 @@ impl Profile {
         }
         if let Some(s) = self.sandbox {
             settings.sandbox = s;
+        }
+        if let Some(enabled) = self.terminal_tool {
+            settings.terminal_tool = enabled;
         }
         // persona and tone are restored by the plugin system at session start,
         // not by Settings.apply_to — Profile stores the name for resumption.
@@ -1145,27 +1401,56 @@ impl Profile {
         });
         self.thinking_level = Some(settings.thinking.as_str().to_string());
         self.max_turns = Some(settings.max_turns);
-        if !settings.provider_order.is_empty() {
-            self.provider_order = settings.provider_order.clone();
+        if settings.automation_level != AutomationLevel::default()
+            || self.automation.level.is_some()
+        {
+            self.automation.level = Some(settings.automation_level);
+        } else {
+            self.automation.level = None;
         }
-        if !settings.trusted_directories.is_empty() {
-            self.trusted_directories = settings.trusted_directories.clone();
-        }
+        self.provider_order = settings.provider_order.clone();
+        self.set_trusted_directories(settings.trusted_directories.clone());
         if settings.update_channel != "stable" {
             self.update_channel = Some(settings.update_channel.clone());
+        } else {
+            self.update_channel = None;
         }
         if settings.auto_update {
             self.auto_update = Some(true);
+        } else {
+            self.auto_update = None;
         }
         if settings.tool_detail != ToolDetail::Detailed {
             self.tool_detail = Some(settings.tool_detail.as_str().to_string());
+        } else {
+            self.tool_detail = None;
         }
         if !settings.mouse {
             self.mouse = Some(false);
+        } else {
+            self.mouse = None;
         }
         if settings.sandbox {
             self.sandbox = Some(true);
+        } else {
+            self.sandbox = None;
         }
+        if !settings.terminal_tool {
+            self.terminal_tool = Some(false);
+        } else {
+            self.terminal_tool = None;
+        }
+    }
+}
+
+fn retain_not_equal(values: &mut Vec<String>, target: &str) {
+    values.retain(|value| value.trim() != target.trim());
+}
+
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    let value = value.trim();
+    if !value.is_empty() && !values.iter().any(|existing| existing.trim() == value) {
+        values.push(value.to_string());
     }
 }
 
@@ -1791,6 +2076,152 @@ mod tests {
         let json = r#"{"lastUsedModel": {"provider": "anthropic", "modelId": "claude-sonnet-4-6"}, "thinkingLevel": "medium"}"#;
         let p: Profile = serde_json::from_str(json).unwrap();
         assert!(p.provider_order.is_empty());
+        assert!(p.integrations.is_empty());
+        assert!(p.extensions.is_empty());
+    }
+
+    #[test]
+    fn profile_integration_and_extension_policy_round_trip() {
+        let json = r#"{
+            "integrations": {
+                "mqtt": {
+                    "enabled": true,
+                    "brokerHost": "mqtt.internal",
+                    "brokerPort": 1884
+                }
+            },
+            "extensions": {
+                "enabled": ["scry"],
+                "disabled": ["vox"]
+            }
+        }"#;
+        let p: Profile = serde_json::from_str(json).unwrap();
+        assert_eq!(p.integrations.mqtt.enabled, Some(true));
+        assert_eq!(
+            p.integrations.mqtt.broker_host.as_deref(),
+            Some("mqtt.internal")
+        );
+        assert_eq!(p.integrations.mqtt.broker_port, Some(1884));
+        assert!(p.extensions.permits("scry", &[], &[]));
+        assert!(!p.extensions.permits("vox", &[], &[]));
+        assert!(!p.extensions.permits("lipstyk", &[], &[]));
+    }
+
+    #[test]
+    fn profile_permissions_prefer_unified_surface_with_legacy_fallback() {
+        let legacy_json = r#"{"trustedDirectories":["/legacy"]}"#;
+        let p: Profile = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(p.effective_trusted_directories(), vec!["/legacy"]);
+
+        let unified_json = r#"{
+            "permissions": {"trustedDirectories":["/unified"]},
+            "trustedDirectories":["/legacy"]
+        }"#;
+        let p: Profile = serde_json::from_str(unified_json).unwrap();
+        assert_eq!(
+            p.effective_trusted_directories(),
+            vec!["/unified", "/legacy"]
+        );
+    }
+
+    #[test]
+    fn profile_automation_applies_to_settings() {
+        let profile: Profile = serde_json::from_str(r#"{"automation":{"level":"flow"}}"#).unwrap();
+        let mut settings = Settings::default();
+        profile.apply_to(&mut settings);
+        assert_eq!(settings.automation_level, AutomationLevel::Flow);
+
+        let mut captured = Profile::default();
+        settings.automation_level = AutomationLevel::Autonomous;
+        captured.capture_from(&settings);
+        assert_eq!(captured.automation.level, Some(AutomationLevel::Autonomous));
+
+        let mut default_capture = Profile::default();
+        default_capture.capture_from(&Settings::default());
+        assert_eq!(default_capture.automation.level, None);
+
+        let mut explicit_default_capture =
+            serde_json::from_str::<Profile>(r#"{"automation":{"level":"guarded"}}"#).unwrap();
+        explicit_default_capture.capture_from(&Settings::default());
+        assert_eq!(
+            explicit_default_capture.automation.level,
+            Some(AutomationLevel::Guarded)
+        );
+    }
+
+    #[test]
+    fn profile_terminal_tool_applies_and_only_captures_false() {
+        let profile: Profile = serde_json::from_str(r#"{"terminalTool":false}"#).unwrap();
+        let mut settings = Settings::default();
+        profile.apply_to(&mut settings);
+        assert!(!settings.terminal_tool);
+
+        let mut captured = Profile::default();
+        captured.capture_from(&settings);
+        assert_eq!(captured.terminal_tool, Some(false));
+
+        settings.terminal_tool = true;
+        let mut default_capture = Profile::default();
+        default_capture.capture_from(&settings);
+        assert_eq!(default_capture.terminal_tool, None);
+
+        let mut restored_capture = Profile {
+            terminal_tool: Some(false),
+            ..Profile::default()
+        };
+        restored_capture.capture_from(&settings);
+        assert_eq!(restored_capture.terminal_tool, None);
+
+        let json = serde_json::to_value(Profile::default()).unwrap();
+        assert!(json.get("terminalTool").is_none());
+    }
+
+    #[test]
+    fn automation_level_parse_accepts_aliases() {
+        assert_eq!(AutomationLevel::parse("ask"), Some(AutomationLevel::Ask));
+        assert_eq!(
+            AutomationLevel::parse("default"),
+            Some(AutomationLevel::Guarded)
+        );
+        assert_eq!(
+            AutomationLevel::parse("proceed"),
+            Some(AutomationLevel::Flow)
+        );
+        assert_eq!(
+            AutomationLevel::parse("auto"),
+            Some(AutomationLevel::Autonomous)
+        );
+        assert_eq!(AutomationLevel::parse("bogus"), None);
+    }
+
+    #[test]
+    fn profile_permission_save_migrates_legacy_trusted_directories() {
+        let mut p = Profile {
+            trusted_directories: vec!["/legacy".into()],
+            ..Profile::default()
+        };
+        p.add_trusted_directory("/unified".into());
+
+        let json = serde_json::to_string_pretty(&p).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(value.get("permissions").is_some());
+        assert!(value.get("trustedDirectories").is_none());
+        assert_eq!(
+            p.effective_trusted_directories(),
+            vec!["/legacy", "/unified"]
+        );
+    }
+
+    #[test]
+    fn env_extension_policy_overrides_profile_allow_list() {
+        let policy = ProfileExtensions {
+            enabled: vec!["scry".into()],
+            disabled: vec!["vox".into()],
+        };
+        assert!(policy.permits("lipstyk", &["lipstyk".into()], &[]));
+        assert!(!policy.permits("scry", &["lipstyk".into()], &[]));
+        assert!(!policy.permits("vox", &["vox".into()], &[]));
+        assert!(!policy.permits("scry", &["scry".into()], &["scry".into()]));
     }
 
     #[test]
@@ -1799,10 +2230,11 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
         let nested = tmp.path().join("core/crates/omegon");
         std::fs::create_dir_all(&nested).unwrap();
+        let root = tmp.path().canonicalize().unwrap();
 
         assert_eq!(
             project_profile_path(&nested),
-            tmp.path().join(".omegon/profile.json")
+            root.join(".omegon/profile.json")
         );
     }
 

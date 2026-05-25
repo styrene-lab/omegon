@@ -42,12 +42,21 @@ fn is_core_tool(name: &str) -> bool {
             | reg::core::EDIT
             | reg::core::VALIDATE
             | reg::core::COMMIT
+            | reg::core::TERMINAL
             | reg::codescan::CODEBASE_SEARCH
             | reg::context::CONTEXT_STATUS
             | reg::context::REQUEST_CONTEXT
             | reg::manage_tools::MANAGE_TOOLS
             | reg::view::VIEW
     )
+}
+
+/// Dynamically registered tools come from runtime-discovered surfaces such as
+/// native extensions, MCP servers, and plugin manifests. Keep them visible after
+/// turn 1 so operators can ask for an installed extension by name without first
+/// forcing a `manage_tools` or exact tool call.
+fn is_dynamic_tool(name: &str) -> bool {
+    !crate::tool_registry::all_static_names().contains(&name)
 }
 
 /// Tools registered in the runtime but hidden from the model-facing tool surface.
@@ -381,7 +390,9 @@ impl EventBus {
             .iter()
             .filter(|(_, d)| disabled.as_ref().is_none_or(|set| !set.contains(&d.name)))
             .filter(|(_, d)| !is_model_hidden_tool(&d.name))
-            .filter(|(_, d)| is_core_tool(&d.name) || used_tools.contains(&d.name))
+            .filter(|(_, d)| {
+                is_core_tool(&d.name) || is_dynamic_tool(&d.name) || used_tools.contains(&d.name)
+            })
             .map(|(_, d)| {
                 if compact {
                     compact_tool_schema(d)
@@ -1079,6 +1090,42 @@ mod tests {
                 "'{tool}' must be disabled in slim mode"
             );
         }
+    }
+
+    #[test]
+    fn lazy_tool_surface_keeps_dynamic_extension_tools_visible_after_turn_one() {
+        let bus = bus_with_tools(&["bash", "reader_doctor", "reader_open"]);
+        let used_tools = std::collections::HashSet::new();
+
+        let defs = bus.tool_definitions_lazy(false, 2, &used_tools);
+        let def_names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+
+        assert!(def_names.contains(&"bash"));
+        assert!(
+            def_names.contains(&"reader_doctor"),
+            "dynamic native extension tools must stay visible after turn 1"
+        );
+        assert!(
+            def_names.contains(&"reader_open"),
+            "dynamic native extension tools must stay visible after turn 1"
+        );
+    }
+
+    #[test]
+    fn lazy_tool_surface_still_hides_unused_static_non_core_tools_after_turn_one() {
+        use crate::tool_registry as reg;
+
+        let bus = bus_with_tools(&["bash", reg::web_search::WEB_SEARCH]);
+        let used_tools = std::collections::HashSet::new();
+
+        let defs = bus.tool_definitions_lazy(false, 2, &used_tools);
+        let def_names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+
+        assert!(def_names.contains(&"bash"));
+        assert!(
+            !def_names.contains(&reg::web_search::WEB_SEARCH),
+            "unused static non-core tools should remain lazy-filtered"
+        );
     }
 
     #[test]

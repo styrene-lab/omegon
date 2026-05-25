@@ -5,7 +5,11 @@
 
 use super::conv_widget::ConvState;
 use super::image::ImageCache;
-use super::segments::{Segment, SegmentContent, SegmentExportMode, SegmentMeta, TokenUsage};
+use super::segments::{
+    Segment, SegmentContent, SegmentExportMode, SegmentMeta, SegmentRenderMode, TokenUsage,
+    is_plan_progress_text,
+};
+use super::theme::Theme;
 
 /// Tab variant — conversation or extension widget
 #[derive(Debug, Clone)]
@@ -334,6 +338,23 @@ impl ConversationView {
     }
 
     pub fn push_system(&mut self, text: &str) {
+        if is_plan_progress_text(text)
+            && let Some(existing) = self
+                .segments
+                .iter_mut()
+                .rev()
+                .filter_map(|segment| match &mut segment.content {
+                    SegmentContent::SystemNotification { text } => Some(text),
+                    _ => None,
+                })
+                .find(|existing| is_plan_progress_text(existing))
+        {
+            *existing = text.to_string();
+            self.conv_state.invalidate();
+            self.conv_state.auto_scroll_to_bottom();
+            return;
+        }
+
         // Merge consecutive system notifications into a single card to avoid
         // excessive vertical padding (each card has border overhead).
         if let Some(last) = self.segments.last_mut()
@@ -626,6 +647,86 @@ impl ConversationView {
         self.conv_state.auto_scroll_to_bottom();
     }
 
+    pub fn maybe_scroll_latest_assistant_to_start(
+        &mut self,
+        viewport_width: u16,
+        viewport_height: u16,
+        theme: &dyn Theme,
+        mode: SegmentRenderMode,
+    ) -> bool {
+        if viewport_width == 0 || viewport_height == 0 || self.conv_state.user_scrolled {
+            return false;
+        }
+
+        let Some(idx) = self
+            .segments
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, segment)| {
+                matches!(
+                    segment.content,
+                    SegmentContent::AssistantText {
+                        ref text,
+                        complete: true,
+                        ..
+                    } if !text.trim().is_empty()
+                )
+            })
+            .map(|(idx, _)| idx)
+        else {
+            return false;
+        };
+
+        let heights = self
+            .segments
+            .iter()
+            .map(|segment| segment.height_in_mode(viewport_width, theme, mode))
+            .collect::<Vec<_>>();
+
+        let segment_height = heights[idx];
+        if segment_height <= viewport_height.saturating_mul(3) / 2 {
+            return false;
+        }
+
+        let total_height: u16 = heights.iter().copied().sum();
+        let max_scroll = total_height.saturating_sub(viewport_height);
+        if max_scroll == 0 {
+            return false;
+        }
+
+        let segment_top: u16 = heights[..idx].iter().copied().sum();
+        let desired_scroll = total_height
+            .saturating_sub(viewport_height)
+            .saturating_sub(segment_top)
+            .min(max_scroll);
+        if desired_scroll == 0 {
+            return false;
+        }
+
+        self.conv_state.scroll_offset = desired_scroll;
+        self.conv_state.user_scrolled = true;
+        self.conv_state.heights = heights;
+        self.conv_state.invalidate();
+        self.selected_segment = Some(idx);
+        true
+    }
+
+    pub fn latest_plan_progress(&self) -> Option<&str> {
+        for segment in self.segments.iter().rev() {
+            if let SegmentContent::SystemNotification { text } = &segment.content
+                && is_plan_progress_text(text)
+            {
+                return if text.lines().next() == Some("Plan cleared") {
+                    None
+                } else {
+                    Some(text.as_str())
+                };
+            }
+        }
+        None
+    }
+
     pub fn abort_streaming(&mut self) {
         self.streaming = false;
         self.conv_state.invalidate();
@@ -703,21 +804,27 @@ impl ConversationView {
     /// at the bottom of the conversation viewport. Pressing Ctrl+O again (or Esc)
     /// unpins and collapses.
     pub fn toggle_pin(&mut self) {
+        self.toggle_pin_in_viewport(None);
+    }
+
+    pub fn toggle_pin_in_viewport(&mut self, viewport_height: Option<u16>) {
         if let Some(pinned) = self.pinned_segment.take() {
             // Unpin: collapse the segment
             self.toggle_expand(pinned);
             return;
         }
 
+        let selected_tool = self.selected_segment.filter(|&idx| {
+            matches!(
+                self.segments.get(idx).map(|s| &s.content),
+                Some(SegmentContent::ToolCard { .. })
+            )
+        });
+        let visible_tool = self.focused_tool_card_in_viewport(viewport_height);
         let target = self
-            .selected_segment
-            .filter(|&idx| {
-                matches!(
-                    self.segments.get(idx).map(|s| &s.content),
-                    Some(SegmentContent::ToolCard { .. })
-                )
-            })
-            .or_else(|| self.focused_tool_card());
+            .latest_running_tool_card()
+            .or(visible_tool)
+            .or(selected_tool);
 
         if let Some(idx) = target {
             // Pin: expand and lock focus
@@ -740,34 +847,156 @@ impl ConversationView {
         }
     }
 
+    fn latest_running_tool_card(&self) -> Option<usize> {
+        self.segments.iter().rposition(|s| {
+            matches!(
+                s.content,
+                SegmentContent::ToolCard {
+                    complete: false,
+                    ..
+                }
+            )
+        })
+    }
+
     /// Find the nearest tool card segment visible in the viewport.
     /// Uses cached heights from the last render (which used the real width).
     pub fn focused_tool_card(&self) -> Option<usize> {
-        let offset = self.conv_state.scroll_offset;
+        self.focused_tool_card_in_viewport(None)
+    }
+
+    pub fn focused_tool_card_in_viewport(&self, viewport_height: Option<u16>) -> Option<usize> {
+        self.visible_tool_cards(viewport_height)
+            .last()
+            .copied()
+            .or_else(|| {
+                self.segments
+                    .iter()
+                    .rposition(|s| matches!(s.content, SegmentContent::ToolCard { .. }))
+            })
+    }
+
+    pub fn visible_tool_cards(&self, viewport_height: Option<u16>) -> Vec<usize> {
         let heights = &self.conv_state.heights;
         if heights.len() != self.segments.len() {
-            return self
-                .segments
-                .iter()
-                .rposition(|s| matches!(s.content, SegmentContent::ToolCard { .. }));
+            return self.recent_tool_cards(viewport_height);
         }
 
         let total: u16 = heights.iter().sum();
-        let viewport_top = total.saturating_sub(offset);
+        let viewport_height = viewport_height.unwrap_or(total).min(total);
+        let max_scroll = total.saturating_sub(viewport_height);
+        let scroll_offset = self.conv_state.scroll_offset.min(max_scroll);
+        let viewport_top = total
+            .saturating_sub(viewport_height)
+            .saturating_sub(scroll_offset);
+        let viewport_bottom = viewport_top.saturating_add(viewport_height);
 
         let mut y: u16 = 0;
+        let mut visible = Vec::new();
         for (i, seg) in self.segments.iter().enumerate() {
-            y += heights[i];
+            let seg_top = y;
+            let seg_bottom = seg_top.saturating_add(heights[i]);
+            y = seg_bottom;
 
-            if matches!(seg.content, SegmentContent::ToolCard { .. })
-                && y > viewport_top.saturating_sub(total / 2)
-            {
-                return Some(i);
+            if seg_bottom <= viewport_top {
+                continue;
+            }
+            if seg_top >= viewport_bottom {
+                break;
+            }
+            if matches!(seg.content, SegmentContent::ToolCard { .. }) {
+                visible.push(i);
             }
         }
-        self.segments
+        if visible.is_empty() {
+            self.recent_tool_cards(Some(viewport_height))
+        } else {
+            visible
+        }
+    }
+
+    fn recent_tool_cards(&self, viewport_height: Option<u16>) -> Vec<usize> {
+        let limit = viewport_height.unwrap_or(3).clamp(1, 6) as usize;
+        let mut recent: Vec<usize> = self
+            .segments
             .iter()
-            .rposition(|s| matches!(s.content, SegmentContent::ToolCard { .. }))
+            .enumerate()
+            .rev()
+            .filter_map(|(idx, segment)| {
+                matches!(segment.content, SegmentContent::ToolCard { .. }).then_some(idx)
+            })
+            .take(limit)
+            .collect();
+        recent.reverse();
+        recent
+    }
+
+    pub fn select_latest_visible_tool_card(
+        &mut self,
+        viewport_height: Option<u16>,
+    ) -> Option<usize> {
+        let idx = self.focused_tool_card_in_viewport(viewport_height)?;
+        self.selected_segment = Some(idx);
+        Some(idx)
+    }
+
+    /// Select the segment focus mode should open on.
+    ///
+    /// Focus mode is a reading view, so entry should bias to the live tail of
+    /// the conversation. Tool-card viewport targeting is reserved for explicit
+    /// tool navigation actions like Tab/Ctrl+O; using it here can anchor focus
+    /// to an older visible tool when the viewport cache lags behind streaming
+    /// assistant output.
+    pub fn select_focus_entry_segment(&mut self) -> Option<usize> {
+        let idx = self.last_selectable_segment()?;
+        self.selected_segment = Some(idx);
+        Some(idx)
+    }
+
+    pub fn select_next_visible_tool_card(&mut self, viewport_height: Option<u16>) -> Option<usize> {
+        let visible = self.visible_tool_cards(viewport_height);
+        if visible.is_empty() {
+            return None;
+        }
+        let selected = self.selected_segment;
+        let idx = selected
+            .and_then(|selected| visible.iter().position(|&idx| idx == selected))
+            .map(|pos| visible[(pos + 1) % visible.len()])
+            .unwrap_or_else(|| *visible.last().expect("visible is not empty"));
+        self.selected_segment = Some(idx);
+        Some(idx)
+    }
+
+    pub fn select_prev_visible_tool_card(&mut self, viewport_height: Option<u16>) -> Option<usize> {
+        let visible = self.visible_tool_cards(viewport_height);
+        if visible.is_empty() {
+            return None;
+        }
+        let selected = self.selected_segment;
+        let idx = selected
+            .and_then(|selected| visible.iter().position(|&idx| idx == selected))
+            .map(|pos| visible[(pos + visible.len() - 1) % visible.len()])
+            .unwrap_or_else(|| *visible.last().expect("visible is not empty"));
+        self.selected_segment = Some(idx);
+        Some(idx)
+    }
+
+    pub fn expand_visible_tool_cards(&mut self, viewport_height: Option<u16>) -> usize {
+        let visible = self.visible_tool_cards(viewport_height);
+        let mut changed = 0;
+        for idx in visible {
+            if let Some(seg) = self.segments.get_mut(idx)
+                && let SegmentContent::ToolCard { expanded, .. } = &mut seg.content
+                && !*expanded
+            {
+                *expanded = true;
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.conv_state.invalidate();
+        }
+        changed
     }
 
     pub fn select_segment(&mut self, idx: usize) {
@@ -832,6 +1061,21 @@ impl ConversationView {
         self.selected_or_focused_segment()
             .and_then(|idx| self.segments.get(idx))
             .map(|segment| segment.export_text(mode))
+    }
+
+    pub fn latest_assistant_text_with_mode(&self, mode: SegmentExportMode) -> Option<String> {
+        self.segments.iter().rev().find_map(|segment| {
+            if matches!(segment.content, SegmentContent::AssistantText { .. }) {
+                let text = segment.export_text(mode);
+                if text.trim().is_empty() {
+                    None
+                } else {
+                    Some(text)
+                }
+            } else {
+                None
+            }
+        })
     }
 
     pub fn move_selected_segment_prev(&mut self) -> Option<usize> {
@@ -914,6 +1158,63 @@ mod tests {
     use super::*;
     use crate::tui::theme::Alpharius;
     use ratatui::prelude::*;
+
+    #[test]
+    fn plan_progress_notifications_replace_latest_snapshot_across_tool_cards() {
+        let mut cv = ConversationView::new();
+        cv.push_system("Plan progress\nPlan mode: executing\nProgress: 2/6\n\n1. ● A\n2. ◐ B");
+        cv.push_tool_start(
+            "plan-1",
+            "plan",
+            Some("{\"action\":\"complete\",\"index\":2}"),
+            Some("complete 2"),
+        );
+        cv.push_tool_end("plan-1", false, Some("Marked item 2 complete."));
+        cv.push_system(
+            "Plan progress\nPlan mode: executing\nProgress: 3/6\n\n1. ● A\n2. ● B\n3. ◐ C",
+        );
+
+        let plan_segments: Vec<&str> = cv
+            .segments
+            .iter()
+            .filter_map(|segment| match &segment.content {
+                SegmentContent::SystemNotification { text } if is_plan_progress_text(text) => {
+                    Some(text.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(plan_segments.len(), 1);
+        assert!(plan_segments[0].contains("Progress: 3/6"));
+        assert!(!plan_segments[0].contains("Progress: 2/6"));
+        assert!(
+            cv.segments
+                .iter()
+                .any(|segment| matches!(segment.content, SegmentContent::ToolCard { .. })),
+            "tool card should remain available for audit/detail"
+        );
+    }
+
+    #[test]
+    fn non_plan_system_notifications_still_append_after_tool_cards() {
+        let mut cv = ConversationView::new();
+        cv.push_system("First notice");
+        cv.push_tool_start("t1", "read", Some("README.md"), Some("README.md"));
+        cv.push_tool_end("t1", false, Some("contents"));
+        cv.push_system("Second notice");
+
+        let system_segments: Vec<&str> = cv
+            .segments
+            .iter()
+            .filter_map(|segment| match &segment.content {
+                SegmentContent::SystemNotification { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(system_segments, vec!["First notice", "Second notice"]);
+    }
 
     #[test]
     fn stamp_turn_tokens_walks_back_and_stamps_matching_segments() {
@@ -1373,6 +1674,67 @@ mod tests {
     }
 
     #[test]
+    fn completed_assistant_response_stays_at_tail() {
+        let mut cv = ConversationView::new();
+        cv.push_system("older context");
+        cv.append_streaming(&format!(
+            "{}\n{}",
+            "long answer",
+            "wrapped response line with enough detail to require many rendered terminal rows"
+                .repeat(20)
+        ));
+        cv.finalize_message();
+
+        assert!(!cv.conv_state.user_scrolled);
+        assert_eq!(cv.conv_state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn long_completed_assistant_pin_ignores_stale_cached_height() {
+        let mut cv = ConversationView::new();
+        cv.append_streaming(
+            "heading\n\n\
+             This answer has enough wrapped prose to exceed the viewport by a wide margin. \
+             It should be measured from the completed text, not from whatever short height \
+             was cached while the response was still streaming.\n\n\
+             - first item\n\
+             - second item\n\
+             - third item\n",
+        );
+        cv.finalize_message();
+        cv.conv_state.heights = vec![1];
+
+        assert!(cv.maybe_scroll_latest_assistant_to_start(
+            24,
+            4,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+        ));
+        assert!(cv.conv_state.user_scrolled);
+        assert!(
+            cv.conv_state.heights[0] > 1,
+            "pinning must refresh stale completed assistant heights"
+        );
+    }
+
+    #[test]
+    fn short_completed_assistant_response_stays_at_tail() {
+        let mut cv = ConversationView::new();
+        cv.append_streaming("short answer");
+        cv.finalize_message();
+        cv.conv_state.heights = vec![8];
+
+        assert!(!cv.maybe_scroll_latest_assistant_to_start(
+            40,
+            10,
+            &Alpharius,
+            SegmentRenderMode::Full,
+        ));
+        assert!(!cv.conv_state.user_scrolled);
+        assert_eq!(cv.conv_state.scroll_offset, 0);
+    }
+
+    #[test]
     fn full_result_stored_not_truncated() {
         let mut cv = ConversationView::new();
         let long_result = (0..50)
@@ -1413,6 +1775,168 @@ mod tests {
         assert!(cv.pinned_segment.is_none());
         if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[idx].content {
             assert!(!expanded, "unpinned card should be collapsed");
+        }
+    }
+
+    #[test]
+    fn toggle_pin_uses_visible_viewport_not_top_segment() {
+        let mut cv = ConversationView::new();
+        for idx in 0..5 {
+            let id = format!("t{idx}");
+            let path = format!("file{idx}.rs");
+            let name = format!("read{idx}");
+            cv.push_tool_start(&id, &name, Some(&path), Some(&path));
+            cv.push_tool_end(&id, false, Some("result"));
+        }
+        cv.conv_state.heights = vec![2; 5];
+        cv.conv_state.scroll_offset = 0;
+
+        cv.toggle_pin_in_viewport(Some(4));
+
+        assert_eq!(cv.pinned_segment, Some(4));
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[4].content {
+            assert!(expanded, "bottom visible tool card should expand");
+        } else {
+            panic!("expected tool card");
+        }
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[0].content {
+            assert!(
+                !expanded,
+                "top tool card must not be expanded from bottom viewport"
+            );
+        }
+    }
+
+    #[test]
+    fn toggle_pin_ignores_stale_selected_tool_for_new_visible_set() {
+        let mut cv = ConversationView::new();
+        for idx in 0..8 {
+            let id = format!("t{idx}");
+            let path = format!("file{idx}.rs");
+            let name = format!("read{idx}");
+            cv.push_tool_start(&id, &name, Some(&path), Some(&path));
+            cv.push_tool_end(&id, false, Some("result"));
+        }
+        cv.conv_state.heights = vec![1; 8];
+        cv.conv_state.scroll_offset = 0;
+        cv.selected_segment = Some(2);
+
+        cv.toggle_pin_in_viewport(Some(3));
+
+        assert_eq!(cv.pinned_segment, Some(7));
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[7].content {
+            assert!(expanded, "most recent visible tool card should expand");
+        } else {
+            panic!("expected tool card");
+        }
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[2].content {
+            assert!(
+                !expanded,
+                "stale selected tool from previous set must not expand"
+            );
+        }
+    }
+    #[test]
+    fn focus_entry_prefers_live_tail_over_visible_tool_card() {
+        let mut cv = ConversationView::new();
+        for idx in 0..6 {
+            let id = format!("t{idx}");
+            let path = format!("file{idx}.rs");
+            let name = format!("read{idx}");
+            cv.push_tool_start(&id, &name, Some(&path), Some(&path));
+            cv.push_tool_end(&id, false, Some("result"));
+        }
+        cv.append_thinking("reasoning about the latest response");
+
+        // Simulate a stale/older viewport where the bottom visible rows still
+        // contain tool cards. Explicit tool navigation should continue to use
+        // the visible tool-card target, but entering focus mode must open at
+        // the live tail instead.
+        cv.conv_state.heights = vec![1; cv.segments.len()];
+        cv.conv_state.scroll_offset = 2;
+        cv.selected_segment = Some(1);
+
+        assert_eq!(cv.select_latest_visible_tool_card(Some(3)), Some(4));
+        assert_eq!(cv.selected_segment, Some(4));
+
+        assert_eq!(cv.select_focus_entry_segment(), Some(6));
+        assert_eq!(cv.selected_segment, Some(6));
+        assert!(matches!(
+            cv.segments[6].content,
+            SegmentContent::AssistantText { .. }
+        ));
+    }
+
+    #[test]
+    fn visible_tool_focus_cycles_and_expands_current_viewport() {
+        let mut cv = ConversationView::new();
+        for idx in 0..8 {
+            let id = format!("t{idx}");
+            let path = format!("file{idx}.rs");
+            let name = format!("read{idx}");
+            cv.push_tool_start(&id, &name, Some(&path), Some(&path));
+            cv.push_tool_end(&id, false, Some("result"));
+        }
+        cv.conv_state.heights = vec![1; 8];
+        cv.conv_state.scroll_offset = 0;
+        cv.selected_segment = Some(2);
+
+        assert_eq!(cv.visible_tool_cards(Some(3)), vec![5, 6, 7]);
+        assert_eq!(cv.select_latest_visible_tool_card(Some(3)), Some(7));
+        assert_eq!(cv.select_next_visible_tool_card(Some(3)), Some(5));
+        assert_eq!(cv.select_prev_visible_tool_card(Some(3)), Some(7));
+
+        assert_eq!(cv.expand_visible_tool_cards(Some(3)), 3);
+        for idx in [5, 6, 7] {
+            if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[idx].content {
+                assert!(*expanded, "visible tool card {idx} should expand");
+            }
+        }
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[2].content {
+            assert!(!expanded, "non-visible stale selection must stay collapsed");
+        }
+    }
+
+    #[test]
+    fn visible_tool_cards_falls_back_to_recent_when_height_cache_is_stale() {
+        let mut cv = ConversationView::new();
+        for idx in 0..8 {
+            let id = format!("t{idx}");
+            let path = format!("file{idx}.rs");
+            let name = format!("read{idx}");
+            cv.push_tool_start(&id, &name, Some(&path), Some(&path));
+            cv.push_tool_end(&id, false, Some("result"));
+        }
+        cv.conv_state.heights.clear();
+
+        assert_eq!(cv.visible_tool_cards(Some(3)), vec![5, 6, 7]);
+        cv.toggle_pin_in_viewport(Some(3));
+        assert_eq!(cv.pinned_segment, Some(7));
+        if let SegmentContent::ToolCard { expanded, .. } = &cv.segments[7].content {
+            assert!(expanded, "recent fallback target should expand");
+        } else {
+            panic!("expected tool card");
+        }
+    }
+
+    #[test]
+    fn toggle_pin_prefers_latest_running_tool_card() {
+        let mut cv = ConversationView::new();
+        cv.push_tool_start("done", "read", Some("old"), Some("old"));
+        cv.push_tool_end("done", false, Some("old result"));
+        cv.push_tool_start("running", "codebase_search", Some("query"), Some("query"));
+
+        cv.toggle_pin();
+
+        assert_eq!(cv.pinned_segment, Some(1));
+        if let SegmentContent::ToolCard {
+            expanded, complete, ..
+        } = &cv.segments[1].content
+        {
+            assert!(!complete, "test target should still be running");
+            assert!(expanded, "running card should expand before ToolEnd");
+        } else {
+            panic!("expected running tool card");
         }
     }
 

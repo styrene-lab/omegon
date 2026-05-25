@@ -11,6 +11,12 @@ visibility = "private"
 
 # Token Cost Reduction — Local Inference Offload Strategy
 
+## Disposition — 2026-05-23
+
+**Status: superseded strategy snapshot.** This document captures an early local-first cost-reduction strategy. Later work reversed or narrowed several recommendations: cheap/cloud memory extraction is tracked in `cheap-gpt-memory-models.md`, episode reliability notes explicitly demote Ollama-first for low-frequency narrative work, and provider/fallback policy moved toward operator capability profiles rather than raw local availability.
+
+Use this document as historical budget analysis and as evidence for why cost controls were needed. Do not treat the local-first extraction/compaction recommendations or `project-memory` TypeScript file references as current policy without checking the newer provider-profile and Rust memory/model-budget implementation.
+
 ## Overview
 
 Assess and implement strategies to reduce cloud API token consumption by ≥50% by leveraging the M1 Max 64GB for local inference. Current state: 19% weekly budget burned by Saturday of week 1, $6.83 extra usage accrued, with significant token spend on background processes and routine tasks that don't need frontier models.

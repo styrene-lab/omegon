@@ -15,10 +15,168 @@ use anyhow::Context;
 use crate::acp_worker::{self, WorkerEvent, WorkerHandle, WorkerRequest};
 use crate::host_context::{self, HostCapabilities, HostContext, HostProxySender};
 
+#[path = "acp/labels.rs"]
+mod labels;
+#[path = "acp/model_options.rs"]
+mod model_options;
+#[path = "acp/resource_context.rs"]
+mod resource_context;
+
+use labels::compact_tool_call_label;
+use model_options::{
+    acp_model_provider_available, compact_model_label, unavailable_current_model_label,
+};
+use resource_context::prompt_blocks_to_text;
+
+pub(crate) type AcpClientConnection = AgentSideConnection;
+pub(crate) type SharedAcpClientConnection = Rc<RefCell<Option<AcpClientConnection>>>;
+
+pub(crate) async fn send_session_update(
+    conn: &AcpClientConnection,
+    session_id: SessionId,
+    update: SessionUpdate,
+) -> agent_client_protocol::Result<()> {
+    conn.session_notification(SessionNotification::new(session_id, update))
+        .await
+}
+
+pub(crate) fn connect_acp_agent<AgentHandler, Outgoing, Incoming, SpawnFn>(
+    agent: AgentHandler,
+    outgoing: Outgoing,
+    incoming: Incoming,
+    spawn: SpawnFn,
+) -> (
+    AcpClientConnection,
+    impl std::future::Future<Output = agent_client_protocol::Result<()>>,
+)
+where
+    AgentHandler: Agent + 'static,
+    Outgoing: futures::AsyncWrite + Unpin + 'static,
+    Incoming: futures::AsyncRead + Unpin + 'static,
+    SpawnFn: Fn(futures::future::LocalBoxFuture<'static, ()>) + 'static,
+{
+    AgentSideConnection::new(agent, outgoing, incoming, spawn)
+}
+
+pub(crate) fn plan_entries_from_snapshot_json(
+    snapshot_json: &serde_json::Value,
+) -> Vec<acp_worker::PlanEntryData> {
+    snapshot_json
+        .get("items")
+        .and_then(|items| items.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let content = item
+                        .get("description")
+                        .and_then(|value| value.as_str())
+                        .map(str::trim)
+                        .filter(|description| !description.is_empty())?;
+                    let status = match item
+                        .get("status")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("todo")
+                    {
+                        "active" | "in_progress" => acp_worker::PlanEntryState::InProgress,
+                        "done" | "completed" => acp_worker::PlanEntryState::Completed,
+                        "skipped" | "failed" => acp_worker::PlanEntryState::Failed,
+                        _ => acp_worker::PlanEntryState::Pending,
+                    };
+                    Some(acp_worker::PlanEntryData {
+                        content: content.to_string(),
+                        status,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn merge_plan_entries(
+    plan_state: &mut Vec<acp_worker::PlanEntryData>,
+    entries: Vec<acp_worker::PlanEntryData>,
+) {
+    if entries.is_empty() {
+        plan_state.clear();
+    } else if entries.len() > 1 || plan_state.is_empty() {
+        *plan_state = entries;
+    } else {
+        for update in entries {
+            if let Some(existing) = plan_state
+                .iter_mut()
+                .find(|entry| entry.content == update.content)
+            {
+                existing.status = update.status;
+            } else {
+                plan_state.push(update);
+            }
+        }
+    }
+}
+
+fn acp_plan_entry_status(status: acp_worker::PlanEntryState) -> PlanEntryStatus {
+    match status {
+        acp_worker::PlanEntryState::Pending => PlanEntryStatus::Pending,
+        acp_worker::PlanEntryState::InProgress => PlanEntryStatus::InProgress,
+        acp_worker::PlanEntryState::Completed | acp_worker::PlanEntryState::Failed => {
+            PlanEntryStatus::Completed
+        }
+    }
+}
+
+fn acp_plan_entries(entries: &[acp_worker::PlanEntryData]) -> Vec<PlanEntry> {
+    entries
+        .iter()
+        .map(|entry| {
+            PlanEntry::new(
+                &entry.content,
+                PlanEntryPriority::Medium,
+                acp_plan_entry_status(entry.status),
+            )
+        })
+        .collect()
+}
+
+fn acp_status_message_text(msg: &str) -> Option<String> {
+    let trimmed = msg.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if trimmed.contains("Plan mode:") || trimmed.starts_with("Plan ") {
+        let mode = trimmed
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("Plan mode:"))
+            .map(str::trim)
+            .unwrap_or("");
+
+        let text = if trimmed.starts_with("Plan set") && mode == "planning" {
+            "Planning mode — edits blocked until approval.".to_string()
+        } else if trimmed.starts_with("Plan approved") || mode == "approved" {
+            "Plan approved — execution may proceed.".to_string()
+        } else if trimmed.starts_with("Plan executing") || mode == "executing" {
+            "Plan executing.".to_string()
+        } else if trimmed.starts_with("Plan cleared") || mode == "off" {
+            "Plan cleared.".to_string()
+        } else if trimmed.starts_with("Plan item skipped") {
+            "Plan item skipped.".to_string()
+        } else if trimmed.starts_with("Plan progress") || mode == "complete" {
+            "Plan progress updated.".to_string()
+        } else {
+            "Plan updated.".to_string()
+        };
+
+        return Some(text);
+    }
+
+    Some(trimmed.to_string())
+}
+
 pub struct OmegonAcpAgent {
     model: String,
     worker: RefCell<Option<WorkerHandle>>,
-    conn: Rc<RefCell<Option<AgentSideConnection>>>,
+    conn: SharedAcpClientConnection,
     session_id: RefCell<Option<SessionId>>,
     secrets: RefCell<Option<std::sync::Arc<omegon_secrets::SecretsManager>>>,
     host_caps: RefCell<HostCapabilities>,
@@ -36,7 +194,7 @@ impl OmegonAcpAgent {
         }
     }
 
-    pub fn set_client(&self, c: AgentSideConnection) {
+    pub fn set_client(&self, c: AcpClientConnection) {
         *self.conn.borrow_mut() = Some(c);
     }
 
@@ -101,14 +259,26 @@ impl OmegonAcpAgent {
             }
         }
 
-        for (id, name) in [
-            ("anthropic:claude-opus-4-7", "Claude Opus 4.7"),
-            ("anthropic:claude-sonnet-4-7", "Claude Sonnet 4.7"),
-            ("anthropic:claude-opus-4-6", "Claude Opus 4.6"),
-            ("anthropic:claude-sonnet-4-6", "Claude Sonnet 4.6"),
-            ("openai:gpt-5.4", "GPT-5.4"),
-        ] {
-            model_options.push(SessionConfigSelectOption::new(id, name));
+        let registry = crate::model_registry::ModelRegistry::global();
+        let mut registry_models: Vec<_> = registry.all_models().collect();
+        registry_models.sort_by(|a, b| {
+            a.provider
+                .cmp(&b.provider)
+                .then_with(|| a.cost_tier.cmp(&b.cost_tier))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        for model in registry_models {
+            let id = format!("{}:{}", model.provider, model.id);
+            if model_options.iter().any(|o| o.value.0.as_ref() == id) {
+                continue;
+            }
+            if !acp_model_provider_available(&model.provider) {
+                continue;
+            }
+            model_options.push(SessionConfigSelectOption::new(
+                id,
+                compact_model_label(&model.name, &model.provider),
+            ));
         }
 
         if !model_options
@@ -119,7 +289,7 @@ impl OmegonAcpAgent {
                 0,
                 SessionConfigSelectOption::new(
                     current_model.to_string(),
-                    current_model.to_string(),
+                    unavailable_current_model_label(current_model),
                 ),
             );
         }
@@ -281,7 +451,7 @@ impl Agent for OmegonAcpAgent {
             Some(Implementation::new("omegon", env!("CARGO_PKG_VERSION")).title("Omegon Agent"));
         response.agent_capabilities = AgentCapabilities::default()
             .load_session(true)
-            .prompt_capabilities(PromptCapabilities::new().image(true))
+            .prompt_capabilities(PromptCapabilities::new().embedded_context(true))
             .session_capabilities(
                 SessionCapabilities::new()
                     .list(SessionListCapabilities::new())
@@ -351,40 +521,37 @@ impl Agent for OmegonAcpAgent {
         tokio::task::spawn_local(async move {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             if let Some(c) = conn.borrow().as_ref() {
-                let _ = c
-                    .session_notification(SessionNotification::new(
-                        cmd_sid,
-                        SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(vec![
-                            AvailableCommand::new("model", "List or switch LLM model"),
-                            AvailableCommand::new("thinking", "Show or set thinking level"),
-                            AvailableCommand::new("posture", "Show or set behavioral posture"),
-                            AvailableCommand::new(
-                                "skills",
-                                "Manage skills (list, get, create, delete)",
-                            ),
-                            AvailableCommand::new(
-                                "extension",
-                                "Manage extensions (list, install, enable, search)",
-                            ),
-                            AvailableCommand::new(
-                                "armory",
-                                "Browse upstream extensions, plugins, skills, and agents",
-                            ),
-                            AvailableCommand::new(
-                                "persona",
-                                "Manage personas (list, create, switch)",
-                            ),
-                            AvailableCommand::new(
-                                "catalog",
-                                "Browse agent catalog (list, install, remove)",
-                            ),
-                            AvailableCommand::new("secrets", "Show configured secrets (no values)"),
-                            AvailableCommand::new("status", "Session status"),
-                            AvailableCommand::new("login", "Authentication help"),
-                            AvailableCommand::new("help", "List all commands"),
-                        ])),
-                    ))
-                    .await;
+                let _ = send_session_update(
+                    c,
+                    cmd_sid,
+                    SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(vec![
+                        AvailableCommand::new("model", "List or switch LLM model"),
+                        AvailableCommand::new("thinking", "Show or set thinking level"),
+                        AvailableCommand::new("posture", "Show or set behavioral posture"),
+                        AvailableCommand::new(
+                            "skills",
+                            "Manage skills (list, get, create, delete)",
+                        ),
+                        AvailableCommand::new(
+                            "extension",
+                            "Manage extensions (list, install, enable, search)",
+                        ),
+                        AvailableCommand::new(
+                            "armory",
+                            "Browse upstream extensions, plugins, skills, and agents",
+                        ),
+                        AvailableCommand::new("persona", "Manage personas (list, create, switch)"),
+                        AvailableCommand::new(
+                            "catalog",
+                            "Browse agent catalog (list, install, remove)",
+                        ),
+                        AvailableCommand::new("secrets", "Show configured secrets (no values)"),
+                        AvailableCommand::new("status", "Session status"),
+                        AvailableCommand::new("login", "Authentication help"),
+                        AvailableCommand::new("help", "List all commands"),
+                    ])),
+                )
+                .await;
             }
         });
 
@@ -398,19 +565,11 @@ impl Agent for OmegonAcpAgent {
         let cwd = std::env::current_dir().unwrap_or_default();
         self.ensure_worker(&cwd);
 
-        // Extract user text
-        let user_text: String = args
-            .prompt
-            .iter()
-            .filter_map(|block| {
-                if let ContentBlock::Text(text) = block {
-                    Some(text.text.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        // Extract user text and referenced context. ACP requires agents to
+        // support ResourceLink prompt blocks, and Resource blocks are allowed
+        // when embedded_context is advertised. Do not silently drop non-text
+        // blocks; Zed sends @file mentions through this surface.
+        let user_text = prompt_blocks_to_text(&args.prompt, &cwd);
 
         // Handle slash commands locally (no worker round-trip)
         if user_text.starts_with('/') {
@@ -420,14 +579,14 @@ impl Agent for OmegonAcpAgent {
             tokio::task::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 if let Some(c) = conn.borrow().as_ref() {
-                    let _ = c
-                        .session_notification(SessionNotification::new(
-                            notify_sid,
-                            SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                                ContentBlock::Text(TextContent::new(response_text)),
-                            )),
-                        ))
-                        .await;
+                    let _ = send_session_update(
+                        c,
+                        notify_sid,
+                        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                            TextContent::new(response_text),
+                        ))),
+                    )
+                    .await;
                 }
             });
             return Ok(PromptResponse::new(StopReason::EndTurn));
@@ -473,27 +632,27 @@ impl Agent for OmegonAcpAgent {
                         Ok(WorkerEvent::TextChunk(text)) => {
                             let text = redact(&text);
                             if let Some(c) = conn.borrow().as_ref() {
-                                let _ = c
-                                    .session_notification(SessionNotification::new(
-                                        stream_sid.clone(),
-                                        SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                                            ContentBlock::Text(TextContent::new(text)),
-                                        )),
-                                    ))
-                                    .await;
+                                let _ = send_session_update(
+                                    c,
+                                    stream_sid.clone(),
+                                    SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                                        ContentBlock::Text(TextContent::new(text)),
+                                    )),
+                                )
+                                .await;
                             }
                         }
                         Ok(WorkerEvent::ThinkingChunk(text)) => {
                             let text = redact(&text);
                             if let Some(c) = conn.borrow().as_ref() {
-                                let _ = c
-                                    .session_notification(SessionNotification::new(
-                                        stream_sid.clone(),
-                                        SessionUpdate::AgentThoughtChunk(ContentChunk::new(
-                                            ContentBlock::Text(TextContent::new(text)),
-                                        )),
-                                    ))
-                                    .await;
+                                let _ = send_session_update(
+                                    c,
+                                    stream_sid.clone(),
+                                    SessionUpdate::AgentThoughtChunk(ContentChunk::new(
+                                        ContentBlock::Text(TextContent::new(text)),
+                                    )),
+                                )
+                                .await;
                             }
                         }
                         Ok(WorkerEvent::ToolStart { id, name, args }) => {
@@ -501,31 +660,33 @@ impl Agent for OmegonAcpAgent {
                                 let s = redact(&a.to_string());
                                 serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))
                             });
+                            let display_name = compact_tool_call_label(&name, args.as_ref());
                             if let Some(c) = conn.borrow().as_ref() {
-                                let mut tc = ToolCall::new(ToolCallId::new(id), name);
+                                let mut tc = ToolCall::new(ToolCallId::new(id), display_name);
                                 tc.status = ToolCallStatus::InProgress;
                                 tc.raw_input = args;
-                                let _ = c
-                                    .session_notification(SessionNotification::new(
-                                        stream_sid.clone(),
-                                        SessionUpdate::ToolCall(tc),
-                                    ))
-                                    .await;
+                                let _ = send_session_update(
+                                    c,
+                                    stream_sid.clone(),
+                                    SessionUpdate::ToolCall(tc),
+                                )
+                                .await;
                             }
                         }
                         Ok(WorkerEvent::StatusUpdate(msg)) => {
                             let msg = redact(&msg);
+                            let Some(msg) = acp_status_message_text(&msg) else {
+                                continue;
+                            };
                             if let Some(c) = conn.borrow().as_ref() {
-                                let _ = c
-                                    .session_notification(SessionNotification::new(
-                                        stream_sid.clone(),
-                                        SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                                            ContentBlock::Text(TextContent::new(format!(
-                                                "_{msg}_\n\n"
-                                            ))),
-                                        )),
-                                    ))
-                                    .await;
+                                let _ = send_session_update(
+                                    c,
+                                    stream_sid.clone(),
+                                    SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                                        ContentBlock::Text(TextContent::new(format!("{msg}\n\n"))),
+                                    )),
+                                )
+                                .await;
                             }
                         }
                         Ok(WorkerEvent::ToolEnd { id, success }) => {
@@ -536,15 +697,15 @@ impl Agent for OmegonAcpAgent {
                                     ToolCallStatus::Failed
                                 };
                                 let fields = ToolCallUpdateFields::new().status(status);
-                                let _ = c
-                                    .session_notification(SessionNotification::new(
-                                        stream_sid.clone(),
-                                        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-                                            ToolCallId::new(id),
-                                            fields,
-                                        )),
-                                    ))
-                                    .await;
+                                let _ = send_session_update(
+                                    c,
+                                    stream_sid.clone(),
+                                    SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                                        ToolCallId::new(id),
+                                        fields,
+                                    )),
+                                )
+                                .await;
                             }
                         }
                         Ok(WorkerEvent::ToolOutput { id, text }) => {
@@ -555,15 +716,15 @@ impl Agent for OmegonAcpAgent {
                                         ContentBlock::Text(TextContent::new(text)),
                                     ));
                                 let fields = ToolCallUpdateFields::new().content(vec![content]);
-                                let _ = c
-                                    .session_notification(SessionNotification::new(
-                                        stream_sid.clone(),
-                                        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-                                            ToolCallId::new(id),
-                                            fields,
-                                        )),
-                                    ))
-                                    .await;
+                                let _ = send_session_update(
+                                    c,
+                                    stream_sid.clone(),
+                                    SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                                        ToolCallId::new(id),
+                                        fields,
+                                    )),
+                                )
+                                .await;
                             }
                         }
                         Ok(WorkerEvent::PlanUpdate { entries }) => {
@@ -572,67 +733,26 @@ impl Agent for OmegonAcpAgent {
                                 // DecompositionStarted sends the full initial set;
                                 // subsequent updates send single-entry patches.
                                 // We maintain the full plan and re-emit it.
-                                if !entries.is_empty() {
-                                    if entries.len() > 1 {
-                                        // Multi-entry = fresh decomposition plan
-                                        plan_state = entries.clone();
-                                    } else if plan_state.is_empty() {
-                                        // Single entry, no existing plan — initialize
-                                        plan_state = entries.clone();
-                                    } else {
-                                        // Single entry status update — merge into existing
-                                        for update in &entries {
-                                            if let Some(existing) = plan_state
-                                                .iter_mut()
-                                                .find(|e| e.content == update.content)
-                                            {
-                                                existing.status = update.status;
-                                            }
-                                        }
-                                    }
-                                }
-                                let plan_entries: Vec<PlanEntry> = plan_state
-                                    .iter()
-                                    .map(|e| {
-                                        let status = match e.status {
-                                            acp_worker::PlanEntryState::Pending => {
-                                                PlanEntryStatus::Pending
-                                            }
-                                            acp_worker::PlanEntryState::InProgress => {
-                                                PlanEntryStatus::InProgress
-                                            }
-                                            acp_worker::PlanEntryState::Completed => {
-                                                PlanEntryStatus::Completed
-                                            }
-                                            acp_worker::PlanEntryState::Failed => {
-                                                PlanEntryStatus::Completed
-                                            }
-                                        };
-                                        PlanEntry::new(
-                                            &e.content,
-                                            PlanEntryPriority::Medium,
-                                            status,
-                                        )
-                                    })
-                                    .collect();
-                                let _ = c
-                                    .session_notification(SessionNotification::new(
-                                        stream_sid.clone(),
-                                        SessionUpdate::Plan(Plan::new(plan_entries)),
-                                    ))
-                                    .await;
+                                merge_plan_entries(&mut plan_state, entries);
+                                let plan_entries = acp_plan_entries(&plan_state);
+                                let _ = send_session_update(
+                                    c,
+                                    stream_sid.clone(),
+                                    SessionUpdate::Plan(Plan::new(plan_entries)),
+                                )
+                                .await;
                             }
                         }
                         Ok(WorkerEvent::SessionTitle(title)) => {
                             if let Some(c) = conn.borrow().as_ref() {
-                                let _ = c
-                                    .session_notification(SessionNotification::new(
-                                        stream_sid.clone(),
-                                        SessionUpdate::SessionInfoUpdate(
-                                            SessionInfoUpdate::new().title(title),
-                                        ),
-                                    ))
-                                    .await;
+                                let _ = send_session_update(
+                                    c,
+                                    stream_sid.clone(),
+                                    SessionUpdate::SessionInfoUpdate(
+                                        SessionInfoUpdate::new().title(title),
+                                    ),
+                                )
+                                .await;
                             }
                         }
                         Ok(WorkerEvent::TurnComplete) => break,
@@ -659,14 +779,14 @@ impl Agent for OmegonAcpAgent {
             tokio::task::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 if let Some(c) = conn.borrow().as_ref() {
-                    let _ = c
-                        .session_notification(SessionNotification::new(
-                            err_sid,
-                            SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                                ContentBlock::Text(TextContent::new(err_text)),
-                            )),
-                        ))
-                        .await;
+                    let _ = send_session_update(
+                        c,
+                        err_sid,
+                        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                            TextContent::new(err_text),
+                        ))),
+                    )
+                    .await;
                 }
             });
         }
@@ -702,12 +822,12 @@ impl Agent for OmegonAcpAgent {
             let conn = self.conn.clone();
             tokio::task::spawn_local(async move {
                 if let Some(c) = conn.borrow().as_ref() {
-                    let _ = c
-                        .session_notification(SessionNotification::new(
-                            sid,
-                            SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(mode_id)),
-                        ))
-                        .await;
+                    let _ = send_session_update(
+                        c,
+                        sid,
+                        SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(mode_id)),
+                    )
+                    .await;
                 }
             });
         }
@@ -777,14 +897,12 @@ impl Agent for OmegonAcpAgent {
             let push_options = options.clone();
             tokio::task::spawn_local(async move {
                 if let Some(c) = conn.borrow().as_ref() {
-                    let _ = c
-                        .session_notification(SessionNotification::new(
-                            sid,
-                            SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
-                                push_options,
-                            )),
-                        ))
-                        .await;
+                    let _ = send_session_update(
+                        c,
+                        sid,
+                        SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(push_options)),
+                    )
+                    .await;
                 }
             });
         }
@@ -1897,6 +2015,14 @@ impl OmegonAcpAgent {
             | "control/persona_list"
             | "control/persona_switch"
             | "control/profile_view"
+            | "control/profile_capture"
+            | "control/profile_apply"
+            | "control/profile_mqtt"
+            | "control/profile_extension_allow"
+            | "control/profile_extension_deny"
+            | "control/profile_extension_clear"
+            | "control/profile_persona"
+            | "control/profile_tone"
             | "control/context_status"
             | "control/context_class"
             | "control/runtime_mode"
@@ -1908,14 +2034,29 @@ impl OmegonAcpAgent {
             | "control/notes_clear"
             | "control/workspace_status"
             | "control/workspace_list"
+            | "control/workspace_new"
+            | "control/workspace_destroy"
+            | "control/workspace_adopt"
+            | "control/workspace_release"
+            | "control/workspace_archive"
+            | "control/workspace_prune"
+            | "control/workspace_bind_milestone"
+            | "control/workspace_bind_node"
+            | "control/workspace_bind_clear"
+            | "control/workspace_role"
+            | "control/workspace_role_set"
+            | "control/workspace_role_clear"
+            | "control/workspace_kind"
+            | "control/workspace_kind_set"
+            | "control/workspace_kind_clear"
             | "control/tree_view"
             | "control/provider_status" => {
                 let control_cmd = method.strip_prefix("control/").unwrap_or(method);
-                let arg = params.get("args").and_then(|v| v.as_str()).unwrap_or("");
+                let arg = control_request_args(method, &params);
                 let full_cmd = if arg.is_empty() {
                     control_cmd.to_string()
                 } else {
-                    format!("{control_cmd} {arg}")
+                    format!("{control_cmd} {}", arg.trim())
                 };
 
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -1927,7 +2068,14 @@ impl OmegonAcpAgent {
                             response_tx: tx,
                         })
                         .await;
-                    match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+                    let timeout_secs = if control_cmd.starts_with("workspace_") {
+                        60
+                    } else {
+                        5
+                    };
+                    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx)
+                        .await
+                    {
                         Ok(Ok(resp)) => Ok(serde_json::json!({
                             "text": resp.text,
                             "error": resp.error,
@@ -2070,6 +2218,30 @@ impl OmegonAcpAgent {
     }
 }
 
+fn control_request_args(method: &str, params: &serde_json::Value) -> String {
+    if let Some(args) = params.get("args").and_then(|v| v.as_str()) {
+        return args.to_string();
+    }
+
+    let key = match method {
+        "control/workspace_new" => Some("label"),
+        "control/workspace_destroy" => Some("target"),
+        "control/workspace_bind_milestone" => Some("milestone_id"),
+        "control/workspace_bind_node" => Some("design_node_id"),
+        "control/workspace_role_set" => Some("role"),
+        "control/workspace_kind_set" => Some("kind"),
+        "control/note_add" => Some("text"),
+        "control/persona_switch" => Some("name"),
+        "control/profile_extension_allow" | "control/profile_extension_deny" => Some("name"),
+        "control/profile_persona" | "control/profile_tone" => Some("name"),
+        _ => None,
+    };
+
+    key.and_then(|key| params.get(key).and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string()
+}
+
 // ── ACP → internal MCP server conversion ──────────────────────────────
 
 fn mcp_config(
@@ -2160,7 +2332,7 @@ pub async fn run(model: &str, agent_id: Option<&str>, cwd: &std::path::Path) -> 
     let stdin = tokio::io::stdin().compat();
 
     let agent_clone = agent.clone();
-    let (conn, io_task) = AgentSideConnection::new(agent_clone, stdout, stdin, |fut| {
+    let (conn, io_task) = connect_acp_agent(agent_clone, stdout, stdin, |fut| {
         tokio::task::spawn_local(fut);
     });
 
@@ -2313,6 +2485,49 @@ mod tests {
     }
 
     #[test]
+    fn control_request_args_accepts_workspace_specific_fields() {
+        assert_eq!(
+            control_request_args(
+                "control/workspace_new",
+                &serde_json::json!({ "label": "feature-a" })
+            ),
+            "feature-a"
+        );
+        assert_eq!(
+            control_request_args(
+                "control/workspace_destroy",
+                &serde_json::json!({ "target": "workspace-1" })
+            ),
+            "workspace-1"
+        );
+        assert_eq!(
+            control_request_args(
+                "control/workspace_role_set",
+                &serde_json::json!({ "role": "release" })
+            ),
+            "release"
+        );
+        assert_eq!(
+            control_request_args(
+                "control/workspace_kind_set",
+                &serde_json::json!({ "kind": "spec" })
+            ),
+            "spec"
+        );
+    }
+
+    #[test]
+    fn control_request_args_prefers_legacy_args_field() {
+        assert_eq!(
+            control_request_args(
+                "control/workspace_new",
+                &serde_json::json!({ "args": "from-args", "label": "from-label" })
+            ),
+            "from-args"
+        );
+    }
+
+    #[test]
     fn plan_entry_state_mapping() {
         use crate::acp_worker::{PlanEntryData, PlanEntryState};
 
@@ -2329,25 +2544,105 @@ mod tests {
                 content: "Step 3".into(),
                 status: PlanEntryState::Pending,
             },
+            PlanEntryData {
+                content: "Step 4".into(),
+                status: PlanEntryState::Failed,
+            },
         ];
 
-        let plan_entries: Vec<PlanEntry> = entries
-            .iter()
-            .map(|e| {
-                let status = match e.status {
-                    PlanEntryState::Pending => PlanEntryStatus::Pending,
-                    PlanEntryState::InProgress => PlanEntryStatus::InProgress,
-                    PlanEntryState::Completed => PlanEntryStatus::Completed,
-                    PlanEntryState::Failed => PlanEntryStatus::Completed,
-                };
-                PlanEntry::new(&e.content, PlanEntryPriority::Medium, status)
-            })
-            .collect();
+        let plan_entries = acp_plan_entries(&entries);
 
-        assert_eq!(plan_entries.len(), 3);
+        assert_eq!(plan_entries.len(), 4);
         assert_eq!(plan_entries[0].status, PlanEntryStatus::Completed);
         assert_eq!(plan_entries[1].status, PlanEntryStatus::InProgress);
         assert_eq!(plan_entries[2].status, PlanEntryStatus::Pending);
+        assert_eq!(plan_entries[3].status, PlanEntryStatus::Completed);
+    }
+
+    #[test]
+    fn plan_snapshot_json_maps_work_plan_items() {
+        use crate::acp_worker::PlanEntryState;
+
+        let snapshot = serde_json::json!({
+            "mode": "executing",
+            "completed": 1,
+            "total": 4,
+            "items": [
+                { "description": "Inspect", "status": "done" },
+                { "description": "Patch", "status": "active" },
+                { "description": "Validate", "status": "todo" },
+                { "description": "Deferred", "status": "skipped" }
+            ]
+        });
+
+        let entries = plan_entries_from_snapshot_json(&snapshot);
+
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[0].content, "Inspect");
+        assert_eq!(entries[0].status, PlanEntryState::Completed);
+        assert_eq!(entries[1].status, PlanEntryState::InProgress);
+        assert_eq!(entries[2].status, PlanEntryState::Pending);
+        assert_eq!(entries[3].status, PlanEntryState::Failed);
+    }
+
+    #[test]
+    fn plan_snapshot_json_empty_items_clears_state() {
+        let snapshot = serde_json::json!({
+            "mode": "off",
+            "completed": 0,
+            "total": 0,
+            "items": []
+        });
+
+        let entries = plan_entries_from_snapshot_json(&snapshot);
+
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn acp_status_compresses_plan_set_receipt() {
+        let raw = "Plan set
+Plan mode: planning
+Planning gate active: keep work to read/search/design until /plan approve.
+Progress: 0/4
+
+1. ◐ Inventory docs";
+
+        assert_eq!(
+            acp_status_message_text(raw).as_deref(),
+            Some("Planning mode — edits blocked until approval.")
+        );
+    }
+
+    #[test]
+    fn acp_status_compresses_plan_approval_and_progress() {
+        assert_eq!(
+            acp_status_message_text(
+                "Plan approved
+Plan mode: approved
+Progress: 0/2"
+            )
+            .as_deref(),
+            Some("Plan approved — execution may proceed.")
+        );
+        assert_eq!(
+            acp_status_message_text(
+                "Plan progress
+Plan mode: executing
+Progress: 1/2"
+            )
+            .as_deref(),
+            Some("Plan executing.")
+        );
+    }
+
+    #[test]
+    fn acp_status_preserves_non_plan_messages_plainly() {
+        assert_eq!(
+            acp_status_message_text("  Request aborted  ").as_deref(),
+            Some("Request aborted")
+        );
+        assert_eq!(acp_status_message_text("   "), None);
     }
 
     #[test]
@@ -2386,9 +2681,7 @@ mod tests {
                 status: PlanEntryState::Pending,
             },
         ];
-        if entries.len() > 1 {
-            plan_state = entries.clone();
-        }
+        merge_plan_entries(&mut plan_state, entries);
         assert_eq!(plan_state.len(), 3);
 
         // Single entry update merges
@@ -2396,11 +2689,7 @@ mod tests {
             content: "B".into(),
             status: PlanEntryState::Completed,
         }];
-        for u in &update {
-            if let Some(existing) = plan_state.iter_mut().find(|e| e.content == u.content) {
-                existing.status = u.status;
-            }
-        }
+        merge_plan_entries(&mut plan_state, update);
         assert_eq!(plan_state[0].status, PlanEntryState::Pending);
         assert_eq!(plan_state[1].status, PlanEntryState::Completed);
         assert_eq!(plan_state[2].status, PlanEntryState::Pending);
@@ -2417,9 +2706,7 @@ mod tests {
             content: "Solo".into(),
             status: PlanEntryState::Pending,
         }];
-        if entries.len() > 1 || plan_state.is_empty() {
-            plan_state = entries.clone();
-        }
+        merge_plan_entries(&mut plan_state, entries);
         assert_eq!(plan_state.len(), 1);
         assert_eq!(plan_state[0].content, "Solo");
     }
@@ -2450,9 +2737,7 @@ mod tests {
                 status: PlanEntryState::Pending,
             },
         ];
-        if new_entries.len() > 1 {
-            plan_state = new_entries.clone();
-        }
+        merge_plan_entries(&mut plan_state, new_entries);
         assert_eq!(plan_state.len(), 2);
         assert_eq!(plan_state[0].content, "New X");
     }

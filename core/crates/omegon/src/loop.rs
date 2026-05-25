@@ -7,7 +7,9 @@
 use crate::bridge::{LlmBridge, LlmEvent, LlmMessage, StreamOptions};
 
 use crate::context::ContextManager;
-use crate::conversation::{AssistantMessage, ConversationState, ToolCall, ToolResultEntry};
+use crate::conversation::{
+    AssistantMessage, ConversationState, IntentDocument, ToolCall, ToolResultEntry,
+};
 use crate::ollama::{OllamaManager, WarmupResult};
 use crate::upstream_errors::{
     TransientFailureKind, UpstreamFailureLogEntry, append_upstream_failure_log,
@@ -22,7 +24,7 @@ use futures_util::stream::{self, StreamExt};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
@@ -403,18 +405,21 @@ pub async fn run(
             );
             if warning.consecutive >= 3 {
                 tracing::warn!(
-                    "Stuck detector escalation — force-breaking agent loop after {} consecutive warnings",
+                    "Stuck detector escalation — injecting recovery guidance after {} consecutive warnings",
                     warning.consecutive
                 );
                 conversation.push_user(
                     "[System: STUCK LOOP DETECTED. You have been repeating the same \
-                     actions for multiple turns despite warnings. Stop using tools. \
-                     Summarize what you know so far and respond to the user.]"
+                     actions for multiple turns despite warnings. Do not repeat the \
+                     same failing tool call. If a concrete next action is available, \
+                     take it now with a different tool or corrected arguments. If no \
+                     concrete action is possible, state the blocker plainly and stop.]"
                         .to_string(),
                 );
-                break;
+                stuck_detector.reset_after_escalation();
+            } else {
+                conversation.push_user(format!("[System: {}]", warning.message));
             }
-            conversation.push_user(format!("[System: {}]", warning.message));
         }
 
         // If context is getting large, try LLM-driven compaction.
@@ -670,6 +675,17 @@ pub async fn run(
         // Real provider token counts for this turn (0 if provider didn't report them)
         let (act_in, act_out, act_cr, act_cc) = assistant_msg.provider_tokens;
         let provider_telemetry = assistant_msg.provider_telemetry.clone();
+        let active_provider = crate::providers::infer_provider_id(&active_model).to_string();
+        if let Some(reason) = provider_stop_reason(&assistant_msg.raw)
+            && let Some(message) = provider_stop_notice(&active_provider, reason)
+        {
+            tracing::warn!(
+                provider = active_provider.as_str(),
+                stop_reason = reason,
+                "provider ended response abnormally"
+            );
+            let _ = events.send(AgentEvent::SystemNotification { message });
+        }
 
         let captured =
             crate::lifecycle::capture::parse_ambient_blocks(assistant_msg.text_content());
@@ -808,6 +824,35 @@ pub async fn run(
                     ));
                     continue;
                 }
+            }
+
+            if turn < config.max_turns
+                && dead_mouse_nudges < 3
+                && should_continue_text_only_turn(
+                    config
+                        .settings
+                        .as_ref()
+                        .and_then(|s| s.lock().ok().map(|s| s.automation_level))
+                        .unwrap_or_default(),
+                    conversation.last_user_prompt(),
+                    &assistant_msg.text,
+                    conversation.intent.stats.tool_calls > 0,
+                )
+            {
+                dead_mouse_nudges += 1;
+                tracing::info!(
+                    nudge = dead_mouse_nudges,
+                    "Text-only turn ended before action — auto-continuing"
+                );
+                conversation.push_user(
+                    "[System: The operator already asked you to proceed. Do not ask for \
+                     confirmation or describe work you will do next. Take the next concrete \
+                     action now with the available tools, or give a final answer only if the \
+                     requested work is actually complete.]"
+                        .to_string(),
+                );
+                dead_mouse_nudge_injected = true;
+                continue;
             }
 
             // Model responded with text-only (no tool calls) but hasn't
@@ -1031,9 +1076,20 @@ pub async fn run(
         for result in &results {
             conversation.push_tool_result(result.clone());
         }
+        let plan_snapshot_before = conversation.intent.work_plan_snapshot_json();
         conversation
             .intent
             .update_from_tools(dispatch_calls, &results);
+        let plan_snapshot_after = conversation.intent.work_plan_snapshot_json();
+
+        if let Some(message) = plan_status_notification(dispatch_calls, &conversation.intent) {
+            let _ = events.send(AgentEvent::SystemNotification { message });
+        }
+        if work_plan_snapshot_changed(&plan_snapshot_before, &plan_snapshot_after) {
+            let _ = events.send(AgentEvent::PlanUpdated {
+                snapshot_json: plan_snapshot_after,
+            });
+        }
 
         let dominant_phase = classify_turn_phase(&tool_catalog, dispatch_calls, &results);
         let drift_kind =
@@ -1387,6 +1443,39 @@ pub async fn run(
     Ok(())
 }
 
+fn plan_status_notification(calls: &[ToolCall], intent: &IntentDocument) -> Option<String> {
+    let plan_call = calls
+        .iter()
+        .rev()
+        .find(|call| call.name == crate::tool_registry::core::PLAN)?;
+    let action = plan_call
+        .arguments
+        .get("action")
+        .and_then(|value| value.as_str())
+        .unwrap_or("status");
+    let heading = if intent.work_plan.is_empty()
+        && matches!(action, "advance" | "complete" | "skip" | "clear")
+    {
+        "Plan cleared"
+    } else {
+        match action {
+            "set" => "Plan set",
+            "advance" | "complete" => "Plan progress",
+            "skip" => "Plan item skipped",
+            "approve" => "Plan approved",
+            "execute" => "Plan executing",
+            "clear" => "Plan cleared",
+            "status" => "Plan status",
+            _ => "Plan updated",
+        }
+    };
+    Some(format!("{heading}\n{}", intent.render_work_plan()))
+}
+
+fn work_plan_snapshot_changed(before: &serde_json::Value, after: &serde_json::Value) -> bool {
+    before != after
+}
+
 /// Request an LLM-driven compaction summary for old conversation messages.
 ///
 /// The payload is truncated to ~100k chars (~25k tokens) to ensure the
@@ -1692,6 +1781,43 @@ pub(crate) fn is_upstream_exhausted(err: &anyhow::Error) -> bool {
     err.to_string()
         .to_lowercase()
         .contains("upstream exhausted:")
+}
+
+fn provider_stop_reason(raw: &serde_json::Value) -> Option<&str> {
+    raw.get("provider_stop_reason")
+        .and_then(|reason| reason.as_str())
+        .filter(|reason| !reason.trim().is_empty())
+}
+
+fn is_abnormal_provider_stop(provider: &str, reason: &str) -> bool {
+    match provider {
+        "openai" | "openrouter" | "openai-compatible" => {
+            !matches!(reason, "stop" | "tool_calls" | "function_call")
+        }
+        "anthropic" => !matches!(reason, "end_turn" | "tool_use" | "stop_sequence"),
+        _ => matches!(
+            reason,
+            "length" | "max_tokens" | "content_filter" | "safety" | "incomplete"
+        ),
+    }
+}
+
+fn provider_stop_notice(provider: &str, reason: &str) -> Option<String> {
+    if !is_abnormal_provider_stop(provider, reason) {
+        return None;
+    }
+    let hint = match reason {
+        "length" | "max_tokens" => {
+            "The provider stopped because the output limit was reached; the visible answer may be incomplete."
+        }
+        "content_filter" | "safety" => {
+            "The provider stopped because safety/content filtering intervened; the visible answer may be incomplete."
+        }
+        _ => "The provider ended the response abnormally; the visible answer may be incomplete.",
+    };
+    Some(format!(
+        "Provider stop: {provider}/{reason}\n{hint}\nUse a continuation prompt or retry with a larger output budget if needed."
+    ))
 }
 
 /// Consume LlmEvents from the bridge, build an AssistantMessage.
@@ -2311,6 +2437,143 @@ async fn execute_tool_invocation(
     let (result, is_error) = match first_result {
         Ok(result) => (result, false),
         Err(e)
+            if e.downcast_ref::<crate::tools::OperatorWaitRequired>()
+                .is_some() =>
+        {
+            let wait = e
+                .downcast::<crate::tools::OperatorWaitRequired>()
+                .expect("checked OperatorWaitRequired downcast");
+
+            if host_context.is_some() {
+                (
+                    omegon_traits::ToolResult {
+                        content: vec![ContentBlock::Text {
+                            text: "Manual action required, but interactive operator confirmation is only available in the TUI right now.".into(),
+                        }],
+                        details: serde_json::json!({
+                            "is_error": true,
+                            "status": "unsupported_surface",
+                            "reason": "operator_wait_requires_tui",
+                            "prompt": wait.prompt,
+                            "timeoutSecs": wait.timeout_secs,
+                        }),
+                    },
+                    true,
+                )
+            } else {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let respond = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+                let (ack_tx, ack_rx) = std::sync::mpsc::channel();
+                let acknowledge = std::sync::Arc::new(std::sync::Mutex::new(Some(ack_tx)));
+                let _ = events.send(AgentEvent::OperatorWaitRequest {
+                    prompt: wait.prompt.clone(),
+                    timeout_secs: wait.timeout_secs,
+                    acknowledge,
+                    respond,
+                });
+
+                let acknowledged = tokio::task::spawn_blocking(move || {
+                    ack_rx.recv_timeout(Duration::from_secs(2)).is_ok()
+                })
+                .await
+                .unwrap_or(false);
+                if !acknowledged {
+                    return (
+                        omegon_traits::ToolResult {
+                            content: vec![ContentBlock::Text {
+                                text: "Manual action required, but no interactive operator surface acknowledged the wait request.".into(),
+                            }],
+                            details: serde_json::json!({
+                                "is_error": true,
+                                "status": "unsupported_surface",
+                                "reason": "operator_wait_not_acknowledged",
+                                "prompt": wait.prompt,
+                                "timeoutSecs": wait.timeout_secs,
+                            }),
+                        },
+                        true,
+                    );
+                }
+
+                let start = Instant::now();
+                let mut initial = omegon_traits::PartialToolResult::content(
+                    format!(
+                        "Manual action required:\n{}\n\nWaiting for operator confirmation. Timeout: {} seconds.",
+                        wait.prompt, wait.timeout_secs
+                    ),
+                    0,
+                );
+                initial.progress.phase = Some("waiting_for_operator".into());
+                initial.details = serde_json::json!({
+                    "status": "waiting",
+                    "prompt": wait.prompt,
+                    "timeoutSecs": wait.timeout_secs,
+                });
+                sink.send(initial);
+
+                let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
+                tokio::task::spawn_blocking(move || {
+                    let _ = notify_tx.send(rx.recv());
+                });
+
+                let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
+                heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                let timeout = tokio::time::sleep(Duration::from_secs(wait.timeout_secs));
+                tokio::pin!(timeout);
+
+                let status = loop {
+                    tokio::select! {
+                        _ = cancel.cancelled() => {
+                            break "cancelled";
+                        }
+                        _ = &mut timeout => {
+                            break "timed_out";
+                        }
+                        response = notify_rx.recv() => {
+                            match response {
+                                Some(Ok(omegon_traits::OperatorWaitResponse::Completed)) => break "completed",
+                                Some(Ok(omegon_traits::OperatorWaitResponse::Cancelled)) => break "cancelled",
+                                _ => break "cancelled",
+                            }
+                        }
+                        _ = heartbeat.tick() => {
+                            let mut partial = omegon_traits::PartialToolResult::heartbeat(
+                                start.elapsed().as_millis() as u64,
+                            );
+                            partial.progress.phase = Some("waiting_for_operator".into());
+                            partial.details = serde_json::json!({
+                                "status": "waiting",
+                                "elapsedSecs": start.elapsed().as_secs(),
+                                "timeoutSecs": wait.timeout_secs,
+                            });
+                            sink.send(partial);
+                        }
+                    }
+                };
+
+                let elapsed_secs = start.elapsed().as_secs();
+                let is_error = status != "completed";
+                let text = match status {
+                    "completed" => format!("Manual action completed after {elapsed_secs}s."),
+                    "timed_out" => format!(
+                        "Manual action timed out after {elapsed_secs}s without operator confirmation."
+                    ),
+                    _ => format!("Manual action cancelled after {elapsed_secs}s."),
+                };
+                (
+                    omegon_traits::ToolResult {
+                        content: vec![ContentBlock::Text { text }],
+                        details: serde_json::json!({
+                            "status": status,
+                            "elapsedSecs": elapsed_secs,
+                            "timeoutSecs": wait.timeout_secs,
+                        }),
+                    },
+                    is_error,
+                )
+            }
+        }
+        Err(e)
             if e.downcast_ref::<crate::tools::PathPermissionError>()
                 .is_some() =>
         {
@@ -2369,7 +2632,10 @@ async fn execute_tool_invocation(
                         path: perm_err.requested_path.clone(),
                         decision: "allow".into(),
                     });
-                    let trust_args = serde_json::json!({ "path": perm_err.directory });
+                    let trust_args = serde_json::json!({
+                        "path": perm_err.directory,
+                        "scope": "session",
+                    });
                     if let Err(e) = bus
                         .execute_internal(
                             crate::tool_registry::core::TRUST_DIRECTORY,
@@ -2401,7 +2667,10 @@ async fn execute_tool_invocation(
                         path: perm_err.requested_path.clone(),
                         decision: "always_allow".into(),
                     });
-                    let trust_args = serde_json::json!({ "path": perm_err.directory });
+                    let trust_args = serde_json::json!({
+                        "path": perm_err.directory,
+                        "scope": "persistent",
+                    });
                     if let Err(e) = bus
                         .execute_internal(
                             crate::tool_registry::core::TRUST_DIRECTORY,
@@ -2439,7 +2708,7 @@ async fn execute_tool_invocation(
                                 text: format!(
                                     "BLOCKED: '{}' is outside the workspace. \
                                      This operation was denied by the permission system. \
-                                     The operator must run /trust add {} to allow \
+                                     The operator can run /permissions add {} to allow \
                                      access to this directory, then re-run the task.",
                                     perm_err.requested_path, perm_err.directory,
                                 ),
@@ -2656,6 +2925,204 @@ fn counts_as_real_work_for_dead_mouse(call: &ToolCall) -> bool {
                 .unwrap_or(false))
 }
 
+fn should_continue_text_only_turn(
+    automation_level: crate::settings::AutomationLevel,
+    user_prompt: &str,
+    assistant_text: &str,
+    prior_tool_activity: bool,
+) -> bool {
+    if matches!(automation_level, crate::settings::AutomationLevel::Ask) {
+        return false;
+    }
+    let assistant = assistant_text.trim();
+    if assistant.is_empty() {
+        return false;
+    }
+    if looks_like_blocked_response(assistant) || looks_like_completion(assistant) {
+        return false;
+    }
+    if looks_like_incomplete_structured_answer(assistant) {
+        return matches!(
+            automation_level,
+            crate::settings::AutomationLevel::Flow | crate::settings::AutomationLevel::Autonomous
+        ) || user_prompt_is_continue_or_proceed(user_prompt);
+    }
+    if looks_like_continuation_request(assistant) {
+        return true;
+    }
+    if matches!(automation_level, crate::settings::AutomationLevel::Guarded) {
+        return user_prompt_is_continue_or_proceed(user_prompt)
+            && looks_like_plan_or_future_action(assistant);
+    }
+    if user_prompt_is_continue_or_proceed(user_prompt) {
+        return looks_like_plan_or_future_action(assistant) || !prior_tool_activity;
+    }
+    user_prompt_expects_concrete_action(user_prompt) && looks_like_plan_or_future_action(assistant)
+}
+
+fn looks_like_incomplete_structured_answer(text: &str) -> bool {
+    let trimmed = text.trim();
+    let fence_count = trimmed
+        .lines()
+        .filter(|line| line.trim_start().starts_with("```"))
+        .count();
+    if fence_count % 2 == 1 {
+        return true;
+    }
+    if trimmed.len() < 120 {
+        return false;
+    }
+
+    let nonempty = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let Some(last) = nonempty.last().copied() else {
+        return false;
+    };
+    let lower = trimmed.to_ascii_lowercase();
+    let last_lower = last.to_ascii_lowercase();
+    let last_is_list_item = last_lower.starts_with("- ")
+        || last_lower.starts_with("* ")
+        || last_lower
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_digit())
+            && last_lower.contains(". ");
+    let last_has_terminal_punctuation = last.ends_with('.')
+        || last.ends_with('!')
+        || last.ends_with('?')
+        || last.ends_with(')')
+        || last.ends_with(']')
+        || last.ends_with('`');
+
+    last_is_list_item
+        && !last_has_terminal_punctuation
+        && (lower.contains("phase 1") || lower.contains("roadmap") || lower.contains("plan"))
+        && !lower.contains("phase 2")
+}
+
+fn looks_like_continuation_request(text: &str) -> bool {
+    let tail = text
+        .chars()
+        .rev()
+        .take(300)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>()
+        .to_ascii_lowercase();
+    tail.contains("shall i")
+        || tail.contains("should i")
+        || tail.contains("would you like")
+        || tail.contains("do you want me to")
+        || tail.contains("ready to proceed")
+        || tail.contains("want me to proceed")
+        || tail.contains("want me to continue")
+        || tail.contains("let me know if you want me to")
+        || tail.contains("let me know and i")
+        || tail.ends_with('?')
+            && (tail.contains("proceed")
+                || tail.contains("continue")
+                || tail.contains("implement")
+                || tail.contains("make the change")
+                || tail.contains("go ahead"))
+}
+
+fn user_prompt_is_continue_or_proceed(text: &str) -> bool {
+    let lower = text.trim().to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "continue" | "proceed" | "go ahead" | "do it" | "make it so"
+    ) || lower.contains("get it done")
+        || lower.contains("do it already")
+        || lower.contains("stop talking")
+        || lower.contains("make it so")
+        || lower.contains("go ahead")
+        || lower.contains("continue on")
+}
+
+fn user_prompt_expects_concrete_action(text: &str) -> bool {
+    let lower = text.trim().to_ascii_lowercase();
+    let trimmed = lower.trim_start();
+    let action_prefixes = [
+        "fix ",
+        "get ",
+        "implement ",
+        "make ",
+        "build ",
+        "wire ",
+        "add ",
+        "update ",
+        "remove ",
+        "delete ",
+        "clean ",
+        "cleanup ",
+        "install ",
+        "link ",
+        "commit ",
+        "push ",
+        "publish ",
+        "cut ",
+        "release ",
+        "run ",
+        "test ",
+        "validate ",
+        "proceed",
+        "continue",
+    ];
+    action_prefixes
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+        || lower.contains("make it so")
+        || lower.contains("get it done")
+        || lower.contains("go fix")
+        || lower.contains("go clean")
+        || lower.contains("go ahead")
+}
+
+fn looks_like_plan_or_future_action(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let planning_markers = [
+        "i'll ",
+        "i will ",
+        "i’m going to ",
+        "i'm going to ",
+        "i can ",
+        "i would ",
+        "i should ",
+        "next i",
+        "the next step",
+        "my plan",
+        "plan:",
+        "approach:",
+        "i’ll start",
+        "i'll start",
+        "i’ll inspect",
+        "i'll inspect",
+        "i’ll update",
+        "i'll update",
+        "i’ll implement",
+        "i'll implement",
+        "i’ll make",
+        "i'll make",
+    ];
+    planning_markers.iter().any(|marker| lower.contains(marker))
+}
+
+fn looks_like_blocked_response(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("blocked")
+        || lower.contains("i need clarification")
+        || lower.contains("need clarification")
+        || lower.contains("i need you to")
+        || lower.contains("cannot proceed")
+        || lower.contains("can't proceed")
+        || lower.contains("unable to proceed")
+        || lower.contains("permission")
+}
+
 /// Returns true if an assistant text response contains language that suggests
 /// the agent is wrapping up a task rather than pausing mid-work.
 ///
@@ -2762,6 +3229,12 @@ impl StuckDetector {
             window: 10,
             consecutive_warnings: 0,
         }
+    }
+
+    fn reset_after_escalation(&mut self) {
+        self.recent.clear();
+        self.recent_file_accesses.clear();
+        self.consecutive_warnings = 0;
     }
 
     /// Record a tool call for pattern analysis.
@@ -2959,6 +3432,35 @@ pub fn summarize_tool_args(tool_name: &str, args: &Value) -> Option<String> {
                 clean.to_string()
             };
             Some(short)
+        }
+        "terminal" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("status");
+            match action {
+                "start" => args
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .map(|cmd| format!("start: {}", crate::util::truncate(cmd, 60))),
+                "send" => args
+                    .get("session_id")
+                    .or_else(|| args.get("name"))
+                    .and_then(|v| v.as_str())
+                    .map(|id| format!("send: {id}")),
+                "read" => args
+                    .get("session_id")
+                    .or_else(|| args.get("name"))
+                    .and_then(|v| v.as_str())
+                    .map(|id| format!("read: {id}")),
+                "stop" => args
+                    .get("session_id")
+                    .or_else(|| args.get("name"))
+                    .and_then(|v| v.as_str())
+                    .map(|id| format!("stop: {id}")),
+                "list" => Some("list".into()),
+                other => Some(other.to_string()),
+            }
         }
         "change" => {
             let edits = args.get("edits").and_then(|v| v.as_array())?;
@@ -3443,6 +3945,85 @@ mod tests {
         assert_eq!(result.as_deref(), Some("implement OAuth flow"));
     }
 
+    #[test]
+    fn plan_tool_update_renders_operator_checklist_snapshot() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Inspect plan rendering".into(), "Patch TUI".into()]);
+        intent.execute_work_plan();
+        intent.advance_work_plan();
+        let calls = vec![ToolCall {
+            id: "plan-1".into(),
+            name: crate::tool_registry::core::PLAN.into(),
+            arguments: serde_json::json!({"action": "advance"}),
+        }];
+
+        let notification = plan_status_notification(&calls, &intent).unwrap();
+
+        assert!(notification.starts_with("Plan progress"));
+        assert!(notification.contains("Progress: 1/2"));
+        assert!(notification.contains("● Inspect plan rendering"));
+        assert!(notification.contains("◐ Patch TUI"));
+    }
+
+    #[test]
+    fn completing_plan_tool_preserves_operator_checklist_snapshot() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Only item".into()]);
+        intent.advance_work_plan();
+        let calls = vec![ToolCall {
+            id: "plan-1".into(),
+            name: crate::tool_registry::core::PLAN.into(),
+            arguments: serde_json::json!({"action": "advance"}),
+        }];
+
+        let notification = plan_status_notification(&calls, &intent).unwrap();
+
+        assert!(notification.starts_with("Plan progress"));
+        assert!(notification.contains("Plan mode: complete"));
+        assert!(notification.contains("Progress: 1/1"));
+        assert!(notification.contains("● Only item"));
+        assert_eq!(intent.work_plan_snapshot_json()["total"], 1);
+        assert_eq!(intent.work_plan_snapshot_json()["mode"], "complete");
+    }
+
+    #[test]
+    fn non_plan_tool_does_not_emit_plan_snapshot() {
+        let calls = vec![ToolCall {
+            id: "read-1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "src/main.rs"}),
+        }];
+
+        assert!(plan_status_notification(&calls, &IntentDocument::default()).is_none());
+    }
+
+    #[test]
+    fn work_plan_snapshot_changes_only_for_plan_state_mutations() {
+        let mut intent = IntentDocument::default();
+        intent.set_work_plan(vec!["Inspect".into(), "Patch".into()]);
+        intent.execute_work_plan();
+        let before = intent.work_plan_snapshot_json();
+
+        let read_calls = vec![ToolCall {
+            id: "read-1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "src/main.rs"}),
+        }];
+        intent.update_from_tools(&read_calls, &[]);
+        let after_read = intent.work_plan_snapshot_json();
+        assert!(!work_plan_snapshot_changed(&before, &after_read));
+
+        let plan_calls = vec![ToolCall {
+            id: "plan-1".into(),
+            name: crate::tool_registry::core::PLAN.into(),
+            arguments: serde_json::json!({"action": "advance"}),
+        }];
+        intent.update_from_tools(&plan_calls, &[]);
+        let after_plan = intent.work_plan_snapshot_json();
+        assert!(work_plan_snapshot_changed(&after_read, &after_plan));
+        assert_eq!(after_plan["completed"], 1);
+    }
+
     #[tokio::test]
     async fn auto_batch_rollback_on_second_edit_failure() {
         use omegon_traits::ToolResult;
@@ -3906,6 +4487,113 @@ mod tests {
         ));
         assert!(!looks_like_completion("I'll write the fix next."));
         assert!(!looks_like_completion("short")); // too short
+    }
+
+    #[test]
+    fn text_only_continuation_requests_force_another_turn() {
+        assert!(should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Guarded,
+            "fix the release flow",
+            "I can make that change. Should I proceed?",
+            false
+        ));
+        assert!(should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
+            "continue",
+            "I'll inspect the relevant files and then make the change.",
+            true
+        ));
+    }
+
+    #[test]
+    fn incomplete_structured_answers_continue_in_flow_mode() {
+        let reply = r#"What Flynt should not copy directly
+
+Recommended Flynt roadmap from Zotero research
+
+Phase 1 - Source note foundation
+
+Low cost, high leverage.
+
+- Define kind = "source" frontmatter schema.
+- Add source-specific note rendering.
+- Add source lens/query presets:
+  - all sources
+  - unread
+  - annotated"#;
+
+        assert!(looks_like_incomplete_structured_answer(reply));
+        assert!(should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
+            "perform research and give me the roadmap",
+            reply,
+            true
+        ));
+    }
+
+    #[test]
+    fn complete_structured_answers_do_not_continue() {
+        let reply = r#"Recommended roadmap
+
+Phase 1 - Source note foundation
+
+- all sources
+- unread
+- annotated
+
+This is the right first slice."#;
+
+        assert!(!looks_like_incomplete_structured_answer(reply));
+        assert!(!should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
+            "perform research and give me the roadmap",
+            reply,
+            true
+        ));
+    }
+
+    #[test]
+    fn open_code_fence_answers_continue_in_flow_mode() {
+        let reply = "Here is the config:\n\n```json\n{\"phase\": 1}";
+        assert!(looks_like_incomplete_structured_answer(reply));
+        assert!(should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
+            "show the json",
+            reply,
+            true
+        ));
+    }
+
+    #[test]
+    fn text_only_final_answers_and_blockers_do_not_force_continue() {
+        assert!(!should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
+            "describe the API surface",
+            "The API surface should be a single facade over profiles, tools, and tasking.",
+            false
+        ));
+        assert!(!should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
+            "fix the release flow",
+            "I am blocked because the repository has conflicting local edits that overlap this file.",
+            true
+        ));
+        assert!(!should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Flow,
+            "fix the release flow",
+            "All done. The release flow has been updated and tested.",
+            true
+        ));
+    }
+
+    #[test]
+    fn text_only_automation_ask_disables_auto_continue() {
+        assert!(!should_continue_text_only_turn(
+            crate::settings::AutomationLevel::Ask,
+            "fix the release flow",
+            "I can make that change. Should I proceed?",
+            false
+        ));
     }
 
     #[test]
@@ -5391,6 +6079,30 @@ mod tests {
     }
 
     #[test]
+    fn stuck_detector_escalation_reset_allows_recovery_turn() {
+        let mut detector = StuckDetector::new();
+        for i in 0..10 {
+            detector.record(
+                &test_tool_catalog(),
+                &ToolCall {
+                    id: format!("{i}"),
+                    name: "bash".into(),
+                    arguments: serde_json::json!({"command": "false"}),
+                },
+                true,
+            );
+        }
+
+        assert!(detector.check(&test_tool_catalog()).is_some());
+        detector.reset_after_escalation();
+
+        assert!(
+            detector.check(&test_tool_catalog()).is_none(),
+            "recovery guidance must reach the model instead of immediately re-triggering"
+        );
+    }
+
+    #[test]
     fn exhaustion_advice_distinguishes_provider_outage_from_rate_limit() {
         assert!(
             exhaustion_advice(Some(TransientFailureKind::Upstream5xx), false, false)
@@ -5416,5 +6128,18 @@ mod tests {
             exhaustion_advice(Some(TransientFailureKind::StalledStream), false, true)
                 .contains("stream is unresponsive")
         );
+    }
+
+    #[test]
+    fn provider_stop_notice_only_surfaces_abnormal_stops() {
+        assert!(provider_stop_notice("openai", "stop").is_none());
+        assert!(provider_stop_notice("openai", "tool_calls").is_none());
+        let notice = provider_stop_notice("openai", "length").expect("length should warn");
+        assert!(notice.contains("output limit"), "{notice}");
+
+        assert!(provider_stop_notice("anthropic", "end_turn").is_none());
+        let notice =
+            provider_stop_notice("anthropic", "max_tokens").expect("max_tokens should warn");
+        assert!(notice.contains("output limit"), "{notice}");
     }
 }

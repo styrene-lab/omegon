@@ -142,6 +142,20 @@ impl HostProxy {
             }
         }
     }
+
+    /// Execute a HostAction through the host.
+    ///
+    /// This emits JSON-RPC method `actions/execute` with params
+    /// `{ "action": <HostAction> }` and expects a full `HostActionOutcome`.
+    pub async fn execute_action(
+        &self,
+        action: crate::HostAction,
+    ) -> crate::Result<crate::HostActionOutcome> {
+        let value = self
+            .request("actions/execute", serde_json::json!({ "action": action }))
+            .await?;
+        serde_json::from_value(value).map_err(|err| crate::Error::invalid_params(err.to_string()))
+    }
 }
 
 // ─── v2 Message Router ───────────────────────────────────────────────────
@@ -558,6 +572,53 @@ mod tests {
         // Check the extension got the result.
         let result = handle.await.unwrap().unwrap();
         assert_eq!(result["role"], "assistant");
+    }
+
+    #[tokio::test]
+    async fn test_host_proxy_execute_action_request_response() {
+        let (tx, mut rx) = mpsc::channel(16);
+        let pending: Arc<Mutex<HashMap<String, oneshot::Sender<RpcResponse>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let proxy = HostProxy::new(tx, pending.clone());
+
+        let action = crate::HostAction::new(
+            "open-reader",
+            crate::actions::terminal::TERMINAL_CREATE_V1,
+            crate::actions::terminal::TerminalCreateParams::new("bookokrat"),
+        )
+        .unwrap();
+
+        let proxy_clone = proxy.clone();
+        let handle = tokio::spawn(async move { proxy_clone.execute_action(action).await });
+
+        let msg = rx.recv().await.unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        let id = parsed["id"].as_str().unwrap().to_string();
+        assert_eq!(parsed["method"], "actions/execute");
+        assert_eq!(parsed["params"]["action"]["id"], "open-reader");
+        assert_eq!(parsed["params"]["action"]["type"], "terminal.create@1");
+        assert_eq!(parsed["params"]["action"]["params"]["command"], "bookokrat");
+
+        let response = RpcResponse::success(
+            Some(Value::String(id.clone())),
+            serde_json::json!({
+                "action_id": "open-reader",
+                "status": "completed",
+                "result": {
+                    "terminal_id": "term_123",
+                    "backend": "zellij",
+                    "actual_placement": "background_session"
+                }
+            }),
+        );
+        if let Some(tx) = pending.lock().await.remove(&id) {
+            tx.send(response).unwrap();
+        }
+
+        let outcome = handle.await.unwrap().unwrap();
+        assert_eq!(outcome.action_id, "open-reader");
+        assert_eq!(outcome.status, crate::HostActionStatus::Completed);
+        assert_eq!(outcome.result.unwrap()["terminal_id"], "term_123");
     }
 
     // ─── Bounded read tests ──────────────────────────────────────────

@@ -18,6 +18,7 @@ pub(crate) mod output_filter;
 pub mod read;
 pub mod render;
 pub mod serve;
+pub mod terminal;
 pub mod validate;
 pub mod view;
 pub mod web_search;
@@ -60,6 +61,29 @@ impl std::fmt::Display for PathPermissionError {
 }
 
 impl std::error::Error for PathPermissionError {}
+
+pub const OPERATOR_WAIT_DEFAULT_SECS: u64 = 30 * 60;
+pub const OPERATOR_WAIT_MAX_SECS: u64 = 6 * 60 * 60;
+
+/// Error returned by `wait_for_operator`. The dispatch layer intercepts this
+/// typed error and owns the interactive wait/confirmation lifecycle.
+#[derive(Debug, Clone)]
+pub struct OperatorWaitRequired {
+    pub prompt: String,
+    pub timeout_secs: u64,
+}
+
+impl std::fmt::Display for OperatorWaitRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Manual action required: {} (timeout: {}s)",
+            self.prompt, self.timeout_secs
+        )
+    }
+}
+
+impl std::error::Error for OperatorWaitRequired {}
 
 // ── Workspace boundary ──────────────────────────────────────────────────
 
@@ -128,6 +152,10 @@ impl WorkspaceBoundary {
             return Ok(resolved);
         }
 
+        if is_allowed_special_path(&resolved) {
+            return Ok(resolved);
+        }
+
         // Canonicalize to resolve symlinks and `..` — but the file may not
         // exist yet (write/edit creating new files). In that case, canonicalize
         // the parent directory and append the filename.
@@ -174,6 +202,10 @@ impl WorkspaceBoundary {
     /// or a trusted directory. Does not return error details.
     pub fn is_inside_boundary(&self, path: &Path) -> bool {
         if self.bypass {
+            return true;
+        }
+
+        if is_allowed_special_path(path) {
             return true;
         }
 
@@ -241,6 +273,31 @@ impl WorkspaceBoundary {
     }
 }
 
+fn is_allowed_special_path(path: &Path) -> bool {
+    let Some(path) = path.to_str() else {
+        return false;
+    };
+
+    #[cfg(windows)]
+    if path.eq_ignore_ascii_case("NUL") {
+        return true;
+    }
+
+    matches!(
+        path,
+        "/dev/null"
+            | "/dev/stdin"
+            | "/dev/stdout"
+            | "/dev/stderr"
+            | "/dev/fd/0"
+            | "/dev/fd/1"
+            | "/dev/fd/2"
+            | "/proc/self/fd/0"
+            | "/proc/self/fd/1"
+            | "/proc/self/fd/2"
+    )
+}
+
 /// Expand `~` to the home directory in a path string.
 fn expand_tilde(path_str: &str) -> PathBuf {
     if let Some(rest) = path_str.strip_prefix("~/")
@@ -261,6 +318,7 @@ pub struct CoreTools {
     repo_model: Option<std::sync::Arc<omegon_git::RepoModel>>,
     /// Workspace boundary enforcer — shared with other tool providers.
     boundary: WorkspaceBoundary,
+    terminal_tool_enabled: bool,
 }
 
 impl CoreTools {
@@ -270,6 +328,7 @@ impl CoreTools {
             cwd,
             repo_model: None,
             boundary,
+            terminal_tool_enabled: true,
         }
     }
 
@@ -283,11 +342,13 @@ impl CoreTools {
             cwd,
             repo_model: Some(repo_model),
             boundary,
+            terminal_tool_enabled: true,
         }
     }
 
     /// Attach shared settings for trusted directory resolution.
     pub fn with_settings(mut self, settings: crate::settings::SharedSettings) -> Self {
+        self.terminal_tool_enabled = settings.lock().map(|s| s.terminal_tool).unwrap_or(true);
         self.boundary = self.boundary.with_settings(settings);
         self
     }
@@ -451,7 +512,9 @@ impl ToolProvider for CoreTools {
                 name: reg::VALIDATE.into(),
                 label: reg::VALIDATE.into(),
                 description: "Run narrow project validation for specific paths. Use this after edits \
-                    instead of shelling out through bash for standard typecheck/lint/test validation."
+                    instead of shelling out through bash for standard typecheck/lint/test validation. \
+                    If the result reports validation_skipped, do not retry validate for the same path set; \
+                    use the recommended project-specific command or a validator plugin instead."
                     .into(),
                 parameters: json!({
                     "type": "object",
@@ -568,6 +631,31 @@ impl ToolProvider for CoreTools {
                 capabilities: vec![omegon_traits::ToolCapability::Orientation],
             },
             ToolDefinition {
+                name: reg::WAIT_FOR_OPERATOR.into(),
+                label: reg::WAIT_FOR_OPERATOR.into(),
+                description: "Pause the agent while the operator performs a physical/manual \
+                    action, then resume when the operator confirms completion. Use this when \
+                    real-world work is required before the next agent step, such as adjusting \
+                    hardware, testing an instrument, moving a device, or observing a live \
+                    system. The wait is bounded by a safety timeout."
+                    .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Clear instruction for the operator describing the physical/manual action to perform"
+                        },
+                        "timeout": {
+                            "type": "number",
+                            "description": "Safety timeout in seconds. Defaults to 1800 and is capped at 21600."
+                        }
+                    },
+                    "required": ["prompt"]
+                }),
+                capabilities: vec![omegon_traits::ToolCapability::ProgressBoundary],
+            },
+            ToolDefinition {
                 name: reg::WHOAMI.into(),
                 label: reg::WHOAMI.into(),
                 description: "Check authentication status across development tools \
@@ -653,6 +741,58 @@ impl ToolProvider for CoreTools {
                         "lines": {
                             "type": "number",
                             "description": "Number of log lines to return (default: 50, for 'logs')"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+                capabilities: vec![omegon_traits::ToolCapability::StateChanging],
+            },
+            ToolDefinition {
+                name: reg::TERMINAL.into(),
+                label: reg::TERMINAL.into(),
+                description: "Manage interactive background terminal sessions. Use this for \
+                    long-running commands that need later input or monitoring. Sessions are \
+                    created through the same workspace permission checks as bash and are \
+                    cleaned up on session exit unless stopped sooner.\n\nActions:\n- start: \
+                    Launch an interactive terminal command (command required, name optional)\n- \
+                    send: Send stdin to a session\n- read: Read recent output/tail from a session\n- \
+                    stop: Stop a session\n- list: Show active sessions"
+                    .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["start", "send", "read", "stop", "list"],
+                            "description": "Action to perform"
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "Command to run (for 'start')"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Human-readable session name"
+                        },
+                        "session_id": {
+                            "type": "string",
+                            "description": "Terminal session id returned by start"
+                        },
+                        "input": {
+                            "type": "string",
+                            "description": "Text to send to stdin (for 'send')"
+                        },
+                        "newline": {
+                            "type": "boolean",
+                            "description": "Append a newline to input if missing (default: true)"
+                        },
+                        "max_bytes": {
+                            "type": "number",
+                            "description": "Maximum tail bytes to return (for 'read')"
+                        },
+                        "force": {
+                            "type": "boolean",
+                            "description": "Force kill instead of graceful terminate (for 'stop')"
                         }
                     },
                     "required": ["action"]
@@ -967,6 +1107,23 @@ impl ToolProvider for CoreTools {
                     details: Value::Null,
                 })
             }
+            reg::WAIT_FOR_OPERATOR => {
+                let prompt = args["prompt"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("missing 'prompt' argument"))?;
+                let timeout_secs = args["timeout"]
+                    .as_u64()
+                    .unwrap_or(OPERATOR_WAIT_DEFAULT_SECS)
+                    .clamp(1, OPERATOR_WAIT_MAX_SECS);
+
+                Err(OperatorWaitRequired {
+                    prompt: prompt.to_string(),
+                    timeout_secs,
+                }
+                .into())
+            }
             reg::WHOAMI => whoami::execute().await,
             reg::CHRONOS => {
                 let sub = args["subcommand"].as_str().unwrap_or("week");
@@ -987,24 +1144,64 @@ impl ToolProvider for CoreTools {
                     .ok_or_else(|| anyhow::anyhow!("missing 'action' argument"))?;
                 serve::execute(action, &args, &self.cwd).await
             }
+            reg::TERMINAL => {
+                if !self.terminal_tool_enabled {
+                    return Ok(ToolResult {
+                        content: vec![omegon_traits::ContentBlock::Text {
+                            text: "Terminal tool is disabled by the active profile.".into(),
+                        }],
+                        details: json!({
+                            "is_error": true,
+                            "blocked": true,
+                            "reason": "terminal_tool_disabled_by_profile",
+                        }),
+                    });
+                }
+                let action = args["action"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'action' argument"))?;
+                terminal::execute(action, &args, &self.cwd, Some(self.boundary.clone())).await
+            }
             reg::TRUST_DIRECTORY => {
                 let path_str = args["path"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'path' argument"))?;
+                let scope = args["scope"].as_str().unwrap_or("session");
                 let expanded = expand_tilde(path_str);
                 let canonical = expanded.canonicalize().unwrap_or(expanded.clone());
                 self.approve_directory(canonical.clone());
+                if matches!(scope, "persistent" | "always" | "project") {
+                    let canonical_str = canonical.display().to_string();
+                    if let Some(ref settings) = self.boundary.settings
+                        && let Ok(mut s) = settings.lock()
+                        && !s.trusted_directories.contains(&canonical_str)
+                    {
+                        s.trusted_directories.push(canonical_str.clone());
+                    }
+                    let mut profile = crate::settings::Profile::load(&self.cwd);
+                    profile.add_trusted_directory(canonical_str);
+                    profile.save(&self.cwd)?;
+                }
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: format!(
-                            "✓ Directory approved for this session: {}\n\
+                            "✓ Directory approved for {}: {}\n\
                              You can now read and write files in this directory.",
+                            if matches!(scope, "persistent" | "always" | "project") {
+                                "future sessions"
+                            } else {
+                                "this session"
+                            },
                             canonical.display()
                         ),
                     }],
                     details: serde_json::json!({
                         "path": canonical.display().to_string(),
-                        "scope": "session",
+                        "scope": if matches!(scope, "persistent" | "always" | "project") {
+                            "persistent"
+                        } else {
+                            "session"
+                        },
                     }),
                 })
             }
@@ -1106,6 +1303,55 @@ mod tests {
     }
 
     #[test]
+    fn standard_device_streams_are_allowed_by_boundary() {
+        let tools = CoreTools::new(PathBuf::from("/tmp/workspace"));
+        for path in [
+            "/dev/null",
+            "/dev/stdin",
+            "/dev/stdout",
+            "/dev/stderr",
+            "/dev/fd/0",
+            "/dev/fd/1",
+            "/dev/fd/2",
+            "/proc/self/fd/0",
+            "/proc/self/fd/1",
+            "/proc/self/fd/2",
+        ] {
+            let result = tools.resolve_path(path);
+            assert!(result.is_ok(), "{path} should be allowed: {result:?}");
+        }
+    }
+
+    #[test]
+    fn unsafe_device_paths_are_not_allowlisted() {
+        let tools = CoreTools::new(PathBuf::from("/tmp/workspace"));
+        for path in [
+            "/dev/zero",
+            "/dev/random",
+            "/dev/urandom",
+            "/dev/fd/3",
+            "/proc/self/fd/3",
+        ] {
+            let result = tools.resolve_path(path);
+            assert!(result.is_err(), "{path} should still require permission");
+        }
+    }
+
+    #[test]
+    fn native_cat_dev_null_is_not_blocked_by_boundary() {
+        let boundary = WorkspaceBoundary::new(PathBuf::from("/tmp/workspace"));
+        let result = native_cmd::try_dispatch(
+            "cat /dev/null",
+            Path::new("/tmp/workspace"),
+            Some(&boundary),
+        )
+        .expect("cat should dispatch natively");
+
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.is_empty());
+    }
+
+    #[test]
     fn tilde_expansion_resolves_home_directory() {
         let expanded = expand_tilde("~/Documents/test.md");
         assert!(!expanded.to_str().unwrap().contains('~'));
@@ -1182,6 +1428,98 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn trust_directory_persistent_scope_updates_profile_permissions() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("AGENTS.md"), "instructions").unwrap();
+        let trusted = tempfile::tempdir().unwrap();
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+        let tools = CoreTools::new(project.path().to_path_buf()).with_settings(settings.clone());
+
+        tools
+            .execute(
+                reg::TRUST_DIRECTORY,
+                "test",
+                serde_json::json!({
+                    "path": trusted.path().display().to_string(),
+                    "scope": "persistent",
+                }),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let trusted_dir = trusted.path().canonicalize().unwrap().display().to_string();
+        assert!(
+            settings
+                .lock()
+                .unwrap()
+                .trusted_directories
+                .contains(&trusted_dir)
+        );
+        let profile = crate::settings::Profile::load(project.path());
+        assert!(
+            profile
+                .effective_trusted_directories()
+                .contains(&trusted_dir)
+        );
+        assert!(profile.trusted_directories.is_empty());
+        assert_eq!(
+            profile.permissions.trusted_directories,
+            vec![trusted_dir.clone()]
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_for_operator_returns_typed_wait_request() {
+        let tools = CoreTools::new(PathBuf::from("/tmp/workspace"));
+        let err = tools
+            .execute(
+                reg::WAIT_FOR_OPERATOR,
+                "test",
+                serde_json::json!({
+                    "prompt": "Strike the snare once and confirm when the monitor captures it.",
+                    "timeout": OPERATOR_WAIT_MAX_SECS + 100,
+                }),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        let wait = err
+            .downcast_ref::<OperatorWaitRequired>()
+            .expect("wait_for_operator should return OperatorWaitRequired");
+        assert_eq!(
+            wait.prompt,
+            "Strike the snare once and confirm when the monitor captures it."
+        );
+        assert_eq!(wait.timeout_secs, OPERATOR_WAIT_MAX_SECS);
+    }
+
+    #[tokio::test]
+    async fn terminal_tool_profile_disable_blocks_direct_execution() {
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+        settings.lock().unwrap().terminal_tool = false;
+        let tools = CoreTools::new(PathBuf::from("/tmp/workspace")).with_settings(settings);
+        let result = tools
+            .execute(
+                reg::TERMINAL,
+                "terminal-disabled-test",
+                serde_json::json!({"action": "list"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.details.get("blocked").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            result.details.get("reason").and_then(|v| v.as_str()),
+            Some("terminal_tool_disabled_by_profile")
+        );
+    }
+
     #[test]
     fn lexical_normalize_resolves_dotdot() {
         let result = lexical_normalize(Path::new("/a/b/../c"));
@@ -1215,6 +1553,8 @@ mod tests {
         // Utility tools
         assert!(tool_names.contains("whoami"));
         assert!(tool_names.contains("chronos"));
+        assert!(tool_names.contains("terminal"));
+        assert!(tool_names.contains("wait_for_operator"));
 
         // view, web_search, local_inference tools are provided
         // by dedicated providers, NOT by CoreTools (to avoid duplicates).
@@ -1224,13 +1564,13 @@ mod tests {
         assert!(!tool_names.contains("list_local_models"));
         assert!(!tool_names.contains("manage_ollama"));
 
-        // 11 registered core tools. trust_directory is internal-only and not in
+        // 13 registered core tools. trust_directory is internal-only and not in
         // tool_defs; change is registered for harness batching but hidden from
         // the model-facing tool surface by EventBus filtering.
         assert_eq!(
             tool_names.len(),
-            11,
-            "Expected 11 registered core tools, got {}",
+            13,
+            "Expected 13 registered core tools, got {}",
             tool_names.len()
         );
     }

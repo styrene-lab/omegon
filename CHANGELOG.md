@@ -16,13 +16,204 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-05-25
+
 ### Added
 
-- **Native `/plan` session gate** — added a first-class TUI/remote slash surface over the existing session intent work plan with `set`, `approve`, `execute`, `advance`, `skip`, `clear`, and status rendering so high-level plan mode can reuse the current conversation state instead of creating a shadow planning store.
-- **Unified Armory install surface** — `/armory install`, `armory/install`, extension installs, and named skill installs now route through one Armory installer that materializes extensions, plugins, and skills into the runtime paths Omegon actually loads.
+- Added `omegon-extension` HostAction SDK types, host action capabilities, typed `ToolResult` actions, `HostProxy::execute_action()`, and `terminal.create@1` protocol structs for extension-side host side-effect declarations.
+- Added manifest policy parsing and host-side validation for declarative HostActions, including terminal create permission checks and structured policy outcomes.
+- Added native extension HostAction execution through the canonical executor registry, including the `terminal.create@1` backend adapter.
+- Preserve HostActions across MCP metadata using `_meta["omegon/hostActions"]` for native extension MCP exposure and MCP-origin tool results.
+- Added deny-by-default MCP HostAction metadata handling so MCP-origin actions are preserved, validated, surfaced as outcomes, and never auto-executed without a future explicit policy layer.
+- Added an extension `voice` capability flag as the first substrate for push-based local voice notification routing.
+- Route voice-capable extension `voice/transcription` notifications into operator-trusted daemon prompt events.
+- Added host-side voice MVP integration coverage proving fake voice extensions route through the existing daemon event ingress rather than a parallel prompt stream.
 
 ### Fixed
 
+- Keep dynamically registered native extension tools visible in the lazy model tool surface after turn 1 so installed extension tools such as `reader_doctor` and `reader_open` can be discovered during an active session.
+- Normalize native extension SDK `get_tools` schemas that use `inputSchema` into Omegon's internal tool definitions so installed extensions advertise their tools instead of silently registering zero tools.
+- Harden extension tool-result envelope parsing and HostAction policy outcomes.
+- Avoid blocking-runtime panics when native HostAction terminal execution starts a local terminal backend from an interactive turn runtime.
+- Preserve voice transcription `utterance_id` metadata when routing voice-capable extension notifications into daemon prompt events.
+- **Completed plans surface in Slim** — completed plan updates now leave the active pinned plan lane clear while keeping a `plan done · view` affordance visible so the last completed plan can be recalled.
+- **Completed plans remain recoverable** — completed work plans are now recorded as bounded session state, survive save/resume, and `/plan view` can show the last completed plan even after the active plan has been cleared.
+
+## [0.23.9] - 2026-05-25
+
+### Fixed
+
+- **Session persistence is atomic and versioned** — session snapshots and metadata now use locked atomic writes, snapshots are saved before listing metadata, and new snapshots include schema/version metadata for safer resume across upgrades.
+- **Interactive startup preserves model preferences** — launching the TUI no longer rewrites the selected/profile model to an automation-safe fallback such as Sonnet when the preferred provider is temporarily unavailable; unavailable providers now surface as disconnected instead of resetting the model.
+- **Operator-facing URLs render as explicit links** — base prompt behavior now instructs agents to format localhost/server/viewer URLs as Markdown links so validation endpoints are clickable in the TUI.
+
+## [0.23.8] - 2026-05-25
+
+### Added
+
+- **Lifecycle runtime state split plan** — documented the Option C design for separating tracked lifecycle baseline artifacts from ignored mutable runtime state so release branches stop picking up lifecycle session churn.
+
+### Fixed
+
+- **Focus mode opens at the live tail** — entering focus mode now selects the latest readable conversation segment instead of anchoring to an older visible tool card when viewport height caches lag behind streaming output.
+- **Completed Slim plans detach into history** — plan completion now clears the pinned plan lane and reattaches the conversation viewport so completed plans scroll with the transcript instead of leaving stale `view detached` / `more below` hints above the composer.
+
+## [0.23.7] - 2026-05-24
+
+### Fixed
+
+- **Terminal PTY tests tolerate CI scheduling latency** — terminal send/read, TTY detection, and name-reuse tests now use deadline-based polling so GitHub-hosted PTY startup and transcript writes do not fail on a one-second race.
+
+## [0.23.6] - 2026-05-24
+
+### Added
+
+- **Repo dirty-tree hygiene report** — `just dirty-report` now classifies working-tree changes into lifecycle state, source, release memory, tooling, and other buckets so runtime lifecycle churn and unrelated formatter drift are easier to split from scoped commits.
+
+### Fixed
+
+- **Slim tool expansion has a recent-card fallback** — Ctrl+O/Tab/a no longer depend solely on a fresh render-height cache; if the viewport cache is stale or no card intersects it, Slim falls back to the most recent tool cards so recent compressed calls can still be expanded on demand.
+- **Slim plan and tool pinning stay visually verifiable** — completed plan snapshots now remain in the pinned Slim plan lane until explicitly cleared, pinned tool cards render a visible `pinned` marker, and expanded Slim tool cards render their result details so Ctrl+O has an observable effect.
+- **Slim bottom UX starts separating live state from history** — the slim footer now avoids duplicate `plan: next` text when the pinned plan already shows the next item, running tools maintain a display-only active stream above the pinned plan without entering the conversation focus ring, permission prompts use a pinned decision lane with Shift+A required for persistent grants, and constrained layouts compact live tool/plan panels before crowding out the conversation.
+- **ACP plan status lint gate** — redundant plan-status formatting branch removed so the release Clippy gate passes without changing user-visible ACP status text.
+
+## [0.23.5] - 2026-05-23
+
+### Fixed
+
+- **OpenSpec archive crash recovery** — archive operations now write a repo-local transaction journal, recover interrupted moves before lifecycle doctor/archive runs, complete content-moved archives by marking lifecycle state archived, clean journals after successful rollback, and report ambiguous archive conflicts without deleting content.
+
+## [0.23.4] - 2026-05-23
+
+### Added
+
+- **Side-process substrate design docs** — documented extension-facing side-process pane APIs, backend capability negotiation, manifest policy, terminal compatibility matrices, and macOS/Linux backend posture for Zellij, Cockpit/par-term, Kitty, and fallback reader workflows.
+- **Managed reader workspace research** — captured reader workspace design nodes, Zellij/Cockpit/par-term spike plans, Bookokrat side-pane contracts, and par-term graphics prototype evidence for embedded reader-pane evaluation.
+- **Scratch probe cleanup** — moved useful `.tmp` par-term/Cockpit evidence into design nodes and removed stale local probe/build artifacts.
+- **Design-node stale-content audit** — started the `docs/design/` cleanup pass with an audit node and disposition headers for the first batch of historical/stale implementation-scope design docs.
+
+### Fixed
+
+- **Zed ACP plan presentation** — plan status updates now render as concise plain text while native ACP plan updates own the checklist, avoiding raw plan receipts and markdown underscore artifacts in Zed.
+
+## [0.23.3] - 2026-05-23
+
+### Fixed
+
+- **Slim completed responses stay at the live tail** — completed assistant turns no longer rewind compact sessions to the start of long responses, and the conversation renderer reserves a one-column edge gutter to avoid right-edge rendering pressure.
+
+## [0.23.2] - 2026-05-22
+
+### Fixed
+
+- **ACP plan updates use Zed native plan UI** — ordinary `plan` tool snapshots now flow through ACP `SessionUpdate::Plan`, not only cleave/decomposition progress, so Zed can track agent work-plan state directly.
+- **Slim tool rows no longer fake-link Markdown paths** — bare `.md` paths in expanded tool summaries now render as plain text instead of terminal hyperlinks that show a hand cursor without opening.
+- **Image previews use a crisp high-contrast edge** — inline image placeholders now use a slim accent border, clear background fill, and explicit `file://` caption link so rendered images do not blend into surrounding chrome.
+
+## [0.23.1] - 2026-05-20
+
+### Changed
+
+- **Slim status hints are meaning-first** — the footer now distinguishes active, completed, and absent plan state with concise operator hints, and file activity uses semantic `files: … touched/changed/read` labels instead of opaque `r/w` shorthand.
+- **Recursive tasking design is unified** — documented Slim plans, IntentDocument work plans, design/OpenSpec tasking, cleave decomposition, and memory-backed supersession as projections of one recursive tasking system with suspend/block/resume/supersede lifecycle semantics.
+
+### Fixed
+
+- **Slim-mode focus navigation targets visible tools** — empty-editor `Tab` enters/cycles visible tool focus, `Shift+Tab` cycles backward, `a` expands visible tool cards, and `Ctrl+O` prefers current running/visible tool cards over stale selections.
+- **Session plans are coupled to execution state** — the agent loop now broadcasts structured plan snapshots whenever work-plan state changes, while execution-mode intent injection explicitly instructs agents to call the `plan` tool when active items complete so the pinned operator checklist stays synchronized with real progress.
+- **Completed session plans remain visible** — automatic completion now marks the plan `complete` without erasing its item snapshot, while explicit plan clears and newly set plans still replace the displayed checklist.
+- **Slim-mode Ctrl+O targets the visible tool card** — detail expansion now uses the actual conversation viewport height so Ctrl+O expands the bottom/visible segment instead of repeatedly expanding the top cached segment.
+- **Slim-mode tool errors use compact rows** — failed tool calls now follow the same compact Slim rendering path as successful tools, preserving the red error status without expanding into full bordered cards.
+- **ACP Zed compatibility is release-ready** — ACP now treats prompt resources as the canonical external integration surface, including Zed `@file`, `@selection`, and `@directory` mentions, embedded text resources, ecosystem text files, line slicing, bounded directory listings, binary-resource suppression, root containment, and symlink escape rejection.
+- **ACP model controls respect configured providers** — the ACP model dropdown now filters registry models by exact provider availability, distinguishes OpenAI API credentials from Codex OAuth, labels stale unavailable current models, and persists model/thinking/posture changes across ACP sessions.
+- **ACP host writes are permission-gated and recoverable** — delegated host writes now request ACP permission before mutation, include failed paths in diagnostics, and fall back to local writes only after permission is granted.
+- **TUI tool overflow hints are scoped to real expansion targets** — Slim-mode tool overflow rows now advertise `Ctrl+O details` only when the hidden cells include expandable detail content, avoiding stale hints on non-addressable summary overflow.
+- **TUI tool interaction stays live while tools run** — global conversation keys such as `Ctrl+O`, `PageUp`, `PageDown`, `Home`, and `End` are handled before input suppression, and `Ctrl+O` targets the latest running tool card when no explicit selection exists.
+- **TUI assistant replies no longer clip markdown tails** — assistant response height measurement now over-allocates the temporary render buffer before trimming, preventing narrow fenced-code responses from appearing truncated above the composer.
+
+## [0.23.0] - 2026-05-20
+
+### Added
+
+- **Interactive background terminal tool** — added a first-class PTY-backed `terminal` core tool with `start`, `send`, `read`, `stop`, and `list` actions for session-scoped interactive processes, including transcript files, stdin/exit audit markers, output tails, TUI shutdown cleanup, and the same workspace-boundary permission scan used by `bash`.
+- **Slim operator contract** — documented the `om` UX contract for rendering existing harness state through compact tool evidence, pinned plan state, consequence-complete permission prompts, contextual footer hints, and shared ACP/TUI persistence paths without introducing shadow control planes.
+- **OCI-safe terminal profile control** — added profile/env controls for the PTY-backed `terminal` tool so hardened k8s/OCI agents can disable it with `terminalTool: false` or `OMEGON_TERMINAL_TOOL=0`, while bootstrap auto-hides the tool when `/dev/pts` or transcript storage is unavailable.
+
+### Fixed
+
+- **Slim-mode long responses are easier to read** — provider stop reasons from OpenAI-compatible and Anthropic streams are now surfaced when output may be incomplete, and Slim mode pins very long completed assistant replies at their beginning instead of leaving operators at the tail.
+- **Slim-mode transcript chrome is lower noise** — assistant prose now renders without response headers, completed successful tool cards collapse to one-line timeline markers that still show command/path/output summaries, and active plan progress is pinned above the composer instead of reappearing as scrollback cards.
+- **Slim-mode operator contract is visible in the UI** — pinned plan rows now render from structured session plan snapshots with `done`/`active`/`skipped`/`todo` labels and `+N more` overflow, the status line shows contextual plan/copy/transcript/automation hints, and permission prompts use the consequence-complete tool/target/reason/persist/key-map shape.
+- **Slim-mode tool rows carry operational evidence** — compact completed tool rows now extract targets from JSON arguments, show shell commands instead of opaque wrapper names, summarize validation scope, and report output line counts plus the first useful result line.
+- **Slim-mode dense tool rows split cleanly** — long compact tool rows now break into bounded indented evidence lines with subtle row background separation instead of clipping command/result summaries off the right edge.
+- **Slim-mode live tools expand only while active** — running tool rows now show a compact indented live-evidence view under the tool header, then collapse back to a single row once complete so old tool history does not stay visually expanded.
+- **Slim-mode reasoning noise is consolidated** — reasoning-only turns now render as a single subtle status row in Slim mode instead of dumping full intermediate thought blocks between every tool row.
+- **Slim-mode terminal rows identify their target** — PTY terminal actions now summarize start/send/read/stop/list targets, session ids, bounded read sizes, useful output tails, and transcript paths instead of collapsing to opaque action names.
+- **Slim-mode tool expansion is discoverable** — compact tool rows that have captured arguments, results, or live output now advertise `Ctrl+O details`, reusing the existing selected/nearest tool expansion path without adding another operator surface.
+- **Slim-mode running tools show live evidence** — in-flight tool cards now collapse to a one-line Slim row with the target command/path, live phase, progress units, elapsed time, idle heartbeat marker, and latest output tail when available.
+- **Slim-mode turn completion is explicit** — the status line now carries a turn-state field (`ready`, `thinking`, `responding`, `running <tool>`, `turn done`, `turn continuing`, `turn cancelled`) so operators do not have to infer whether a turn is still active or finished from scrollback shape.
+- **Slim-mode footer hints prioritize blocking action** — permission prompts, manual waits, terminal-copy mode, plan controls, and default copy/transcript affordances now share one ordered status-line hint path so the operator sees the most urgent available action first.
+- **Permissions cleanup prefers the canonical operator surface** — denial recovery text, preferences output, trait docs, and Slim contract examples now point at `/permissions` and `profile.permissions.trustedDirectories`, with `/trust` presented only as a compatibility alias.
+- **Stuck-loop recovery no longer ends the turn before recovery** — repeated-tool escalation now injects corrective guidance and clears the detector window so the model can take the next concrete action, instead of force-breaking into a summary while valid work remains.
+- **Codex login and model selection persist across restarts** — successful OpenAI/Codex login now stores the provider default model in the project profile, external Codex CLI auth adoption persists into Omegon auth storage with account identity, and project-root discovery prefers the repo root over nested build manifests so model defaults are not written into split profile files.
+- **Nested Omegon state no longer shadows global model defaults** — project-root discovery now treats nested `.omegon/` directories as state rather than hard workspace boundaries inside an existing Git checkout, preventing stale subdirectory profiles from forcing Anthropic/Sonnet over a global OpenAI Codex/GPT selection.
+- **Profile capture no longer leaves stale non-default toggles** — provider/login persistence now saves through the active workspace root and clears defaulted profile fields such as update channel, mouse mode, sandbox, and terminal-tool enablement when settings return to defaults.
+- **Session plan updates are structured across surfaces** — plan changes now emit a `plan.updated` event for TUI, IPC, MQTT, and WebSocket consumers so operator surfaces no longer need to parse human-readable plan notifications for live state.
+- **Slim-mode detached scroll state is visible** — the status line now shows when the conversation viewport is detached from the live tail, making auto-pinned long responses distinguishable from truncated turns.
+- **Slim-mode detached pages no longer look truncated** — detached conversation viewports now render an inline `more below · End to tail` marker at the bottom of the transcript pane, so fenced blocks and long answers do not appear to end mid-response without explanation.
+- **Slim-mode completed replies no longer reuse stale streaming height** — long completed assistant responses are remeasured before auto-pinning, and detached completed tails refresh their cached height so a finished turn cannot appear clipped mid-answer.
+- **Incomplete structured replies continue under automation** — Flow/Autonomous turns now recover from text-only responses that end on open code fences or dangling phase/list structures instead of surfacing them as cleanly done.
+- **Validate skips are actionable** — `validate` now returns a structured skipped result with recommended project-specific checks and Armory validator-plugin guidance for unsupported file types instead of failing with only the built-in source-type list.
+- **Armory validator metadata is supported** — Armory manifests can declare `[[validators]]` entries that point to plugin tools by file extension, mark those tools as validation-capable, and surface installed validator recommendations from the built-in `validate` tool.
+- **Completed plans clear the operator surface** — finishing the final plan item now clears the active plan state and emits a clear snapshot so Slim mode does not leave a stale pinned checklist after plan completion.
+- **Clean transcript copy paths are available** — `/copy latest` copies the latest assistant response from semantic segment text, and `/transcript` writes a deduplicated Markdown transcript with a clickable `.md` file link; `/transcript scrollback` keeps the native scrollback export available explicitly.
+- **Spinner tests no longer race shared state** — global spinner counter tests now serialize access and assert against the active verb list, preventing parallel test flakes after startup initializes shuffled verbs.
+- **Background terminal security posture is tighter** — PTY sessions now reject credential-prompt commands, cap command/input/session/transcript growth, write transcripts with owner-only permissions on Unix, and strip terminal control sequences before output is returned or audited.
+
+## [0.22.4] - 2026-05-18
+
+### Fixed
+
+- **TUI update checks recover after release asset delays** — `/update` and `/update install` now force fresh checks when needed, avoid caching incomplete GitHub release metadata, distinguish published-but-not-yet-downloadable releases, and keep periodic polling aligned with the active update channel.
+
+## [0.22.3] - 2026-05-18
+
+### Added
+
+- **Manual operator wait tool** — added `wait_for_operator` so agents can pause for explicit physical/manual operator action with TUI confirmation, cancellation, live heartbeats, and a bounded safety timeout.
+
+## [0.22.2] - 2026-05-18
+
+### Added
+
+- **ACP workspace mutations** — ACP clients can now call the same workspace lifecycle mutation surface as the TUI, including create, destroy, adopt, release, archive, prune, bind, role, and kind operations through `control/workspace_*` methods.
+- **Clickable terminal links** — assistant, operator, system, and tool-card text now render bare `http://`, `https://`, and `file://` URLs as OSC 8 hyperlinks, and file tool summary rows normalize relative paths into clickable `file://` targets.
+- **Profile-backed automation policy** — added `/automation` and `/autonomy` controls for choosing `ask`, `guarded`, `flow`, or `autonomous` continuation behavior, persisted through the project profile while keeping permission, security, plan, interrupt, and max-turn gates as hard boundaries.
+- **Unified `/permissions` operator surface** — added `/permissions list|add|remove` as the canonical permission-grant control surface, with `/trust` retained as an alias so TUI and ACP/control callers share the same persisted profile permissions path.
+- **Native `/plan` session gate** — added a first-class TUI/remote slash surface over the existing session intent work plan with `set`, `approve`, `execute`, `advance`, `skip`, `clear`, and status rendering so high-level plan mode can reuse the current conversation state instead of creating a shadow planning store.
+- **Unified profile operator surface** — `/profile`, IPC/web control commands, and ACP control methods can now view, capture, apply, and edit profile defaults for MQTT, extension allow/deny policy, persona, and tone.
+- **Unified Armory install surface** — `/armory install`, `armory/install`, extension installs, and named skill installs now route through one Armory installer that materializes extensions, plugins, and skills into the runtime paths Omegon actually loads.
+- **Profile-scoped integration defaults** — project/global profiles can now opt into MQTT bridge startup and constrain native extension loading with allow/deny lists instead of letting every installed operator extension load everywhere by default.
+
+### Changed
+
+- **Permissions persistence now has a single profile surface** — path grants are written under `profile.permissions.trustedDirectories`, with legacy `trustedDirectories` still accepted as a read/write migration alias.
+- **Release candidates retired again** — release branches now carry stable semver versions directly, `just release` cuts stable tags without opening a follow-on RC line, and install/Homebrew/docs surfaces only advertise stable and nightly channels.
+
+### Fixed
+
+- **Text-only continuation stalls now auto-recover** — when the operator has already said to proceed or requested a concrete action, assistant replies that only ask for confirmation or describe future work now trigger an internal continuation nudge instead of ending the turn and forcing the operator to type "continue" again.
+- **Plan tool progress is now visible in the TUI** — model-driven `plan` tool calls now emit an operator-facing checklist snapshot after set/advance/skip/execute/status updates instead of only appearing as an opaque tool card.
+- **Plan progress no longer floods the TUI timeline** — repeated plan snapshots now replace the latest plan progress card across intervening tool cards, keeping one live checklist while preserving the tool cards for audit detail.
+- **Auspex projected provider auth is honored** — `OMEGON_AUTH_JSON_PATH` now overrides the provider `auth.json` location, provider readers and legacy resolvers share that path, projected credentials are registered for output redaction, and read-only refresh write-back failures report credential-rotation guidance without exposing secret material.
+- **TUI operator surfaces are clearer** — permission prompts now show tool/path/key consequences explicitly, queued prompts explain when they will run, `/auth status` reports the active provider auth file source, and `/permissions`/`/automation` status output documents persistence and hard boundaries.
+- **Publish links the local binary with an absolute target** — `just publish` no longer creates a broken `~/.local/bin/omegon -> target/release/omegon` symlink when run from the repository root.
+- **ACP and TUI always-allow now persist through the same grant path** — `allow_always` decisions route through the internal permission grant tool, so host-panel approvals and terminal approvals update the same project profile permission store.
+- **Standard device streams are no longer blocked as outside-workspace paths** — `/dev/null`, standard stdio aliases, and fd aliases for descriptors 0-2 are allowed by the shared workspace boundary instead of triggering permission prompts.
+- **Workspace path discovery no longer escapes into ancestor home repos** — Omegon project/runtime state now respects explicit project markers and shell git commands run with a project-root discovery ceiling, preserving legitimate nested repo status while preventing child workspaces from inheriting unrelated parent repositories.
+- **MQTT bridge no longer starts implicitly** — interactive and daemon sessions now leave MQTT disabled unless the profile or environment explicitly enables it, and enabled bridges preflight the broker socket before handing control to the MQTT client event loop.
+- **Startup persona and tone now honor profile defaults** — local, ACP, and embedded startup can load persona/tone defaults from the profile instead of requiring ad hoc child environment variables.
+- **TUI provider status no longer probes credentials every frame** — OAuth footer state is cached on model changes instead of repeatedly reading external credential files during redraws.
 - **Armory installation is reachable and discoverable from the TUI** — command suggestions, slash usage, ACP help, browse output, dispatcher routing, and post-install messages now point operators at `/armory install`, `/skills install <name>`, and `/extension install <name|url|path>` instead of leaving registry installs as a hidden CLI path.
 - **Queued TUI prompts no longer interrupt by default** — submitting a follow-up while the agent is active now queues it until the current turn finishes instead of cancelling the active turn under the misleading "queued" banner. Explicit interrupt queue mode still cancels when selected.
 - **Web search timeout path no longer burns one timeout per free engine** — automatic web search now tries DuckDuckGo, Bing, and Google through the shared concurrent failover path instead of spending a full sequential timeout on each free engine, and the tool schema exposes a real `timeout` parameter.
@@ -32,6 +223,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - **Stale native extensions recover after transport failure** — extension tool calls now drop broken stdin/stdout handles, respawn the extension, rerun the handshake, and retry once when the child process exits or the pipe closes.
 - **OpenSpec docs no longer advertise removed `/opsx:*` slash commands** — the site now points operators at the current `openspec_manage` lifecycle tool actions.
 - **Non-English TUI output has regression coverage** — added coverage for Cyrillic streaming output so future truncation/rendering changes cannot reintroduce byte-boundary panics.
+
+## [0.22.1] - 2026-05-16
+
+### Fixed
+
+- **Interrupted interactive turns can no longer hold the TUI hostage indefinitely** — local TUI cancellation now gives the active agent loop a bounded grace period to drain and then recovers the operator surface with an explicit warning if a provider/tool future fails to stop.
+- **Publish and smoke recipe summaries no longer fail after successful release work** — `just publish` now keeps the docs page count in the parent shell, and `just smoke` sums multi-binary test results before its safety-floor comparison so release verification output stays clean under `set -u`.
 
 ## [0.22.0] - 2026-05-14
 

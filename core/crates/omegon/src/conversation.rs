@@ -9,6 +9,7 @@ use omegon_traits::LifecyclePhase;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A tool call extracted from an assistant message.
 #[derive(Debug, Clone)]
@@ -146,6 +147,8 @@ pub struct IntentDocument {
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub work_plan: Vec<WorkItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub completed_work_plans: Vec<CompletedWorkPlan>,
     #[serde(default)]
     pub plan_mode: PlanMode,
 
@@ -160,6 +163,12 @@ pub struct IntentDocument {
 pub struct WorkItem {
     pub description: String,
     pub status: WorkItemStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompletedWorkPlan {
+    pub items: Vec<WorkItem>,
+    pub completed_turn: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -214,6 +223,15 @@ impl WorkItemStatus {
             Self::Active => "◐",
             Self::Done => "●",
             Self::Skipped => "⊘",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Pending => "todo",
+            Self::Active => "active",
+            Self::Done => "done",
+            Self::Skipped => "skipped",
         }
     }
 }
@@ -425,9 +443,7 @@ impl IntentDocument {
             {
                 next.status = WorkItemStatus::Active;
             }
-            if self.work_plan_complete() {
-                self.plan_mode = PlanMode::Complete;
-            }
+            self.clear_if_work_plan_complete();
         }
     }
 
@@ -448,9 +464,7 @@ impl IntentDocument {
         {
             next.status = WorkItemStatus::Active;
         }
-        if self.work_plan_complete() {
-            self.plan_mode = PlanMode::Complete;
-        }
+        self.clear_if_work_plan_complete();
     }
 
     /// Skip the current active item and activate the next.
@@ -466,10 +480,44 @@ impl IntentDocument {
             {
                 next.status = WorkItemStatus::Active;
             }
-            if self.work_plan_complete() {
-                self.plan_mode = PlanMode::Complete;
-            }
+            self.clear_if_work_plan_complete();
         }
+    }
+
+    fn clear_if_work_plan_complete(&mut self) {
+        if self.work_plan_complete() {
+            self.record_completed_work_plan();
+            self.plan_mode = PlanMode::Complete;
+        }
+    }
+
+    fn record_completed_work_plan(&mut self) {
+        if self.work_plan.is_empty() {
+            return;
+        }
+        if self
+            .completed_work_plans
+            .last()
+            .is_some_and(|record| record.items == self.work_plan)
+        {
+            return;
+        }
+        self.completed_work_plans.push(CompletedWorkPlan {
+            items: self.work_plan.clone(),
+            completed_turn: self.stats.turns,
+        });
+        const MAX_COMPLETED_WORK_PLANS: usize = 5;
+        let overflow = self
+            .completed_work_plans
+            .len()
+            .saturating_sub(MAX_COMPLETED_WORK_PLANS);
+        if overflow > 0 {
+            self.completed_work_plans.drain(0..overflow);
+        }
+    }
+
+    pub fn last_completed_work_plan(&self) -> Option<&CompletedWorkPlan> {
+        self.completed_work_plans.last()
     }
 
     /// True when all work items are terminal (done or skipped).
@@ -492,6 +540,26 @@ impl IntentDocument {
             .map(|w| format!("{} {}", w.status.icon(), w.description))
             .collect();
         Some(parts.join("  "))
+    }
+
+    /// Render the last completed work plan, if one exists.
+    pub fn render_last_completed_work_plan(&self) -> Option<String> {
+        let record = self.last_completed_work_plan()?;
+        let mut lines = vec![
+            "Plan mode: complete".to_string(),
+            "Last completed work plan.".to_string(),
+            format!("Progress: {}/{}", record.items.len(), record.items.len()),
+            String::new(),
+        ];
+        for (idx, item) in record.items.iter().enumerate() {
+            lines.push(format!(
+                "{}. {} {}",
+                idx + 1,
+                item.status.icon(),
+                item.description
+            ));
+        }
+        Some(lines.join("\n"))
     }
 
     /// Render the active work plan with mode and approval-gate guidance.
@@ -520,6 +588,42 @@ impl IntentDocument {
         }
         lines.join("\n")
     }
+
+    pub fn work_plan_snapshot_json(&self) -> serde_json::Value {
+        let done = self
+            .work_plan
+            .iter()
+            .filter(|w| matches!(w.status, WorkItemStatus::Done))
+            .count();
+        let items: Vec<serde_json::Value> = self
+            .work_plan
+            .iter()
+            .map(|item| {
+                serde_json::json!({
+                    "description": item.description,
+                    "status": item.status.label(),
+                })
+            })
+            .collect();
+
+        serde_json::json!({
+            "mode": self.plan_mode.label(),
+            "guidance": self.plan_mode.guidance(),
+            "completed": done,
+            "total": self.work_plan.len(),
+            "items": items,
+        })
+    }
+}
+
+const SESSION_SNAPSHOT_SCHEMA_VERSION: u16 = 1;
+
+fn current_session_saved_at() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("unix:{secs}")
 }
 
 /// Serializable session snapshot for save/resume.
@@ -530,6 +634,9 @@ impl IntentDocument {
 #[serde(default)]
 #[derive(Default)]
 struct SessionSnapshot {
+    schema_version: u16,
+    omegon_version: String,
+    saved_at: String,
     messages: Vec<LlmMessage>,
     intent: IntentDocument,
     decay_window: usize,
@@ -773,6 +880,12 @@ impl ConversationState {
                 intent.plan_mode.label(),
                 intent.plan_mode.guidance()
             ));
+            if intent.plan_mode == PlanMode::Executing {
+                lines.push(
+                    "Plan execution contract: when the active item is completed, call the `plan` tool with action `advance` or `complete` before continuing."
+                        .to_string(),
+                );
+            }
             for item in &items {
                 lines.push(format!("  {item}"));
             }
@@ -1228,13 +1341,16 @@ impl ConversationState {
     pub fn save_session(&self, path: &Path) -> anyhow::Result<()> {
         let view = self.build_llm_view();
         let session = SessionSnapshot {
+            schema_version: SESSION_SNAPSHOT_SCHEMA_VERSION,
+            omegon_version: env!("CARGO_PKG_VERSION").to_string(),
+            saved_at: current_session_saved_at(),
             messages: view,
             intent: self.intent.clone(),
             decay_window: self.decay_window,
             compaction_summary: self.compaction_summary.clone(),
         };
         let json = serde_json::to_string_pretty(&session)?;
-        std::fs::write(path, json)?;
+        crate::filelock::atomic_write_locked(path, json.as_bytes())?;
         tracing::info!(path = %path.display(), turns = self.intent.stats.turns, "session saved");
         Ok(())
     }
@@ -1254,6 +1370,9 @@ impl ConversationState {
             path = %path.display(),
             turns = snapshot.intent.stats.turns,
             messages = snapshot.messages.len(),
+            schema_version = snapshot.schema_version,
+            omegon_version = %snapshot.omegon_version,
+            saved_at = %snapshot.saved_at,
             "session loaded"
         );
 
@@ -1438,6 +1557,27 @@ impl ConversationState {
                     format!("[bash{ctx_suffix}{exit_hint}: {text}]")
                 } else {
                     format!("[bash{ctx_suffix}: {lines} lines{exit_hint}. Tail:\n{tail_str}]")
+                }
+            }
+            "terminal" => {
+                let lines = text.lines().count();
+                let transcript = text
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Transcript: "))
+                    .unwrap_or("");
+                let tail: Vec<&str> = text.lines().rev().take(bash_tail_lines).collect();
+                let tail_str = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+                let transcript_suffix = if transcript.is_empty() {
+                    String::new()
+                } else {
+                    format!(" Transcript: {transcript}.")
+                };
+                if lines <= 5 {
+                    format!("[terminal{ctx_suffix}: {text}]")
+                } else {
+                    format!(
+                        "[terminal{ctx_suffix}: {lines} lines.{transcript_suffix} Tail:\n{tail_str}]"
+                    )
                 }
             }
             "edit" => {
@@ -2287,6 +2427,100 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
     }
 
+    #[test]
+    fn completed_work_plan_is_recorded_once_and_survives_new_plan() {
+        let mut intent = IntentDocument::default();
+        intent.stats.turns = 7;
+        intent.set_work_plan(vec!["one".into(), "two".into()]);
+        intent.execute_work_plan();
+
+        intent.advance_work_plan();
+        assert!(intent.completed_work_plans.is_empty());
+
+        intent.advance_work_plan();
+        assert_eq!(intent.plan_mode, PlanMode::Complete);
+        assert_eq!(intent.completed_work_plans.len(), 1);
+        assert_eq!(intent.completed_work_plans[0].completed_turn, 7);
+        assert_eq!(intent.completed_work_plans[0].items.len(), 2);
+
+        intent.advance_work_plan();
+        assert_eq!(intent.completed_work_plans.len(), 1);
+
+        intent.set_work_plan(vec!["new plan".into()]);
+        assert_eq!(intent.completed_work_plans.len(), 1);
+        assert_eq!(intent.work_plan[0].description, "new plan");
+        assert_eq!(intent.completed_work_plans[0].items[0].description, "one");
+    }
+
+    #[test]
+    fn completed_work_plan_history_is_bounded() {
+        let mut intent = IntentDocument::default();
+        for idx in 0..7 {
+            intent.stats.turns = idx;
+            intent.set_work_plan(vec![format!("plan {idx}")]);
+            intent.advance_work_plan();
+        }
+
+        assert_eq!(intent.completed_work_plans.len(), 5);
+        assert_eq!(
+            intent.completed_work_plans[0].items[0].description,
+            "plan 2"
+        );
+        assert_eq!(
+            intent.completed_work_plans[4].items[0].description,
+            "plan 6"
+        );
+    }
+
+    #[test]
+    fn completed_work_plan_survives_session_round_trip() {
+        let mut conv = ConversationState::new();
+        conv.intent.stats.turns = 3;
+        conv.intent
+            .set_work_plan(vec!["persist completed plan".into()]);
+        conv.intent.advance_work_plan();
+
+        let tmp = std::env::temp_dir().join("omegon-test-completed-plan-history.json");
+        let _ = std::fs::remove_file(&tmp);
+        conv.save_session(&tmp).unwrap();
+
+        let loaded = ConversationState::load_session(&tmp).unwrap();
+        let completed = loaded.intent.last_completed_work_plan().unwrap();
+        assert_eq!(completed.completed_turn, 3);
+        assert_eq!(completed.items[0].description, "persist completed plan");
+        assert!(
+            loaded
+                .intent
+                .render_last_completed_work_plan()
+                .unwrap()
+                .contains("persist completed plan")
+        );
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn save_session_includes_snapshot_metadata_and_uses_atomic_temp_path() {
+        let mut conv = ConversationState::new();
+        conv.push_user("keep this across upgrades".into());
+
+        let tmp = std::env::temp_dir().join("omegon-test-versioned-session.json");
+        let _ = std::fs::remove_file(&tmp);
+        let _ = std::fs::remove_file(tmp.with_extension("tmp"));
+
+        conv.save_session(&tmp).unwrap();
+
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&tmp).unwrap()).unwrap();
+        assert_eq!(raw["schema_version"], SESSION_SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(raw["omegon_version"], env!("CARGO_PKG_VERSION"));
+        let saved_at = raw["saved_at"].as_str().unwrap();
+        assert!(saved_at.starts_with("unix:"), "saved_at was {saved_at}");
+        assert!(!tmp.with_extension("tmp").exists());
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
     /// Sessions saved by older omegon versions may lack fields added later
     /// (e.g. commit_nudged). Deserialization must not fail — missing fields
     /// get their Default value.
@@ -2704,6 +2938,39 @@ mod tests {
             );
             assert!(content.contains("line 20"), "should preserve tail");
             assert!(!content.contains("line 5"), "should strip middle");
+        }
+    }
+
+    #[test]
+    fn decay_terminal_preserves_transcript_path_and_tail() {
+        let mut conv = ConversationState::new();
+        conv.decay_window = 0;
+
+        push_matching_assistant(&mut conv, "t1");
+        let output = "Terminal 'watch' (abc) — exited\nTranscript: /tmp/omegon-terminal.log\n\nline 1\nline 2\nline 3\nline 4\nline 5";
+        conv.push_tool_result(ToolResultEntry {
+            call_id: "t1".into(),
+            tool_name: "terminal".into(),
+            content: vec![omegon_traits::ContentBlock::Text {
+                text: output.into(),
+            }],
+            is_error: false,
+            args_summary: Some("read: abc".into()),
+        });
+        conv.intent.stats.turns = 1;
+
+        let view = conv.build_llm_view();
+        if let LlmMessage::ToolResult { content, .. } = &view[1] {
+            assert!(
+                content.contains("Transcript: /tmp/omegon-terminal.log"),
+                "terminal decay must preserve transcript path: {content}"
+            );
+            assert!(
+                content.contains("line 5"),
+                "terminal decay should preserve tail"
+            );
+        } else {
+            panic!("Expected ToolResult message");
         }
     }
 
@@ -3575,6 +3842,7 @@ mod tests {
 
         intent.advance_work_plan();
         intent.advance_work_plan();
+        assert_eq!(intent.work_plan.len(), 3);
         assert!(intent.work_plan_complete());
         assert_eq!(intent.plan_mode, PlanMode::Complete);
     }
@@ -3612,6 +3880,11 @@ mod tests {
         intent.complete_work_item(0);
         assert_eq!(intent.work_plan[0].status, WorkItemStatus::Done);
         assert_eq!(intent.work_plan[2].status, WorkItemStatus::Active);
+
+        intent.complete_work_item(2);
+        assert_eq!(intent.work_plan.len(), 3);
+        assert!(intent.work_plan_complete());
+        assert_eq!(intent.plan_mode, PlanMode::Complete);
     }
 
     #[test]
@@ -3625,7 +3898,9 @@ mod tests {
         assert!(intent.work_plan[0].status != WorkItemStatus::Done);
 
         intent.advance_work_plan();
+        assert_eq!(intent.work_plan.len(), 2);
         assert!(intent.work_plan_complete());
+        assert_eq!(intent.plan_mode, PlanMode::Complete);
     }
 
     #[test]
@@ -3639,6 +3914,14 @@ mod tests {
         assert!(rendered.contains("Plan mode: planning"));
         assert!(rendered.contains("◐ Read"));
         assert!(rendered.contains("○ Write"));
+        assert!(!rendered.contains("Plan execution contract:"));
+
+        conv.intent.execute_work_plan();
+        let rendered = conv.render_intent_for_injection();
+        assert!(rendered.contains("Plan mode: executing"));
+        assert!(rendered.contains("Plan execution contract:"));
+        assert!(rendered.contains("`plan` tool"));
+        assert!(rendered.contains("action `advance` or `complete`"));
 
         conv.intent.advance_work_plan();
         let rendered = conv.render_intent_for_injection();

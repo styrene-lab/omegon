@@ -12,10 +12,10 @@ on:
 
 jobs:
   update-stable-formula:
-    # Only update on stable releases (no -rc. or -nightly.)
+    # Only update on stable releases (no nightly.)
     if: >-
       (github.event_name == 'workflow_dispatch') ||
-      (!contains(github.ref_name, '-rc.') && !contains(github.ref_name, '-nightly.'))
+      (!contains(github.ref_name, '-nightly.'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -65,58 +65,4 @@ jobs:
           git add Formula/omegon.rb
           git diff --cached --quiet && echo "formula unchanged" && exit 0
           git commit -m "chore(brew): update omegon to ${{ steps.release.outputs.version }}"
-          git push origin main
-
-  update-rc-formula:
-    # Only update on RC releases (never from workflow_dispatch — that's for stable)
-    if: "github.event_name != 'workflow_dispatch' && contains(github.ref_name, '-rc.')"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout omegon (for release_manifest.py)
-        uses: actions/checkout@v4
-        with:
-          path: omegon
-
-      - name: Checkout homebrew-tap
-        uses: actions/checkout@v4
-        with:
-          repository: styrene-lab/homebrew-tap
-          token: ${{ secrets.RELEASE_GITHUB_TOKEN }}
-          path: homebrew-tap
-
-      - name: Get release info
-        id: release
-        run: |
-          TAG="${{ github.ref_name }}"
-          VERSION=${TAG#v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-
-      - name: Download release manifest
-        run: |
-          curl -fsSL "https://github.com/styrene-lab/omegon/releases/download/${{ steps.release.outputs.tag }}/release-manifest.json" \
-            -o release-manifest.json
-          cat release-manifest.json
-
-      - name: Update RC formula
-        run: |
-          python3 omegon/scripts/release_manifest.py update-homebrew \
-            --manifest release-manifest.json \
-            --formula homebrew-tap/Formula/omegon-rc.rb
-          echo "--- updated formula ---"
-          cat homebrew-tap/Formula/omegon-rc.rb
-
-      - name: Validate formula syntax
-        run: brew style homebrew-tap/Formula/omegon-rc.rb 2>/dev/null || ruby -c homebrew-tap/Formula/omegon-rc.rb
-
-      - name: Commit and push to tap
-        run: |
-          cd homebrew-tap
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/omegon-rc.rb
-          git diff --cached --quiet && echo "formula unchanged" && exit 0
-          git commit -m "chore(brew): update omegon-rc to ${{ steps.release.outputs.version }}"
           git push origin main

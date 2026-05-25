@@ -1,28 +1,27 @@
 #!/usr/bin/env bash
 # milestone-update.sh — Maintain .omegon/milestones.json during release lifecycle.
 #
-# Called by `just rc` and `just release` to keep milestone state in sync
+# Called by release and nightly automation to keep milestone state in sync
 # with the actual release cadence. Designed so that milestones.json is
 # always the source of truth for "what version are we building toward,
 # what shipped, and what's in flight."
 #
 # Usage:
-#   milestone-update.sh rc       <version>   # Record an RC cut (e.g. 0.15.3-rc.2)
 #   milestone-update.sh release  <version>   # Mark milestone released (e.g. 0.15.3)
 #   milestone-update.sh open     <version>   # Open next milestone after stable release
 #   milestone-update.sh nightly  <version>   # Record a nightly build (e.g. 0.15.3-nightly.20260326)
 
 set -euo pipefail
 
-ACTION="${1:?Usage: milestone-update.sh <rc|release|open|nightly> <version>}"
-VERSION="${2:?Usage: milestone-update.sh <rc|release|open|nightly> <version>}"
+ACTION="${1:?Usage: milestone-update.sh <release|open|nightly> <version>}"
+VERSION="${2:?Usage: milestone-update.sh <release|open|nightly> <version>}"
 
 MILESTONES_FILE=".omegon/milestones.json"
 mkdir -p .omegon
 
-# Extract the base version (strip -rc.N or -nightly.DATE)
+# Extract the base version (strip -nightly.DATE)
 base_version() {
-    echo "$1" | sed -E 's/-(rc\.[0-9]+|nightly\.[0-9]+)$//'
+    echo "$1" | sed -E 's/-nightly\.[0-9]+$//'
 }
 
 # Get current ISO 8601 timestamp
@@ -55,53 +54,6 @@ BASE=$(base_version "$VERSION")
 NOW=$(now_iso)
 
 case "$ACTION" in
-    rc)
-        # Ensure the base milestone exists, then record the RC
-        NOTES=$(collect_notes "$BASE")
-        NOTES_JSON=$(echo "$NOTES" | jq -R -s 'split("\n") | map(select(length > 0))')
-        
-        # Read existing milestones
-        EXISTING=$(cat "$MILESTONES_FILE")
-        
-        # Check if base milestone exists
-        if echo "$EXISTING" | jq -e ".[\"$BASE\"]" > /dev/null 2>&1; then
-            # Update existing: set status=rc, update rc_version, timestamp, merge notes
-            UPDATED=$(echo "$EXISTING" | jq \
-                --arg base "$BASE" \
-                --arg ver "$VERSION" \
-                --arg now "$NOW" \
-                --argjson notes "$NOTES_JSON" \
-                '.[$base].status = "rc"
-                | .[$base].channel = "stable"
-                | .[$base].rc_version = $ver
-                | .[$base].rc_count = (.[$base].rc_count // 0) + 1
-                | .[$base].last_rc = $now
-                | .[$base].notes = ((.[$base].notes // []) + $notes | unique)')
-        else
-            # Create new milestone
-            UPDATED=$(echo "$EXISTING" | jq \
-                --arg base "$BASE" \
-                --arg ver "$VERSION" \
-                --arg now "$NOW" \
-                --argjson notes "$NOTES_JSON" \
-                '.[$base] = {
-                    "status": "rc",
-                    "channel": "stable",
-                    "nodes": [],
-                    "frozen": false,
-                    "opened": $now,
-                    "last_rc": $now,
-                    "rc_version": $ver,
-                    "rc_count": 1,
-                    "released": null,
-                    "notes": $notes
-                }')
-        fi
-        
-        echo "$UPDATED" | jq '.' > "$MILESTONES_FILE"
-        echo "  milestone: $BASE → rc ($VERSION)"
-        ;;
-        
     release)
         # Mark milestone as released
         EXISTING=$(cat "$MILESTONES_FILE")
@@ -150,7 +102,6 @@ case "$ACTION" in
                     "frozen": false,
                     "opened": $now,
                     "released": null,
-                    "rc_count": 0,
                     "notes": []
                 }')
             echo "$UPDATED" | jq '.' > "$MILESTONES_FILE"
@@ -180,7 +131,7 @@ case "$ACTION" in
         
     *)
         echo "Unknown action: $ACTION"
-        echo "Usage: milestone-update.sh <rc|release|open|nightly> <version>"
+        echo "Usage: milestone-update.sh <release|open|nightly> <version>"
         exit 1
         ;;
 esac

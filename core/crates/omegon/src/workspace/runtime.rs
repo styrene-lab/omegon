@@ -8,18 +8,7 @@ use super::types::{WorkspaceLease, WorkspaceRegistry};
 const STALE_HEARTBEAT_SECS: i64 = 300;
 
 pub fn workspace_root(cwd: &Path) -> PathBuf {
-    let mut dir = cwd.to_path_buf();
-    loop {
-        let git_path = dir.join(".git");
-        let jj_path = dir.join(".jj");
-        if git_path.is_dir() || git_path.is_file() || jj_path.is_dir() {
-            return dir;
-        }
-        if !dir.pop() {
-            break;
-        }
-    }
-    cwd.to_path_buf()
+    crate::setup::find_project_root(cwd)
 }
 
 pub fn runtime_dir(cwd: &Path) -> PathBuf {
@@ -281,15 +270,16 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         let cwd = dir.path().join("nested/project");
         std::fs::create_dir_all(&cwd).unwrap();
-        assert_eq!(workspace_root(&cwd), dir.path());
-        assert_eq!(runtime_dir(&cwd), dir.path().join(".omegon/runtime"));
+        let root = dir.path().canonicalize().unwrap();
+        assert_eq!(workspace_root(&cwd), root);
+        assert_eq!(runtime_dir(&cwd), root.join(".omegon/runtime"));
         assert_eq!(
             workspace_lease_path(&cwd),
-            dir.path().join(".omegon/runtime/workspace.json")
+            root.join(".omegon/runtime/workspace.json")
         );
         assert_eq!(
             workspace_registry_path(&cwd),
-            dir.path().join(".omegon/runtime/workspaces.json")
+            root.join(".omegon/runtime/workspaces.json")
         );
     }
 

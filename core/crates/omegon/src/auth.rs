@@ -344,6 +344,32 @@ pub fn provider_session_status(provider: &ProviderCredential) -> ProviderSession
 }
 
 pub fn provider_connected_for_model(model_spec: &str) -> bool {
+    let Some(provider) = provider_for_model(model_spec) else {
+        return false;
+    };
+
+    provider_session_status(provider) == ProviderSessionStatus::Configured
+}
+
+pub fn provider_oauth_for_model(model_spec: &str) -> bool {
+    let Some(provider) = provider_for_model(model_spec) else {
+        return false;
+    };
+
+    if provider
+        .env_vars
+        .iter()
+        .any(|key| key.contains("OAUTH") && std::env::var(key).is_ok_and(|s| !s.trim().is_empty()))
+    {
+        return true;
+    }
+
+    read_credentials(provider.auth_key)
+        .or_else(|| read_external_credentials(provider.auth_key))
+        .is_some_and(|creds| creds.cred_type == "oauth")
+}
+
+fn provider_for_model(model_spec: &str) -> Option<&'static ProviderCredential> {
     let trimmed = model_spec.trim();
     let provider_id = if let Some((head, _tail)) = trimmed.split_once(':') {
         if head == "local" {
@@ -351,17 +377,13 @@ pub fn provider_connected_for_model(model_spec: &str) -> bool {
         } else if provider_by_id(head).is_some() {
             head.to_string()
         } else {
-            return false;
+            return None;
         }
     } else {
         crate::providers::infer_provider_id(trimmed)
     };
 
-    let Some(provider) = provider_by_id(&provider_id) else {
-        return false;
-    };
-
-    provider_session_status(provider) == ProviderSessionStatus::Configured
+    provider_by_id(&provider_id)
 }
 
 /// Authentication status for all providers and backends.
@@ -449,7 +471,17 @@ impl OAuthCredentials {
 }
 
 /// Path to auth.json.
+///
+/// `OMEGON_AUTH_JSON_PATH` lets fleet supervisors mount provider credentials
+/// from the normal secret-grant system. When unset, local desktop behavior
+/// remains `~/.config/omegon/auth.json`.
 pub fn auth_json_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("OMEGON_AUTH_JSON_PATH") {
+        let path = path.trim();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
     dirs::home_dir().map(|h| h.join(".config").join("omegon").join("auth.json"))
 }
 
@@ -527,8 +559,8 @@ pub fn read_external_credentials(provider: &str) -> Option<OAuthCredentials> {
             // Codex CLI stores last_refresh as unix seconds; tokens typically last 1 hour
             let last_refresh = data
                 .get("last_refresh")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0) as u64;
+                .and_then(codex_cli_last_refresh_secs)
+                .unwrap_or(0);
             let expires = if last_refresh > 0 {
                 (last_refresh + 3600) * 1000 // 1 hour from last refresh, in ms
             } else {
@@ -611,6 +643,32 @@ pub fn read_external_credentials(provider: &str) -> Option<OAuthCredentials> {
                 refresh: String::new(),
                 expires: u64::MAX, // long-lived personal access token
             })
+        }
+        _ => None,
+    }
+}
+
+fn codex_cli_last_refresh_secs(value: &Value) -> Option<u64> {
+    value.as_u64().or_else(|| {
+        value.as_str().and_then(|raw| {
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .ok()
+                .and_then(|dt| u64::try_from(dt.timestamp()).ok())
+        })
+    })
+}
+
+fn read_external_credential_extra(provider: &str, field: &str) -> Option<String> {
+    let home = dirs::home_dir()?;
+    match (provider, field) {
+        ("openai-codex", "accountId") => {
+            let data: Value =
+                serde_json::from_str(&std::fs::read_to_string(home.join(".codex/auth.json")).ok()?)
+                    .ok()?;
+            data.pointer("/tokens/account_id")
+                .and_then(|v| v.as_str())
+                .filter(|value| !value.is_empty())
+                .map(String::from)
         }
         _ => None,
     }
@@ -708,7 +766,13 @@ async fn probe_provider(provider: &str) -> ProviderInfo {
     // Check stored credentials
     let auth_key = auth_json_key(provider);
     if let Some(creds) = read_credentials(auth_key) {
-        let status = if creds.is_expired() {
+        let status = if creds.cred_type == "oauth" && creds.is_expired() {
+            if resolve_with_refresh(provider).await.is_some() {
+                ProviderAuthStatus::Authenticated
+            } else {
+                ProviderAuthStatus::Expired
+            }
+        } else if creds.is_expired() {
             ProviderAuthStatus::Expired
         } else {
             ProviderAuthStatus::Authenticated
@@ -719,6 +783,22 @@ async fn probe_provider(provider: &str) -> ProviderInfo {
             status,
             is_oauth: creds.cred_type == "oauth",
             details: Some("stored".to_string()),
+        };
+    }
+
+    if provider_by_id(provider).is_some_and(|p| p.auth_method == AuthMethod::OAuth)
+        && read_external_credentials(auth_key).is_some()
+    {
+        let status = if resolve_with_refresh(provider).await.is_some() {
+            ProviderAuthStatus::Authenticated
+        } else {
+            ProviderAuthStatus::Expired
+        };
+        return ProviderInfo {
+            name: provider.to_string(),
+            status,
+            is_oauth: true,
+            details: Some("external".to_string()),
         };
     }
 
@@ -812,9 +892,22 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
     let mut creds = match read_credentials(auth_key) {
         Some(c) => c,
         None => {
-            // 3. Fallback: adopt Claude Code credentials from ~/.claude.json
+            // 3. Fallback: adopt credentials from supported external tools.
             if let Some(c) = read_external_credentials(auth_key) {
                 tracing::info!(provider, "Adopted credentials from external tool");
+                let persist_result = if auth_key == "openai-codex" {
+                    let account_id = read_external_credential_extra(auth_key, "accountId");
+                    write_credentials_with_extra(auth_key, &c, account_id.as_deref())
+                } else {
+                    write_credentials(auth_key, &c)
+                };
+                if let Err(e) = persist_result {
+                    tracing::warn!(
+                        provider = auth_key,
+                        error = %auth_write_failure_operator_message(&e),
+                        "adopted provider credential could not be persisted"
+                    );
+                }
                 c
             } else {
                 return None;
@@ -830,7 +923,11 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
         match refresh_token(auth_key, &creds.refresh).await {
             Ok(new_creds) => {
                 if let Err(e) = write_refreshed_credentials(auth_key, &new_creds) {
-                    tracing::warn!("Failed to save refreshed token: {e}");
+                    tracing::warn!(
+                        provider = auth_key,
+                        error = %auth_write_failure_operator_message(&e),
+                        "OAuth token refreshed but could not be persisted"
+                    );
                 }
                 creds = new_creds;
             }
@@ -851,6 +948,22 @@ pub async fn resolve_with_refresh(provider: &str) -> Option<(String, bool)> {
 
 fn oauth_refresh_failure_is_fatal(provider: &str) -> bool {
     matches!(provider, "openai-codex" | "google-antigravity")
+}
+
+fn auth_write_failure_operator_message(error: &anyhow::Error) -> &'static str {
+    if error
+        .chain()
+        .filter_map(|e| e.downcast_ref::<std::io::Error>())
+        .any(|e| {
+            matches!(
+                e.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+            )
+        })
+    {
+        return "auth.json is read-only; rotate the backing credential grant or reauthenticate through the secret projection";
+    }
+    "auth.json write-back failed; rotate credentials or reauthenticate before the projected token expires"
 }
 
 /// Refresh an OAuth token.
@@ -1848,6 +1961,34 @@ pub fn auth_status_to_provider_statuses(status: &AuthStatus) -> Vec<ProviderStat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{LazyLock, Mutex};
+
+    static AUTH_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    fn with_auth_json_path_env<T>(
+        path: Option<&Path>,
+        f: impl FnOnce() -> T + std::panic::UnwindSafe,
+    ) -> T {
+        let _guard = AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+        unsafe {
+            match path {
+                Some(path) => std::env::set_var("OMEGON_AUTH_JSON_PATH", path),
+                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+            }
+        }
+        let result = std::panic::catch_unwind(f);
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
+                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+            }
+        }
+        match result {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
 
     #[test]
     fn pkce_generation() {
@@ -2048,6 +2189,50 @@ mod tests {
     }
 
     #[test]
+    fn auth_json_path_honors_env_override_and_default_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("mounted-auth.json");
+        with_auth_json_path_env(Some(&override_path), || {
+            assert_eq!(auth_json_path().as_deref(), Some(override_path.as_path()));
+        });
+
+        with_auth_json_path_env(None, || {
+            let path = auth_json_path().expect("default auth path");
+            assert!(path.ends_with(".config/omegon/auth.json"));
+        });
+    }
+
+    #[test]
+    fn auth_read_write_use_env_override_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("projected").join("auth.json");
+        let creds = OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "override-access-token".into(),
+            refresh: "override-refresh-token".into(),
+            expires: 9_999_999_999_999,
+        };
+
+        with_auth_json_path_env(Some(&override_path), || {
+            write_credentials("anthropic", &creds).expect("write override auth");
+            let loaded = read_credentials("anthropic").expect("read override auth");
+            assert_eq!(loaded.access, "override-access-token");
+            assert_eq!(loaded.refresh, "override-refresh-token");
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&override_path)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777;
+                assert_eq!(mode, 0o600);
+            }
+        });
+    }
+
+    #[test]
     fn write_and_read_credentials_roundtrip() {
         // Write creds to a temp dir, then read them back
         let dir = tempfile::tempdir().unwrap();
@@ -2105,6 +2290,80 @@ mod tests {
         assert_eq!(entry["access"], "not-a-jwt");
         assert_eq!(entry["refresh"], "new-refresh");
         assert_eq!(entry["accountId"], "acct_123");
+    }
+
+    #[test]
+    fn codex_cli_last_refresh_accepts_rfc3339_timestamps() {
+        let parsed = codex_cli_last_refresh_secs(&json!("2026-05-11T02:34:22.555736Z"))
+            .expect("timestamp should parse");
+        assert_eq!(parsed, 1_778_466_862);
+        assert_eq!(
+            codex_cli_last_refresh_secs(&json!(1_778_466_862)),
+            Some(1_778_466_862)
+        );
+    }
+
+    #[test]
+    fn write_refreshed_credentials_preserves_codex_account_id_in_auth_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let override_path = dir.path().join("auth.json");
+        let initial = OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "old-access-token".into(),
+            refresh: "old-refresh-token".into(),
+            expires: 1,
+        };
+        let refreshed = OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "not-a-jwt".into(),
+            refresh: "new-refresh-token".into(),
+            expires: 9_999_999_999_999,
+        };
+
+        with_auth_json_path_env(Some(&override_path), || {
+            write_credentials_with_extra("openai-codex", &initial, Some("acct_123"))
+                .expect("write initial codex auth");
+            write_refreshed_credentials("openai-codex", &refreshed)
+                .expect("write refreshed codex auth");
+            assert_eq!(
+                read_credential_extra("openai-codex", "accountId").as_deref(),
+                Some("acct_123")
+            );
+            assert_eq!(
+                read_credentials("openai-codex")
+                    .expect("refreshed credentials")
+                    .refresh,
+                "new-refresh-token"
+            );
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_auth_json_write_error_gets_operator_safe_message() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let auth_dir = dir.path().join("projected");
+        std::fs::create_dir_all(&auth_dir).unwrap();
+        std::fs::set_permissions(&auth_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let override_path = auth_dir.join("auth.json");
+        let creds = OAuthCredentials {
+            cred_type: "oauth".into(),
+            access: "projected-access-token".into(),
+            refresh: "projected-refresh-token".into(),
+            expires: 9_999_999_999_999,
+        };
+
+        with_auth_json_path_env(Some(&override_path), || {
+            let err = write_credentials("anthropic", &creds).expect_err("write should fail");
+            let message = auth_write_failure_operator_message(&err);
+            assert!(message.contains("read-only"));
+            assert!(!message.contains("projected-access-token"));
+            assert!(!message.contains("projected-refresh-token"));
+        });
+
+        std::fs::set_permissions(&auth_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
 
     #[test]

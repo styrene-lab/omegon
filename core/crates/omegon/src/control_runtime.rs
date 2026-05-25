@@ -36,6 +36,35 @@ pub enum ControlRequest {
     SetThinking {
         level: crate::settings::ThinkingLevel,
     },
+    ProfileCapture,
+    ProfileApply,
+    ProfileSetMqtt {
+        enabled: Option<bool>,
+    },
+    ProfileExtensionAllow {
+        name: String,
+    },
+    ProfileExtensionDeny {
+        name: String,
+    },
+    ProfileExtensionClear,
+    ProfileSetPersona {
+        name: Option<String>,
+    },
+    ProfileSetTone {
+        name: Option<String>,
+    },
+    AutomationView,
+    AutomationSet {
+        level: settings::AutomationLevel,
+    },
+    PermissionsView,
+    PermissionTrustAdd {
+        path: String,
+    },
+    PermissionTrustRemove {
+        path: String,
+    },
     StatusView,
     WorkspaceStatusView,
     WorkspaceListView,
@@ -199,6 +228,39 @@ pub fn control_request_from_slash(
         },
         crate::tui::CanonicalSlashCommand::SetThinking(level) => {
             ControlRequest::SetThinking { level: *level }
+        }
+        crate::tui::CanonicalSlashCommand::ProfileView => ControlRequest::ProfileView,
+        crate::tui::CanonicalSlashCommand::ProfileExport => ControlRequest::ProfileExport,
+        crate::tui::CanonicalSlashCommand::ProfileCapture => ControlRequest::ProfileCapture,
+        crate::tui::CanonicalSlashCommand::ProfileApply => ControlRequest::ProfileApply,
+        crate::tui::CanonicalSlashCommand::ProfileSetMqtt(enabled) => {
+            ControlRequest::ProfileSetMqtt { enabled: *enabled }
+        }
+        crate::tui::CanonicalSlashCommand::ProfileExtensionAllow(name) => {
+            ControlRequest::ProfileExtensionAllow { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::ProfileExtensionDeny(name) => {
+            ControlRequest::ProfileExtensionDeny { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::ProfileExtensionClear => {
+            ControlRequest::ProfileExtensionClear
+        }
+        crate::tui::CanonicalSlashCommand::ProfileSetPersona(name) => {
+            ControlRequest::ProfileSetPersona { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::ProfileSetTone(name) => {
+            ControlRequest::ProfileSetTone { name: name.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::AutomationView => ControlRequest::AutomationView,
+        crate::tui::CanonicalSlashCommand::AutomationSet(level) => {
+            ControlRequest::AutomationSet { level: *level }
+        }
+        crate::tui::CanonicalSlashCommand::PermissionsView => ControlRequest::PermissionsView,
+        crate::tui::CanonicalSlashCommand::PermissionTrustAdd(path) => {
+            ControlRequest::PermissionTrustAdd { path: path.clone() }
+        }
+        crate::tui::CanonicalSlashCommand::PermissionTrustRemove(path) => {
+            ControlRequest::PermissionTrustRemove { path: path.clone() }
         }
         crate::tui::CanonicalSlashCommand::StatusView => ControlRequest::StatusView,
         crate::tui::CanonicalSlashCommand::WorkspaceStatusView => {
@@ -427,9 +489,37 @@ async fn try_stateless_control(
         ControlRequest::SetMaxTurns { max_turns } => {
             set_max_turns_response(shared_settings, cwd, *max_turns).await
         }
-        ControlRequest::ProfileView => profile_view_response(shared_settings).await,
+        ControlRequest::ProfileView => profile_view_response(shared_settings, cwd).await,
         ControlRequest::ProfileExport => {
             profile_export_response(shared_settings, cwd, handles).await
+        }
+        ControlRequest::ProfileCapture => profile_capture_response(shared_settings, cwd).await,
+        ControlRequest::ProfileSetMqtt { enabled } => {
+            profile_set_mqtt_response(cwd, *enabled).await
+        }
+        ControlRequest::ProfileExtensionAllow { name } => {
+            profile_extension_allow_response(cwd, name).await
+        }
+        ControlRequest::ProfileExtensionDeny { name } => {
+            profile_extension_deny_response(cwd, name).await
+        }
+        ControlRequest::ProfileExtensionClear => profile_extension_clear_response(cwd).await,
+        ControlRequest::ProfileSetPersona { name } => {
+            profile_set_persona_response(cwd, name.as_deref()).await
+        }
+        ControlRequest::ProfileSetTone { name } => {
+            profile_set_tone_response(cwd, name.as_deref()).await
+        }
+        ControlRequest::AutomationView => automation_view_response(shared_settings, cwd).await,
+        ControlRequest::AutomationSet { level } => {
+            automation_set_response(shared_settings, cwd, *level).await
+        }
+        ControlRequest::PermissionsView => permissions_view_response(shared_settings, cwd).await,
+        ControlRequest::PermissionTrustAdd { path } => {
+            permission_trust_add_response(shared_settings, cwd, path).await
+        }
+        ControlRequest::PermissionTrustRemove { path } => {
+            permission_trust_remove_response(shared_settings, cwd, path).await
         }
         ControlRequest::PersonaList => persona_list_response(handles).await,
         ControlRequest::PersonaSwitch { name } => persona_switch_response(name).await,
@@ -478,36 +568,90 @@ pub async fn execute_control(
         ControlRequest::SetThinking { level } => {
             set_thinking_response(ctx.shared_settings, level).await
         }
+        ControlRequest::ProfileApply => {
+            profile_apply_response(
+                ctx.agent,
+                ctx.runtime_state,
+                ctx.shared_settings,
+                ctx.bridge,
+                ctx.events_tx,
+            )
+            .await
+        }
         ControlRequest::StatusView => {
             status_view_response(ctx.runtime_state, ctx.shared_settings).await
         }
-        ControlRequest::WorkspaceStatusView => workspace_status_view_response(ctx.agent).await,
-        ControlRequest::WorkspaceListView => workspace_list_view_response(ctx.agent).await,
-        ControlRequest::WorkspaceNew { label } => workspace_new_response(ctx.agent, &label).await,
-        ControlRequest::WorkspaceDestroy { target } => {
-            workspace_destroy_response(ctx.agent, &target).await
+        ControlRequest::WorkspaceStatusView => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_status_view_response(&workspace_ctx)
         }
-        ControlRequest::WorkspaceAdopt => workspace_adopt_response(ctx.agent).await,
-        ControlRequest::WorkspaceRelease => workspace_release_response(ctx.agent).await,
-        ControlRequest::WorkspaceArchive => workspace_archive_response(ctx.agent).await,
-        ControlRequest::WorkspacePrune => workspace_prune_response(ctx.agent).await,
+        ControlRequest::WorkspaceListView => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_list_view_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspaceNew { label } => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_new_response(&workspace_ctx, &label)
+        }
+        ControlRequest::WorkspaceDestroy { target } => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_destroy_response(&workspace_ctx, &target)
+        }
+        ControlRequest::WorkspaceAdopt => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_adopt_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspaceRelease => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_release_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspaceArchive => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_archive_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspacePrune => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_prune_response(&workspace_ctx)
+        }
         ControlRequest::WorkspaceBindMilestone { milestone_id } => {
-            workspace_bind_milestone_response(ctx.agent, &milestone_id).await
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_bind_milestone_response(
+                &workspace_ctx,
+                &milestone_id,
+            )
         }
         ControlRequest::WorkspaceBindNode { design_node_id } => {
-            workspace_bind_node_response(ctx.agent, &design_node_id).await
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_bind_node_response(&workspace_ctx, &design_node_id)
         }
-        ControlRequest::WorkspaceBindClear => workspace_bind_clear_response(ctx.agent).await,
-        ControlRequest::WorkspaceRoleView => workspace_role_view_response(ctx.agent).await,
+        ControlRequest::WorkspaceBindClear => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_bind_clear_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspaceRoleView => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_role_view_response(&workspace_ctx)
+        }
         ControlRequest::WorkspaceRoleSet { role } => {
-            workspace_role_set_response(ctx.agent, role).await
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_role_set_response(&workspace_ctx, role)
         }
-        ControlRequest::WorkspaceRoleClear => workspace_role_clear_response(ctx.agent).await,
-        ControlRequest::WorkspaceKindView => workspace_kind_view_response(ctx.agent).await,
+        ControlRequest::WorkspaceRoleClear => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_role_clear_response(&workspace_ctx)
+        }
+        ControlRequest::WorkspaceKindView => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_kind_view_response(&workspace_ctx)
+        }
         ControlRequest::WorkspaceKindSet { kind } => {
-            workspace_kind_set_response(ctx.agent, kind).await
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_kind_set_response(&workspace_ctx, kind)
         }
-        ControlRequest::WorkspaceKindClear => workspace_kind_clear_response(ctx.agent).await,
+        ControlRequest::WorkspaceKindClear => {
+            let workspace_ctx = workspace_control_context(ctx.agent);
+            crate::workspace::control::workspace_kind_clear_response(&workspace_ctx)
+        }
         ControlRequest::SessionStatsView => {
             session_stats_view_response(ctx.runtime_state, ctx.shared_settings, ctx.agent).await
         }
@@ -555,6 +699,7 @@ pub async fn execute_control(
                 ctx.login_prompt_tx,
                 ctx.events_tx,
                 ctx.cli,
+                &ctx.agent.cwd,
                 &provider,
             )
             .await
@@ -590,6 +735,14 @@ pub async fn execute_daemon_control(
             | ControlRequest::SetContextClass { .. }
             | ControlRequest::SetRuntimeMode { .. }
             | ControlRequest::SetMaxTurns { .. }
+            | ControlRequest::ProfileApply
+            | ControlRequest::ProfileCapture
+            | ControlRequest::ProfileSetMqtt { .. }
+            | ControlRequest::ProfileExtensionAllow { .. }
+            | ControlRequest::ProfileExtensionDeny { .. }
+            | ControlRequest::ProfileExtensionClear
+            | ControlRequest::ProfileSetPersona { .. }
+            | ControlRequest::ProfileSetTone { .. }
     );
     // Try stateless handlers first (shared with TUI mode).
     let resp = if let Some(resp) =
@@ -610,6 +763,9 @@ pub async fn execute_daemon_control(
             }
             ControlRequest::SetRuntimeMode { slim } => {
                 set_runtime_mode_daemon_response(shared_settings, cwd, slim).await
+            }
+            ControlRequest::ProfileApply => {
+                profile_apply_daemon_response(shared_settings, cwd).await
             }
             ControlRequest::AuthLogin { provider } => auth_login_daemon_response(&provider).await,
             ControlRequest::ListSessions => {
@@ -1089,925 +1245,129 @@ pub async fn status_view_response(
         &session_kind,
         &authorization,
     );
-    let panel = crate::tui::bootstrap::render_bootstrap(&status, false);
+    let panel = format!(
+        "{}\nAutomation\n  Level:        {} ({})",
+        crate::tui::bootstrap::render_bootstrap(&status, false),
+        settings.automation_level.as_str(),
+        settings.automation_level.summary()
+    );
     SlashCommandResponse {
         accepted: true,
         output: Some(panel),
     }
 }
 
+fn workspace_control_context(
+    agent: &InteractiveAgentHost,
+) -> crate::workspace::control::WorkspaceControlContext<'_> {
+    crate::workspace::control::WorkspaceControlContext::new(
+        &agent.cwd,
+        &agent.session_id,
+        &agent.instance_id,
+    )
+}
+
 pub async fn workspace_status_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let lease = crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten();
-    let registry = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten();
-
-    let Some(lease) = lease else {
-        return SlashCommandResponse {
-            accepted: true,
-            output: Some("Workspace: no local runtime metadata yet.".into()),
-        };
-    };
-
-    let occupancy = registry
-        .as_ref()
-        .map(|registry| registry.workspaces.len())
-        .unwrap_or(1);
-    let owner = lease.owner_session_id.as_deref().unwrap_or("(none)");
-    let milestone = lease.bindings.milestone_id.as_deref().unwrap_or("(none)");
-    let node = lease.bindings.design_node_id.as_deref().unwrap_or("(none)");
-    let change = lease
-        .bindings
-        .openspec_change
-        .as_deref()
-        .unwrap_or("(none)");
-    let text = format!(
-        "Workspace\n  ID:           {}\n  Label:        {}\n  Project:      {}\n  Path:         {}\n  Backend:      {}\n  Branch:       {}\n  Role:         {:?}\n  Kind:         {:?}\n  Mutability:   {:?}\n  Owner:        {}\n  Source:       {}\n  Milestone:    {}\n  Design Node:  {}\n  OpenSpec:     {}\n  Local Views:  {}",
-        lease.workspace_id,
-        lease.label,
-        lease.project_id,
-        lease.path,
-        lease.backend_kind.as_str(),
-        lease.branch,
-        lease.role,
-        lease.workspace_kind,
-        lease.mutability,
-        owner,
-        lease.source,
-        milestone,
-        node,
-        change,
-        occupancy,
-    );
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(text),
-    }
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_status_view_response(&ctx)
 }
 
-pub async fn workspace_role_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let lease = crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten();
-    let Some(lease) = lease else {
-        return SlashCommandResponse {
-            accepted: true,
-            output: Some("Workspace role: no lease metadata yet.".into()),
-        };
-    };
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Workspace Role\n  Current:      {}",
-            lease.role.as_str(),
-        )),
-    }
-}
-
-pub async fn workspace_role_set_response(
-    agent: &InteractiveAgentHost,
-    role: crate::workspace::types::WorkspaceRole,
-) -> SlashCommandResponse {
-    let mut lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace role cannot be set before workspace metadata exists.".into(),
-                ),
-            };
-        }
-    };
-    lease.role = role;
-    if let Err(err) =
-        crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-    {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to update workspace lease: {err}")),
-        };
-    }
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.path == lease.path {
-                workspace.role = role;
-            }
-        }
-        let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!("Workspace role set to {}.", role.as_str())),
-    }
-}
-
-pub async fn workspace_role_clear_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let mut lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace role cannot be cleared before workspace metadata exists.".into(),
-                ),
-            };
-        }
-    };
-    lease.role = crate::workspace::types::WorkspaceRole::Primary;
-    if let Err(err) =
-        crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-    {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to update workspace lease: {err}")),
-        };
-    }
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.path == lease.path {
-                workspace.role = crate::workspace::types::WorkspaceRole::Primary;
-            }
-        }
-        let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some("Workspace role reset to primary.".into()),
-    }
-}
-
-pub async fn workspace_kind_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let lease = crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten();
-    let inferred = crate::workspace::infer::infer_workspace_kind(&agent.cwd);
-    let Some(lease) = lease else {
-        return SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Workspace kind: no lease metadata yet. Inferred kind would be {}.",
-                inferred.as_str()
-            )),
-        };
-    };
-    let declared = lease.workspace_kind;
-    let source = if declared == inferred {
-        "inferred/default"
-    } else {
-        "operator-declared"
-    };
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Workspace Kind\n  Current:      {}\n  Inferred:     {}\n  Source:       {}",
-            declared.as_str(),
-            inferred.as_str(),
-            source,
-        )),
-    }
-}
-
-fn find_workspace_target(
-    registry: &crate::workspace::types::WorkspaceRegistry,
-    target: &str,
-) -> Result<crate::workspace::types::WorkspaceSummary, String> {
-    if let Some(workspace) = registry
-        .workspaces
-        .iter()
-        .find(|workspace| workspace.workspace_id == target)
-    {
-        return Ok(workspace.clone());
-    }
-
-    let matches = registry
-        .workspaces
-        .iter()
-        .filter(|workspace| workspace.label == target)
-        .cloned()
-        .collect::<Vec<_>>();
-    match matches.len() {
-        0 => Err(format!("Workspace '{target}' not found in local registry.")),
-        1 => Ok(matches.into_iter().next().unwrap()),
-        _ => Err(format!(
-            "Workspace label '{target}' is ambiguous; use workspace_id instead."
-        )),
-    }
-}
-
-fn safe_remove_workspace_dir(
-    current_cwd: &Path,
-    repo_root: &Path,
-    workspace_path: &Path,
-) -> Result<(), String> {
-    if workspace_path == current_cwd {
-        return Err("Refusing to destroy the current active workspace path.".into());
-    }
-    if workspace_path == repo_root {
-        return Err("Refusing to destroy the project root workspace.".into());
-    }
-    if workspace_path.exists() {
-        std::fs::remove_dir_all(workspace_path)
-            .map_err(|err| format!("Failed to remove workspace directory: {err}"))?;
-    }
-    Ok(())
-}
-
-pub async fn workspace_destroy_response(
-    agent: &InteractiveAgentHost,
-    target: &str,
-) -> SlashCommandResponse {
-    let registry = match crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(registry) => registry,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some("Workspace destroy requires existing local registry metadata.".into()),
-            };
-        }
-    };
-    let workspace = match find_workspace_target(&registry, target) {
-        Ok(workspace) => workspace,
-        Err(message) => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(message),
-            };
-        }
-    };
-    if workspace.path == agent.cwd.display().to_string() {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some("Refusing to destroy the current active workspace.".into()),
-        };
-    }
-    if workspace.role == crate::workspace::types::WorkspaceRole::Primary {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some("Refusing to destroy the primary workspace.".into()),
-        };
-    }
-    if workspace.owner_session_id.is_some() {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some("Workspace must be released before it can be destroyed.".into()),
-        };
-    }
-    if !workspace.archived {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some("Workspace must be archived before it can be destroyed.".into()),
-        };
-    }
-
-    let repo_root = Path::new(&registry.repo_root);
-    let workspace_path = Path::new(&workspace.path);
-    let removal = match workspace.backend_kind {
-        crate::workspace::types::WorkspaceBackendKind::GitWorktree
-        | crate::workspace::types::WorkspaceBackendKind::JjCheckout => {
-            omegon_git::worktree::remove_smart(repo_root, &workspace.label, workspace_path)
-                .map_err(|err| format!("Failed to remove workspace backend: {err}"))
-        }
-        crate::workspace::types::WorkspaceBackendKind::LocalDir
-        | crate::workspace::types::WorkspaceBackendKind::GitClone => {
-            safe_remove_workspace_dir(&agent.cwd, repo_root, workspace_path)
-        }
-        crate::workspace::types::WorkspaceBackendKind::RemoteDir
-        | crate::workspace::types::WorkspaceBackendKind::PodVolume => Err(
-            "Workspace destroy is not yet implemented for remote-dir/pod-volume backends.".into(),
-        ),
-    };
-    if let Err(message) = removal {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        };
-    }
-
-    let mut updated = registry.clone();
-    updated
-        .workspaces
-        .retain(|entry| entry.workspace_id != workspace.workspace_id);
-    if let Err(err) = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &updated) {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!(
-                "Destroyed workspace but failed to update registry: {err}"
-            )),
-        };
-    }
-
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Destroyed archived workspace {} ({}).",
-            workspace.workspace_id, workspace.label
-        )),
-    }
-}
-
-pub async fn workspace_adopt_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let mut lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some("Workspace adopt requires existing local workspace metadata.".into()),
-            };
-        }
-    };
-    let heartbeat = crate::workspace::runtime::heartbeat_epoch_secs(&lease.last_heartbeat);
-    let now_epoch = chrono::Utc::now().timestamp();
-    let request = crate::workspace::types::WorkspaceAdmissionRequest {
-        requested_role: lease.role,
-        requested_kind: lease.workspace_kind,
-        requested_mutability: lease.mutability,
-        session_id: Some(agent.session_id.clone()),
-        action: crate::workspace::types::WorkspaceActionKind::SessionStart,
-    };
-    let outcome = crate::workspace::admission::classify_admission(
-        Some(&lease),
-        &request,
-        now_epoch,
-        heartbeat,
-    );
-    if !matches!(
-        outcome,
-        crate::workspace::types::AdmissionOutcome::ConflictStaleLeaseAdoptable { .. }
-    ) {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!(
-                "Workspace adopt is only allowed for stale leases. Current admission state: {:?}",
-                outcome
-            )),
-        };
-    }
-    lease.owner_session_id = Some(agent.session_id.clone());
-    lease.owner_agent_id = Some("omegon-local".into());
-    lease.last_heartbeat = crate::workspace::runtime::current_timestamp();
-    if let Err(err) =
-        crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-    {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to adopt workspace lease: {err}")),
-        };
-    }
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.workspace_id == lease.workspace_id {
-                workspace.owner_session_id = lease.owner_session_id.clone();
-                workspace.last_heartbeat = lease.last_heartbeat.clone();
-                workspace.stale = false;
-            }
-        }
-        let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Adopted stale workspace lease for {} ({}).",
-            lease.workspace_id, lease.label
-        )),
-    }
-}
-
-fn rewrite_current_workspace<F>(
-    agent: &InteractiveAgentHost,
-    mutator: F,
-) -> Result<crate::workspace::types::WorkspaceLease, String>
-where
-    F: FnOnce(&mut crate::workspace::types::WorkspaceLease),
-{
-    let mut lease = crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .map_err(|err| format!("Failed to read workspace lease: {err}"))?
-        .ok_or_else(|| "Workspace metadata does not exist yet.".to_string())?;
-    mutator(&mut lease);
-    crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-        .map_err(|err| format!("Failed to update workspace lease: {err}"))?;
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .map_err(|err| format!("Failed to read workspace registry: {err}"))?
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.path == lease.path {
-                workspace.bindings = lease.bindings.clone();
-                workspace.role = lease.role;
-                workspace.workspace_kind = lease.workspace_kind;
-                workspace.owner_session_id = lease.owner_session_id.clone();
-                workspace.last_heartbeat = lease.last_heartbeat.clone();
-                workspace.archived = lease.archived;
-                workspace.archived_at = lease.archived_at.clone();
-                workspace.archive_reason = lease.archive_reason.clone();
-            }
-        }
-        crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry)
-            .map_err(|err| format!("Failed to update workspace registry: {err}"))?;
-    }
-    Ok(lease)
-}
-
-pub async fn workspace_release_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace release requires existing local workspace metadata.".into(),
-                ),
-            };
-        }
-    };
-    if lease.owner_session_id.as_deref() != Some(agent.session_id.as_str()) {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!(
-                "Workspace release requires current ownership. Current owner: {}",
-                lease.owner_session_id.as_deref().unwrap_or("(none)")
-            )),
-        };
-    }
-    match rewrite_current_workspace(agent, |lease| {
-        lease.owner_session_id = None;
-        lease.owner_agent_id = None;
-    }) {
-        Ok(lease) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Released workspace {} ({}). It remains registered but is no longer owned.",
-                lease.workspace_id, lease.label
-            )),
-        },
-        Err(message) => SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        },
-    }
-}
-
-pub async fn workspace_archive_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace archive requires existing local workspace metadata.".into(),
-                ),
-            };
-        }
-    };
-    if lease.owner_session_id.is_some() {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some("Workspace must be released before it can be archived.".into()),
-        };
-    }
-    match rewrite_current_workspace(agent, |lease| {
-        lease.archived = true;
-        lease.archived_at = Some(crate::workspace::runtime::current_timestamp());
-        lease.archive_reason = Some("operator".into());
-    }) {
-        Ok(lease) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Archived workspace {} ({}). It remains on disk but is retired from active use.",
-                lease.workspace_id, lease.label
-            )),
-        },
-        Err(message) => SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        },
-    }
-}
-
-pub async fn workspace_prune_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let mut registry = match crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(registry) => registry,
-        None => {
-            return SlashCommandResponse {
-                accepted: true,
-                output: Some("Workspace registry: nothing to prune.".into()),
-            };
-        }
-    };
-    let before = registry.workspaces.len();
-    registry.workspaces.retain(|workspace| {
-        let path = Path::new(&workspace.path);
-        path.exists() || !workspace.archived
-    });
-    let removed = before.saturating_sub(registry.workspaces.len());
-    if let Err(err) = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry) {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to write workspace registry: {err}")),
-        };
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!("Pruned {} workspace registry entries.", removed)),
-    }
-}
-
-pub async fn workspace_bind_milestone_response(
-    agent: &InteractiveAgentHost,
-    milestone_id: &str,
-) -> SlashCommandResponse {
-    match rewrite_current_workspace(agent, |lease| {
-        lease.bindings.milestone_id = Some(milestone_id.to_string());
-    }) {
-        Ok(lease) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Workspace {} ({}) bound to milestone {}.",
-                lease.workspace_id, lease.label, milestone_id
-            )),
-        },
-        Err(message) => SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        },
-    }
-}
-
-pub async fn workspace_bind_node_response(
-    agent: &InteractiveAgentHost,
-    design_node_id: &str,
-) -> SlashCommandResponse {
-    match rewrite_current_workspace(agent, |lease| {
-        lease.bindings.design_node_id = Some(design_node_id.to_string());
-    }) {
-        Ok(lease) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Workspace {} ({}) bound to design node {}.",
-                lease.workspace_id, lease.label, design_node_id
-            )),
-        },
-        Err(message) => SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        },
-    }
-}
-
-pub async fn workspace_bind_clear_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    match rewrite_current_workspace(agent, |lease| {
-        lease.bindings = crate::workspace::types::WorkspaceBindings::default();
-    }) {
-        Ok(lease) => SlashCommandResponse {
-            accepted: true,
-            output: Some(format!(
-                "Workspace {} ({}) lifecycle bindings cleared.",
-                lease.workspace_id, lease.label
-            )),
-        },
-        Err(message) => SlashCommandResponse {
-            accepted: false,
-            output: Some(message),
-        },
-    }
+pub async fn workspace_list_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_list_view_response(&ctx)
 }
 
 pub async fn workspace_new_response(
     agent: &InteractiveAgentHost,
     label: &str,
 ) -> SlashCommandResponse {
-    let project_root = crate::setup::find_project_root(&agent.cwd);
-    let parent = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace creation requires existing local workspace metadata.".into(),
-                ),
-            };
-        }
-    };
-    let sanitized = label
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_lowercase();
-    if sanitized.is_empty() {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(
-                "Workspace label must contain at least one alphanumeric character.".into(),
-            ),
-        };
-    }
-    let workspace_path = project_root
-        .parent()
-        .unwrap_or(project_root.as_path())
-        .join(format!(
-            "{}-{}",
-            project_root
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("workspace"),
-            sanitized
-        ));
-    let branch = format!("workspace/{}", sanitized);
-    let info = match omegon_git::worktree::create_smart(
-        &project_root,
-        &workspace_path,
-        &sanitized,
-        &branch,
-    ) {
-        Ok(info) => info,
-        Err(err) => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(format!("Failed to create sibling workspace: {err}")),
-            };
-        }
-    };
-    let backend_kind = match info.backend {
-        "jj" => crate::workspace::types::WorkspaceBackendKind::JjCheckout,
-        _ => crate::workspace::types::WorkspaceBackendKind::GitWorktree,
-    };
-    let now = crate::workspace::runtime::current_timestamp();
-    let new_workspace_id = crate::workspace::runtime::workspace_id_from_path(&workspace_path);
-    let new_lease = crate::workspace::types::WorkspaceLease {
-        project_id: parent.project_id.clone(),
-        workspace_id: new_workspace_id.clone(),
-        label: sanitized.clone(),
-        path: workspace_path.display().to_string(),
-        backend_kind,
-        vcs_ref: Some(crate::workspace::types::WorkspaceVcsRef {
-            vcs: if info.backend == "jj" {
-                "jj".into()
-            } else {
-                "git".into()
-            },
-            branch: Some(info.branch.clone()),
-            revision: None,
-            remote: Some("origin".into()),
-        }),
-        bindings: parent.bindings.clone(),
-        branch: info.branch.clone(),
-        role: crate::workspace::types::WorkspaceRole::Feature,
-        workspace_kind: parent.workspace_kind,
-        mutability: crate::workspace::types::Mutability::Mutable,
-        owner_session_id: None,
-        owner_agent_id: None,
-        created_at: now.clone(),
-        last_heartbeat: now.clone(),
-        archived: false,
-        archived_at: None,
-        archive_reason: None,
-        parent_workspace_id: Some(parent.workspace_id.clone()),
-        source: "operator".into(),
-    };
-    if let Err(err) = crate::workspace::runtime::write_workspace_lease(
-        &workspace_path,
-        &agent.instance_id,
-        &new_lease,
-    ) {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!(
-                "Created workspace but failed to write lease metadata: {err}"
-            )),
-        };
-    }
-    let mut registry = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-        .unwrap_or(crate::workspace::types::WorkspaceRegistry {
-            project_id: parent.project_id.clone(),
-            repo_root: project_root.display().to_string(),
-            workspaces: vec![],
-        });
-    registry
-        .workspaces
-        .retain(|ws| ws.workspace_id != new_workspace_id);
-    registry
-        .workspaces
-        .push(crate::workspace::types::WorkspaceSummary {
-            workspace_id: new_lease.workspace_id.clone(),
-            label: new_lease.label.clone(),
-            path: new_lease.path.clone(),
-            backend_kind: new_lease.backend_kind,
-            vcs_ref: new_lease.vcs_ref.clone(),
-            bindings: new_lease.bindings.clone(),
-            branch: new_lease.branch.clone(),
-            role: new_lease.role,
-            workspace_kind: new_lease.workspace_kind,
-            mutability: new_lease.mutability,
-            owner_session_id: new_lease.owner_session_id.clone(),
-            last_heartbeat: new_lease.last_heartbeat.clone(),
-            archived: new_lease.archived,
-            archived_at: new_lease.archived_at.clone(),
-            archive_reason: new_lease.archive_reason.clone(),
-            stale: false,
-        });
-    let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    let _ = crate::workspace::runtime::write_workspace_registry(&workspace_path, &registry);
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Created sibling workspace '{}' at {} using {}.",
-            sanitized,
-            workspace_path.display(),
-            backend_kind.as_str()
-        )),
-    }
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_new_response(&ctx, label)
 }
 
-pub async fn workspace_list_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let registry = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten();
-    let Some(registry) = registry else {
-        return SlashCommandResponse {
-            accepted: true,
-            output: Some("Workspace registry: no local runtime metadata yet.".into()),
-        };
-    };
-    if registry.workspaces.is_empty() {
-        return SlashCommandResponse {
-            accepted: true,
-            output: Some("Workspace registry is empty.".into()),
-        };
-    }
-    let mut lines = vec![format!(
-        "Workspaces\n  Project:      {}\n  Repo Root:    {}\n  Count:        {}\n",
-        registry.project_id,
-        registry.repo_root,
-        registry.workspaces.len()
-    )];
-    for workspace in registry.workspaces {
-        let owner = workspace.owner_session_id.as_deref().unwrap_or("(none)");
-        let milestone = workspace
-            .bindings
-            .milestone_id
-            .as_deref()
-            .unwrap_or("(none)");
-        let node = workspace
-            .bindings
-            .design_node_id
-            .as_deref()
-            .unwrap_or("(none)");
-        let archive = if workspace.archived {
-            format!(
-                "archived at {} ({})",
-                workspace.archived_at.as_deref().unwrap_or("unknown"),
-                workspace.archive_reason.as_deref().unwrap_or("no reason")
-            )
-        } else {
-            "active".to_string()
-        };
-        lines.push(format!(
-            "- {} ({})\n    path: {}\n    backend: {}\n    branch: {}\n    role/kind: {:?} / {:?}\n    milestone/node: {} / {}\n    mutability: {:?}\n    owner: {}\n    archive: {}\n    stale: {}",
-            workspace.workspace_id,
-            workspace.label,
-            workspace.path,
-            workspace.backend_kind.as_str(),
-            workspace.branch,
-            workspace.role,
-            workspace.workspace_kind,
-            milestone,
-            node,
-            workspace.mutability,
-            owner,
-            archive,
-            workspace.stale,
-        ));
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(lines.join("\n")),
-    }
+pub async fn workspace_destroy_response(
+    agent: &InteractiveAgentHost,
+    target: &str,
+) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_destroy_response(&ctx, target)
+}
+
+pub async fn workspace_adopt_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_adopt_response(&ctx)
+}
+
+pub async fn workspace_release_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_release_response(&ctx)
+}
+
+pub async fn workspace_archive_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_archive_response(&ctx)
+}
+
+pub async fn workspace_prune_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_prune_response(&ctx)
+}
+
+pub async fn workspace_bind_milestone_response(
+    agent: &InteractiveAgentHost,
+    milestone_id: &str,
+) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_bind_milestone_response(&ctx, milestone_id)
+}
+
+pub async fn workspace_bind_node_response(
+    agent: &InteractiveAgentHost,
+    design_node_id: &str,
+) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_bind_node_response(&ctx, design_node_id)
+}
+
+pub async fn workspace_bind_clear_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_bind_clear_response(&ctx)
+}
+
+pub async fn workspace_role_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_role_view_response(&ctx)
+}
+
+pub async fn workspace_role_set_response(
+    agent: &InteractiveAgentHost,
+    role: crate::workspace::types::WorkspaceRole,
+) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_role_set_response(&ctx, role)
+}
+
+pub async fn workspace_role_clear_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_role_clear_response(&ctx)
+}
+
+pub async fn workspace_kind_view_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_kind_view_response(&ctx)
 }
 
 pub async fn workspace_kind_set_response(
     agent: &InteractiveAgentHost,
     kind: crate::workspace::types::WorkspaceKind,
 ) -> SlashCommandResponse {
-    let mut lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace kind cannot be set before workspace metadata exists.".into(),
-                ),
-            };
-        }
-    };
-    lease.workspace_kind = kind;
-    if let Err(err) =
-        crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-    {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to update workspace lease: {err}")),
-        };
-    }
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.path == lease.path {
-                workspace.workspace_kind = kind;
-            }
-        }
-        let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!("Workspace kind set to {}.", kind.as_str())),
-    }
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_kind_set_response(&ctx, kind)
 }
 
 pub async fn workspace_kind_clear_response(agent: &InteractiveAgentHost) -> SlashCommandResponse {
-    let mut lease = match crate::workspace::runtime::read_workspace_lease(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        Some(lease) => lease,
-        None => {
-            return SlashCommandResponse {
-                accepted: false,
-                output: Some(
-                    "Workspace kind cannot be cleared before workspace metadata exists.".into(),
-                ),
-            };
-        }
-    };
-    let inferred = crate::workspace::infer::infer_workspace_kind(&agent.cwd);
-    lease.workspace_kind = inferred;
-    if let Err(err) =
-        crate::workspace::runtime::write_workspace_lease(&agent.cwd, &agent.instance_id, &lease)
-    {
-        return SlashCommandResponse {
-            accepted: false,
-            output: Some(format!("Failed to update workspace lease: {err}")),
-        };
-    }
-    if let Some(mut registry) = crate::workspace::runtime::read_workspace_registry(&agent.cwd)
-        .ok()
-        .flatten()
-    {
-        for workspace in &mut registry.workspaces {
-            if workspace.path == lease.path {
-                workspace.workspace_kind = inferred;
-            }
-        }
-        let _ = crate::workspace::runtime::write_workspace_registry(&agent.cwd, &registry);
-    }
-    SlashCommandResponse {
-        accepted: true,
-        output: Some(format!(
-            "Workspace kind reset to inferred value {}.",
-            inferred.as_str()
-        )),
-    }
+    let ctx = workspace_control_context(agent);
+    crate::workspace::control::workspace_kind_clear_response(&ctx)
 }
 
 pub async fn session_stats_view_response(
@@ -2584,6 +1944,7 @@ pub async fn auth_login_response(
     login_prompt_tx: &std::sync::Arc<tokio::sync::Mutex<Option<oneshot::Sender<String>>>>,
     events_tx: &broadcast::Sender<AgentEvent>,
     cli: &CliRuntimeView<'_>,
+    cwd: &Path,
     provider: &str,
 ) -> SlashCommandResponse {
     let provider = provider.trim();
@@ -2618,6 +1979,7 @@ pub async fn auth_login_response(
         .ok()
         .map(|s| s.model.clone())
         .unwrap_or_else(|| cli.model.to_string());
+    let cwd_for_profile = cwd.to_path_buf();
     let settings_for_login = shared_settings.clone();
     tokio::spawn(async move {
         let progress: auth::LoginProgress = Box::new(move |msg| {
@@ -2701,6 +2063,9 @@ pub async fn auth_login_response(
                     s.set_model(&effective_model);
                     s.provider_connected =
                         crate::auth::provider_connected_for_model(&effective_model);
+                    let mut profile = settings::Profile::load(&cwd_for_profile);
+                    profile.capture_from(&s);
+                    let _ = profile.save(&cwd_for_profile);
                 }
                 let _ = events_tx_clone.send(AgentEvent::SystemNotification {
                     message: auth::operator_provider_connected_message(&effective_model),
@@ -2783,7 +2148,9 @@ pub async fn auth_login_daemon_response(provider: &str) -> SlashCommandResponse 
             output: Some(format!(
                 "{} uses OAuth login which requires a browser. \
                      Run `omegon auth login {}` from a terminal with browser access, \
-                     then the daemon will pick up the new credentials on the next request.",
+                     or mount a grant-backed provider auth file and set \
+                     `OMEGON_AUTH_JSON_PATH=/config/omegon/auth.json`. \
+                     The daemon will pick up credentials on the next request.",
                 provider_info.display_name, provider,
             )),
         },
@@ -2794,6 +2161,8 @@ pub async fn auth_login_daemon_response(provider: &str) -> SlashCommandResponse 
                 output: Some(format!(
                     "{} uses API key auth. Set {} in the environment or run \
                      `omegon auth login {}` from a terminal to store the key. \
+                     For Auspex-managed agents, project provider credentials via \
+                     `OMEGON_AUTH_JSON_PATH=/config/omegon/auth.json`. \
                      The daemon will pick up credentials on the next request.",
                     provider_info.display_name, env_hint, provider,
                 )),
@@ -2936,18 +2305,27 @@ pub async fn set_max_turns_response(
 
 pub async fn profile_view_response(
     shared_settings: &settings::SharedSettings,
+    cwd: &Path,
 ) -> SlashCommandResponse {
+    let profile = settings::Profile::load(cwd);
     let output = if let Ok(s) = shared_settings.lock() {
         serde_json::json!({
-            "model": s.model,
-            "thinking_level": s.thinking.as_str(),
-            "context_class": s.effective_requested_class().label(),
-            "context_window": s.context_window,
-            "max_turns": s.max_turns,
-            "slim_mode": s.is_slim(),
-            "posture": serde_json::to_value(&s.posture).unwrap_or(serde_json::json!(null)),
-            "provider_order": s.provider_order,
-            "provider_connected": s.provider_connected,
+            "live": {
+                "model": s.model,
+                "thinkingLevel": s.thinking.as_str(),
+                "contextClass": s.effective_requested_class().label(),
+                "contextWindow": s.context_window,
+                "maxTurns": s.max_turns,
+                "automation": {
+                    "level": s.automation_level.as_str(),
+                    "summary": s.automation_level.summary()
+                },
+                "slimMode": s.is_slim(),
+                "posture": serde_json::to_value(&s.posture).unwrap_or(serde_json::json!(null)),
+                "providerOrder": s.provider_order,
+                "providerConnected": s.provider_connected,
+            },
+            "profile": serde_json::to_value(&profile).unwrap_or(serde_json::json!(null)),
         })
         .to_string()
     } else {
@@ -2956,6 +2334,440 @@ pub async fn profile_view_response(
     SlashCommandResponse {
         accepted: true,
         output: Some(output),
+    }
+}
+
+pub async fn profile_capture_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+) -> SlashCommandResponse {
+    let Ok(s) = shared_settings.lock() else {
+        return SlashCommandResponse {
+            accepted: false,
+            output: Some("failed to read settings".into()),
+        };
+    };
+    let mut profile = settings::Profile::load(cwd);
+    profile.capture_from(&s);
+    match profile.save(cwd) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some("Profile captured from live runtime.".into()),
+        },
+        Err(e) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("failed to save profile: {e}")),
+        },
+    }
+}
+
+pub async fn profile_apply_response(
+    agent: &mut InteractiveAgentHost,
+    runtime_state: &mut InteractiveAgentState,
+    shared_settings: &settings::SharedSettings,
+    bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
+    events_tx: &broadcast::Sender<AgentEvent>,
+) -> SlashCommandResponse {
+    let profile = settings::Profile::load(&agent.cwd);
+    let old_model = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.model.clone())
+        .unwrap_or_default();
+    if let Ok(mut s) = shared_settings.lock() {
+        profile.apply_to_with_posture(&mut s, &agent.cwd);
+    }
+
+    let new_model = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.model.clone())
+        .unwrap_or_default();
+    if !new_model.is_empty()
+        && new_model != old_model
+        && let Some(new_bridge) = providers::auto_detect_bridge(&new_model).await
+    {
+        let mut guard = bridge.write().await;
+        *guard = new_bridge;
+    }
+
+    let (slim, posture_disabled, posture_enabled) = shared_settings
+        .lock()
+        .ok()
+        .map(|s| {
+            (
+                s.is_slim(),
+                s.posture_disabled_tools.clone(),
+                s.posture_enabled_tools.clone(),
+            )
+        })
+        .unwrap_or_default();
+    runtime_state.conversation.set_slim_mode(slim);
+    runtime_state
+        .bus
+        .apply_operator_tool_profile(slim, &posture_disabled, &posture_enabled);
+    if let Some(persona) = profile.persona.as_deref() {
+        let _ = runtime_state
+            .bus
+            .execute_tool(
+                crate::tool_registry::persona::SWITCH_PERSONA,
+                "profile-apply-persona",
+                serde_json::json!({ "name": persona, "reason": "profile apply" }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await;
+    }
+    if let Some(tone) = profile.tone.as_deref() {
+        let _ = runtime_state
+            .bus
+            .execute_tool(
+                crate::tool_registry::persona::SWITCH_TONE,
+                "profile-apply-tone",
+                serde_json::json!({ "name": tone, "reason": "profile apply" }),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await;
+    }
+
+    let mut status = crate::status::HarnessStatus::assemble();
+    if let Ok(settings) = shared_settings.lock().map(|s| s.clone()) {
+        let operating_profile = settings.operating_profile();
+        status.update_routing(
+            settings.effective_requested_class().label(),
+            settings.thinking.as_str(),
+            &status.capability_tier.clone(),
+            operating_profile.posture.effective.display_name(),
+            &operating_profile.summary(),
+            operating_profile
+                .identity
+                .principal_id
+                .as_deref()
+                .unwrap_or("anonymous"),
+            operating_profile
+                .identity
+                .issuer
+                .as_deref()
+                .unwrap_or("unknown"),
+            operating_profile
+                .identity
+                .session_kind
+                .as_deref()
+                .unwrap_or("unknown"),
+            &operating_profile.authorization.summary(),
+        );
+    }
+    status.update_from_bus(&runtime_state.bus);
+    let status_json = runtime_state.bus.emit_harness_status(&status);
+    let _ = events_tx.send(AgentEvent::HarnessStatusChanged { status_json });
+
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(
+            "Profile applied to live runtime. Integration and extension load policy changes take effect on next startup."
+                .into(),
+        ),
+    }
+}
+
+pub async fn profile_apply_daemon_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+) -> SlashCommandResponse {
+    let profile = settings::Profile::load(cwd);
+    if let Ok(mut s) = shared_settings.lock() {
+        profile.apply_to_with_posture(&mut s, cwd);
+        s.provider_connected = crate::auth::provider_connected_for_model(&s.model);
+        SlashCommandResponse {
+            accepted: true,
+            output: Some(
+                "Profile applied to daemon runtime. Integration and extension load policy changes take effect on next startup."
+                    .into(),
+            ),
+        }
+    } else {
+        SlashCommandResponse {
+            accepted: false,
+            output: Some("failed to update settings".into()),
+        }
+    }
+}
+
+pub async fn profile_set_mqtt_response(cwd: &Path, enabled: Option<bool>) -> SlashCommandResponse {
+    let mut profile = settings::Profile::load(cwd);
+    if let Some(enabled) = enabled {
+        profile.integrations.mqtt.enabled = Some(enabled);
+        let output = if enabled {
+            "MQTT bridge profile default enabled. Takes effect on next startup."
+        } else {
+            "MQTT bridge profile default disabled. Takes effect on next startup."
+        };
+        return save_profile_response(cwd, profile, output);
+    }
+
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(format!(
+            "MQTT bridge profile default: {}",
+            match profile.integrations.mqtt.enabled {
+                Some(true) => "enabled",
+                Some(false) => "disabled",
+                None => "unset (disabled by default)",
+            }
+        )),
+    }
+}
+
+pub async fn profile_extension_allow_response(cwd: &Path, name: &str) -> SlashCommandResponse {
+    let name = name.trim();
+    if name.is_empty() {
+        return usage_response("Usage: /profile extension allow <name>");
+    }
+    let mut profile = settings::Profile::load(cwd);
+    retain_not_equal(&mut profile.extensions.disabled, name);
+    push_unique(&mut profile.extensions.enabled, name);
+    save_profile_response(
+        cwd,
+        profile,
+        "Extension allowed in profile. Extension load policy takes effect on next startup.",
+    )
+}
+
+pub async fn profile_extension_deny_response(cwd: &Path, name: &str) -> SlashCommandResponse {
+    let name = name.trim();
+    if name.is_empty() {
+        return usage_response("Usage: /profile extension deny <name>");
+    }
+    let mut profile = settings::Profile::load(cwd);
+    retain_not_equal(&mut profile.extensions.enabled, name);
+    push_unique(&mut profile.extensions.disabled, name);
+    save_profile_response(
+        cwd,
+        profile,
+        "Extension denied in profile. Extension load policy takes effect on next startup.",
+    )
+}
+
+pub async fn profile_extension_clear_response(cwd: &Path) -> SlashCommandResponse {
+    let mut profile = settings::Profile::load(cwd);
+    profile.extensions.enabled.clear();
+    profile.extensions.disabled.clear();
+    save_profile_response(
+        cwd,
+        profile,
+        "Extension profile policy cleared. Installed enabled extensions are loadable again on next startup.",
+    )
+}
+
+pub async fn profile_set_persona_response(cwd: &Path, name: Option<&str>) -> SlashCommandResponse {
+    let mut profile = settings::Profile::load(cwd);
+    profile.persona = name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    save_profile_response(cwd, profile, "Profile default persona updated.")
+}
+
+pub async fn profile_set_tone_response(cwd: &Path, name: Option<&str>) -> SlashCommandResponse {
+    let mut profile = settings::Profile::load(cwd);
+    profile.tone = name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    save_profile_response(cwd, profile, "Profile default tone updated.")
+}
+
+pub async fn permissions_view_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+) -> SlashCommandResponse {
+    let profile = settings::Profile::load(cwd);
+    let live_trusted = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.trusted_directories.clone())
+        .unwrap_or_default();
+    let profile_trusted = profile.effective_trusted_directories();
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(
+            serde_json::json!({
+                "permissions": {
+                    "workspace": cwd.display().to_string(),
+                    "liveTrustedDirectories": live_trusted,
+                    "profileTrustedDirectories": profile_trusted,
+                    "commands": [
+                        "/permissions list",
+                        "/permissions add <path>",
+                        "/permissions remove <path>"
+                    ],
+                    "aliases": ["/trust add <path>", "/trust remove <path>"],
+                    "promptKeys": {
+                        "y": "allow once for this session",
+                        "a": "always allow and save to project profile permissions",
+                        "n": "deny",
+                        "Esc": "deny"
+                    },
+                    "persistence": "always-allow grants are saved under profile.permissions.trustedDirectories",
+                    "hardBoundaries": [
+                        "secrets are still redacted and guarded",
+                        "auth.json material is provider credential material, not an identity grant",
+                        "operator deny always wins"
+                    ]
+                }
+            })
+            .to_string(),
+        ),
+    }
+}
+
+pub async fn automation_view_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+) -> SlashCommandResponse {
+    let profile = settings::Profile::load(cwd);
+    let live_level = shared_settings
+        .lock()
+        .ok()
+        .map(|s| s.automation_level)
+        .unwrap_or_default();
+    let profile_level = profile.automation.level.unwrap_or_default();
+    SlashCommandResponse {
+        accepted: true,
+        output: Some(
+            serde_json::json!({
+                "automation": {
+                    "liveLevel": live_level.as_str(),
+                    "liveSummary": live_level.summary(),
+                    "profileLevel": profile_level.as_str(),
+                    "profileSummary": profile_level.summary(),
+                    "commands": [
+                        "/automation ask",
+                        "/automation guarded",
+                        "/automation flow",
+                        "/automation autonomous",
+                        "/autonomy flow"
+                    ],
+                    "hardBoundaries": [
+                        "permissions",
+                        "security",
+                        "plan gates",
+                        "operator interrupt",
+                        "max turns"
+                    ],
+                    "levels": {
+                        "ask": "never auto-continue text-only proceed prompts",
+                        "guarded": "continue only through low-risk proceed stalls",
+                        "flow": "continue through action-shaped stalls until task completion",
+                        "autonomous": "run to completion within the same hard gates"
+                    }
+                }
+            })
+            .to_string(),
+        ),
+    }
+}
+
+pub async fn automation_set_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+    level: settings::AutomationLevel,
+) -> SlashCommandResponse {
+    if let Ok(mut s) = shared_settings.lock() {
+        s.automation_level = level;
+    }
+    let mut profile = settings::Profile::load(cwd);
+    profile.automation.level = Some(level);
+    save_profile_response(
+        cwd,
+        profile,
+        &format!(
+            "Automation → {} ({})\n\
+             This tunes continuation behavior only; permissions and plan gates remain hard boundaries.",
+            level.as_str(),
+            level.summary()
+        ),
+    )
+}
+
+pub async fn permission_trust_add_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+    path: &str,
+) -> SlashCommandResponse {
+    let path = path.trim();
+    if path.is_empty() {
+        return usage_response("Usage: /permissions add <path>");
+    }
+    if let Ok(mut s) = shared_settings.lock() {
+        push_unique(&mut s.trusted_directories, path);
+    }
+    let mut profile = settings::Profile::load(cwd);
+    profile.add_trusted_directory(path.to_string());
+    save_profile_response(
+        cwd,
+        profile,
+        &format!(
+            "Trusted directory added to project permissions: {path}\n\
+             The agent can now read/write files in this directory."
+        ),
+    )
+}
+
+pub async fn permission_trust_remove_response(
+    shared_settings: &settings::SharedSettings,
+    cwd: &Path,
+    path: &str,
+) -> SlashCommandResponse {
+    let path = path.trim();
+    if path.is_empty() {
+        return usage_response("Usage: /permissions remove <path>");
+    }
+    if let Ok(mut s) = shared_settings.lock() {
+        retain_not_equal(&mut s.trusted_directories, path);
+    }
+    let mut profile = settings::Profile::load(cwd);
+    profile.remove_trusted_directory(path);
+    save_profile_response(
+        cwd,
+        profile,
+        &format!("Trusted directory removed from project permissions: {path}"),
+    )
+}
+
+fn save_profile_response(
+    cwd: &Path,
+    profile: settings::Profile,
+    success: &str,
+) -> SlashCommandResponse {
+    match profile.save(cwd) {
+        Ok(()) => SlashCommandResponse {
+            accepted: true,
+            output: Some(success.to_string()),
+        },
+        Err(e) => SlashCommandResponse {
+            accepted: false,
+            output: Some(format!("failed to save profile: {e}")),
+        },
+    }
+}
+
+fn usage_response(message: &str) -> SlashCommandResponse {
+    SlashCommandResponse {
+        accepted: false,
+        output: Some(message.to_string()),
+    }
+}
+
+fn retain_not_equal(values: &mut Vec<String>, target: &str) {
+    values.retain(|value| !value.eq_ignore_ascii_case(target));
+}
+
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    if !values
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(value))
+    {
+        values.push(value.to_string());
     }
 }
 
@@ -3928,6 +3740,22 @@ pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
         "Authentication Overview".to_string(),
         String::new(),
         format!(
+            "Auth file\n  Path:            {}{}",
+            auth::auth_json_path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "unavailable".into()),
+            if std::env::var("OMEGON_AUTH_JSON_PATH")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .is_some()
+            {
+                " (OMEGON_AUTH_JSON_PATH)"
+            } else {
+                ""
+            }
+        ),
+        String::new(),
+        format!(
             "Providers\n  Authenticated:   {authenticated}/{}",
             status.providers.len()
         ),
@@ -3963,4 +3791,118 @@ pub(crate) fn format_auth_status(status: &auth::AuthStatus) -> String {
     }
 
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn permission_trust_add_remove_updates_live_settings_and_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("AGENTS.md"), "instructions").unwrap();
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+
+        let add = permission_trust_add_response(&settings, tmp.path(), "/tmp/vault").await;
+        assert!(add.accepted);
+        assert!(
+            settings
+                .lock()
+                .unwrap()
+                .trusted_directories
+                .contains(&"/tmp/vault".to_string())
+        );
+        let profile = crate::settings::Profile::load(tmp.path());
+        assert_eq!(
+            profile.permissions.trusted_directories,
+            vec!["/tmp/vault".to_string()]
+        );
+        assert!(profile.trusted_directories.is_empty());
+
+        let remove = permission_trust_remove_response(&settings, tmp.path(), "/tmp/vault").await;
+        assert!(remove.accepted);
+        assert!(
+            !settings
+                .lock()
+                .unwrap()
+                .trusted_directories
+                .contains(&"/tmp/vault".to_string())
+        );
+        let profile = crate::settings::Profile::load(tmp.path());
+        assert!(profile.effective_trusted_directories().is_empty());
+    }
+
+    #[tokio::test]
+    async fn permissions_view_prefers_canonical_permissions_commands() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("AGENTS.md"), "instructions").unwrap();
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+
+        let view = permissions_view_response(&settings, tmp.path()).await;
+        let output = view.output.expect("permissions view output");
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let commands = json["permissions"]["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>();
+        assert!(commands.contains(&"/permissions add <path>"), "{output}");
+        assert!(!commands.contains(&"/trust add <path>"), "{output}");
+        let aliases = json["permissions"]["aliases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>();
+        assert!(aliases.contains(&"/trust add <path>"), "{output}");
+        assert!(
+            output.contains("profile.permissions.trustedDirectories"),
+            "{output}"
+        );
+    }
+
+    #[tokio::test]
+    async fn automation_set_updates_live_settings_and_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("AGENTS.md"), "instructions").unwrap();
+        let settings = crate::settings::shared("anthropic:claude-sonnet-4-6");
+
+        let response =
+            automation_set_response(&settings, tmp.path(), settings::AutomationLevel::Flow).await;
+        assert!(response.accepted);
+        assert_eq!(
+            settings.lock().unwrap().automation_level,
+            settings::AutomationLevel::Flow
+        );
+        let profile = crate::settings::Profile::load(tmp.path());
+        assert_eq!(
+            profile.automation.level,
+            Some(settings::AutomationLevel::Flow)
+        );
+
+        let view = automation_view_response(&settings, tmp.path()).await;
+        let output = view.output.unwrap_or_default();
+        assert!(output.contains("\"liveLevel\":\"flow\""));
+    }
+
+    #[test]
+    fn auth_status_includes_auth_file_surface() {
+        let status = auth::AuthStatus {
+            providers: vec![auth::ProviderInfo {
+                name: "openai-codex".into(),
+                status: auth::ProviderAuthStatus::Authenticated,
+                is_oauth: true,
+                details: Some("stored".into()),
+            }],
+            vault: vec![],
+            secrets: vec![],
+            mcp: vec![],
+        };
+
+        let rendered = format_auth_status(&status);
+        assert!(rendered.contains("Auth file"));
+        assert!(rendered.contains("Provider Status"));
+        assert!(rendered.contains("openai-codex"));
+    }
 }

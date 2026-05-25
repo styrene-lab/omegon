@@ -181,14 +181,25 @@ async fn worker_loop(
     // thread reads them when rebuilding ConfigOption lists.
     if let Ok(mut s) = shared_settings.lock() {
         let profile = crate::settings::Profile::load(&cwd);
+        let has_profile_model = profile.last_used_model.is_some();
         profile.apply_to_with_posture(&mut s, &cwd);
-        s.set_model(&model);
+        if !has_profile_model {
+            s.set_model(&model);
+        }
     }
 
     let agent_setup =
         match crate::setup::AgentSetup::new(&cwd, None, Some(shared_settings.clone())).await {
             Ok(mut setup) => {
+                let setup_instance_id = setup.instance_id.clone();
                 setup.instance_id = crate::paths::instance_id("acp");
+                setup.workspace_state.lease.owner_agent_id = Some("omegon-acp".into());
+                let _ = crate::workspace::runtime::write_workspace_lease(
+                    &cwd,
+                    &setup.instance_id,
+                    &setup.workspace_state.lease,
+                );
+                crate::workspace::runtime::cleanup_instance(&cwd, &setup_instance_id);
                 setup
             }
             Err(e) => {
@@ -197,6 +208,8 @@ async fn worker_loop(
             }
         };
 
+    let session_id = agent_setup.session_id.clone();
+    let instance_id = agent_setup.instance_id.clone();
     let mut bus = agent_setup.bus;
     let mut context_manager = agent_setup.context_manager;
     let mut conversation = agent_setup.conversation;
@@ -315,6 +328,11 @@ async fn worker_loop(
                                 // forwarder will emit the full snapshot.
                                 None
                             }
+                            omegon_traits::AgentEvent::PlanUpdated { snapshot_json } => {
+                                let entries =
+                                    crate::acp::plan_entries_from_snapshot_json(&snapshot_json);
+                                Some(WorkerEvent::PlanUpdate { entries })
+                            }
                             omegon_traits::AgentEvent::SystemNotification { message } => {
                                 Some(WorkerEvent::StatusUpdate(message))
                             }
@@ -399,6 +417,9 @@ async fn worker_loop(
             WorkerRequest::SetModel { value, ack } => {
                 if let Ok(mut s) = shared_settings.lock() {
                     s.set_model(&value);
+                    let mut profile = crate::settings::Profile::load(&cwd);
+                    profile.capture_from(&s);
+                    let _ = profile.save(&cwd);
                 }
                 if let Some(tx) = ack {
                     let _ = tx.send(());
@@ -410,6 +431,9 @@ async fn worker_loop(
                     && let Ok(mut s) = shared_settings.lock()
                 {
                     s.thinking = l;
+                    let mut profile = crate::settings::Profile::load(&cwd);
+                    profile.capture_from(&s);
+                    let _ = profile.save(&cwd);
                 }
                 if let Some(tx) = ack {
                     let _ = tx.send(());
@@ -428,6 +452,9 @@ async fn worker_loop(
                     && let Ok(mut s) = shared_settings.lock()
                 {
                     s.set_posture(p);
+                    let mut profile = crate::settings::Profile::load(&cwd);
+                    profile.capture_from(&s);
+                    let _ = profile.save(&cwd);
                 }
                 if let Some(tx) = ack {
                     let _ = tx.send(());
@@ -443,7 +470,7 @@ async fn worker_loop(
                     &conversation,
                     &shared_settings,
                     &secrets,
-                    &cwd,
+                    workspace_ctx(&cwd, &session_id, &instance_id),
                     &mut bus,
                 )
                 .await;
@@ -527,9 +554,10 @@ async fn handle_control_request(
     conversation: &crate::conversation::ConversationState,
     shared_settings: &crate::settings::SharedSettings,
     secrets: &std::sync::Arc<omegon_secrets::SecretsManager>,
-    cwd: &std::path::Path,
+    workspace_ctx: crate::workspace::control::WorkspaceControlContext<'_>,
     bus: &mut crate::bus::EventBus,
 ) -> String {
+    let cwd = workspace_ctx.cwd;
     let parts: Vec<&str> = command.splitn(2, char::is_whitespace).collect();
     let cmd = parts[0];
     let args = parts.get(1).unwrap_or(&"").trim();
@@ -613,14 +641,132 @@ async fn handle_control_request(
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
-            format!(
-                "Model: {}\nThinking: {}\nPosture: {}\nContext window: {}\nMax turns: {}",
-                settings.model,
-                settings.thinking.as_str(),
-                settings.posture.effective.as_str(),
-                settings.context_window,
-                settings.max_turns,
-            )
+            let profile = crate::settings::Profile::load(cwd);
+            serde_json::json!({
+                "live": {
+                    "model": settings.model,
+                    "thinkingLevel": settings.thinking.as_str(),
+                    "posture": settings.posture.effective.as_str(),
+                    "contextWindow": settings.context_window,
+                    "maxTurns": settings.max_turns,
+                },
+                "profile": profile,
+            })
+            .to_string()
+        }
+
+        "profile_capture" => {
+            let settings = shared_settings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let mut profile = crate::settings::Profile::load(cwd);
+            profile.capture_from(&settings);
+            match profile.save(cwd) {
+                Ok(()) => "Profile captured from live ACP runtime.".into(),
+                Err(e) => format!("failed to save profile: {e}"),
+            }
+        }
+
+        "profile_apply" => {
+            let profile = crate::settings::Profile::load(cwd);
+            if let Ok(mut settings) = shared_settings.lock() {
+                profile.apply_to_with_posture(&mut settings, cwd);
+                let slim = settings.is_slim();
+                let disabled = settings.posture_disabled_tools.clone();
+                let enabled = settings.posture_enabled_tools.clone();
+                drop(settings);
+                bus.apply_operator_tool_profile(slim, &disabled, &enabled);
+                "Profile applied to ACP runtime. Integration and extension load policy changes take effect on next startup.".into()
+            } else {
+                "failed to update settings".into()
+            }
+        }
+
+        "profile_mqtt" => {
+            let mut profile = crate::settings::Profile::load(cwd);
+            match args {
+                "on" | "enable" | "true" => profile.integrations.mqtt.enabled = Some(true),
+                "off" | "disable" | "false" => profile.integrations.mqtt.enabled = Some(false),
+                "" | "status" => {
+                    return match profile.integrations.mqtt.enabled {
+                        Some(true) => "MQTT bridge profile default: enabled".into(),
+                        Some(false) => "MQTT bridge profile default: disabled".into(),
+                        None => "MQTT bridge profile default: unset (disabled by default)".into(),
+                    };
+                }
+                _ => return "Usage: profile_mqtt [on|off|status]".into(),
+            }
+            match profile.save(cwd) {
+                Ok(()) => {
+                    "MQTT bridge profile default updated. Takes effect on next startup.".into()
+                }
+                Err(e) => format!("failed to save profile: {e}"),
+            }
+        }
+
+        "profile_extension_allow" | "profile_extension_deny" => {
+            if args.is_empty() {
+                return format!("Usage: {cmd} <name>");
+            }
+            let mut profile = crate::settings::Profile::load(cwd);
+            let name = args.to_string();
+            if cmd == "profile_extension_allow" {
+                profile
+                    .extensions
+                    .disabled
+                    .retain(|v| !v.eq_ignore_ascii_case(&name));
+                if !profile
+                    .extensions
+                    .enabled
+                    .iter()
+                    .any(|v| v.eq_ignore_ascii_case(&name))
+                {
+                    profile.extensions.enabled.push(name);
+                }
+            } else {
+                profile
+                    .extensions
+                    .enabled
+                    .retain(|v| !v.eq_ignore_ascii_case(&name));
+                if !profile
+                    .extensions
+                    .disabled
+                    .iter()
+                    .any(|v| v.eq_ignore_ascii_case(&name))
+                {
+                    profile.extensions.disabled.push(name);
+                }
+            }
+            match profile.save(cwd) {
+                Ok(()) => "Extension profile policy updated. Takes effect on next startup.".into(),
+                Err(e) => format!("failed to save profile: {e}"),
+            }
+        }
+
+        "profile_extension_clear" => {
+            let mut profile = crate::settings::Profile::load(cwd);
+            profile.extensions.enabled.clear();
+            profile.extensions.disabled.clear();
+            match profile.save(cwd) {
+                Ok(()) => "Extension profile policy cleared.".into(),
+                Err(e) => format!("failed to save profile: {e}"),
+            }
+        }
+
+        "profile_persona" | "profile_tone" => {
+            let mut profile = crate::settings::Profile::load(cwd);
+            let value =
+                (!args.is_empty() && args != "off" && args != "clear").then(|| args.to_string());
+            if cmd == "profile_persona" {
+                profile.persona = value;
+            } else {
+                profile.tone = value;
+            }
+            match profile.save(cwd) {
+                Ok(()) => "Profile default updated.".into(),
+                Err(e) => format!("failed to save profile: {e}"),
+            }
         }
 
         "context_status" => {
@@ -712,48 +858,97 @@ async fn handle_control_request(
         }
 
         // ── Workspace ────────────────────────────────────
-        "workspace_status" => {
-            use crate::workspace::runtime::{read_workspace_lease, read_workspace_registry};
-            match read_workspace_lease(cwd).ok().flatten() {
-                Some(lease) => {
-                    let occupancy = read_workspace_registry(cwd)
-                        .ok()
-                        .flatten()
-                        .map(|r| r.workspaces.len())
-                        .unwrap_or(1);
-                    format!(
-                        "Workspace\n  ID: {}\n  Label: {}\n  Path: {}\n  Backend: {}\n  Branch: {}\n  Role: {:?}\n  Kind: {:?}\n  Mutability: {:?}\n  Local views: {}",
-                        lease.workspace_id,
-                        lease.label,
-                        lease.path,
-                        lease.backend_kind.as_str(),
-                        lease.branch,
-                        lease.role,
-                        lease.workspace_kind,
-                        lease.mutability,
-                        occupancy,
-                    )
-                }
-                None => "Workspace: no local runtime metadata yet.".into(),
+        "workspace_status" => workspace_response_text(
+            crate::workspace::control::workspace_status_view_response(&workspace_ctx),
+        ),
+        "workspace_list" => workspace_response_text(
+            crate::workspace::control::workspace_list_view_response(&workspace_ctx),
+        ),
+        "workspace_new" => {
+            if args.is_empty() {
+                "Usage: workspace_new <label>".into()
+            } else {
+                workspace_response_text(crate::workspace::control::workspace_new_response(
+                    &workspace_ctx,
+                    args,
+                ))
             }
         }
-
-        "workspace_list" => {
-            use crate::workspace::runtime::read_workspace_registry;
-            match read_workspace_registry(cwd).ok().flatten() {
-                Some(registry) => {
-                    let mut out = format!("Workspaces ({}):\n", registry.workspaces.len());
-                    for ws in &registry.workspaces {
-                        out.push_str(&format!(
-                            "  {} — {} ({:?})\n",
-                            ws.workspace_id, ws.label, ws.role
-                        ));
-                    }
-                    out
-                }
-                None => "No workspace registry found.".into(),
+        "workspace_destroy" => {
+            if args.is_empty() {
+                "Usage: workspace_destroy <workspace_id|label>".into()
+            } else {
+                workspace_response_text(crate::workspace::control::workspace_destroy_response(
+                    &workspace_ctx,
+                    args,
+                ))
             }
         }
+        "workspace_adopt" => workspace_response_text(
+            crate::workspace::control::workspace_adopt_response(&workspace_ctx),
+        ),
+        "workspace_release" => workspace_response_text(
+            crate::workspace::control::workspace_release_response(&workspace_ctx),
+        ),
+        "workspace_archive" => workspace_response_text(
+            crate::workspace::control::workspace_archive_response(&workspace_ctx),
+        ),
+        "workspace_prune" => workspace_response_text(
+            crate::workspace::control::workspace_prune_response(&workspace_ctx),
+        ),
+        "workspace_bind_milestone" => {
+            if args.is_empty() {
+                "Usage: workspace_bind_milestone <milestone_id>".into()
+            } else {
+                workspace_response_text(crate::workspace::control::workspace_bind_milestone_response(
+                    &workspace_ctx,
+                    args,
+                ))
+            }
+        }
+        "workspace_bind_node" => {
+            if args.is_empty() {
+                "Usage: workspace_bind_node <design_node_id>".into()
+            } else {
+                workspace_response_text(crate::workspace::control::workspace_bind_node_response(
+                    &workspace_ctx,
+                    args,
+                ))
+            }
+        }
+        "workspace_bind_clear" => workspace_response_text(
+            crate::workspace::control::workspace_bind_clear_response(&workspace_ctx),
+        ),
+        "workspace_role" => workspace_response_text(
+            crate::workspace::control::workspace_role_view_response(&workspace_ctx),
+        ),
+        "workspace_role_set" => match crate::workspace::types::WorkspaceRole::parse(args) {
+            Some(role) => workspace_response_text(
+                crate::workspace::control::workspace_role_set_response(
+                    &workspace_ctx,
+                    role,
+                ),
+            ),
+            None => "Usage: workspace_role_set <primary|feature|cleave-child|benchmark|release|exploratory|read-only>".into(),
+        },
+        "workspace_role_clear" => workspace_response_text(
+            crate::workspace::control::workspace_role_clear_response(&workspace_ctx),
+        ),
+        "workspace_kind" => workspace_response_text(
+            crate::workspace::control::workspace_kind_view_response(&workspace_ctx),
+        ),
+        "workspace_kind_set" => match crate::workspace::types::WorkspaceKind::parse(args) {
+            Some(kind) => workspace_response_text(
+                crate::workspace::control::workspace_kind_set_response(
+                    &workspace_ctx,
+                    kind,
+                ),
+            ),
+            None => "Usage: workspace_kind_set <code|vault|knowledge|spec|mixed|generic>".into(),
+        },
+        "workspace_kind_clear" => workspace_response_text(
+            crate::workspace::control::workspace_kind_clear_response(&workspace_ctx),
+        ),
 
         // ── Design tree ────────────────────────────────
         "tree_view" => match bus.dispatch_command("design", args) {
@@ -810,6 +1005,25 @@ async fn handle_control_request(
 
         _ => format!("Unknown control request: {command}"),
     }
+}
+
+fn workspace_ctx<'a>(
+    cwd: &'a std::path::Path,
+    session_id: &'a str,
+    instance_id: &'a str,
+) -> crate::workspace::control::WorkspaceControlContext<'a> {
+    crate::workspace::control::WorkspaceControlContext::new(cwd, session_id, instance_id)
+        .with_owner_agent_id("omegon-acp")
+}
+
+fn workspace_response_text(response: omegon_traits::SlashCommandResponse) -> String {
+    response.output.unwrap_or_else(|| {
+        if response.accepted {
+            "Workspace command accepted.".into()
+        } else {
+            "Workspace command rejected.".into()
+        }
+    })
 }
 
 /// Convert raw agent loop errors into actionable messages for the user.

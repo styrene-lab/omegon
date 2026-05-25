@@ -4,7 +4,7 @@
 //! advertise capabilities for file I/O, terminal execution, and permission
 //! mediation. This module captures those capabilities and provides a
 //! channel-based proxy so the worker thread can call host methods without
-//! holding a reference to the !Send `AgentSideConnection`.
+//! holding a reference to the !Send ACP client connection.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -223,8 +223,126 @@ pub struct HostContext {
 }
 
 // ---------------------------------------------------------------------------
+// ACP client operations boundary. Keep direct SDK method calls here so the
+// 0.12 migration can replace this layer without disturbing worker-side host
+// delegation semantics.
+// ---------------------------------------------------------------------------
+
+async fn acp_read_text_file(
+    client: &crate::acp::AcpClientConnection,
+    session_id: SessionId,
+    path: PathBuf,
+) -> agent_client_protocol::Result<ReadTextFileResponse> {
+    client
+        .read_text_file(ReadTextFileRequest::new(session_id, path))
+        .await
+}
+
+async fn acp_write_text_file(
+    client: &crate::acp::AcpClientConnection,
+    session_id: SessionId,
+    path: PathBuf,
+    content: String,
+) -> agent_client_protocol::Result<WriteTextFileResponse> {
+    client
+        .write_text_file(WriteTextFileRequest::new(session_id, path, content))
+        .await
+}
+
+async fn acp_create_terminal(
+    client: &crate::acp::AcpClientConnection,
+    session_id: SessionId,
+    command: String,
+    args: Vec<String>,
+    cwd: Option<PathBuf>,
+    output_byte_limit: Option<u64>,
+) -> agent_client_protocol::Result<CreateTerminalResponse> {
+    let mut request = CreateTerminalRequest::new(session_id, command);
+    if !args.is_empty() {
+        request = request.args(args);
+    }
+    if let Some(cwd) = cwd {
+        request = request.cwd(cwd);
+    }
+    if let Some(limit) = output_byte_limit {
+        request = request.output_byte_limit(limit);
+    }
+    client.create_terminal(request).await
+}
+
+async fn acp_terminal_output(
+    client: &crate::acp::AcpClientConnection,
+    session_id: SessionId,
+    terminal_id: TerminalId,
+) -> agent_client_protocol::Result<TerminalOutputResponse> {
+    client
+        .terminal_output(TerminalOutputRequest::new(session_id, terminal_id))
+        .await
+}
+
+async fn acp_wait_for_terminal_exit(
+    client: &crate::acp::AcpClientConnection,
+    session_id: SessionId,
+    terminal_id: TerminalId,
+) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
+    client
+        .wait_for_terminal_exit(WaitForTerminalExitRequest::new(session_id, terminal_id))
+        .await
+}
+
+async fn acp_kill_terminal(
+    client: &crate::acp::AcpClientConnection,
+    session_id: SessionId,
+    terminal_id: TerminalId,
+) -> agent_client_protocol::Result<KillTerminalResponse> {
+    client
+        .kill_terminal(KillTerminalRequest::new(session_id, terminal_id))
+        .await
+}
+
+async fn acp_release_terminal(
+    client: &crate::acp::AcpClientConnection,
+    session_id: SessionId,
+    terminal_id: TerminalId,
+) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
+    client
+        .release_terminal(ReleaseTerminalRequest::new(session_id, terminal_id))
+        .await
+}
+
+async fn acp_request_permission(
+    client: &crate::acp::AcpClientConnection,
+    session_id: SessionId,
+    tool_call_id: String,
+    tool_name: String,
+    path: String,
+) -> agent_client_protocol::Result<RequestPermissionResponse> {
+    let tool_call = ToolCallUpdate::new(
+        tool_call_id,
+        ToolCallUpdateFields::new()
+            .status(ToolCallStatus::InProgress)
+            .title(tool_name)
+            .raw_input(Value::String(format!("Access path: {path}"))),
+    );
+    let options = vec![
+        PermissionOption::new("allow_once", "Allow once", PermissionOptionKind::AllowOnce),
+        PermissionOption::new(
+            "allow_always",
+            "Allow always (save)",
+            PermissionOptionKind::AllowAlways,
+        ),
+        PermissionOption::new("reject_once", "Reject", PermissionOptionKind::RejectOnce),
+    ];
+    client
+        .request_permission(RequestPermissionRequest::new(
+            session_id, tool_call, options,
+        ))
+        .await
+}
+
+// ---------------------------------------------------------------------------
 // ACP-thread pump — receives HostProxyRequests and executes them on the
-// AgentSideConnection (which implements Client).
+// ACP client connection.
 //
 // The pump borrows conn across .await just like the existing event
 // forwarder in acp.rs (which has #[allow(clippy::await_holding_refcell_ref)]
@@ -237,7 +355,7 @@ pub struct HostContext {
 #[allow(clippy::await_holding_refcell_ref)]
 pub fn spawn_proxy_pump(
     mut rx: mpsc::Receiver<HostProxyRequest>,
-    conn: std::rc::Rc<std::cell::RefCell<Option<AgentSideConnection>>>,
+    conn: crate::acp::SharedAcpClientConnection,
     session_id: SessionId,
 ) {
     tokio::task::spawn_local(async move {
@@ -281,11 +399,14 @@ pub fn spawn_proxy_pump(
 
             match req {
                 HostProxyRequest::ReadTextFile { path, reply } => {
-                    let r = ReadTextFileRequest::new(session_id.clone(), path);
-                    let result = client.read_text_file(r).await;
+                    let result = acp_read_text_file(client, session_id.clone(), path.clone()).await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp.content),
-                        Err(e) => Err(anyhow::anyhow!("host read_text_file: {}", e.message)),
+                        Err(e) => Err(anyhow::anyhow!(
+                            "host read_text_file {}: {}",
+                            path.display(),
+                            e.message
+                        )),
                     });
                 }
                 HostProxyRequest::WriteTextFile {
@@ -293,11 +414,16 @@ pub fn spawn_proxy_pump(
                     content,
                     reply,
                 } => {
-                    let r = WriteTextFileRequest::new(session_id.clone(), path, content);
-                    let result = client.write_text_file(r).await;
+                    let result =
+                        acp_write_text_file(client, session_id.clone(), path.clone(), content)
+                            .await;
                     let _ = reply.send(match result {
                         Ok(_) => Ok(()),
-                        Err(e) => Err(anyhow::anyhow!("host write_text_file: {}", e.message)),
+                        Err(e) => Err(anyhow::anyhow!(
+                            "host write_text_file {}: {}",
+                            path.display(),
+                            e.message
+                        )),
                     });
                 }
                 HostProxyRequest::CreateTerminal {
@@ -307,33 +433,30 @@ pub fn spawn_proxy_pump(
                     output_byte_limit,
                     reply,
                 } => {
-                    let mut r = CreateTerminalRequest::new(session_id.clone(), command);
-                    if !args.is_empty() {
-                        r = r.args(args);
-                    }
-                    if let Some(d) = cwd {
-                        r = r.cwd(d);
-                    }
-                    if let Some(l) = output_byte_limit {
-                        r = r.output_byte_limit(l);
-                    }
-                    let result = client.create_terminal(r).await;
+                    let result = acp_create_terminal(
+                        client,
+                        session_id.clone(),
+                        command,
+                        args,
+                        cwd,
+                        output_byte_limit,
+                    )
+                    .await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp.terminal_id),
                         Err(e) => Err(anyhow::anyhow!("host create_terminal: {}", e.message)),
                     });
                 }
                 HostProxyRequest::TerminalOutput { terminal_id, reply } => {
-                    let r = TerminalOutputRequest::new(session_id.clone(), terminal_id);
-                    let result = client.terminal_output(r).await;
+                    let result = acp_terminal_output(client, session_id.clone(), terminal_id).await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp),
                         Err(e) => Err(anyhow::anyhow!("host terminal_output: {}", e.message)),
                     });
                 }
                 HostProxyRequest::WaitForTerminalExit { terminal_id, reply } => {
-                    let r = WaitForTerminalExitRequest::new(session_id.clone(), terminal_id);
-                    let result = client.wait_for_terminal_exit(r).await;
+                    let result =
+                        acp_wait_for_terminal_exit(client, session_id.clone(), terminal_id).await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp),
                         Err(e) => Err(anyhow::anyhow!(
@@ -343,16 +466,15 @@ pub fn spawn_proxy_pump(
                     });
                 }
                 HostProxyRequest::KillTerminal { terminal_id, reply } => {
-                    let r = KillTerminalRequest::new(session_id.clone(), terminal_id);
-                    let result = client.kill_terminal(r).await;
+                    let result = acp_kill_terminal(client, session_id.clone(), terminal_id).await;
                     let _ = reply.send(match result {
                         Ok(_) => Ok(()),
                         Err(e) => Err(anyhow::anyhow!("host kill_terminal: {}", e.message)),
                     });
                 }
                 HostProxyRequest::ReleaseTerminal { terminal_id, reply } => {
-                    let r = ReleaseTerminalRequest::new(session_id.clone(), terminal_id);
-                    let result = client.release_terminal(r).await;
+                    let result =
+                        acp_release_terminal(client, session_id.clone(), terminal_id).await;
                     let _ = reply.send(match result {
                         Ok(_) => Ok(()),
                         Err(e) => Err(anyhow::anyhow!("host release_terminal: {}", e.message)),
@@ -364,32 +486,14 @@ pub fn spawn_proxy_pump(
                     path,
                     reply,
                 } => {
-                    let tool_call = ToolCallUpdate::new(
+                    let result = acp_request_permission(
+                        client,
+                        session_id.clone(),
                         tool_call_id,
-                        ToolCallUpdateFields::new()
-                            .status(ToolCallStatus::InProgress)
-                            .title(tool_name)
-                            .raw_input(Value::String(format!("Access path: {path}"))),
-                    );
-                    let options = vec![
-                        PermissionOption::new(
-                            "allow_once",
-                            "Allow once",
-                            PermissionOptionKind::AllowOnce,
-                        ),
-                        PermissionOption::new(
-                            "allow_always",
-                            "Allow always",
-                            PermissionOptionKind::AllowAlways,
-                        ),
-                        PermissionOption::new(
-                            "reject_once",
-                            "Reject",
-                            PermissionOptionKind::RejectOnce,
-                        ),
-                    ];
-                    let r = RequestPermissionRequest::new(session_id.clone(), tool_call, options);
-                    let result = client.request_permission(r).await;
+                        tool_name,
+                        path,
+                    )
+                    .await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp.outcome),
                         Err(e) => Err(anyhow::anyhow!("host request_permission: {}", e.message)),
@@ -470,9 +574,18 @@ async fn delegate_read(
     offset: Option<usize>,
     limit: Option<usize>,
 ) -> anyhow::Result<ToolResult> {
-    // Read the entire file from the host — we do all slicing locally to
-    // match the exact output format the local read tool produces.
-    let content = ctx.proxy.read_text_file(path).await?;
+    // Prefer the host when available so editor clients can apply their own
+    // workspace/security semantics. If the host rejects a normal local file,
+    // fall back to local read instead of making ACP-host flakiness break tools.
+    let content = match ctx.proxy.read_text_file(path.clone()).await {
+        Ok(content) => content,
+        Err(host_err) if path.is_file() => std::fs::read_to_string(&path).map_err(|local_err| {
+            anyhow::anyhow!(
+                "host read failed for {path_str}: {host_err}; local fallback failed: {local_err}"
+            )
+        })?,
+        Err(host_err) => return Err(host_err),
+    };
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();
 
@@ -517,7 +630,39 @@ async fn delegate_write(
     path_str: &str,
     content: &str,
 ) -> anyhow::Result<ToolResult> {
-    ctx.proxy.write_text_file(path, content.to_string()).await?;
+    let permission = ctx
+        .proxy
+        .request_permission(
+            format!("write:{}", path.display()),
+            "write".to_string(),
+            path_str.to_string(),
+        )
+        .await?;
+    if !matches!(
+        permission,
+        RequestPermissionOutcome::Selected(sel) if sel.option_id.0.as_ref() == "allow_once" || sel.option_id.0.as_ref() == "allow_always"
+    ) {
+        anyhow::bail!("write denied by ACP host for {path_str}");
+    }
+
+    let host_result = ctx
+        .proxy
+        .write_text_file(path.clone(), content.to_string())
+        .await;
+    if let Err(host_err) = host_result {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|local_err| {
+                anyhow::anyhow!(
+                    "host write failed for {path_str}: {host_err}; local parent creation failed: {local_err}"
+                )
+            })?;
+        }
+        std::fs::write(&path, content).map_err(|local_err| {
+            anyhow::anyhow!(
+                "host write failed for {path_str}: {host_err}; local fallback failed: {local_err}"
+            )
+        })?;
+    }
 
     let line_count = content.lines().count();
     let byte_count = content.len();

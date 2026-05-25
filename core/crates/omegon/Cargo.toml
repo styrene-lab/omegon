@@ -88,6 +88,9 @@ percent-encoding = "2"
 styrene-mqtt = "0.1.0"
 cron = "0.16"
 notify = "8.0"
+content_inspector = "0.2"
+mime_guess = "2"
+portable-pty = "0.9.0"
 
 # Local embedding (optional — adds ~15MB ONNX Runtime to binary)
 ort = { version = "2.0.0-rc.12", optional = true, features = ["ndarray"] }

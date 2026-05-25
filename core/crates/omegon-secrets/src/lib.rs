@@ -540,6 +540,20 @@ impl SecretsManager {
         redactor.redact_strings(texts);
     }
 
+    /// Add a runtime-discovered secret value to the redaction set without
+    /// creating or changing a persisted recipe. Used for projected credentials
+    /// such as provider auth.json entries.
+    pub fn register_redaction_secret(&self, name: &str, value: &str) {
+        if value.is_empty() {
+            return;
+        }
+        self.redaction_set
+            .write()
+            .unwrap()
+            .insert(name.to_string(), SecretString::from(value.to_string()));
+        self.rebuild_redactor();
+    }
+
     /// Check if a tool call should be guarded (sensitive path access).
     pub fn check_guard(&self, tool_name: &str, args: &serde_json::Value) -> Option<GuardDecision> {
         let decision = self.path_guard.check(tool_name, args);
@@ -713,6 +727,19 @@ impl SecretsManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_projected_secret_is_redacted_without_recipe() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = SecretsManager::new(dir.path()).unwrap();
+        mgr.register_redaction_secret("CHATGPT_OAUTH_TOKEN", "projected-oauth-token");
+
+        let redacted = mgr.redact("Authorization: Bearer projected-oauth-token");
+        assert_eq!(
+            redacted,
+            "Authorization: Bearer [REDACTED:CHATGPT_OAUTH_TOKEN]"
+        );
+    }
 
     #[tokio::test]
     async fn init_vault_uses_configured_token_secret_name() {

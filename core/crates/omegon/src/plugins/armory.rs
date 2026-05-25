@@ -5,6 +5,7 @@
 
 use omegon_traits::ToolCapability;
 use serde::Deserialize;
+use std::collections::HashSet;
 
 /// Plugin type discriminator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -40,6 +41,9 @@ pub struct ArmoryManifest {
     /// Functional tools — script-backed, HTTP-backed, OCI, or WASM-backed.
     #[serde(default)]
     pub tools: Vec<ToolEntry>,
+    /// Validator declarations — route file validation to named plugin tools.
+    #[serde(default)]
+    pub validators: Vec<ValidatorEntry>,
     /// MCP servers — tools discovered via Model Context Protocol.
     #[serde(default)]
     pub mcp_servers: std::collections::HashMap<String, super::mcp::McpServerConfig>,
@@ -119,6 +123,134 @@ pub struct ToolEntry {
     /// Execution timeout in seconds (default: 30).
     #[serde(default = "default_tool_timeout")]
     pub timeout_secs: u64,
+}
+
+/// A validator declaration for file types not covered by Omegon's built-ins.
+///
+/// Validators point at a declared tool. The tool keeps the normal Armory
+/// JSON stdin/stdout contract; Omegon uses this metadata to recommend the
+/// right installed validator when the built-in `validate` tool skips a path.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValidatorEntry {
+    pub name: String,
+    /// Tool name from this manifest's `[[tools]]` list.
+    pub tool: String,
+    /// File extensions without leading dots, e.g. `md`, `toml`, `pkl`.
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    /// Optional glob-like hints for humans and future richer routing.
+    #[serde(default)]
+    pub globs: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+impl ValidatorEntry {
+    pub fn matches_path(&self, path: &std::path::Path) -> bool {
+        let extension_matches = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                self.extensions
+                    .iter()
+                    .any(|candidate| candidate.trim_start_matches('.').eq_ignore_ascii_case(ext))
+            });
+        extension_matches
+            || self
+                .globs
+                .iter()
+                .any(|pattern| validator_glob_matches(pattern, path))
+    }
+
+    fn validate(&self, tool_names: &HashSet<&str>) -> Vec<String> {
+        let mut errors = Vec::new();
+        if self.name.trim().is_empty() {
+            errors.push("validator entry must have a non-empty name".into());
+        }
+        if self.tool.trim().is_empty() {
+            errors.push(format!("validator '{}': tool must not be empty", self.name));
+        } else if !tool_names.contains(self.tool.as_str()) {
+            errors.push(format!(
+                "validator '{}': referenced tool '{}' is not declared in [[tools]]",
+                self.name, self.tool
+            ));
+        }
+        if self.extensions.is_empty() && self.globs.is_empty() {
+            errors.push(format!(
+                "validator '{}': must declare extensions or globs",
+                self.name
+            ));
+        }
+        errors
+    }
+}
+
+fn validator_glob_matches(pattern: &str, path: &std::path::Path) -> bool {
+    let pattern = pattern.trim().replace('\\', "/");
+    if pattern.is_empty() {
+        return false;
+    }
+
+    let Some(path) = path.to_str().map(|path| path.replace('\\', "/")) else {
+        return false;
+    };
+
+    if validator_pattern_matches(&pattern, &path) {
+        return true;
+    }
+
+    let path_segments = path.split('/').collect::<Vec<_>>();
+    for index in 0..path_segments.len() {
+        let suffix = path_segments[index..].join("/");
+        if validator_pattern_matches(&pattern, &suffix) {
+            return true;
+        }
+    }
+
+    path_segments
+        .last()
+        .is_some_and(|basename| validator_pattern_matches(&pattern, basename))
+}
+
+fn validator_pattern_matches(pattern: &str, value: &str) -> bool {
+    if wildcard_matches(pattern, value) {
+        return true;
+    }
+    let zero_depth_pattern = pattern.replace("/**/", "/");
+    zero_depth_pattern != pattern && wildcard_matches(&zero_depth_pattern, value)
+}
+
+fn wildcard_matches(pattern: &str, value: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let value = value.as_bytes();
+    let (mut pattern_index, mut value_index) = (0, 0);
+    let mut star_index = None;
+    let mut star_value_index = 0;
+
+    while value_index < value.len() {
+        if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star_index = Some(pattern_index);
+            pattern_index += 1;
+            star_value_index = value_index;
+        } else if pattern_index < pattern.len()
+            && pattern[pattern_index].eq_ignore_ascii_case(&value[value_index])
+        {
+            pattern_index += 1;
+            value_index += 1;
+        } else if let Some(star) = star_index {
+            pattern_index = star + 1;
+            star_value_index += 1;
+            value_index = star_value_index;
+        } else {
+            return false;
+        }
+    }
+
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+
+    pattern_index == pattern.len()
 }
 
 fn default_params() -> serde_json::Value {
@@ -432,7 +564,9 @@ impl ArmoryManifest {
                 }
             }
             PluginType::Extension => {
-                // Extensions must have at least one tool or context entry
+                // Extensions must have at least one tool or context entry.
+                // Validator entries target tools, so they are covered by
+                // the tool check once their references are validated below.
                 if self.tools.is_empty() && self.context.is_none() {
                     errors.push(
                         "extension plugin must have at least one [[tools]] entry or [context]"
@@ -445,6 +579,11 @@ impl ArmoryManifest {
         // Validate tool entries
         for tool in &self.tools {
             errors.extend(tool.validate());
+        }
+
+        let tool_names = self.tools.iter().map(|tool| tool.name.as_str()).collect();
+        for validator in &self.validators {
+            errors.extend(validator.validate(&tool_names));
         }
 
         errors
@@ -854,6 +993,85 @@ mod tests {
         let errors = manifest.validate();
         assert!(
             errors.iter().any(|e| e.contains("must have either")),
+            "errors: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn parse_validator_declaration() {
+        let toml = r#"
+            [plugin]
+            type = "extension"
+            id = "dev.example.docs-validator"
+            name = "Docs Validator"
+            version = "1.0.0"
+            description = "Validate Markdown documentation"
+
+            [[tools]]
+            name = "validate_docs"
+            description = "Validate Markdown files"
+            runner = "bash"
+            script = "tools/validate-docs.sh"
+
+            [[validators]]
+            name = "markdown"
+            tool = "validate_docs"
+            extensions = ["md", "mdx"]
+            globs = ["docs/**/*.md"]
+            description = "Markdown documentation validation"
+        "#;
+        let manifest = ArmoryManifest::parse(toml).unwrap();
+        assert!(manifest.validate().is_empty());
+        assert_eq!(manifest.validators.len(), 1);
+        assert!(manifest.validators[0].matches_path(std::path::Path::new("docs/readme.md")));
+        assert!(!manifest.validators[0].matches_path(std::path::Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn validator_globs_match_nested_paths() {
+        let validator = ValidatorEntry {
+            name: "docs".to_string(),
+            tool: "validate_docs".to_string(),
+            extensions: Vec::new(),
+            globs: vec!["docs/**/*.md".to_string(), "README.*".to_string()],
+            description: None,
+        };
+
+        assert!(validator.matches_path(std::path::Path::new(
+            "/work/project/docs/reference/install.md"
+        )));
+        assert!(validator.matches_path(std::path::Path::new("/work/project/docs/readme.md")));
+        assert!(validator.matches_path(std::path::Path::new("/work/project/README.md")));
+        assert!(
+            !validator.matches_path(std::path::Path::new("/work/project/design/reference.txt"))
+        );
+    }
+
+    #[test]
+    fn validate_validator_requires_declared_tool() {
+        let toml = r#"
+            [plugin]
+            type = "extension"
+            id = "dev.example.bad-validator"
+            name = "Bad Validator"
+            version = "1.0.0"
+            description = "Broken validator"
+
+            [[tools]]
+            name = "other_tool"
+            description = "Some tool"
+            runner = "bash"
+            script = "tools/other.sh"
+
+            [[validators]]
+            name = "markdown"
+            tool = "validate_docs"
+            extensions = ["md"]
+        "#;
+        let manifest = ArmoryManifest::parse(toml).unwrap();
+        let errors = manifest.validate();
+        assert!(
+            errors.iter().any(|error| error.contains("referenced tool")),
             "errors: {errors:?}"
         );
     }

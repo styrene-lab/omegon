@@ -3,7 +3,7 @@
 //! Replaces core/bridge/llm-bridge.mjs entirely. The Rust binary makes
 //! HTTPS requests directly to api.anthropic.com / api.openai.com.
 //!
-//! API keys resolved from: env vars → ~/.config/omegon/auth.json (OAuth tokens).
+//! API keys resolved from: env vars → auth.json (OAuth tokens).
 //! The upstream provider APIs are the only external dependency — no npm,
 //! no Node.js, no supply chain risk from package registries.
 
@@ -51,13 +51,17 @@ pub fn anthropic_credential_mode() -> AnthropicCredentialMode {
 /// subscription-only interactive-use constraints or unsupported consumer-backend automation.
 ///
 /// Priority (highest to lowest):
-///   1. OpenAI API key  → `openai:gpt-4o`
-///   2. OpenRouter      → `openrouter:openai/gpt-4o`
-///   3. Ollama          → `ollama:llama3` (local, always unrestricted)
+///   1. Anthropic credential
+///   2. OpenAI Codex OAuth
+///   3. Google Gemini API key
+///   4. Google Antigravity OAuth
+///   5. OpenAI API key
+///   6. OpenRouter
+///   7. Ollama (local, always unrestricted)
 ///
-/// Intentionally excludes consumer subscription routes such as ChatGPT/Codex OAuth and
-/// Anthropic subscription OAuth. Those may be usable interactively in some cases, but they
-/// are not treated as automation-safe defaults.
+/// Intentionally excludes unsupported consumer subscription routes such as ChatGPT OAuth and
+/// Anthropic subscription OAuth. Codex OAuth is included because it is the supported Codex
+/// automation credential surface.
 ///
 /// Returns `None` only when no automation-safe provider is available.
 ///
@@ -70,7 +74,7 @@ pub fn automation_safe_model() -> Option<String> {
     }
     // 2. OpenAI Codex (OAuth)
     if resolve_api_key_sync("openai-codex").is_some() {
-        return Some("openai-codex:codex-mini-latest".to_string());
+        return default_model_for_provider("openai-codex");
     }
     // 3. Google Gemini (API key)
     if resolve_api_key_sync("google").is_some() {
@@ -84,11 +88,11 @@ pub fn automation_safe_model() -> Option<String> {
     if resolve_api_key_sync("openai").is_some_and(|(_, oauth)| !oauth) {
         return Some("openai:gpt-4o".to_string());
     }
-    // 4. OpenRouter
+    // 6. OpenRouter
     if resolve_api_key_sync("openrouter").is_some() {
         return Some("openrouter:openai/gpt-4o".to_string());
     }
-    // 3. Ollama — local inference, always unrestricted.
+    // 7. Ollama — local inference, always unrestricted.
     // Probe once per process with a tight 50ms timeout (localhost should respond in <5ms).
     // Cached in a OnceLock so repeated calls (TUI event loop, orchestrator) are instant.
     static OLLAMA_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -203,7 +207,7 @@ pub fn resolve_api_key_sync(provider: &str) -> Option<(String, bool)> {
     resolve_api_key_from_sources(&env_values, persisted)
 }
 
-/// Resolve API key from env vars or ~/.config/omegon/auth.json (legacy, no refresh).
+/// Resolve API key from env vars or auth.json (legacy, no refresh).
 fn resolve_api_key(provider: &str) -> Option<String> {
     // Use canonical provider map for env vars
     let env_keys = crate::auth::provider_env_vars(provider);
@@ -223,15 +227,9 @@ fn resolve_api_key(provider: &str) -> Option<String> {
         return Some(val);
     }
 
-    // auth.json — use canonical key mapping
+    // auth.json — use canonical key mapping and the shared path resolver.
     let auth_key = crate::auth::auth_json_key(provider);
-    let auth_path = crate::auth::auth_json_path()?;
-    let content = std::fs::read_to_string(&auth_path).ok()?;
-    let auth: Value = serde_json::from_str(&content).ok()?;
-    auth.get(auth_key)?
-        .get("access")?
-        .as_str()
-        .map(String::from)
+    crate::auth::read_credentials(auth_key).map(|creds| creds.access)
 }
 
 fn is_known_provider_id(provider_id: &str) -> bool {
@@ -426,7 +424,7 @@ pub async fn delegate_default_model() -> String {
         ("anthropic", "claude-sonnet-4-6"),
         ("openai", "gpt-4o"),
         ("openrouter", "openai/gpt-4o"),
-        ("openai-codex", "gpt-5.4"),
+        ("openai-codex", "gpt-5.5"),
         ("ollama-cloud", "gpt-oss:120b-cloud"),
         ("groq", "llama-3.3-70b-versatile"),
         ("xai", "grok-3-mini-fast"),
@@ -1302,6 +1300,7 @@ async fn parse_anthropic_stream(
     let mut acc_output_tokens: u64 = 0;
     let mut acc_cache_read_tokens: u64 = 0;
     let mut acc_cache_creation_tokens: u64 = 0;
+    let mut stop_reason: Option<String> = None;
 
     tracing::debug!("parsing Anthropic SSE stream");
     let provider_telemetry_done = provider_telemetry.clone();
@@ -1442,6 +1441,7 @@ async fn parse_anthropic_stream(
                     );
                 }
                 if let Some(stop) = event.pointer("/delta/stop_reason").and_then(|v| v.as_str()) {
+                    stop_reason = Some(stop.to_string());
                     tracing::debug!(stop_reason = stop, "message_delta");
                 }
             }
@@ -1483,6 +1483,7 @@ async fn parse_anthropic_stream(
                         "text": full_text,
                         "tool_calls": tc_vals,
                         "content": content_blocks,
+                        "provider_stop_reason": stop_reason,
                     }),
                     input_tokens: acc_input_tokens,
                     output_tokens: acc_output_tokens,
@@ -1725,11 +1726,7 @@ async fn parse_openai_stream(
         }
 
         // Finish
-        if choice
-            .get("finish_reason")
-            .and_then(|f| f.as_str())
-            .is_some()
-        {
+        if let Some(finish_reason) = choice.get("finish_reason").and_then(|f| f.as_str()) {
             for tc in &tool_calls {
                 let _ = tx.try_send(LlmEvent::ToolCallEnd {
                     tool_call: crate::bridge::WireToolCall {
@@ -1742,7 +1739,11 @@ async fn parse_openai_stream(
             let _ = tx.try_send(LlmEvent::TextEnd);
             let tc_vals: Vec<Value> = tool_calls.iter().map(|tc| tc.to_value()).collect();
             let _ = tx.try_send(LlmEvent::Done {
-                message: json!({"text": full_text, "tool_calls": tc_vals}),
+                message: json!({
+                    "text": full_text,
+                    "tool_calls": tc_vals,
+                    "provider_stop_reason": finish_reason,
+                }),
                 input_tokens: acc_input_tokens,
                 output_tokens: acc_output_tokens,
                 cache_read_tokens: 0,
@@ -1994,7 +1995,7 @@ impl LlmBridge for CodexClient {
                 m.strip_prefix("openai-codex:")
                     .or_else(|| m.strip_prefix("openai:"))
             })
-            .unwrap_or("gpt-5.4-mini");
+            .unwrap_or("gpt-5.5");
 
         let input = Self::build_input(messages);
         let wire_tools = Self::build_tools(tools);
@@ -4552,19 +4553,19 @@ mod tests {
     fn codex_model_prefix_stripping() {
         // The stream() method strips "openai-codex:" and "openai:" prefixes
         // Verify the logic conceptually (can't call stream without a server)
-        let full = "openai-codex:gpt-5.4-mini";
+        let full = "openai-codex:gpt-5.5";
         let stripped = full
             .strip_prefix("openai-codex:")
             .or_else(|| full.strip_prefix("openai:"))
-            .unwrap_or("gpt-5.4-mini");
-        assert_eq!(stripped, "gpt-5.4-mini");
+            .unwrap_or("gpt-5.5");
+        assert_eq!(stripped, "gpt-5.5");
 
         let bare = "some-model";
         let stripped = bare
             .strip_prefix("openai-codex:")
             .or_else(|| bare.strip_prefix("openai:"))
-            .unwrap_or("gpt-5.4-mini");
-        assert_eq!(stripped, "gpt-5.4-mini"); // fallback
+            .unwrap_or("gpt-5.5");
+        assert_eq!(stripped, "gpt-5.5"); // fallback
     }
 
     #[test]

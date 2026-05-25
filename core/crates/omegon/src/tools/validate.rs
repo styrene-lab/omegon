@@ -118,7 +118,9 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
 
     if validation_results.is_empty() {
         let mut message =
-            "No validator applies to the supplied path set. Supported source types: Rust, TypeScript, Python.".to_string();
+            "Validation skipped: no applicable validator was available for the supplied path set.\n\
+Supported built-in source types: Rust, TypeScript, Python."
+                .to_string();
         if !unsupported_paths.is_empty() {
             message.push_str("\nUnsupported paths:\n");
             for path in &unsupported_paths {
@@ -131,7 +133,31 @@ pub async fn execute(paths: &[PathBuf], level: ValidationLevel, cwd: &Path) -> R
                 message.push_str(&format!("  - {path}\n"));
             }
         }
-        anyhow::bail!("{}", message.trim_end());
+        message.push_str("\nRecommended next step:\n");
+        message.push_str(&validation_recommendation(
+            &unique_paths,
+            !unsupported_paths.is_empty(),
+            !missing_validator_paths.is_empty(),
+            cwd,
+        ));
+        return Ok(ToolResult {
+            content: vec![ContentBlock::Text {
+                text: message.trim_end().to_string(),
+            }],
+            details: serde_json::json!({
+                "paths": Vec::<String>::new(),
+                "unsupported_paths": unsupported_paths,
+                "missing_validator_paths": missing_validator_paths,
+                "level": match level {
+                    ValidationLevel::Quick => "quick",
+                    ValidationLevel::Standard => "standard",
+                    ValidationLevel::Full => "full",
+                },
+                "validators_run": 0,
+                "validation_skipped": true,
+                "recommendation": "Do not retry validate for this same path set in this session unless a project validator is added; run a project-specific command or validator plugin instead.",
+            }),
+        });
     }
 
     let mut output = format!(
@@ -310,6 +336,136 @@ fn validator_for_file(path: &Path) -> Option<ValidatorKind> {
         Some("py") => Some(ValidatorKind::Python),
         _ => None,
     }
+}
+
+fn validation_recommendation(
+    paths: &[PathBuf],
+    has_unsupported_paths: bool,
+    has_missing_project_validator: bool,
+    cwd: &Path,
+) -> String {
+    let quoted_paths = paths
+        .iter()
+        .map(|path| shell_quote_path(path, cwd))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut lines = Vec::new();
+
+    if has_unsupported_paths {
+        lines.push(format!(
+            "  - For this file type, use a project-specific check such as `git diff --check -- {quoted_paths}` or the repo's docs/config validator if one exists."
+        ));
+        for recommendation in discover_armory_validator_recommendations(paths, cwd) {
+            lines.push(format!("  - {recommendation}"));
+        }
+        if paths.iter().any(|path| is_markdown_path(path)) {
+            lines.push(
+                "  - For Markdown/docs, prefer the repo's documentation build or linter when present (`just docs`, `mdbook test`, `markdownlint`, etc.).".to_string(),
+            );
+        }
+        lines.push(
+            "  - If this file type should be first-class, add a lightweight Omegon Armory validator plugin so agents can call a named validator instead of guessing shell commands.".to_string(),
+        );
+    }
+
+    if has_missing_project_validator {
+        lines.push(
+            "  - For supported source files, add the expected project config or run the repo-specific validation command directly once and report it.".to_string(),
+        );
+    }
+
+    lines.push(
+        "  - Do not retry `validate` for the same unsupported path set this session unless the validator surface changes.".to_string(),
+    );
+
+    lines.join("\n")
+}
+
+fn discover_armory_validator_recommendations(paths: &[PathBuf], cwd: &Path) -> Vec<String> {
+    let mut recommendations = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for manifest_path in armory_plugin_manifest_paths(cwd) {
+        let Ok(content) = std::fs::read_to_string(&manifest_path) else {
+            continue;
+        };
+        let Ok(manifest) = crate::plugins::armory::ArmoryManifest::parse(&content) else {
+            continue;
+        };
+        for validator in &manifest.validators {
+            if !paths.iter().any(|path| validator.matches_path(path)) {
+                continue;
+            }
+            let key = format!("{}:{}", manifest.plugin.id, validator.tool);
+            if !seen.insert(key) {
+                continue;
+            }
+            let extensions = if validator.extensions.is_empty() {
+                "declared files".to_string()
+            } else {
+                validator
+                    .extensions
+                    .iter()
+                    .map(|ext| format!(".{}", ext.trim_start_matches('.')))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            recommendations.push(format!(
+                "Installed Armory validator `{}` from `{}` handles {extensions}; call that tool with the rejected path set.",
+                validator.tool, manifest.plugin.name
+            ));
+        }
+    }
+
+    recommendations
+}
+
+fn armory_plugin_manifest_paths(cwd: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(home) = crate::paths::omegon_home() {
+        roots.push(home.join("plugins"));
+    }
+    roots.push(cwd.join(".omegon").join("plugins"));
+    if let Ok(dir) = std::env::var("OMEGON_PLUGIN_DIR") {
+        roots.push(PathBuf::from(dir));
+    }
+
+    let mut manifests = Vec::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path().join("plugin.toml");
+            if path.exists() {
+                manifests.push(path);
+            }
+        }
+    }
+    manifests
+}
+
+fn shell_quote_path(path: &Path, cwd: &Path) -> String {
+    let display_path = path
+        .strip_prefix(cwd)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
+    if display_path
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-'))
+    {
+        display_path
+    } else {
+        format!("'{}'", display_path.replace('\'', "'\\''"))
+    }
+}
+
+fn is_markdown_path(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("md" | "mdx" | "markdown")
+    )
 }
 
 /// Discover available validators by scanning for project config files.
@@ -498,17 +654,74 @@ mod tests {
         let path = dir.path().join("README.md");
         std::fs::write(&path, "# docs").unwrap();
 
-        let err = execute(
+        let result = execute(
             std::slice::from_ref(&path),
             ValidationLevel::Standard,
             dir.path(),
         )
         .await
-        .unwrap_err();
-        let message = err.to_string();
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(message.contains("Validation skipped"));
         assert!(message.contains("Unsupported paths"));
         assert!(message.contains("README.md"));
         assert!(message.contains("extension: md"));
+        assert!(message.contains("Recommended next step"));
+        assert!(message.contains("git diff --check"));
+        assert!(message.contains("Armory validator plugin"));
+        assert!(message.contains("Do not retry `validate`"));
+        assert_eq!(result.details["validators_run"], 0);
+        assert_eq!(result.details["validation_skipped"], true);
+    }
+
+    #[tokio::test]
+    async fn validate_recommends_installed_armory_validator() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join(".omegon/plugins/docs-validator");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.toml"),
+            r#"
+            [plugin]
+            type = "extension"
+            id = "dev.example.docs-validator"
+            name = "Docs Validator"
+            version = "1.0.0"
+            description = "Validate Markdown docs"
+
+            [[tools]]
+            name = "validate_docs"
+            description = "Validate docs"
+            runner = "bash"
+            script = "tools/validate-docs.sh"
+
+            [[validators]]
+            name = "markdown"
+            tool = "validate_docs"
+            extensions = ["md"]
+        "#,
+        )
+        .unwrap();
+        let path = dir.path().join("README.md");
+        std::fs::write(&path, "# docs").unwrap();
+
+        let result = execute(
+            std::slice::from_ref(&path),
+            ValidationLevel::Standard,
+            dir.path(),
+        )
+        .await
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(
+            message.contains("Installed Armory validator `validate_docs` from `Docs Validator`"),
+            "{message}"
+        );
+        assert!(message.contains("handles .md"), "{message}");
     }
 
     #[tokio::test]
@@ -517,16 +730,22 @@ mod tests {
         let path = dir.path().join("main.rs");
         std::fs::write(&path, "fn main() {}\n").unwrap();
 
-        let err = execute(
+        let result = execute(
             std::slice::from_ref(&path),
             ValidationLevel::Standard,
             dir.path(),
         )
         .await
-        .unwrap_err();
-        let message = err.to_string();
+        .unwrap();
+        let ContentBlock::Text { text: message } = &result.content[0] else {
+            panic!("expected text result");
+        };
+        assert!(message.contains("Validation skipped"));
         assert!(message.contains("Supported paths without a discovered project validator"));
         assert!(message.contains("main.rs"));
         assert!(message.contains("Cargo.toml"));
+        assert!(message.contains("repo-specific validation command"));
+        assert_eq!(result.details["validators_run"], 0);
+        assert_eq!(result.details["validation_skipped"], true);
     }
 }

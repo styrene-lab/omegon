@@ -86,6 +86,9 @@ pub struct AgentSetup {
     /// Polling handles for extensions that provide `vox_route`.
     /// Used by the daemon to start the vox event bridge.
     pub vox_polling_handles: Vec<crate::extensions::ExtensionPollingHandle>,
+    /// Notification receivers for voice-capable extensions.
+    pub voice_notification_receivers:
+        Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
 }
 
 /// Pre-computed state gathered during setup for TUI initial display.
@@ -194,7 +197,7 @@ impl AgentSetup {
         }
         // Extension-declared required secrets — read manifests early so keyring-backed
         // secrets (e.g. GITHUB_TOKEN) are resolved before extension subprocesses spawn.
-        for name in collect_extension_secret_requirements() {
+        for name in collect_extension_secret_requirements(&cwd) {
             preflight.insert(name);
         }
         // Plugin MCP env templates — scan {VAR_NAME} references so vault-backed
@@ -226,7 +229,7 @@ impl AgentSetup {
         // Replaces the sync preflight_session_cache() which silently skips vault recipes.
         secrets.preflight_session_cache_async(preflight).await;
         let mut session_secret_env = secrets.session_env();
-        hydrate_provider_auth_env_from_auth_json(&mut session_secret_env);
+        hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
         for (name, value) in &session_secret_env {
             // SAFETY: setup runs before provider detection for this process; exporting
             // startup-resolved secrets here makes the active provider path see the
@@ -266,25 +269,36 @@ impl AgentSetup {
 
         let mut bus = EventBus::new();
 
+        let project_root = find_project_root(&cwd);
+
         // ─── Repo model (git state tracking) ────────────────────────────
-        let repo_model = match omegon_git::RepoModel::discover(&cwd) {
-            Ok(Some(model)) => {
-                tracing::info!(
-                    repo = %model.repo_path().display(),
-                    branch = model.branch().as_deref().unwrap_or("(detached)"),
-                    submodules = model.submodules().len(),
-                    "RepoModel active"
-                );
-                Some(model)
+        let repo_model = if project_root.join(".git").exists() || project_root.join(".jj").exists()
+        {
+            match omegon_git::RepoModel::discover(&project_root) {
+                Ok(Some(model)) => {
+                    tracing::info!(
+                        repo = %model.repo_path().display(),
+                        branch = model.branch().as_deref().unwrap_or("(detached)"),
+                        submodules = model.submodules().len(),
+                        "RepoModel active"
+                    );
+                    Some(model)
+                }
+                Ok(None) => {
+                    tracing::debug!("not inside a git repo — RepoModel disabled");
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!("git repo discovery failed: {e} — RepoModel disabled");
+                    None
+                }
             }
-            Ok(None) => {
-                tracing::debug!("not inside a git repo — RepoModel disabled");
-                None
-            }
-            Err(e) => {
-                tracing::warn!("git repo discovery failed: {e} — RepoModel disabled");
-                None
-            }
+        } else {
+            tracing::debug!(
+                project = %project_root.display(),
+                "selected project root is not a VCS root — RepoModel disabled"
+            );
+            None
         };
 
         // ─── Core tools (bash, read, write, edit, commit; hidden internal change) ──
@@ -334,8 +348,6 @@ impl AgentSetup {
                 secrets.clone(),
             )),
         )));
-
-        let project_root = find_project_root(&cwd);
 
         let openapi_configs = tools::openapi_config::load_openapi_configs(&project_root);
         if !openapi_configs.is_empty() {
@@ -672,26 +684,16 @@ impl AgentSetup {
             );
         }
 
-        // ─── Activate startup persona (child or headless --persona) ────
-        if let Ok(persona_name) = std::env::var("OMEGON_CHILD_PERSONA") {
-            let (personas, _) = crate::plugins::persona_loader::scan_available();
-            let target = persona_name.to_lowercase();
-            if let Some(available) = personas
-                .iter()
-                .find(|p| p.name.to_lowercase() == target || p.id.to_lowercase().contains(&target))
-            {
-                match crate::plugins::persona_loader::load_persona(&available.path) {
-                    Ok(loaded) => {
-                        tracing::info!(persona = %loaded.name, "activating startup persona");
-                        persona_registry.activate_persona(loaded);
-                    }
-                    Err(e) => {
-                        tracing::warn!(persona = %persona_name, error = %e, "startup persona load failed");
-                    }
-                }
-            } else {
-                tracing::warn!(persona = %persona_name, "startup persona not found");
-            }
+        // ─── Activate startup persona/tone from child env or profile ────
+        let startup_profile = crate::settings::Profile::load(&cwd);
+        if let Some(persona_name) = std::env::var("OMEGON_CHILD_PERSONA")
+            .ok()
+            .or_else(|| startup_profile.persona.clone())
+        {
+            activate_startup_persona(&mut persona_registry, &persona_name);
+        }
+        if let Some(tone_name) = startup_profile.tone.clone() {
+            activate_startup_tone(&mut persona_registry, &tone_name);
         }
 
         bus.register(Box::new(features::persona::PersonaFeature::new(
@@ -727,15 +729,22 @@ impl AgentSetup {
 
         // ─── Operator-installed extensions (RPC + OCI) ────────────────
         // All extensions, including bundled ones (scribe-rpc), are discovered here
-        let (extension_widgets, widget_receivers, vox_polling_handles) =
-            match discover_and_register_extensions(&mut bus, std::sync::Arc::clone(&secrets)).await
-            {
-                Ok((widgets, receivers, handles)) => (widgets, receivers, handles),
-                Err(e) => {
-                    tracing::warn!("extension discovery failed: {}", e);
-                    (vec![], vec![], vec![])
-                }
-            };
+        let (
+            extension_widgets,
+            widget_receivers,
+            vox_polling_handles,
+            voice_notification_receivers,
+        ) = match discover_and_register_extensions(&cwd, &mut bus, std::sync::Arc::clone(&secrets))
+            .await
+        {
+            Ok((widgets, receivers, handles, voice_receivers)) => {
+                (widgets, receivers, handles, voice_receivers)
+            }
+            Err(e) => {
+                tracing::warn!("extension discovery failed: {}", e);
+                (vec![], vec![], vec![], vec![])
+            }
+        };
 
         // ─── External plugins (TOML manifests) ────────────────────────
         let plugin_filter = crate::plugins::PluginSelectionFilter {
@@ -757,18 +766,29 @@ impl AgentSetup {
 
         // ─── Default tool profile — disable rarely-used tools ───────────
         {
-            let (slim_mode, posture_disabled, posture_enabled) = settings
-                .as_ref()
-                .and_then(|s| {
-                    s.lock().ok().map(|g| {
-                        (
-                            g.is_slim(),
-                            g.posture_disabled_tools.clone(),
-                            g.posture_enabled_tools.clone(),
-                        )
+            let (slim_mode, mut posture_disabled, posture_enabled, profile_terminal_tool) =
+                settings
+                    .as_ref()
+                    .and_then(|s| {
+                        s.lock().ok().map(|g| {
+                            (
+                                g.is_slim(),
+                                g.posture_disabled_tools.clone(),
+                                g.posture_enabled_tools.clone(),
+                                g.terminal_tool,
+                            )
+                        })
                     })
-                })
-                .unwrap_or_default();
+                    .unwrap_or_else(|| (false, Vec::new(), Vec::new(), true));
+            if !profile_terminal_tool {
+                posture_disabled.push(crate::tool_registry::core::TERMINAL.into());
+            } else if let Err(reason) = crate::tools::terminal::runtime_available() {
+                tracing::warn!(
+                    reason,
+                    "terminal tool unavailable; disabling model-facing terminal tool"
+                );
+                posture_disabled.push(crate::tool_registry::core::TERMINAL.into());
+            }
             bus.apply_operator_tool_profile(slim_mode, &posture_disabled, &posture_enabled);
             let mut disabled = disabled_handle.lock().unwrap();
             tracing::info!(
@@ -1132,6 +1152,7 @@ impl AgentSetup {
             cleave_event_slot,
             delegate_event_slot,
             vox_polling_handles,
+            voice_notification_receivers,
             skill_phases,
         })
     }
@@ -1160,15 +1181,36 @@ impl AgentSetup {
     }
 }
 
-/// Find the project root by walking up from cwd looking for .git.
+/// Find the project root for Omegon-local state.
+///
+/// Git discovery is intentionally bounded away from the user's home directory:
+/// a `$HOME/.git` repository must not capture arbitrary child workspaces and
+/// make `.omegon/`, memory, status, or generated git commands operate against
+/// the wrong tree.
 pub fn find_project_root(cwd: &Path) -> PathBuf {
-    let mut dir = cwd.to_path_buf();
+    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    if has_hard_project_marker(&cwd) {
+        return cwd;
+    }
+
+    let mut dir = cwd.clone();
+    let mut nearest_marker = if has_explicit_project_marker(&cwd) {
+        Some(cwd.clone())
+    } else {
+        None
+    };
     loop {
         let git_path = dir.join(".git");
         if git_path.is_dir() {
+            if is_home_ancestor_repo(&dir, &cwd) {
+                return nearest_marker.unwrap_or(cwd);
+            }
             return dir;
         }
         if git_path.is_file() {
+            if is_home_ancestor_repo(&dir, &cwd) {
+                return nearest_marker.unwrap_or(cwd);
+            }
             if let Ok(content) = std::fs::read_to_string(&git_path)
                 && let Some(gitdir) = content.strip_prefix("gitdir: ")
             {
@@ -1188,20 +1230,54 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
             }
             return dir;
         }
+        if nearest_marker.is_none() && has_explicit_project_marker(&dir) {
+            nearest_marker = Some(dir.clone());
+        }
         if !dir.pop() {
             break;
         }
     }
-    cwd.to_path_buf()
+    nearest_marker.unwrap_or(cwd)
+}
+
+pub fn git_ceiling_directory(cwd: &Path) -> Option<PathBuf> {
+    find_project_root(cwd).parent().map(Path::to_path_buf)
+}
+
+fn has_explicit_project_marker(dir: &Path) -> bool {
+    has_hard_project_marker(dir)
+        || [
+            "Cargo.toml",
+            "package.json",
+            "pyproject.toml",
+            "go.mod",
+            "Justfile",
+            "justfile",
+        ]
+        .iter()
+        .any(|marker| dir.join(marker).exists())
+}
+
+fn has_hard_project_marker(dir: &Path) -> bool {
+    [".git", ".jj", ".codex", "AGENTS.md"]
+        .iter()
+        .any(|marker| dir.join(marker).exists())
+}
+
+fn is_home_ancestor_repo(repo_root: &Path, cwd: &Path) -> bool {
+    cwd != repo_root
+        && dirs::home_dir()
+            .and_then(|home| home.canonicalize().ok())
+            .is_some_and(|home| repo_root == home)
 }
 
 /// Scan installed extension manifests and collect all declared secret names.
 /// Called during the startup preflight phase — before extensions are spawned —
 /// so keyring-backed secrets are warmed into the session cache in time.
-fn collect_extension_secret_requirements() -> Vec<String> {
-    let ext_dir = match dirs::home_dir() {
-        Some(h) => h.join(".omegon/extensions"),
-        None => return vec![],
+fn collect_extension_secret_requirements(cwd: &Path) -> Vec<String> {
+    let ext_dir = match crate::paths::omegon_home() {
+        Ok(home) => home.join("extensions"),
+        Err(_) => return vec![],
     };
     if !ext_dir.exists() {
         return vec![];
@@ -1210,9 +1286,33 @@ fn collect_extension_secret_requirements() -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(&ext_dir) else {
         return vec![];
     };
+    let profile = crate::settings::Profile::load(cwd);
+    let env_enabled = crate::parse_csv_env("OMEGON_CHILD_ENABLED_EXTENSIONS");
+    let env_disabled = crate::parse_csv_env("OMEGON_CHILD_DISABLED_EXTENSIONS");
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_dir() {
+            continue;
+        }
+        let ext_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        if !profile
+            .extensions
+            .permits(ext_name, &env_enabled, &env_disabled)
+        {
+            tracing::debug!(
+                extension = ext_name,
+                "extension skipped during secret preflight"
+            );
+            continue;
+        }
+        if extension_state_disabled(&path) {
+            tracing::debug!(
+                extension = ext_name,
+                "disabled extension skipped during secret preflight"
+            );
             continue;
         }
         if let Ok(manifest) = crate::extensions::ExtensionManifest::from_extension_dir(&path) {
@@ -1235,7 +1335,10 @@ fn collect_extension_secret_requirements() -> Vec<String> {
     names
 }
 
-fn hydrate_provider_auth_env_from_auth_json(session_secret_env: &mut Vec<(String, String)>) {
+fn hydrate_provider_auth_env_from_auth_json(
+    session_secret_env: &mut Vec<(String, String)>,
+    secrets: &omegon_secrets::SecretsManager,
+) {
     // Hydrate credentials for ALL providers that have stored auth, not just the
     // parent session's model. Children (cleave, delegate) may use any provider
     // and need the corresponding API keys in their inherited environment.
@@ -1250,6 +1353,23 @@ fn hydrate_provider_auth_env_from_auth_json(session_secret_env: &mut Vec<(String
             continue;
         }
         if let Some(creds) = crate::auth::read_credentials(provider.auth_key) {
+            secrets.register_redaction_secret(primary_env, &creds.access);
+            secrets.register_redaction_secret(
+                &format!("{}_AUTH_JSON_ACCESS", provider.id),
+                &creds.access,
+            );
+            secrets.register_redaction_secret(
+                &format!("{}_AUTH_JSON_REFRESH", provider.id),
+                &creds.refresh,
+            );
+            if let Some(account_id) =
+                crate::auth::read_credential_extra(provider.auth_key, "accountId")
+            {
+                secrets.register_redaction_secret(
+                    &format!("{}_AUTH_JSON_ACCOUNT_ID", provider.id),
+                    &account_id,
+                );
+            }
             session_secret_env.push((primary_env.to_string(), creds.access));
             tracing::info!(
                 provider = provider.id,
@@ -1346,24 +1466,30 @@ fn collect_plugin_secret_requirements(cwd: &std::path::Path) -> Vec<String> {
 /// Resolves declared secrets from the session cache and delivers them to each
 /// extension via `bootstrap_secrets` RPC — never via subprocess environment.
 async fn discover_and_register_extensions(
+    cwd: &Path,
     bus: &mut crate::bus::EventBus,
     secrets: std::sync::Arc<omegon_secrets::SecretsManager>,
 ) -> anyhow::Result<(
     Vec<crate::extensions::ExtensionTabWidget>,
     Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
     Vec<crate::extensions::ExtensionPollingHandle>,
+    Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
 )> {
     let ext_dir = crate::paths::omegon_home()?.join("extensions");
 
     if !ext_dir.exists() {
         tracing::debug!("extension directory not found: {}", ext_dir.display());
-        return Ok((vec![], vec![], vec![]));
+        return Ok((vec![], vec![], vec![], vec![]));
     }
 
+    let profile = crate::settings::Profile::load(cwd);
+    let env_enabled = crate::parse_csv_env("OMEGON_CHILD_ENABLED_EXTENSIONS");
+    let env_disabled = crate::parse_csv_env("OMEGON_CHILD_DISABLED_EXTENSIONS");
     let mut count = 0;
     let mut extension_widgets = vec![];
     let mut widget_receivers = vec![];
     let mut vox_polling_handles = vec![];
+    let mut voice_notification_receivers = vec![];
     for entry in std::fs::read_dir(&ext_dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -1374,6 +1500,21 @@ async fn discover_and_register_extensions(
 
         let manifest_path = path.join("manifest.toml");
         if !manifest_path.exists() {
+            continue;
+        }
+        let ext_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        if !profile
+            .extensions
+            .permits(ext_name, &env_enabled, &env_disabled)
+        {
+            tracing::debug!(extension = ext_name, "extension skipped by profile policy");
+            continue;
+        }
+        if extension_state_disabled(&path) {
+            tracing::debug!(extension = ext_name, "disabled extension skipped");
             continue;
         }
 
@@ -1402,10 +1543,6 @@ async fn discover_and_register_extensions(
         // Try to spawn this extension
         match crate::extensions::spawn_from_manifest(&path, &resolved_secrets).await {
             Ok(spawned) => {
-                let ext_name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown");
                 let tool_count = spawned.feature.tools().len();
                 let widget_count = spawned.widgets.len();
                 tracing::info!(
@@ -1418,6 +1555,9 @@ async fn discover_and_register_extensions(
                 // Collect vox polling handle if present
                 if let Some(handle) = spawned.vox_polling_handle {
                     vox_polling_handles.push(handle);
+                }
+                if let Some(rx) = spawned.voice_notification_rx {
+                    voice_notification_receivers.push(rx);
                 }
                 bus.register(spawned.feature);
                 // Collect widgets and receivers for TUI
@@ -1444,5 +1584,151 @@ async fn discover_and_register_extensions(
         tracing::info!(count = count, "extension discovery complete");
     }
 
-    Ok((extension_widgets, widget_receivers, vox_polling_handles))
+    Ok((
+        extension_widgets,
+        widget_receivers,
+        vox_polling_handles,
+        voice_notification_receivers,
+    ))
+}
+
+fn extension_state_disabled(path: &Path) -> bool {
+    crate::extensions::ExtensionState::load(path)
+        .is_ok_and(|state| !state.enabled || state.stability.auto_disabled)
+}
+
+fn activate_startup_persona(
+    registry: &mut crate::plugins::registry::PluginRegistry,
+    persona_name: &str,
+) {
+    let (personas, _) = crate::plugins::persona_loader::scan_available();
+    let target = persona_name.to_lowercase();
+    if let Some(available) = personas
+        .iter()
+        .find(|p| p.name.to_lowercase() == target || p.id.to_lowercase().contains(&target))
+    {
+        match crate::plugins::persona_loader::load_persona(&available.path) {
+            Ok(loaded) => {
+                tracing::info!(persona = %loaded.name, "activating startup persona");
+                registry.activate_persona(loaded);
+            }
+            Err(e) => {
+                tracing::warn!(persona = %persona_name, error = %e, "startup persona load failed");
+            }
+        }
+    } else {
+        tracing::warn!(persona = %persona_name, "startup persona not found");
+    }
+}
+
+fn activate_startup_tone(registry: &mut crate::plugins::registry::PluginRegistry, tone_name: &str) {
+    let (_, tones) = crate::plugins::persona_loader::scan_available();
+    let target = tone_name.to_lowercase();
+    if let Some(available) = tones
+        .iter()
+        .find(|t| t.name.to_lowercase() == target || t.id.to_lowercase().contains(&target))
+    {
+        match crate::plugins::persona_loader::load_tone(&available.path) {
+            Ok(loaded) => {
+                tracing::info!(tone = %loaded.name, "activating startup tone");
+                registry.activate_tone(loaded);
+            }
+            Err(e) => {
+                tracing::warn!(tone = %tone_name, error = %e, "startup tone load failed");
+            }
+        }
+    } else {
+        tracing::warn!(tone = %tone_name, "startup tone not found");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_project_marker_wins_over_parent_git_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let child = dir.path().join("child-workspace");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(child.join("AGENTS.md"), "instructions").unwrap();
+
+        assert_eq!(find_project_root(&child), child.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn git_repo_still_wins_for_unmarked_subdirectories() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let child = dir.path().join("src/bin");
+        std::fs::create_dir_all(&child).unwrap();
+
+        assert_eq!(
+            find_project_root(&child),
+            dir.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn git_repo_wins_over_nested_build_manifest_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let member = dir.path().join("core/crates/omegon");
+        std::fs::create_dir_all(&member).unwrap();
+        std::fs::write(member.join("Cargo.toml"), "[package]\nname = \"omegon\"\n").unwrap();
+
+        assert_eq!(
+            find_project_root(&member),
+            dir.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn git_repo_wins_over_nested_omegon_state_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let member = dir.path().join("core");
+        std::fs::create_dir_all(member.join(".omegon")).unwrap();
+        std::fs::write(member.join(".omegon/profile.json"), "{}").unwrap();
+
+        assert_eq!(
+            find_project_root(&member),
+            dir.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn git_ceiling_is_parent_of_selected_project_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let child = dir.path().join("child-workspace");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(child.join("AGENTS.md"), "instructions").unwrap();
+
+        assert_eq!(
+            git_ceiling_directory(&child),
+            child
+                .canonicalize()
+                .unwrap()
+                .parent()
+                .map(Path::to_path_buf)
+        );
+    }
+
+    #[test]
+    fn git_ceiling_preserves_parent_repo_for_unmarked_subdirectories() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let child = dir.path().join("src/bin");
+        std::fs::create_dir_all(&child).unwrap();
+
+        assert_eq!(
+            git_ceiling_directory(&child),
+            dir.path()
+                .canonicalize()
+                .unwrap()
+                .parent()
+                .map(Path::to_path_buf)
+        );
+    }
 }

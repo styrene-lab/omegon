@@ -65,13 +65,11 @@ The release.yml workflow can notarize macOS binaries if we add the API key as a 
 
 ## Homebrew Tap
 
-Stable and RC formulas are updated by `.github/workflows/homebrew.yml` in the separate `styrene-lab/homebrew-tap` repository:
+Stable formulas are updated by `.github/workflows/homebrew.yml` in the separate `styrene-lab/homebrew-tap` repository:
 - stable → `Formula/omegon.rb`
-- rc → `Formula/omegon-rc.rb`
 
 Install:
-- stable: `brew tap styrene-lab/tap && brew install omegon`
-- rc: `brew tap styrene-lab/tap && brew install styrene-lab/tap/omegon-rc`
+- `brew tap styrene-lab/tap && brew install omegon`
 
 ## Linux ABI compatibility
 

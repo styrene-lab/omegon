@@ -11,6 +11,12 @@ visibility = "private"
 
 # Non-Capturing Dashboard Overlay
 
+## Disposition — 2026-05-23
+
+**Status: historical-decision / OBE implementation path.** This node evaluates Pi 0.57.0 non-capturing overlay APIs and dashboard overlay keybindings. The current Omegon TUI is Rust-native, defaults to Slim mode, and no longer uses the referenced TypeScript overlay files as the dashboard implementation path.
+
+Retain this document for terminal-keyboard and overlay UX lessons only. Do not use the Pi overlay lifecycle, `overlay.ts`, `index.ts`, or `/dashboard` extension implementation notes as current code guidance.
+
 ## Overview
 
 Evaluate pi 0.57.0's non-capturing overlay API (OverlayOptions.nonCapturing, OverlayHandle.focus/unfocus/isFocused) for refactoring the dashboard Layer 2 from a modal overlay to a persistent side panel that doesn't steal input.

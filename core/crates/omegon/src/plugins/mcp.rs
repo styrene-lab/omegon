@@ -22,7 +22,7 @@ use rmcp::{
     transport::{StreamableHttpClientTransport, TokioChildProcess},
 };
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -926,7 +926,7 @@ impl Feature for McpFeature {
         };
 
         let mut params = CallToolRequestParams::default();
-        params.name = mcp_name.into();
+        params.name = mcp_name.clone().into();
         params.arguments = arguments;
 
         // If a consumer is attached, mint a progress token, register the
@@ -967,6 +967,7 @@ impl Feature for McpFeature {
         // Convert MCP content to Omegon content blocks
         let content: Vec<ContentBlock> = result
             .content
+            .clone()
             .into_iter()
             .filter_map(|c| match c.raw {
                 RawContent::Text(t) => Some(ContentBlock::Text {
@@ -980,11 +981,23 @@ impl Feature for McpFeature {
             })
             .collect();
 
-        Ok(ToolResult {
-            content,
-            details: Value::Null,
-        })
+        let details = mcp_tool_result_details(&server_name, &mcp_name, &result);
+
+        Ok(ToolResult { content, details })
     }
+}
+
+fn mcp_tool_result_details(server_name: &str, tool_name: &str, result: &CallToolResult) -> Value {
+    let Some(meta) = result.meta.as_ref() else {
+        return Value::Null;
+    };
+    let Some(actions) = meta.get("omegon/hostActions") else {
+        return Value::Null;
+    };
+
+    let outcomes =
+        crate::extensions::host_actions::process_mcp_host_actions(actions, server_name, tool_name);
+    json!({"host_action_outcomes": outcomes})
 }
 
 /// RAII guard that removes a progress-token registration when dropped.
@@ -1244,6 +1257,61 @@ mod tests {
     fn resolve_env_template_missing_var() {
         let result = resolve_env_template("{NONEXISTENT_VAR_12345}", None);
         assert_eq!(result, "");
+    }
+
+    #[test]
+    fn mcp_tool_result_details_marks_mcp_actions_invalid_without_breaking_content() {
+        let mut meta = rmcp::model::Meta::new();
+        meta.insert(
+            "omegon/hostActions".to_string(),
+            json!([{
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "execution": "auto_if_allowed",
+                "params": {"command": "bookokrat"}
+            }]),
+        );
+        let mut result =
+            CallToolResult::success(vec![rmcp::model::Content::text("still readable")]);
+        result.meta = Some(meta);
+
+        let details = mcp_tool_result_details("reader", "open", &result);
+
+        assert_eq!(
+            details["host_action_outcomes"][0]["action_id"],
+            "open-reader"
+        );
+        assert_eq!(details["host_action_outcomes"][0]["status"], "denied");
+        assert_eq!(
+            details["host_action_outcomes"][0]["error"]["code"],
+            "manifest_denied"
+        );
+    }
+
+    #[test]
+    fn mcp_tool_result_details_without_metadata_is_null() {
+        let result = CallToolResult::success(vec![rmcp::model::Content::text("plain")]);
+
+        assert_eq!(
+            mcp_tool_result_details("server", "tool", &result),
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn mcp_tool_result_details_reports_non_array_metadata() {
+        let mut meta = rmcp::model::Meta::new();
+        meta.insert("omegon/hostActions".to_string(), json!("bad"));
+        let mut result = CallToolResult::success(vec![rmcp::model::Content::text("plain")]);
+        result.meta = Some(meta);
+
+        let details = mcp_tool_result_details("server", "tool", &result);
+
+        assert_eq!(details["host_action_outcomes"][0]["status"], "invalid");
+        assert_eq!(
+            details["host_action_outcomes"][0]["error"]["code"],
+            "invalid_host_actions_metadata"
+        );
     }
 
     #[test]

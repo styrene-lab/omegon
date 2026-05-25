@@ -18,6 +18,10 @@
 //! and any release that ships this state will break extensions
 //! built against the new version.
 
+use omegon_extension::actions::terminal::{
+    TERMINAL_CREATE_V1, TerminalCreateParams, TerminalCreateResult,
+};
+use omegon_extension::{Capabilities, HostAction, HostActionOutcome, HostActionStatus, ToolResult};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
@@ -163,4 +167,65 @@ fn spawn_responds_within_one_second() {
         elapsed < Duration::from_secs(1),
         "initialize round-trip took {elapsed:?} — should be <1s on a cold spawn"
     );
+}
+
+#[test]
+fn host_action_sdk_public_exports_have_stable_wire_shape() {
+    let action = HostAction::new(
+        "open-reader",
+        TERMINAL_CREATE_V1,
+        TerminalCreateParams::new("bookokrat").with_args(["/books/example.epub"]),
+    )
+    .expect("terminal params serialize");
+
+    let result = ToolResult::text("Opening reader").with_action(action);
+    let json = serde_json::to_value(result).expect("tool result serializes");
+
+    assert_eq!(
+        json["content"][0],
+        json!({"type": "text", "text": "Opening reader"})
+    );
+    assert_eq!(json["actions"][0]["id"], "open-reader");
+    assert_eq!(json["actions"][0]["type"], "terminal.create@1");
+    assert_eq!(json["actions"][0]["params"]["command"], "bookokrat");
+    assert_eq!(
+        json["actions"][0]["params"]["args"],
+        json!(["/books/example.epub"])
+    );
+}
+
+#[test]
+fn host_action_execute_response_example_decodes_to_typed_outcome() {
+    let outcome: HostActionOutcome = serde_json::from_value(json!({
+        "action_id": "open-reader",
+        "status": "completed",
+        "result": {
+            "terminal_id": "term_123",
+            "backend": "zellij",
+                    "actual_placement": "background_session"
+        }
+    }))
+    .expect("outcome response decodes");
+
+    assert_eq!(outcome.action_id, "open-reader");
+    assert_eq!(outcome.status, HostActionStatus::Completed);
+    let terminal: TerminalCreateResult =
+        serde_json::from_value(outcome.result.expect("result")).expect("terminal result decodes");
+    assert_eq!(terminal.terminal_id, "term_123");
+    assert_eq!(terminal.backend, "zellij");
+}
+
+#[test]
+fn legacy_capabilities_payload_defaults_host_action_capabilities_off() {
+    let caps: Capabilities = serde_json::from_value(json!({
+        "tools": true,
+        "streaming": true
+    }))
+    .expect("legacy capabilities decode");
+
+    assert!(caps.tools);
+    assert!(caps.streaming);
+    assert!(!caps.voice);
+    assert!(!caps.host_actions);
+    assert!(!caps.host_action_execution);
 }

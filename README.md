@@ -54,22 +54,21 @@ That means you get:
 curl -fsSL https://omegon.styrene.io/install.sh | sh
 ```
 
-Preview channel one-shot:
+Nightly channel one-shot:
 
 ```sh
-curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --channel=rc
+curl -fsSL https://omegon.styrene.io/install.sh | sh -s -- --channel=nightly
 ```
 
 Or with Homebrew:
 
 ```sh
 brew tap styrene-lab/tap
-brew install omegon                # stable
-brew install styrene-lab/tap/omegon-rc  # preview / rc
+brew install omegon
 ```
 
 Stable docs: <https://omegon.styrene.io/docs/install>
-Preview docs: <https://omegon.styrene.dev/docs/install>
+Nightly/staging docs: <https://omegon.styrene.dev/docs/install>
 
 ---
 
@@ -397,7 +396,7 @@ Omegon ships signed releases with:
 
 Install/update docs:
 - <https://omegon.styrene.io/docs/install>
-- Preview / RC docs: <https://omegon.styrene.dev/docs/install>
+- Nightly / staging docs: <https://omegon.styrene.dev/docs/install>
 
 ---
 

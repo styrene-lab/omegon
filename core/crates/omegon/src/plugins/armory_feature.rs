@@ -20,6 +20,7 @@
 //! network policy. Same stdin/stdout contract. Container runtime detected via
 //! `detect_container_runtime()` from the MCP module.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -64,6 +65,8 @@ pub struct ArmoryFeature {
     plugin_root: PathBuf,
     /// Executable tool entries (script + OCI only).
     tools: Vec<ToolEntry>,
+    /// Tools declared as validators in the Armory manifest.
+    validator_tools: HashSet<String>,
     /// Detected container runtime (lazy — only probed if OCI tools exist).
     container_runtime: std::sync::OnceLock<String>,
     /// Pre-cached dynamic context (generated at load time by context script/endpoint).
@@ -92,6 +95,11 @@ impl ArmoryFeature {
             .filter(|t| t.is_script() || t.is_oci())
             .cloned()
             .collect();
+        let validator_tools = manifest
+            .validators
+            .iter()
+            .map(|validator| validator.tool.clone())
+            .collect::<HashSet<_>>();
 
         // Generate dynamic context if declared
         let cached_context = if let Some(ref ctx) = manifest.context {
@@ -130,6 +138,7 @@ impl ArmoryFeature {
             name: manifest.plugin.name.clone(),
             plugin_root: plugin_root.to_path_buf(),
             tools: executable_tools,
+            validator_tools,
             container_runtime: std::sync::OnceLock::new(),
             cached_context,
         })
@@ -326,28 +335,34 @@ impl Feature for ArmoryFeature {
                     .as_ref()
                     .map(|r| format!("{r}:"))
                     .unwrap_or_default();
+                let mut capabilities = resolve_external_tool_capabilities(
+                    &t.capabilities,
+                    &t.name,
+                    &t.description,
+                    &t.parameters,
+                    if t.is_http()
+                        && t.method
+                            .as_deref()
+                            .is_some_and(|method| method.eq_ignore_ascii_case("GET"))
+                    {
+                        ExternalExecutionHint::HttpGet
+                    } else if t.is_http() {
+                        ExternalExecutionHint::HttpMutating
+                    } else {
+                        ExternalExecutionHint::ScriptOrContainer
+                    },
+                );
+                if self.validator_tools.contains(&t.name)
+                    && !capabilities.contains(&omegon_traits::ToolCapability::Validation)
+                {
+                    capabilities.push(omegon_traits::ToolCapability::Validation);
+                }
                 ToolDefinition {
                     name: t.name.clone(),
                     label: format!("armory:{}{}", runner_prefix, t.name),
                     description: t.description.clone(),
                     parameters: t.parameters.clone(),
-                    capabilities: resolve_external_tool_capabilities(
-                        &t.capabilities,
-                        &t.name,
-                        &t.description,
-                        &t.parameters,
-                        if t.is_http()
-                            && t.method
-                                .as_deref()
-                                .is_some_and(|method| method.eq_ignore_ascii_case("GET"))
-                        {
-                            ExternalExecutionHint::HttpGet
-                        } else if t.is_http() {
-                            ExternalExecutionHint::HttpMutating
-                        } else {
-                            ExternalExecutionHint::ScriptOrContainer
-                        },
-                    ),
+                    capabilities,
                 }
             })
             .collect()
@@ -592,6 +607,43 @@ mod tests {
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name, "analyze");
         assert!(tools[0].label.contains("armory:python:"));
+    }
+
+    #[tokio::test]
+    async fn validator_declaration_marks_tool_as_validation_capable() {
+        let manifest = ArmoryManifest::parse(
+            r#"
+            [plugin]
+            type = "extension"
+            id = "dev.test.docs"
+            name = "Docs Validator"
+            version = "1.0.0"
+            description = "test plugin"
+
+            [[tools]]
+            name = "validate_docs"
+            description = "validate docs"
+            runner = "bash"
+            script = "tools/validate-docs.sh"
+
+            [[validators]]
+            name = "markdown"
+            tool = "validate_docs"
+            extensions = ["md"]
+        "#,
+        )
+        .unwrap();
+
+        let feature = ArmoryFeature::from_manifest(&manifest, Path::new("/tmp"))
+            .await
+            .unwrap();
+        let tools = feature.tools();
+        assert_eq!(tools.len(), 1);
+        assert!(
+            tools[0]
+                .capabilities
+                .contains(&omegon_traits::ToolCapability::Validation)
+        );
     }
 
     #[tokio::test]

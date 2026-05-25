@@ -11,6 +11,12 @@ visibility = "private"
 
 # Unified Live Dashboard for Cleave + Design Tree + OpenSpec
 
+## Disposition — 2026-05-23
+
+**Status: historical-decision / superseded implementation substrate.** This node was written against the older Pi TypeScript extension TUI (`ctx.ui.setWidget`, `ctx.ui.setFooter`, `sharedState`, `pi.events`, and `extensions/dashboard/*`). The current repository has a Rust-native TUI dashboard/statusline under `core/crates/omegon/src/tui/`, and the referenced TypeScript dashboard extension paths are absent.
+
+Keep this as historical UX/design rationale for unifying design tree, OpenSpec, and cleave progress. Do not treat the Pi extension API audit or `extensions/dashboard/*` file scope as current implementation guidance.
+
 ## Overview
 
 Explore how to create a persistent, live, navigable view that unifies Design Tree state, OpenSpec change status, and Cleave execution progress into a single always-visible dashboard, with optional interactive detail panel.

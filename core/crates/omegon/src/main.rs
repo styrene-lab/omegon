@@ -989,6 +989,53 @@ fn parse_csv_env(name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn parse_bool_env(name: &str) -> Option<bool> {
+    let raw = std::env::var(name).ok()?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" | "enabled" => Some(true),
+        "0" | "false" | "no" | "off" | "disabled" => Some(false),
+        _ => None,
+    }
+}
+
+fn maybe_start_mqtt_bridge(
+    cwd: &Path,
+    instance_id: String,
+    events_tx: broadcast::Sender<AgentEvent>,
+) -> Option<mqtt_bridge::MqttBridgeHandle> {
+    let profile = settings::Profile::load(cwd);
+    let mqtt = &profile.integrations.mqtt;
+    let enabled = parse_bool_env("OMEGON_MQTT_ENABLED")
+        .or_else(|| parse_bool_env("OMEGON_MQTT"))
+        .or(mqtt.enabled)
+        .unwrap_or(false);
+    if !enabled {
+        tracing::debug!("MQTT bridge disabled by profile/default policy");
+        return None;
+    }
+
+    let broker_host = std::env::var("OMEGON_MQTT_HOST")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| mqtt.broker_host.clone())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let broker_port = std::env::var("OMEGON_MQTT_PORT")
+        .ok()
+        .and_then(|raw| raw.parse::<u16>().ok())
+        .or(mqtt.broker_port)
+        .unwrap_or(mqtt_bridge::DEFAULT_BROKER_PORT);
+
+    Some(mqtt_bridge::start_mqtt_bridge(
+        mqtt_bridge::MqttBridgeConfig {
+            instance_id,
+            broker_host,
+            broker_port,
+            ..Default::default()
+        },
+        events_tx,
+    ))
+}
+
 fn child_preloaded_files() -> Vec<PathBuf> {
     std::env::var("OMEGON_CHILD_PRELOADED_FILES")
         .ok()
@@ -2166,13 +2213,7 @@ async fn run_embedded_command(
         );
     }
 
-    let _mqtt_bridge = mqtt_bridge::start_mqtt_bridge(
-        mqtt_bridge::MqttBridgeConfig {
-            instance_id: agent.session_id.clone(),
-            ..Default::default()
-        },
-        events_tx.clone(),
-    );
+    let _mqtt_bridge = maybe_start_mqtt_bridge(&cwd, agent.session_id.clone(), events_tx.clone());
 
     if !agent.vox_polling_handles.is_empty() {
         for handle in agent.vox_polling_handles {
@@ -2183,6 +2224,14 @@ async fn run_embedded_command(
                 global_cancel.clone(),
             );
         }
+    }
+
+    for rx in agent.voice_notification_receivers {
+        crate::extensions::voice_bridge::start_voice_bridge(
+            rx,
+            vox_daemon_events.clone(),
+            global_cancel.clone(),
+        );
     }
 
     let _daemon_checkpoint_task = checkpoint::spawn_checkpoint_subscriber(
@@ -3606,45 +3655,38 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         .await
         .unwrap_or_else(|| requested_start_model.clone());
     if resolved_cli_model != requested_start_model {
-        tracing::info!(requested = %requested_start_model, resolved = %resolved_cli_model, "resolved startup model to executable provider");
-        if let Ok(mut s) = shared_settings.lock() {
-            s.set_model(&resolved_cli_model);
-        }
+        tracing::info!(requested = %requested_start_model, resolved = %resolved_cli_model, "resolved startup model to executable provider without changing selected model");
     }
 
-    let mut provider_connected = true;
-    // Try the resolved model first; if unavailable, auto-detect any working provider.
-    let (effective_model, bridge): (String, Box<dyn LlmBridge>) = match providers::auto_detect_bridge(&resolved_cli_model).await
-    {
-        Some(native) => {
-            tracing::info!("using native LLM provider");
-            (resolved_cli_model.clone(), native)
-        }
-        None => match providers::automation_safe_model() {
-            Some(safe) if providers::auto_detect_bridge(&safe).await.is_some() => {
-                tracing::info!(
-                    configured = %resolved_cli_model, resolved = %safe,
-                    "configured model unavailable — switching to detected provider"
-                );
-                if let Ok(mut s) = shared_settings.lock() {
-                    s.set_model(&safe);
-                }
-                let bridge = providers::auto_detect_bridge(&safe).await.unwrap();
-                (safe, bridge)
-            }
-            _ => {
-            tracing::warn!(
-                "no LLM provider available — run /login anthropic or `omegon auth login` to connect"
-            );
-            eprintln!("No LLM provider configured. Use /login <provider> in the TUI or run `omegon auth login` first.");
-            provider_connected = false;
-            (resolved_cli_model.clone(), Box::new(bridge::NullBridge) as Box<dyn LlmBridge>)
-        }
-        }
+    let resolved_bridge = providers::auto_detect_bridge(&resolved_cli_model).await;
+    let startup_decision = decide_interactive_startup_model(
+        &requested_start_model,
+        &resolved_cli_model,
+        resolved_bridge.is_some(),
+    );
+    let (_effective_model, bridge): (String, Box<dyn LlmBridge>) = if let Some(native) = resolved_bridge {
+        tracing::info!("using native LLM provider");
+        (startup_decision.bridge_model.clone(), native)
+    } else {
+        tracing::warn!(
+            selected = %startup_decision.selected_model,
+            bridge_model = %startup_decision.bridge_model,
+            "no LLM provider available for selected interactive model"
+        );
+        eprintln!(
+            "No LLM provider configured for {}. Use /login <provider> in the TUI or run `omegon auth login` first.",
+            startup_decision.selected_model
+        );
+        (
+            startup_decision.bridge_model.clone(),
+            Box::new(bridge::NullBridge) as Box<dyn LlmBridge>,
+        )
     };
-    // Update settings with provider status before TUI reads it
+    // Update settings with selected-model provider status before TUI reads it.
+    // Do not mutate s.model here: profile/CLI model selection is operator intent,
+    // while `effective_model` is only the bridge route for this startup.
     if let Ok(mut s) = shared_settings.lock() {
-        s.provider_connected = provider_connected || auth::provider_connected_for_model(&effective_model);
+        s.provider_connected = startup_decision.provider_connected;
     }
     let bridge: Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>> =
         Arc::new(tokio::sync::RwLock::new(bridge));
@@ -3822,13 +3864,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         );
     }
 
-    let _mqtt_bridge = mqtt_bridge::start_mqtt_bridge(
-        mqtt_bridge::MqttBridgeConfig {
-            instance_id: agent.session_id.clone(),
-            ..Default::default()
-        },
-        events_tx.clone(),
-    );
+    let _mqtt_bridge =
+        maybe_start_mqtt_bridge(&agent.cwd, agent.session_id.clone(), events_tx.clone());
 
     let (mut agent, mut runtime_state) = split_interactive_agent(agent);
 
@@ -3898,9 +3935,11 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 respond_to,
             } => {
                 let response = execute_plan_slash_command(&mut runtime_state, command);
+                let snapshot_json = runtime_state.conversation.intent.work_plan_snapshot_json();
                 if let Some(output) = response.output.clone() {
                     let _ = events_tx.send(AgentEvent::SystemNotification { message: output });
                 }
+                let _ = events_tx.send(AgentEvent::PlanUpdated { snapshot_json });
                 if let Some(respond_to) = respond_to {
                     let _ = respond_to.send(omegon_traits::ControlOutputResponse {
                         accepted: response.accepted,
@@ -4371,6 +4410,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                         no_session: cli.no_session,
                         model: &cli.model,
                     },
+                    &agent.cwd,
                     &provider,
                 )
                 .await;
@@ -4660,6 +4700,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 .ok()
                                 .map(|s| s.model.clone())
                                 .unwrap_or_else(|| cli.model.clone());
+                            let cwd_for_profile = agent.cwd.clone();
                             let settings_for_login = shared_settings.clone();
                             crate::task_spawn::spawn_operator_task(
                                 "interactive-auth-login",
@@ -4726,11 +4767,15 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                         .send(AgentEvent::SystemNotification { message });
 
                                     if result.is_ok() {
-                                        let effective_model = providers::resolve_execution_model_spec(
-                                            &model_for_redetect,
-                                        )
-                                        .await
-                                        .unwrap_or(model_for_redetect.clone());
+                                        let login_provider_model =
+                                            providers::default_model_for_provider(&provider_clone)
+                                                .unwrap_or(model_for_redetect.clone());
+                                        let effective_model =
+                                            providers::resolve_execution_model_spec(
+                                                &login_provider_model,
+                                            )
+                                            .await
+                                            .unwrap_or(login_provider_model);
                                         if let Some(new_bridge) =
                                             providers::auto_detect_bridge(&effective_model).await
                                         {
@@ -4739,6 +4784,9 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                             if let Ok(mut s) = settings_for_login.lock() {
                                                 s.set_model(&effective_model);
                                                 s.provider_connected = auth::provider_connected_for_model(&effective_model);
+                                                let mut profile = settings::Profile::load(&cwd_for_profile);
+                                                profile.capture_from(&s);
+                                                let _ = profile.save(&cwd_for_profile);
                                             }
                                             tracing::info!("bridge hot-swapped after successful login");
                                             let _ =
@@ -5346,6 +5394,27 @@ fn split_interactive_agent(
     (host, state)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InteractiveStartupModelDecision {
+    selected_model: String,
+    bridge_model: String,
+    provider_connected: bool,
+    use_null_bridge: bool,
+}
+
+fn decide_interactive_startup_model(
+    selected_model: &str,
+    resolved_model: &str,
+    resolved_available: bool,
+) -> InteractiveStartupModelDecision {
+    InteractiveStartupModelDecision {
+        selected_model: selected_model.to_string(),
+        bridge_model: resolved_model.to_string(),
+        provider_connected: resolved_available,
+        use_null_bridge: !resolved_available,
+    }
+}
+
 #[derive(Clone)]
 struct InteractiveRuntimeResources {
     cwd: PathBuf,
@@ -5395,6 +5464,8 @@ async fn run_interactive_active_turn(
     events_tx: broadcast::Sender<AgentEvent>,
     active: ActiveTurnMeta,
 ) -> InteractiveAgentState {
+    const CANCEL_DRAIN_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
+
     let loop_config = build_interactive_loop_config(&runtime, &shared_settings, &pending_compact);
 
     if active.prompt.image_paths.is_empty() {
@@ -5433,19 +5504,50 @@ async fn run_interactive_active_turn(
         *guard = Some(cancel.clone());
     }
 
-    let bridge_guard = bridge.read().await;
-    if let Err(e) = r#loop::run(
-        bridge_guard.as_ref(),
-        &mut runtime_state.bus,
-        &mut runtime_state.context_manager,
-        &mut runtime_state.conversation,
-        &events_tx,
-        cancel,
-        &loop_config,
-    )
-    .await
-    {
-        drop(bridge_guard);
+    let run_result = {
+        let bridge_guard = bridge.read().await;
+        let mut run = std::pin::pin!(r#loop::run(
+            bridge_guard.as_ref(),
+            &mut runtime_state.bus,
+            &mut runtime_state.context_manager,
+            &mut runtime_state.conversation,
+            &events_tx,
+            cancel.clone(),
+            &loop_config,
+        ));
+
+        tokio::select! {
+            result = &mut run => Some(result),
+            _ = cancel.cancelled() => {
+                tracing::warn!(
+                    runtime_turn_id = active.runtime_turn_id,
+                    "operator cancellation requested; waiting for agent loop to drain"
+                );
+                let _ = events_tx.send(AgentEvent::SystemNotification {
+                    message: "Interrupt requested — waiting up to 10s for the active turn to stop cleanly.".into(),
+                });
+                match tokio::time::timeout(CANCEL_DRAIN_GRACE, &mut run).await {
+                    Ok(result) => Some(result),
+                    Err(_) => {
+                        tracing::error!(
+                            runtime_turn_id = active.runtime_turn_id,
+                            "agent loop did not stop after cancellation grace period; forcing TUI recovery"
+                        );
+                        let _ = events_tx.send(AgentEvent::MessageAbort {
+                            reason: Some("Interrupted turn did not stop within 10s; returning the operator surface to idle.".into()),
+                        });
+                        let _ = events_tx.send(AgentEvent::SystemNotification {
+                            message: "Interrupted turn did not stop within 10s; recovered the operator surface. The abandoned provider/tool request may finish in the background.".into(),
+                        });
+                        let _ = events_tx.send(AgentEvent::AgentEnd);
+                        None
+                    }
+                }
+            }
+        }
+    };
+
+    if let Some(Err(e)) = run_result {
         let recent_telemetry = runtime_state.conversation.last_provider_telemetry(None);
         let user_msg = format_agent_error(&e, recent_telemetry.as_ref());
         tracing::error!(
@@ -6347,9 +6449,15 @@ fn execute_plan_slash_command(
     use omegon_traits::SlashCommandResponse;
 
     let intent = &mut runtime_state.conversation.intent;
+    let clears_completed_plan = matches!(
+        command,
+        CanonicalSlashCommand::PlanAdvance
+            | CanonicalSlashCommand::PlanSkip
+            | CanonicalSlashCommand::PlanClear
+    );
     match command {
         CanonicalSlashCommand::PlanView => {}
-        CanonicalSlashCommand::PlanSet(items) => intent.set_work_plan(items),
+        CanonicalSlashCommand::PlanSet(ref items) => intent.set_work_plan(items.clone()),
         CanonicalSlashCommand::PlanApprove => intent.approve_work_plan(),
         CanonicalSlashCommand::PlanExecute => intent.execute_work_plan(),
         CanonicalSlashCommand::PlanAdvance => intent.advance_work_plan(),
@@ -6363,9 +6471,33 @@ fn execute_plan_slash_command(
         }
     }
 
+    let output = match command {
+        CanonicalSlashCommand::PlanView if intent.work_plan.is_empty() => intent
+            .render_last_completed_work_plan()
+            .unwrap_or_else(|| intent.render_work_plan()),
+        _ if clears_completed_plan && intent.work_plan.is_empty() => {
+            let mut output = format!(
+                "Plan cleared
+{}",
+                intent.render_work_plan()
+            );
+            if let Some(completed) = intent.render_last_completed_work_plan() {
+                output.push_str(
+                    "
+
+Last completed plan
+",
+                );
+                output.push_str(&completed);
+            }
+            output
+        }
+        _ => intent.render_work_plan(),
+    };
+
     SlashCommandResponse {
         accepted: true,
-        output: Some(intent.render_work_plan()),
+        output: Some(output),
     }
 }
 
@@ -7631,6 +7763,7 @@ mod tests {
             cleave_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
             delegate_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
             vox_polling_handles: vec![],
+            voice_notification_receivers: vec![],
         }
     }
 
@@ -8265,6 +8398,95 @@ mod tests {
         assert!(!auth::provider_connected_for_model(
             "nonexistent-provider:test-model"
         ));
+    }
+
+    #[test]
+    fn interactive_startup_uses_selected_model_when_available() {
+        let decision =
+            decide_interactive_startup_model("openai-codex:gpt-5.5", "openai-codex:gpt-5.5", true);
+
+        assert_eq!(decision.selected_model, "openai-codex:gpt-5.5");
+        assert_eq!(decision.bridge_model, "openai-codex:gpt-5.5");
+        assert!(decision.provider_connected);
+        assert!(!decision.use_null_bridge);
+    }
+
+    #[test]
+    fn interactive_startup_preserves_selected_model_when_route_resolves_differently() {
+        let decision =
+            decide_interactive_startup_model("openai:gpt-5.5", "openai-codex:gpt-5.5", true);
+
+        assert_eq!(decision.selected_model, "openai:gpt-5.5");
+        assert_eq!(decision.bridge_model, "openai-codex:gpt-5.5");
+        assert!(decision.provider_connected);
+        assert!(!decision.use_null_bridge);
+    }
+
+    #[test]
+    fn interactive_startup_does_not_replace_unavailable_profile_model_with_safe_fallback() {
+        let decision =
+            decide_interactive_startup_model("openai-codex:gpt-5.5", "openai-codex:gpt-5.5", false);
+
+        assert_eq!(decision.selected_model, "openai-codex:gpt-5.5");
+        assert_eq!(decision.bridge_model, "openai-codex:gpt-5.5");
+        assert!(!decision.provider_connected);
+        assert!(decision.use_null_bridge);
+    }
+
+    #[test]
+    fn interactive_loop_config_uses_selected_model_after_startup_resolution() {
+        let shared_settings = std::sync::Arc::new(std::sync::Mutex::new(settings::Settings::new(
+            "openai-codex:gpt-5.5",
+        )));
+        {
+            let mut s = shared_settings.lock().unwrap();
+            let decision = decide_interactive_startup_model(
+                "openai-codex:gpt-5.5",
+                "openai-codex:gpt-5.5",
+                false,
+            );
+            s.provider_connected = decision.provider_connected;
+        }
+        let secrets_dir = tempfile::tempdir().unwrap();
+        let runtime = InteractiveRuntimeResources {
+            cwd: PathBuf::from("."),
+            secrets: std::sync::Arc::new(
+                omegon_secrets::SecretsManager::new(secrets_dir.path()).unwrap(),
+            ),
+            context_metrics: crate::features::context::SharedContextMetrics::new(),
+        };
+        let pending_compact = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let loop_config =
+            build_interactive_loop_config(&runtime, &shared_settings, &pending_compact);
+
+        assert_eq!(loop_config.model, "openai-codex:gpt-5.5");
+        assert!(!shared_settings.lock().unwrap().provider_connected);
+    }
+
+    #[test]
+    fn plan_view_returns_last_completed_plan_when_no_active_plan_exists() {
+        let mut runtime_state = InteractiveAgentState {
+            bus: crate::bus::EventBus::new(),
+            context_manager: crate::context::ContextManager::new(String::new(), Vec::new()),
+            conversation: crate::conversation::ConversationState::new(),
+        };
+        runtime_state
+            .conversation
+            .intent
+            .set_work_plan(vec!["recover completed plan".into()]);
+        runtime_state.conversation.intent.advance_work_plan();
+        runtime_state.conversation.intent.clear_work_plan();
+
+        let response = execute_plan_slash_command(
+            &mut runtime_state,
+            crate::tui::CanonicalSlashCommand::PlanView,
+        );
+
+        assert!(response.accepted);
+        let output = response.output.unwrap();
+        assert!(output.contains("Plan mode: complete"), "{output}");
+        assert!(output.contains("recover completed plan"), "{output}");
     }
 
     #[test]

@@ -22,7 +22,7 @@ import { snippet } from "../../lib/snippets";
   <p>All commits must follow the <a href="https://www.conventionalcommits.org/">Conventional Commits</a> spec:</p>
   <pre><code>feat(tui): surface SegmentMeta as response header tag
 fix(providers): handle rate-limit 429 with exponential backoff
-chore(release): 0.15.9-rc.14
+chore(release): 0.22.0
 refactor(memory): extract semantic search into separate module
 docs: update provider matrix in FAQ
 test: add snapshot test for rounded borders</code></pre>
@@ -38,10 +38,9 @@ test: add snapshot test for rounded borders</code></pre>
 
   <h2>Release Workflow</h2>
   <p>Releases use the <code>just</code> task runner:</p>
-  <pre><code># Cut a release candidate (bump, test, commit, tag, build, sign)
+  <pre><code># Cut the stable release tag and build the local release binary
 # Sign the local macOS validation binary with Apple Developer ID (YubiKey — optional)
 # Publish refs and trigger CI-built release artifacts
-# Cut a stable release (strip -rc.N suffix)
 {snippet("cli.release_workflow")}</code></pre>
 
   <h3>What <code>just publish</code> Does</h3>

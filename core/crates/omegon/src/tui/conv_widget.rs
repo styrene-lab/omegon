@@ -20,6 +20,8 @@ pub struct ConvState {
     pub heights: Vec<u16>,
     /// Terminal width when heights were last computed.
     cached_width: u16,
+    /// Render mode when heights were last computed.
+    cached_mode: Option<SegmentRenderMode>,
     /// Number of segments when heights were last computed.
     cached_count: usize,
     /// Total rendered height from the previous frame.
@@ -34,6 +36,7 @@ impl ConvState {
             user_scrolled: false,
             heights: Vec::new(),
             cached_width: 0,
+            cached_mode: None,
             cached_count: 0,
             last_total_height: 0,
         }
@@ -68,8 +71,14 @@ impl ConvState {
     }
 
     /// Ensure heights are computed for all segments at the given width.
-    fn ensure_heights(&mut self, segments: &[Segment], width: u16, t: &dyn Theme) {
-        self.ensure_heights_with_scroll_state(segments, width, t, self.user_scrolled);
+    fn ensure_heights(
+        &mut self,
+        segments: &[Segment],
+        width: u16,
+        t: &dyn Theme,
+        mode: SegmentRenderMode,
+    ) {
+        self.ensure_heights_with_scroll_state(segments, width, t, self.user_scrolled, mode);
     }
 
     fn ensure_heights_with_scroll_state(
@@ -78,11 +87,13 @@ impl ConvState {
         width: u16,
         t: &dyn Theme,
         user_scrolled: bool,
+        mode: SegmentRenderMode,
     ) {
         // Full recompute if width changed
-        if width != self.cached_width {
+        if width != self.cached_width || self.cached_mode != Some(mode) {
             self.heights.clear();
             self.cached_width = width;
+            self.cached_mode = Some(mode);
             self.cached_count = 0;
         }
 
@@ -93,17 +104,34 @@ impl ConvState {
             self.cached_count = segments.len();
         }
 
-        // Recompute the last segment only when the viewport is attached to the live tail.
-        // When manually detached, the streaming tail is often off-screen, and remeasuring
-        // it on every chunk creates avoidable scroll jank.
-        if !segments.is_empty() && self.cached_count == segments.len() && !user_scrolled {
+        // Recompute the last segment while attached, and always once it is
+        // no longer live. Detached streaming tails intentionally keep their
+        // cached height to preserve the operator's scroll anchor; completed
+        // tails must be measured again or a final assistant response can look
+        // hard-truncated after the turn is marked done.
+        let last_is_live = segments.last().is_some_and(|segment| {
+            matches!(
+                segment.content,
+                SegmentContent::AssistantText {
+                    complete: false,
+                    ..
+                } | SegmentContent::ToolCard {
+                    complete: false,
+                    ..
+                }
+            )
+        });
+        if !segments.is_empty()
+            && self.cached_count == segments.len()
+            && (!user_scrolled || !last_is_live)
+        {
             let last = segments.len() - 1;
-            self.heights[last] = segments[last].height(width, t);
+            self.heights[last] = segments[last].height_in_mode(width, t, mode);
         }
 
         // Compute any new segments
         while self.cached_count < segments.len() {
-            let h = segments[self.cached_count].height(width, t);
+            let h = segments[self.cached_count].height_in_mode(width, t, mode);
             if self.cached_count < self.heights.len() {
                 self.heights[self.cached_count] = h;
             } else {
@@ -155,15 +183,15 @@ impl ConvState {
             if matches!(segment.content, SegmentContent::Image { .. }) && seg_top >= top_offset {
                 let render_y = viewport.y + (seg_top - top_offset);
                 let available_height = viewport.bottom().saturating_sub(render_y);
-                if available_height > 2 {
-                    // Leave 2 rows for border top/bottom, render image inside
+                if available_height > 3 {
+                    // Leave a one-cell blue edge and the bottom caption row.
                     result.push((
                         i,
                         Rect {
-                            x: viewport.x + 1,
-                            y: render_y + 1, // skip top border
+                            x: viewport.x.saturating_add(1),
+                            y: render_y.saturating_add(1),
                             width: viewport.width.saturating_sub(2),
-                            height: seg_height.saturating_sub(3).min(available_height - 2),
+                            height: seg_height.saturating_sub(3).min(available_height - 3),
                         },
                     ));
                 }
@@ -185,6 +213,7 @@ pub struct ConversationWidget<'a> {
     theme: &'a dyn Theme,
     mode: SegmentRenderMode,
     density: crate::settings::ToolDetail,
+    pinned_segment: Option<usize>,
 }
 
 impl<'a> ConversationWidget<'a> {
@@ -194,6 +223,7 @@ impl<'a> ConversationWidget<'a> {
             theme,
             mode: SegmentRenderMode::Full,
             density: crate::settings::ToolDetail::Detailed,
+            pinned_segment: None,
         }
     }
 
@@ -204,6 +234,11 @@ impl<'a> ConversationWidget<'a> {
 
     pub fn with_density(mut self, density: crate::settings::ToolDetail) -> Self {
         self.density = density;
+        self
+    }
+
+    pub fn with_pinned_segment(mut self, pinned_segment: Option<usize>) -> Self {
+        self.pinned_segment = pinned_segment;
         self
     }
 }
@@ -232,7 +267,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
         }
 
         // Ensure all segment heights are computed
-        state.ensure_heights(self.segments, area.width, self.theme);
+        state.ensure_heights(self.segments, area.width, self.theme, self.mode);
 
         let viewport_height = area.height;
         let total_height = state.total_height();
@@ -291,7 +326,14 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                     width: area.width,
                     height: seg_height.min(available_height),
                 };
-                segment.render(seg_area, buf, self.theme, self.mode, self.density);
+                segment.render_with_pinned(
+                    seg_area,
+                    buf,
+                    self.theme,
+                    self.mode,
+                    self.density,
+                    self.pinned_segment == Some(i),
+                );
             } else {
                 // Segment starts ABOVE the viewport — partially visible.
                 // Render into a temp buffer at full size, then copy the
@@ -315,12 +357,13 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                         cell.set_fg(fg);
                     }
                 }
-                segment.render(
+                segment.render_with_pinned(
                     temp_area,
                     &mut temp_buf,
                     self.theme,
                     self.mode,
                     self.density,
+                    self.pinned_segment == Some(i),
                 );
 
                 // Copy the visible portion from temp_buf to main buf
@@ -339,6 +382,45 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                     }
                 }
             }
+        }
+
+        if matches!(self.mode, SegmentRenderMode::Slim) && state.scroll_offset > 0 {
+            render_detached_viewport_hint(area, buf, self.theme, state.scroll_offset);
+        }
+    }
+}
+
+fn render_detached_viewport_hint(
+    area: Rect,
+    buf: &mut Buffer,
+    theme: &dyn Theme,
+    scroll_offset: u16,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let y = area.bottom().saturating_sub(1);
+    let label = format!(" more below · End to tail · +{scroll_offset} ");
+    let left_rule = "─";
+    let label_width = label.chars().count() as u16;
+    let right_rule_width = area.width.saturating_sub(label_width + 2) as usize;
+    let text = format!("{left_rule}{label}{}", "─".repeat(right_rule_width));
+    let style = Style::default()
+        .fg(theme.warning())
+        .bg(theme.surface_bg())
+        .add_modifier(Modifier::BOLD);
+
+    for x in area.left()..area.right() {
+        if let Some(cell) = buf.cell_mut((x, y)) {
+            cell.set_char(' ');
+            cell.set_style(Style::default().bg(theme.surface_bg()));
+        }
+    }
+    for (idx, ch) in text.chars().take(area.width as usize).enumerate() {
+        if let Some(cell) = buf.cell_mut((area.x + idx as u16, y)) {
+            cell.set_char(ch);
+            cell.set_style(style);
         }
     }
 }
@@ -419,7 +501,7 @@ mod tests {
             Segment::separator(),
         ];
         let mut state = ConvState::new();
-        state.ensure_heights(&segments, 80, &Alpharius);
+        state.ensure_heights(&segments, 80, &Alpharius, SegmentRenderMode::Full);
         assert_eq!(state.heights.len(), 3);
         assert_eq!(state.heights[0], 1); // separator
         assert_eq!(state.heights[2], 1); // separator
@@ -436,16 +518,54 @@ mod tests {
             },
         }];
         let mut state = ConvState::new();
-        state.ensure_heights(&segments, 40, &Alpharius);
+        state.ensure_heights(&segments, 40, &Alpharius, SegmentRenderMode::Full);
         state.heights[0] = 7;
         state.cached_count = segments.len();
         state.cached_width = 40;
+        state.cached_mode = Some(SegmentRenderMode::Full);
         state.user_scrolled = true;
 
-        state.ensure_heights_with_scroll_state(&segments, 40, &Alpharius, true);
+        state.ensure_heights_with_scroll_state(
+            &segments,
+            40,
+            &Alpharius,
+            true,
+            SegmentRenderMode::Full,
+        );
         assert_eq!(
             state.heights[0], 7,
             "detached viewport should preserve cached tail height instead of remeasuring it"
+        );
+    }
+
+    #[test]
+    fn detached_scroll_remeasures_completed_last_segment() {
+        let segments = vec![Segment {
+            meta: Default::default(),
+            content: SegmentContent::AssistantText {
+                text: "completed tail now has enough content to wrap across several terminal rows"
+                    .into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        }];
+        let mut state = ConvState::new();
+        state.heights = vec![1];
+        state.cached_count = segments.len();
+        state.cached_width = 20;
+        state.cached_mode = Some(SegmentRenderMode::Slim);
+        state.user_scrolled = true;
+
+        state.ensure_heights_with_scroll_state(
+            &segments,
+            20,
+            &Alpharius,
+            true,
+            SegmentRenderMode::Slim,
+        );
+        assert!(
+            state.heights[0] > 1,
+            "completed detached tail must be remeasured so it cannot look truncated"
         );
     }
 
@@ -585,6 +705,39 @@ mod tests {
     }
 
     #[test]
+    fn slim_detached_viewport_marks_more_content_below() {
+        let segments = vec![Segment {
+            meta: Default::default(),
+            content: SegmentContent::AssistantText {
+                text: "first page\n```json\n{\"pattern\":\"armory\"}\n```\nmore explanation".into(),
+                thinking: String::new(),
+                complete: true,
+            },
+        }];
+        let area = Rect::new(0, 0, 80, 3);
+        let mut state = ConvState::new();
+        state.scroll_offset = 2;
+        state.user_scrolled = true;
+
+        let mut buf = Buffer::empty(area);
+        ConversationWidget::new(&segments, &Alpharius)
+            .with_mode(SegmentRenderMode::Slim)
+            .render(area, &mut buf, &mut state);
+
+        let mut text = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                text.push_str(buf[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(
+            text.contains("more below · End to tail"),
+            "detached slim viewport should not look like truncated content: {text}"
+        );
+    }
+
+    #[test]
     fn slim_mode_renders_lighter_segment_chrome() {
         let segments = vec![
             Segment::user_prompt("hello"),
@@ -619,5 +772,29 @@ mod tests {
             !text.contains("│"),
             "slim mode should avoid left-rule chrome too: {text}"
         );
+    }
+
+    #[test]
+    fn slim_mode_hides_plan_snapshots_from_scrollback() {
+        let segments = vec![
+            Segment::system("Plan progress\nPlan mode: executing\nProgress: 1/2\n\n1. ◐ Do it"),
+            Segment::user_prompt("hello"),
+        ];
+        let widget =
+            ConversationWidget::new(&segments, &Alpharius).with_mode(SegmentRenderMode::Slim);
+        let area = Rect::new(0, 0, 80, 8);
+        let mut buf = Buffer::empty(area);
+        let mut state = ConvState::new();
+        widget.render(area, &mut buf, &mut state);
+
+        assert_eq!(state.heights[0], 0);
+        let mut text = String::new();
+        for y in 0..8 {
+            for x in 0..80 {
+                text.push_str(buf[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(!text.contains("Plan progress"), "{text}");
     }
 }

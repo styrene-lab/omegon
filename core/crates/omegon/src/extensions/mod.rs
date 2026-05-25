@@ -19,13 +19,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 pub mod config_store;
+pub(crate) mod host_actions;
 pub mod manifest;
 pub mod mind;
 pub mod state;
+mod tool_result;
+pub mod voice_bridge;
 pub mod vox_bridge;
 pub mod widgets;
 pub use manifest::{
@@ -66,6 +69,36 @@ const SAFE_INHERIT_ENVS: &[&str] = &[
     "CODEX_VAULT",
 ];
 
+#[derive(Debug, Clone)]
+pub struct ExtensionNotification {
+    pub extension_name: String,
+    pub method: String,
+    pub params: Value,
+}
+
+#[derive(Clone)]
+struct ExtensionNotificationSink {
+    extension_name: String,
+    tx: mpsc::UnboundedSender<ExtensionNotification>,
+}
+
+impl ExtensionNotificationSink {
+    fn send(&self, notification: omegon_extension::RpcNotification) {
+        let event = ExtensionNotification {
+            extension_name: self.extension_name.clone(),
+            method: notification.method,
+            params: notification.params,
+        };
+        if let Err(err) = self.tx.send(event) {
+            tracing::debug!(
+                extension = %self.extension_name,
+                error = %err,
+                "extension notification dropped because receiver is closed"
+            );
+        }
+    }
+}
+
 /// Handles for communicating with an extension process.
 pub struct ProcessHandles {
     child: tokio::process::Child,
@@ -91,6 +124,15 @@ impl ProcessHandles {
     /// Send a JSON-RPC request and receive the response.
     /// Standalone so the handshake sequence can run before ExtensionFeature is constructed.
     async fn rpc_call(&mut self, method: &str, params: Value) -> Result<Value> {
+        self.rpc_call_with_notifications(method, params, None).await
+    }
+
+    async fn rpc_call_with_notifications(
+        &mut self,
+        method: &str,
+        params: Value,
+        notification_sink: Option<&ExtensionNotificationSink>,
+    ) -> Result<Value> {
         let id = self.next_id;
         self.next_id += 1;
 
@@ -117,6 +159,14 @@ impl ProcessHandles {
                 continue;
             }
             let resp: Value = serde_json::from_str(trimmed)?;
+            if let Ok(omegon_extension::RpcIncoming::Notification(notification)) =
+                omegon_extension::RpcIncoming::parse(trimmed)
+            {
+                if let Some(sink) = notification_sink {
+                    sink.send(notification);
+                }
+                continue;
+            }
             if resp.get("id").and_then(|v| v.as_u64()) == Some(id) {
                 return if let Some(result) = resp.get("result") {
                     Ok(result.clone())
@@ -131,12 +181,53 @@ impl ProcessHandles {
     }
 }
 
+fn host_rpc_response_for_extension_request(
+    manifest: &ExtensionManifest,
+    extension_name: &str,
+    request: &omegon_extension::RpcRequest,
+) -> Option<Value> {
+    match request.method.as_str() {
+        "actions/execute" => {
+            let action = request.params.get("action").cloned().unwrap_or(Value::Null);
+            let outcome = host_actions::process_native_extension_action_execute(
+                action,
+                manifest,
+                extension_name,
+            );
+            let result = serde_json::to_value(outcome).unwrap_or_else(|err| {
+                json!({
+                    "action_id": "<serialization-error>",
+                    "status": "invalid",
+                    "error": {
+                        "code": "serialization_error",
+                        "message": err.to_string()
+                    }
+                })
+            });
+            Some(json!({
+                "jsonrpc": "2.0",
+                "id": request.id.clone(),
+                "result": result
+            }))
+        }
+        _ => Some(json!({
+            "jsonrpc": "2.0",
+            "id": request.id.clone(),
+            "error": {
+                "code": -32601,
+                "message": format!("unknown host request method '{}'", request.method)
+            }
+        })),
+    }
+}
+
 #[derive(Clone)]
 struct ExtensionRuntimeContext {
     name: String,
     ext_dir: PathBuf,
     manifest: ExtensionManifest,
     resolved_secrets: Vec<(String, String)>,
+    notification_sink: Option<ExtensionNotificationSink>,
 }
 
 /// Wrapper Feature for any extension (native or OCI).
@@ -208,6 +299,31 @@ impl ExtensionFeature {
                 continue;
             }
             let resp: Value = serde_json::from_str(trimmed)?;
+            if let Ok(incoming) = omegon_extension::RpcIncoming::parse(trimmed) {
+                match incoming {
+                    omegon_extension::RpcIncoming::Request(req) => {
+                        let response = host_rpc_response_for_extension_request(
+                            &self.runtime.manifest,
+                            &self.runtime.name,
+                            &req,
+                        )
+                        .ok_or_else(|| anyhow!("host request produced no response"))?;
+                        handles
+                            .stdin
+                            .write_all(format!("{}\n", response).as_bytes())
+                            .await?;
+                        handles.stdin.flush().await?;
+                        continue;
+                    }
+                    omegon_extension::RpcIncoming::Notification(notification) => {
+                        if let Some(sink) = &self.runtime.notification_sink {
+                            sink.send(notification);
+                        }
+                        continue;
+                    }
+                    omegon_extension::RpcIncoming::Response(_) => {}
+                }
+            }
             if resp.get("id").and_then(|v| v.as_u64()) == Some(id) {
                 return if let Some(result) = resp.get("result") {
                     Ok(result.clone())
@@ -218,6 +334,21 @@ impl ExtensionFeature {
                 };
             }
         }
+    }
+
+    fn extension_tool_result(&self, output: Value, call_id: &str) -> ToolResult {
+        let mut envelope = tool_result::parse_extension_tool_envelope(output);
+        if !envelope.host_actions.is_empty() {
+            let outcomes = host_actions::process_declarative_host_actions(
+                envelope.host_actions,
+                &self.runtime.manifest,
+                &self.runtime.name,
+                call_id,
+            );
+            envelope.host_actions = Vec::new();
+            envelope.host_action_outcomes.extend(outcomes);
+        }
+        envelope.into_tool_result()
     }
 
     async fn respawn_after_transport_error(&self, cause: &anyhow::Error) -> Result<()> {
@@ -240,6 +371,7 @@ impl ExtensionFeature {
             &self.runtime.manifest,
             &self.runtime.ext_dir,
             &self.runtime.resolved_secrets,
+            self.runtime.notification_sink.as_ref(),
         )
         .await
         .map_err(|err| {
@@ -348,6 +480,30 @@ impl ExtensionPollingHandle {
                 continue;
             }
             let resp: Value = serde_json::from_str(trimmed)?;
+            if let Ok(incoming) = omegon_extension::RpcIncoming::parse(trimmed) {
+                match incoming {
+                    omegon_extension::RpcIncoming::Request(req) => {
+                        let response = json!({
+                            "jsonrpc": "2.0",
+                            "id": req.id,
+                            "error": {
+                                "code": -32601,
+                                "message": format!("host request method '{}' is unavailable on polling handles", req.method)
+                            }
+                        });
+                        handles
+                            .stdin
+                            .write_all(format!("{}\n", response).as_bytes())
+                            .await?;
+                        handles.stdin.flush().await?;
+                        continue;
+                    }
+                    omegon_extension::RpcIncoming::Notification(_) => {
+                        continue;
+                    }
+                    omegon_extension::RpcIncoming::Response(_) => {}
+                }
+            }
             if resp.get("id").and_then(|v| v.as_u64()) == Some(id) {
                 return if let Some(result) = resp.get("result") {
                     Ok(result.clone())
@@ -382,12 +538,7 @@ impl Feature for ExtensionFeature {
             .rpc_call("execute_tool", json!({ "name": tool_name, "args": args }))
             .await
         {
-            Ok(output) => Ok(ToolResult {
-                content: vec![ContentBlock::Text {
-                    text: output.to_string(),
-                }],
-                details: json!({}),
-            }),
+            Ok(output) => Ok(self.extension_tool_result(output, _call_id)),
             Err(e) if is_extension_transport_error(&e) => {
                 self.record_error(format!("transport failure: {e}")).await;
                 self.respawn_after_transport_error(&e).await?;
@@ -401,12 +552,15 @@ impl Feature for ExtensionFeature {
                             tool_name
                         )
                     })?;
-                Ok(ToolResult {
-                    content: vec![ContentBlock::Text {
-                        text: output.to_string(),
-                    }],
-                    details: json!({"extension_reconnected": true}),
-                })
+                let mut result = self.extension_tool_result(output, _call_id);
+                result.details = match result.details {
+                    Value::Object(mut details) => {
+                        details.insert("extension_reconnected".to_string(), Value::Bool(true));
+                        Value::Object(details)
+                    }
+                    other => json!({"extension_reconnected": true, "extension_details": other}),
+                };
+                Ok(result)
             }
             Err(e) => {
                 let msg = e.to_string();
@@ -436,6 +590,8 @@ pub struct SpawnedExtension {
     pub widget_rx: broadcast::Receiver<WidgetEvent>,
     /// Polling handle for extensions that provide `vox_route` (event bridge).
     pub vox_polling_handle: Option<ExtensionPollingHandle>,
+    /// Push notification receiver for voice-capable extensions.
+    pub voice_notification_rx: Option<mpsc::UnboundedReceiver<ExtensionNotification>>,
 }
 
 /// Spawn an extension from its manifest directory.
@@ -557,16 +713,20 @@ async fn handshake(
     manifest: &ExtensionManifest,
     ext_dir: &Path,
     resolved_secrets: &[(String, String)],
+    notification_sink: Option<&ExtensionNotificationSink>,
 ) -> Result<Vec<ToolDefinition>> {
     let name = &manifest.extension.name;
 
     // 1. Discover tools
-    let tools: Vec<ToolDefinition> = handles
-        .rpc_call("get_tools", json!({}))
-        .await
-        .ok()
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
+    let tools_response = handles
+        .rpc_call_with_notifications("get_tools", json!({}), notification_sink)
+        .await?;
+    let tools = normalize_extension_tool_definitions(&tools_response).map_err(|err| {
+        anyhow!(
+            "extension '{}' returned invalid get_tools response: {err}",
+            name
+        )
+    })?;
 
     // 2. Deliver secrets over pipe — never via env var
     if !resolved_secrets.is_empty() {
@@ -575,7 +735,11 @@ async fn handshake(
             .map(|(k, v)| (k.clone(), Value::String(v.clone())))
             .collect();
         match handles
-            .rpc_call("bootstrap_secrets", Value::Object(secrets_map))
+            .rpc_call_with_notifications(
+                "bootstrap_secrets",
+                Value::Object(secrets_map),
+                notification_sink,
+            )
             .await
         {
             Ok(_) => tracing::debug!(
@@ -604,7 +768,11 @@ async fn handshake(
     let config = resolved_config(manifest, ext_dir)?;
     if !config.is_empty() {
         match handles
-            .rpc_call("bootstrap_config", Value::Object(config))
+            .rpc_call_with_notifications(
+                "bootstrap_config",
+                Value::Object(config),
+                notification_sink,
+            )
             .await
         {
             Ok(_) => tracing::debug!(extension = name, "bootstrap_config delivered"),
@@ -619,6 +787,60 @@ async fn handshake(
     }
 
     Ok(tools)
+}
+
+fn normalize_extension_tool_definitions(value: &Value) -> Result<Vec<ToolDefinition>> {
+    let tools = value
+        .as_array()
+        .ok_or_else(|| anyhow!("get_tools result must be an array"))?;
+    tools
+        .iter()
+        .map(normalize_extension_tool_definition)
+        .collect()
+}
+
+fn normalize_extension_tool_definition(value: &Value) -> Result<ToolDefinition> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| anyhow!("tool definition must be an object"))?;
+    let name = obj
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| anyhow!("tool definition missing non-empty name"))?
+        .to_string();
+    let label = obj
+        .get("label")
+        .and_then(Value::as_str)
+        .filter(|label| !label.is_empty())
+        .unwrap_or(&name)
+        .to_string();
+    let description = obj
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let parameters = obj
+        .get("parameters")
+        .or_else(|| obj.get("inputSchema"))
+        .or_else(|| obj.get("input_schema"))
+        .cloned()
+        .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
+    let capabilities = obj
+        .get("capabilities")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|err| anyhow!("tool '{name}' has invalid capabilities: {err}"))?
+        .unwrap_or_default();
+
+    Ok(ToolDefinition {
+        name,
+        label,
+        description,
+        parameters,
+        capabilities,
+    })
 }
 
 fn resolved_config(
@@ -689,7 +911,27 @@ async fn spawn_native(
 ) -> Result<SpawnedExtension> {
     let mut handles = spawn_process_handles(manifest, ext_dir).await?;
 
-    let tools = handshake(&mut handles, manifest, ext_dir, resolved_secrets).await?;
+    let notification_pair = if manifest.capabilities.voice {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            Some(ExtensionNotificationSink {
+                extension_name: manifest.extension.name.clone(),
+                tx,
+            }),
+            Some(rx),
+        )
+    } else {
+        (None, None)
+    };
+
+    let tools = handshake(
+        &mut handles,
+        manifest,
+        ext_dir,
+        resolved_secrets,
+        notification_pair.0.as_ref(),
+    )
+    .await?;
 
     tracing::info!(
         name = %manifest.extension.name,
@@ -705,6 +947,7 @@ async fn spawn_native(
         ext_dir: ext_dir.to_path_buf(),
         manifest: manifest.clone(),
         resolved_secrets: resolved_secrets.to_vec(),
+        notification_sink: notification_pair.0,
     };
 
     let (feature, widget_rx) =
@@ -743,6 +986,7 @@ async fn spawn_native(
         widgets: tab_widgets,
         widget_rx,
         vox_polling_handle,
+        voice_notification_rx: notification_pair.1,
     })
 }
 
@@ -756,7 +1000,27 @@ async fn spawn_container(
 ) -> Result<SpawnedExtension> {
     let mut handles = spawn_process_handles(manifest, ext_dir).await?;
 
-    let tools = handshake(&mut handles, manifest, ext_dir, resolved_secrets).await?;
+    let notification_pair = if manifest.capabilities.voice {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            Some(ExtensionNotificationSink {
+                extension_name: manifest.extension.name.clone(),
+                tx,
+            }),
+            Some(rx),
+        )
+    } else {
+        (None, None)
+    };
+
+    let tools = handshake(
+        &mut handles,
+        manifest,
+        ext_dir,
+        resolved_secrets,
+        notification_pair.0.as_ref(),
+    )
+    .await?;
 
     tracing::info!(
         name = %manifest.extension.name,
@@ -772,6 +1036,7 @@ async fn spawn_container(
         ext_dir: ext_dir.to_path_buf(),
         manifest: manifest.clone(),
         resolved_secrets: resolved_secrets.to_vec(),
+        notification_sink: notification_pair.0,
     };
 
     let (feature, widget_rx) =
@@ -805,6 +1070,7 @@ async fn spawn_container(
         widgets: tab_widgets,
         widget_rx,
         vox_polling_handle,
+        voice_notification_rx: notification_pair.1,
     })
 }
 
@@ -971,6 +1237,330 @@ binary = "flaky-extension.sh"
         assert_eq!(second.details["extension_reconnected"], true);
     }
 
+    #[test]
+    fn extension_sdk_tool_schema_normalizes_input_schema() {
+        let tools = normalize_extension_tool_definitions(&json!([
+            {
+                "name": "reader_doctor",
+                "description": "Diagnose Bookokrat availability and HostAction readiness",
+                "inputSchema": {"type": "object", "properties": {}}
+            },
+            {
+                "name": "reader_open",
+                "description": "Open a readable file",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"]
+                }
+            }
+        ]))
+        .unwrap();
+
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].name, "reader_doctor");
+        assert_eq!(tools[0].label, "reader_doctor");
+        assert_eq!(tools[0].parameters["type"], "object");
+        assert_eq!(tools[1].name, "reader_open");
+        assert_eq!(tools[1].parameters["required"][0], "path");
+    }
+
+    #[test]
+    fn extension_internal_tool_schema_still_accepts_parameters_and_label() {
+        let tools = normalize_extension_tool_definitions(&json!([
+            {
+                "name": "hello_extension",
+                "label": "Hello Extension",
+                "description": "Say hello",
+                "parameters": {"type": "object", "properties": {"name": {"type": "string"}}}
+            }
+        ]))
+        .unwrap();
+
+        assert_eq!(tools[0].name, "hello_extension");
+        assert_eq!(tools[0].label, "Hello Extension");
+        assert_eq!(tools[0].parameters["properties"]["name"]["type"], "string");
+    }
+
+    #[test]
+    fn extension_tool_schema_rejects_missing_name() {
+        let err = normalize_extension_tool_definitions(&json!([
+            {"description": "broken", "inputSchema": {"type": "object"}}
+        ]))
+        .unwrap_err();
+
+        assert!(err.to_string().contains("missing non-empty name"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn voice_capable_extension_notification_does_not_break_get_tools_response_matching() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("voice-extension.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *get_tools*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"voice/transcription","params":{"text":"synthetic validation","duration_s":0.2}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":[{"name":"voice_status","description":"Voice status","inputSchema":{"type":"object","properties":{}}}]}'
+      ;;
+    *bootstrap_config*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"acknowledged":true}}'
+      ;;
+    *execute_tool*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"ok"}]}}'
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        std::fs::write(
+            temp.path().join("manifest.toml"),
+            r#"
+[extension]
+name = "voice-test"
+version = "0.1.0"
+description = "Voice test extension"
+
+[runtime]
+type = "native"
+binary = "voice-extension.sh"
+
+[capabilities]
+voice = true
+"#,
+        )
+        .unwrap();
+
+        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
+        let mut rx = spawned
+            .voice_notification_rx
+            .expect("voice-capable extension should expose notification receiver");
+        let names: Vec<String> = spawned
+            .feature
+            .tools()
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect();
+        assert_eq!(names, vec!["voice_status"]);
+
+        let notification = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("notification received")
+            .expect("notification channel open");
+        assert_eq!(notification.extension_name, "voice-test");
+        assert_eq!(notification.method, "voice/transcription");
+        assert_eq!(notification.params["text"], "synthetic validation");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn voice_capable_extension_notification_reaches_daemon_queue_through_bridge() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("voice-extension.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *get_tools*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"voice/transcription","params":{"text":"summarize the current project","utterance_id":"test-u1","duration_s":1.2}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":[{"name":"voice_status","description":"Voice status","inputSchema":{"type":"object","properties":{}}}]}'
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        std::fs::write(
+            temp.path().join("manifest.toml"),
+            r#"
+[extension]
+name = "voice-test"
+version = "0.1.0"
+description = "Voice test extension"
+
+[runtime]
+type = "native"
+binary = "voice-extension.sh"
+
+[capabilities]
+voice = true
+"#,
+        )
+        .unwrap();
+
+        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
+        let rx = spawned
+            .voice_notification_rx
+            .expect("voice-capable extension should expose notification receiver");
+        let daemon_events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let cancel = tokio_util::sync::CancellationToken::new();
+        crate::extensions::voice_bridge::start_voice_bridge(
+            rx,
+            daemon_events.clone(),
+            cancel.clone(),
+        );
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if let Some(event) = daemon_events.lock().unwrap().first().cloned() {
+                    return event;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("voice bridge should inject daemon event");
+        cancel.cancel();
+
+        assert_eq!(event.source, "voice");
+        assert_eq!(event.trigger_kind, "prompt");
+        assert_eq!(event.source_channel.as_deref(), Some("voice"));
+        assert_eq!(event.caller_role.as_deref(), Some("edit"));
+        assert_eq!(event.payload["text"], "summarize the current project");
+        assert_eq!(event.payload["utterance_id"], "test-u1");
+        assert_eq!(event.payload["duration_s"], 1.2);
+        assert_eq!(event.payload["extension"], "voice-test");
+        assert_eq!(event.payload["trust_level"], "operator");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn non_voice_extension_does_not_get_voice_notification_receiver() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("voice-extension.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *get_tools*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"voice/transcription","params":{"text":"should not inject"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":[{"name":"status","description":"Status","inputSchema":{"type":"object","properties":{}}}]}'
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        std::fs::write(
+            temp.path().join("manifest.toml"),
+            r#"
+[extension]
+name = "not-voice"
+version = "0.1.0"
+description = "Non voice extension"
+
+[runtime]
+type = "native"
+binary = "voice-extension.sh"
+"#,
+        )
+        .unwrap();
+
+        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
+        assert!(
+            spawned.voice_notification_rx.is_none(),
+            "non-voice extension must not get a voice notification receiver"
+        );
+        let names: Vec<String> = spawned
+            .feature
+            .tools()
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect();
+        assert_eq!(names, vec!["status"]);
+    }
+
+    #[test]
+    fn host_rpc_actions_execute_routes_to_policy_pipeline() {
+        let manifest = test_manifest(HashMap::new());
+        let request = omegon_extension::RpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!("ext-1")),
+            method: "actions/execute".to_string(),
+            params: json!({
+                "action": {"id": "broken", "params": {}}
+            }),
+        };
+
+        let response =
+            host_rpc_response_for_extension_request(&manifest, "test-extension", &request).unwrap();
+        assert_eq!(response["id"], "ext-1");
+        assert_eq!(response["result"]["status"], "invalid");
+    }
+
+    #[test]
+    fn host_rpc_actions_execute_cannot_bypass_manifest_policy() {
+        let manifest = test_manifest(HashMap::new());
+        let request = omegon_extension::RpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!("ext-2")),
+            method: "actions/execute".to_string(),
+            params: json!({
+                "action": {"id": "open-reader", "type": "terminal.create@1", "params": {}}
+            }),
+        };
+
+        let response =
+            host_rpc_response_for_extension_request(&manifest, "test-extension", &request).unwrap();
+        assert_eq!(response["result"]["status"], "denied");
+        assert_eq!(response["result"]["error"]["code"], "manifest_denied");
+    }
+
+    #[test]
+    fn declarative_host_actions_render_as_outcomes_separate_from_content() {
+        let mut envelope = tool_result::parse_extension_tool_envelope(json!({
+            "content": [{"type": "text", "text": "Opening reader"}],
+            "actions": [{"id": "open-reader", "type": "terminal.create@1", "params": {}}]
+        }));
+        let actions = std::mem::take(&mut envelope.host_actions);
+        let outcomes = host_actions::process_declarative_host_actions(
+            actions,
+            &test_manifest(HashMap::new()),
+            "reader",
+            "call-1",
+        );
+        envelope.host_action_outcomes.extend(outcomes);
+        let result = envelope.into_tool_result();
+
+        match &result.content[0] {
+            ContentBlock::Text { text } => assert_eq!(text, "Opening reader"),
+            ContentBlock::Image { .. } => panic!("expected text"),
+        }
+        assert!(result.details.get("host_actions").is_none());
+        assert_eq!(
+            result.details["host_action_outcomes"][0]["status"],
+            "denied"
+        );
+        assert_eq!(
+            result.details["host_action_outcomes"][0]["error"]["code"],
+            "manifest_denied"
+        );
+    }
+
     fn config_field(
         field_type: ConfigFieldType,
         default: Option<&str>,
@@ -1003,6 +1593,8 @@ binary = "flaky-extension.sh"
             secrets: manifest::SecretsConfig::default(),
             mcp: None,
             config,
+            capabilities: omegon_extension::Capabilities::default(),
+            permissions: omegon_extension::ManifestPermissions::default(),
         }
     }
 }
