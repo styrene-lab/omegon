@@ -321,6 +321,8 @@ pub struct App {
     // ui_mode removed — all behavior driven by ui_surfaces
     ui_surfaces: UiSurfaces,
     theme: Box<dyn theme::Theme>,
+    /// Whether durable completed-plan history exists for /plan view recall.
+    completed_plan_history_available: bool,
     /// Shared settings — source of truth for model, thinking, etc.
     settings: crate::settings::SharedSettings,
     /// Shared cancel token — Escape/Ctrl+C cancels the active agent turn.
@@ -1607,6 +1609,10 @@ enum SlimPlanHintState {
     Complete,
 }
 
+fn slim_completed_plan_hint_available(completed_plan_history_available: bool) -> bool {
+    completed_plan_history_available
+}
+
 fn slim_operator_hint(
     pending_permission: bool,
     pending_operator_wait: bool,
@@ -1630,7 +1636,7 @@ fn slim_operator_hint(
             } => {
                 format!("plan: next · advance · {automation}")
             }
-            SlimPlanHintState::Complete => "plan done · clear".to_string(),
+            SlimPlanHintState::Complete => "plan done · view".to_string(),
             SlimPlanHintState::None => format!("copy · transcript · {automation}"),
         }
     }
@@ -2008,6 +2014,7 @@ impl App {
             )),
             status_line: statusline::StatusLine::default(),
             slim_plan_snapshot: None,
+            completed_plan_history_available: false,
             active_tool_stream: None,
             slim_turn_state: SlimTurnState::Ready,
             effects: effects::Effects::new(),
@@ -4237,7 +4244,13 @@ impl App {
             let plan_state = slim_plan_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.hint_state(slim_plan_area.height))
-                .unwrap_or(SlimPlanHintState::None);
+                .unwrap_or_else(|| {
+                    if slim_completed_plan_hint_available(self.completed_plan_history_available) {
+                        SlimPlanHintState::Complete
+                    } else {
+                        SlimPlanHintState::None
+                    }
+                });
             self.status_line.operator_hint = Some(slim_operator_hint(
                 self.pending_permission.is_some(),
                 self.pending_operator_wait.is_some(),
@@ -7807,6 +7820,10 @@ impl App {
             }
             AgentEvent::PlanUpdated { snapshot_json } => {
                 let snapshot = PlanDisplaySnapshot::from_json(snapshot_json);
+                self.completed_plan_history_available = snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.is_complete())
+                    || self.completed_plan_history_available;
                 if let Some(snapshot) = snapshot.as_ref()
                     && snapshot.is_complete()
                 {
@@ -7828,6 +7845,7 @@ impl App {
             AgentEvent::SessionReset => {
                 self.conversation = ConversationView::new();
                 self.slim_plan_snapshot = None;
+                self.completed_plan_history_available = false;
                 self.active_tool_stream = None;
                 self.turn = 0;
                 self.tool_calls = 0;
@@ -9980,7 +9998,8 @@ mod slash_command_parsing_tests {
     use super::{
         ActiveToolStream, PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus,
         SlimPlanHintState, format_permission_prompt, permission_persist_scope_label,
-        permission_response_for_key, slim_operator_hint, slim_pinned_plan_snapshot, slim_plan_rows,
+        permission_response_for_key, slim_completed_plan_hint_available, slim_operator_hint,
+        slim_pinned_plan_snapshot, slim_plan_rows,
     };
     use crossterm::event::{KeyCode, KeyModifiers};
     use tokio::sync::mpsc;
@@ -10266,6 +10285,12 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
+    fn slim_completed_plan_hint_available_reads_completed_history_flag() {
+        assert!(!slim_completed_plan_hint_available(false));
+        assert!(slim_completed_plan_hint_available(true));
+    }
+
+    #[test]
     fn slim_operator_hint_prioritizes_blocking_prompts() {
         let active = SlimPlanHintState::Active { next_visible: true };
         assert_eq!(
@@ -10304,7 +10329,7 @@ mod slash_command_parsing_tests {
                 SlimPlanHintState::Complete,
                 "assistive"
             ),
-            "plan done · clear"
+            "plan done · view"
         );
         assert_eq!(
             slim_operator_hint(false, false, false, SlimPlanHintState::None, "assistive"),

@@ -30,6 +30,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Keep dynamically registered native extension tools visible in the lazy model tool surface after turn 1 so installed extension tools such as `reader_doctor` and `reader_open` can be discovered during an active session.
 - Normalize native extension SDK `get_tools` schemas that use `inputSchema` into Omegon's internal tool definitions so installed extensions advertise their tools instead of silently registering zero tools.
 - Preserve voice transcription `utterance_id` metadata when routing voice-capable extension notifications into daemon prompt events.
+- **Completed plans surface in Slim** — completed plan updates now leave the active pinned plan lane clear while keeping a `plan done · view` affordance visible so the last completed plan can be recalled.
 - **Completed plans remain recoverable** — completed work plans are now recorded as bounded session state, survive save/resume, and `/plan view` can show the last completed plan even after the active plan has been cleared.
 
 ## [0.23.9] - 2026-05-25

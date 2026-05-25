@@ -1010,6 +1010,28 @@ fn slim_status_line_marks_detached_conversation_viewport() {
 }
 
 #[test]
+fn completed_plan_update_enables_done_view_hint_without_pinning() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::PlanUpdated {
+        snapshot_json: serde_json::json!({
+            "mode": "complete",
+            "completed": 1,
+            "total": 1,
+            "items": [{"status": "done", "description": "remember me"}]
+        }),
+    });
+
+    assert!(app.completed_plan_history_available);
+    assert!(app.slim_plan_snapshot.is_none());
+    let text = render_app_to_string(&mut app, 120, 18);
+    assert!(text.contains("plan done · view"), "{text}");
+    assert!(
+        !text.contains("remember me"),
+        "completed history should not pin active lane: {text}"
+    );
+}
+
+#[test]
 fn completed_plan_update_reattaches_detached_slim_viewport() {
     let mut app = test_app();
     app.conversation.conv_state.scroll_offset = 46;
