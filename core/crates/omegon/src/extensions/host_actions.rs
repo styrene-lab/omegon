@@ -282,11 +282,11 @@ pub(super) fn process_declarative_host_actions(
         .collect()
 }
 
-pub(crate) fn process_mcp_host_actions(
+pub(crate) fn process_mcp_host_actions_typed(
     actions: &Value,
     server_name: &str,
     tool_name: &str,
-) -> Vec<Value> {
+) -> Vec<HostActionOutcome> {
     let Some(actions) = actions.as_array() else {
         let scoped = ScopedHostActionId {
             origin: HostActionOrigin::mcp(server_name),
@@ -302,7 +302,7 @@ pub(crate) fn process_mcp_host_actions(
             "invalid_host_actions_metadata",
             "_meta[\"omegon/hostActions\"] must be an array",
         );
-        return vec![serde_json::to_value(outcome).unwrap_or_else(serialization_error_outcome)];
+        return vec![outcome];
     };
 
     let manifest = mcp_deny_by_default_manifest();
@@ -320,15 +320,25 @@ pub(crate) fn process_mcp_host_actions(
                     .map(ToString::to_string)
                     .unwrap_or_else(|| format!("<pending-parse-{idx}>")),
             };
-            let outcome = process_host_action_candidate(
+            process_host_action_candidate(
                 action.clone(),
                 &manifest,
                 scoped,
                 &RuntimeHostActionPolicy::default(),
                 &HostActionExecutorRegistry::default_supported(),
-            );
-            serde_json::to_value(outcome).unwrap_or_else(serialization_error_outcome)
+            )
         })
+        .collect()
+}
+
+pub(crate) fn process_mcp_host_actions(
+    actions: &Value,
+    server_name: &str,
+    tool_name: &str,
+) -> Vec<Value> {
+    process_mcp_host_actions_typed(actions, server_name, tool_name)
+        .into_iter()
+        .map(|outcome| serde_json::to_value(outcome).unwrap_or_else(serialization_error_outcome))
         .collect()
 }
 

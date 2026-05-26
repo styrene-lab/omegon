@@ -102,6 +102,9 @@ pub struct McpServerConfig {
     /// Timeout for tool calls in seconds (default: 30).
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
+    /// Explicit HostAction policy for actions emitted by this MCP server.
+    #[serde(default)]
+    pub host_actions: McpHostActionPolicy,
 }
 
 fn default_timeout() -> u64 {
@@ -109,6 +112,29 @@ fn default_timeout() -> u64 {
 }
 fn default_true() -> bool {
     true
+}
+
+/// HostAction permission policy for a single MCP server.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct McpHostActionPolicy {
+    /// Explicitly permitted HostAction type strings, e.g. `terminal.create@1`.
+    #[serde(default)]
+    pub allowed: Vec<String>,
+    /// Tool names allowed to return approvable HostActions. Empty means all
+    /// tools from the server may request the allowed action types.
+    #[serde(default)]
+    pub tools: Vec<String>,
+    /// Manual/request approval is required by default. Auto execution remains
+    /// off for MCP-origin HostActions in this slice.
+    #[serde(default)]
+    pub manual: bool,
+}
+
+impl McpHostActionPolicy {
+    fn allows(&self, tool_name: &str, action_type: &str) -> bool {
+        self.allowed.iter().any(|allowed| allowed == action_type)
+            && (self.tools.is_empty() || self.tools.iter().any(|tool| tool == tool_name))
+    }
 }
 
 /// A discovered tool from an MCP server.
@@ -261,6 +287,8 @@ pub struct McpFeature {
     /// client handler can route incoming `on_progress` notifications
     /// back to the right tool-call sink.
     progress: Arc<ProgressRegistry>,
+    /// Explicit MCP HostAction permissions by server name.
+    host_action_policies: HashMap<String, McpHostActionPolicy>,
 }
 
 impl McpFeature {
@@ -278,6 +306,7 @@ impl McpFeature {
         let progress = Arc::new(ProgressRegistry::default());
 
         let mut timeouts = HashMap::new();
+        let mut host_action_policies = HashMap::new();
         for (server_name, config) in servers {
             match Self::connect_one(server_name, config, secrets, Arc::clone(&progress)).await {
                 Ok((server_tools, client)) => {
@@ -289,6 +318,10 @@ impl McpFeature {
                     );
                     all_tools.extend(server_tools);
                     timeouts.insert(server_name.clone(), config.timeout_secs);
+                    if !config.host_actions.allowed.is_empty() {
+                        host_action_policies
+                            .insert(server_name.clone(), config.host_actions.clone());
+                    }
 
                     // Discover resources (non-fatal — many servers don't expose any)
                     match client.list_all_resources().await {
@@ -408,6 +441,7 @@ impl McpFeature {
             clients: Arc::new(Mutex::new(clients)),
             timeouts,
             progress,
+            host_action_policies,
         })
     }
 
@@ -981,13 +1015,23 @@ impl Feature for McpFeature {
             })
             .collect();
 
-        let details = mcp_tool_result_details(&server_name, &mcp_name, &result);
+        let details = mcp_tool_result_details(
+            &server_name,
+            &mcp_name,
+            &result,
+            self.host_action_policies.get(&server_name),
+        );
 
         Ok(ToolResult { content, details })
     }
 }
 
-fn mcp_tool_result_details(server_name: &str, tool_name: &str, result: &CallToolResult) -> Value {
+fn mcp_tool_result_details(
+    server_name: &str,
+    tool_name: &str,
+    result: &CallToolResult,
+    policy: Option<&McpHostActionPolicy>,
+) -> Value {
     let Some(meta) = result.meta.as_ref() else {
         return Value::Null;
     };
@@ -995,9 +1039,67 @@ fn mcp_tool_result_details(server_name: &str, tool_name: &str, result: &CallTool
         return Value::Null;
     };
 
-    let outcomes =
-        crate::extensions::host_actions::process_mcp_host_actions(actions, server_name, tool_name);
+    let outcomes = mcp_host_action_outcomes(actions, server_name, tool_name, policy);
     json!({"host_action_outcomes": outcomes})
+}
+
+fn mcp_host_action_outcomes(
+    actions: &Value,
+    server_name: &str,
+    tool_name: &str,
+    policy: Option<&McpHostActionPolicy>,
+) -> Vec<Value> {
+    let Some(policy) = policy else {
+        return crate::extensions::host_actions::process_mcp_host_actions(
+            actions,
+            server_name,
+            tool_name,
+        );
+    };
+    let mut outcomes = crate::extensions::host_actions::process_mcp_host_actions_typed(
+        actions,
+        server_name,
+        tool_name,
+    );
+    let Some(action_values) = actions.as_array() else {
+        return outcomes
+            .into_iter()
+            .map(|outcome| serde_json::to_value(outcome).unwrap_or(Value::Null))
+            .collect();
+    };
+
+    for (outcome, action_value) in outcomes.iter_mut().zip(action_values.iter()) {
+        let action_type = action_value
+            .get("type")
+            .or_else(|| action_value.get("action_type"))
+            .and_then(Value::as_str);
+        let Some(action_type) = action_type else {
+            continue;
+        };
+        if outcome.status == omegon_extension::HostActionStatus::Denied
+            && outcome
+                .error
+                .as_ref()
+                .is_some_and(|error| error.code == "manifest_denied")
+            && policy.allows(tool_name, action_type)
+        {
+            outcome.status = omegon_extension::HostActionStatus::NeedsApproval;
+            outcome.error = None;
+            outcome.result = Some(json!({
+                "approval": "required",
+                "origin": "mcp",
+                "server": server_name,
+                "tool": tool_name,
+                "action_type": action_type,
+                "auto_execution": "downgraded_to_manual"
+            }));
+        }
+    }
+
+    outcomes
+        .into_iter()
+        .map(|outcome| serde_json::to_value(outcome).unwrap_or(Value::Null))
+        .collect()
 }
 
 /// RAII guard that removes a progress-token registration when dropped.
@@ -1260,6 +1362,82 @@ mod tests {
     }
 
     #[test]
+    fn mcp_host_action_policy_allowed_actions_become_needs_approval() {
+        let mut meta = rmcp::model::Meta::new();
+        meta.insert(
+            "omegon/hostActions".to_string(),
+            json!([{
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "execution": "auto_if_allowed",
+                "params": {"command": "bookokrat"}
+            }]),
+        );
+        let mut result = CallToolResult::success(vec![rmcp::model::Content::text("ok")]);
+        result.meta = Some(meta);
+        let policy = McpHostActionPolicy {
+            allowed: vec!["terminal.create@1".to_string()],
+            tools: vec!["open".to_string()],
+            manual: true,
+        };
+
+        let details = mcp_tool_result_details("reader", "open", &result, Some(&policy));
+        let outcome = &details["host_action_outcomes"][0];
+
+        assert_eq!(outcome["status"], "needs_approval");
+        assert_eq!(outcome["error"], Value::Null);
+        assert_eq!(outcome["result"]["approval"], "required");
+        assert_eq!(outcome["result"]["origin"], "mcp");
+        assert_eq!(outcome["result"]["server"], "reader");
+        assert_eq!(outcome["result"]["tool"], "open");
+        assert_eq!(outcome["result"]["action_type"], "terminal.create@1");
+        assert_eq!(outcome["result"]["auto_execution"], "downgraded_to_manual");
+    }
+
+    #[test]
+    fn mcp_host_action_policy_tool_scope_is_enforced() {
+        let mut meta = rmcp::model::Meta::new();
+        meta.insert(
+            "omegon/hostActions".to_string(),
+            json!([{
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "params": {"command": "bookokrat"}
+            }]),
+        );
+        let mut result = CallToolResult::success(vec![rmcp::model::Content::text("ok")]);
+        result.meta = Some(meta);
+        let policy = McpHostActionPolicy {
+            allowed: vec!["terminal.create@1".to_string()],
+            tools: vec!["other_tool".to_string()],
+            manual: true,
+        };
+
+        let details = mcp_tool_result_details("reader", "open", &result, Some(&policy));
+        let outcome = &details["host_action_outcomes"][0];
+
+        assert_eq!(outcome["status"], "denied");
+        assert_eq!(outcome["error"]["code"], "manifest_denied");
+    }
+
+    #[test]
+    fn mcp_host_action_policy_parses_from_server_config() {
+        let toml = r#"
+command = "reader-mcp"
+
+[host_actions]
+allowed = ["terminal.create@1"]
+tools = ["open"]
+manual = true
+"#;
+        let config: McpServerConfig = toml::from_str(toml).unwrap();
+
+        assert_eq!(config.host_actions.allowed, vec!["terminal.create@1"]);
+        assert_eq!(config.host_actions.tools, vec!["open"]);
+        assert!(config.host_actions.manual);
+    }
+
+    #[test]
     fn mcp_tool_result_details_marks_mcp_actions_invalid_without_breaking_content() {
         let mut meta = rmcp::model::Meta::new();
         meta.insert(
@@ -1275,7 +1453,7 @@ mod tests {
             CallToolResult::success(vec![rmcp::model::Content::text("still readable")]);
         result.meta = Some(meta);
 
-        let details = mcp_tool_result_details("reader", "open", &result);
+        let details = mcp_tool_result_details("reader", "open", &result, None);
 
         assert_eq!(
             details["host_action_outcomes"][0]["action_id"],
@@ -1293,7 +1471,7 @@ mod tests {
         let result = CallToolResult::success(vec![rmcp::model::Content::text("plain")]);
 
         assert_eq!(
-            mcp_tool_result_details("server", "tool", &result),
+            mcp_tool_result_details("server", "tool", &result, None),
             Value::Null
         );
     }
@@ -1305,7 +1483,7 @@ mod tests {
         let mut result = CallToolResult::success(vec![rmcp::model::Content::text("plain")]);
         result.meta = Some(meta);
 
-        let details = mcp_tool_result_details("server", "tool", &result);
+        let details = mcp_tool_result_details("server", "tool", &result, None);
 
         assert_eq!(details["host_action_outcomes"][0]["status"], "invalid");
         assert_eq!(
@@ -1445,6 +1623,7 @@ mod tests {
             docker_mcp: None,
             styrene_dest: None,
             timeout_secs: 30,
+            host_actions: McpHostActionPolicy::default(),
         };
         let cmd = McpFeature::build_command("test", &config, None).unwrap();
         let prog = cmd.as_std().get_program().to_str().unwrap();
@@ -1464,6 +1643,7 @@ mod tests {
             docker_mcp: None,
             styrene_dest: None,
             timeout_secs: 30,
+            host_actions: McpHostActionPolicy::default(),
         };
         let cmd = McpFeature::build_command("test", &config, None).unwrap();
         let prog = cmd.as_std().get_program().to_str().unwrap();
@@ -1500,6 +1680,7 @@ mod tests {
             docker_mcp: Some("github".into()),
             styrene_dest: None,
             timeout_secs: 30,
+            host_actions: McpHostActionPolicy::default(),
         };
         let cmd = McpFeature::build_command("test", &config, None).unwrap();
         let prog = cmd.as_std().get_program().to_str().unwrap();
@@ -1548,6 +1729,7 @@ mod tests {
             docker_mcp: None,
             styrene_dest: Some("a7b3c9d1e5f2".into()),
             timeout_secs: 60,
+            host_actions: McpHostActionPolicy::default(),
         };
         let cmd = McpFeature::build_command("gpu", &config, None).unwrap();
         let prog = cmd.as_std().get_program().to_str().unwrap();
@@ -1584,6 +1766,7 @@ mod tests {
             docker_mcp: None,
             styrene_dest: None,
             timeout_secs: 30,
+            host_actions: McpHostActionPolicy::default(),
         };
         let result = McpFeature::build_command("test", &config, None);
         assert!(
@@ -1684,6 +1867,7 @@ mod tests {
             clients: Arc::new(Mutex::new(HashMap::new())),
             timeouts: HashMap::new(),
             progress: Arc::new(ProgressRegistry::default()),
+            host_action_policies: HashMap::new(),
         }
     }
 
