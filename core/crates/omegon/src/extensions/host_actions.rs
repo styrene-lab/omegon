@@ -6,7 +6,7 @@ use serde_json::Value;
 
 /// Host-attached origin for an untrusted HostAction candidate.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum HostActionOriginKind {
+pub(crate) enum HostActionOriginKind {
     NativeExtension,
     Mcp,
     Internal,
@@ -14,7 +14,7 @@ pub(super) enum HostActionOriginKind {
 
 /// Trusted runtime origin attached by Omegon before policy evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct HostActionOrigin {
+pub(crate) struct HostActionOrigin {
     pub kind: HostActionOriginKind,
     pub identity: String,
 }
@@ -47,7 +47,7 @@ impl HostActionOrigin {
 /// Session/tool-call scoped action identity. Extension-provided action ids are
 /// local labels only; this type is the runtime identity used for policy/audit.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ScopedHostActionId {
+pub(crate) struct ScopedHostActionId {
     pub origin: HostActionOrigin,
     pub session_id: String,
     pub tool_call_id: String,

@@ -928,10 +928,30 @@ impl Feature for McpFeature {
     async fn execute_with_sink(
         &self,
         tool_name: &str,
+        call_id: &str,
+        args: Value,
+        cancel: tokio_util::sync::CancellationToken,
+        sink: ToolProgressSink,
+    ) -> anyhow::Result<ToolResult> {
+        self.execute_with_context(
+            tool_name,
+            call_id,
+            args,
+            cancel,
+            sink,
+            omegon_traits::ToolExecutionContext::default(),
+        )
+        .await
+    }
+
+    async fn execute_with_context(
+        &self,
+        tool_name: &str,
         _call_id: &str,
         args: Value,
         _cancel: tokio_util::sync::CancellationToken,
         sink: ToolProgressSink,
+        context: omegon_traits::ToolExecutionContext,
     ) -> anyhow::Result<ToolResult> {
         let (server_name, mcp_name) = Self::split_tool_name(tool_name);
 
@@ -1015,12 +1035,14 @@ impl Feature for McpFeature {
             })
             .collect();
 
-        let details = mcp_tool_result_details(
+        let details = mcp_tool_result_details_with_context(
             &server_name,
             &mcp_name,
             &result,
             self.host_action_policies.get(&server_name),
-        );
+            &context,
+        )
+        .await;
 
         Ok(ToolResult { content, details })
     }
@@ -1040,6 +1062,26 @@ fn mcp_tool_result_details(
     };
 
     let outcomes = mcp_host_action_outcomes(actions, server_name, tool_name, policy);
+    json!({"host_action_outcomes": outcomes})
+}
+
+async fn mcp_tool_result_details_with_context(
+    server_name: &str,
+    tool_name: &str,
+    result: &CallToolResult,
+    policy: Option<&McpHostActionPolicy>,
+    context: &omegon_traits::ToolExecutionContext,
+) -> Value {
+    let Some(meta) = result.meta.as_ref() else {
+        return Value::Null;
+    };
+    let Some(actions) = meta.get("omegon/hostActions") else {
+        return Value::Null;
+    };
+
+    let outcomes =
+        mcp_host_action_outcomes_with_context(actions, server_name, tool_name, policy, context)
+            .await;
     json!({"host_action_outcomes": outcomes})
 }
 
@@ -1100,6 +1142,130 @@ fn mcp_host_action_outcomes(
         .into_iter()
         .map(|outcome| serde_json::to_value(outcome).unwrap_or(Value::Null))
         .collect()
+}
+
+async fn mcp_host_action_outcomes_with_context(
+    actions: &Value,
+    server_name: &str,
+    tool_name: &str,
+    policy: Option<&McpHostActionPolicy>,
+    context: &omegon_traits::ToolExecutionContext,
+) -> Vec<Value> {
+    let Some(policy) = policy else {
+        return crate::extensions::host_actions::process_mcp_host_actions(
+            actions,
+            server_name,
+            tool_name,
+        );
+    };
+    let Some(action_values) = actions.as_array() else {
+        return crate::extensions::host_actions::process_mcp_host_actions(
+            actions,
+            server_name,
+            tool_name,
+        );
+    };
+
+    let mut out = Vec::new();
+    for (idx, action_value) in action_values.iter().enumerate() {
+        let action_type = action_value
+            .get("type")
+            .or_else(|| action_value.get("action_type"))
+            .and_then(Value::as_str);
+        let Some(action_type) = action_type else {
+            out.extend(crate::extensions::host_actions::process_mcp_host_actions(
+                &json!([action_value]),
+                server_name,
+                tool_name,
+            ));
+            continue;
+        };
+        if !policy.allows(tool_name, action_type) {
+            out.extend(crate::extensions::host_actions::process_mcp_host_actions(
+                &json!([action_value]),
+                server_name,
+                tool_name,
+            ));
+            continue;
+        }
+
+        let action =
+            match serde_json::from_value::<omegon_extension::HostAction>(action_value.clone()) {
+                Ok(action) => action,
+                Err(_) => {
+                    out.extend(crate::extensions::host_actions::process_mcp_host_actions(
+                        &json!([action_value]),
+                        server_name,
+                        tool_name,
+                    ));
+                    continue;
+                }
+            };
+        let scoped = crate::extensions::host_actions::ScopedHostActionId {
+            origin: crate::extensions::host_actions::HostActionOrigin::mcp(server_name),
+            session_id: "mcp-tool-result".to_string(),
+            tool_call_id: tool_name.to_string(),
+            action_id: action.id.clone(),
+        };
+
+        let decision = if let Some(sink) = &context.host_action_approval {
+            let request = crate::extensions::approval::build_host_action_permission_request(
+                scoped.session_id.clone(),
+                tool_name,
+                &scoped,
+                &action,
+                "mcp action requires approval",
+            );
+            let request_json = serde_json::to_value(request).unwrap_or_else(|err| {
+                json!({"error": {"code": "approval_request_serialization", "message": err.to_string()}})
+            });
+            serde_json::from_value::<crate::extensions::approval::HostActionApprovalDecision>(
+                sink(request_json).await,
+            )
+            .unwrap_or(crate::extensions::approval::HostActionApprovalDecision::Unavailable)
+        } else {
+            crate::extensions::approval::HostActionApprovalDecision::Unavailable
+        };
+
+        if decision == crate::extensions::approval::HostActionApprovalDecision::Approved {
+            let mut single = crate::extensions::host_actions::process_mcp_host_actions(
+                &json!([action_value]),
+                server_name,
+                tool_name,
+            );
+            if let Some(outcome) = single.first_mut()
+                && outcome.get("status").and_then(Value::as_str) == Some("denied")
+                && outcome
+                    .get("error")
+                    .and_then(|e| e.get("code"))
+                    .and_then(Value::as_str)
+                    == Some("manifest_denied")
+            {
+                *outcome = json!({
+                    "action_id": action.id,
+                    "status": "needs_approval",
+                    "result": {
+                        "approval": "required",
+                        "origin": "mcp",
+                        "server": server_name,
+                        "tool": tool_name,
+                        "action_type": action_type,
+                        "decision": "approved_for_future_executor",
+                        "auto_execution": "downgraded_to_manual"
+                    }
+                });
+            }
+            out.extend(single);
+        } else {
+            let outcome =
+                crate::extensions::approval::denied_approval_outcome(&scoped, &action, decision);
+            out.push(serde_json::to_value(outcome).unwrap_or(Value::Null));
+        }
+
+        let _ = idx;
+    }
+
+    out
 }
 
 /// RAII guard that removes a progress-token registration when dropped.

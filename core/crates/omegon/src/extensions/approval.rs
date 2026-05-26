@@ -20,7 +20,7 @@ pub(crate) enum HostActionApprovalDecision {
     Unavailable,
 }
 
-pub(super) fn build_host_action_permission_request(
+pub(crate) fn build_host_action_permission_request(
     session_id: impl Into<SessionId>,
     tool_name: &str,
     scoped_id: &ScopedHostActionId,
@@ -114,7 +114,7 @@ pub(crate) fn decision_from_permission_outcome(
     }
 }
 
-pub(super) fn denied_approval_outcome(
+pub(crate) fn denied_approval_outcome(
     scoped_id: &ScopedHostActionId,
     action: &HostAction,
     decision: HostActionApprovalDecision,

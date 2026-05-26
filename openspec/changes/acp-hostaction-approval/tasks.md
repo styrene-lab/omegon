@@ -26,9 +26,9 @@
 ## 4. MCP HostAction convergence
 <!-- specs: extensions/hostaction-approval -->
 
-- [ ] 4.1 Route policy-allowed MCP actions through the ACP approval bridge.
-- [ ] 4.2 Preserve unconfigured MCP deny-by-default behavior.
-- [ ] 4.3 Ensure `auto_if_allowed` from MCP downgrades to manual approval.
+- [x] 4.1 Route policy-allowed MCP actions through the ACP approval bridge.
+- [x] 4.2 Preserve unconfigured MCP deny-by-default behavior.
+- [x] 4.3 Ensure `auto_if_allowed` from MCP downgrades to manual approval.
 
 ## 5. Loop integration
 <!-- specs: extensions/hostaction-approval -->
