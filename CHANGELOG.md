@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Added explicit MCP HostAction policy parsing and manual `needs_approval` outcomes so configured MCP servers can advertise approved action requests without gaining auto-execution.
+
 ### Fixed
 
 - Shorten pre-content provider/SSE idle detection from five minutes to 90 seconds, with environment overrides, so stale provider sessions surface as failures instead of apparent hangs.

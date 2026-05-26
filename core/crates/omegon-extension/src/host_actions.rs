@@ -79,6 +79,8 @@ pub struct HostActionOutcome {
 pub enum HostActionStatus {
     /// Action completed successfully.
     Completed,
+    /// Action is valid but requires explicit operator approval before execution.
+    NeedsApproval,
     /// Action was denied by manifest, project, runtime, or operator policy.
     Denied,
     /// Action family or requested feature is unsupported by the host.
@@ -141,8 +143,17 @@ mod tests {
 
     #[test]
     fn host_action_status_invalid_serializes_as_snake_case() {
+        let status = serde_json::to_value(HostActionStatus::NeedsApproval).unwrap();
+        assert_eq!(status, serde_json::json!("needs_approval"));
+
         let status = serde_json::to_value(HostActionStatus::Invalid).unwrap();
         assert_eq!(status, serde_json::json!("invalid"));
+    }
+
+    #[test]
+    fn host_action_status_needs_approval_serializes_as_snake_case() {
+        let status = serde_json::to_value(HostActionStatus::NeedsApproval).unwrap();
+        assert_eq!(status, serde_json::json!("needs_approval"));
     }
 
     #[test]

@@ -475,7 +475,14 @@ impl EventBus {
             if def.name == tool_name {
                 return match tokio::time::timeout(
                     timeout,
-                    self.features[*idx].execute_with_sink(tool_name, call_id, args, cancel, sink),
+                    self.features[*idx].execute_with_context(
+                        tool_name,
+                        call_id,
+                        args,
+                        cancel,
+                        sink,
+                        omegon_traits::ToolExecutionContext::default(),
+                    ),
                 )
                 .await
                 {
@@ -504,18 +511,57 @@ impl EventBus {
         anyhow::bail!("no feature provides tool '{tool_name}'")
     }
 
+    /// Execute a tool with a host interaction context. Used by ACP-hosted
+    /// sessions to route operator approval requests back to the client.
+    pub async fn execute_tool_with_context(
+        &self,
+        tool_name: &str,
+        call_id: &str,
+        args: Value,
+        cancel: tokio_util::sync::CancellationToken,
+        sink: omegon_traits::ToolProgressSink,
+        context: omegon_traits::ToolExecutionContext,
+    ) -> anyhow::Result<omegon_traits::ToolResult> {
+        let default_timeout = self
+            .tool_timeouts
+            .get(tool_name)
+            .copied()
+            .unwrap_or(DEFAULT_TOOL_TIMEOUT);
+        let timeout = args
+            .get("timeout")
+            .and_then(|v| v.as_u64())
+            .map(|secs| Duration::from_secs(secs + 5).min(MAX_TOOL_TIMEOUT))
+            .filter(|t| *t > default_timeout)
+            .unwrap_or(default_timeout);
+
+        for (idx, def) in &self.tool_defs {
+            if def.name == tool_name {
+                return match tokio::time::timeout(
+                    timeout,
+                    self.features[*idx]
+                        .execute_with_context(tool_name, call_id, args, cancel, sink, context),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_elapsed) => Ok(omegon_traits::ToolResult {
+                        content: vec![omegon_traits::ContentBlock::Text {
+                            text: format!(
+                                "Tool '{}' timed out after {} seconds. The operation was cancelled.",
+                                tool_name,
+                                timeout.as_secs()
+                            ),
+                        }],
+                        details: serde_json::json!({"is_error": true}),
+                    }),
+                };
+            }
+        }
+        anyhow::bail!("no feature provides tool '{tool_name}'")
+    }
+
     /// Execute an internal tool that may not be in the LLM-visible tool_defs.
     ///
-    /// Unlike `execute_tool`, this tries every feature directly rather than
-    /// looking up the tool name in the registered definitions. Used for harness
-    /// plumbing (trust_directory, etc.) that the model should never call but
-    /// the dispatch layer needs.
-    /// Execute an internal tool that is NOT in the LLM-visible tool_defs.
-    ///
-    /// Tries each feature that declares matching tools. Unlike `execute_tool`,
-    /// this checks the full tool registry (including tools not in the disabled
-    /// set) by looking at each feature's `tools()` output. Used for harness
-    /// plumbing (trust_directory, etc.) that the model should never call.
     /// Execute an internal tool that may not be in the LLM-visible tool_defs.
     ///
     /// Unlike `execute_tool`, this doesn't require the tool to be in the

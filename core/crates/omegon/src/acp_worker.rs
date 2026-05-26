@@ -86,6 +86,7 @@ pub enum WorkerEvent {
     ToolEnd {
         id: String,
         success: bool,
+        details: serde_json::Value,
     },
     /// Partial tool output for streaming to the client.
     ToolOutput {
@@ -279,12 +280,16 @@ async fn worker_loop(
                                     args: if args.is_null() { None } else { Some(args) },
                                 })
                             }
-                            omegon_traits::AgentEvent::ToolEnd { id, is_error, .. } => {
-                                Some(WorkerEvent::ToolEnd {
-                                    id,
-                                    success: !is_error,
-                                })
-                            }
+                            omegon_traits::AgentEvent::ToolEnd {
+                                id,
+                                result,
+                                is_error,
+                                ..
+                            } => Some(WorkerEvent::ToolEnd {
+                                id,
+                                success: !is_error,
+                                details: result.details,
+                            }),
                             omegon_traits::AgentEvent::ToolUpdate { id, partial } => {
                                 if partial.tail.is_empty() {
                                     None

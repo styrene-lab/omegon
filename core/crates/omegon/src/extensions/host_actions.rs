@@ -1,3 +1,4 @@
+use super::approval::{self, HostActionApprovalDecision};
 use super::manifest::ExtensionManifest;
 use crate::tools::terminal;
 use omegon_extension::{HostAction, HostActionOutcome, HostActionStatus};
@@ -5,7 +6,7 @@ use serde_json::Value;
 
 /// Host-attached origin for an untrusted HostAction candidate.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum HostActionOriginKind {
+pub(crate) enum HostActionOriginKind {
     NativeExtension,
     Mcp,
     Internal,
@@ -13,7 +14,7 @@ pub(super) enum HostActionOriginKind {
 
 /// Trusted runtime origin attached by Omegon before policy evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct HostActionOrigin {
+pub(crate) struct HostActionOrigin {
     pub kind: HostActionOriginKind,
     pub identity: String,
 }
@@ -46,7 +47,7 @@ impl HostActionOrigin {
 /// Session/tool-call scoped action identity. Extension-provided action ids are
 /// local labels only; this type is the runtime identity used for policy/audit.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ScopedHostActionId {
+pub(crate) struct ScopedHostActionId {
     pub origin: HostActionOrigin,
     pub session_id: String,
     pub tool_call_id: String,
@@ -113,6 +114,146 @@ impl HostActionExecutorRegistry {
     fn supports(&self, action_type: &str) -> bool {
         self.supported_types.iter().any(|ty| ty == action_type)
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum HostActionPreparedCandidate {
+    Ready {
+        action: HostAction,
+        candidate: Value,
+    },
+    Rejected(HostActionOutcome),
+}
+
+pub(super) fn prepare_host_action_candidate(
+    candidate: Value,
+    manifest: &ExtensionManifest,
+    scoped_id: &ScopedHostActionId,
+    executors: &HostActionExecutorRegistry,
+) -> HostActionPreparedCandidate {
+    let action: HostAction = match serde_json::from_value(candidate.clone()) {
+        Ok(action) => action,
+        Err(err) => {
+            return HostActionPreparedCandidate::Rejected(audited_outcome(
+                scoped_id,
+                None,
+                "<invalid>",
+                HostActionStatus::Invalid,
+                "invalid_action",
+                format!("invalid HostAction candidate: {err}"),
+            ));
+        }
+    };
+
+    if !action.action_type.contains('@') {
+        return HostActionPreparedCandidate::Rejected(audited_outcome(
+            scoped_id,
+            Some(&action.action_type),
+            action.id,
+            HostActionStatus::Invalid,
+            "invalid_action_type",
+            "HostAction type must include an explicit version suffix",
+        ));
+    }
+
+    if !executors.supports(&action.action_type) {
+        return HostActionPreparedCandidate::Rejected(audited_outcome(
+            scoped_id,
+            Some(&action.action_type),
+            action.id,
+            HostActionStatus::Unsupported,
+            "unsupported_action",
+            format!("unsupported HostAction type '{}'", action.action_type),
+        ));
+    }
+
+    if !manifest.allows_host_action_type(&action.action_type) {
+        return HostActionPreparedCandidate::Rejected(audited_outcome(
+            scoped_id,
+            Some(&action.action_type),
+            action.id,
+            HostActionStatus::Denied,
+            "manifest_denied",
+            format!(
+                "manifest does not allow HostAction type '{}'",
+                action.action_type
+            ),
+        ));
+    }
+
+    HostActionPreparedCandidate::Ready { action, candidate }
+}
+
+fn action_requires_manual_approval(
+    action: &HostAction,
+    runtime_policy: &RuntimeHostActionPolicy,
+) -> bool {
+    matches!(
+        action.execution,
+        None | Some(omegon_extension::HostActionExecution::Manual)
+            | Some(omegon_extension::HostActionExecution::AutoIfAllowed)
+    ) && !(runtime_policy.project_allows_auto
+        && runtime_policy.runtime_allows_auto
+        && runtime_policy.origin_trusted_for_auto
+        && runtime_policy.operator_approved)
+}
+
+pub(super) fn prepare_host_action_for_approval(
+    candidate: Value,
+    manifest: &ExtensionManifest,
+    scoped_id: &ScopedHostActionId,
+    runtime_policy: &RuntimeHostActionPolicy,
+    executors: &HostActionExecutorRegistry,
+) -> Result<Option<(HostAction, Value)>, HostActionOutcome> {
+    match prepare_host_action_candidate(candidate, manifest, scoped_id, executors) {
+        HostActionPreparedCandidate::Rejected(outcome) => Err(outcome),
+        HostActionPreparedCandidate::Ready { action, candidate } => {
+            if action_requires_manual_approval(&action, runtime_policy) {
+                Ok(Some((action, candidate)))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+pub(super) fn process_host_action_candidate_with_approval_decision(
+    candidate: Value,
+    manifest: &ExtensionManifest,
+    scoped_id: ScopedHostActionId,
+    runtime_policy: &RuntimeHostActionPolicy,
+    executors: &HostActionExecutorRegistry,
+    approval_decision: HostActionApprovalDecision,
+) -> HostActionOutcome {
+    let prepared = prepare_host_action_candidate(candidate, manifest, &scoped_id, executors);
+    let HostActionPreparedCandidate::Ready { action, candidate } = prepared else {
+        return match prepared {
+            HostActionPreparedCandidate::Rejected(outcome) => outcome,
+            HostActionPreparedCandidate::Ready { .. } => unreachable!(),
+        };
+    };
+
+    if action_requires_manual_approval(&action, runtime_policy) {
+        match approval_decision {
+            HostActionApprovalDecision::Approved => {
+                let mut approved_policy = runtime_policy.clone();
+                approved_policy.operator_approved = true;
+                approved_policy.project_allows_auto = true;
+                approved_policy.runtime_allows_auto = true;
+                approved_policy.origin_trusted_for_auto = true;
+                return process_host_action_candidate(
+                    candidate,
+                    manifest,
+                    scoped_id,
+                    &approved_policy,
+                    executors,
+                );
+            }
+            other => return approval::denied_approval_outcome(&scoped_id, &action, other),
+        }
+    }
+
+    process_host_action_candidate(candidate, manifest, scoped_id, runtime_policy, executors)
 }
 
 pub(super) fn process_native_extension_action_execute(
@@ -259,7 +400,7 @@ pub(super) fn process_declarative_host_actions(
                     .map(ToString::to_string)
                     .unwrap_or_else(|| format!("<pending-parse-{idx}>")),
             };
-            let outcome = process_host_action_candidate(
+            let outcome = process_host_action_candidate_with_approval_decision(
                 action,
                 manifest,
                 scoped,
@@ -267,6 +408,7 @@ pub(super) fn process_declarative_host_actions(
                 &HostActionExecutorRegistry::with_real_terminal_backend(
                     std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
                 ),
+                HostActionApprovalDecision::Unavailable,
             );
             serde_json::to_value(outcome).unwrap_or_else(|err| {
                 serde_json::json!({
@@ -282,11 +424,106 @@ pub(super) fn process_declarative_host_actions(
         .collect()
 }
 
-pub(crate) fn process_mcp_host_actions(
+pub(super) async fn process_declarative_host_actions_with_context(
+    actions: Vec<Value>,
+    manifest: &ExtensionManifest,
+    extension_name: &str,
+    tool_call_id: &str,
+    context: &omegon_traits::ToolExecutionContext,
+) -> Vec<Value> {
+    let mut outcomes = Vec::new();
+    let executors = HostActionExecutorRegistry::with_real_terminal_backend(
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    );
+    let runtime_policy = RuntimeHostActionPolicy::default();
+
+    for (idx, action) in actions.into_iter().enumerate() {
+        let scoped = ScopedHostActionId {
+            origin: HostActionOrigin::native_extension(extension_name),
+            session_id: "tool-result".to_string(),
+            tool_call_id: tool_call_id.to_string(),
+            action_id: action
+                .get("id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| format!("<pending-parse-{idx}>")),
+        };
+
+        let approval_decision = match prepare_host_action_for_approval(
+            action.clone(),
+            manifest,
+            &scoped,
+            &runtime_policy,
+            &executors,
+        ) {
+            Err(outcome) => {
+                outcomes.push(serde_json::to_value(outcome).unwrap_or_else(|err| {
+                    serde_json::json!({
+                        "action_id": "<serialization-error>",
+                        "status": "invalid",
+                        "error": {
+                            "code": "serialization_error",
+                            "message": err.to_string()
+                        }
+                    })
+                }));
+                continue;
+            }
+            Ok(None) => HostActionApprovalDecision::Approved,
+            Ok(Some((prepared_action, _candidate))) => {
+                if let Some(sink) = &context.host_action_approval {
+                    let request = approval::build_host_action_permission_request(
+                        scoped.session_id.clone(),
+                        extension_name,
+                        &scoped,
+                        &prepared_action,
+                        "host action requires approval",
+                    );
+                    let request_json = serde_json::to_value(request).unwrap_or_else(|err| {
+                        serde_json::json!({
+                            "error": {
+                                "code": "approval_request_serialization",
+                                "message": err.to_string()
+                            }
+                        })
+                    });
+                    let decision_json = sink(request_json).await;
+                    serde_json::from_value::<HostActionApprovalDecision>(decision_json)
+                        .unwrap_or(HostActionApprovalDecision::Unavailable)
+                } else {
+                    HostActionApprovalDecision::Unavailable
+                }
+            }
+        };
+
+        let outcome = process_host_action_candidate_with_approval_decision(
+            action,
+            manifest,
+            scoped,
+            &runtime_policy,
+            &executors,
+            approval_decision,
+        );
+        outcomes.push(serde_json::to_value(outcome).unwrap_or_else(|err| {
+            serde_json::json!({
+                "action_id": "<serialization-error>",
+                "status": "invalid",
+                "error": {
+                    "code": "serialization_error",
+                    "message": err.to_string()
+                }
+            })
+        }));
+    }
+
+    outcomes
+}
+
+pub(crate) fn process_mcp_host_actions_typed(
     actions: &Value,
     server_name: &str,
     tool_name: &str,
-) -> Vec<Value> {
+) -> Vec<HostActionOutcome> {
     let Some(actions) = actions.as_array() else {
         let scoped = ScopedHostActionId {
             origin: HostActionOrigin::mcp(server_name),
@@ -302,7 +539,7 @@ pub(crate) fn process_mcp_host_actions(
             "invalid_host_actions_metadata",
             "_meta[\"omegon/hostActions\"] must be an array",
         );
-        return vec![serde_json::to_value(outcome).unwrap_or_else(serialization_error_outcome)];
+        return vec![outcome];
     };
 
     let manifest = mcp_deny_by_default_manifest();
@@ -320,15 +557,25 @@ pub(crate) fn process_mcp_host_actions(
                     .map(ToString::to_string)
                     .unwrap_or_else(|| format!("<pending-parse-{idx}>")),
             };
-            let outcome = process_host_action_candidate(
+            process_host_action_candidate(
                 action.clone(),
                 &manifest,
                 scoped,
                 &RuntimeHostActionPolicy::default(),
                 &HostActionExecutorRegistry::default_supported(),
-            );
-            serde_json::to_value(outcome).unwrap_or_else(serialization_error_outcome)
+            )
         })
+        .collect()
+}
+
+pub(crate) fn process_mcp_host_actions(
+    actions: &Value,
+    server_name: &str,
+    tool_name: &str,
+) -> Vec<Value> {
+    process_mcp_host_actions_typed(actions, server_name, tool_name)
+        .into_iter()
+        .map(|outcome| serde_json::to_value(outcome).unwrap_or_else(serialization_error_outcome))
         .collect()
 }
 
@@ -1152,7 +1399,7 @@ allowed = [{allowed}]
     }
 
     #[test]
-    fn declarative_terminal_create_reaches_executor_after_policy() {
+    fn declarative_terminal_create_requires_approval_before_executor() {
         let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
         let registry = HostActionExecutorRegistry::with_terminal_backend(Box::new(
             FakeTerminalCreateBackend {
@@ -1165,7 +1412,7 @@ allowed = [{allowed}]
             },
         ));
 
-        let outcome = process_host_action_candidate(
+        let outcome = process_host_action_candidate_with_approval_decision(
             json!({"id": "open-reader", "type": "terminal.create@1", "params": {"command": "bookokrat"}}),
             &manifest,
             ScopedHostActionId {
@@ -1176,10 +1423,11 @@ allowed = [{allowed}]
             },
             &RuntimeHostActionPolicy::default(),
             &registry,
+            HostActionApprovalDecision::Unavailable,
         );
 
-        assert_eq!(outcome.status, HostActionStatus::Completed);
-        assert_eq!(outcome.result.as_ref().unwrap()["terminal_id"], "term_decl");
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.as_ref().unwrap().code, "approval_unavailable");
     }
 
     #[test]
@@ -1383,5 +1631,111 @@ allowed = [{allowed}]
         };
 
         assert_ne!(left, right);
+    }
+
+    #[test]
+    fn host_action_approval_approved_executes_through_canonical_executor() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let registry = HostActionExecutorRegistry::with_terminal_backend(Box::new(
+            FakeTerminalCreateBackend {
+                result: omegon_extension::actions::terminal::TerminalCreateResult {
+                    terminal_id: "term-approved".to_string(),
+                    backend: "fake".to_string(),
+                    actual_placement: "background_session".to_string(),
+                    warnings: Vec::new(),
+                },
+            },
+        ));
+
+        let outcome = process_host_action_candidate_with_approval_decision(
+            json!({
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "execution": "auto_if_allowed",
+                "params": {"command": "bookokrat"}
+            }),
+            &manifest,
+            scoped(),
+            &RuntimeHostActionPolicy::default(),
+            &registry,
+            HostActionApprovalDecision::Approved,
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        assert_eq!(outcome.result.unwrap()["terminal_id"], "term-approved");
+    }
+
+    #[test]
+    fn host_action_approval_rejected_does_not_call_executor() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let registry =
+            HostActionExecutorRegistry::with_terminal_backend(Box::new(CountingBackend {
+                calls: calls.clone(),
+            }));
+
+        let outcome = process_host_action_candidate_with_approval_decision(
+            json!({
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "execution": "manual",
+                "params": {"command": "bookokrat"}
+            }),
+            &manifest,
+            scoped(),
+            &RuntimeHostActionPolicy::default(),
+            &registry,
+            HostActionApprovalDecision::Rejected,
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "operator_denied");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn host_action_approval_unavailable_denies_without_executor() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let registry =
+            HostActionExecutorRegistry::with_terminal_backend(Box::new(CountingBackend {
+                calls: calls.clone(),
+            }));
+
+        let outcome = process_host_action_candidate_with_approval_decision(
+            json!({
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "params": {"command": "bookokrat"}
+            }),
+            &manifest,
+            scoped(),
+            &RuntimeHostActionPolicy::default(),
+            &registry,
+            HostActionApprovalDecision::Unavailable,
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "approval_unavailable");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn host_action_approval_cannot_override_manifest_denial() {
+        let outcome = process_host_action_candidate_with_approval_decision(
+            json!({
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "params": {"command": "bookokrat"}
+            }),
+            &manifest(&[]),
+            scoped(),
+            &RuntimeHostActionPolicy::default(),
+            &registry(),
+            HostActionApprovalDecision::Approved,
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "manifest_denied");
     }
 }
