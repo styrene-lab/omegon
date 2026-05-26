@@ -689,11 +689,7 @@ impl Agent for OmegonAcpAgent {
                                 .await;
                             }
                         }
-                        Ok(WorkerEvent::ToolEnd {
-                            id,
-                            success,
-                            details,
-                        }) => {
+                        Ok(WorkerEvent::ToolEnd { id, success, details }) => {
                             if let Some(c) = conn.borrow().as_ref() {
                                 let status = if success {
                                     ToolCallStatus::Completed
@@ -712,28 +708,6 @@ impl Agent for OmegonAcpAgent {
                                     )),
                                 )
                                 .await;
-                            }
-                        }
-                        Ok(WorkerEvent::HostActionApprovalRequest {
-                            request,
-                            response_tx,
-                        }) => {
-                            let decision = if let Some(c) = conn.borrow().as_ref() {
-                                match c.request_permission(*request).await {
-                                    Ok(response) => {
-                                        crate::extensions::approval::decision_from_permission_outcome(
-                                            response.outcome,
-                                        )
-                                    }
-                                    Err(_) => crate::extensions::approval::HostActionApprovalDecision::Unavailable,
-                                }
-                            } else {
-                                crate::extensions::approval::HostActionApprovalDecision::Unavailable
-                            };
-                            if let Ok(mut guard) = response_tx.lock()
-                                && let Some(tx) = guard.take()
-                            {
-                                let _ = tx.send(decision);
                             }
                         }
                         Ok(WorkerEvent::ToolOutput { id, text }) => {

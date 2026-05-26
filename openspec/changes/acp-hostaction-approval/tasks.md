@@ -7,11 +7,11 @@
 - [x] 1.2 Add tests for original HostAction payload preservation in `_meta`.
 - [x] 1.3 Add tests mapping ACP allow/reject/cancel outcomes to HostAction decisions.
 
-## 2. ACP worker bridge
+## 2. ACP approval transport
 <!-- specs: extensions/hostaction-approval -->
 
-- [x] 2.1 Add worker event/request channel for HostAction approval.
-- [x] 2.2 ACP side calls `session/request_permission` and returns the decision.
+- [ ] 2.1 Add host proxy request/response channel for HostAction approval.
+- [ ] 2.2 ACP pump calls `session/request_permission` and returns the decision.
 - [x] 2.3 Add no-client fallback test proving deterministic denial.
 
 ## 3. Native extension declarative HostActions

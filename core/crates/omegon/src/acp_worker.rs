@@ -8,8 +8,6 @@
 use omegon_traits::Feature;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
-
-use crate::extensions::approval::HostActionApprovalDecision;
 use tokio_util::sync::CancellationToken;
 
 /// A single plan entry for decomposition/phased progress.
@@ -89,12 +87,6 @@ pub enum WorkerEvent {
         id: String,
         success: bool,
         details: serde_json::Value,
-    },
-    /// Worker asks the ACP client to review a HostAction before execution.
-    HostActionApprovalRequest {
-        request: Box<agent_client_protocol::RequestPermissionRequest>,
-        response_tx:
-            std::sync::Arc<std::sync::Mutex<Option<oneshot::Sender<HostActionApprovalDecision>>>>,
     },
     /// Partial tool output for streaming to the client.
     ToolOutput {
@@ -288,16 +280,13 @@ async fn worker_loop(
                                     args: if args.is_null() { None } else { Some(args) },
                                 })
                             }
-                            omegon_traits::AgentEvent::ToolEnd {
-                                id,
-                                result,
-                                is_error,
-                                ..
-                            } => Some(WorkerEvent::ToolEnd {
-                                id,
-                                success: !is_error,
-                                details: result.details,
-                            }),
+                            omegon_traits::AgentEvent::ToolEnd { id, result, is_error, .. } => {
+                                Some(WorkerEvent::ToolEnd {
+                                    id,
+                                    success: !is_error,
+                                    details: result.details,
+                                })
+                            }
                             omegon_traits::AgentEvent::ToolUpdate { id, partial } => {
                                 if partial.tail.is_empty() {
                                     None
