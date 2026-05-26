@@ -1543,16 +1543,14 @@ impl PlanDisplaySnapshot {
 
 fn slim_pinned_plan_snapshot(
     live_snapshot: Option<&PlanDisplaySnapshot>,
-    legacy_plan_text: Option<&str>,
+    _legacy_plan_text: Option<&str>,
 ) -> Option<PlanDisplaySnapshot> {
+    // Only the live PlanUpdated projection may pin the Slim plan lane. Legacy
+    // transcript text is durable history, not active state; falling back to it
+    // resurrects old unfinished plans after branch/session/task changes.
     live_snapshot
         .filter(|snapshot| !snapshot.is_complete())
         .cloned()
-        .or_else(|| {
-            legacy_plan_text
-                .and_then(PlanDisplaySnapshot::from_legacy_text)
-                .filter(|snapshot| !snapshot.is_complete())
-        })
 }
 
 fn slim_plan_rows(snapshot: &PlanDisplaySnapshot, width: u16, height: u16) -> Vec<PlanDisplayRow> {
@@ -10181,12 +10179,33 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn active_legacy_plan_still_pins_in_slim() {
+    fn legacy_plan_history_does_not_pin_in_slim() {
         let pinned = slim_pinned_plan_snapshot(
             None,
-            Some("Plan progress\nPlan mode: executing\nProgress: 1/2\n\n1. ● A\n2. ◐ B"),
-        )
-        .unwrap();
+            Some("Plan progress\nPlan mode: executing\nProgress: 1/2\n\n1. ● Old\n2. ◐ Stale"),
+        );
+
+        assert!(pinned.is_none());
+    }
+
+    #[test]
+    fn live_active_plan_still_pins_in_slim() {
+        let live = PlanDisplaySnapshot {
+            mode: "executing".to_string(),
+            completed: 1,
+            total: 2,
+            items: vec![
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Done,
+                    description: "A".to_string(),
+                },
+                PlanDisplayItem {
+                    status: PlanDisplayStatus::Active,
+                    description: "B".to_string(),
+                },
+            ],
+        };
+        let pinned = slim_pinned_plan_snapshot(Some(&live), None).unwrap();
 
         assert_eq!(pinned.summary(), "plan 1/2 · executing");
         assert!(!pinned.is_complete());
