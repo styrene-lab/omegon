@@ -2486,13 +2486,47 @@ async fn execute_tool_invocation(
         return (tool_result, is_error);
     }
 
+    let tool_context = if let Some(ctx) = host_context {
+        let proxy = ctx.proxy.clone();
+        let approval_sink: omegon_traits::HostActionApprovalSink = std::sync::Arc::new(
+            move |request_json: serde_json::Value| {
+                let proxy = proxy.clone();
+                Box::pin(async move {
+                    let request = match serde_json::from_value::<
+                        agent_client_protocol::RequestPermissionRequest,
+                    >(request_json)
+                    {
+                        Ok(request) => request,
+                        Err(_) => {
+                            return serde_json::to_value(
+                                crate::extensions::approval::HostActionApprovalDecision::Unavailable,
+                            )
+                            .unwrap_or(serde_json::Value::String("unavailable".into()));
+                        }
+                    };
+                    let decision = proxy.request_host_action_approval(request).await.unwrap_or(
+                        crate::extensions::approval::HostActionApprovalDecision::Unavailable,
+                    );
+                    serde_json::to_value(decision)
+                        .unwrap_or(serde_json::Value::String("unavailable".into()))
+                })
+            },
+        );
+        omegon_traits::ToolExecutionContext {
+            host_action_approval: Some(approval_sink),
+        }
+    } else {
+        omegon_traits::ToolExecutionContext::default()
+    };
+
     let execute = |cancel: CancellationToken, sink: omegon_traits::ToolProgressSink| {
-        bus.execute_tool_with_sink(
+        bus.execute_tool_with_context(
             execution_tool_name,
             visible_call_id,
             execution_args.clone(),
             cancel,
             sink,
+            tool_context.clone(),
         )
     };
 

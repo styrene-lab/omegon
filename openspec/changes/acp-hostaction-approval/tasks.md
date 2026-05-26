@@ -30,11 +30,18 @@
 - [ ] 4.2 Preserve unconfigured MCP deny-by-default behavior.
 - [ ] 4.3 Ensure `auto_if_allowed` from MCP downgrades to manual approval.
 
-## 5. Validation
+## 5. Loop integration
 <!-- specs: extensions/hostaction-approval -->
 
-- [ ] 5.1 Run `cargo test -p omegon-extension host_action -- --nocapture`.
-- [ ] 5.2 Run `cargo test -p omegon mcp_host_action -- --nocapture`.
-- [ ] 5.3 Run `cargo test -p omegon acp_host_action -- --nocapture`.
-- [ ] 5.4 Run `cargo test -p omegon extensions::tests:: -- --nocapture`.
-- [ ] 5.5 Run `just lint`.
+- [x] 5.1 Build `ToolExecutionContext` from ACP `HostContext` during tool dispatch.
+- [x] 5.2 Route tool calls through `EventBus::execute_tool_with_context`.
+- [x] 5.3 Ensure malformed approval request serialization falls back to `approval_unavailable`.
+
+## 6. Validation
+<!-- specs: extensions/hostaction-approval -->
+
+- [x] 6.1 Run `cargo test -p omegon-extension host_action -- --nocapture`.
+- [x] 6.2 Run `cargo test -p omegon mcp_host_action -- --nocapture`.
+- [x] 6.3 Run `cargo test -p omegon acp_host_action -- --nocapture`.
+- [x] 6.4 Run `cargo test -p omegon extensions::tests:: -- --nocapture`.
+- [x] 6.5 Run `just lint`.
