@@ -16,7 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-## [0.24.3] - 2026-05-26
+## [0.24.4] - 2026-05-26
 
 ### Added
 
