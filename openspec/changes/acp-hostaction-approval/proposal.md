@@ -10,6 +10,10 @@ Native extension declarative HostActions are consumed inside Omegon before ACP c
 
 MCP HostActions are now policy-configurable and can be represented as `needs_approval`, but they also need the same approval route before execution.
 
+## Relationship to `resource.open@1` (#83)
+
+`resource.open@1` is explicitly out of scope for this change. This change provides the generic approval/control plane that `resource.open@1` will use in the next patch.
+
 ## Success criteria
 
 - Manual native extension HostActions are sent to ACP as permission requests before execution.

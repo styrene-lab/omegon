@@ -89,6 +89,49 @@ Mitigation: 0.24.3 exposes only `allow-once` and `reject-once`; durable policy c
 3. Wire ACP bridge once the seam is proven.
 4. Converge MCP on the same seam.
 
+## Relationship to #83 (`resource.open@1`)
+
+Issue #83 is a downstream consumer of this approval/control plane, not a replacement for it.
+
+- #78 owns the generic permission/review/execution path for HostAction candidates.
+- #83 owns a new semantic HostAction family (`resource.open@1`) plus host-side viewer/editor routing.
+
+`resource.open@1` must use the approval path defined here:
+
+```text
+resource.open@1 candidate
+→ validate URI/root/intent/kind
+→ request ACP/Flynt approval when required
+→ execute through a host-selected resource backend
+→ return backend/placement/warnings outcome
+```
+
+The #78 implementation must therefore stay action-family generic: approval metadata carries the original `action.type` and `action.params` without assuming `terminal.create@1`.
+
+## Patch split
+
+### 0.24.3 — #78 closure
+
+Ship the HostAction approval/control plane:
+
+- Preserve original HostAction candidates long enough to request review.
+- Send ACP `session/request_permission` with `_meta["omegon/hostActionApproval"]`.
+- Support native extension and MCP origins.
+- Execute approved actions through Omegon's existing HostAction executor registry.
+- Reject/cancel/unavailable approvals return deterministic denied outcomes.
+- Keep MCP auto-execution disabled; policy-allowed MCP actions are manual approval only.
+- Keep Flynt as reviewer, not terminal/backend executor.
+
+### Next patch — #83 closure
+
+Add the resource-opening action family on top of #78:
+
+- SDK schema: `resource.open@1`, `ResourceOpenParams`, `ResourceOpenResult`.
+- Host policy: file URI root validation, scheme allowlist, view/edit intent checks.
+- Backend registry: fake Flynt/Zed/Bookokrat/system/built-in backends for tests.
+- Routing defaults: markdown/Flynt-native docs → Flynt, code/text config → Zed, ebooks → Bookokrat/terminal.
+- Explicit degraded fallback warnings and deterministic headless behavior.
+
 ## ACP permission payload
 
 Use ACP's existing `session/request_permission` request. Put the HostAction payload in ACP `_meta`:
