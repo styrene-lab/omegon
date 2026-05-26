@@ -89,6 +89,8 @@ pub struct AgentSetup {
     /// Notification receivers for voice-capable extensions.
     pub voice_notification_receivers:
         Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
+    /// Idle notification pumps for voice-capable extensions.
+    pub voice_polling_handles: Vec<crate::extensions::ExtensionPollingHandle>,
 }
 
 /// Pre-computed state gathered during setup for TUI initial display.
@@ -745,15 +747,16 @@ impl AgentSetup {
             widget_receivers,
             vox_polling_handles,
             voice_notification_receivers,
+            voice_polling_handles,
         ) = match discover_and_register_extensions(&cwd, &mut bus, std::sync::Arc::clone(&secrets))
             .await
         {
-            Ok((widgets, receivers, handles, voice_receivers)) => {
-                (widgets, receivers, handles, voice_receivers)
+            Ok((widgets, receivers, handles, voice_receivers, voice_handles)) => {
+                (widgets, receivers, handles, voice_receivers, voice_handles)
             }
             Err(e) => {
                 tracing::warn!("extension discovery failed: {}", e);
-                (vec![], vec![], vec![], vec![])
+                (vec![], vec![], vec![], vec![], vec![])
             }
         };
 
@@ -1164,6 +1167,7 @@ impl AgentSetup {
             delegate_event_slot,
             vox_polling_handles,
             voice_notification_receivers,
+            voice_polling_handles,
             skill_phases,
         })
     }
@@ -1485,12 +1489,13 @@ async fn discover_and_register_extensions(
     Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
     Vec<crate::extensions::ExtensionPollingHandle>,
     Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
+    Vec<crate::extensions::ExtensionPollingHandle>,
 )> {
     let ext_dir = crate::paths::omegon_home()?.join("extensions");
 
     if !ext_dir.exists() {
         tracing::debug!("extension directory not found: {}", ext_dir.display());
-        return Ok((vec![], vec![], vec![], vec![]));
+        return Ok((vec![], vec![], vec![], vec![], vec![]));
     }
 
     let profile = crate::settings::Profile::load(cwd);
@@ -1501,6 +1506,7 @@ async fn discover_and_register_extensions(
     let mut widget_receivers = vec![];
     let mut vox_polling_handles = vec![];
     let mut voice_notification_receivers = vec![];
+    let mut voice_polling_handles = vec![];
     for entry in std::fs::read_dir(&ext_dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -1567,6 +1573,9 @@ async fn discover_and_register_extensions(
                 if let Some(handle) = spawned.vox_polling_handle {
                     vox_polling_handles.push(handle);
                 }
+                if let Some(handle) = spawned.voice_polling_handle {
+                    voice_polling_handles.push(handle);
+                }
                 if let Some(rx) = spawned.voice_notification_rx {
                     voice_notification_receivers.push(rx);
                 }
@@ -1600,6 +1609,7 @@ async fn discover_and_register_extensions(
         widget_receivers,
         vox_polling_handles,
         voice_notification_receivers,
+        voice_polling_handles,
     ))
 }
 

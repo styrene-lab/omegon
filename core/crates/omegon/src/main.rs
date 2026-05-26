@@ -3827,6 +3827,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     let extension_widgets = std::mem::take(&mut agent.extension_widgets);
     let widget_receivers = std::mem::take(&mut agent.widget_receivers);
     let voice_notification_receivers = std::mem::take(&mut agent.voice_notification_receivers);
+    let voice_polling_handles = std::mem::take(&mut agent.voice_polling_handles);
     // Show splash only on first launch; skip on subsequent runs unless
     // the operator explicitly replays via /splash.
     let is_first_run = first_run::should_run(&cli.cwd);
@@ -3844,6 +3845,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         extension_widgets,
         widget_receivers,
         voice_notification_receivers,
+        voice_polling_handles,
     };
     let tui_cancel = shared_cancel.clone();
     let tui_settings = shared_settings.clone();
@@ -7857,6 +7859,7 @@ mod tests {
             delegate_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
             vox_polling_handles: vec![],
             voice_notification_receivers: vec![],
+            voice_polling_handles: vec![],
         }
     }
 
