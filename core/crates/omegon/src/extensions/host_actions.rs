@@ -381,7 +381,7 @@ pub(super) fn process_declarative_host_actions(
                     .map(ToString::to_string)
                     .unwrap_or_else(|| format!("<pending-parse-{idx}>")),
             };
-            let outcome = process_host_action_candidate(
+            let outcome = process_host_action_candidate_with_approval_decision(
                 action,
                 manifest,
                 scoped,
@@ -389,6 +389,7 @@ pub(super) fn process_declarative_host_actions(
                 &HostActionExecutorRegistry::with_real_terminal_backend(
                     std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
                 ),
+                HostActionApprovalDecision::Unavailable,
             );
             serde_json::to_value(outcome).unwrap_or_else(|err| {
                 serde_json::json!({
@@ -1284,7 +1285,7 @@ allowed = [{allowed}]
     }
 
     #[test]
-    fn declarative_terminal_create_reaches_executor_after_policy() {
+    fn declarative_terminal_create_requires_approval_before_executor() {
         let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
         let registry = HostActionExecutorRegistry::with_terminal_backend(Box::new(
             FakeTerminalCreateBackend {
@@ -1297,7 +1298,7 @@ allowed = [{allowed}]
             },
         ));
 
-        let outcome = process_host_action_candidate(
+        let outcome = process_host_action_candidate_with_approval_decision(
             json!({"id": "open-reader", "type": "terminal.create@1", "params": {"command": "bookokrat"}}),
             &manifest,
             ScopedHostActionId {
@@ -1308,10 +1309,11 @@ allowed = [{allowed}]
             },
             &RuntimeHostActionPolicy::default(),
             &registry,
+            HostActionApprovalDecision::Unavailable,
         );
 
-        assert_eq!(outcome.status, HostActionStatus::Completed);
-        assert_eq!(outcome.result.as_ref().unwrap()["terminal_id"], "term_decl");
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.as_ref().unwrap().code, "approval_unavailable");
     }
 
     #[test]

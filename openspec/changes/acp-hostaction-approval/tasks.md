@@ -12,7 +12,7 @@
 
 - [x] 2.1 Add worker event/request channel for HostAction approval.
 - [x] 2.2 ACP side calls `session/request_permission` and returns the decision.
-- [ ] 2.3 Add no-client fallback test proving deterministic denial.
+- [x] 2.3 Add no-client fallback test proving deterministic denial.
 
 ## 3. Native extension declarative HostActions
 <!-- specs: extensions/hostaction-approval -->
@@ -20,7 +20,7 @@
 - [x] 3.1 Preserve native HostAction candidates until approval decision.
 - [x] 3.2 Approved native action executes through canonical executor.
 - [x] 3.3 Rejected native action does not execute.
-- [ ] 3.4 Existing outcome rendering remains available in ToolResult details.
+- [x] 3.4 Existing outcome rendering remains available in ToolResult details.
 
 ## 4. MCP HostAction convergence
 <!-- specs: extensions/hostaction-approval -->
