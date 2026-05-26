@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Surface declarative native-extension HostAction candidates to ACP host approval before execution, including auto-eligible `terminal.create@1` actions, so visual hosts can review or reject them before Omegon falls back to local execution.
+
 ## [0.24.4] - 2026-05-26
 
 ### Added
