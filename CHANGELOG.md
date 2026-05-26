@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.24.3] - 2026-05-26
+
 ### Added
 
 - Added explicit MCP HostAction policy parsing and manual `needs_approval` outcomes so configured MCP servers can advertise approved action requests without gaining auto-execution.
@@ -26,6 +28,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Read Codex CLI JWT `exp` claims and refresh OpenAI OAuth tokens five minutes early so adopted CLI credentials do not wait for stale `last_refresh` timestamps before re-authentication.
 - Stop promoting persisted OAuth credentials into the parent process environment, so one Omegon session no longer shadows shared auth.json refreshes with a stale per-process token.
 - Split well-known secrets into static env credentials and refreshable OAuth session tokens, and only auto-hydrate static credentials into the parent process environment.
+- Slim plan pinning now trusts only live `PlanUpdated` projections so legacy transcript plan text remains history instead of resurrecting stale active plan lanes.
 
 ## [0.24.2] - 2026-05-25
 
