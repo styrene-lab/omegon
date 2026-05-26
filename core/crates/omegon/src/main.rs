@@ -3826,6 +3826,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
     > = std::sync::Arc::new(tokio::sync::Mutex::new(None));
     let extension_widgets = std::mem::take(&mut agent.extension_widgets);
     let widget_receivers = std::mem::take(&mut agent.widget_receivers);
+    let voice_notification_receivers = std::mem::take(&mut agent.voice_notification_receivers);
     // Show splash only on first launch; skip on subsequent runs unless
     // the operator explicitly replays via /splash.
     let is_first_run = first_run::should_run(&cli.cwd);
@@ -3842,6 +3843,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         login_prompt_tx: login_prompt_tx.clone(),
         extension_widgets,
         widget_receivers,
+        voice_notification_receivers,
     };
     let tui_cancel = shared_cancel.clone();
     let tui_settings = shared_settings.clone();
@@ -3907,6 +3909,17 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 Some(cmd) => cmd,
                 None => break,
             }
+        };
+
+        let cmd = match cmd {
+            tui::TuiCommand::VoicePrompt { text, .. } => tui::TuiCommand::SubmitPrompt(tui::PromptSubmission {
+                text: format!("🎙 {}", text.trim()),
+                image_paths: Vec::new(),
+                submitted_by: "voice".to_string(),
+                via: "voice",
+                queue_mode: tui::PromptQueueMode::UntilReady,
+            }),
+            other => other,
         };
 
         match cmd {
@@ -4989,6 +5002,17 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                     continue;
                                 };
 
+                                let cmd = match cmd {
+                                    tui::TuiCommand::VoicePrompt { text, .. } => tui::TuiCommand::SubmitPrompt(tui::PromptSubmission {
+                                        text: format!("🎙 {}", text.trim()),
+                                        image_paths: Vec::new(),
+                                        submitted_by: "voice".to_string(),
+                                        via: "voice",
+                                        queue_mode: tui::PromptQueueMode::UntilReady,
+                                    }),
+                                    other => other,
+                                };
+
                                 match cmd {
                                     tui::TuiCommand::SubmitPrompt(prompt) => {
                                         let actor = RuntimeActor {
@@ -5024,6 +5048,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     }
                 }
             }
+            tui::TuiCommand::VoicePrompt { .. } => unreachable!("VoicePrompt is normalized above"),
         }
     }
 
