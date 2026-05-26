@@ -22,6 +22,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
+pub(crate) mod approval;
 pub mod config_store;
 pub(crate) mod host_actions;
 pub mod manifest;
