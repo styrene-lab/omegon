@@ -1735,11 +1735,7 @@ fn permission_persist_scope_label(tool_name: &str) -> &'static str {
 fn permission_response_for_key(
     code: KeyCode,
     modifiers: KeyModifiers,
-    lane_visible: bool,
 ) -> Option<omegon_traits::PermissionResponse> {
-    if !lane_visible {
-        return None;
-    }
     match code {
         KeyCode::Char('y') | KeyCode::Char('Y') => Some(omegon_traits::PermissionResponse::Allow),
         KeyCode::Char('A') => Some(omegon_traits::PermissionResponse::AlwaysAllow),
@@ -9222,19 +9218,17 @@ pub async fn run_tui(
                             } else {
                                 app.conversation.push_system(&format!("-> {label}"));
                             }
+                            continue;
                         }
-                        continue;
                     }
 
-                    // ── Permission prompt shortcuts are active only while the pinned
-                    // lane is visibly rendered. Lowercase 'a' intentionally remains normal
-                    // editor input; persistent grants require Shift+A / uppercase A.
-                    if app.pending_permission.is_some() && app.permission_lane_visible {
-                        let response = permission_response_for_key(
-                            key.code,
-                            key.modifiers,
-                            app.permission_lane_visible,
-                        );
+                    // ── Permission prompt shortcuts are active while a permission is
+                    // actually pending. Lane visibility is a render detail; do not let
+                    // it decide whether the operator can unblock a waiting tool.
+                    // Lowercase 'a' intentionally remains normal editor input;
+                    // persistent grants require Shift+A / uppercase A.
+                    if app.pending_permission.is_some() {
+                        let response = permission_response_for_key(key.code, key.modifiers);
                         if let Some(resp) = response {
                             let context = app.pending_permission_context.take();
                             app.permission_lane_visible = false;
@@ -9763,9 +9757,8 @@ pub async fn run_tui(
 
                         // Shift+Enter or Alt+Enter: insert newline (multiline input)
                         (KeyCode::Enter, m)
-                            if (m.contains(KeyModifiers::SHIFT)
-                                || m.contains(KeyModifiers::ALT))
-                                && !app.agent_active =>
+                            if m.contains(KeyModifiers::SHIFT)
+                                || m.contains(KeyModifiers::ALT) =>
                         {
                             app.editor.insert_newline();
                         }
@@ -10084,34 +10077,26 @@ mod slash_command_parsing_tests {
     }
 
     #[test]
-    fn permission_shortcuts_require_visible_lane_and_shift_for_persist() {
+    fn permission_shortcuts_ignore_lane_visibility_and_require_shift_for_persist() {
         assert_eq!(
-            permission_response_for_key(KeyCode::Char('y'), KeyModifiers::empty(), true),
+            permission_response_for_key(KeyCode::Char('y'), KeyModifiers::empty()),
             Some(omegon_traits::PermissionResponse::Allow)
         );
         assert_eq!(
-            permission_response_for_key(KeyCode::Char('n'), KeyModifiers::empty(), true),
+            permission_response_for_key(KeyCode::Char('n'), KeyModifiers::empty()),
             Some(omegon_traits::PermissionResponse::Deny)
         );
         assert_eq!(
-            permission_response_for_key(KeyCode::Char('a'), KeyModifiers::empty(), true),
+            permission_response_for_key(KeyCode::Char('a'), KeyModifiers::empty()),
             None
         );
         assert_eq!(
-            permission_response_for_key(KeyCode::Char('A'), KeyModifiers::SHIFT, true),
+            permission_response_for_key(KeyCode::Char('A'), KeyModifiers::SHIFT),
             Some(omegon_traits::PermissionResponse::AlwaysAllow)
         );
         assert_eq!(
-            permission_response_for_key(KeyCode::Char('a'), KeyModifiers::SHIFT, true),
+            permission_response_for_key(KeyCode::Char('a'), KeyModifiers::SHIFT),
             Some(omegon_traits::PermissionResponse::AlwaysAllow)
-        );
-        assert_eq!(
-            permission_response_for_key(KeyCode::Char('y'), KeyModifiers::empty(), false),
-            None
-        );
-        assert_eq!(
-            permission_response_for_key(KeyCode::Char('A'), KeyModifiers::SHIFT, false),
-            None
         );
     }
 
