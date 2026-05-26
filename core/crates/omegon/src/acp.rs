@@ -689,14 +689,16 @@ impl Agent for OmegonAcpAgent {
                                 .await;
                             }
                         }
-                        Ok(WorkerEvent::ToolEnd { id, success }) => {
+                        Ok(WorkerEvent::ToolEnd { id, success, details }) => {
                             if let Some(c) = conn.borrow().as_ref() {
                                 let status = if success {
                                     ToolCallStatus::Completed
                                 } else {
                                     ToolCallStatus::Failed
                                 };
-                                let fields = ToolCallUpdateFields::new().status(status);
+                                let fields = ToolCallUpdateFields::new()
+                                    .status(status)
+                                    .raw_output((!details.is_null()).then_some(details));
                                 let _ = send_session_update(
                                     c,
                                     stream_sid.clone(),
