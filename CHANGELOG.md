@@ -16,9 +16,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.24.5] - 2026-05-26
+
+### Added
+
+- Route process-local voice extension transcriptions into the interactive TUI prompt flow, queueing them while turns are active and ignoring malformed or non-transcription voice notifications.
+
 ### Fixed
 
 - Surface declarative native-extension HostAction candidates to ACP host approval before execution, including auto-eligible `terminal.create@1` actions, so visual hosts can review or reject them before Omegon falls back to local execution.
+- Keep the interactive TUI command loop responsive during active turns so operator input, including queued voice prompts, remains live.
 
 ## [0.24.4] - 2026-05-26
 

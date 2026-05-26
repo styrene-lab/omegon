@@ -9837,8 +9837,7 @@ pub async fn run_tui(
 
                         // Shift+Enter or Alt+Enter: insert newline (multiline input)
                         (KeyCode::Enter, m)
-                            if m.contains(KeyModifiers::SHIFT)
-                                || m.contains(KeyModifiers::ALT) =>
+                            if m.contains(KeyModifiers::SHIFT) || m.contains(KeyModifiers::ALT) =>
                         {
                             app.editor.insert_newline();
                         }
