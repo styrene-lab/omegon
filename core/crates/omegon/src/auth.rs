@@ -556,16 +556,13 @@ pub fn read_external_credentials(provider: &str) -> Option<OAuthCredentials> {
                 .get("refresh_token")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            // Codex CLI stores last_refresh as unix seconds; tokens typically last 1 hour
-            let last_refresh = data
-                .get("last_refresh")
-                .and_then(codex_cli_last_refresh_secs)
+            let expires = codex_access_token_expiry_ms(access)
+                .or_else(|| {
+                    data.get("last_refresh")
+                        .and_then(codex_cli_last_refresh_secs)
+                        .map(|last_refresh| (last_refresh + 3600) * 1000)
+                })
                 .unwrap_or(0);
-            let expires = if last_refresh > 0 {
-                (last_refresh + 3600) * 1000 // 1 hour from last refresh, in ms
-            } else {
-                0
-            };
             Some(OAuthCredentials {
                 cred_type: "oauth".into(),
                 access: access.into(),
@@ -646,6 +643,11 @@ pub fn read_external_credentials(provider: &str) -> Option<OAuthCredentials> {
         }
         _ => None,
     }
+}
+
+fn codex_access_token_expiry_ms(access: &str) -> Option<u64> {
+    let exp = extract_jwt_claim(access, "", "exp")?;
+    exp.parse::<u64>().ok().map(|seconds| seconds * 1000)
 }
 
 fn codex_cli_last_refresh_secs(value: &Value) -> Option<u64> {
@@ -1006,7 +1008,7 @@ pub async fn refresh_token(provider: &str, refresh: &str) -> anyhow::Result<OAut
         cred_type: "oauth".into(),
         access: data["access_token"].as_str().unwrap_or("").into(),
         refresh: data["refresh_token"].as_str().unwrap_or(refresh).into(),
-        expires: now_ms + expires_in * 1000 - 5 * 60 * 1000, // 5 min safety margin
+        expires: now_ms + expires_in.saturating_sub(300) * 1000, // 5 min safety margin
     })
 }
 
@@ -1234,7 +1236,7 @@ pub async fn login_anthropic_with_callbacks(
         cred_type: "oauth".into(),
         access: data["access_token"].as_str().unwrap_or("").into(),
         refresh: data["refresh_token"].as_str().unwrap_or("").into(),
-        expires: now_ms + expires_in * 1000 - 5 * 60 * 1000,
+        expires: now_ms + expires_in.saturating_sub(300) * 1000,
     };
 
     // Save to auth.json
@@ -1254,7 +1256,7 @@ pub async fn login_anthropic_with_callbacks(
     // and gets used instead of the freshly-issued one.
     // SAFETY: single-threaded at login time — no other threads reading env.
     unsafe {
-        std::env::set_var("ANTHROPIC_OAUTH_TOKEN", &creds.access);
+        std::env::remove_var("ANTHROPIC_OAUTH_TOKEN");
     }
 
     progress("✓ Authentication successful. Credentials saved.");
@@ -1420,8 +1422,11 @@ pub async fn login_openai_with_callbacks(
         }
     }
     // Update env var so resolve_with_refresh uses the new token immediately.
+    // Clear the session-cached token instead of setting it: env credentials have
+    // resolver priority over auth.json, so keeping an OAuth token in process env
+    // can shadow later shared-file refreshes performed by another Omegon session.
     unsafe {
-        std::env::set_var("CHATGPT_OAUTH_TOKEN", &creds.access);
+        std::env::remove_var("CHATGPT_OAUTH_TOKEN");
     }
 
     progress("✓ OpenAI authentication successful. Credentials saved.");
@@ -1457,7 +1462,7 @@ pub async fn refresh_openai_token(refresh: &str) -> anyhow::Result<OAuthCredenti
         cred_type: "oauth".into(),
         access: data["access_token"].as_str().unwrap_or("").into(),
         refresh: data["refresh_token"].as_str().unwrap_or(refresh).into(),
-        expires: now_ms + expires_in * 1000,
+        expires: now_ms + expires_in.saturating_sub(300) * 1000,
     })
 }
 
@@ -1585,8 +1590,11 @@ pub async fn login_antigravity_with_callbacks(
     };
 
     write_credentials("google-antigravity", &creds)?;
+    // Drop any session-cached Antigravity token so subsequent resolution uses
+    // the shared auth.json entry that was just written and can be refreshed by
+    // any Omegon process on this machine.
     unsafe {
-        std::env::set_var("ANTIGRAVITY_OAUTH_TOKEN", &creds.access);
+        std::env::remove_var("ANTIGRAVITY_OAUTH_TOKEN");
     }
     progress("✓ Google Antigravity authentication successful. Credentials saved.");
 

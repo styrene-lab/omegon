@@ -18,7 +18,44 @@ use std::sync::{LazyLock, Mutex};
 static TEST_KEYRING: LazyLock<Mutex<HashMap<(String, String), String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Well-known environment variables that commonly contain secrets.
+/// Static API keys and tool credentials that are safe to hydrate into the
+/// process environment. These are bearer/static credentials consumed by legacy
+/// env-based integrations.
+pub const STATIC_SECRET_ENVS: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "BRAVE_API_KEY",
+    "TAVILY_API_KEY",
+    "SERPER_API_KEY",
+    "GITHUB_TOKEN",
+    "GITLAB_TOKEN",
+    "GH_TOKEN",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "NPM_TOKEN",
+    "DOCKER_PASSWORD",
+    "IGOR_API_KEY",
+];
+
+/// Refreshable OAuth session tokens. These should be redacted and may be
+/// passed to child processes when explicitly configured, but they must not be
+/// auto-hydrated into the parent process environment: env values have resolver
+/// priority and can shadow shared auth.json refreshes with stale per-process
+/// tokens.
+pub const REFRESHABLE_OAUTH_SECRET_ENVS: &[&str] = &[
+    "ANTHROPIC_OAUTH_TOKEN",
+    "CHATGPT_OAUTH_TOKEN",
+    "ANTIGRAVITY_OAUTH_TOKEN",
+];
+
+pub fn is_refreshable_oauth_secret_env(name: &str) -> bool {
+    REFRESHABLE_OAUTH_SECRET_ENVS.contains(&name)
+}
+
+/// Well-known environment variables that commonly contain secrets and should be
+/// included in redaction/discovery.
 pub const WELL_KNOWN_SECRET_ENVS: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_OAUTH_TOKEN",

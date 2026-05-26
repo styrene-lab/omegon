@@ -832,19 +832,30 @@ impl ToolCallAccum {
 /// Process an SSE byte stream line by line, calling `on_data` for each `data: ` payload.
 /// SSE idle timeout — if no chunk arrives within this window, assume the
 /// connection is stalled and bail so the retry loop can re-attempt.
-/// OpenAI's Codex CLI defaults to 300s (stream_idle_timeout_ms = 300000)
-/// because reasoning models can be silent for minutes before first token.
-const SSE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+///
+/// Keep the default shorter than Codex CLI's 300s. A stale OAuth session can
+/// otherwise look like a silent provider hang for five minutes before the
+/// operator sees any actionable failure. The env override preserves an escape
+/// hatch for unusually slow reasoning streams.
+fn sse_idle_timeout() -> std::time::Duration {
+    std::env::var("OMEGON_SSE_IDLE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| *seconds >= 30)
+        .map(std::time::Duration::from_secs)
+        .unwrap_or_else(|| std::time::Duration::from_secs(90))
+}
 
 async fn process_sse<F>(response: reqwest::Response, mut on_data: F) -> anyhow::Result<()>
 where
     F: FnMut(&str) -> bool, // returns false to stop
 {
+    let idle_timeout = sse_idle_timeout();
     let mut buffer = String::new();
     let mut stream = response.bytes_stream();
 
     loop {
-        match tokio::time::timeout(SSE_IDLE_TIMEOUT, stream.next()).await {
+        match tokio::time::timeout(idle_timeout, stream.next()).await {
             Ok(Some(chunk)) => {
                 let chunk = chunk?;
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
@@ -864,11 +875,11 @@ where
             Err(_) => {
                 tracing::warn!(
                     "SSE stream idle for {}s — treating as stalled",
-                    SSE_IDLE_TIMEOUT.as_secs()
+                    idle_timeout.as_secs()
                 );
                 anyhow::bail!(
                     "SSE stream idle timeout ({}s with no data)",
-                    SSE_IDLE_TIMEOUT.as_secs()
+                    idle_timeout.as_secs()
                 );
             }
         }
