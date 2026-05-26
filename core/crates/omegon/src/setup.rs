@@ -229,11 +229,22 @@ impl AgentSetup {
         // Replaces the sync preflight_session_cache() which silently skips vault recipes.
         secrets.preflight_session_cache_async(preflight).await;
         let mut session_secret_env = secrets.session_env();
+        let pre_hydrated_env_len = session_secret_env.len();
         hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
-        for (name, value) in &session_secret_env {
+        for (idx, (name, value)) in session_secret_env.iter().enumerate() {
+            if idx >= pre_hydrated_env_len
+                || omegon_secrets::is_refreshable_oauth_secret_env(name.as_str())
+            {
+                // Provider auth copied from auth.json and refreshable OAuth
+                // session tokens are only for child/delegate inheritance. Do
+                // not promote them into this process environment: env
+                // credentials have resolver priority over auth.json and would
+                // freeze a shared disk credential into a per-process stale token.
+                continue;
+            }
             // SAFETY: setup runs before provider detection for this process; exporting
-            // startup-resolved secrets here makes the active provider path see the
-            // same credential surface as child/headless runs.
+            // startup-resolved non-provider secrets here makes the active runtime see
+            // the same credential surface as child/headless runs.
             unsafe { std::env::set_var(name, value) };
         }
 

@@ -1847,11 +1847,17 @@ async fn consume_llm_stream(
     const REPETITION_ABORT_THRESHOLD: usize = 30; // 30 of last 40 chunks identical → abort
 
     // Two-phase idle timeout:
-    // - Before first content: 300s (OpenAI documents stream_idle_timeout_ms=300000
-    //   as their default — reasoning models can be silent for minutes)
+    // - Before first content: 90s by default. Stale provider sessions can
+    //   otherwise look like silent hangs for too long; override with
+    //   OMEGON_LLM_INITIAL_IDLE_TIMEOUT_SECS for unusually slow reasoning.
     // - After first content: 90s (Claude Code's CLAUDE_STREAM_IDLE_TIMEOUT_MS
     //   default is 90s; nobody in the industry uses less than 60s)
-    let initial_idle_timeout = std::time::Duration::from_secs(300);
+    let initial_idle_timeout = std::env::var("OMEGON_LLM_INITIAL_IDLE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| *seconds >= 30)
+        .map(std::time::Duration::from_secs)
+        .unwrap_or_else(|| std::time::Duration::from_secs(90));
     let content_idle_timeout = std::time::Duration::from_secs(90);
     let received_content = std::sync::atomic::AtomicBool::new(false);
     let idle_timeout = || {

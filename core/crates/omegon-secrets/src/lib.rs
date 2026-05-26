@@ -25,8 +25,8 @@ pub use guards::{GuardDecision, PathGuard};
 pub use recipes::{Recipe, RecipeStore};
 pub use redact::Redactor;
 pub use resolve::{
-    delete_from_keyring, execute_recipe_async, resolve_secret_async, resolve_vault_secret,
-    store_in_keyring,
+    delete_from_keyring, execute_recipe_async, is_refreshable_oauth_secret_env,
+    resolve_secret_async, resolve_vault_secret, store_in_keyring,
 };
 pub use store::{KeyBackend, SecretStore};
 pub use vault::{AuthConfig, VaultClient, VaultConfig};
@@ -81,6 +81,22 @@ pub struct SecretsManager {
     audit: AuditLog,
     /// Vault client (optional, only if vault.json exists or VAULT_ADDR set)
     vault_client: Arc<Mutex<Option<VaultClient>>>,
+}
+
+fn hydrate_static_process_env(
+    session_cache: &Arc<RwLock<HashMap<String, SecretString>>>,
+    redaction_set: &Arc<RwLock<HashMap<String, SecretString>>>,
+) {
+    let session = session_cache.read().unwrap();
+    let redaction = redaction_set.read().unwrap();
+    for env_name in resolve::STATIC_SECRET_ENVS {
+        if let Some(value) = session.get(*env_name).or_else(|| redaction.get(*env_name)) {
+            // SAFETY: Omegon mutates process env only on the main runtime thread
+            // during setup or in direct response to operator secret changes.
+            // We do not concurrently iterate the environment while doing this.
+            unsafe { std::env::set_var(env_name, value.expose_secret()) };
+        }
+    }
 }
 
 impl SecretsManager {
@@ -587,16 +603,7 @@ impl SecretsManager {
     }
 
     pub fn hydrate_process_env(&self) {
-        let session = self.session_cache.read().unwrap();
-        let redaction = self.redaction_set.read().unwrap();
-        for env_name in resolve::WELL_KNOWN_SECRET_ENVS {
-            if let Some(value) = session.get(*env_name).or_else(|| redaction.get(*env_name)) {
-                // SAFETY: Omegon mutates process env only on the main runtime thread
-                // during setup or in direct response to operator secret changes.
-                // We do not concurrently iterate the environment while doing this.
-                unsafe { std::env::set_var(env_name, value.expose_secret()) };
-            }
-        }
+        hydrate_static_process_env(&self.session_cache, &self.redaction_set);
     }
 
     /// Set a secret recipe (e.g. "env:MY_VAR", "cmd:pass show x", "vault:path").
@@ -660,7 +667,9 @@ impl SecretsManager {
         let _ = delete_from_keyring(name); // best-effort
         self.recipes.write().unwrap().remove(name).map(|_| ())?;
         self.refresh_redaction_set();
-        if resolve::WELL_KNOWN_SECRET_ENVS.contains(&name) {
+        if resolve::STATIC_SECRET_ENVS.contains(&name)
+            || resolve::REFRESHABLE_OAUTH_SECRET_ENVS.contains(&name)
+        {
             // SAFETY: same reasoning as hydrate_process_env().
             unsafe { std::env::remove_var(name) };
         }
@@ -727,6 +736,9 @@ impl SecretsManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{LazyLock, Mutex};
+
+    static ENV_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn runtime_projected_secret_is_redacted_without_recipe() {
@@ -769,6 +781,7 @@ mod tests {
 
     #[test]
     fn hydrate_process_env_populates_well_known_recipe_secret() {
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         // SAFETY: test process controls these env vars and does not iterate env concurrently.
         unsafe {
@@ -791,7 +804,42 @@ mod tests {
     }
 
     #[test]
+    fn hydrate_process_env_does_not_populate_refreshable_oauth_secret() {
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: test process controls these env vars and does not iterate env concurrently.
+        unsafe {
+            std::env::remove_var("CHATGPT_OAUTH_TOKEN");
+            std::env::set_var("OMEGON_TEST_CHATGPT_TOKEN", "oauth-test-token");
+        }
+        let mgr = SecretsManager::new(dir.path()).unwrap();
+        mgr.set_recipe("CHATGPT_OAUTH_TOKEN", "env:OMEGON_TEST_CHATGPT_TOKEN")
+            .unwrap();
+        mgr.preflight_session_cache(["CHATGPT_OAUTH_TOKEN"]);
+        assert!(
+            std::env::var("CHATGPT_OAUTH_TOKEN").is_err(),
+            "refreshable OAuth tokens must not be auto-hydrated into parent env"
+        );
+        assert!(
+            mgr.session_env()
+                .iter()
+                .any(|(name, value)| name == "CHATGPT_OAUTH_TOKEN" && value == "oauth-test-token"),
+            "refreshable OAuth token should remain available for child/delegate inheritance"
+        );
+        assert_eq!(
+            mgr.redact("Authorization: Bearer oauth-test-token"),
+            "Authorization: Bearer [REDACTED:CHATGPT_OAUTH_TOKEN]"
+        );
+        // SAFETY: cleanup for isolated test env vars.
+        unsafe {
+            std::env::remove_var("OMEGON_TEST_CHATGPT_TOKEN");
+            std::env::remove_var("CHATGPT_OAUTH_TOKEN");
+        }
+    }
+
+    #[test]
     fn delete_recipe_removes_well_known_env_var() {
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let mgr = SecretsManager::new(dir.path()).unwrap();
         // SAFETY: test process controls this env var and does not iterate env concurrently.
@@ -802,6 +850,7 @@ mod tests {
 
     #[test]
     fn evict_secrets_removes_cached_value_and_env_var() {
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         // SAFETY: test process controls these env vars and does not iterate env concurrently.
         unsafe {
