@@ -337,19 +337,35 @@ impl ExtensionFeature {
         }
     }
 
-    fn extension_tool_result(&self, output: Value, call_id: &str) -> ToolResult {
+    async fn extension_tool_result_with_context(
+        &self,
+        output: Value,
+        call_id: &str,
+        context: &omegon_traits::ToolExecutionContext,
+    ) -> ToolResult {
         let mut envelope = tool_result::parse_extension_tool_envelope(output);
         if !envelope.host_actions.is_empty() {
-            let outcomes = host_actions::process_declarative_host_actions(
+            let outcomes = host_actions::process_declarative_host_actions_with_context(
                 envelope.host_actions,
                 &self.runtime.manifest,
                 &self.runtime.name,
                 call_id,
-            );
+                context,
+            )
+            .await;
             envelope.host_actions = Vec::new();
             envelope.host_action_outcomes.extend(outcomes);
         }
         envelope.into_tool_result()
+    }
+
+    async fn extension_tool_result(&self, output: Value, call_id: &str) -> ToolResult {
+        self.extension_tool_result_with_context(
+            output,
+            call_id,
+            &omegon_traits::ToolExecutionContext::default(),
+        )
+        .await
     }
 
     async fn respawn_after_transport_error(&self, cause: &anyhow::Error) -> Result<()> {
@@ -539,7 +555,7 @@ impl Feature for ExtensionFeature {
             .rpc_call("execute_tool", json!({ "name": tool_name, "args": args }))
             .await
         {
-            Ok(output) => Ok(self.extension_tool_result(output, _call_id)),
+            Ok(output) => Ok(self.extension_tool_result(output, _call_id).await),
             Err(e) if is_extension_transport_error(&e) => {
                 self.record_error(format!("transport failure: {e}")).await;
                 self.respawn_after_transport_error(&e).await?;
@@ -553,7 +569,72 @@ impl Feature for ExtensionFeature {
                             tool_name
                         )
                     })?;
-                let mut result = self.extension_tool_result(output, _call_id);
+                let mut result = self.extension_tool_result(output, _call_id).await;
+                result.details = match result.details {
+                    Value::Object(mut details) => {
+                        details.insert("extension_reconnected".to_string(), Value::Bool(true));
+                        Value::Object(details)
+                    }
+                    other => json!({"extension_reconnected": true, "extension_details": other}),
+                };
+                Ok(result)
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("MethodNotFound") {
+                    Ok(ToolResult {
+                        content: vec![ContentBlock::Text {
+                            text: format!(
+                                "Extension '{}' does not support tool execution. \
+                                 The tool '{}' was advertised but cannot be called.",
+                                self.runtime.name, tool_name
+                            ),
+                        }],
+                        details: json!({"is_error": true}),
+                    })
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    async fn execute_with_context(
+        &self,
+        tool_name: &str,
+        call_id: &str,
+        args: Value,
+        cancel: CancellationToken,
+        _sink: omegon_traits::ToolProgressSink,
+        context: omegon_traits::ToolExecutionContext,
+    ) -> Result<ToolResult> {
+        let _ = cancel;
+        match self
+            .rpc_call(
+                "execute_tool",
+                json!({ "name": tool_name, "args": args.clone() }),
+            )
+            .await
+        {
+            Ok(output) => Ok(self
+                .extension_tool_result_with_context(output, call_id, &context)
+                .await),
+            Err(e) if is_extension_transport_error(&e) => {
+                self.record_error(format!("transport failure: {e}")).await;
+                self.respawn_after_transport_error(&e).await?;
+                let output = self
+                    .rpc_call("execute_tool", json!({ "name": tool_name, "args": args }))
+                    .await
+                    .map_err(|retry_err| {
+                        anyhow!(
+                            "extension '{}' reconnected after transport failure, but retrying '{}' failed: {retry_err}",
+                            self.runtime.name,
+                            tool_name
+                        )
+                    })?;
+                let mut result = self
+                    .extension_tool_result_with_context(output, call_id, &context)
+                    .await;
                 result.details = match result.details {
                     Value::Object(mut details) => {
                         details.insert("extension_reconnected".to_string(), Value::Bool(true));

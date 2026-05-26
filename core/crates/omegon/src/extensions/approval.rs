@@ -11,7 +11,8 @@ pub(super) const HOST_ACTION_APPROVAL_META_KEY: &str = "omegon/hostActionApprova
 pub(super) const ALLOW_ONCE_OPTION_ID: &str = "allow-once";
 pub(super) const REJECT_ONCE_OPTION_ID: &str = "reject-once";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum HostActionApprovalDecision {
     Approved,
     Rejected,

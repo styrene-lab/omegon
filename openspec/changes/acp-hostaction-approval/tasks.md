@@ -21,6 +21,7 @@
 - [x] 3.2 Approved native action executes through canonical executor.
 - [x] 3.3 Rejected native action does not execute.
 - [x] 3.4 Existing outcome rendering remains available in ToolResult details.
+- [x] 3.5 Route native extension tool execution through `ToolExecutionContext` approval sinks.
 
 ## 4. MCP HostAction convergence
 <!-- specs: extensions/hostaction-approval -->

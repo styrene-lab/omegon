@@ -198,6 +198,25 @@ fn action_requires_manual_approval(
         && runtime_policy.operator_approved)
 }
 
+pub(super) fn prepare_host_action_for_approval(
+    candidate: Value,
+    manifest: &ExtensionManifest,
+    scoped_id: &ScopedHostActionId,
+    runtime_policy: &RuntimeHostActionPolicy,
+    executors: &HostActionExecutorRegistry,
+) -> Result<Option<(HostAction, Value)>, HostActionOutcome> {
+    match prepare_host_action_candidate(candidate, manifest, scoped_id, executors) {
+        HostActionPreparedCandidate::Rejected(outcome) => Err(outcome),
+        HostActionPreparedCandidate::Ready { action, candidate } => {
+            if action_requires_manual_approval(&action, runtime_policy) {
+                Ok(Some((action, candidate)))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
 pub(super) fn process_host_action_candidate_with_approval_decision(
     candidate: Value,
     manifest: &ExtensionManifest,
@@ -403,6 +422,101 @@ pub(super) fn process_declarative_host_actions(
             })
         })
         .collect()
+}
+
+pub(super) async fn process_declarative_host_actions_with_context(
+    actions: Vec<Value>,
+    manifest: &ExtensionManifest,
+    extension_name: &str,
+    tool_call_id: &str,
+    context: &omegon_traits::ToolExecutionContext,
+) -> Vec<Value> {
+    let mut outcomes = Vec::new();
+    let executors = HostActionExecutorRegistry::with_real_terminal_backend(
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    );
+    let runtime_policy = RuntimeHostActionPolicy::default();
+
+    for (idx, action) in actions.into_iter().enumerate() {
+        let scoped = ScopedHostActionId {
+            origin: HostActionOrigin::native_extension(extension_name),
+            session_id: "tool-result".to_string(),
+            tool_call_id: tool_call_id.to_string(),
+            action_id: action
+                .get("id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| format!("<pending-parse-{idx}>")),
+        };
+
+        let approval_decision = match prepare_host_action_for_approval(
+            action.clone(),
+            manifest,
+            &scoped,
+            &runtime_policy,
+            &executors,
+        ) {
+            Err(outcome) => {
+                outcomes.push(serde_json::to_value(outcome).unwrap_or_else(|err| {
+                    serde_json::json!({
+                        "action_id": "<serialization-error>",
+                        "status": "invalid",
+                        "error": {
+                            "code": "serialization_error",
+                            "message": err.to_string()
+                        }
+                    })
+                }));
+                continue;
+            }
+            Ok(None) => HostActionApprovalDecision::Approved,
+            Ok(Some((prepared_action, _candidate))) => {
+                if let Some(sink) = &context.host_action_approval {
+                    let request = approval::build_host_action_permission_request(
+                        scoped.session_id.clone(),
+                        extension_name,
+                        &scoped,
+                        &prepared_action,
+                        "host action requires approval",
+                    );
+                    let request_json = serde_json::to_value(request).unwrap_or_else(|err| {
+                        serde_json::json!({
+                            "error": {
+                                "code": "approval_request_serialization",
+                                "message": err.to_string()
+                            }
+                        })
+                    });
+                    let decision_json = sink(request_json).await;
+                    serde_json::from_value::<HostActionApprovalDecision>(decision_json)
+                        .unwrap_or(HostActionApprovalDecision::Unavailable)
+                } else {
+                    HostActionApprovalDecision::Unavailable
+                }
+            }
+        };
+
+        let outcome = process_host_action_candidate_with_approval_decision(
+            action,
+            manifest,
+            scoped,
+            &runtime_policy,
+            &executors,
+            approval_decision,
+        );
+        outcomes.push(serde_json::to_value(outcome).unwrap_or_else(|err| {
+            serde_json::json!({
+                "action_id": "<serialization-error>",
+                "status": "invalid",
+                "error": {
+                    "code": "serialization_error",
+                    "message": err.to_string()
+                }
+            })
+        }));
+    }
+
+    outcomes
 }
 
 pub(crate) fn process_mcp_host_actions_typed(
