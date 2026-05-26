@@ -449,7 +449,7 @@ pub(super) async fn process_declarative_host_actions_with_context(
                 .unwrap_or_else(|| format!("<pending-parse-{idx}>")),
         };
 
-        let approval_decision = match prepare_host_action_for_approval(
+        let prepared_for_approval = match prepare_host_action_for_approval(
             action.clone(),
             manifest,
             &scoped,
@@ -469,31 +469,48 @@ pub(super) async fn process_declarative_host_actions_with_context(
                 }));
                 continue;
             }
-            Ok(None) => HostActionApprovalDecision::Approved,
-            Ok(Some((prepared_action, _candidate))) => {
-                if let Some(sink) = &context.host_action_approval {
-                    let request = approval::build_host_action_permission_request(
-                        scoped.session_id.clone(),
-                        extension_name,
-                        &scoped,
-                        &prepared_action,
-                        "host action requires approval",
-                    );
-                    let request_json = serde_json::to_value(request).unwrap_or_else(|err| {
-                        serde_json::json!({
-                            "error": {
-                                "code": "approval_request_serialization",
-                                "message": err.to_string()
-                            }
-                        })
-                    });
-                    let decision_json = sink(request_json).await;
-                    serde_json::from_value::<HostActionApprovalDecision>(decision_json)
-                        .unwrap_or(HostActionApprovalDecision::Unavailable)
-                } else {
-                    HostActionApprovalDecision::Unavailable
+            Ok(Some((prepared_action, _candidate))) => Some(prepared_action),
+            Ok(None) if context.host_action_approval.is_some() => {
+                // A visual ACP host gets first refusal for all declarative
+                // HostActions, including auto-eligible actions. This surfaces
+                // terminal.create@1 candidates before local execution so the
+                // host can own review, placement, lifecycle, and rendering.
+                match serde_json::from_value::<HostAction>(action.clone()) {
+                    Ok(action) => Some(action),
+                    Err(err) => {
+                        outcomes.push(serialization_error_outcome(err));
+                        continue;
+                    }
                 }
             }
+            Ok(None) => None,
+        };
+
+        let approval_decision = if let Some(prepared_action) = prepared_for_approval {
+            if let Some(sink) = &context.host_action_approval {
+                let request = approval::build_host_action_permission_request(
+                    scoped.session_id.clone(),
+                    extension_name,
+                    &scoped,
+                    &prepared_action,
+                    "host action requires approval",
+                );
+                let request_json = serde_json::to_value(request).unwrap_or_else(|err| {
+                    serde_json::json!({
+                        "error": {
+                            "code": "approval_request_serialization",
+                            "message": err.to_string()
+                        }
+                    })
+                });
+                let decision_json = sink(request_json).await;
+                serde_json::from_value::<HostActionApprovalDecision>(decision_json)
+                    .unwrap_or(HostActionApprovalDecision::Unavailable)
+            } else {
+                HostActionApprovalDecision::Unavailable
+            }
+        } else {
+            HostActionApprovalDecision::Approved
         };
 
         let outcome = process_host_action_candidate_with_approval_decision(
@@ -1631,6 +1648,54 @@ allowed = [{allowed}]
         };
 
         assert_ne!(left, right);
+    }
+
+    #[tokio::test]
+    async fn declarative_auto_action_is_sent_to_host_before_execution_when_context_exists() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let approvals = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let approvals_for_sink = approvals.clone();
+        let sink: omegon_traits::HostActionApprovalSink =
+            std::sync::Arc::new(move |request_json| {
+                let approvals = approvals_for_sink.clone();
+                Box::pin(async move {
+                    approvals.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let payload = &request_json["_meta"]["omegon/hostActionApproval"];
+                    assert_eq!(payload["kind"], "host_action");
+                    assert_eq!(payload["origin"], "native_extension");
+                    assert_eq!(payload["extension"], "reader");
+                    assert_eq!(payload["server"], serde_json::Value::Null);
+                    assert_eq!(payload["tool"], "reader");
+                    assert_eq!(payload["tool_call_id"], "call-1");
+                    assert_eq!(payload["action"]["id"], "open-reader");
+                    assert_eq!(payload["action"]["type"], "terminal.create@1");
+                    assert_eq!(payload["action"]["execution"], "auto_if_allowed");
+                    assert_eq!(payload["action"]["params"]["command"], "bookokrat");
+                    assert_eq!(payload["action"]["params"]["placement"], "side_pane");
+                    serde_json::to_value(HostActionApprovalDecision::Rejected).unwrap()
+                })
+            });
+        let context = omegon_traits::ToolExecutionContext {
+            host_action_approval: Some(sink),
+        };
+
+        let outcomes = process_declarative_host_actions_with_context(
+            vec![json!({
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "execution": "auto_if_allowed",
+                "params": {"command": "bookokrat", "placement": "side_pane"}
+            })],
+            &manifest,
+            "reader",
+            "call-1",
+            &context,
+        )
+        .await;
+
+        assert_eq!(approvals.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(outcomes[0]["status"], "denied");
+        assert_eq!(outcomes[0]["error"]["code"], "operator_denied");
     }
 
     #[test]
