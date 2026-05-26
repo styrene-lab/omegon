@@ -12,7 +12,7 @@ pub(super) const ALLOW_ONCE_OPTION_ID: &str = "allow-once";
 pub(super) const REJECT_ONCE_OPTION_ID: &str = "reject-once";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum HostActionApprovalDecision {
+pub(crate) enum HostActionApprovalDecision {
     Approved,
     Rejected,
     Cancelled,
@@ -96,7 +96,7 @@ fn host_action_approval_meta(
     })
 }
 
-pub(super) fn decision_from_permission_outcome(
+pub(crate) fn decision_from_permission_outcome(
     outcome: RequestPermissionOutcome,
 ) -> HostActionApprovalDecision {
     match outcome {

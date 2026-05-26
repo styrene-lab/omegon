@@ -10,8 +10,8 @@
 ## 2. ACP worker bridge
 <!-- specs: extensions/hostaction-approval -->
 
-- [ ] 2.1 Add worker event/request channel for HostAction approval.
-- [ ] 2.2 ACP side calls `session/request_permission` and returns the decision.
+- [x] 2.1 Add worker event/request channel for HostAction approval.
+- [x] 2.2 ACP side calls `session/request_permission` and returns the decision.
 - [ ] 2.3 Add no-client fallback test proving deterministic denial.
 
 ## 3. Native extension declarative HostActions
