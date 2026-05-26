@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.24.2] - 2026-05-25
+
+### Added
+
+- Added OpenSpec-owned task checkbox status updates via `openspec_manage`, with strict numeric task-id matching and ambiguity refusal.
+
 ## [0.24.1] - 2026-05-25
 
 ### Added
