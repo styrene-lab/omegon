@@ -1,3 +1,4 @@
+use super::approval::{self, HostActionApprovalDecision};
 use super::manifest::ExtensionManifest;
 use crate::tools::terminal;
 use omegon_extension::{HostAction, HostActionOutcome, HostActionStatus};
@@ -113,6 +114,127 @@ impl HostActionExecutorRegistry {
     fn supports(&self, action_type: &str) -> bool {
         self.supported_types.iter().any(|ty| ty == action_type)
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum HostActionPreparedCandidate {
+    Ready {
+        action: HostAction,
+        candidate: Value,
+    },
+    Rejected(HostActionOutcome),
+}
+
+pub(super) fn prepare_host_action_candidate(
+    candidate: Value,
+    manifest: &ExtensionManifest,
+    scoped_id: &ScopedHostActionId,
+    executors: &HostActionExecutorRegistry,
+) -> HostActionPreparedCandidate {
+    let action: HostAction = match serde_json::from_value(candidate.clone()) {
+        Ok(action) => action,
+        Err(err) => {
+            return HostActionPreparedCandidate::Rejected(audited_outcome(
+                scoped_id,
+                None,
+                "<invalid>",
+                HostActionStatus::Invalid,
+                "invalid_action",
+                format!("invalid HostAction candidate: {err}"),
+            ));
+        }
+    };
+
+    if !action.action_type.contains('@') {
+        return HostActionPreparedCandidate::Rejected(audited_outcome(
+            scoped_id,
+            Some(&action.action_type),
+            action.id,
+            HostActionStatus::Invalid,
+            "invalid_action_type",
+            "HostAction type must include an explicit version suffix",
+        ));
+    }
+
+    if !executors.supports(&action.action_type) {
+        return HostActionPreparedCandidate::Rejected(audited_outcome(
+            scoped_id,
+            Some(&action.action_type),
+            action.id,
+            HostActionStatus::Unsupported,
+            "unsupported_action",
+            format!("unsupported HostAction type '{}'", action.action_type),
+        ));
+    }
+
+    if !manifest.allows_host_action_type(&action.action_type) {
+        return HostActionPreparedCandidate::Rejected(audited_outcome(
+            scoped_id,
+            Some(&action.action_type),
+            action.id,
+            HostActionStatus::Denied,
+            "manifest_denied",
+            format!(
+                "manifest does not allow HostAction type '{}'",
+                action.action_type
+            ),
+        ));
+    }
+
+    HostActionPreparedCandidate::Ready { action, candidate }
+}
+
+fn action_requires_manual_approval(
+    action: &HostAction,
+    runtime_policy: &RuntimeHostActionPolicy,
+) -> bool {
+    matches!(
+        action.execution,
+        None | Some(omegon_extension::HostActionExecution::Manual)
+            | Some(omegon_extension::HostActionExecution::AutoIfAllowed)
+    ) && !(runtime_policy.project_allows_auto
+        && runtime_policy.runtime_allows_auto
+        && runtime_policy.origin_trusted_for_auto
+        && runtime_policy.operator_approved)
+}
+
+pub(super) fn process_host_action_candidate_with_approval_decision(
+    candidate: Value,
+    manifest: &ExtensionManifest,
+    scoped_id: ScopedHostActionId,
+    runtime_policy: &RuntimeHostActionPolicy,
+    executors: &HostActionExecutorRegistry,
+    approval_decision: HostActionApprovalDecision,
+) -> HostActionOutcome {
+    let prepared = prepare_host_action_candidate(candidate, manifest, &scoped_id, executors);
+    let HostActionPreparedCandidate::Ready { action, candidate } = prepared else {
+        return match prepared {
+            HostActionPreparedCandidate::Rejected(outcome) => outcome,
+            HostActionPreparedCandidate::Ready { .. } => unreachable!(),
+        };
+    };
+
+    if action_requires_manual_approval(&action, runtime_policy) {
+        match approval_decision {
+            HostActionApprovalDecision::Approved => {
+                let mut approved_policy = runtime_policy.clone();
+                approved_policy.operator_approved = true;
+                approved_policy.project_allows_auto = true;
+                approved_policy.runtime_allows_auto = true;
+                approved_policy.origin_trusted_for_auto = true;
+                return process_host_action_candidate(
+                    candidate,
+                    manifest,
+                    scoped_id,
+                    &approved_policy,
+                    executors,
+                );
+            }
+            other => return approval::denied_approval_outcome(&scoped_id, &action, other),
+        }
+    }
+
+    process_host_action_candidate(candidate, manifest, scoped_id, runtime_policy, executors)
 }
 
 pub(super) fn process_native_extension_action_execute(
@@ -1393,5 +1515,111 @@ allowed = [{allowed}]
         };
 
         assert_ne!(left, right);
+    }
+
+    #[test]
+    fn host_action_approval_approved_executes_through_canonical_executor() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let registry = HostActionExecutorRegistry::with_terminal_backend(Box::new(
+            FakeTerminalCreateBackend {
+                result: omegon_extension::actions::terminal::TerminalCreateResult {
+                    terminal_id: "term-approved".to_string(),
+                    backend: "fake".to_string(),
+                    actual_placement: "background_session".to_string(),
+                    warnings: Vec::new(),
+                },
+            },
+        ));
+
+        let outcome = process_host_action_candidate_with_approval_decision(
+            json!({
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "execution": "auto_if_allowed",
+                "params": {"command": "bookokrat"}
+            }),
+            &manifest,
+            scoped(),
+            &RuntimeHostActionPolicy::default(),
+            &registry,
+            HostActionApprovalDecision::Approved,
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        assert_eq!(outcome.result.unwrap()["terminal_id"], "term-approved");
+    }
+
+    #[test]
+    fn host_action_approval_rejected_does_not_call_executor() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let registry =
+            HostActionExecutorRegistry::with_terminal_backend(Box::new(CountingBackend {
+                calls: calls.clone(),
+            }));
+
+        let outcome = process_host_action_candidate_with_approval_decision(
+            json!({
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "execution": "manual",
+                "params": {"command": "bookokrat"}
+            }),
+            &manifest,
+            scoped(),
+            &RuntimeHostActionPolicy::default(),
+            &registry,
+            HostActionApprovalDecision::Rejected,
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "operator_denied");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn host_action_approval_unavailable_denies_without_executor() {
+        let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let registry =
+            HostActionExecutorRegistry::with_terminal_backend(Box::new(CountingBackend {
+                calls: calls.clone(),
+            }));
+
+        let outcome = process_host_action_candidate_with_approval_decision(
+            json!({
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "params": {"command": "bookokrat"}
+            }),
+            &manifest,
+            scoped(),
+            &RuntimeHostActionPolicy::default(),
+            &registry,
+            HostActionApprovalDecision::Unavailable,
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "approval_unavailable");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn host_action_approval_cannot_override_manifest_denial() {
+        let outcome = process_host_action_candidate_with_approval_decision(
+            json!({
+                "id": "open-reader",
+                "type": "terminal.create@1",
+                "params": {"command": "bookokrat"}
+            }),
+            &manifest(&[]),
+            scoped(),
+            &RuntimeHostActionPolicy::default(),
+            &registry(),
+            HostActionApprovalDecision::Approved,
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "manifest_denied");
     }
 }
