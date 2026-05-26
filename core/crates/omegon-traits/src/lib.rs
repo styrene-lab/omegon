@@ -1577,6 +1577,26 @@ pub struct ContextInjection {
     pub ttl_turns: u32,
 }
 
+/// Host-provided execution context for tools that need request/response
+/// interaction with the operator surface. Most tools ignore this and use the
+/// simpler `execute` / `execute_with_sink` paths.
+#[derive(Clone, Default)]
+pub struct ToolExecutionContext {
+    pub host_action_approval: Option<HostActionApprovalSink>,
+}
+
+/// Callback used by host-action-aware tool providers to request an operator
+/// approval decision. Kept as an opaque async callback so `omegon-traits` does
+/// not depend on ACP types directly.
+pub type HostActionApprovalSink = std::sync::Arc<
+    dyn Fn(
+            serde_json::Value,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = serde_json::Value> + Send + 'static>,
+        > + Send
+        + Sync,
+>;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // The Feature trait — unified interface for integrated features
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1639,6 +1659,21 @@ pub trait Feature: Send + Sync {
         _sink: ToolProgressSink,
     ) -> anyhow::Result<ToolResult> {
         self.execute(tool_name, call_id, args, cancel).await
+    }
+
+    /// Execute with host interaction context. Default preserves existing
+    /// behavior and ignores the context.
+    async fn execute_with_context(
+        &self,
+        tool_name: &str,
+        call_id: &str,
+        args: Value,
+        cancel: tokio_util::sync::CancellationToken,
+        sink: ToolProgressSink,
+        _context: ToolExecutionContext,
+    ) -> anyhow::Result<ToolResult> {
+        self.execute_with_sink(tool_name, call_id, args, cancel, sink)
+            .await
     }
 
     /// Slash commands this feature registers. Called once at startup.
