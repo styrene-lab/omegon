@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::extensions::approval::{HostActionApprovalDecision, decision_from_permission_outcome};
 use agent_client_protocol::*;
 use omegon_traits::{ContentBlock, ToolResult};
 use serde_json::Value;
@@ -81,6 +82,10 @@ pub enum HostProxyRequest {
         tool_name: String,
         path: String,
         reply: oneshot::Sender<anyhow::Result<RequestPermissionOutcome>>,
+    },
+    RequestHostActionApproval {
+        request: Box<RequestPermissionRequest>,
+        reply: oneshot::Sender<anyhow::Result<HostActionApprovalDecision>>,
     },
 }
 
@@ -184,6 +189,22 @@ impl HostProxySender {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(HostProxyRequest::ReleaseTerminal { terminal_id, reply })
+            .await
+            .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
+        rx.await
+            .map_err(|_| anyhow::anyhow!("host proxy reply dropped"))?
+    }
+
+    pub async fn request_host_action_approval(
+        &self,
+        request: RequestPermissionRequest,
+    ) -> anyhow::Result<HostActionApprovalDecision> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(HostProxyRequest::RequestHostActionApproval {
+                request: Box::new(request),
+                reply,
+            })
             .await
             .map_err(|_| anyhow::anyhow!("host proxy channel closed"))?;
         rx.await
@@ -393,6 +414,9 @@ pub fn spawn_proxy_pump(
                     HostProxyRequest::RequestPermission { reply, .. } => {
                         let _ = reply.send(no_conn!());
                     }
+                    HostProxyRequest::RequestHostActionApproval { reply, .. } => {
+                        let _ = reply.send(no_conn!());
+                    }
                 }
                 continue;
             };
@@ -497,6 +521,16 @@ pub fn spawn_proxy_pump(
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp.outcome),
                         Err(e) => Err(anyhow::anyhow!("host request_permission: {}", e.message)),
+                    });
+                }
+                HostProxyRequest::RequestHostActionApproval { request, reply } => {
+                    let result = client.request_permission(*request).await;
+                    let _ = reply.send(match result {
+                        Ok(resp) => Ok(decision_from_permission_outcome(resp.outcome)),
+                        Err(e) => Err(anyhow::anyhow!(
+                            "host request_host_action_approval: {}",
+                            e.message
+                        )),
                     });
                 }
             }

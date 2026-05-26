@@ -10,8 +10,8 @@
 ## 2. ACP approval transport
 <!-- specs: extensions/hostaction-approval -->
 
-- [ ] 2.1 Add host proxy request/response channel for HostAction approval.
-- [ ] 2.2 ACP pump calls `session/request_permission` and returns the decision.
+- [x] 2.1 Add host proxy request/response channel for HostAction approval.
+- [x] 2.2 ACP pump calls `session/request_permission` and returns the decision.
 - [x] 2.3 Add no-client fallback test proving deterministic denial.
 
 ## 3. Native extension declarative HostActions

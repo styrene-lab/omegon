@@ -689,7 +689,11 @@ impl Agent for OmegonAcpAgent {
                                 .await;
                             }
                         }
-                        Ok(WorkerEvent::ToolEnd { id, success, details }) => {
+                        Ok(WorkerEvent::ToolEnd {
+                            id,
+                            success,
+                            details,
+                        }) => {
                             if let Some(c) = conn.borrow().as_ref() {
                                 let status = if success {
                                     ToolCallStatus::Completed
