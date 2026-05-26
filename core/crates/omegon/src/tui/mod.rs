@@ -201,6 +201,8 @@ pub enum TuiCommand {
     AuthStatus {
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
     },
+    /// Voice transcription submitted by a process-local voice extension.
+    VoicePrompt { text: String, event_id: String },
     /// Start provider login flow.
     AuthLogin {
         provider: String,
@@ -288,6 +290,29 @@ struct OperatorEvent {
     color: Color,
     icon: &'static str,
     expires_at: std::time::Instant,
+}
+
+pub(crate) fn voice_prompt_from_notification(
+    notification: &crate::extensions::ExtensionNotification,
+) -> Option<TuiCommand> {
+    if notification.method != "voice/transcription" {
+        return None;
+    }
+    let text = notification.params.get("text")?.as_str()?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let event_id = notification
+        .params
+        .get("utterance_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| format!("{}:{}", notification.extension_name, notification.method));
+    Some(TuiCommand::VoicePrompt {
+        text: text.to_string(),
+        event_id,
+    })
 }
 
 /// Application state for the TUI.
@@ -434,6 +459,9 @@ pub struct App {
     extension_widgets: std::collections::HashMap<String, crate::extensions::ExtensionTabWidget>,
     /// Broadcast receivers for widget events — one per extension.
     widget_receivers: Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
+    /// Voice notification receivers owned by this TUI process/session.
+    voice_notification_receivers:
+        Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
     /// Active ephemeral modal from extension widget (widget_id, data, auto_dismiss_ms, spawn_time).
     active_modal: Option<(String, serde_json::Value, Option<u64>, std::time::Instant)>,
     /// Active action prompt from extension widget (widget_id, actions).
@@ -2045,6 +2073,7 @@ impl App {
             last_left_click: None,
             extension_widgets: std::collections::HashMap::new(),
             widget_receivers: Vec::new(),
+            voice_notification_receivers: Vec::new(),
             active_modal: None,
             active_action_prompt: None,
             oauth_tos_notice_shown: false,
@@ -3871,6 +3900,41 @@ impl App {
         if let Some(ref mut overlay) = self.tutorial_overlay {
             overlay.check_any_input();
         }
+    }
+
+    async fn submit_voice_prompt(
+        &mut self,
+        text: String,
+        _event_id: String,
+        command_tx: &mpsc::Sender<TuiCommand>,
+    ) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        let decorated = format!("🎙 {text}");
+        if self.agent_active {
+            self.queue_prompt(decorated.clone(), Vec::new());
+            self.conversation.push_system("Voice prompt queued");
+            return;
+        }
+
+        self.conversation.push_user(&decorated);
+        self.history.push(decorated.clone());
+        self.history_idx = None;
+        self.agent_active = true;
+        if let Ok(mut ss) = self.dashboard_handles.session.lock() {
+            ss.busy = true;
+        }
+        let _ = command_tx
+            .send(TuiCommand::SubmitPrompt(PromptSubmission {
+                text: decorated,
+                image_paths: Vec::new(),
+                submitted_by: "voice".to_string(),
+                via: "voice",
+                queue_mode: self.queue_mode,
+            }))
+            .await;
     }
 
     fn suppress_editor_input_for(&mut self, duration: Duration) {
@@ -7957,6 +8021,9 @@ pub struct TuiConfig {
     pub extension_widgets: Vec<crate::extensions::ExtensionTabWidget>,
     /// Widget event receivers — one per discovered extension.
     pub widget_receivers: Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
+    /// Voice notification receivers — one per voice-capable extension.
+    pub voice_notification_receivers:
+        Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
 }
 
 /// Initial state snapshot gathered during setup, before the TUI event loop starts.
@@ -8689,6 +8756,19 @@ pub async fn run_tui(
             .insert(widget.widget_id.clone(), widget);
     }
     app.widget_receivers = config.widget_receivers;
+    app.voice_notification_receivers = config.voice_notification_receivers;
+    for mut rx in std::mem::take(&mut app.voice_notification_receivers) {
+        let tx = command_tx.clone();
+        tokio::spawn(async move {
+            while let Some(notification) = rx.recv().await {
+                if let Some(cmd) = voice_prompt_from_notification(&notification)
+                    && tx.send(cmd).await.is_err()
+                {
+                    break;
+                }
+            }
+        });
+    }
     // Respect the persisted mouse setting (default: true).
     if mouse_enabled {
         app.enable_mouse_interaction_mode();
@@ -9979,6 +10059,64 @@ mod auspex_copy_tests {
         );
         assert!(hint.contains("project-specific test"));
         assert!(!hint.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod voice_prompt_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn notification(
+        method: &str,
+        params: serde_json::Value,
+    ) -> crate::extensions::ExtensionNotification {
+        crate::extensions::ExtensionNotification {
+            extension_name: "voice".to_string(),
+            method: method.to_string(),
+            params,
+        }
+    }
+
+    #[test]
+    fn voice_transcription_notification_becomes_voice_prompt() {
+        let cmd = voice_prompt_from_notification(&notification(
+            "voice/transcription",
+            json!({"text": " proceed ", "utterance_id": "u1"}),
+        ))
+        .expect("voice prompt");
+        match cmd {
+            TuiCommand::VoicePrompt { text, event_id } => {
+                assert_eq!(text, "proceed");
+                assert_eq!(event_id, "u1");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn non_transcription_and_malformed_voice_notifications_are_ignored() {
+        assert!(
+            voice_prompt_from_notification(&notification(
+                "voice/state",
+                json!({"state": "listening", "mic_open": true}),
+            ))
+            .is_none()
+        );
+        assert!(
+            voice_prompt_from_notification(&notification(
+                "voice/transcription",
+                json!({"text": "   "}),
+            ))
+            .is_none()
+        );
+        assert!(
+            voice_prompt_from_notification(&notification(
+                "voice/transcription",
+                json!({"text": 42}),
+            ))
+            .is_none()
+        );
     }
 }
 
