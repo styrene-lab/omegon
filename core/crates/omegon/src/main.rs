@@ -5355,11 +5355,10 @@ struct PromptEnvelope {
 
 impl PromptEnvelope {
     fn requests_voice_close(&self) -> bool {
-        self.metadata
-            .voice
-            .as_ref()
-            .and_then(|voice| voice.close_session_requested)
-            .unwrap_or(false)
+        self.metadata.voice.as_ref().is_some_and(|voice| {
+            voice.close_session_requested == Some(true)
+                && voice.radio_cue.as_deref() == Some("over_and_out")
+        })
     }
 }
 
@@ -8086,7 +8085,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_envelope_detects_voice_close_request() {
+    fn prompt_envelope_requires_over_and_out_for_voice_close_request() {
         let prompt = PromptEnvelope {
             id: 1,
             text: "🎙 stop listening".to_string(),
@@ -8105,6 +8104,20 @@ mod tests {
             queue_mode: QueueMode::UntilReady,
         };
         assert!(prompt.requests_voice_close());
+
+        let malformed_close = PromptEnvelope {
+            metadata: tui::PromptMetadata {
+                voice: Some(tui::VoicePromptMetadata {
+                    event_id: "u-close".to_string(),
+                    duration_s: None,
+                    radio_cue: Some("over".to_string()),
+                    end_of_turn: Some(true),
+                    close_session_requested: Some(true),
+                }),
+            },
+            ..prompt
+        };
+        assert!(!malformed_close.requests_voice_close());
     }
 
     #[test]
