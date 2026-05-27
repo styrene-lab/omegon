@@ -2248,8 +2248,8 @@ mod tests {
         let text = result.content[0].as_text().unwrap();
         assert!(text.contains("auth"), "should list spec domain: {text}");
         let change: Value = serde_json::from_str(text).unwrap();
-        assert_eq!(change["state"].as_str(), Some("specced"));
-        assert_eq!(change["stage"].as_str(), Some("specced"));
+        assert_eq!(change["state"].as_str(), Some("specified"));
+        assert_eq!(change["stage"].as_str(), Some("specified"));
         assert_eq!(change["file_stage"].as_str(), Some("specified"));
     }
 
@@ -2272,8 +2272,8 @@ mod tests {
         let text = result.content[0].as_text().unwrap();
         let changes: Vec<Value> = serde_json::from_str(text).unwrap();
         assert_eq!(changes[0]["name"].as_str(), Some("legacy-change"));
-        assert_eq!(changes[0]["state"].as_str(), Some("specced"));
-        assert_eq!(changes[0]["stage"].as_str(), Some("specced"));
+        assert_eq!(changes[0]["state"].as_str(), Some("specified"));
+        assert_eq!(changes[0]["stage"].as_str(), Some("specified"));
         assert_eq!(changes[0]["file_stage"].as_str(), Some("specified"));
     }
 

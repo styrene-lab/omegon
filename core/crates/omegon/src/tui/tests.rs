@@ -176,6 +176,33 @@ fn editor_inline_attachment_tokens_submit_as_multimodal_prompt() {
 #[test]
 fn session_reset_clears_instrument_panel_tool_activity() {
     let mut app = test_app();
+    let waiting = render_app_to_string(&mut app, 140, 18);
+    assert!(
+        waiting.contains("waiting: provider request")
+            || waiting.contains("transcript live · no pinned plan"),
+        "{waiting}"
+    );
+
+    app.handle_agent_event(AgentEvent::MessageStart {
+        role: "assistant".into(),
+    });
+    let opening = render_app_to_string(&mut app, 140, 18);
+    assert!(
+        opening.contains("waiting: stream open")
+            || opening.contains("transcript live · no pinned plan"),
+        "{opening}"
+    );
+
+    app.handle_agent_event(AgentEvent::MessageChunk {
+        text: "hello".into(),
+    });
+    let responding = render_app_to_string(&mut app, 140, 18);
+    assert!(
+        responding.contains("streaming answer")
+            || responding.contains("transcript live · no pinned plan"),
+        "{responding}"
+    );
+
     app.handle_agent_event(AgentEvent::ToolStart {
         id: "tool-1".into(),
         name: "context_clear".into(),
@@ -1024,7 +1051,7 @@ fn completed_plan_update_enables_done_view_hint_without_pinning() {
     assert!(app.completed_plan_history_available);
     assert!(app.slim_plan_snapshot.is_none());
     let text = render_app_to_string(&mut app, 120, 18);
-    assert!(text.contains("plan done · view"), "{text}");
+    assert!(text.contains("plan complete · history available"), "{text}");
     assert!(
         !text.contains("remember me"),
         "completed history should not pin active lane: {text}"
@@ -4477,6 +4504,21 @@ fn recovery_hint_context_window() {
     assert!(
         hint.contains("/context compact"),
         "should suggest context compact: {hint}"
+    );
+}
+
+#[test]
+fn retry_notification_marks_turn_state_as_upstream_retry() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });
+    app.handle_agent_event(AgentEvent::SystemNotification {
+        message: "⚠ Upstream rate_limit — retrying (attempt 3, delay 1500ms): provider busy".into(),
+    });
+
+    let rendered = render_app_to_string(&mut app, 150, 18);
+    assert!(
+        rendered.contains("retrying upstream attempt 3 · 1500ms"),
+        "{rendered}"
     );
 }
 

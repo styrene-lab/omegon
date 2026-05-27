@@ -22,6 +22,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Replace unclear Slim plan footer actions with plan pin/tracking/OpenSpec/design-lifecycle status labels.
 - Add explicit Slim footer labels for directory and git branch fields, and render OODA phase as a dim acronym with the active letter highlighted.
 - Dispatch filesystem read/view tools serially so multiple outside-workspace permission prompts cannot overwrite each other and fail before the operator responds.
+- Disambiguate Slim turn status while waiting on provider request setup, stream opening, answer/thinking streaming, tools, and upstream retry backoff.
 - Keep read-only OpenSpec status and lifecycle snapshot calls from materializing discovered file-backed changes into `ai/lifecycle/state.json`.
 
 ## [0.24.7] - 2026-05-27

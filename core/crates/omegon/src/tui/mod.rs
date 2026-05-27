@@ -1443,7 +1443,9 @@ enum PlanDisplayStatus {
 enum SlimTurnState {
     #[default]
     Ready,
-    Running,
+    RequestingProvider,
+    OpeningStream,
+    UpstreamRetrying(String),
     Thinking,
     Responding,
     Tool(String),
@@ -1454,12 +1456,37 @@ impl SlimTurnState {
     fn label(&self) -> String {
         match self {
             Self::Ready => "ready".to_string(),
-            Self::Running => "turn running".to_string(),
-            Self::Thinking => "thinking".to_string(),
-            Self::Responding => "responding".to_string(),
+            Self::RequestingProvider => "waiting: provider request".to_string(),
+            Self::OpeningStream => "waiting: stream open".to_string(),
+            Self::UpstreamRetrying(detail) => format!("retrying upstream {detail}"),
+            Self::Thinking => "streaming thinking".to_string(),
+            Self::Responding => "streaming answer".to_string(),
             Self::Tool(name) => format!("running {name}"),
             Self::Finished(reason) => format!("turn {reason}"),
         }
+    }
+}
+
+fn upstream_retry_hint(message: &str) -> Option<String> {
+    if !(message.contains("— retrying") || message.starts_with("Retrying")) {
+        return None;
+    }
+    let attempt = message
+        .split("attempt ")
+        .nth(1)
+        .and_then(|rest| rest.split([',', ')']).next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let delay = message
+        .split("delay ")
+        .nth(1)
+        .and_then(|rest| rest.split("ms").next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    match (attempt, delay) {
+        (Some(attempt), Some(delay)) => Some(format!("attempt {attempt} · {delay}ms")),
+        (Some(attempt), None) => Some(format!("attempt {attempt}")),
+        _ => Some("active".to_string()),
     }
 }
 
@@ -7574,7 +7601,7 @@ impl App {
         match event {
             AgentEvent::TurnStart { turn } => {
                 self.agent_active = true;
-                self.slim_turn_state = SlimTurnState::Running;
+                self.slim_turn_state = SlimTurnState::RequestingProvider;
                 if let Ok(mut ss) = self.dashboard_handles.session.lock() {
                     ss.busy = true;
                 }
@@ -7666,6 +7693,9 @@ impl App {
                 // Detect if the agent is asking for confirmation and offer
                 // a one-key continuation affordance in the editor.
                 self.detect_continuation_request();
+            }
+            AgentEvent::MessageStart { .. } => {
+                self.slim_turn_state = SlimTurnState::OpeningStream;
             }
             AgentEvent::MessageChunk { text } => {
                 self.slim_turn_state = SlimTurnState::Responding;
@@ -7943,7 +7973,7 @@ impl App {
                     self.active_tool_stream = None;
                 }
                 if self.agent_active {
-                    self.slim_turn_state = SlimTurnState::Running;
+                    self.slim_turn_state = SlimTurnState::RequestingProvider;
                 }
             }
             AgentEvent::AgentEnd => {
@@ -8006,6 +8036,9 @@ impl App {
                 }
             }
             AgentEvent::SystemNotification { message } => {
+                if let Some(detail) = upstream_retry_hint(&message) {
+                    self.slim_turn_state = SlimTurnState::UpstreamRetrying(detail);
+                }
                 // Transient retry notifications → toast (operator sees them but they
                 // don't clutter the conversation). Milestone warnings and other
                 // persistent messages → conversation.
