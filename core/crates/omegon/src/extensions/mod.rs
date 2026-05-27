@@ -270,6 +270,15 @@ impl ExtensionFeature {
 
     /// Send a JSON-RPC request and receive the response.
     async fn rpc_call(&self, method: &str, params: Value) -> Result<Value> {
+        self.rpc_call_with_idle_timeout(method, params, None).await
+    }
+
+    async fn rpc_call_with_idle_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        idle_timeout: Option<std::time::Duration>,
+    ) -> Result<Value> {
         let mut guard = self.handles.lock().await;
         let handles = guard
             .as_mut()
@@ -291,7 +300,15 @@ impl ExtensionFeature {
         let mut line = String::new();
         loop {
             line.clear();
-            let n = handles.reader.read_line(&mut line).await?;
+            let read = handles.reader.read_line(&mut line);
+            let n = if let Some(timeout) = idle_timeout {
+                match tokio::time::timeout(timeout, read).await {
+                    Ok(result) => result?,
+                    Err(_) => return Ok(json!({"timeout": true})),
+                }
+            } else {
+                read.await?
+            };
             if n == 0 {
                 return Err(anyhow!("extension closed connection"));
             }
@@ -445,6 +462,7 @@ impl ExtensionFeature {
             handles: self.handles.clone(),
             request_id: self.request_id.clone(),
             name: self.runtime.name.clone(),
+            notification_sink: self.runtime.notification_sink.clone(),
         }
     }
 }
@@ -457,9 +475,40 @@ pub struct ExtensionPollingHandle {
     handles: Arc<Mutex<Option<ProcessHandles>>>,
     request_id: Arc<AtomicU64>,
     name: String,
+    notification_sink: Option<ExtensionNotificationSink>,
 }
 
 impl ExtensionPollingHandle {
+    pub async fn pump_notifications_for(&self, idle_timeout: std::time::Duration) -> Result<()> {
+        let mut guard = self.handles.lock().await;
+        let handles = guard
+            .as_mut()
+            .ok_or_else(|| anyhow!("extension process not running"))?;
+        let read = async {
+            let mut line = String::new();
+            let n = handles.reader.read_line(&mut line).await?;
+            anyhow::Ok::<(usize, String)>((n, line))
+        };
+        match tokio::time::timeout(idle_timeout, read).await {
+            Ok(Ok((0, _))) => Err(anyhow!("extension closed connection")),
+            Ok(Ok((_n, line))) => {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    return Ok(());
+                }
+                if let Ok(omegon_extension::RpcIncoming::Notification(notification)) =
+                    omegon_extension::RpcIncoming::parse(trimmed)
+                    && let Some(sink) = &self.notification_sink
+                {
+                    sink.send(notification);
+                }
+                Ok(())
+            }
+            Ok(Err(err)) => Err(err),
+            Err(_) => Ok(()),
+        }
+    }
+
     /// Name of the extension this handle is connected to.
     pub fn extension_name(&self) -> &str {
         &self.name
@@ -672,6 +721,8 @@ pub struct SpawnedExtension {
     pub widget_rx: broadcast::Receiver<WidgetEvent>,
     /// Polling handle for extensions that provide `vox_route` (event bridge).
     pub vox_polling_handle: Option<ExtensionPollingHandle>,
+    /// Idle notification pump for voice-capable extensions.
+    pub voice_polling_handle: Option<ExtensionPollingHandle>,
     /// Push notification receiver for voice-capable extensions.
     pub voice_notification_rx: Option<mpsc::UnboundedReceiver<ExtensionNotification>>,
 }
@@ -1063,11 +1114,18 @@ async fn spawn_native(
         tab_widgets.push(tab_widget);
     }
 
+    let voice_polling_handle = if manifest.capabilities.voice {
+        Some(feature.polling_handle())
+    } else {
+        None
+    };
+
     Ok(SpawnedExtension {
         feature: Box::new(feature),
         widgets: tab_widgets,
         widget_rx,
         vox_polling_handle,
+        voice_polling_handle,
         voice_notification_rx: notification_pair.1,
     })
 }
@@ -1147,11 +1205,18 @@ async fn spawn_container(
         tab_widgets.push(tab_widget);
     }
 
+    let voice_polling_handle = if manifest.capabilities.voice {
+        Some(feature.polling_handle())
+    } else {
+        None
+    };
+
     Ok(SpawnedExtension {
         feature: Box::new(feature),
         widgets: tab_widgets,
         widget_rx,
         vox_polling_handle,
+        voice_polling_handle,
         voice_notification_rx: notification_pair.1,
     })
 }

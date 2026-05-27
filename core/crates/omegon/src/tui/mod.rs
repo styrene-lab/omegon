@@ -8024,6 +8024,8 @@ pub struct TuiConfig {
     /// Voice notification receivers — one per voice-capable extension.
     pub voice_notification_receivers:
         Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
+    /// Voice idle notification pumps — one per voice-capable extension.
+    pub voice_polling_handles: Vec<crate::extensions::ExtensionPollingHandle>,
 }
 
 /// Initial state snapshot gathered during setup, before the TUI event loop starts.
@@ -8757,6 +8759,19 @@ pub async fn run_tui(
     }
     app.widget_receivers = config.widget_receivers;
     app.voice_notification_receivers = config.voice_notification_receivers;
+    for handle in config.voice_polling_handles {
+        tokio::spawn(async move {
+            loop {
+                if handle
+                    .pump_notifications_for(std::time::Duration::from_millis(250))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+    }
     for mut rx in std::mem::take(&mut app.voice_notification_receivers) {
         let tx = command_tx.clone();
         tokio::spawn(async move {
