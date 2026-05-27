@@ -16,10 +16,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.24.7] - 2026-05-27
+
 ### Changed
 
 - Preserve voice transcription control metadata (`radio_cue`, `end_of_turn`, `close_session_requested`, and utterance duration) through host prompt routing so radio cues can drive lifecycle behavior without leaking into prompt text.
 - Represent spoken-output lifecycle via status-only `voice/tts_state` notifications, independent from microphone capture state, and deterministically handle `over_and_out` close intent after prompt acceptance; close-session control requires both `radio_cue=over_and_out` and `close_session_requested=true`.
+
+### Fixed
+
+- Stop lifecycle read-model snapshots from rewriting `ai/lifecycle/state.json`, including idempotent OpenSpec progress sync timestamp churn, so dashboard/status reads do not dirty downstream agents' worktrees.
 
 ## [0.24.6] - 2026-05-26
 
