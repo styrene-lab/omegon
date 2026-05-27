@@ -243,39 +243,6 @@ fn is_archived_change(change: &ChangeInfo) -> bool {
     false
 }
 
-fn sync_opsx_change_from_info(
-    opsx: &mut OpsxLifecycle<JsonFileStore>,
-    change: &ChangeInfo,
-) -> anyhow::Result<()> {
-    if !opsx.state().changes.iter().any(|c| c.name == change.name) {
-        opsx.create_change(&change.name, &change.name, None)?;
-    }
-    for spec in &change.specs {
-        opsx.add_spec(&change.name, &spec.domain)?;
-    }
-    opsx.update_change_progress(&change.name, change.total_tasks, change.done_tasks)?;
-
-    if opsx_change_state(opsx, &change.name) == Some(ChangeState::Proposed)
-        && !change.specs.is_empty()
-    {
-        opsx.transition_change(&change.name, ChangeState::Specced)?;
-    }
-    if opsx_change_state(opsx, &change.name) == Some(ChangeState::Specced) && change.total_tasks > 0
-    {
-        opsx.transition_change(&change.name, ChangeState::Planned)?;
-    }
-
-    Ok(())
-}
-
-fn opsx_change_state(opsx: &OpsxLifecycle<JsonFileStore>, name: &str) -> Option<ChangeState> {
-    opsx.state()
-        .changes
-        .iter()
-        .find(|c| c.name == name)
-        .map(|c| c.state)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,6 +311,33 @@ mod tests {
         assert_eq!(snapshot.changes.len(), 1);
         assert_eq!(snapshot.changes[0].lifecycle_state, "proposed");
         assert!(handle.opsx.lock().unwrap().state().changes.is_empty());
+    }
+
+    #[test]
+    fn openspec_snapshot_does_not_materialize_discovered_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        let change_dir = repo.join("openspec/changes/discovered-change");
+        fs::create_dir_all(&change_dir).unwrap();
+        fs::write(change_dir.join("proposal.md"), "# Discovered\n").unwrap();
+        fs::write(change_dir.join("tasks.md"), "- [ ] pending\n").unwrap();
+
+        let provider = Arc::new(Mutex::new(LifecycleContextProvider::new(repo)));
+        let opsx = Arc::new(Mutex::new(
+            OpsxLifecycle::load(JsonFileStore::new(repo)).unwrap(),
+        ));
+        let handle = LifecycleReadHandle::new(provider, opsx, repo.to_path_buf());
+
+        let snapshot = handle
+            .openspec_snapshot(SnapshotOptions::default())
+            .unwrap();
+        assert_eq!(snapshot.changes.len(), 1);
+        assert_eq!(snapshot.changes[0].name, "discovered-change");
+        assert_eq!(snapshot.changes[0].lifecycle_state, "proposed");
+        assert!(
+            !repo.join("ai/lifecycle/state.json").exists(),
+            "read-only snapshot must not write lifecycle state"
+        );
     }
 
     #[test]

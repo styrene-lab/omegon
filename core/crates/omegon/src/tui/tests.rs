@@ -1083,8 +1083,12 @@ fn slim_status_line_marks_turn_state() {
         name: "bash".into(),
         args: serde_json::json!({"command":"cargo test"}),
     });
+    if let Some(stream) = app.active_tool_stream.as_mut() {
+        stream.started_at -= std::time::Duration::from_secs(54);
+    }
     let running = render_app_to_string(&mut app, 140, 18);
     assert!(running.contains("running bash"), "{running}");
+    assert!(running.contains("active tool bash · 54s"), "{running}");
 
     app.handle_agent_event(AgentEvent::TurnEnd(Box::new(
         omegon_traits::AgentEventTurnEnd {

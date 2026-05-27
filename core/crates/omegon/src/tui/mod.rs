@@ -1377,6 +1377,7 @@ fn slim_plan_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> u16 
 struct ActiveToolStream {
     id: String,
     name: String,
+    started_at: std::time::Instant,
     lines: Vec<String>,
 }
 
@@ -1385,6 +1386,7 @@ impl ActiveToolStream {
         Self {
             id: id.into(),
             name: name.into(),
+            started_at: std::time::Instant::now(),
             lines: Vec::new(),
         }
     }
@@ -1730,6 +1732,17 @@ fn slim_operator_hint(
     }
 }
 
+fn format_short_elapsed(duration: std::time::Duration) -> String {
+    let secs = duration.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else {
+        let mins = secs / 60;
+        let rem = secs % 60;
+        format!("{mins}m{rem:02}s")
+    }
+}
+
 fn render_active_tool_stream_panel(
     area: Rect,
     frame: &mut Frame,
@@ -1750,6 +1763,10 @@ fn render_active_tool_stream_panel(
                 .fg(t.accent())
                 .bg(bg)
                 .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" · {}", format_short_elapsed(stream.started_at.elapsed())),
+            Style::default().fg(t.muted()).bg(bg),
         ),
     ]));
     let max_tail = area.height.saturating_sub(1) as usize;

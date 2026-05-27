@@ -1107,7 +1107,6 @@ impl LifecycleFeature {
                 if changes.is_empty() {
                     return Ok(text_result("No active OpenSpec changes."));
                 }
-                self.sync_opsx_changes_from_info(changes)?;
                 let opsx_states = self.opsx_change_states();
                 let list: Vec<Value> = changes
                     .iter()
@@ -1138,7 +1137,6 @@ impl LifecycleFeature {
                     .ok_or_else(|| anyhow::anyhow!("change_name required"))?;
                 let change = spec::get_change(&self.repo_path, name)
                     .ok_or_else(|| anyhow::anyhow!("Change '{name}' not found"))?;
-                self.sync_opsx_changes_from_info(std::slice::from_ref(&change))?;
                 let state = self
                     .opsx_change_states()
                     .get(name)
@@ -2138,6 +2136,29 @@ mod tests {
         assert_eq!(
             result.details["findings"][0]["node_id"].as_str(),
             Some("stale-node")
+        );
+    }
+
+    #[test]
+    fn openspec_status_does_not_materialize_discovered_changes() {
+        let (_dir, repo) = setup_test_repo();
+        let change_dir = repo.join("openspec/changes/discovered");
+        fs::create_dir_all(&change_dir).unwrap();
+        fs::write(change_dir.join("proposal.md"), "# Discovered\n").unwrap();
+        fs::write(change_dir.join("tasks.md"), "- [ ] pending\n").unwrap();
+        let feature = LifecycleFeature::new(&repo);
+
+        let result = feature
+            .execute_openspec_manage(&json!({"action": "status"}))
+            .unwrap();
+        let text = result.content[0].as_text().unwrap();
+        assert!(
+            text.contains("discovered"),
+            "should list file-backed change: {text}"
+        );
+        assert!(
+            !repo.join("ai/lifecycle/state.json").exists(),
+            "read-only status must not write lifecycle state"
         );
     }
 
