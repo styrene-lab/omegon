@@ -106,6 +106,25 @@ pub enum PromptQueueMode {
     Immediate,
 }
 
+#[derive(Debug, Clone)]
+struct QueuedPrompt {
+    text: String,
+    attachments: Vec<std::path::PathBuf>,
+    submitted_by: String,
+    via: &'static str,
+}
+
+impl QueuedPrompt {
+    fn local_tui(text: String, attachments: Vec<std::path::PathBuf>) -> Self {
+        Self {
+            text,
+            attachments,
+            submitted_by: "local-tui".to_string(),
+            via: "tui",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptPrefixMode {
     Agent,
@@ -404,7 +423,7 @@ pub struct App {
     /// Parsed web dashboard socket address (legacy/debug convenience).
     web_server_addr: Option<std::net::SocketAddr>,
     /// Prompts queued while the agent is busy — drained only after authoritative AgentEnd.
-    queued_prompts: std::collections::VecDeque<(String, Vec<std::path::PathBuf>)>,
+    queued_prompts: std::collections::VecDeque<QueuedPrompt>,
     /// Local default queue policy for interactive submissions.
     queue_mode: PromptQueueMode,
     /// Inline operator-facing transient events (replaces floating toasts).
@@ -3729,7 +3748,8 @@ impl App {
 
     fn queue_prompt(&mut self, text: String, attachments: Vec<std::path::PathBuf>) {
         let preview = Self::queue_prompt_preview(&text, &attachments);
-        self.queued_prompts.push_back((text, attachments));
+        self.queued_prompts
+            .push_back(QueuedPrompt::local_tui(text, attachments));
         let queued = self.queued_prompts.len();
         self.conversation.push_system(&format!(
             "⏳ Queued [{queued}]: {preview}\n   It will run after the active turn ends. Press Esc/Ctrl+C to interrupt the active turn."
@@ -3914,8 +3934,16 @@ impl App {
         }
         let decorated = format!("🎙 {text}");
         if self.agent_active {
-            self.queue_prompt(decorated.clone(), Vec::new());
-            self.conversation.push_system("Voice prompt queued");
+            self.queued_prompts.push_back(QueuedPrompt {
+                text: decorated,
+                attachments: Vec::new(),
+                submitted_by: "voice".to_string(),
+                via: "voice",
+            });
+            let queued = self.queued_prompts.len();
+            self.conversation.push_system(&format!(
+                "⏳ Queued [{queued}]: 🎙 voice prompt\n   It will run after the active turn ends. Press Esc/Ctrl+C to interrupt the active turn."
+            ));
             return;
         }
 
@@ -5929,7 +5957,8 @@ impl App {
                     // with the operator to create a new skill.
                     let cwd = self.cwd().to_path_buf();
                     let builder_prompt = crate::skills::skill_builder_prompt(&cwd);
-                    self.queued_prompts.push_back((builder_prompt, Vec::new()));
+                    self.queued_prompts
+                        .push_back(QueuedPrompt::local_tui(builder_prompt, Vec::new()));
                     self.queue_mode = PromptQueueMode::UntilReady;
                     self.conversation.push_system("Starting skill builder...");
                     SlashResult::Handled
@@ -6229,7 +6258,8 @@ impl App {
             "persona" => {
                 if args == "create" || args == "new" {
                     let builder_prompt = crate::plugins::persona_loader::persona_builder_prompt();
-                    self.queued_prompts.push_back((builder_prompt, Vec::new()));
+                    self.queued_prompts
+                        .push_back(QueuedPrompt::local_tui(builder_prompt, Vec::new()));
                     self.queue_mode = PromptQueueMode::UntilReady;
                     self.conversation.push_system("Starting persona builder...");
                     SlashResult::Handled
@@ -9983,7 +10013,11 @@ pub async fn run_tui(
 
         // Drain queued prompts only after authoritative AgentEnd (but not if quitting)
         if !app.agent_active && !app.should_quit && !app.queued_prompts.is_empty() {
-            let (text, attachments) = app.queued_prompts.pop_front().unwrap();
+            let queued_prompt = app.queued_prompts.pop_front().unwrap();
+            let text = queued_prompt.text;
+            let attachments = queued_prompt.attachments;
+            let submitted_by = queued_prompt.submitted_by;
+            let via = queued_prompt.via;
             if attachments.is_empty() {
                 app.conversation.push_user(&text);
             } else {
@@ -10001,8 +10035,8 @@ pub async fn run_tui(
                     .send(TuiCommand::SubmitPrompt(PromptSubmission {
                         text,
                         image_paths: Vec::new(),
-                        submitted_by: "local-tui".to_string(),
-                        via: "tui",
+                        submitted_by: submitted_by.clone(),
+                        via,
                         queue_mode: app.queue_mode,
                     }))
                     .await;
@@ -10011,8 +10045,8 @@ pub async fn run_tui(
                     .send(TuiCommand::SubmitPrompt(PromptSubmission {
                         text,
                         image_paths: attachments,
-                        submitted_by: "local-tui".to_string(),
-                        via: "tui",
+                        submitted_by,
+                        via,
                         queue_mode: app.queue_mode,
                     }))
                     .await;
