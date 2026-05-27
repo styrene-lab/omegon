@@ -63,6 +63,9 @@ pub struct HostTerminalCreateResponse {
     pub backend: String,
     pub actual_placement: String,
     pub warnings: Vec<String>,
+    pub transcript: String,
+    pub tail: String,
+    pub inspect_hint: String,
 }
 
 pub fn host_terminal_runtime_available() -> Result<(), String> {
@@ -153,7 +156,7 @@ pub async fn start_host_terminal(
         cwd: request.cwd,
         pid,
         started: Instant::now(),
-        transcript_path,
+        transcript_path: transcript_path.clone(),
         child: Mutex::new(child),
         writer: Mutex::new(writer),
         _master: Mutex::new(pair.master),
@@ -165,11 +168,19 @@ pub async fn start_host_terminal(
     spawn_reader(session.clone(), reader);
     registry().lock().unwrap().insert(id.clone(), session);
 
+    let inspect_hint = format!(
+        "Use terminal.read with session_id={id} to inspect output, terminal.stop with session_id={id} to stop it, or open transcript {}.",
+        transcript_path.display()
+    );
+
     Ok(HostTerminalCreateResponse {
         terminal_id: id,
         backend: "portable_pty".to_string(),
         actual_placement: "background_session".to_string(),
         warnings: Vec::new(),
+        transcript: transcript_path.display().to_string(),
+        tail: String::new(),
+        inspect_hint,
     })
 }
 

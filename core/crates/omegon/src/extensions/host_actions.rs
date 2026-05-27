@@ -749,11 +749,15 @@ impl TerminalCreateBackend for RealTerminalCreateBackend {
         })
         .join()
         .map_err(|_| "terminal backend worker panicked".to_string())??;
+        let mut warnings = response.warnings;
+        if response.actual_placement == "background_session" {
+            warnings.push(response.inspect_hint.clone());
+        }
         Ok(omegon_extension::actions::terminal::TerminalCreateResult {
             terminal_id: response.terminal_id,
             backend: response.backend,
             actual_placement: response.actual_placement,
-            warnings: response.warnings,
+            warnings,
         })
     }
 }
