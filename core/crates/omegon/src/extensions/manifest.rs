@@ -34,7 +34,85 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Top-level manifest structure.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UiConfig {
+    #[serde(default)]
+    pub namespace: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub commands: Vec<UiCommand>,
+    #[serde(default)]
+    pub status_items: Vec<UiStatusItem>,
+    #[serde(default)]
+    pub surfaces: Vec<UiSurface>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiCommand {
+    pub id: String,
+    pub title: String,
+    pub slash: String,
+    pub tool: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiStatusItem {
+    pub id: String,
+    pub title: String,
+    pub refresh_tool: String,
+    pub interval_ms: u64,
+    pub template: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiSurface {
+    pub id: String,
+    pub title: String,
+    pub surface_type: String,
+    pub rendering: String,
+    #[serde(default)]
+    pub preferred_placements: Vec<String>,
+    #[serde(default)]
+    pub open_tool: Option<String>,
+    #[serde(default)]
+    pub status_tool: Option<String>,
+    #[serde(default)]
+    pub view: Option<UiPrimitiveView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiPrimitiveView {
+    pub primitive: String,
+    pub data_tool: String,
+    #[serde(default)]
+    pub item: Option<UiListItemTemplate>,
+    #[serde(default)]
+    pub actions: Vec<UiPrimitiveAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiListItemTemplate {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub subtitle: Option<String>,
+    #[serde(default)]
+    pub badge: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiPrimitiveAction {
+    pub id: String,
+    pub title: String,
+    pub tool: String,
+    #[serde(default)]
+    pub args: serde_json::Value,
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtensionManifest {
     pub extension: ExtensionMetadata,
     pub runtime: RuntimeConfig,
@@ -54,6 +132,8 @@ pub struct ExtensionManifest {
     pub config: std::collections::HashMap<String, omegon_extension::ConfigField>,
     #[serde(default)]
     pub capabilities: omegon_extension::Capabilities,
+    #[serde(default)]
+    pub ui: UiConfig,
     #[serde(default)]
     pub permissions: omegon_extension::ManifestPermissions,
 }

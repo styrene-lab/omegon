@@ -114,6 +114,7 @@ mod resources;
 mod rpc;
 mod sampling;
 mod streaming;
+mod ui_contributions;
 
 pub use capabilities::{
     Capabilities, ExtensionInfo, HostInfo, InitializeParams, InitializeResult, PROTOCOL_VERSION,
@@ -148,6 +149,11 @@ pub use sampling::{
     SamplingMessage, SamplingRoute, TokenUsage,
 };
 pub use streaming::{CancelledParams, ProgressContent, ProgressReporter, ToolProgressParams};
+pub use ui_contributions::{
+    CommandContribution, ListItemTemplate, ListPrimitiveView, PrimitiveAction, PrimitiveView,
+    StatusItemContribution, SurfaceContribution, SurfacePlacement, SurfaceRendering,
+    UiContribution, UiContributionSet, UiNamespace,
+};
 
 /// Convenience type for RPC method results.
 pub type RpcResult = Result<serde_json::Value>;

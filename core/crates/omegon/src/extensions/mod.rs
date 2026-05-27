@@ -1741,6 +1741,7 @@ binary = "voice-extension.sh"
             mcp: None,
             config,
             capabilities: omegon_extension::Capabilities::default(),
+            ui: manifest::UiConfig::default(),
             permissions: omegon_extension::ManifestPermissions::default(),
         }
     }

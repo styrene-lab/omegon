@@ -55,6 +55,10 @@ pub struct Capabilities {
     #[serde(default)]
     pub voice: bool,
 
+    /// Extension can declare host-owned operator surface contributions.
+    #[serde(default)]
+    pub ui_contributions: bool,
+
     /// Extension can return declarative host action requests in tool results.
     #[serde(default)]
     pub host_actions: bool,
@@ -81,6 +85,7 @@ impl Default for Capabilities {
             elicitation: false,
             streaming: false,
             voice: false,
+            ui_contributions: false,
             host_actions: false,
             host_action_execution: false,
         }
@@ -101,6 +106,7 @@ impl Capabilities {
             elicitation: true,
             streaming: true,
             voice: true,
+            ui_contributions: true,
             host_actions: true,
             host_action_execution: true,
         }
@@ -120,6 +126,7 @@ impl Capabilities {
             elicitation: self.elicitation && other.elicitation,
             streaming: self.streaming && other.streaming,
             voice: self.voice && other.voice,
+            ui_contributions: self.ui_contributions && other.ui_contributions,
             host_actions: self.host_actions && other.host_actions,
             host_action_execution: self.host_action_execution && other.host_action_execution,
         }
@@ -172,6 +179,7 @@ mod tests {
         assert!(!caps.widgets);
         assert!(!caps.sampling);
         assert!(!caps.voice);
+        assert!(!caps.ui_contributions);
         assert!(!caps.host_actions);
         assert!(!caps.host_action_execution);
     }
@@ -184,6 +192,7 @@ mod tests {
         assert!(caps.sampling);
         assert!(caps.elicitation);
         assert!(caps.voice);
+        assert!(caps.ui_contributions);
         assert!(caps.host_actions);
         assert!(caps.host_action_execution);
     }
@@ -203,6 +212,7 @@ mod tests {
         assert!(!active.mind);
         assert!(!active.sampling);
         assert!(!active.voice);
+        assert!(!active.ui_contributions);
         assert!(!active.host_actions);
         assert!(!active.host_action_execution);
     }
@@ -218,6 +228,7 @@ mod tests {
         assert!(caps.tools);
         assert!(caps.streaming);
         assert!(!caps.voice);
+        assert!(!caps.ui_contributions);
         assert!(!caps.host_actions);
         assert!(!caps.host_action_execution);
     }

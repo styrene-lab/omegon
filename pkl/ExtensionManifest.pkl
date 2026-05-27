@@ -87,7 +87,81 @@ class McpConfig {
   serve_subcommand: String = "serve"
 }
 
-/// Widget declaration — UI surface exposed by the extension.
+
+/// Capability declarations for extension features.
+class CapabilitiesConfig {
+  tools: Boolean = true
+  widgets: Boolean = false
+  mind: Boolean = false
+  vox: Boolean = false
+  resources: Boolean = false
+  prompts: Boolean = false
+  sampling: Boolean = false
+  elicitation: Boolean = false
+  streaming: Boolean = false
+  voice: Boolean = false
+  ui_contributions: Boolean = false
+  host_actions: Boolean = false
+  host_action_execution: Boolean = false
+}
+
+/// Declarative operator-surface contribution envelope.
+class UiConfig {
+  namespace: String(matches(Regex(#"^[a-z0-9][a-z0-9_-]*$"#)))
+  description: String = ""
+  commands: Listing<UiCommand>?
+  status_items: Listing<UiStatusItem>?
+  surfaces: Listing<UiSurface>?
+}
+
+class UiCommand {
+  id: String(length > 0)
+  title: String(length > 0)
+  slash: String(length > 0)
+  tool: String(length > 0)
+}
+
+class UiStatusItem {
+  id: String(length > 0)
+  title: String(length > 0)
+  refresh_tool: String(length > 0)
+  interval_ms: Int(this >= 5000) = 30000
+  template: String(length > 0)
+}
+
+class UiSurface {
+  id: String(length > 0)
+  title: String(length > 0)
+  surface_type: String(length > 0)
+  rendering: "host"|"delegated"
+  preferred_placements: Listing<"side_pane"|"bottom_pane"|"modal"|"new_tab"|"external"|"background_session">?
+  open_tool: String?
+  status_tool: String?
+  view: UiPrimitiveView?
+}
+
+class UiPrimitiveView {
+  primitive: "list"
+  data_tool: String(length > 0)
+  item: UiListItemTemplate?
+  actions: Listing<UiPrimitiveAction>?
+}
+
+class UiListItemTemplate {
+  title: String?
+  subtitle: String?
+  badge: String?
+}
+
+class UiPrimitiveAction {
+  id: String(length > 0)
+  title: String(length > 0)
+  tool: String(length > 0)
+  args: Dynamic?
+  confirm: Boolean = false
+}
+
+/// Widget declaration — legacy UI surface exposed by the extension.
 class WidgetConfig {
   /// Human-readable label for the tab or modal.
   label: String(length > 0)
@@ -130,6 +204,12 @@ secrets: SecretsConfig?
 /// MCP capability declaration (optional).
 /// If present, this extension supports remote access via MCP.
 mcp: McpConfig?
+
+/// Capability declarations for extension features.
+capabilities: CapabilitiesConfig?
+
+/// Declarative operator-surface contribution envelope.
+ui: UiConfig?
 
 /// Configuration field declarations, keyed by field name.
 /// The host resolves values from per-extension config and delivers
