@@ -237,3 +237,194 @@ For the MVP, surface contributions describe the operator affordance and preferre
 - Host validates runtime contributions against manifest envelope.
 - Host rejects raw drawing claims.
 - At least a reader status diagnostic can show accepted contributions before full visual rendering lands.
+
+## Surface rendering modes
+
+Surface contributions have two independent axes:
+
+```text
+rendering: host | delegated
+placement: side_pane | bottom_pane | modal | new_tab | external | background_session
+```
+
+`placement` says where the operator should see the contribution. `rendering`
+says who owns the visual/runtime implementation.
+
+### Delegated rendering
+
+Delegated surfaces are for extensions that own a domain-specific UI or runtime.
+Reader is the canonical MVP example.
+
+```json
+{
+  "kind": "surface",
+  "id": "reader",
+  "title": "Reader",
+  "surface_type": "document_reader",
+  "rendering": "delegated",
+  "preferred_placements": ["side_pane", "new_tab", "external", "background_session"],
+  "open_tool": "reader_open",
+  "status_tool": "reader_status"
+}
+```
+
+Meaning:
+
+- Reader owns document navigation/rendering through its backend.
+- Omegon/Cockpit owns placement, lifecycle, focus, diagnostics, and policy.
+- Placement can degrade honestly, e.g. side pane to external app to background
+  terminal session.
+- Delegated rendering still cannot draw into host frames unless the selected
+  backend is host-approved.
+
+### Host-rendered primitive surfaces
+
+Host-rendered surfaces are for simple extensions that want to use Omegon/Cockpit
+primitives rather than ship their own UI.
+
+The extension declares data tools, action tools, and a primitive view schema. The
+host renders the view using blessed primitives.
+
+```json
+{
+  "kind": "surface",
+  "id": "scratchpad",
+  "title": "Scratchpad",
+  "surface_type": "primitive_view",
+  "rendering": "host",
+  "preferred_placements": ["side_pane", "modal"],
+  "view": {
+    "primitive": "list",
+    "data_tool": "scratchpad_list",
+    "item": {
+      "title": "{title}",
+      "subtitle": "{body_preview}",
+      "badge": "{tag_count}"
+    },
+    "actions": [
+      {
+        "id": "open",
+        "title": "Open",
+        "tool": "scratchpad_get",
+        "args": { "id": "{id}" }
+      }
+    ]
+  }
+}
+```
+
+Meaning:
+
+- Extension does not render.
+- Extension provides data through declared tools.
+- Host owns layout, styling, focus, scrolling, selection, and confirmation UI.
+- Host-owned actions route only to declared extension tools.
+- If no requested placement is available, host-rendered primitive views can
+  degrade to ordinary command/tool result output.
+
+## Initial primitive vocabulary
+
+The first MVP should implement only one host-rendered primitive:
+
+```text
+list
+```
+
+Reserve but do not implement the broader vocabulary:
+
+```text
+table
+key_value
+markdown
+form
+card_grid
+tree
+log
+progress
+empty_state
+```
+
+The `list` primitive should be enough for a scratchpad or simple search-results
+extension and prevents the protocol from overfitting to Reader's delegated
+surface model.
+
+## Host-rendered primitive safety rules
+
+Allowed for `rendering = host`:
+
+- data from declared tools
+- limited field interpolation such as `{title}` or `{id}`
+- host-owned list/card/table styling
+- host-owned actions routed to declared tools
+- host-owned confirmation dialogs
+- host-enforced refresh intervals
+
+Denied:
+
+- raw ANSI
+- terminal escape sequences
+- arbitrary layout code
+- arbitrary HTML/JS
+- keyboard capture
+- background refresh below host minimum
+- actions targeting tools not owned by the extension
+- filesystem or process side effects except through existing tool/HostAction
+  policy paths
+
+## Updated Reader/Scratchpad MVP pairing
+
+Use two dogfood extensions to keep the model honest:
+
+| Dogfood target | Surface mode | Proves |
+|---|---|---|
+| Reader | delegated document_reader | placement/backend degradation and domain UI ownership |
+| Scratchpad | host primitive_view/list | simple extensions can use host primitives without owning UI |
+
+Reader remains the primary MVP because it exercises surface placement,
+HostAction approval, backend degradation, and status. Scratchpad should be the
+minimal primitive-view smoke test.
+
+## Updated slice plan
+
+### Slice 1: protocol/schema
+
+- Add `ui_contributions` capability.
+- Add surface `rendering = host | delegated`.
+- Add surface `surface_type`.
+- Add `preferred_placements`.
+- Add host-rendered `view.primitive = list` schema.
+- Add SDK JSON round-trip tests for:
+  - Reader delegated document_reader surface.
+  - Scratchpad host-rendered list surface.
+- Add manifest TOML parsing tests for both examples.
+- No rendering yet.
+
+### Slice 2: validation/registry
+
+- Runtime `ui/list_contributions` discovery gated by capability.
+- Runtime contribution validation against manifest envelope.
+- Host rejects raw drawing claims.
+- Host records accepted delegated and host-rendered surfaces in a registry.
+- Diagnostics expose accepted/rejected contribution reasons.
+
+### Slice 3: command contribution MVP
+
+- Reader command contribution routes a namespaced slash command to `reader_open`
+  or `reader_status`.
+- Scratchpad command contribution routes to a simple scratchpad tool.
+- Namespace conflict behavior is deterministic and visible.
+
+### Slice 4: primitive list MVP
+
+- Host renders a scratchpad-style list primitive from a data tool result.
+- Supports title/subtitle/badge field templates.
+- Supports one host-owned action routed to an extension tool.
+- No arbitrary rendering or custom styling.
+
+### Slice 5: Reader surface placement MVP
+
+- Host registers Reader's delegated document_reader surface.
+- Host chooses an available placement/backend.
+- If side pane is unavailable, result reports actual placement and warning.
+- Existing terminal.create@1/Bookokrat fallback remains a backend, not the
+  surface protocol itself.
