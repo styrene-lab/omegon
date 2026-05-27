@@ -20,6 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - Show elapsed wall-clock time in the Slim active-tool stream header while tools are running.
 - Replace unclear Slim plan footer actions with plan pin/tracking/OpenSpec/design-lifecycle status labels.
+- Add explicit Slim footer labels for directory and git branch fields, and render OODA phase as a dim acronym with the active letter highlighted.
 - Keep read-only OpenSpec status and lifecycle snapshot calls from materializing discovered file-backed changes into `ai/lifecycle/state.json`.
 
 ## [0.24.7] - 2026-05-27
