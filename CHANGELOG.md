@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.24.7] - 2026-05-26
+
+### Fixed
+
+- Preserve voice prompt origin metadata when queued voice transcriptions are drained after an active turn so follow-up turns remain attributed to voice instead of local TUI input.
+
 ## [0.24.6] - 2026-05-26
 
 ### Fixed
