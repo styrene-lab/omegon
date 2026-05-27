@@ -10,6 +10,6 @@
 ## 2. Milestone follow-up
 <!-- specs: extensions/roadmap -->
 
-- [ ] 2.1 Assign #104, #83, and optionally #87 to milestone 0.25.0.
-- [ ] 2.2 Decide whether #98/#100 belong to 0.25.0 or 0.25.x.
-- [ ] 2.3 Decide whether #102 starts in 0.25.0 or after #101/#83 schema stabilization.
+- [x] 2.1 Assign #104, #83, and optionally #87 to milestone 0.25.0.
+- [x] 2.2 Decide whether #98/#100 belong to 0.25.0 or 0.25.x.
+- [x] 2.3 Decide whether #102 starts in 0.25.0 or after #101/#83 schema stabilization.

@@ -650,6 +650,60 @@ allow_env = ["BOOKOKRAT_THEME"]
     }
 
     #[test]
+    fn test_ui_contributions_parse_from_toml() {
+        let toml_str = r#"
+[extension]
+name = "reader"
+version = "0.1.0"
+
+[runtime]
+type = "native"
+binary = "target/release/reader"
+
+[capabilities]
+ui_contributions = true
+
+[ui]
+namespace = "reader"
+description = "Document reader surfaces"
+
+[[ui.commands]]
+id = "open"
+title = "Open Reader"
+slash = "/reader open"
+tool = "reader_open"
+
+[[ui.status_items]]
+id = "status"
+title = "Reader"
+refresh_tool = "reader_status"
+interval_ms = 30000
+template = "{state}"
+
+[[ui.surfaces]]
+id = "reader"
+title = "Reader"
+surface_type = "document_reader"
+rendering = "delegated"
+preferred_placements = ["side_pane", "new_tab", "external"]
+open_tool = "reader_open"
+status_tool = "reader_status"
+"#;
+
+        let manifest: ExtensionManifest = toml::from_str(toml_str).unwrap();
+        assert!(manifest.capabilities.ui_contributions);
+        assert_eq!(manifest.ui.namespace, "reader");
+        assert_eq!(manifest.ui.commands[0].slash, "/reader open");
+        assert_eq!(manifest.ui.status_items[0].refresh_tool, "reader_status");
+        assert_eq!(manifest.ui.surfaces[0].rendering, "delegated");
+        assert_eq!(manifest.ui.surfaces[0].preferred_placements[0], "side_pane");
+        assert_eq!(
+            manifest.ui.surfaces[0].open_tool.as_deref(),
+            Some("reader_open")
+        );
+    }
+
+    #[test]
     fn test_config_fields_parse_from_toml() {
         let toml_str = r#"
 [extension]

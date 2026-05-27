@@ -415,6 +415,60 @@ description = "Timeline of engagement activity"
     }
 
     #[test]
+    fn parse_ui_contributions_manifest() {
+        let toml = r#"
+[extension]
+name = "reader"
+version = "0.1.0"
+
+[runtime]
+type = "native"
+binary = "target/release/reader"
+
+[capabilities]
+ui_contributions = true
+
+[ui]
+namespace = "reader"
+description = "Document reader surfaces"
+
+[[ui.commands]]
+id = "open"
+title = "Open Reader"
+slash = "/reader open"
+tool = "reader_open"
+
+[[ui.status_items]]
+id = "status"
+title = "Reader"
+refresh_tool = "reader_status"
+interval_ms = 30000
+template = "{state}"
+
+[[ui.surfaces]]
+id = "reader"
+title = "Reader"
+surface_type = "document_reader"
+rendering = "delegated"
+preferred_placements = ["side_pane", "new_tab", "external"]
+open_tool = "reader_open"
+status_tool = "reader_status"
+"#;
+        let manifest: ExtensionManifest = toml::from_str(toml).unwrap();
+        assert!(manifest.capabilities.ui_contributions);
+        assert_eq!(manifest.ui.namespace, "reader");
+        assert_eq!(manifest.ui.description, "Document reader surfaces");
+        assert_eq!(manifest.ui.commands[0].tool, "reader_open");
+        assert_eq!(manifest.ui.status_items[0].interval_ms, 30000);
+        assert_eq!(manifest.ui.surfaces[0].surface_type, "document_reader");
+        assert_eq!(manifest.ui.surfaces[0].rendering, "delegated");
+        assert_eq!(
+            manifest.ui.surfaces[0].status_tool.as_deref(),
+            Some("reader_status")
+        );
+    }
+
+    #[test]
     fn parse_manifest_with_secrets() {
         let toml = r#"
 [extension]
