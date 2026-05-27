@@ -35,6 +35,7 @@ mod snapshot_tests;
 #[cfg(test)]
 mod tests;
 
+use segments::SegmentMeta;
 use std::io;
 use std::time::Duration;
 
@@ -315,6 +316,18 @@ pub(crate) struct QueuedPrompt {
     text: String,
     attachments: Vec<std::path::PathBuf>,
     metadata: PromptMetadata,
+}
+
+fn segment_meta_from_prompt_metadata(metadata: &PromptMetadata) -> SegmentMeta {
+    let mut meta = SegmentMeta::default();
+    if let Some(voice) = &metadata.voice {
+        meta.source_channel = Some("voice".to_string());
+        meta.radio_cue = voice.radio_cue.clone();
+        meta.voice_end_of_turn = voice.end_of_turn;
+        meta.voice_close_session_requested = voice.close_session_requested;
+        meta.voice_duration_s = voice.duration_s;
+    }
+    meta
 }
 
 pub(crate) fn voice_prompt_from_notification(
@@ -1959,6 +1972,11 @@ impl App {
                 .and_then(|r| r.active_persona().map(|p| p.id.clone())),
             branch: None,      // populated lazily if needed
             duration_ms: None, // set on completion
+            source_channel: None,
+            radio_cue: None,
+            voice_end_of_turn: None,
+            voice_close_session_requested: None,
+            voice_duration_s: None,
         }
     }
 
@@ -10050,10 +10068,14 @@ pub async fn run_tui(
             let attachments = queued.attachments;
             let metadata = queued.metadata;
             if attachments.is_empty() {
-                app.conversation.push_user(&text);
-            } else {
                 app.conversation
-                    .push_user_with_attachments(&text, &attachments);
+                    .push_user_with_meta(&text, segment_meta_from_prompt_metadata(&metadata));
+            } else {
+                app.conversation.push_user_with_attachments_and_meta(
+                    &text,
+                    &attachments,
+                    segment_meta_from_prompt_metadata(&metadata),
+                );
             }
             app.history.push(text.clone());
             app.history_idx = None;

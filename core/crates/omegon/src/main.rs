@@ -4962,6 +4962,8 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 }
 
                 while let Some(active) = runtime.maybe_start_next_turn() {
+                    stop_voice_session_if_requested(&active.prompt, &runtime_state.bus, &events_tx)
+                        .await;
                     mark_interactive_session_busy(&agent.dashboard_handles, true);
 
                     let mut quit_after_turn = false;
@@ -5025,11 +5027,18 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                             label: prompt.submitted_by.clone(),
                                         };
                                         let via = control_surface_from_via(prompt.via);
-                                        runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via, prompt.metadata, Some(match prompt.queue_mode {
+                                        let prompt_id = runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via, prompt.metadata, Some(match prompt.queue_mode {
                                             crate::tui::PromptQueueMode::InterruptAfterTurn => QueueMode::InterruptAfterTurn,
                                             crate::tui::PromptQueueMode::UntilReady => QueueMode::UntilReady,
                                             crate::tui::PromptQueueMode::Immediate => QueueMode::Immediate,
                                         }));
+                                        if let Some(queued_prompt) = runtime.queue.iter().find(|queued| queued.id == prompt_id)
+                                            && queued_prompt.requests_voice_close()
+                                        {
+                                            let _ = events_tx.send(AgentEvent::SystemNotification {
+                                                message: "Voice requested shutdown after this prompt; it will be stopped when the active turn completes.".to_string(),
+                                            });
+                                        }
                                     }
                                     tui::TuiCommand::Quit => {
                                         quit_after_turn = true;
@@ -5344,6 +5353,16 @@ struct PromptEnvelope {
     queue_mode: QueueMode,
 }
 
+impl PromptEnvelope {
+    fn requests_voice_close(&self) -> bool {
+        self.metadata
+            .voice
+            .as_ref()
+            .and_then(|voice| voice.close_session_requested)
+            .unwrap_or(false)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ActiveTurnPhase {
     Running,
@@ -5618,6 +5637,44 @@ async fn run_interactive_active_turn(
     });
 
     runtime_state
+}
+
+async fn stop_voice_session_if_requested(
+    prompt: &PromptEnvelope,
+    bus: &crate::bus::EventBus,
+    events_tx: &tokio::sync::broadcast::Sender<AgentEvent>,
+) {
+    if !prompt.requests_voice_close() {
+        return;
+    }
+
+    if !bus.has_tool("voice_session_stop") {
+        let _ = events_tx.send(AgentEvent::SystemNotification {
+            message: "Voice requested shutdown after this prompt, but no voice_session_stop tool is available.".to_string(),
+        });
+        return;
+    }
+
+    match bus
+        .execute_tool(
+            "voice_session_stop",
+            "voice-over-and-out-stop",
+            serde_json::json!({}),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+    {
+        Ok(_) => {
+            let _ = events_tx.send(AgentEvent::SystemNotification {
+                message: "Voice session stop requested after over and out.".to_string(),
+            });
+        }
+        Err(err) => {
+            let _ = events_tx.send(AgentEvent::SystemNotification {
+                message: format!("Voice requested shutdown, but voice_session_stop failed: {err}"),
+            });
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -8026,6 +8083,28 @@ mod tests {
     fn interactive_resume_mode_fresh_overrides_resume_flag() {
         let cli = Cli::parse_from(["omegon", "--fresh", "--resume", "abc123"]);
         assert!(interactive_resume_mode(&cli).is_none());
+    }
+
+    #[test]
+    fn prompt_envelope_detects_voice_close_request() {
+        let prompt = PromptEnvelope {
+            id: 1,
+            text: "🎙 stop listening".to_string(),
+            image_paths: Vec::new(),
+            submitted_by: RuntimeActor::tui(),
+            via: ControlSurface::Tui,
+            metadata: tui::PromptMetadata {
+                voice: Some(tui::VoicePromptMetadata {
+                    event_id: "u-close".to_string(),
+                    duration_s: None,
+                    radio_cue: Some("over_and_out".to_string()),
+                    end_of_turn: Some(true),
+                    close_session_requested: Some(true),
+                }),
+            },
+            queue_mode: QueueMode::UntilReady,
+        };
+        assert!(prompt.requests_voice_close());
     }
 
     #[test]

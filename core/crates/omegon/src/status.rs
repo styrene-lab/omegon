@@ -78,6 +78,9 @@ pub struct HarnessStatus {
     /// Latest voice extension lifecycle state reported through `voice/state`.
     /// This is extension-reported capture state, not OS/device/hardware truth.
     pub voice_state: Option<VoiceStateStatus>,
+    /// Latest spoken-output lifecycle state reported through `voice/tts_state`.
+    /// This is independent from microphone capture state.
+    pub voice_tts_state: Option<VoiceTtsStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -85,6 +88,17 @@ pub struct VoiceStateStatus {
     pub extension: String,
     pub state: String,
     pub mic_open: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VoiceTtsStatus {
+    pub extension: String,
+    pub state: String,
+    pub audio_output: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice: Option<String>,
 }
 
 /// Summary of an active delegate process.
@@ -302,12 +316,16 @@ impl HarnessStatus {
             let label = match (voice.mic_open, voice.state.as_str()) {
                 (true, "listening") => "voice listening".to_string(),
                 (true, "processing") => "voice processing".to_string(),
-                (true, "speaking") => "voice speaking".to_string(),
                 (true, state) => format!("voice {state}"),
                 (false, "error") => "voice error".to_string(),
                 (false, state) => format!("voice {state}"),
             };
             parts.push(label);
+        }
+        if let Some(ref tts) = self.voice_tts_state
+            && tts.audio_output
+        {
+            parts.push(format!("voice {}", tts.state));
         }
 
         parts.push(self.context_class.clone());
@@ -838,6 +856,7 @@ impl Default for HarnessStatus {
             mutation_diagnostics: 0,
             active_delegates: vec![],
             voice_state: None,
+            voice_tts_state: None,
         }
     }
 }
@@ -876,6 +895,27 @@ mod tests {
     }
 
     #[test]
+    fn footer_summary_reports_tts_independent_from_mic_state() {
+        let status = HarnessStatus {
+            voice_state: Some(VoiceStateStatus {
+                extension: "omegon-voice".to_string(),
+                state: "listening".to_string(),
+                mic_open: true,
+            }),
+            voice_tts_state: Some(VoiceTtsStatus {
+                extension: "omegon-voice".to_string(),
+                state: "speaking".to_string(),
+                audio_output: true,
+                backend: Some("macos".to_string()),
+                voice: Some("Reed".to_string()),
+            }),
+            ..HarnessStatus::default()
+        };
+        let summary = status.footer_summary();
+        assert!(summary.contains("voice listening"), "{summary}");
+        assert!(summary.contains("voice speaking"), "{summary}");
+    }
+
     fn footer_summary_minimal() {
         let status = HarnessStatus::default();
         let footer = status.footer_summary();

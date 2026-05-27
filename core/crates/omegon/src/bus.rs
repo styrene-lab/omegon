@@ -328,6 +328,11 @@ impl EventBus {
         self.tool_definitions_mode(false)
     }
 
+    pub fn has_tool(&self, tool_name: &str) -> bool {
+        self.tool_defs.iter().any(|(_, def)| def.name == tool_name)
+            || self.internal_tool_owners.contains_key(tool_name)
+    }
+
     /// Tool definitions with optional schema compaction for token efficiency.
     pub fn tool_definitions_mode(&self, compact: bool) -> Vec<ToolDefinition> {
         let disabled = self.disabled_tools.as_ref().and_then(|d| d.lock().ok());
