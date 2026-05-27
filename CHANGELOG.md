@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.24.6] - 2026-05-26
+
+### Fixed
+
+- Keep reading voice extension stdout while the TUI is idle so post-turn `voice/transcription` notifications become `🎙` prompts and can start the next agent turn.
+
 ## [0.24.5] - 2026-05-26
 
 ### Added
