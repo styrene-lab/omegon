@@ -142,6 +142,11 @@ fn transcription_params_to_event(
         return None;
     }
     let duration_s = params.get("duration_s").and_then(Value::as_f64);
+    let radio_cue = params.get("radio_cue").and_then(Value::as_str);
+    let end_of_turn = params.get("end_of_turn").and_then(Value::as_bool);
+    let close_session_requested = params
+        .get("close_session_requested")
+        .and_then(Value::as_bool);
     let utterance_id = params
         .get("utterance_id")
         .and_then(Value::as_str)
@@ -158,6 +163,10 @@ fn transcription_params_to_event(
             "utterance_id": utterance_id,
             "trust_level": "operator",
             "extension": extension_name,
+            "source_channel": "voice",
+            "radio_cue": radio_cue,
+            "end_of_turn": end_of_turn,
+            "close_session_requested": close_session_requested,
         }),
         caller_role: Some("edit".to_string()),
         source_user: None,
@@ -194,10 +203,34 @@ mod tests {
         assert_eq!(event.payload["utterance_id"], "u1");
         assert_eq!(event.payload["trust_level"], "operator");
         assert_eq!(event.payload["extension"], "omegon-voice");
+        assert_eq!(event.payload["source_channel"], "voice");
         assert_eq!(event.caller_role.as_deref(), Some("edit"));
         assert_eq!(event.source_user, None);
         assert_eq!(event.source_channel.as_deref(), Some("voice"));
         assert_eq!(event.source_thread, None);
+    }
+
+    #[test]
+    fn transcription_control_metadata_is_preserved() {
+        let event = voice_notification_to_event(&notification(
+            "voice/transcription",
+            json!({
+                "text": "assess this directory",
+                "duration_s": 2.1,
+                "utterance_id": "u2",
+                "radio_cue": "over",
+                "end_of_turn": true,
+                "close_session_requested": false
+            }),
+        ))
+        .expect("voice event");
+
+        assert_eq!(event.payload["text"], "assess this directory");
+        assert_eq!(event.payload["duration_s"], 2.1);
+        assert_eq!(event.payload["radio_cue"], "over");
+        assert_eq!(event.payload["end_of_turn"], true);
+        assert_eq!(event.payload["close_session_requested"], false);
+        assert_eq!(event.payload["source_channel"], "voice");
     }
 
     #[test]

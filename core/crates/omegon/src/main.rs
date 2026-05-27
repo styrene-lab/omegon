@@ -3914,12 +3914,13 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
         };
 
         let cmd = match cmd {
-            tui::TuiCommand::VoicePrompt { text, .. } => tui::TuiCommand::SubmitPrompt(tui::PromptSubmission {
+            tui::TuiCommand::VoicePrompt { text, metadata } => tui::TuiCommand::SubmitPrompt(tui::PromptSubmission {
                 text: format!("🎙 {}", text.trim()),
                 image_paths: Vec::new(),
                 submitted_by: "voice".to_string(),
                 via: "voice",
                 queue_mode: tui::PromptQueueMode::UntilReady,
+                metadata: tui::PromptMetadata { voice: Some(metadata) },
             }),
             other => other,
         };
@@ -4537,6 +4538,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                             submitted_by: "web-dashboard".to_string(),
                                             via: "websocket",
                                             queue_mode: crate::tui::PromptQueueMode::InterruptAfterTurn,
+                                            metadata: crate::tui::PromptMetadata::default(),
                                         })
                                     }
                                     web::WebCommand::SlashCommand {
@@ -4949,7 +4951,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                 };
                 let via = control_surface_from_via(prompt.via);
 
-                runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via, Some(match prompt.queue_mode {
+                runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via, prompt.metadata, Some(match prompt.queue_mode {
                         crate::tui::PromptQueueMode::InterruptAfterTurn => QueueMode::InterruptAfterTurn,
                         crate::tui::PromptQueueMode::UntilReady => QueueMode::UntilReady,
                         crate::tui::PromptQueueMode::Immediate => QueueMode::Immediate,
@@ -5005,12 +5007,13 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                 };
 
                                 let cmd = match cmd {
-                                    tui::TuiCommand::VoicePrompt { text, .. } => tui::TuiCommand::SubmitPrompt(tui::PromptSubmission {
+                                    tui::TuiCommand::VoicePrompt { text, metadata } => tui::TuiCommand::SubmitPrompt(tui::PromptSubmission {
                                         text: format!("🎙 {}", text.trim()),
                                         image_paths: Vec::new(),
                                         submitted_by: "voice".to_string(),
                                         via: "voice",
                                         queue_mode: tui::PromptQueueMode::UntilReady,
+                                        metadata: tui::PromptMetadata { voice: Some(metadata) },
                                     }),
                                     other => other,
                                 };
@@ -5022,7 +5025,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                                             label: prompt.submitted_by.clone(),
                                         };
                                         let via = control_surface_from_via(prompt.via);
-                                        runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via, Some(match prompt.queue_mode {
+                                        runtime.enqueue_prompt(prompt.text, prompt.image_paths, actor, via, prompt.metadata, Some(match prompt.queue_mode {
                                             crate::tui::PromptQueueMode::InterruptAfterTurn => QueueMode::InterruptAfterTurn,
                                             crate::tui::PromptQueueMode::UntilReady => QueueMode::UntilReady,
                                             crate::tui::PromptQueueMode::Immediate => QueueMode::Immediate,
@@ -5330,13 +5333,14 @@ enum QueueMode {
     Immediate,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct PromptEnvelope {
     id: u64,
     text: String,
     image_paths: Vec<PathBuf>,
     submitted_by: RuntimeActor,
     via: ControlSurface,
+    metadata: tui::PromptMetadata,
     queue_mode: QueueMode,
 }
 
@@ -5349,7 +5353,7 @@ enum ActiveTurnPhase {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct ActiveTurnMeta {
     runtime_turn_id: u64,
     prompt: PromptEnvelope,
@@ -5632,6 +5636,7 @@ impl InteractiveRuntimeSupervisor {
         image_paths: Vec<PathBuf>,
         actor: RuntimeActor,
         via: ControlSurface,
+        metadata: tui::PromptMetadata,
         queue_mode: Option<QueueMode>,
     ) -> u64 {
         self.next_prompt_id += 1;
@@ -5642,6 +5647,7 @@ impl InteractiveRuntimeSupervisor {
             image_paths,
             submitted_by: actor,
             via,
+            metadata,
             queue_mode: queue_mode.unwrap_or(self.default_queue_mode),
         });
         prompt_id
@@ -8022,6 +8028,32 @@ mod tests {
         assert!(interactive_resume_mode(&cli).is_none());
     }
 
+    #[test]
+    fn interactive_runtime_supervisor_preserves_prompt_metadata() {
+        let mut supervisor = InteractiveRuntimeSupervisor::default();
+        let metadata = tui::PromptMetadata {
+            voice: Some(tui::VoicePromptMetadata {
+                event_id: "u-close".to_string(),
+                duration_s: Some(2.1),
+                radio_cue: Some("over_and_out".to_string()),
+                end_of_turn: Some(true),
+                close_session_requested: Some(true),
+            }),
+        };
+        supervisor.enqueue_prompt(
+            "🎙 stop listening".to_string(),
+            Vec::new(),
+            RuntimeActor::tui(),
+            ControlSurface::Tui,
+            metadata.clone(),
+            None,
+        );
+
+        let active = supervisor.maybe_start_next_turn().expect("active turn");
+        assert_eq!(active.prompt.metadata, metadata);
+    }
+
+    #[test]
     fn interactive_runtime_supervisor_starts_first_prompt_fifo() {
         let mut supervisor = InteractiveRuntimeSupervisor::default();
         supervisor.enqueue_prompt(
@@ -8029,6 +8061,7 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            tui::PromptMetadata::default(),
             None,
         );
         supervisor.enqueue_prompt(
@@ -8036,6 +8069,7 @@ mod tests {
             Vec::new(),
             RuntimeActor::auspex(),
             ControlSurface::Ipc,
+            tui::PromptMetadata::default(),
             None,
         );
 
@@ -8058,6 +8092,7 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            tui::PromptMetadata::default(),
             None,
         );
         supervisor.maybe_start_next_turn().expect("active turn");
@@ -8085,6 +8120,7 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            tui::PromptMetadata::default(),
             None,
         );
         supervisor.maybe_start_next_turn().expect("active turn");
@@ -8105,6 +8141,7 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            tui::PromptMetadata::default(),
             None,
         );
         supervisor.enqueue_prompt(
@@ -8112,6 +8149,7 @@ mod tests {
             vec![PathBuf::from("/tmp/paste.png")],
             RuntimeActor::auspex(),
             ControlSurface::Ipc,
+            tui::PromptMetadata::default(),
             None,
         );
 
@@ -8141,6 +8179,7 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            tui::PromptMetadata::default(),
             None,
         );
         supervisor.enqueue_prompt(
@@ -8148,6 +8187,7 @@ mod tests {
             Vec::new(),
             RuntimeActor::auspex(),
             ControlSurface::Ipc,
+            tui::PromptMetadata::default(),
             None,
         );
 
@@ -8173,6 +8213,7 @@ mod tests {
             Vec::new(),
             RuntimeActor::tui(),
             ControlSurface::Tui,
+            tui::PromptMetadata::default(),
             None,
         );
         supervisor.enqueue_prompt(
@@ -8180,6 +8221,7 @@ mod tests {
             Vec::new(),
             RuntimeActor::auspex(),
             ControlSurface::Ipc,
+            tui::PromptMetadata::default(),
             None,
         );
         supervisor

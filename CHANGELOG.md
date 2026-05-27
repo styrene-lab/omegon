@@ -16,11 +16,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-## [0.24.7] - 2026-05-26
+### Changed
 
-### Fixed
-
-- Preserve voice prompt origin metadata when queued voice transcriptions are drained after an active turn so follow-up turns remain attributed to voice instead of local TUI input.
+- Preserve voice transcription control metadata (`radio_cue`, `end_of_turn`, `close_session_requested`, and utterance duration) through host prompt routing so radio cues can drive lifecycle behavior without leaking into prompt text.
 
 ## [0.24.6] - 2026-05-26
 

@@ -266,6 +266,7 @@ impl IpcConnection {
                             submitted_by: "ipc-controller".to_string(),
                             via: "ipc",
                             queue_mode: crate::tui::PromptQueueMode::InterruptAfterTurn,
+                            metadata: crate::tui::PromptMetadata::default(),
                         }))
                         .await
                         .is_ok();

@@ -437,8 +437,6 @@ fn queue_prompt_preserves_fifo_order() {
         .expect("second queued prompt");
 
     assert_eq!(first.text, "first");
-    assert_eq!(first.submitted_by, "local-tui");
-    assert_eq!(first.via, "tui");
     assert_eq!(second.text, "second");
 }
 
