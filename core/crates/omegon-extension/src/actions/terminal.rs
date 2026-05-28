@@ -64,6 +64,8 @@ pub enum TerminalPlacement {
     BottomPane,
     /// Open in a new tab/window when supported.
     NewTab,
+    /// Run as a managed background terminal session with transcript inspection.
+    BackgroundSession,
 }
 
 /// Result payload for `terminal.create@1`.
@@ -99,6 +101,20 @@ mod tests {
         let json = serde_json::to_value(&params).unwrap();
         assert_eq!(json["command"], "bookokrat");
         assert_eq!(json["placement"], "side_pane");
+
+        let background = TerminalCreateParams {
+            command: "bookokrat".to_string(),
+            args: Vec::new(),
+            cwd: None,
+            env: BTreeMap::new(),
+            title: None,
+            placement: Some(TerminalPlacement::BackgroundSession),
+            reuse_key: None,
+        };
+        assert_eq!(
+            serde_json::to_value(background).unwrap()["placement"],
+            "background_session"
+        );
         let parsed: TerminalCreateParams = serde_json::from_value(json).unwrap();
         assert_eq!(parsed, params);
     }
