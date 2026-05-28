@@ -1653,6 +1653,14 @@ allowed = [{allowed}]
     #[test]
     fn terminal_create_side_pane_degradation_includes_inspection_hint() {
         let manifest = terminal_manifest(&["printf"], &["${workspace}"], &[]);
+        let terminal_name = format!(
+            "side-visible-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        );
         let outcome = process_host_action_candidate_with_approval_decision(
             json!({
                 "id": "open-side",
@@ -1662,7 +1670,8 @@ allowed = [{allowed}]
                     "command": "printf",
                     "args": ["side-visible"],
                     "cwd": ".",
-                    "placement": "side_pane"
+                    "placement": "side_pane",
+                    "name": terminal_name
                 }
             }),
             &manifest,
