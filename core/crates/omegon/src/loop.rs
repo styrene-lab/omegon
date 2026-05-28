@@ -2291,7 +2291,12 @@ async fn dispatch_tools(
 }
 
 fn is_parallel_safe_read_only_tool(name: &str) -> bool {
-    matches!(name, "read" | "view" | "web_search" | "whoami" | "chronos")
+    // File reads can hit workspace-boundary permission prompts. Those prompts
+    // are interactive and single-pending in the TUI, so dispatching read/view
+    // in parallel can overwrite the visible responder and leave earlier reads
+    // blocked until timeout. Keep filesystem reads serial; only inherently
+    // permissionless read-only tools may run concurrently.
+    matches!(name, "web_search" | "whoami" | "chronos")
 }
 
 fn enrich_plan_list_tool_results(
@@ -4312,7 +4317,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parallel_safe_read_only_tools_dispatch_concurrently() {
+    async fn non_filesystem_read_only_tools_dispatch_concurrently() {
         use omegon_traits::ToolResult;
         use tokio::time::{Duration, Instant, sleep};
 
@@ -4323,16 +4328,16 @@ mod tests {
             fn tools(&self) -> Vec<omegon_traits::ToolDefinition> {
                 vec![
                     omegon_traits::ToolDefinition {
-                        name: "read".into(),
-                        label: "read".into(),
-                        description: "read file".into(),
+                        name: "whoami".into(),
+                        label: "whoami".into(),
+                        description: "identity".into(),
                         parameters: serde_json::json!({}),
                         capabilities: vec![],
                     },
                     omegon_traits::ToolDefinition {
-                        name: "view".into(),
-                        label: "view".into(),
-                        description: "view file".into(),
+                        name: "chronos".into(),
+                        label: "chronos".into(),
+                        description: "clock".into(),
                         parameters: serde_json::json!({}),
                         capabilities: vec![],
                     },
@@ -4367,13 +4372,13 @@ mod tests {
         let calls = vec![
             ToolCall {
                 id: "1".into(),
-                name: "read".into(),
-                arguments: serde_json::json!({"path": "a.txt"}),
+                name: "whoami".into(),
+                arguments: serde_json::json!({}),
             },
             ToolCall {
                 id: "2".into(),
-                name: "view".into(),
-                arguments: serde_json::json!({"path": "b.txt"}),
+                name: "chronos".into(),
+                arguments: serde_json::json!({}),
             },
         ];
 
@@ -4387,8 +4392,14 @@ mod tests {
             elapsed < Duration::from_millis(260),
             "expected parallel dispatch, got {elapsed:?}"
         );
-        assert_eq!(dispatch.results[0].tool_name, "read");
-        assert_eq!(dispatch.results[1].tool_name, "view");
+        assert_eq!(dispatch.results[0].tool_name, "whoami");
+        assert_eq!(dispatch.results[1].tool_name, "chronos");
+    }
+
+    #[tokio::test]
+    async fn filesystem_read_tools_dispatch_serially_to_preserve_permission_prompts() {
+        assert!(!is_parallel_safe_read_only_tool("read"));
+        assert!(!is_parallel_safe_read_only_tool("view"));
     }
 
     // ── Turn limit + config tests ──────────────────────────────────────

@@ -128,7 +128,10 @@ impl StatusLine {
 
         // CWD basename (≥55)
         if w >= 55 && !self.cwd_basename.is_empty() {
-            let field = Span::styled(self.cwd_basename.clone(), Style::default().fg(t.muted()));
+            let field = Span::styled(
+                format!("dir {}", self.cwd_basename),
+                Style::default().fg(t.muted()),
+            );
             let cost = sect.width() + field.width();
             if used + cost < w {
                 spans.push(sect.clone());
@@ -141,7 +144,7 @@ impl StatusLine {
         if w >= 65
             && let Some(ref branch) = self.git_branch
         {
-            let field = Span::styled(branch.clone(), Style::default().fg(t.muted()));
+            let field = Span::styled(format!("git {branch}"), Style::default().fg(t.muted()));
             let cost = sep.width() + field.width();
             if used + cost < w {
                 spans.push(sep.clone());
@@ -168,17 +171,11 @@ impl StatusLine {
         if w >= 85
             && let Some(phase) = &self.phase
         {
-            let (label, color) = match phase {
-                OodaPhase::Act => ("Act", t.accent()),
-                OodaPhase::Observe => ("Observe", t.muted()),
-                OodaPhase::Orient => ("Orient", t.muted()),
-                OodaPhase::Decide => ("Decide", t.muted()),
-            };
-            let field = Span::styled(label, Style::default().fg(color));
-            let cost = sep.width() + field.width();
+            let ooda = ooda_phase_spans(*phase, t);
+            let cost = sep.width() + ooda.iter().map(|span| span.width()).sum::<usize>();
             if used + cost < w {
                 spans.push(sep.clone());
-                spans.push(field);
+                spans.extend(ooda);
                 used += cost;
             }
         }
@@ -244,6 +241,39 @@ fn fmt_tokens(count: u64) -> String {
     widgets::format_tokens_compact(count as usize)
 }
 
+fn ooda_phase_spans(phase: OodaPhase, t: &dyn Theme) -> Vec<Span<'static>> {
+    let active = match phase {
+        OodaPhase::Observe => 0,
+        OodaPhase::Orient => 1,
+        OodaPhase::Decide => 2,
+        OodaPhase::Act => 3,
+    };
+    let label = match phase {
+        OodaPhase::Observe => "Observe",
+        OodaPhase::Orient => "Orient",
+        OodaPhase::Decide => "Decide",
+        OodaPhase::Act => "Act",
+    };
+    let letters = ['o', 'o', 'd', 'a'];
+    let mut spans = Vec::new();
+    for (idx, ch) in letters.into_iter().enumerate() {
+        if idx == active {
+            spans.push(Span::styled(
+                ch.to_ascii_uppercase().to_string(),
+                Style::default().fg(t.accent()),
+            ));
+        } else {
+            spans.push(Span::styled(ch.to_string(), Style::default().fg(t.dim())));
+        }
+    }
+    spans.push(Span::styled(" ".to_string(), Style::default().fg(t.dim())));
+    spans.push(Span::styled(
+        label.to_string(),
+        Style::default().fg(t.accent()),
+    ));
+    spans
+}
+
 fn file_activity_label(read: usize, modified: usize, width: usize) -> String {
     let total = read + modified;
     if width >= 115 && read > 0 && modified > 0 {
@@ -278,6 +308,53 @@ mod tests {
         assert!(sl.viewport_hint.is_none());
         assert!(sl.turn_state.is_none());
         assert!(sl.operator_hint.is_none());
+    }
+
+    #[test]
+    fn ooda_phase_label_lights_active_letter() {
+        let t = super::super::theme::Alpharius;
+        let rendered = |phase| {
+            ooda_phase_spans(phase, &t)
+                .into_iter()
+                .map(|span| span.content.to_string())
+                .collect::<String>()
+        };
+
+        assert_eq!(rendered(OodaPhase::Observe), "Ooda Observe");
+        assert_eq!(rendered(OodaPhase::Orient), "oOda Orient");
+        assert_eq!(rendered(OodaPhase::Decide), "ooDa Decide");
+        assert_eq!(rendered(OodaPhase::Act), "oodA Act");
+    }
+
+    #[test]
+    fn status_line_icons_label_directory_branch_and_ooda() {
+        let mut sl = StatusLine {
+            context_percent: 50.0,
+            turn: 8,
+            model_short: "gpt".into(),
+            session_input_tokens: 32_000,
+            session_output_tokens: 2_000,
+            cwd_basename: "omegon".into(),
+            git_branch: Some("fix/footer".into()),
+            phase: Some(OodaPhase::Act),
+            ..Default::default()
+        };
+        sl.operator_hint = Some("plan active".into());
+
+        let backend = ratatui::backend::TestBackend::new(160, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| sl.render(frame.area(), frame, &super::super::theme::Alpharius))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let mut text = String::new();
+        for x in 0..160 {
+            text.push_str(buf[(x, 0)].symbol());
+        }
+
+        assert!(text.contains("dir omegon"), "{text}");
+        assert!(text.contains("git fix/footer"), "{text}");
+        assert!(text.contains("oodA Act"), "{text}");
     }
 
     #[test]

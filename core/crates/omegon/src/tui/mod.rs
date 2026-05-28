@@ -1377,6 +1377,7 @@ fn slim_plan_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> u16 
 struct ActiveToolStream {
     id: String,
     name: String,
+    started_at: std::time::Instant,
     lines: Vec<String>,
 }
 
@@ -1385,6 +1386,7 @@ impl ActiveToolStream {
         Self {
             id: id.into(),
             name: name.into(),
+            started_at: std::time::Instant::now(),
             lines: Vec::new(),
         }
     }
@@ -1441,7 +1443,9 @@ enum PlanDisplayStatus {
 enum SlimTurnState {
     #[default]
     Ready,
-    Running,
+    RequestingProvider,
+    OpeningStream,
+    UpstreamRetrying(String),
     Thinking,
     Responding,
     Tool(String),
@@ -1452,12 +1456,37 @@ impl SlimTurnState {
     fn label(&self) -> String {
         match self {
             Self::Ready => "ready".to_string(),
-            Self::Running => "turn running".to_string(),
-            Self::Thinking => "thinking".to_string(),
-            Self::Responding => "responding".to_string(),
+            Self::RequestingProvider => "waiting: provider request".to_string(),
+            Self::OpeningStream => "waiting: stream open".to_string(),
+            Self::UpstreamRetrying(detail) => format!("retrying upstream {detail}"),
+            Self::Thinking => "streaming thinking".to_string(),
+            Self::Responding => "streaming answer".to_string(),
             Self::Tool(name) => format!("running {name}"),
             Self::Finished(reason) => format!("turn {reason}"),
         }
+    }
+}
+
+fn upstream_retry_hint(message: &str) -> Option<String> {
+    if !(message.contains("— retrying") || message.starts_with("Retrying")) {
+        return None;
+    }
+    let attempt = message
+        .split("attempt ")
+        .nth(1)
+        .and_then(|rest| rest.split([',', ')']).next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let delay = message
+        .split("delay ")
+        .nth(1)
+        .and_then(|rest| rest.split("ms").next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    match (attempt, delay) {
+        (Some(attempt), Some(delay)) => Some(format!("attempt {attempt} · {delay}ms")),
+        (Some(attempt), None) => Some(format!("attempt {attempt}")),
+        _ => Some("active".to_string()),
     }
 }
 
@@ -1697,6 +1726,44 @@ enum SlimPlanHintState {
     Complete,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SlimPlanContext {
+    pinned: bool,
+    tracked: bool,
+    openspec_changes: usize,
+    focused_design: bool,
+}
+
+impl SlimPlanContext {
+    fn from_dashboard(
+        pinned: bool,
+        active_changes: &[dashboard::ChangeSummary],
+        focused_node: Option<&dashboard::FocusedNodeSummary>,
+    ) -> Self {
+        Self {
+            pinned,
+            tracked: pinned || !active_changes.is_empty() || focused_node.is_some(),
+            openspec_changes: active_changes.len(),
+            focused_design: focused_node.is_some(),
+        }
+    }
+
+    fn labels(&self) -> Vec<String> {
+        let mut labels = Vec::new();
+        labels.push(if self.pinned { "pinned" } else { "unpinned" }.to_string());
+        if self.tracked {
+            labels.push("tracked".to_string());
+        }
+        if self.openspec_changes > 0 {
+            labels.push(format!("OpenSpec×{}", self.openspec_changes));
+        }
+        if self.focused_design {
+            labels.push("design-linked".to_string());
+        }
+        labels
+    }
+}
+
 fn slim_completed_plan_hint_available(completed_plan_history_available: bool) -> bool {
     completed_plan_history_available
 }
@@ -1706,7 +1773,7 @@ fn slim_operator_hint(
     pending_operator_wait: bool,
     terminal_copy_mode: bool,
     plan_state: SlimPlanHintState,
-    automation: &str,
+    plan_context: &SlimPlanContext,
 ) -> String {
     if pending_permission {
         "permission · y once · a always · n deny".to_string()
@@ -1717,16 +1784,31 @@ fn slim_operator_hint(
     } else {
         match plan_state {
             SlimPlanHintState::Active { next_visible: true } => {
-                format!("plan active · advance · suspend · {automation}")
+                let mut labels = vec!["plan active".to_string()];
+                labels.extend(plan_context.labels());
+                labels.join(" · ")
             }
             SlimPlanHintState::Active {
                 next_visible: false,
             } => {
-                format!("plan: next · advance · {automation}")
+                let mut labels = vec!["plan active".to_string(), "next below".to_string()];
+                labels.extend(plan_context.labels());
+                labels.join(" · ")
             }
-            SlimPlanHintState::Complete => "plan done · view".to_string(),
-            SlimPlanHintState::None => format!("copy · transcript · {automation}"),
+            SlimPlanHintState::Complete => "plan complete · history available".to_string(),
+            SlimPlanHintState::None => "transcript live · no pinned plan".to_string(),
         }
+    }
+}
+
+fn format_short_elapsed(duration: std::time::Duration) -> String {
+    let secs = duration.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else {
+        let mins = secs / 60;
+        let rem = secs % 60;
+        format!("{mins}m{rem:02}s")
     }
 }
 
@@ -1750,6 +1832,10 @@ fn render_active_tool_stream_panel(
                 .fg(t.accent())
                 .bg(bg)
                 .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" · {}", format_short_elapsed(stream.started_at.elapsed())),
+            Style::default().fg(t.muted()).bg(bg),
         ),
     ]));
     let max_tail = area.height.saturating_sub(1) as usize;
@@ -4371,7 +4457,6 @@ impl App {
                 None
             };
             self.status_line.turn_state = Some(self.slim_turn_state.label());
-            let automation = self.settings().automation_level.as_str();
             let plan_state = slim_plan_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.hint_state(slim_plan_area.height))
@@ -4382,12 +4467,17 @@ impl App {
                         SlimPlanHintState::None
                     }
                 });
+            let plan_context = SlimPlanContext::from_dashboard(
+                slim_plan_snapshot.is_some(),
+                &self.dashboard.active_changes,
+                self.dashboard.focused_node.as_ref(),
+            );
             self.status_line.operator_hint = Some(slim_operator_hint(
                 self.pending_permission.is_some(),
                 self.pending_operator_wait.is_some(),
                 self.terminal_copy_mode,
                 plan_state,
-                automation,
+                &plan_context,
             ));
             self.status_line
                 .render(status_area, frame, self.theme.as_ref());
@@ -7511,7 +7601,7 @@ impl App {
         match event {
             AgentEvent::TurnStart { turn } => {
                 self.agent_active = true;
-                self.slim_turn_state = SlimTurnState::Running;
+                self.slim_turn_state = SlimTurnState::RequestingProvider;
                 if let Ok(mut ss) = self.dashboard_handles.session.lock() {
                     ss.busy = true;
                 }
@@ -7603,6 +7693,9 @@ impl App {
                 // Detect if the agent is asking for confirmation and offer
                 // a one-key continuation affordance in the editor.
                 self.detect_continuation_request();
+            }
+            AgentEvent::MessageStart { .. } => {
+                self.slim_turn_state = SlimTurnState::OpeningStream;
             }
             AgentEvent::MessageChunk { text } => {
                 self.slim_turn_state = SlimTurnState::Responding;
@@ -7880,7 +7973,7 @@ impl App {
                     self.active_tool_stream = None;
                 }
                 if self.agent_active {
-                    self.slim_turn_state = SlimTurnState::Running;
+                    self.slim_turn_state = SlimTurnState::RequestingProvider;
                 }
             }
             AgentEvent::AgentEnd => {
@@ -7943,6 +8036,9 @@ impl App {
                 }
             }
             AgentEvent::SystemNotification { message } => {
+                if let Some(detail) = upstream_retry_hint(&message) {
+                    self.slim_turn_state = SlimTurnState::UpstreamRetrying(detail);
+                }
                 // Transient retry notifications → toast (operator sees them but they
                 // don't clutter the conversation). Milestone warnings and other
                 // persistent messages → conversation.
@@ -10267,11 +10363,12 @@ mod slash_command_parsing_tests {
     use super::TuiCommand;
     use super::canonical_slash_command;
     use super::{
-        ActiveToolStream, PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus,
-        SlimPlanHintState, format_permission_prompt, permission_persist_scope_label,
+        ActiveToolStream, PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus, SlimPlanContext,
+        SlimPlanHintState, dashboard, format_permission_prompt, permission_persist_scope_label,
         permission_response_for_key, slim_completed_plan_hint_available, slim_operator_hint,
         slim_pinned_plan_snapshot, slim_plan_rows,
     };
+    use crate::lifecycle::types::NodeStatus;
     use crossterm::event::{KeyCode, KeyModifiers};
     use tokio::sync::mpsc;
 
@@ -10577,21 +10674,27 @@ mod slash_command_parsing_tests {
     #[test]
     fn slim_operator_hint_prioritizes_blocking_prompts() {
         let active = SlimPlanHintState::Active { next_visible: true };
+        let context = SlimPlanContext {
+            pinned: true,
+            tracked: true,
+            openspec_changes: 2,
+            focused_design: true,
+        };
         assert_eq!(
-            slim_operator_hint(true, true, true, active, "assistive"),
+            slim_operator_hint(true, true, true, active, &context),
             "permission · y once · a always · n deny"
         );
         assert_eq!(
-            slim_operator_hint(false, true, true, active, "assistive"),
+            slim_operator_hint(false, true, true, active, &context),
             "manual wait · Enter done · Esc cancel"
         );
         assert_eq!(
-            slim_operator_hint(false, false, true, active, "assistive"),
+            slim_operator_hint(false, false, true, active, &context),
             "copy mode · select text · /mouse on exits"
         );
         assert_eq!(
-            slim_operator_hint(false, false, false, active, "assistive"),
-            "plan active · advance · suspend · assistive"
+            slim_operator_hint(false, false, false, active, &context),
+            "plan active · pinned · tracked · OpenSpec×2 · design-linked"
         );
         assert_eq!(
             slim_operator_hint(
@@ -10601,24 +10704,47 @@ mod slash_command_parsing_tests {
                 SlimPlanHintState::Active {
                     next_visible: false
                 },
-                "assistive"
+                &context
             ),
-            "plan: next · advance · assistive"
+            "plan active · next below · pinned · tracked · OpenSpec×2 · design-linked"
         );
         assert_eq!(
-            slim_operator_hint(
-                false,
-                false,
-                false,
-                SlimPlanHintState::Complete,
-                "assistive"
-            ),
-            "plan done · view"
+            slim_operator_hint(false, false, false, SlimPlanHintState::Complete, &context),
+            "plan complete · history available"
         );
         assert_eq!(
-            slim_operator_hint(false, false, false, SlimPlanHintState::None, "assistive"),
-            "copy · transcript · assistive"
+            slim_operator_hint(false, false, false, SlimPlanHintState::None, &context),
+            "transcript live · no pinned plan"
         );
+    }
+
+    #[test]
+    fn slim_plan_context_labels_pin_tracking_and_lifecycle_links() {
+        let changes = vec![dashboard::ChangeSummary {
+            name: "rollup".into(),
+            stage: "implementing".into(),
+            done_tasks: 1,
+            total_tasks: 3,
+        }];
+        let focused = dashboard::FocusedNodeSummary {
+            id: "node".into(),
+            title: "Node".into(),
+            status: NodeStatus::Exploring,
+            open_questions: 0,
+            assumptions: 0,
+            decisions: 1,
+            readiness: 1.0,
+            openspec_change: Some("rollup".into()),
+        };
+
+        let context = SlimPlanContext::from_dashboard(true, &changes, Some(&focused));
+        assert_eq!(
+            context.labels(),
+            vec!["pinned", "tracked", "OpenSpec×1", "design-linked"]
+        );
+
+        let context = SlimPlanContext::from_dashboard(false, &[], None);
+        assert_eq!(context.labels(), vec!["unpinned"]);
     }
 
     #[test]
