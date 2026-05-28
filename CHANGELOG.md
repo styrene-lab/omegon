@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.24.11] - 2026-05-28
+
 ### Changed
 
 - Add Claude Opus 4.8 to the model registry, mark Claude Opus 4.7 as not recommended, and refresh the Claude Code OAuth user-agent to 2.1.154.
