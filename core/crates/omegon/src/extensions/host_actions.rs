@@ -883,9 +883,9 @@ impl TerminalCreateLaunchPlan {
             Some(omegon_extension::actions::terminal::TerminalPlacement::NewTab) => {
                 TerminalPlacementCapability::NewTab
             }
-            Some(omegon_extension::actions::terminal::TerminalPlacement::Default)
-            | Some(omegon_extension::actions::terminal::TerminalPlacement::BackgroundSession)
-            | None => TerminalPlacementCapability::BackgroundSession,
+            Some(omegon_extension::actions::terminal::TerminalPlacement::Default) | None => {
+                TerminalPlacementCapability::BackgroundSession
+            }
         }
     }
 }
