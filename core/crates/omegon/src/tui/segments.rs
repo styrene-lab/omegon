@@ -979,6 +979,16 @@ pub struct SegmentMeta {
     pub branch: Option<String>,
     /// Duration of the operation (for tool calls: execution time).
     pub duration_ms: Option<u64>,
+    /// Source channel for externally-originated prompts, e.g. voice.
+    pub source_channel: Option<String>,
+    /// Voice radio cue metadata, e.g. over or over_and_out.
+    pub radio_cue: Option<String>,
+    /// Whether the voice extension marked the utterance as end-of-turn.
+    pub voice_end_of_turn: Option<bool>,
+    /// Whether the voice extension requested microphone/session closure.
+    pub voice_close_session_requested: Option<bool>,
+    /// Voice utterance duration in seconds.
+    pub voice_duration_s: Option<f64>,
 }
 
 /// A segment in the conversation — metadata wrapper + typed content.
@@ -1830,6 +1840,18 @@ pub fn build_meta_tag(meta: &SegmentMeta) -> String {
     }
     if let Some(ref persona) = meta.persona {
         parts.push(format!("⌘ {persona}"));
+    }
+    if let Some(ref channel) = meta.source_channel {
+        parts.push(format!("source:{channel}"));
+    }
+    if let Some(ref cue) = meta.radio_cue {
+        parts.push(format!("cue:{cue}"));
+    }
+    if meta.voice_close_session_requested == Some(true) {
+        parts.push("close-session".to_string());
+    }
+    if let Some(duration) = meta.voice_duration_s {
+        parts.push(format!("voice:{duration:.1}s"));
     }
     if let Some(ctx) = meta.context_percent.filter(|p| *p > 5.0) {
         parts.push(format!("ctx:{ctx:.0}%"));
@@ -6562,6 +6584,21 @@ After fence text.
     }
 
     #[test]
+    fn meta_tag_includes_voice_prompt_metadata() {
+        let meta = SegmentMeta {
+            source_channel: Some("voice".to_string()),
+            radio_cue: Some("over_and_out".to_string()),
+            voice_close_session_requested: Some(true),
+            voice_duration_s: Some(2.1),
+            ..SegmentMeta::default()
+        };
+        let tag = build_meta_tag(&meta);
+        assert!(tag.contains("source:voice"), "{tag}");
+        assert!(tag.contains("cue:over_and_out"), "{tag}");
+        assert!(tag.contains("close-session"), "{tag}");
+        assert!(tag.contains("voice:2.1s"), "{tag}");
+    }
+
     fn meta_tag_omits_thinking_off() {
         let meta = SegmentMeta {
             model_id: Some("gpt-4o".into()),

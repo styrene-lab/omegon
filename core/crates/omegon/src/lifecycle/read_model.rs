@@ -126,13 +126,6 @@ impl LifecycleReadHandle {
             changes.extend(spec::list_archived_changes(&self.repo_path));
         }
 
-        {
-            let mut opsx = self.opsx.lock().unwrap();
-            for change in &active_changes {
-                sync_opsx_change_from_info(&mut opsx, change)?;
-            }
-        }
-
         let opsx_states = self.opsx_states();
         let mut projected = Vec::new();
         for change in &changes {
@@ -312,8 +305,45 @@ mod tests {
             .unwrap();
         assert_eq!(snapshot.changes.len(), 1);
         assert_eq!(snapshot.changes[0].name, "snapshot-change");
-        assert_eq!(snapshot.changes[0].lifecycle_state, "specced");
+        assert_eq!(snapshot.changes[0].lifecycle_state, "specified");
         assert_eq!(snapshot.changes[0].file_stage, "specified");
+        assert!(
+            handle.opsx.lock().unwrap().state().changes.is_empty(),
+            "read-model snapshots must not write opsx state"
+        );
+    }
+
+    #[test]
+    fn openspec_snapshot_is_read_only_when_opsx_state_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        let change_dir = repo.join("openspec/changes/read-only");
+        fs::create_dir_all(change_dir.join("specs")).unwrap();
+        fs::write(
+            change_dir.join("proposal.md"),
+            "# Read Only
+",
+        )
+        .unwrap();
+        fs::write(
+            change_dir.join("tasks.md"),
+            "- [ ] pending
+",
+        )
+        .unwrap();
+
+        let provider = Arc::new(Mutex::new(LifecycleContextProvider::new(repo)));
+        let opsx = Arc::new(Mutex::new(
+            OpsxLifecycle::load(JsonFileStore::new(repo)).unwrap(),
+        ));
+        let handle = LifecycleReadHandle::new(provider, opsx, repo.to_path_buf());
+
+        let snapshot = handle
+            .openspec_snapshot(SnapshotOptions::default())
+            .unwrap();
+        assert_eq!(snapshot.changes.len(), 1);
+        assert_eq!(snapshot.changes[0].lifecycle_state, "proposed");
+        assert!(handle.opsx.lock().unwrap().state().changes.is_empty());
     }
 
     #[test]

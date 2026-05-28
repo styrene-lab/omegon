@@ -309,7 +309,20 @@ impl ConversationView {
         self.push_user_with_attachments(text, &[]);
     }
 
+    pub fn push_user_with_meta(&mut self, text: &str, meta: SegmentMeta) {
+        self.push_user_with_attachments_and_meta(text, &[], meta);
+    }
+
     pub fn push_user_with_attachments(&mut self, text: &str, attachments: &[std::path::PathBuf]) {
+        self.push_user_with_attachments_and_meta(text, attachments, SegmentMeta::default());
+    }
+
+    pub fn push_user_with_attachments_and_meta(
+        &mut self,
+        text: &str,
+        attachments: &[std::path::PathBuf],
+        meta: SegmentMeta,
+    ) {
         if !self.segments.is_empty() {
             self.segments.push(Segment::separator());
         }
@@ -323,7 +336,9 @@ impl ConversationView {
         };
 
         if !rendered.is_empty() || attachments.is_empty() {
-            self.segments.push(Segment::user_prompt(rendered));
+            let mut segment = Segment::user_prompt(rendered);
+            segment.meta = meta;
+            self.segments.push(segment);
         }
 
         for (idx, path) in attachments.iter().enumerate() {

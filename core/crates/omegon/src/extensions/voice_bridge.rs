@@ -17,6 +17,15 @@ pub struct VoiceStateUpdate {
     pub mic_open: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VoiceTtsUpdate {
+    pub extension: String,
+    pub state: String,
+    pub audio_output: bool,
+    pub backend: Option<String>,
+    pub voice: Option<String>,
+}
+
 /// Start a push-driven bridge for one voice-capable extension.
 pub fn start_voice_bridge(
     rx: mpsc::UnboundedReceiver<ExtensionNotification>,
@@ -47,6 +56,12 @@ pub fn start_voice_bridge_with_status(
                     if let Some(update) = voice_notification_to_state(&notification) {
                         if let Some(sink) = &status_sink {
                             sink.publish(update);
+                        }
+                        continue;
+                    }
+                    if let Some(update) = voice_notification_to_tts_state(&notification) {
+                        if let Some(sink) = &status_sink {
+                            sink.publish_tts(update);
                         }
                         continue;
                     }
@@ -104,6 +119,28 @@ impl VoiceStatusSink {
             .events_tx
             .send(AgentEvent::HarnessStatusChanged { status_json });
     }
+
+    pub fn publish_tts(&self, update: VoiceTtsUpdate) {
+        let status_json = match self.harness_status.lock() {
+            Ok(mut status) => {
+                status.voice_tts_state = Some(crate::status::VoiceTtsStatus {
+                    extension: update.extension,
+                    state: update.state,
+                    audio_output: update.audio_output,
+                    backend: update.backend,
+                    voice: update.voice,
+                });
+                serde_json::to_value(&*status).unwrap_or_default()
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "failed to update voice TTS status");
+                return;
+            }
+        };
+        let _ = self
+            .events_tx
+            .send(AgentEvent::HarnessStatusChanged { status_json });
+    }
 }
 
 pub(crate) fn voice_notification_to_state(
@@ -121,6 +158,36 @@ pub(crate) fn voice_notification_to_state(
         extension: notification.extension_name.clone(),
         state: state.to_string(),
         mic_open,
+    })
+}
+
+pub(crate) fn voice_notification_to_tts_state(
+    notification: &ExtensionNotification,
+) -> Option<VoiceTtsUpdate> {
+    if notification.method != "voice/tts_state" {
+        return None;
+    }
+    let state = notification.params.get("state")?.as_str()?.trim();
+    if state.is_empty() {
+        return None;
+    }
+    let audio_output = notification.params.get("audio_output")?.as_bool()?;
+    Some(VoiceTtsUpdate {
+        extension: notification.extension_name.clone(),
+        state: state.to_string(),
+        audio_output,
+        backend: notification
+            .params
+            .get("backend")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(ToString::to_string),
+        voice: notification
+            .params
+            .get("voice")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(ToString::to_string),
     })
 }
 
@@ -142,6 +209,11 @@ fn transcription_params_to_event(
         return None;
     }
     let duration_s = params.get("duration_s").and_then(Value::as_f64);
+    let radio_cue = params.get("radio_cue").and_then(Value::as_str);
+    let end_of_turn = params.get("end_of_turn").and_then(Value::as_bool);
+    let close_session_requested = params
+        .get("close_session_requested")
+        .and_then(Value::as_bool);
     let utterance_id = params
         .get("utterance_id")
         .and_then(Value::as_str)
@@ -158,6 +230,10 @@ fn transcription_params_to_event(
             "utterance_id": utterance_id,
             "trust_level": "operator",
             "extension": extension_name,
+            "source_channel": "voice",
+            "radio_cue": radio_cue,
+            "end_of_turn": end_of_turn,
+            "close_session_requested": close_session_requested,
         }),
         caller_role: Some("edit".to_string()),
         source_user: None,
@@ -194,10 +270,34 @@ mod tests {
         assert_eq!(event.payload["utterance_id"], "u1");
         assert_eq!(event.payload["trust_level"], "operator");
         assert_eq!(event.payload["extension"], "omegon-voice");
+        assert_eq!(event.payload["source_channel"], "voice");
         assert_eq!(event.caller_role.as_deref(), Some("edit"));
         assert_eq!(event.source_user, None);
         assert_eq!(event.source_channel.as_deref(), Some("voice"));
         assert_eq!(event.source_thread, None);
+    }
+
+    #[test]
+    fn transcription_control_metadata_is_preserved() {
+        let event = voice_notification_to_event(&notification(
+            "voice/transcription",
+            json!({
+                "text": "assess this directory",
+                "duration_s": 2.1,
+                "utterance_id": "u2",
+                "radio_cue": "over",
+                "end_of_turn": true,
+                "close_session_requested": false
+            }),
+        ))
+        .expect("voice event");
+
+        assert_eq!(event.payload["text"], "assess this directory");
+        assert_eq!(event.payload["duration_s"], 2.1);
+        assert_eq!(event.payload["radio_cue"], "over");
+        assert_eq!(event.payload["end_of_turn"], true);
+        assert_eq!(event.payload["close_session_requested"], false);
+        assert_eq!(event.payload["source_channel"], "voice");
     }
 
     #[test]
@@ -230,6 +330,34 @@ mod tests {
         assert!(
             voice_notification_to_event(&notification("voice/transcription", json!({"text": 42}),))
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn voice_tts_state_notification_becomes_status_update_without_prompt_event() {
+        let update = voice_notification_to_tts_state(&notification(
+            "voice/tts_state",
+            json!({
+                "state": "speaking",
+                "audio_output": true,
+                "backend": "macos",
+                "voice": "Reed (English (US))"
+            }),
+        ))
+        .expect("voice tts state");
+
+        assert_eq!(update.extension, "omegon-voice");
+        assert_eq!(update.state, "speaking");
+        assert!(update.audio_output);
+        assert_eq!(update.backend.as_deref(), Some("macos"));
+        assert_eq!(update.voice.as_deref(), Some("Reed (English (US))"));
+        assert!(
+            voice_notification_to_event(&notification(
+                "voice/tts_state",
+                json!({"state": "speaking", "audio_output": true}),
+            ))
+            .is_none(),
+            "voice tts state must not become a daemon prompt event"
         );
     }
 
@@ -300,6 +428,26 @@ mod tests {
             AgentEvent::HarnessStatusChanged { status_json } => {
                 assert_eq!(status_json["voice_state"]["state"], "processing");
                 assert_eq!(status_json["voice_state"]["mic_open"], true);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        sink.publish_tts(VoiceTtsUpdate {
+            extension: "omegon-voice".to_string(),
+            state: "speaking".to_string(),
+            audio_output: true,
+            backend: Some("macos".to_string()),
+            voice: Some("Reed".to_string()),
+        });
+
+        let stored = status.lock().unwrap().voice_tts_state.clone().unwrap();
+        assert_eq!(stored.extension, "omegon-voice");
+        assert_eq!(stored.state, "speaking");
+        assert!(stored.audio_output);
+        match events_rx.try_recv().expect("tts status event") {
+            AgentEvent::HarnessStatusChanged { status_json } => {
+                assert_eq!(status_json["voice_tts_state"]["state"], "speaking");
+                assert_eq!(status_json["voice_tts_state"]["audio_output"], true);
             }
             other => panic!("unexpected event: {other:?}"),
         }

@@ -677,6 +677,9 @@ impl<S: StateStore> Lifecycle<S> {
             .iter_mut()
             .find(|c| c.name == name)
             .ok_or_else(|| OpsxError::NotFound(format!("change '{name}'")))?;
+        if change.tasks_total == total && change.tasks_done == done {
+            return Ok(());
+        }
         change.tasks_total = total;
         change.tasks_done = done;
         change.updated_at = iso_now();
@@ -1402,6 +1405,33 @@ mod tests {
             .unwrap();
         assert_eq!(change.tasks_total, 10);
         assert_eq!(change.tasks_done, 7);
+    }
+
+    #[test]
+    fn update_change_progress_is_idempotent_when_counts_do_not_change() {
+        let (_tmp, mut lc) = test_lifecycle();
+        lc.create_change("prog", "Progress", None).unwrap();
+        lc.update_change_progress("prog", 10, 7).unwrap();
+        let first_updated_at = lc
+            .state()
+            .changes
+            .iter()
+            .find(|c| c.name == "prog")
+            .unwrap()
+            .updated_at
+            .clone();
+
+        lc.update_change_progress("prog", 10, 7).unwrap();
+        let second_updated_at = lc
+            .state()
+            .changes
+            .iter()
+            .find(|c| c.name == "prog")
+            .unwrap()
+            .updated_at
+            .clone();
+
+        assert_eq!(first_updated_at, second_updated_at);
     }
 
     #[test]

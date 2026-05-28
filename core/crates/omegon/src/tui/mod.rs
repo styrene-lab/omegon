@@ -35,6 +35,7 @@ mod snapshot_tests;
 #[cfg(test)]
 mod tests;
 
+use segments::SegmentMeta;
 use std::io;
 use std::time::Duration;
 
@@ -89,6 +90,20 @@ fn get_rss_mb() -> Option<f64> {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct VoicePromptMetadata {
+    pub event_id: String,
+    pub duration_s: Option<f64>,
+    pub radio_cue: Option<String>,
+    pub end_of_turn: Option<bool>,
+    pub close_session_requested: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PromptMetadata {
+    pub voice: Option<VoicePromptMetadata>,
+}
+
 #[derive(Debug, Clone)]
 pub struct PromptSubmission {
     pub text: String,
@@ -96,6 +111,7 @@ pub struct PromptSubmission {
     pub submitted_by: String,
     pub via: &'static str,
     pub queue_mode: PromptQueueMode,
+    pub metadata: PromptMetadata,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -104,25 +120,6 @@ pub enum PromptQueueMode {
     #[default]
     UntilReady,
     Immediate,
-}
-
-#[derive(Debug, Clone)]
-struct QueuedPrompt {
-    text: String,
-    attachments: Vec<std::path::PathBuf>,
-    submitted_by: String,
-    via: &'static str,
-}
-
-impl QueuedPrompt {
-    fn local_tui(text: String, attachments: Vec<std::path::PathBuf>) -> Self {
-        Self {
-            text,
-            attachments,
-            submitted_by: "local-tui".to_string(),
-            via: "tui",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,7 +218,10 @@ pub enum TuiCommand {
         respond_to: Option<tokio::sync::oneshot::Sender<omegon_traits::ControlOutputResponse>>,
     },
     /// Voice transcription submitted by a process-local voice extension.
-    VoicePrompt { text: String, event_id: String },
+    VoicePrompt {
+        text: String,
+        metadata: VoicePromptMetadata,
+    },
     /// Start provider login flow.
     AuthLogin {
         provider: String,
@@ -311,6 +311,25 @@ struct OperatorEvent {
     expires_at: std::time::Instant,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct QueuedPrompt {
+    text: String,
+    attachments: Vec<std::path::PathBuf>,
+    metadata: PromptMetadata,
+}
+
+fn segment_meta_from_prompt_metadata(metadata: &PromptMetadata) -> SegmentMeta {
+    let mut meta = SegmentMeta::default();
+    if let Some(voice) = &metadata.voice {
+        meta.source_channel = Some("voice".to_string());
+        meta.radio_cue = voice.radio_cue.clone();
+        meta.voice_end_of_turn = voice.end_of_turn;
+        meta.voice_close_session_requested = voice.close_session_requested;
+        meta.voice_duration_s = voice.duration_s;
+    }
+    meta
+}
+
 pub(crate) fn voice_prompt_from_notification(
     notification: &crate::extensions::ExtensionNotification,
 ) -> Option<TuiCommand> {
@@ -328,9 +347,30 @@ pub(crate) fn voice_prompt_from_notification(
         .filter(|id| !id.trim().is_empty())
         .map(ToString::to_string)
         .unwrap_or_else(|| format!("{}:{}", notification.extension_name, notification.method));
+    let metadata = VoicePromptMetadata {
+        event_id,
+        duration_s: notification
+            .params
+            .get("duration_s")
+            .and_then(serde_json::Value::as_f64),
+        radio_cue: notification
+            .params
+            .get("radio_cue")
+            .and_then(serde_json::Value::as_str)
+            .filter(|cue| !cue.trim().is_empty())
+            .map(ToString::to_string),
+        end_of_turn: notification
+            .params
+            .get("end_of_turn")
+            .and_then(serde_json::Value::as_bool),
+        close_session_requested: notification
+            .params
+            .get("close_session_requested")
+            .and_then(serde_json::Value::as_bool),
+    };
     Some(TuiCommand::VoicePrompt {
         text: text.to_string(),
-        event_id,
+        metadata,
     })
 }
 
@@ -1932,6 +1972,11 @@ impl App {
                 .and_then(|r| r.active_persona().map(|p| p.id.clone())),
             branch: None,      // populated lazily if needed
             duration_ms: None, // set on completion
+            source_channel: None,
+            radio_cue: None,
+            voice_end_of_turn: None,
+            voice_close_session_requested: None,
+            voice_duration_s: None,
         }
     }
 
@@ -3748,8 +3793,11 @@ impl App {
 
     fn queue_prompt(&mut self, text: String, attachments: Vec<std::path::PathBuf>) {
         let preview = Self::queue_prompt_preview(&text, &attachments);
-        self.queued_prompts
-            .push_back(QueuedPrompt::local_tui(text, attachments));
+        self.queued_prompts.push_back(QueuedPrompt {
+            text,
+            attachments,
+            metadata: PromptMetadata::default(),
+        });
         let queued = self.queued_prompts.len();
         self.conversation.push_system(&format!(
             "⏳ Queued [{queued}]: {preview}\n   It will run after the active turn ends. Press Esc/Ctrl+C to interrupt the active turn."
@@ -3915,6 +3963,7 @@ impl App {
                 submitted_by: "local-tui".to_string(),
                 via: "tui",
                 queue_mode: self.queue_mode,
+                metadata: PromptMetadata::default(),
             }))
             .await;
         if let Some(ref mut overlay) = self.tutorial_overlay {
@@ -3934,16 +3983,8 @@ impl App {
         }
         let decorated = format!("🎙 {text}");
         if self.agent_active {
-            self.queued_prompts.push_back(QueuedPrompt {
-                text: decorated,
-                attachments: Vec::new(),
-                submitted_by: "voice".to_string(),
-                via: "voice",
-            });
-            let queued = self.queued_prompts.len();
-            self.conversation.push_system(&format!(
-                "⏳ Queued [{queued}]: 🎙 voice prompt\n   It will run after the active turn ends. Press Esc/Ctrl+C to interrupt the active turn."
-            ));
+            self.queue_prompt(decorated.clone(), Vec::new());
+            self.conversation.push_system("Voice prompt queued");
             return;
         }
 
@@ -3961,6 +4002,7 @@ impl App {
                 submitted_by: "voice".to_string(),
                 via: "voice",
                 queue_mode: self.queue_mode,
+                metadata: PromptMetadata::default(),
             }))
             .await;
     }
@@ -5957,8 +5999,11 @@ impl App {
                     // with the operator to create a new skill.
                     let cwd = self.cwd().to_path_buf();
                     let builder_prompt = crate::skills::skill_builder_prompt(&cwd);
-                    self.queued_prompts
-                        .push_back(QueuedPrompt::local_tui(builder_prompt, Vec::new()));
+                    self.queued_prompts.push_back(QueuedPrompt {
+                        text: builder_prompt,
+                        attachments: Vec::new(),
+                        metadata: PromptMetadata::default(),
+                    });
                     self.queue_mode = PromptQueueMode::UntilReady;
                     self.conversation.push_system("Starting skill builder...");
                     SlashResult::Handled
@@ -6258,8 +6303,11 @@ impl App {
             "persona" => {
                 if args == "create" || args == "new" {
                     let builder_prompt = crate::plugins::persona_loader::persona_builder_prompt();
-                    self.queued_prompts
-                        .push_back(QueuedPrompt::local_tui(builder_prompt, Vec::new()));
+                    self.queued_prompts.push_back(QueuedPrompt {
+                        text: builder_prompt,
+                        attachments: Vec::new(),
+                        metadata: PromptMetadata::default(),
+                    });
                     self.queue_mode = PromptQueueMode::UntilReady;
                     self.conversation.push_system("Starting persona builder...");
                     SlashResult::Handled
@@ -9538,6 +9586,7 @@ pub async fn run_tui(
                                                             submitted_by: "local-tui".to_string(),
                                                             via: "tui",
                                                             queue_mode: app.queue_mode,
+                                                            metadata: PromptMetadata::default(),
                                                         },
                                                     ))
                                                     .await;
@@ -9573,6 +9622,7 @@ pub async fn run_tui(
                                                             submitted_by: "local-tui".to_string(),
                                                             via: "tui",
                                                             queue_mode: app.queue_mode,
+                                                            metadata: PromptMetadata::default(),
                                                         },
                                                     ))
                                                     .await;
@@ -10013,16 +10063,19 @@ pub async fn run_tui(
 
         // Drain queued prompts only after authoritative AgentEnd (but not if quitting)
         if !app.agent_active && !app.should_quit && !app.queued_prompts.is_empty() {
-            let queued_prompt = app.queued_prompts.pop_front().unwrap();
-            let text = queued_prompt.text;
-            let attachments = queued_prompt.attachments;
-            let submitted_by = queued_prompt.submitted_by;
-            let via = queued_prompt.via;
+            let queued = app.queued_prompts.pop_front().unwrap();
+            let text = queued.text;
+            let attachments = queued.attachments;
+            let metadata = queued.metadata;
             if attachments.is_empty() {
-                app.conversation.push_user(&text);
-            } else {
                 app.conversation
-                    .push_user_with_attachments(&text, &attachments);
+                    .push_user_with_meta(&text, segment_meta_from_prompt_metadata(&metadata));
+            } else {
+                app.conversation.push_user_with_attachments_and_meta(
+                    &text,
+                    &attachments,
+                    segment_meta_from_prompt_metadata(&metadata),
+                );
             }
             app.history.push(text.clone());
             app.history_idx = None;
@@ -10035,9 +10088,10 @@ pub async fn run_tui(
                     .send(TuiCommand::SubmitPrompt(PromptSubmission {
                         text,
                         image_paths: Vec::new(),
-                        submitted_by: submitted_by.clone(),
-                        via,
+                        submitted_by: "local-tui".to_string(),
+                        via: "tui",
                         queue_mode: app.queue_mode,
+                        metadata,
                     }))
                     .await;
             } else {
@@ -10045,9 +10099,10 @@ pub async fn run_tui(
                     .send(TuiCommand::SubmitPrompt(PromptSubmission {
                         text,
                         image_paths: attachments,
-                        submitted_by,
-                        via,
+                        submitted_by: "local-tui".to_string(),
+                        via: "tui",
                         queue_mode: app.queue_mode,
+                        metadata,
                     }))
                     .await;
             }
@@ -10130,19 +10185,55 @@ mod voice_prompt_tests {
     fn voice_transcription_notification_becomes_voice_prompt() {
         let cmd = voice_prompt_from_notification(&notification(
             "voice/transcription",
-            json!({"text": " proceed ", "utterance_id": "u1"}),
+            json!({
+                "text": " proceed ",
+                "utterance_id": "u1",
+                "duration_s": 2.1,
+                "radio_cue": "over",
+                "end_of_turn": true,
+                "close_session_requested": false
+            }),
         ))
         .expect("voice prompt");
         match cmd {
-            TuiCommand::VoicePrompt { text, event_id } => {
+            TuiCommand::VoicePrompt { text, metadata } => {
                 assert_eq!(text, "proceed");
-                assert_eq!(event_id, "u1");
+                assert_eq!(metadata.event_id, "u1");
+                assert_eq!(metadata.duration_s, Some(2.1));
+                assert_eq!(metadata.radio_cue.as_deref(), Some("over"));
+                assert_eq!(metadata.end_of_turn, Some(true));
+                assert_eq!(metadata.close_session_requested, Some(false));
             }
             other => panic!("unexpected command: {other:?}"),
         }
     }
 
     #[test]
+    fn voice_prompt_metadata_preserves_over_and_out_close_intent() {
+        let cmd = voice_prompt_from_notification(&notification(
+            "voice/transcription",
+            json!({
+                "text": "stop listening",
+                "utterance_id": "u-close",
+                "radio_cue": "over_and_out",
+                "end_of_turn": true,
+                "close_session_requested": true
+            }),
+        ))
+        .expect("voice prompt");
+
+        match cmd {
+            TuiCommand::VoicePrompt { text, metadata } => {
+                assert_eq!(text, "stop listening");
+                assert_eq!(metadata.event_id, "u-close");
+                assert_eq!(metadata.radio_cue.as_deref(), Some("over_and_out"));
+                assert_eq!(metadata.end_of_turn, Some(true));
+                assert_eq!(metadata.close_session_requested, Some(true));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
     fn non_transcription_and_malformed_voice_notifications_are_ignored() {
         assert!(
             voice_prompt_from_notification(&notification(
