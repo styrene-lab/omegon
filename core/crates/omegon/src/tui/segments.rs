@@ -150,7 +150,10 @@ mod terminal_control_tests {
 
     #[test]
     fn clean_inline_text_drops_control_noise() {
-        assert_eq!(clean_inline_text("nex \x1b[?25lswitch now"), "nex switch now");
+        assert_eq!(
+            clean_inline_text("nex \x1b[?25lswitch now"),
+            "nex switch now"
+        );
     }
 }
 

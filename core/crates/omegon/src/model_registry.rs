@@ -330,7 +330,10 @@ mod tests {
         assert_eq!(info.context_input, 1_000_000);
         assert_eq!(info.context_output, 131_072);
         assert_eq!(info.cost_tier, "premium");
-        assert_eq!(reg.infer_tier("anthropic", "claude-opus-4-8"), Some("gloriana"));
+        assert_eq!(
+            reg.infer_tier("anthropic", "claude-opus-4-8"),
+            Some("gloriana")
+        );
     }
 
     #[test]

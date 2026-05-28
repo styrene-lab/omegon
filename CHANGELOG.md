@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Update to `omegon-extension` 0.25.1 and handle explicit `background_session` terminal placement requests from extracted SDK clients.
+
 ## [0.24.11] - 2026-05-28
 
 ### Changed
