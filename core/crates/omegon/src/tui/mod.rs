@@ -4098,20 +4098,23 @@ impl App {
     }
 
     fn editor_input_suppressed(&mut self) -> bool {
+        let suppressed = self.editor_input_suppressed_now();
+        if !suppressed {
+            self.suppress_editor_input_until = None;
+        }
+        suppressed
+    }
+
+    fn editor_input_suppressed_now(&self) -> bool {
         if self.interrupt_pending {
             return true;
         }
-        if let Some(until) = self.suppress_editor_input_until {
-            if std::time::Instant::now() < until {
-                return true;
-            }
-            self.suppress_editor_input_until = None;
-        }
-        false
+        self.suppress_editor_input_until
+            .is_some_and(|until| std::time::Instant::now() < until)
     }
 
     fn should_discard_key_after_interrupt(&mut self, key: &KeyEvent) -> bool {
-        if !self.editor_input_suppressed() {
+        if !self.editor_input_suppressed_now() {
             return false;
         }
         let is_interrupt_key = matches!(key.code, KeyCode::Esc)
@@ -4827,53 +4830,52 @@ impl App {
                 .style(Style::default().bg(t.surface_bg()))
                 .block(editor_block); // no .wrap() — pre-split above
             frame.render_widget(editor_widget, editor_rect);
-            if !self.agent_active {
+            if !self.editor_input_suppressed_now() {
                 let (cx, cy) = self.editor.cursor_screen_position(editor_rect);
                 frame.set_cursor_position(ratatui::layout::Position { x: cx, y: cy });
             }
         }
 
-        // Command palette popup (above editor when typing /)
-        if !self.agent_active {
-            let matches = if self.at_picker.is_some() {
-                vec![]
-            } else {
-                self.matching_commands()
+        // Command palette popup (above editor when typing /). Keep this visible
+        // during active turns: queued steering prompts still use the same editor,
+        // and hiding autocomplete made the command surface feel locked even
+        // though key input was still being accepted.
+        let matches = if self.at_picker.is_some() || self.editor_input_suppressed_now() {
+            vec![]
+        } else {
+            self.matching_commands()
+        };
+        if !matches.is_empty() {
+            let palette_height = matches.len().min(8) as u16 + 2; // +2 for borders
+            let _editor_area_inner = editor_area;
+            let palette_area = Rect {
+                x: editor_area.x,
+                y: editor_area.y.saturating_sub(palette_height),
+                width: editor_area.width.min(50),
+                height: palette_height,
             };
-            if !matches.is_empty() {
-                let palette_height = matches.len().min(8) as u16 + 2; // +2 for borders
-                let _editor_area_inner = editor_area;
-                let palette_area = Rect {
-                    x: editor_area.x,
-                    y: editor_area.y.saturating_sub(palette_height),
-                    width: editor_area.width.min(50),
-                    height: palette_height,
-                };
 
-                let items: Vec<Line<'static>> = matches
-                    .iter()
-                    .map(|(name, desc)| {
-                        Line::from(vec![
-                            Span::styled(format!(" /{name}"), t.style_accent()),
-                            Span::styled(format!("  {desc}"), t.style_muted()),
-                        ])
-                    })
-                    .collect();
+            let items: Vec<Line<'static>> = matches
+                .iter()
+                .map(|(name, desc)| {
+                    Line::from(vec![
+                        Span::styled(format!(" /{name}"), t.style_accent()),
+                        Span::styled(format!("  {desc}"), t.style_muted()),
+                    ])
+                })
+                .collect();
 
-                let palette = Paragraph::new(items).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(ratatui::widgets::BorderType::Rounded)
-                        .border_style(t.style_border())
-                        .title(Span::styled(" commands ", t.style_dim())),
-                );
+            let palette = Paragraph::new(items).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .border_style(t.style_border())
+                    .title(Span::styled(" commands ", t.style_dim())),
+            );
 
-                // Clear the area first (prevents bleed-through)
-                frame.render_widget(ratatui::widgets::Clear, palette_area);
-                frame.render_widget(palette, palette_area);
-            }
-
-            // Textarea renders its own cursor via cursor_style
+            // Clear the area first (prevents bleed-through)
+            frame.render_widget(ratatui::widgets::Clear, palette_area);
+            frame.render_widget(palette, palette_area);
         }
 
         if let Some(ref picker) = self.at_picker {

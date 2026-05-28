@@ -22,6 +22,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - Keep the Claude Code OAuth user-agent version in sync with upstream `@anthropic-ai/claude-code` 2.1.153, and let the scheduled upstream-version workflow create update PRs instead of failing as soon as drift is detected.
 - Keep Slim footer waiting-state labels width-stable so provider/stream transitions do not churn the rest of the footer.
+- Keep the command palette and editor cursor visible during active turns unless editor input is explicitly suppressed, so queued steering commands retain autocomplete feedback.
 - Strip terminal control sequences from tool summaries and unparsable live tails so noisy command output cannot leak ANSI controls into the TUI.
 
 ## [0.24.9] - 2026-05-28

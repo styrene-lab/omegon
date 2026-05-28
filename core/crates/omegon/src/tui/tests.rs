@@ -3534,6 +3534,18 @@ fn slash_cleave_run_still_uses_bus_path() {
 }
 
 #[test]
+fn command_palette_renders_while_agent_active() {
+    let mut app = test_app();
+    app.agent_active = true;
+    app.editor.set_text("/pla");
+
+    let rendered = render_app_to_string(&mut app, 140, 24);
+
+    assert!(rendered.contains("commands"), "{rendered}");
+    assert!(rendered.contains("/plan"), "{rendered}");
+}
+
+#[test]
 fn hidden_model_aliases_do_not_appear_in_palette() {
     let mut app = test_app();
     app.bus_commands = vec![
