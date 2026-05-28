@@ -739,7 +739,11 @@ impl TerminalCreateBackend for RealTerminalCreateBackend {
         &self,
         plan: TerminalCreateLaunchPlan,
     ) -> Result<omegon_extension::actions::terminal::TerminalCreateResult, String> {
-        let request = terminal_backend_request_from_plan(plan, &self.workspace_cwd, None);
+        let request = terminal_backend_request_from_plan(
+            plan.clone(),
+            &self.workspace_cwd,
+            plan.name.clone(),
+        );
         let response = std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -864,6 +868,7 @@ pub(super) struct TerminalCreateLaunchPlan {
     pub cwd: Option<String>,
     pub env: Vec<(String, String)>,
     pub placement: Option<omegon_extension::actions::terminal::TerminalPlacement>,
+    pub name: Option<String>,
 }
 
 impl TerminalCreateLaunchPlan {
@@ -944,6 +949,7 @@ pub(super) fn validate_terminal_create_policy(
         cwd: params.cwd,
         env: params.env.into_iter().collect(),
         placement: params.placement,
+        name: params.reuse_key.or(params.title),
     })
 }
 
@@ -1302,6 +1308,7 @@ allowed = [{allowed}]
                 cwd: Some("books".to_string()),
                 env: vec![("BOOKOKRAT_THEME".to_string(), "dark".to_string())],
                 placement: None,
+                name: None,
             },
             std::path::Path::new("/workspace"),
             Some("reader".to_string()),
@@ -1671,7 +1678,7 @@ allowed = [{allowed}]
                     "args": ["side-visible"],
                     "cwd": ".",
                     "placement": "side_pane",
-                    "name": terminal_name
+                    "reuse_key": terminal_name
                 }
             }),
             &manifest,
