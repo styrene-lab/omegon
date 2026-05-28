@@ -15,7 +15,7 @@ Issue #75 must land as a sequence of red-green commits. Each phase introduces fa
 
 ### Implementation target
 
-- `core/crates/omegon-extension/src/manifest.rs`
+- `omegon-extension-rs/src/manifest.rs`
 - possibly `core/crates/omegon/src/extensions/mod.rs` for runtime exposure
 
 ### Exit criteria

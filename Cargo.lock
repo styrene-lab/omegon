@@ -4932,7 +4932,9 @@ dependencies = [
 
 [[package]]
 name = "omegon-extension"
-version = "0.24.11"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d0b315376e7ea3e1cb802d4b2fd03cf2fdfb8f60b0872c4d5dbf2e0e8b9323a"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4941,7 +4943,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tokio-test",
  "toml",
  "tracing",
 ]
