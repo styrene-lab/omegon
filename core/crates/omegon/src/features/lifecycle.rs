@@ -2248,8 +2248,8 @@ mod tests {
         let text = result.content[0].as_text().unwrap();
         assert!(text.contains("auth"), "should list spec domain: {text}");
         let change: Value = serde_json::from_str(text).unwrap();
-        assert_eq!(change["state"].as_str(), Some("specified"));
-        assert_eq!(change["stage"].as_str(), Some("specified"));
+        assert_eq!(change["state"].as_str(), Some("specced"));
+        assert_eq!(change["stage"].as_str(), Some("specced"));
         assert_eq!(change["file_stage"].as_str(), Some("specified"));
     }
 
