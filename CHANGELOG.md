@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.24.8] - 2026-05-28
+
 ### Fixed
 
 - Show elapsed wall-clock time in the Slim active-tool stream header while tools are running.
