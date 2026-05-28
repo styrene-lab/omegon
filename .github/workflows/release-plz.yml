@@ -1,24 +1,23 @@
 name: release-plz
 
-# Auto-publishes crates.io releases when a release PR merges to main.
+# Auto-publishes crates.io releases from release commits on main.
 #
 # ── How it works ─────────────────────────────────────────────────────
-# 1. Push to main → release-plz-pr opens (or updates) a release PR
-#    with version bumps + CHANGELOG entries derived from conventional
-#    commits.
-# 2. Operator reviews + merges the PR.
-# 3. The resulting push to main → release-plz-release tags the commit
-#    and `cargo publish`-es the bumped crates in dep order.
+# 1. Push to main → release-plz-release publishes any already-bumped
+#    release commit and tags/publishes the crates in dependency order.
+# 2. Manual workflow dispatch → release-plz-pr opens or updates a
+#    release PR with version bumps + CHANGELOG entries derived from
+#    conventional commits.
+# 3. Operator reviews + merges the release PR; the resulting push to
+#    main runs step 1.
 #
 # ── Required secret ──────────────────────────────────────────────────
 # CARGO_REGISTRY_TOKEN — crates.io API token with publish scope.
 #
-# ── Optional secret (recommended) ────────────────────────────────────
+# ── Optional secret ──────────────────────────────────────────────────
 # RELEASE_PLZ_TOKEN — a fine-grained PAT (contents:write, pull-requests:write).
-# Without it, step 3 above won't fire automatically: the default
-# GITHUB_TOKEN can open the PR but pushes it creates don't trigger
-# subsequent workflow runs, so the operator has to manually re-run
-# the workflow after merging.
+# Current org policy does not permit the default GITHUB_TOKEN to create
+# pull requests, so the release-pr job is intentionally manual-only.
 
 on:
   push:
@@ -56,7 +55,7 @@ jobs:
   release-plz-pr:
     name: Release PR
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'styrene-lab' }}
+    if: ${{ github.repository_owner == 'styrene-lab' && github.event_name == 'workflow_dispatch' }}
     concurrency:
       group: release-plz-${{ github.ref }}
       cancel-in-progress: false
