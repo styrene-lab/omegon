@@ -78,12 +78,80 @@ fn split_trimmed_trailing_empty_lines(text: &str) -> Vec<&str> {
 }
 
 fn clean_inline_text(text: &str) -> String {
-    text.chars()
-        .filter(|ch| !ch.is_control() || *ch == '\t')
-        .collect::<String>()
+    strip_terminal_control(text)
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn strip_terminal_control(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            match chars.peek().copied() {
+                Some('[') => {
+                    chars.next();
+                    for next in chars.by_ref() {
+                        if ('@'..='~').contains(&next) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    chars.next();
+                    let mut prev = '\0';
+                    for next in chars.by_ref() {
+                        if next == '\u{7}' || (prev == '\u{1b}' && next == '\\') {
+                            break;
+                        }
+                        prev = next;
+                    }
+                }
+                Some('P' | '^' | '_' | 'X') => {
+                    // DCS/PM/APC/SOS strings terminate with ST (ESC \\). If
+                    // upstream command output leaks one into a tool card, strip
+                    // the whole control string rather than leaving its payload
+                    // as printable garbage in the terminal buffer.
+                    chars.next();
+                    let mut prev = '\0';
+                    for next in chars.by_ref() {
+                        if prev == '\u{1b}' && next == '\\' {
+                            break;
+                        }
+                        prev = next;
+                    }
+                }
+                Some(next) if ('@'..='_').contains(&next) => {
+                    // Single-character C1 escape sequence, e.g. ESC c reset.
+                    chars.next();
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if ch.is_control() && ch != '\t' {
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+#[cfg(test)]
+mod terminal_control_tests {
+    use super::*;
+
+    #[test]
+    fn strip_terminal_control_removes_csi_and_osc() {
+        let input = "pre\x1b[31mred\x1b[0m mid\x1b]0;title\x07 post";
+        assert_eq!(strip_terminal_control(input), "prered mid post");
+    }
+
+    #[test]
+    fn clean_inline_text_drops_control_noise() {
+        assert_eq!(clean_inline_text("nex \x1b[?25lswitch now"), "nex switch now");
+    }
 }
 
 fn first_arg_line(args: &str) -> String {
@@ -2607,7 +2675,7 @@ fn render_tool_card(
                     // defensively rather than letting them write
                     // into cell symbols.
                     for line in &tail_lines[start..] {
-                        let stripped: String = line.chars().filter(|c| !c.is_control()).collect();
+                        let stripped = strip_terminal_control(line);
                         lines.push(Line::from(Span::styled(stripped, tail_style)));
                         live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
                     }

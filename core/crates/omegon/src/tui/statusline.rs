@@ -103,7 +103,7 @@ impl StatusLine {
         // Explicit turn state: makes "done vs still running vs waiting"
         // visible without requiring the operator to infer it from scrollback.
         if let Some(ref state) = self.turn_state {
-            let field = Span::styled(state.clone(), Style::default().fg(t.warning()));
+            let field = Span::styled(turn_state_field(state), Style::default().fg(t.warning()));
             let cost = sect.width() + field.width();
             if used + cost < w {
                 spans.push(sect.clone());
@@ -274,6 +274,18 @@ fn ooda_phase_spans(phase: OodaPhase, t: &dyn Theme) -> Vec<Span<'static>> {
     spans
 }
 
+fn turn_state_field(state: &str) -> String {
+    // Keep the early-turn wait labels width-stable so transitions like
+    // "provider request" -> "stream open" don't shove the rest of the
+    // one-line Slim footer back and forth every frame.
+    const WAITING_WIDTH: usize = "waiting: provider request".len();
+    if matches!(state, "waiting: provider request" | "waiting: stream open") {
+        format!("{state:<WAITING_WIDTH$}")
+    } else {
+        state.to_string()
+    }
+}
+
 fn file_activity_label(read: usize, modified: usize, width: usize) -> String {
     let total = read + modified;
     if width >= 115 && read > 0 && modified > 0 {
@@ -355,6 +367,16 @@ mod tests {
         assert!(text.contains("dir omegon"), "{text}");
         assert!(text.contains("git fix/footer"), "{text}");
         assert!(text.contains("oodA Act"), "{text}");
+    }
+
+    #[test]
+    fn turn_state_waiting_labels_are_width_stable() {
+        let provider = turn_state_field("waiting: provider request");
+        let stream = turn_state_field("waiting: stream open");
+
+        assert_eq!(provider.len(), stream.len());
+        assert_eq!(provider, "waiting: provider request");
+        assert_eq!(stream.trim_end(), "waiting: stream open");
     }
 
     #[test]
