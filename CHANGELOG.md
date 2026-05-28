@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep the Claude Code OAuth user-agent version in sync with upstream `@anthropic-ai/claude-code` 2.1.153, and let the scheduled upstream-version workflow create update PRs instead of failing as soon as drift is detected.
+
 ## [0.24.8] - 2026-05-28
 
 ### Fixed

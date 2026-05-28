@@ -5,7 +5,8 @@ Checks:
   - Claude Code CLI version (npm: @anthropic-ai/claude-code)
 
 Outputs JSON: {"updates": [{"name": ..., "current": ..., "latest": ..., "file": ..., "pattern": ...}]}
-Exit code 0 = all up to date, 1 = updates available, 2 = check failed.
+Exit code 0 = check completed, including when updates are available.
+Exit code 2 = check failed.
 """
 
 import json
@@ -39,17 +40,21 @@ def get_current_claude_code_ua() -> str | None:
     return m.group(1) if m else None
 
 
-def check_claude_code() -> dict | None:
-    """Check if Claude Code CLI version is up to date."""
+def check_claude_code() -> tuple[dict | None, bool]:
+    """Check if Claude Code CLI version is up to date.
+
+    Returns (update, failed). An upstream mismatch is an update, not a
+    check failure; failure means we could not inspect local or upstream state.
+    """
     current = get_current_claude_code_ua()
     if not current:
         print("WARNING: Could not extract current Claude Code UA version", file=sys.stderr)
-        return None
+        return None, True
 
     latest = get_npm_latest("@anthropic-ai/claude-code")
     if not latest:
         print("WARNING: Could not fetch latest Claude Code version from npm", file=sys.stderr)
-        return None
+        return None, True
 
     if current != latest:
         return {
@@ -59,28 +64,33 @@ def check_claude_code() -> dict | None:
             "file": str(PROVIDERS_RS.relative_to(REPO_ROOT)),
             "pattern": f'claude-cli/{current}',
             "replacement": f'claude-cli/{latest}',
-        }
-    return None
+        }, False
+    return None, False
 
 
 def main():
     updates = []
+    checks_failed = False
 
-    result = check_claude_code()
+    result, failed = check_claude_code()
     if result:
         updates.append(result)
+    checks_failed = checks_failed or failed
 
     output = {"updates": updates}
     print(json.dumps(output, indent=2))
+
+    if checks_failed:
+        print("\nOne or more upstream version checks failed.", file=sys.stderr)
+        sys.exit(2)
 
     if updates:
         print(f"\n{len(updates)} update(s) available:", file=sys.stderr)
         for u in updates:
             print(f"  {u['name']}: {u['current']} -> {u['latest']}", file=sys.stderr)
-        sys.exit(1)
     else:
         print("\nAll upstream versions up to date.", file=sys.stderr)
-        sys.exit(0)
+    sys.exit(0)
 
 
 if __name__ == "__main__":
