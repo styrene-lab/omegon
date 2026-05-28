@@ -883,9 +883,9 @@ impl TerminalCreateLaunchPlan {
             Some(omegon_extension::actions::terminal::TerminalPlacement::NewTab) => {
                 TerminalPlacementCapability::NewTab
             }
-            Some(omegon_extension::actions::terminal::TerminalPlacement::BackgroundSession)
-            | Some(omegon_extension::actions::terminal::TerminalPlacement::Default)
-            | None => TerminalPlacementCapability::BackgroundSession,
+            Some(omegon_extension::actions::terminal::TerminalPlacement::Default) | None => {
+                TerminalPlacementCapability::BackgroundSession
+            }
         }
     }
 }
@@ -1604,57 +1604,6 @@ allowed = [{allowed}]
         assert_eq!(result["backend"], "flynt_side_pane");
         assert_eq!(result["actual_placement"], "side_pane");
         assert!(result["warnings"].as_array().is_none_or(Vec::is_empty));
-    }
-
-    #[test]
-    fn terminal_create_background_result_includes_inspection_hint() {
-        let manifest = terminal_manifest(&["printf"], &["${workspace}"], &[]);
-        let outcome = process_host_action_candidate_with_approval_decision(
-            json!({
-                "id": "open-bg",
-                "type": "terminal.create@1",
-                "execution": "manual",
-                "params": {
-                    "command": "printf",
-                    "args": ["visible"],
-                    "cwd": ".",
-                    "placement": "background_session"
-                }
-            }),
-            &manifest,
-            ScopedHostActionId {
-                origin: HostActionOrigin::native_extension("reader"),
-                session_id: "test-session".into(),
-                tool_call_id: "tc1".into(),
-                action_id: "open-bg".into(),
-            },
-            &RuntimeHostActionPolicy::default(),
-            &HostActionExecutorRegistry::with_real_terminal_backend(
-                std::env::current_dir().unwrap(),
-            ),
-            crate::extensions::approval::HostActionApprovalDecision::Approved,
-        );
-
-        assert_eq!(
-            outcome.status,
-            omegon_extension::HostActionStatus::Completed,
-            "outcome: {outcome:?}"
-        );
-        let result = outcome.result.expect("result");
-        assert_eq!(result["actual_placement"], "background_session");
-        let warnings = result["warnings"].as_array().expect("warnings array");
-        let warning_text = warnings
-            .iter()
-            .filter_map(|v| v.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            !warning_text.contains("placement degraded"),
-            "{warning_text}"
-        );
-        assert!(warning_text.contains("terminal.read"), "{warning_text}");
-        assert!(warning_text.contains("terminal.stop"), "{warning_text}");
-        assert!(warning_text.contains("open transcript"), "{warning_text}");
     }
 
     #[test]
