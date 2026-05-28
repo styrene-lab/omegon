@@ -16,9 +16,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-### Fixed
+## [0.25.0] - 2026-05-28
 
-- Update to `omegon-extension` 0.25.1 and handle explicit `background_session` terminal placement requests from extracted SDK clients.
+### Added
+
+- Extracted the Rust extension SDK into the standalone `omegon-extension` crate and updated the host to consume the published SDK instead of the internal workspace crate.
+- Added 0.25 extension SDK planning docs covering the contract artifact, host compatibility policy, cross-language lockstep, conformance suite, and standalone repository extraction.
+
+### Changed
+
+- Updated first-party extension integration docs and the browser extension consumer path for the published SDK crate.
+- Keep default or omitted `terminal.create@1` placement mapped to the host background-session backend while the public 0.25 SDK request contract remains `default`, `side_pane`, `bottom_pane`, and `new_tab`.
 
 ## [0.24.11] - 2026-05-28
 
