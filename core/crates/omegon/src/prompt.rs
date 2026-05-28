@@ -70,7 +70,8 @@ pub fn build_base_prompt_for_mode(
         String::new()
     };
     let extension_authoring_context = if cwd.join("manifest.toml").exists()
-        || cwd.join("core/crates/omegon-extension").is_dir()
+        || cwd.join("schema/sdk-contract.json").is_file()
+        || cwd.join("src/contract.rs").is_file()
     {
         include_str!("../../../../data/extension-authoring-context.md").to_string()
     } else {

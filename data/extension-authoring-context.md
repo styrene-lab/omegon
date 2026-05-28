@@ -148,9 +148,21 @@ omegon extension install https://github.com/user/my-ext
 
 ## Crate Reference
 
-The `omegon-extension` crate is at `core/crates/omegon-extension/`. Key files:
-- `lib.rs` — `serve()` function, safety docs
-- `extension.rs` — `Extension` trait definition
-- `rpc.rs` — JSON-RPC message types
-- `manifest.rs` — `ExtensionManifest` struct with validation
-- `error.rs` — Error codes (MethodNotFound, InvalidParams, etc.)
+The `omegon-extension` Rust SDK is published separately from the Omegon host.
+Its canonical source lives in the extension ecosystem workspace as
+`omegon-extension-rs/`, and consumers should depend on the crate from crates.io:
+
+```toml
+[dependencies]
+omegon-extension = "0.25"
+```
+
+Host-owned runtime code remains in the Omegon repository. SDK-owned protocol
+and authoring helpers live in `omegon-extension-rs/`. Key SDK files:
+
+- `omegon-extension-rs/src/lib.rs` — public API and safety docs
+- `omegon-extension-rs/src/extension.rs` — `Extension`, `serve()`, `serve_v2()`, `HostProxy`
+- `omegon-extension-rs/src/rpc.rs` — JSON-RPC message types
+- `omegon-extension-rs/src/manifest.rs` — `ExtensionManifest` struct with validation
+- `omegon-extension-rs/src/error.rs` — error codes (`MethodNotFound`, `InvalidParams`, etc.)
+- `omegon-extension-rs/schema/sdk-contract.json` — cross-language SDK contract artifact

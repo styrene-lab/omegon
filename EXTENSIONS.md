@@ -424,18 +424,23 @@ The current manifest schema does not require an `sdk_version` field. Compatibili
 - New optional manifest fields
 - New error codes (old code still works)
 
-## Contributing to Omegon
+## Contributing to Omegon Extension SDKs
 
-The extension system is part of Omegon core. To contribute:
+The Rust extension SDK is now owned outside the host repository in
+[`styrene-lab/omegon-extension-rs`](https://github.com/styrene-lab/omegon-extension-rs)
+and published as `omegon-extension` on crates.io. To contribute SDK changes:
 
-1. Fork [styrene-lab/omegon](https://github.com/styrene-lab/omegon)
-2. Create feature branch: `git checkout -b feature/extension-xyz`
-3. Make changes to `core/crates/omegon-extension/`
-4. Add tests: `cargo test -p omegon-extension`
-5. Update documentation in `EXTENSION_SDK.md` or `EXTENSION_INTEGRATION.md`
-6. Open PR with description of SDK changes
+1. Fork `styrene-lab/omegon-extension-rs`.
+2. Create a feature branch: `git checkout -b feature/extension-xyz`.
+3. Make SDK changes in the standalone SDK repository.
+4. Run `cargo test --features test-extension-bin` and `cargo publish --dry-run`.
+5. If the wire contract changes, update `schema/sdk-contract.json` and port the
+   artifact to the Python and TypeScript SDKs.
+6. Open a PR with the SDK contract impact called out explicitly.
 
-All SDK changes must maintain backward compatibility or clearly document breaking changes.
+Host runtime changes still belong in `styrene-lab/omegon`. The host consumes the
+published SDK crate and should validate extension compatibility using
+`SDK_CONTRACT_VERSION`, not the Rust crate version.
 
 ## Resources
 
