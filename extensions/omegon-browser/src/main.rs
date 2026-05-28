@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use omegon_extension::{Error, Extension};
+use omegon_extension::{Error, Extension, SDK_CONTRACT_VERSION};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -66,7 +66,7 @@ impl Extension for BrowserExtension {
                 "extension_info": {
                     "name": NAME,
                     "version": VERSION,
-                    "sdk_version": "0.19"
+                    "sdk_version": SDK_CONTRACT_VERSION
                 },
                 "capabilities": {
                     "tools": true,
