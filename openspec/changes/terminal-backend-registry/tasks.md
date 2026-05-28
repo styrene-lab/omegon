@@ -5,7 +5,7 @@
 
 - [x] 1.1 Capture Flynt terminal contract/manager evidence.
 - [x] 1.2 Record that Flynt is a future backend candidate, not an Omegon dependency.
-- [ ] 1.3 Add issue #82 milestone/comment after implementation evidence.
+- [x] 1.3 Add issue #82 milestone/comment after implementation evidence.
 
 ## 2. Registry seam
 <!-- specs: extensions/terminal-backend-registry -->

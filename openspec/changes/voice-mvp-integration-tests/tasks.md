@@ -13,7 +13,7 @@
 
 - [x] 2.1 Add non-voice manifest test proving `voice_notification_rx` is absent.
 - [x] 2.2 Add `voice/state` no-daemon-event test at bridge level.
-- [ ] 2.3 Record initialize-negotiation caveat in #81 closeout comment.
+- [x] 2.3 Record initialize-negotiation caveat in #81 closeout comment.
 
 ## 3. Validation
 <!-- specs: extensions/voice-mvp-tests -->

@@ -27,8 +27,8 @@
 - [x] 4.1 Wire voice-capable extension notifications into the daemon event queue.
 - [x] 4.2 Validate `omegon-voice` transcription injection locally.
 - [x] 4.3 Run `cargo test -p omegon-extension`.
-- [ ] 4.4 Run `cargo test -p omegon`.
+- [x] 4.4 Run `cargo test -p omegon`.
 - [x] 4.5 Run `just lint`.
 - [x] 4.6 Implement minimal `voice/state` observability for a TUI mic indicator using only extension-reported `state` and `mic_open`.
 - [x] 4.7 Document that OS/backend/USB/hardware mute/privacy indicator semantics remain extension-owned and are not inferred by Omegon.
-- [ ] 4.8 Post acceptance trace to #79 and close only after end-to-end validation.
+- [x] 4.8 Post acceptance trace to #79 and close only after end-to-end validation.
