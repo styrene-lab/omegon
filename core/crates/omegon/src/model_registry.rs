@@ -312,10 +312,25 @@ mod tests {
         let reg = ModelRegistry::global();
         assert_eq!(reg.tier_model("gloriana", "openai"), Some("gpt-5.5"));
         assert_eq!(
+            reg.tier_model("gloriana", "anthropic"),
+            Some("claude-opus-4-6")
+        );
+        assert_eq!(
             reg.tier_model("retribution", "anthropic"),
             Some("claude-haiku-4-5-20251001")
         );
         assert_eq!(reg.tier_model("gloriana", "nonexistent"), None);
+    }
+
+    #[test]
+    fn claude_opus_4_8_is_registered_as_frontier_anthropic_model() {
+        let reg = ModelRegistry::global();
+        let info = reg.model_info("anthropic:claude-opus-4-8").unwrap();
+        assert_eq!(info.name, "Claude Opus 4.8");
+        assert_eq!(info.context_input, 1_000_000);
+        assert_eq!(info.context_output, 131_072);
+        assert_eq!(info.cost_tier, "premium");
+        assert_eq!(reg.infer_tier("anthropic", "claude-opus-4-8"), Some("gloriana"));
     }
 
     #[test]

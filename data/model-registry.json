@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "lastReviewed": "2026-04-25",
+  "lastReviewed": "2026-05-28",
 
   "_comment_inference": [
     "Inference defaults for dynamically discovered models (Ollama Cloud, local Ollama).",
@@ -109,11 +109,19 @@
   ],
   "models": [
     {
-      "id": "claude-opus-4-7", "provider": "anthropic", "name": "Claude Opus 4.7",
+      "id": "claude-opus-4-8", "provider": "anthropic", "name": "Claude Opus 4.8",
       "contextInput": 1000000, "contextOutput": 131072,
       "costTier": "premium", "pricing": { "input": 15.0, "output": 75.0 },
       "capabilities": ["reasoning", "coding", "vision"],
       "description": "Latest frontier reasoning, coding, and vision"
+    },
+    {
+      "id": "claude-opus-4-7", "provider": "anthropic", "name": "Claude Opus 4.7",
+      "contextInput": 1000000, "contextOutput": 131072,
+      "costTier": "premium", "pricing": { "input": 15.0, "output": 75.0 },
+      "capabilities": ["reasoning", "coding", "vision"],
+      "recommended": false,
+      "description": "Previous Opus release retained for compatibility; not recommended for new sessions now that Opus 4.8 is available"
     },
     {
       "id": "claude-sonnet-4-7", "provider": "anthropic", "name": "Claude Sonnet 4.7",
