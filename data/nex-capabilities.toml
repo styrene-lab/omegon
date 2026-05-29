@@ -1,0 +1,29 @@
+[capabilities."binary:d2"]
+commands = ["d2"]
+
+[[capabilities."binary:d2".overlays]]
+base = "coding"
+profile_name = "coding-d2"
+packages = ["d2"]
+
+[capabilities."binary:piper"]
+commands = ["piper"]
+
+[[capabilities."binary:piper".overlays]]
+base = "coding-python"
+profile_name = "voice-piper"
+packages = ["piper-tts"]
+
+[capabilities."binary:podman"]
+commands = ["podman"]
+
+[capabilities."binary:docker"]
+commands = ["docker"]
+
+[capabilities."extension:omegon-voice"]
+extension = "omegon-voice"
+armory = true
+
+[capabilities."extension:scratchpad"]
+extension = "scratchpad"
+armory = true

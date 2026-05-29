@@ -19,6 +19,7 @@
 //! same OCI image. Identity binding links a profile to its creator via
 //! Styrene Identity (when available) or local-operator placeholders.
 
+pub mod capabilities;
 pub mod compose;
 mod container;
 mod manifest;

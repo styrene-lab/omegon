@@ -847,6 +847,31 @@ impl ToolProvider for CoreTools {
                 }),
                 capabilities: vec![omegon_traits::ToolCapability::StateChanging],
             },
+            ToolDefinition {
+                name: reg::NEX_CAPABILITY.into(),
+                label: reg::NEX_CAPABILITY.into(),
+                description: "Read-only Nex capability resolver. Checks whether a binary or extension capability is available and recommends host/Nex profile/extension routes without mutating the machine.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["check", "resolve"],
+                            "description": "Read-only action to perform"
+                        },
+                        "capability": {
+                            "type": "string",
+                            "description": "Capability key such as binary:d2, d2, extension:scratchpad, or omegon-voice"
+                        },
+                        "profile": {
+                            "type": "string",
+                            "description": "Optional Nex profile name to include as evidence"
+                        }
+                    },
+                    "required": ["action", "capability"]
+                }),
+                capabilities: vec![omegon_traits::ToolCapability::RepoInspection],
+            },
             // trust_directory is NOT in the tool schema — it's internal harness
             // plumbing called via bus.execute_internal() by the permission
             // dispatch layer. The handler is in CoreTools::execute().
@@ -1210,6 +1235,29 @@ impl ToolProvider for CoreTools {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing 'action' argument"))?;
                 terminal::execute(action, &args, &self.cwd, Some(self.boundary.clone())).await
+            }
+            reg::NEX_CAPABILITY => {
+                let action = args["action"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'action' argument"))?;
+                let capability = args["capability"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'capability' argument"))?;
+                let profile = args["profile"].as_str().map(str::to_string);
+                let resolver = crate::nex::capabilities::CapabilityResolver::bundled()?;
+                let context = crate::nex::capabilities::CapabilityContext { path: None, profile };
+                let resolution = match action {
+                    "check" => resolver.check(capability, context, None),
+                    "resolve" => resolver.resolve(capability, context, None),
+                    other => anyhow::bail!(
+                        "unsupported nex_capability action: {other}; MVP is read-only and supports only check|resolve"
+                    ),
+                };
+                let text = serde_json::to_string_pretty(&resolution)?;
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text { text }],
+                    details: serde_json::to_value(&resolution)?,
+                })
             }
             reg::TRUST_DIRECTORY => {
                 let path_str = args["path"]

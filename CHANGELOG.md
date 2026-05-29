@@ -16,12 +16,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-### Changed
-
-- Canonicalize fresh conversation starts under `/context reset`, with `/context clear` and `/new` routed as aliases to the same context reset path.
+## [0.25.3] - 2026-05-29
 
 ### Added
 
+- Add `nex_capability` as a read-only agent tool for checking host availability and resolving Nex overlay/extension recommendations.
+
+### Changed
+
+- Canonicalize fresh conversation starts under `/context reset`, with `/context clear` and `/new` routed as aliases to the same context reset path.
 - Documented the canonical domain-scoped slash command map for consolidating top-level aliases such as `/new`, `/login`, and `/bench` under domain parents like `/context`, `/auth`, and `/stats`.
 
 ## [0.25.2] - 2026-05-29
