@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Add `package.install@1` HostAction support for trusted `omegon-nex` helper-tool installs through host-managed terminal execution.
+
 ## [0.25.3] - 2026-05-29
 
 ### Added

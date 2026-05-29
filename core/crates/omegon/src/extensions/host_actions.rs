@@ -3,6 +3,9 @@ use super::manifest::ExtensionManifest;
 use crate::tools::terminal;
 use omegon_extension::{HostAction, HostActionOutcome, HostActionStatus};
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
+
+const PACKAGE_INSTALL_V1: &str = "package.install@1";
 
 /// Host-attached origin for an untrusted HostAction candidate.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +70,7 @@ pub(super) struct RuntimeHostActionPolicy {
 pub(super) struct HostActionExecutorRegistry {
     supported_types: Vec<String>,
     terminal_create_registry: Option<TerminalBackendRegistry>,
+    package_install_policy: Option<PackageInstallPolicy>,
 }
 
 impl HostActionExecutorRegistry {
@@ -74,11 +78,12 @@ impl HostActionExecutorRegistry {
         Self {
             supported_types: types.into_iter().map(Into::into).collect(),
             terminal_create_registry: None,
+            package_install_policy: None,
         }
     }
 
     pub fn default_supported() -> Self {
-        Self::with_supported_types(["terminal.create@1"])
+        Self::with_supported_types(["terminal.create@1", PACKAGE_INSTALL_V1])
     }
 
     pub(super) fn with_terminal_backend(
@@ -89,6 +94,7 @@ impl HostActionExecutorRegistry {
                 omegon_extension::actions::terminal::TERMINAL_CREATE_V1.to_string(),
             ],
             terminal_create_registry: Some(TerminalBackendRegistry::new(vec![backend])),
+            package_install_policy: None,
         }
     }
 
@@ -106,8 +112,10 @@ impl HostActionExecutorRegistry {
         Self {
             supported_types: vec![
                 omegon_extension::actions::terminal::TERMINAL_CREATE_V1.to_string(),
+                PACKAGE_INSTALL_V1.to_string(),
             ],
             terminal_create_registry: Some(terminal_create_registry),
+            package_install_policy: Some(PackageInstallPolicy::default_enabled()),
         }
     }
 
@@ -356,6 +364,24 @@ pub(super) fn process_host_action_candidate(
         && let Some(registry) = executors.terminal_create_registry.as_ref()
     {
         let outcome = execute_terminal_create_with_registry(&action, manifest, registry);
+        audit_host_action_outcome(
+            &scoped_id,
+            Some(&action.action_type),
+            &outcome.action_id,
+            &outcome.status,
+            outcome
+                .error
+                .as_ref()
+                .map(|error| error.code.as_str())
+                .unwrap_or("completed"),
+        );
+        return outcome;
+    }
+
+    if action.action_type == PACKAGE_INSTALL_V1
+        && let Some(policy) = executors.package_install_policy.as_ref()
+    {
+        let outcome = execute_package_install(&action, policy, executors.terminal_create_registry.as_ref());
         audit_host_action_outcome(
             &scoped_id,
             Some(&action.action_type),
@@ -766,6 +792,136 @@ impl TerminalCreateBackend for RealTerminalCreateBackend {
     }
 }
 
+
+#[derive(Debug, Clone)]
+pub(super) struct PackageInstallPolicy {
+    enabled: bool,
+    allowed_providers: BTreeSet<String>,
+    allowed_tools: BTreeMap<String, PackageToolPolicy>,
+    allowed_scopes: BTreeSet<String>,
+    allow_privilege_escalation: bool,
+}
+
+#[derive(Debug, Clone)]
+struct PackageToolPolicy {
+    package: String,
+}
+
+impl PackageInstallPolicy {
+    fn default_enabled() -> Self {
+        Self {
+            enabled: true,
+            allowed_providers: BTreeSet::from(["omegon-nex".to_string()]),
+            allowed_tools: BTreeMap::from([
+                ("micro".to_string(), PackageToolPolicy { package: "micro".to_string() }),
+                ("hx".to_string(), PackageToolPolicy { package: "hx".to_string() }),
+                ("nvim".to_string(), PackageToolPolicy { package: "nvim".to_string() }),
+            ]),
+            allowed_scopes: BTreeSet::from(["user".to_string()]),
+            allow_privilege_escalation: true,
+        }
+    }
+
+    #[cfg(test)]
+    fn disabled() -> Self {
+        Self { enabled: false, ..Self::default_enabled() }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PackageInstallParams {
+    provider: String,
+    tool: String,
+    package: String,
+    scope: String,
+    #[serde(default)]
+    capability: Option<String>,
+    #[serde(default)]
+    may_require_privilege: bool,
+}
+
+fn execute_package_install(
+    action: &HostAction,
+    policy: &PackageInstallPolicy,
+    terminal_registry: Option<&TerminalBackendRegistry>,
+) -> HostActionOutcome {
+    let params: PackageInstallParams = match serde_json::from_value(action.params.clone()) {
+        Ok(params) => params,
+        Err(err) => {
+            return outcome(
+                action.id.clone(),
+                HostActionStatus::Invalid,
+                "invalid_package_install_params",
+                format!("package.install@1 params failed validation: {err}"),
+            );
+        }
+    };
+
+    if !policy.enabled {
+        return outcome(action.id.clone(), HostActionStatus::Denied, "package_install_denied", "package install is disabled by host policy");
+    }
+    if !policy.allowed_providers.contains(&params.provider) {
+        return outcome(action.id.clone(), HostActionStatus::Denied, "package_provider_denied", format!("package provider '{}' is not allowlisted", params.provider));
+    }
+    let Some(tool_policy) = policy.allowed_tools.get(&params.tool) else {
+        return outcome(action.id.clone(), HostActionStatus::Invalid, "package_tool_denied", format!("package tool '{}' is not allowlisted", params.tool));
+    };
+    if params.package != tool_policy.package {
+        return outcome(action.id.clone(), HostActionStatus::Invalid, "package_tool_mismatch", format!("provider {} maps tool {} to package {}; received package {}", params.provider, params.tool, tool_policy.package, params.package));
+    }
+    if !policy.allowed_scopes.contains(&params.scope) {
+        return outcome(action.id.clone(), HostActionStatus::Invalid, "package_scope_denied", format!("package install scope '{}' is not allowlisted", params.scope));
+    }
+    if params.may_require_privilege && !policy.allow_privilege_escalation {
+        return outcome(action.id.clone(), HostActionStatus::Denied, "package_privilege_denied", "package install may require privilege escalation, which host policy disallows");
+    }
+
+    let Some(registry) = terminal_registry else {
+        return outcome(action.id.clone(), HostActionStatus::Unsupported, "package_install_executor_unavailable", "managed-terminal package install requires a terminal backend");
+    };
+    let Some(backend) = registry.select(TerminalPlacementCapability::BackgroundSession) else {
+        return outcome(action.id.clone(), HostActionStatus::Unsupported, "terminal_backend_unavailable", "no terminal backend is available for package install");
+    };
+
+    let plan = TerminalCreateLaunchPlan {
+        command: "nex".to_string(),
+        args: vec!["install".to_string(), "--nix".to_string(), params.package.clone()],
+        cwd: None,
+        env: Vec::new(),
+        placement: Some(omegon_extension::actions::terminal::TerminalPlacement::Default),
+        name: Some(format!("install {}", params.tool)),
+    };
+
+    match backend.create(plan) {
+        Ok(result) => outcome_completed_package_install(action, params, result),
+        Err(reason) => outcome(action.id.clone(), HostActionStatus::Unsupported, "terminal_backend_unavailable", reason),
+    }
+}
+
+fn outcome_completed_package_install(
+    action: &HostAction,
+    params: PackageInstallParams,
+    terminal: omegon_extension::actions::terminal::TerminalCreateResult,
+) -> HostActionOutcome {
+    HostActionOutcome {
+        action_id: action.id.clone(),
+        status: HostActionStatus::Completed,
+        result: Some(serde_json::json!({
+            "provider": params.provider,
+            "tool": params.tool,
+            "package": params.package,
+            "scope": params.scope,
+            "capability": params.capability,
+            "execution_mode": "managed_terminal",
+            "terminal_id": terminal.terminal_id,
+            "terminal_backend": terminal.backend,
+            "actual_placement": terminal.actual_placement,
+            "warnings": terminal.warnings,
+        })),
+        error: None,
+    }
+}
+
 pub(super) fn execute_terminal_create_with_backend(
     action: &HostAction,
     manifest: &ExtensionManifest,
@@ -1072,6 +1228,89 @@ allowed = [{allowed}]
 
     fn registry() -> HostActionExecutorRegistry {
         HostActionExecutorRegistry::default_supported()
+    }
+
+
+    fn package_action(tool: &str, package: &str) -> HostAction {
+        HostAction::new(
+            format!("install-{tool}"),
+            PACKAGE_INSTALL_V1,
+            json!({
+                "provider": "omegon-nex",
+                "tool": tool,
+                "package": package,
+                "scope": "user",
+                "capability": "terminal-editor",
+                "may_require_privilege": true
+            }),
+        )
+        .unwrap()
+    }
+
+    fn package_registry_with_fake_terminal() -> HostActionExecutorRegistry {
+        HostActionExecutorRegistry {
+            supported_types: vec![
+                omegon_extension::actions::terminal::TERMINAL_CREATE_V1.to_string(),
+                PACKAGE_INSTALL_V1.to_string(),
+            ],
+            terminal_create_registry: Some(TerminalBackendRegistry::new(vec![Box::new(
+                FakeTerminalCreateBackend {
+                    result: omegon_extension::actions::terminal::TerminalCreateResult {
+                        terminal_id: "term_pkg".into(),
+                        backend: "fake".into(),
+                        actual_placement: "background_session".into(),
+                        warnings: vec![],
+                    },
+                },
+            )])),
+            package_install_policy: Some(PackageInstallPolicy::default_enabled()),
+        }
+    }
+
+    #[test]
+    fn package_install_rejects_manifest_without_permission() {
+        let outcome = process_host_action_candidate(
+            serde_json::to_value(package_action("micro", "micro")).unwrap(),
+            &manifest(&["terminal.create@1"]),
+            scoped(),
+            &RuntimeHostActionPolicy::default(),
+            &package_registry_with_fake_terminal(),
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "manifest_denied");
+    }
+
+    #[test]
+    fn package_install_rejects_package_mismatch() {
+        let outcome = process_host_action_candidate(
+            serde_json::to_value(package_action("micro", "curl")).unwrap(),
+            &manifest(&[PACKAGE_INSTALL_V1]),
+            scoped(),
+            &RuntimeHostActionPolicy { operator_approved: true, project_allows_auto: true, runtime_allows_auto: true, origin_trusted_for_auto: true },
+            &package_registry_with_fake_terminal(),
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Invalid);
+        assert_eq!(outcome.error.unwrap().code, "package_tool_mismatch");
+    }
+
+    #[test]
+    fn package_install_approved_path_creates_managed_terminal() {
+        let outcome = process_host_action_candidate(
+            serde_json::to_value(package_action("micro", "micro")).unwrap(),
+            &manifest(&[PACKAGE_INSTALL_V1]),
+            scoped(),
+            &RuntimeHostActionPolicy { operator_approved: true, project_allows_auto: true, runtime_allows_auto: true, origin_trusted_for_auto: true },
+            &package_registry_with_fake_terminal(),
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        let result = outcome.result.unwrap();
+        assert_eq!(result["provider"], "omegon-nex");
+        assert_eq!(result["tool"], "micro");
+        assert_eq!(result["execution_mode"], "managed_terminal");
+        assert_eq!(result["terminal_id"], "term_pkg");
     }
 
     #[test]
