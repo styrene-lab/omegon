@@ -1,75 +1,26 @@
 name: release-plz
 
-# Auto-publishes crates.io releases from release commits on main.
+# The public extension SDK was extracted to the standalone
+# styrene-lab/omegon-extension-rs repository. The host workspace now contains
+# only private/internal crates and binary support crates, so release-plz has no
+# public packages to publish here.
 #
-# ── How it works ─────────────────────────────────────────────────────
-# 1. Push to main → release-plz-release publishes any already-bumped
-#    release commit and tags/publishes the crates in dependency order.
-# 2. Manual workflow dispatch → release-plz-pr opens or updates a
-#    release PR with version bumps + CHANGELOG entries derived from
-#    conventional commits.
-# 3. Operator reviews + merges the release PR; the resulting push to
-#    main runs step 1.
-#
-# ── Required secret ──────────────────────────────────────────────────
-# CARGO_REGISTRY_TOKEN — crates.io API token with publish scope.
-#
-# ── Optional secret ──────────────────────────────────────────────────
-# RELEASE_PLZ_TOKEN — a fine-grained PAT (contents:write, pull-requests:write).
-# Current org policy does not permit the default GITHUB_TOKEN to create
-# pull requests, so the release-pr job is intentionally manual-only.
+# Keep this workflow manual-only as a placeholder for future public workspace
+# crates. It intentionally does not run on pushes to main.
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
-  pull-requests: write
-  contents: write
+  contents: read
 
 jobs:
-  release-plz-release:
-    name: Release
+  release-plz-disabled:
+    name: Release disabled
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'styrene-lab' }}
-    concurrency:
-      group: release-plz-release-${{ github.ref }}
-      cancel-in-progress: false
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: release-plz release
-        uses: release-plz/action@v0.5
-        with:
-          command: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-  release-plz-pr:
-    name: Release PR
-    runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'styrene-lab' && github.event_name == 'workflow_dispatch' }}
-    concurrency:
-      group: release-plz-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: release-plz release-pr
-        uses: release-plz/action@v0.5
-        with:
-          command: release-pr
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Explain disabled release-plz
+        run: |
+          echo "release-plz is disabled for the Omegon host workspace."
+          echo "The public omegon-extension SDK is released from styrene-lab/omegon-extension-rs."
+          echo "Host binary releases are handled by the Release Rust binary workflow."
