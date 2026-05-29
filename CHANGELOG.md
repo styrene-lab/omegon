@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Documented the canonical domain-scoped slash command map for consolidating top-level aliases such as `/new`, `/login`, and `/bench` under domain parents like `/context`, `/auth`, and `/stats`.
+
 ## [0.25.2] - 2026-05-29
 
 ### Fixed
