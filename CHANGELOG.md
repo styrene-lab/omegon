@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Removed stale host CI/release-plz references to the former internal `omegon-extension` workspace crate; SDK protocol smoke tests and SDK publishing now belong to the standalone repository.
 - Updated first-party extension integration docs and the browser extension consumer path for the published SDK crate.
 - Keep default or omitted `terminal.create@1` placement mapped to the host background-session backend while the public 0.25 SDK request contract remains `default`, `side_pane`, `bottom_pane`, and `new_tab`.
 
