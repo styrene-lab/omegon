@@ -4716,3 +4716,33 @@ fn copy_full_session_on_empty_conversation_shows_warning() {
     // Conversation still empty.
     assert!(app.conversation.segments().is_empty());
 }
+
+#[test]
+fn slash_new_is_context_reset_alias() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/new", &tx);
+
+    assert!(matches!(result, SlashResult::Handled));
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        TuiCommand::ContextClear { .. }
+    ));
+}
+
+#[test]
+fn slash_context_reset_uses_context_clear_control_path() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let result = app.handle_slash_command("/context reset", &tx);
+
+    assert!(
+        matches!(result, SlashResult::Display(ref text) if text.contains("Starting fresh context"))
+    );
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        TuiCommand::ContextClear { .. }
+    ));
+}

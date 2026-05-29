@@ -4305,7 +4305,7 @@ async fn run_interactive_command(cli: &Cli) -> anyhow::Result<()> {
                     }
                 };
                 let message = format!(
-                    "Context\n  Usage:           {est}/{ctx_window} tokens ({pct}%)\n  Meter:           {bar}\n  Requested Class: {requested_class}\n  Actual Class:    {actual_class}\n  Model:           {model}\n  Thinking Level:  {thinking}\n\nActions\n  /context compact   Compact older turns\n  /context clear     Start a fresh conversation\n  /context request   Pull a mediated context pack"
+                    "Context\n  Usage:           {est}/{ctx_window} tokens ({pct}%)\n  Meter:           {bar}\n  Requested Class: {requested_class}\n  Actual Class:    {actual_class}\n  Model:           {model}\n  Thinking Level:  {thinking}\n\nActions\n  /context compact   Compact older turns\n  /context reset     Save current session and start fresh context\n  /new               Alias for /context reset\n  /context request   Pull a mediated context pack"
                 );
                 let _ = events_tx.send(AgentEvent::SystemNotification {
                     message: message.clone(),

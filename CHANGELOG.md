@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Changed
+
+- Canonicalize fresh conversation starts under `/context reset`, with `/context clear` and `/new` routed as aliases to the same context reset path.
+
 ### Added
 
 - Documented the canonical domain-scoped slash command map for consolidating top-level aliases such as `/new`, `/login`, and `/bench` under domain parents like `/context`, `/auth`, and `/stats`.

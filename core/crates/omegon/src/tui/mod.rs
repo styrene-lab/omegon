@@ -828,7 +828,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
             match sub {
                 "status" => Some(CanonicalSlashCommand::ContextStatus),
                 "compact" | "compress" => Some(CanonicalSlashCommand::ContextCompact),
-                "clear" => Some(CanonicalSlashCommand::ContextClear),
+                "clear" | "reset" | "new" => Some(CanonicalSlashCommand::ContextClear),
                 "request" => {
                     if rest.starts_with('{') {
                         match serde_json::from_str::<serde_json::Value>(rest) {
@@ -855,7 +855,7 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                     .map(CanonicalSlashCommand::SetContextClass),
             }
         }
-        "new" if args.is_empty() => Some(CanonicalSlashCommand::NewSession),
+        "new" if args.is_empty() => Some(CanonicalSlashCommand::ContextClear),
         "sessions" if args.is_empty() => Some(CanonicalSlashCommand::ListSessions),
         "auth" => match args {
             "" | "status" => Some(CanonicalSlashCommand::AuthStatus),
@@ -5692,7 +5692,7 @@ impl App {
             "session telemetry and performance metrics",
             &["bench"],
         ),
-        ("new", "save current session and start fresh", &[]),
+        ("new", "quick alias for /context reset", &[]),
         (
             "ui",
             "switch UI presets or toggle individual surfaces",
@@ -5702,9 +5702,10 @@ impl App {
         ),
         (
             "context",
-            "context management (class selection or compaction)",
+            "context lifecycle and budget management",
             &[
-                "status", "compact", "clear", "squad", "maniple", "clan", "legion",
+                "status", "compact", "reset", "clear", "request", "squad", "maniple", "clan",
+                "legion",
             ],
         ),
         (
@@ -6494,7 +6495,7 @@ impl App {
                         }
                         Some(CanonicalSlashCommand::ContextClear) => {
                             let _ = tx.try_send(TuiCommand::ContextClear { respond_to: None });
-                            SlashResult::Display("Clearing context…".into())
+                            SlashResult::Display("Starting fresh context…".into())
                         }
                         Some(CanonicalSlashCommand::ContextRequest { kind, query }) => {
                             let display =
@@ -6533,7 +6534,7 @@ impl App {
                             let (sub, _) = args.split_once(' ').unwrap_or((args, ""));
                             SlashResult::Display(format!(
                                 "Unknown context option: {sub}.\n\
-                                 Use: /context [status|compact|compress|clear|<class>]\n\
+                                 Use: /context [status|compact|compress|reset|clear|<class>]\n\
                                  Classes: squad, maniple, clan, legion"
                             ))
                         }
@@ -6542,7 +6543,7 @@ impl App {
             }
 
             "new" => {
-                let _ = tx.try_send(TuiCommand::NewSession { respond_to: None });
+                let _ = tx.try_send(TuiCommand::ContextClear { respond_to: None });
                 SlashResult::Handled
             }
 
