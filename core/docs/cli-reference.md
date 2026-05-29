@@ -152,19 +152,19 @@ path = "/output/result.json"
 |---------|-------------|
 | `/model [name]` | View or switch model |
 | `/think [level]` | Set thinking level (off/minimal/low/medium/high) |
-| `/login [provider]` | Authenticate with a provider |
-| `/logout [provider]` | Remove provider credentials |
 | `/auth status` | Show authentication status |
 
 #### UI & Display
 | Command | Description |
 |---------|-------------|
 | `/ui full` | Show dashboard + instruments + footer |
-| `/ui slim` | Conversation-only mode (default) |
+| `/ui lean` | Conversation-only mode (default) |
 | `/ui show\|hide\|toggle <surface>` | Control dashboard/instruments/footer |
+| `/ui detail <lean|compact|detailed|verbose>` | Set tool-card output density |
+| `/auth login|logout <provider>` | Manage provider authentication |
+| `/notes add <text>` / `/notes checkin` | Capture or triage pending notes |
 | `/focus` | Enter focus mode (timeline navigation) |
 | `/mouse on\|off` | Enable/disable mouse capture |
-| `/splash` | Replay splash animation |
 
 #### Context & Memory
 | Command | Description |
@@ -177,9 +177,9 @@ path = "/output/result.json"
 | Command | Description |
 |---------|-------------|
 | `/tree [list\|...]` | Design tree operations |
-| `/note <text>` | Add investigation note |
+| `/notes add <text>` | Add investigation note |
 | `/notes [clear]` | Show or clear notes |
-| `/checkin` | Triage workflow |
+| `/notes checkin` | Triage workflow |
 | `/milestone` | Milestone tracking |
 
 #### Workspace & Tools

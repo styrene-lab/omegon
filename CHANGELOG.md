@@ -33,6 +33,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Updated first-party extension integration docs and the browser extension consumer path for the published SDK crate.
 - Keep default or omitted `terminal.create@1` placement mapped to the host background-session backend while the public 0.25 SDK request contract remains `default`, `side_pane`, `bottom_pane`, and `new_tab`.
 
+## [0.25.1] - 2026-05-28
+
+### Changed
+
+- Remove the redundant `standard` UI preset and obsolete `/ui` aliases, leaving `lean` and `full` as the named layout presets.
+- Consolidate visible slash commands under canonical parents: `/auth login|logout`, `/stats bench`, `/ui detail`, `/help tutorial`, and transitional `/notes`.
+- Add an internal slash/CLI command map documenting canonical surfaces, hidden deletion debt, and the planned scratchpad extension extraction path.
+
 ## [0.24.11] - 2026-05-28
 
 ### Changed

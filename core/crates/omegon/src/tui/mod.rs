@@ -264,13 +264,6 @@ impl UiSurfaces {
             footer: false,
         }
     }
-    fn standard() -> Self {
-        Self {
-            dashboard: false,
-            instruments: false,
-            footer: true,
-        }
-    }
     fn full() -> Self {
         Self {
             dashboard: true,
@@ -288,17 +281,15 @@ impl UiSurfaces {
     fn preset_name(&self) -> &'static str {
         match (self.dashboard, self.instruments, self.footer) {
             (false, false, false) => "lean",
-            (false, false, true) => "standard",
             (true, true, true) => "full",
             _ => "custom",
         }
     }
 
-    /// Cycle to the next preset.
-    fn next_preset(&self) -> Self {
+    /// Toggle between the two named presets. Partial surface combinations are custom.
+    fn toggle_preset(&self) -> Self {
         match self.preset_name() {
-            "lean" => Self::standard(),
-            "standard" => Self::full(),
+            "lean" => Self::full(),
             _ => Self::lean(),
         }
     }
@@ -2257,9 +2248,9 @@ impl App {
 
     fn toggle_ui_surface(&mut self, surface: &str, enabled: bool) -> Result<(), String> {
         match surface {
-            "dashboard" | "dash" | "tree" => self.ui_surfaces.dashboard = enabled,
+            "dashboard" | "dash" => self.ui_surfaces.dashboard = enabled,
             "instruments" | "instrument" | "tools" => self.ui_surfaces.instruments = enabled,
-            "footer" | "status" => self.ui_surfaces.footer = enabled,
+            "footer" => self.ui_surfaces.footer = enabled,
             other => return Err(format!("Unknown UI surface: {other}")),
         }
         Ok(())
@@ -2316,7 +2307,7 @@ impl App {
     fn ui_status_text(&self) -> String {
         let mode = self.ui_surfaces.preset_name();
         format!(
-            "UI preset: {mode}\n  dashboard: {}\n  instruments: {}\n  footer: {}\n\nPresets\n  /ui lean    (minimal)\n  /ui standard (+ footer)\n  /ui full    (+ dashboard + instruments)\n\nSurfaces\n  /ui show|hide|toggle dashboard|instruments|footer",
+            "UI preset: {mode}\n  dashboard: {}\n  instruments: {}\n  footer: {}\n\nPresets\n  /ui lean    (conversation-only)\n  /ui full    (+ dashboard + instruments)\n\nSurfaces\n  /ui show|hide|toggle dashboard|instruments|footer",
             if self.ui_surfaces.dashboard {
                 "on"
             } else {
@@ -2561,7 +2552,7 @@ impl App {
             || lower.contains("invalid api key")
             || lower.contains("invalid_api_key")
         {
-            return "Authentication failed. Use /login to re-authenticate.";
+            return "Authentication failed. Use /auth login <provider> to re-authenticate.";
         }
         if lower.contains("status 403")
             || lower.contains("http 403")
@@ -3436,19 +3427,19 @@ impl App {
                 if let Some(ref tut) = self.tutorial {
                     return SlashResult::Display(tut.status_line());
                 }
-                SlashResult::Display("No tutorial active. Type /tutorial to start.".into())
+                SlashResult::Display("No tutorial active. Type /help tutorial to start.".into())
             }
             "reset" => {
                 if self.tutorial_overlay.is_some() {
                     self.tutorial_overlay = None;
                     return SlashResult::Display(
-                        "Tutorial overlay reset. Type /tutorial to start again.".into(),
+                        "Tutorial overlay reset. Type /help tutorial to start again.".into(),
                     );
                 }
                 if let Some(ref mut tut) = self.tutorial {
                     tut.reset();
                     return SlashResult::Display(
-                        "Tutorial reset to lesson 1. Type /tutorial to start.".into(),
+                        "Tutorial reset to lesson 1. Type /help tutorial to start.".into(),
                     );
                 }
                 SlashResult::Display("No tutorial active.".into())
@@ -3511,10 +3502,10 @@ impl App {
                 {
                     let mode_note = match overlay.mode {
                         tutorial::TutorialMode::ConsentRequired => {
-                            "\n\nℹ Anthropic subscription detected. Type /tutorial consent\nto enable interactive agent steps (uses subscription quota)."
+                            "\n\nℹ Anthropic subscription detected. Type /help tutorial consent\nto enable interactive agent steps (uses subscription quota)."
                         }
                         tutorial::TutorialMode::OrientationOnly => {
-                            "\n\nℹ No Victory-tier cloud model found. Add an API key or\n/login openai-codex for the full interactive tutorial."
+                            "\n\nℹ No Victory-tier cloud model found. Add an API key or\n/auth login openai-codex for the full interactive tutorial."
                         }
                         tutorial::TutorialMode::Interactive => "",
                     };
@@ -3536,15 +3527,15 @@ impl App {
                         "Tutorial started (orientation mode).\n\n\
                          Anthropic subscription detected. Omegon's ToS restricts automated use\n\
                          of subscriptions without your explicit consent.\n\n\
-                         Type /tutorial consent to enable interactive agent steps,\n\
-                         or add an API key / /login openai-codex for automatic access.\n\n\
+                         Type /help tutorial consent to enable interactive agent steps,\n\
+                         or add an API key / /auth login openai-codex for automatic access.\n\n\
                          Tab to advance orientation steps, Esc to dismiss."
                             .to_string()
                     }
                     tutorial::TutorialMode::OrientationOnly => {
                         "Tutorial started (orientation mode).\n\n\
                          No Victory-tier cloud model found. Add an API key or\n\
-                         /login openai-codex for the full interactive tutorial.\n\n\
+                         /auth login openai-codex for the full interactive tutorial.\n\n\
                          Tab to advance, Esc to dismiss."
                             .to_string()
                     }
@@ -3575,11 +3566,11 @@ impl App {
                 SlashResult::Display(format!("{status}\n\nLesson queued."))
             } else {
                 SlashResult::Display(
-                    "🎉 You've completed the tutorial! Type /tutorial reset to start over.".into(),
+                    "🎉 You've completed the tutorial! Type /help tutorial reset to start over.".into(),
                 )
             }
         } else {
-            SlashResult::Display("No tutorial active. Type /tutorial to start.".into())
+            SlashResult::Display("No tutorial active. Type /help tutorial to start.".into())
         }
     }
 
@@ -3605,7 +3596,7 @@ impl App {
                 SlashResult::Display("Already at the first lesson.".into())
             }
         } else {
-            SlashResult::Display("No tutorial active. Type /tutorial to start.".into())
+            SlashResult::Display("No tutorial active. Type /help tutorial to start.".into())
         }
     }
 
@@ -3639,8 +3630,8 @@ impl App {
             if result.is_err() || !tutorial_dir.join(".git").exists() {
                 return SlashResult::Display(
                     "Could not download the demo project.\n\n\
-                     Try /tutorial instead — it works with your current project,\n\
-                     no download needed. Or check your network and try /tutorial demo again."
+                     Try /help tutorial instead — it works with your current project,\n\
+                     no download needed. Or check your network and try /help tutorial demo again."
                         .into(),
                 );
             }
@@ -5685,23 +5676,18 @@ impl App {
                 "tone",
             ],
         ),
-        ("stats", "session telemetry", &[]),
         (
-            "bench",
-            "performance metrics (RSS, tokens/turn, avg turn time)",
-            &[],
+            "stats",
+            "session telemetry and performance metrics",
+            &["bench"],
         ),
-        ("perf", "alias for /bench", &[]),
         ("new", "save current session and start fresh", &[]),
         (
-            "detail",
-            "tool output density (lean/compact/detailed/verbose)",
-            &["lean", "compact", "detailed", "verbose"],
-        ),
-        (
-            "density",
-            "alias for /detail",
-            &["lean", "compact", "detailed", "verbose"],
+            "ui",
+            "switch UI presets or toggle individual surfaces",
+            &[
+                "status", "lean", "full", "show", "hide", "toggle", "detail", "density",
+            ],
         ),
         (
             "context",
@@ -5732,13 +5718,6 @@ impl App {
             ],
         ),
         (
-            "ext",
-            "alias for /extension",
-            &[
-                "list", "get", "install", "remove", "update", "enable", "disable", "search",
-            ],
-        ),
-        (
             "plugin",
             "manage local or git plugins",
             &["list", "install", "remove", "update"],
@@ -5759,30 +5738,21 @@ impl App {
             &["status"],
         ),
         (
-            "login",
-            "log in to a provider or service",
+            "auth",
+            "authentication management",
             &[
+                "status",
+                "unlock",
+                "login",
+                "logout",
                 "anthropic",
                 "openai",
                 "openai-codex",
                 "openrouter",
-                "opencode-go",
                 "ollama-cloud",
                 "github",
             ],
         ),
-        (
-            "logout",
-            "log out of provider",
-            &[
-                "anthropic",
-                "openai",
-                "openai-codex",
-                "openrouter",
-                "ollama-cloud",
-            ],
-        ),
-        ("auth", "authentication management", &["status", "unlock"]),
         (
             "chronos",
             "date/time context",
@@ -5801,24 +5771,9 @@ impl App {
             &["install", "channel"],
         ),
         (
-            "ui",
-            "switch UI presets or toggle individual surfaces",
-            &[
-                "status", "lean", "standard", "full", "slim", "show", "hide", "toggle",
-            ],
-        ),
-        ("shackle", "switch to slim constrained mode", &[]),
-        ("unshackle", "switch to full harness mode", &[]),
-        ("warp", "toggle between slim and full harness modes", &[]),
-        (
             "migrate",
             "import from other tools",
             &["auto", "claude-code", "pi", "codex", "cursor", "aider"],
-        ),
-        (
-            "dash",
-            "open the Auspex compatibility browser surface (legacy/debug path)",
-            &["status"],
         ),
         (
             "auspex",
@@ -5854,25 +5809,15 @@ impl App {
             &["list", "frontier", "ready", "blocked"],
         ),
         (
-            "tutorial",
-            "interactive tutorial (replaces /demo)",
-            &["status", "reset", "consent", "demo"],
-        ),
-        ("next", "advance to next tutorial lesson", &[]),
-        ("prev", "go back to previous tutorial lesson", &[]),
-        (
             "milestone",
             "release milestone management",
             &["freeze", "status"],
         ),
-        ("splash", "replay splash animation", &[]),
         (
-            "note",
-            "capture a note for later (persists across sessions)",
-            &[],
+            "notes",
+            "capture, show, clear, or triage pending notes",
+            &["add", "clear", "checkin"],
         ),
-        ("notes", "show or clear pending notes", &["clear"]),
-        ("checkin", "triage what needs attention now", &[]),
         (
             "editor",
             "integrate omegon with an editor/IDE",
@@ -5883,7 +5828,6 @@ impl App {
             "open preferences menu (model, thinking, density, mouse, etc.)",
             &[],
         ),
-        ("prefs", "alias for /preferences", &[]),
         (
             "permissions",
             "view grants and always-allow persistence",
@@ -5893,16 +5837,6 @@ impl App {
             "automation",
             "tune ask/proceed gates without changing permissions",
             &["status", "ask", "guarded", "flow", "autonomous"],
-        ),
-        (
-            "autonomy",
-            "alias for /automation continuation policy",
-            &["ask", "guarded", "flow", "autonomous"],
-        ),
-        (
-            "trust",
-            "alias for /permissions trusted directories",
-            &["add", "remove", "list"],
         ),
         (
             "sandbox",
@@ -5936,17 +5870,32 @@ impl App {
 
         match cmd {
             "help" => {
+                if matches!(args, "tutorial" | "tour") {
+                    return self.handle_tutorial("");
+                }
+                if args == "tutorial status" {
+                    return self.handle_tutorial("status");
+                }
+                if args == "tutorial reset" {
+                    return self.handle_tutorial("reset");
+                }
+                if args == "tutorial consent" {
+                    return self.handle_tutorial("consent");
+                }
+                if args == "tutorial demo" {
+                    return self.handle_tutorial("demo");
+                }
+                if args == "next" {
+                    return self.handle_tutorial_next();
+                }
+                if args == "prev" {
+                    return self.handle_tutorial_prev();
+                }
+
                 let show_all = args == "all";
                 let slim = !show_all && self.settings.lock().ok().is_some_and(|s| s.is_slim());
                 // Harness-lifecycle commands hidden in slim/Cruise zone.
-                const SLIM_HIDDEN: &[&str] = &[
-                    "tree",
-                    "cleave",
-                    "delegate",
-                    "milestone",
-                    "shackle",
-                    "unshackle",
-                ];
+                const SLIM_HIDDEN: &[&str] = &["tree", "cleave", "delegate", "milestone"];
                 let lines: Vec<String> = Self::COMMANDS
                     .iter()
                     .filter(|(n, _, _)| !slim || !SLIM_HIDDEN.contains(n))
@@ -5964,7 +5913,7 @@ impl App {
                     ""
                 };
                 SlashResult::Display(format!(
-                    "Commands:\n{}\n\nType / to browse. Tab completes.{suffix}",
+                    "Commands:\n{}\n\nGuided tour: /help tutorial. Type / to browse. Tab completes.{suffix}",
                     lines.join("\n")
                 ))
             }
@@ -6236,6 +6185,9 @@ impl App {
             }
 
             "stats" => {
+                if args == "bench" {
+                    return self.handle_slash_command("/bench", tx);
+                }
                 if let Some(command) = canonical_slash_command("stats", args)
                     && let Some(request) =
                         crate::control_runtime::control_request_from_slash(&command)
@@ -6246,7 +6198,7 @@ impl App {
                     });
                     SlashResult::Handled
                 } else {
-                    SlashResult::Display("Usage: /stats".into())
+                    SlashResult::Display("Usage: /stats [bench]".into())
                 }
             }
 
@@ -6611,7 +6563,7 @@ impl App {
                     SlashResult::Handled
                 }
                 _ => SlashResult::Display(format!(
-                    "Unknown auth command: {args}\n\nUsage:\n  /auth status\n\nUse /login <provider> or /logout <provider> for provider authentication."
+                    "Unknown auth command: {args}\n\nUsage:\n  /auth status\n\nUse /auth login <provider> or /auth logout <provider> for provider authentication."
                 )),
             },
 
@@ -6877,23 +6829,26 @@ impl App {
 
             "ui" => {
                 let args = args.trim();
+                if let Some(density) = args.strip_prefix("detail ").or_else(|| args.strip_prefix("density ")) {
+                    return self.handle_slash_command(&format!("/detail {}", density.trim()), tx);
+                }
+                if matches!(args, "detail" | "density") {
+                    return self.handle_slash_command("/detail", tx);
+                }
                 if args.is_empty() || args == "status" {
                     SlashResult::Display(self.ui_status_text())
-                } else if args == "lean" || args == "slim" || args == "minimal" {
+                } else if args == "lean" {
                     self.apply_ui_preset(UiSurfaces::lean());
-                    SlashResult::Display("UI → lean (minimal)".into())
-                } else if args == "standard" || args == "std" {
-                    self.apply_ui_preset(UiSurfaces::standard());
-                    SlashResult::Display("UI → standard (+ footer)".into())
+                    SlashResult::Display("UI → lean".into())
                 } else if args == "full" {
                     self.apply_ui_preset(UiSurfaces::full());
                     SlashResult::Display("UI → full (+ dashboard + instruments)".into())
                 } else if let Some(surface) = args.strip_prefix("toggle ") {
                     let surface = surface.trim();
                     let enabled = match surface {
-                        "dashboard" | "dash" | "tree" => !self.ui_surfaces.dashboard,
+                        "dashboard" | "dash" => !self.ui_surfaces.dashboard,
                         "instruments" | "instrument" | "tools" => !self.ui_surfaces.instruments,
-                        "footer" | "status" => !self.ui_surfaces.footer,
+                        "footer" => !self.ui_surfaces.footer,
                         other => {
                             return SlashResult::Display(format!("Unknown UI surface: {other}"));
                         }
@@ -6921,7 +6876,10 @@ impl App {
                         Err(err) => SlashResult::Display(err),
                     }
                 } else {
-                    SlashResult::Display(self.ui_status_text())
+                    SlashResult::Display(format!(
+                        "Unknown UI command: {args}\n\n{}",
+                        self.ui_status_text()
+                    ))
                 }
             }
 
@@ -6985,11 +6943,7 @@ impl App {
 
             "milestone" => self.handle_milestone(args),
 
-            "tutorial" | "demo" => self.handle_tutorial(args),
-
-            "next" => self.handle_tutorial_next(),
-
-            "prev" => self.handle_tutorial_prev(),
+            "demo" => self.handle_tutorial(args),
 
             "secrets" => self.handle_secrets(args, tx),
 
@@ -9040,7 +8994,7 @@ pub async fn run_tui(
                 let ctx = s.context_window / 1000;
                 brief.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
             } else {
-                brief.push_str("\n  ⚠ No provider — use /login to connect");
+                brief.push_str("\n  ⚠ No provider — use /auth login to connect");
             }
             if !s.is_slim() && facts > 0 {
                 brief.push_str(&format!("  ·  {facts} facts loaded"));
@@ -9080,7 +9034,7 @@ pub async fn run_tui(
                 let ctx = s.context_window / 1000;
                 welcome.push_str(&format!("\n  ▸ {model_short}  ·  {ctx}k context"));
             } else {
-                welcome.push_str("\n  ⚠ No provider — use /login to connect");
+                welcome.push_str("\n  ⚠ No provider — use /auth login to connect");
             }
             if !s.is_slim() && facts > 0 {
                 welcome.push_str(&format!("  ·  {facts} facts loaded"));
@@ -9105,7 +9059,7 @@ pub async fn run_tui(
                     if s.is_slim() {
                         "💡 Lean mode is active. Start with the file or command you want to inspect. Use /ui full any time to reveal the richer harness surfaces."
                     } else {
-                        "💡 First time here? Type /tutorial for a guided tour, or just start typing."
+                        "💡 First time here? Type /help tutorial for a guided tour, or just start typing."
                     },
                 );
             }
@@ -9582,7 +9536,7 @@ pub async fn run_tui(
                                             .await;
 
                                         // For provider keys, also write to auth.json so the
-                                        // provider resolution chain finds them (/login checks
+                                        // provider resolution chain finds them (/auth login checks
                                         // auth.json, not the secrets keyring)
                                         // Look up provider by env var name using canonical map
                                         let provider = crate::auth::PROVIDERS
@@ -9956,9 +9910,9 @@ pub async fn run_tui(
                             app.set_focus_mode(!app.focus_mode);
                         }
 
-                        // Ctrl+G: cycle UI preset (lean → standard → full → lean)
+                        // Ctrl+G: toggle UI preset (lean ↔ full).
                         (KeyCode::Char('g'), KeyModifiers::CONTROL) => {
-                            let next = app.ui_surfaces.next_preset();
+                            let next = app.ui_surfaces.toggle_preset();
                             let name = next.preset_name();
                             app.apply_ui_preset(next);
                             app.show_toast(
@@ -10234,14 +10188,11 @@ mod auspex_copy_tests {
     use super::*;
 
     #[test]
-    fn command_copy_marks_auspex_primary_and_dash_compatibility() {
-        let dash = App::COMMANDS
-            .iter()
-            .find(|(name, _, _)| *name == "dash")
-            .expect("/dash command must exist");
-        assert!(dash.1.contains("compatibility"));
-        assert!(dash.1.contains("legacy/debug"));
-        assert!(dash.1.contains("Auspex"));
+    fn command_copy_marks_auspex_primary_without_dash_autocomplete() {
+        assert!(
+            App::COMMANDS.iter().all(|(name, _, _)| *name != "dash"),
+            "/dash is a hidden compatibility/debug handler, not an autocomplete command"
+        );
 
         let auspex = App::COMMANDS
             .iter()

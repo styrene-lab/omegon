@@ -1831,10 +1831,26 @@ fn ui_command_switches_between_full_and_slim_presets() {
 
     let result = app.handle_slash_command("/ui standard", &tx);
     assert!(matches!(result, SlashResult::Display(_)));
-    assert!(app.ui_surfaces.is_compact());
-    assert!(!app.ui_surfaces.dashboard);
-    assert!(!app.ui_surfaces.instruments);
-    assert!(app.ui_surfaces.footer);
+    if let SlashResult::Display(text) = result {
+        assert!(text.contains("Unknown UI command"), "{text}");
+    }
+}
+
+#[test]
+fn ctrl_g_preset_toggle_skips_removed_standard_mode() {
+    let mut surfaces = UiSurfaces::lean();
+    surfaces = surfaces.toggle_preset();
+    assert_eq!(surfaces.preset_name(), "full");
+    surfaces = surfaces.toggle_preset();
+    assert_eq!(surfaces.preset_name(), "lean");
+
+    let custom = UiSurfaces {
+        dashboard: false,
+        instruments: false,
+        footer: true,
+    };
+    assert_eq!(custom.preset_name(), "custom");
+    assert_eq!(custom.toggle_preset().preset_name(), "lean");
 }
 
 #[test]
@@ -1861,6 +1877,19 @@ fn ui_command_can_toggle_individual_surfaces() {
         !app.ui_surfaces.footer,
         "slim mode surface hiding should leave footer hidden unless explicitly shown"
     );
+    let result = app.handle_slash_command("/ui toggle dash", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(app.ui_surfaces.dashboard);
+
+    let result = app.handle_slash_command("/ui toggle tools", &tx);
+    assert!(matches!(result, SlashResult::Display(_)));
+    assert!(app.ui_surfaces.instruments);
+
+    let result = app.handle_slash_command("/ui toggle tree", &tx);
+    assert!(matches!(result, SlashResult::Display(ref text) if text.contains("Unknown UI surface: tree")));
+
+    let result = app.handle_slash_command("/ui toggle status", &tx);
+    assert!(matches!(result, SlashResult::Display(ref text) if text.contains("Unknown UI surface: status")));
 }
 
 #[test]
@@ -1894,8 +1923,14 @@ fn slash_help_lists_ui_and_runtime_mode_commands() {
         panic!("expected display");
     };
     assert!(text.contains("/ui"), "{text}");
-    assert!(text.contains("/shackle"), "{text}");
-    assert!(text.contains("/unshackle"), "{text}");
+    assert!(text.contains("/ui           switch UI presets"), "{text}");
+    assert!(text.contains("detail|density"), "{text}");
+    assert!(text.contains("/stats"), "{text}");
+    assert!(!text.contains("/bench"), "{text}");
+    assert!(!text.contains("/detail       tool output density"), "{text}");
+    assert!(!text.contains("/shackle"), "{text}");
+    assert!(!text.contains("/unshackle"), "{text}");
+    assert!(!text.contains("/warp"), "{text}");
 }
 
 #[test]
