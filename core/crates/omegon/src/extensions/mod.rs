@@ -400,7 +400,7 @@ impl ExtensionFeature {
                     self.runtime.name
                 )
             })?;
-        let tools = handshake(
+        let handshake = handshake(
             &mut handles,
             &self.runtime.manifest,
             &self.runtime.ext_dir,
@@ -418,7 +418,7 @@ impl ExtensionFeature {
         *guard = Some(handles);
         tracing::warn!(
             extension = %self.runtime.name,
-            tools = tools.len(),
+            tools = handshake.tools.len(),
             cause = %cause,
             "respawned extension after transport failure"
         );
@@ -719,6 +719,8 @@ pub struct SpawnedExtension {
     pub feature: Box<dyn Feature>,
     pub widgets: Vec<ExtensionTabWidget>,
     pub widget_rx: broadcast::Receiver<WidgetEvent>,
+    /// Optional metadata returned by the extension initialize handshake.
+    pub metadata: Option<Value>,
     /// Polling handle for extensions that provide `vox_route` (event bridge).
     pub vox_polling_handle: Option<ExtensionPollingHandle>,
     /// Idle notification pump for voice-capable extensions.
@@ -847,10 +849,23 @@ async fn handshake(
     ext_dir: &Path,
     resolved_secrets: &[(String, String)],
     notification_sink: Option<&ExtensionNotificationSink>,
-) -> Result<Vec<ToolDefinition>> {
+) -> Result<ExtensionHandshake> {
     let name = &manifest.extension.name;
 
-    // 1. Discover tools
+    // 1. Optional initialize handshake metadata. Older extensions may not
+    // implement this method; absence must not prevent startup.
+    let metadata = match handles
+        .rpc_call_with_notifications("initialize", json!({}), notification_sink)
+        .await
+    {
+        Ok(value) => Some(value),
+        Err(e) => {
+            tracing::debug!(extension = name, error = %e, "extension initialize metadata unavailable");
+            None
+        }
+    };
+
+    // 2. Discover tools
     let tools_response = handles
         .rpc_call_with_notifications("get_tools", json!({}), notification_sink)
         .await?;
@@ -861,7 +876,7 @@ async fn handshake(
         )
     })?;
 
-    // 2. Deliver secrets over pipe — never via env var
+    // 3. Deliver secrets over pipe — never via env var
     if !resolved_secrets.is_empty() {
         let secrets_map: serde_json::Map<String, Value> = resolved_secrets
             .iter()
@@ -895,7 +910,7 @@ async fn handshake(
         }
     }
 
-    // 3. Deliver typed config defaults + persisted operator values.
+    // 4. Deliver typed config defaults + persisted operator values.
     // Values are delivered over RPC after process start so extension config
     // stays in the same channel as secrets and never depends on inherited env.
     let config = resolved_config(manifest, ext_dir)?;
@@ -919,7 +934,12 @@ async fn handshake(
         }
     }
 
-    Ok(tools)
+    Ok(ExtensionHandshake { tools, metadata })
+}
+
+struct ExtensionHandshake {
+    tools: Vec<ToolDefinition>,
+    metadata: Option<Value>,
 }
 
 fn normalize_extension_tool_definitions(value: &Value) -> Result<Vec<ToolDefinition>> {
@@ -1057,7 +1077,7 @@ async fn spawn_native(
         (None, None)
     };
 
-    let tools = handshake(
+    let handshake = handshake(
         &mut handles,
         manifest,
         ext_dir,
@@ -1069,7 +1089,7 @@ async fn spawn_native(
     tracing::info!(
         name = %manifest.extension.name,
         binary = %binary.display(),
-        tools = tools.len(),
+        tools = handshake.tools.len(),
         widgets = widgets.len(),
         secrets = resolved_secrets.len(),
         "spawned native extension"
@@ -1084,10 +1104,10 @@ async fn spawn_native(
     };
 
     let (feature, widget_rx) =
-        ExtensionFeature::new(runtime, tools.clone(), widgets.clone(), handles, state);
+        ExtensionFeature::new(runtime, handshake.tools.clone(), widgets.clone(), handles, state);
 
     // Extract polling handle if this extension provides vox_route
-    let vox_polling_handle = if tools.iter().any(|t| t.name == "vox_route") {
+    let vox_polling_handle = if handshake.tools.iter().any(|t| t.name == "vox_route") {
         tracing::info!(
             name = %manifest.extension.name,
             "extension provides vox_route — creating polling handle for event bridge"
@@ -1124,6 +1144,7 @@ async fn spawn_native(
         feature: Box::new(feature),
         widgets: tab_widgets,
         widget_rx,
+        metadata: handshake.metadata,
         vox_polling_handle,
         voice_polling_handle,
         voice_notification_rx: notification_pair.1,
@@ -1153,7 +1174,7 @@ async fn spawn_container(
         (None, None)
     };
 
-    let tools = handshake(
+    let handshake = handshake(
         &mut handles,
         manifest,
         ext_dir,
@@ -1165,7 +1186,7 @@ async fn spawn_container(
     tracing::info!(
         name = %manifest.extension.name,
         image = image,
-        tools = tools.len(),
+        tools = handshake.tools.len(),
         widgets = widgets.len(),
         secrets = resolved_secrets.len(),
         "spawned OCI extension"
@@ -1180,9 +1201,9 @@ async fn spawn_container(
     };
 
     let (feature, widget_rx) =
-        ExtensionFeature::new(runtime, tools.clone(), widgets.clone(), handles, state);
+        ExtensionFeature::new(runtime, handshake.tools.clone(), widgets.clone(), handles, state);
 
-    let vox_polling_handle = if tools.iter().any(|t| t.name == "vox_route") {
+    let vox_polling_handle = if handshake.tools.iter().any(|t| t.name == "vox_route") {
         Some(feature.polling_handle())
     } else {
         None
@@ -1215,6 +1236,7 @@ async fn spawn_container(
         feature: Box::new(feature),
         widgets: tab_widgets,
         widget_rx,
+        metadata: handshake.metadata,
         vox_polling_handle,
         voice_polling_handle,
         voice_notification_rx: notification_pair.1,

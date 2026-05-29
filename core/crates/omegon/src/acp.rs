@@ -180,10 +180,18 @@ pub struct OmegonAcpAgent {
     session_id: RefCell<Option<SessionId>>,
     secrets: RefCell<Option<std::sync::Arc<omegon_secrets::SecretsManager>>>,
     host_caps: RefCell<HostCapabilities>,
+    extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 impl OmegonAcpAgent {
     pub fn new(model: &str) -> Self {
+        Self::new_with_extension_metadata(model, Default::default())
+    }
+
+    pub fn new_with_extension_metadata(
+        model: &str,
+        extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Self {
         Self {
             model: model.to_string(),
             worker: RefCell::new(None),
@@ -191,6 +199,7 @@ impl OmegonAcpAgent {
             session_id: RefCell::new(None),
             secrets: RefCell::new(None),
             host_caps: RefCell::new(HostCapabilities::default()),
+            extension_metadata,
         }
     }
 
@@ -461,6 +470,12 @@ impl Agent for OmegonAcpAgent {
             AuthMethodAgent::new("omegon-auth", "Omegon Authentication")
                 .description("Run `omegon auth login` in a terminal or set API keys."),
         )];
+        if !self.extension_metadata.is_empty() {
+            response.meta = Some(serde_json::Map::from_iter([(
+                "omegon/extensions".to_string(),
+                serde_json::json!(self.extension_metadata),
+            )]));
+        }
         Ok(response)
     }
 
@@ -756,6 +771,22 @@ impl Agent for OmegonAcpAgent {
                                     stream_sid.clone(),
                                     SessionUpdate::SessionInfoUpdate(
                                         SessionInfoUpdate::new().title(title),
+                                    ),
+                                )
+                                .await;
+                            }
+                        }
+                        Ok(WorkerEvent::ExtensionMetadata(metadata)) => {
+                            if let Some(c) = conn.borrow().as_ref() {
+                                let meta = serde_json::Map::from_iter([(
+                                    "omegon/extensions".to_string(),
+                                    serde_json::json!(metadata),
+                                )]);
+                                let _ = send_session_update(
+                                    c,
+                                    stream_sid.clone(),
+                                    SessionUpdate::SessionInfoUpdate(
+                                        SessionInfoUpdate::new().meta(meta),
                                     ),
                                 )
                                 .await;
@@ -2324,6 +2355,32 @@ fn convert_acp_mcp_server(
 }
 
 // ── Entry point ────────────────────────────────────────────────────────
+
+
+#[cfg(test)]
+mod extension_metadata_tests {
+    use super::*;
+    use agent_client_protocol::{InitializeRequest, ProtocolVersion};
+
+    #[tokio::test]
+    async fn initialize_includes_extension_metadata() {
+        let metadata = std::collections::BTreeMap::from([(
+            "flynt".to_string(),
+            serde_json::json!({"deployment": {"kind": "local", "path": "/tmp/flynt"}}),
+        )]);
+        let agent = OmegonAcpAgent::new_with_extension_metadata("test-model", metadata);
+        let response = agent
+            .initialize(InitializeRequest::new(ProtocolVersion::V1))
+            .await
+            .unwrap();
+
+        let meta = response.meta.expect("metadata should be populated");
+        assert_eq!(
+            meta["omegon/extensions"]["flynt"]["deployment"]["kind"],
+            "local"
+        );
+    }
+}
 
 pub async fn run(model: &str, agent_id: Option<&str>, cwd: &std::path::Path) -> anyhow::Result<()> {
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};

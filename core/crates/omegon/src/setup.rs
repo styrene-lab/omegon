@@ -74,7 +74,9 @@ pub struct AgentSetup {
     pub workspace_state: WorkspaceStartupState,
     /// Extension widgets discovered during setup — passed to TUI for rendering.
     pub extension_widgets: Vec<crate::extensions::ExtensionTabWidget>,
-    /// Widget event receivers — one per discovered extension.
+    /// Extension deployment metadata discovered during startup.
+    pub extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Extension widget event receivers discovered during setup.
     pub widget_receivers: Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
     /// Slot the AgentEvent broadcast sender gets written into once main.rs
     /// has constructed the channel. The cleave feature reads this slot when
@@ -748,15 +750,16 @@ impl AgentSetup {
             vox_polling_handles,
             voice_notification_receivers,
             voice_polling_handles,
+            extension_metadata,
         ) = match discover_and_register_extensions(&cwd, &mut bus, std::sync::Arc::clone(&secrets))
             .await
         {
-            Ok((widgets, receivers, handles, voice_receivers, voice_handles)) => {
-                (widgets, receivers, handles, voice_receivers, voice_handles)
+            Ok((widgets, receivers, handles, voice_receivers, voice_handles, metadata)) => {
+                (widgets, receivers, handles, voice_receivers, voice_handles, metadata)
             }
             Err(e) => {
                 tracing::warn!("extension discovery failed: {}", e);
-                (vec![], vec![], vec![], vec![], vec![])
+                (vec![], vec![], vec![], vec![], vec![], Default::default())
             }
         };
 
@@ -1151,6 +1154,7 @@ impl AgentSetup {
             startup_snapshot,
             initial_harness_status: initial_harness_status.clone(),
             extension_widgets,
+            extension_metadata,
             widget_receivers,
             dashboard_handles: crate::tui::dashboard::DashboardHandles {
                 lifecycle: Some(lifecycle_handle),
@@ -1490,12 +1494,13 @@ async fn discover_and_register_extensions(
     Vec<crate::extensions::ExtensionPollingHandle>,
     Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
     Vec<crate::extensions::ExtensionPollingHandle>,
+    std::collections::BTreeMap<String, serde_json::Value>,
 )> {
     let ext_dir = crate::paths::omegon_home()?.join("extensions");
 
     if !ext_dir.exists() {
         tracing::debug!("extension directory not found: {}", ext_dir.display());
-        return Ok((vec![], vec![], vec![], vec![], vec![]));
+        return Ok((vec![], vec![], vec![], vec![], vec![], Default::default()));
     }
 
     let profile = crate::settings::Profile::load(cwd);
@@ -1507,6 +1512,7 @@ async fn discover_and_register_extensions(
     let mut vox_polling_handles = vec![];
     let mut voice_notification_receivers = vec![];
     let mut voice_polling_handles = vec![];
+    let mut extension_metadata = std::collections::BTreeMap::new();
     for entry in std::fs::read_dir(&ext_dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -1579,6 +1585,9 @@ async fn discover_and_register_extensions(
                 if let Some(rx) = spawned.voice_notification_rx {
                     voice_notification_receivers.push(rx);
                 }
+                if let Some(metadata) = spawned.metadata {
+                    extension_metadata.insert(ext_name.to_string(), metadata);
+                }
                 bus.register(spawned.feature);
                 // Collect widgets and receivers for TUI
                 extension_widgets.extend(spawned.widgets);
@@ -1610,6 +1619,7 @@ async fn discover_and_register_extensions(
         vox_polling_handles,
         voice_notification_receivers,
         voice_polling_handles,
+        extension_metadata,
     ))
 }
 

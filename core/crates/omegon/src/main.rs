@@ -7916,6 +7916,7 @@ mod tests {
                 admission: crate::workspace::types::AdmissionOutcome::GrantedMutable,
             },
             extension_widgets: vec![],
+            extension_metadata: Default::default(),
             widget_receivers: vec![],
             cleave_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
             delegate_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),

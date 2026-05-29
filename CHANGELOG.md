@@ -19,6 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 
 - Add `package.install@1` HostAction support for trusted `omegon-nex` helper-tool installs through host-managed terminal execution.
+- Surface extension initialize metadata through ACP initialize and session info updates for clients such as Flynt.
 
 ## [0.25.3] - 2026-05-29
 

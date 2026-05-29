@@ -93,6 +93,8 @@ pub enum WorkerEvent {
         id: String,
         text: String,
     },
+    /// Extension deployment metadata discovered after worker setup.
+    ExtensionMetadata(std::collections::BTreeMap<String, serde_json::Value>),
     /// Execution plan update (decomposition children, phased work).
     PlanUpdate {
         entries: Vec<PlanEntryData>,
@@ -215,9 +217,13 @@ async fn worker_loop(
     let mut context_manager = agent_setup.context_manager;
     let mut conversation = agent_setup.conversation;
     let secrets = agent_setup.secrets;
+    let extension_metadata = agent_setup.extension_metadata.clone();
     let mut cancel = CancellationToken::new();
 
     let _ = secrets_tx.send(secrets.clone());
+    if !extension_metadata.is_empty() {
+        let _ = event_tx.send(WorkerEvent::ExtensionMetadata(extension_metadata));
+    }
     let host_ctx_arc = host_ctx.map(std::sync::Arc::new);
     tracing::info!(model = %model, "ACP worker ready");
     let mut first_prompt = true;
