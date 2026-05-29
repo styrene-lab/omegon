@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep arrow, Home/End, and Alt-word movement editing the composer while focus mode is active and the input buffer contains text.
+
 ## [0.25.0] - 2026-05-28
 
 ### Added

@@ -9817,7 +9817,7 @@ pub async fn run_tui(
                         }
                     }
 
-                    if app.focus_mode {
+                    if app.focus_mode && app.editor.is_empty() {
                         match (key.code, key.modifiers) {
                             (KeyCode::Up, _) | (KeyCode::Left, _) => {
                                 app.conversation.scroll_up(3);
