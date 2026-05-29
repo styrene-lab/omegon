@@ -16,9 +16,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-05-29
+
 ### Fixed
 
-- Keep arrow, Home/End, and Alt-word movement editing the composer while focus mode is active and the input buffer contains text.
+- Route `/auth login <provider>` and `/auth logout <provider>` through the interactive auth command handlers so documented 401 recovery hints work from the canonical `/auth` surface.
 
 ## [0.25.0] - 2026-05-28
 
