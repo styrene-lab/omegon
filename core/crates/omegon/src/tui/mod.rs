@@ -859,6 +859,16 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
         "sessions" if args.is_empty() => Some(CanonicalSlashCommand::ListSessions),
         "auth" => match args {
             "" | "status" => Some(CanonicalSlashCommand::AuthStatus),
+            _ if args.starts_with("login ") => {
+                let provider = args.trim_start_matches("login ").trim();
+                (!provider.is_empty())
+                    .then(|| CanonicalSlashCommand::AuthLogin(provider.to_string()))
+            }
+            _ if args.starts_with("logout ") => {
+                let provider = args.trim_start_matches("logout ").trim();
+                (!provider.is_empty())
+                    .then(|| CanonicalSlashCommand::AuthLogout(provider.to_string()))
+            }
             _ => None,
         },
         "login" if !args.is_empty() => Some(CanonicalSlashCommand::AuthLogin(args.to_string())),
@@ -3566,7 +3576,8 @@ impl App {
                 SlashResult::Display(format!("{status}\n\nLesson queued."))
             } else {
                 SlashResult::Display(
-                    "🎉 You've completed the tutorial! Type /help tutorial reset to start over.".into(),
+                    "🎉 You've completed the tutorial! Type /help tutorial reset to start over."
+                        .into(),
                 )
             }
         } else {
@@ -6562,8 +6573,22 @@ impl App {
                     let _ = tx.try_send(TuiCommand::AuthStatus { respond_to: None });
                     SlashResult::Handled
                 }
+                Some(CanonicalSlashCommand::AuthLogin(provider)) => {
+                    let _ = tx.try_send(TuiCommand::AuthLogin {
+                        provider,
+                        respond_to: None,
+                    });
+                    SlashResult::Handled
+                }
+                Some(CanonicalSlashCommand::AuthLogout(provider)) => {
+                    let _ = tx.try_send(TuiCommand::AuthLogout {
+                        provider,
+                        respond_to: None,
+                    });
+                    SlashResult::Handled
+                }
                 _ => SlashResult::Display(format!(
-                    "Unknown auth command: {args}\n\nUsage:\n  /auth status\n\nUse /auth login <provider> or /auth logout <provider> for provider authentication."
+                    "Unknown auth command: {args}\n\nUsage:\n  /auth status\n  /auth login <provider>\n  /auth logout <provider>"
                 )),
             },
 
@@ -6829,7 +6854,10 @@ impl App {
 
             "ui" => {
                 let args = args.trim();
-                if let Some(density) = args.strip_prefix("detail ").or_else(|| args.strip_prefix("density ")) {
+                if let Some(density) = args
+                    .strip_prefix("detail ")
+                    .or_else(|| args.strip_prefix("density "))
+                {
                     return self.handle_slash_command(&format!("/detail {}", density.trim()), tx);
                 }
                 if matches!(args, "detail" | "density") {

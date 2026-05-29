@@ -1886,10 +1886,14 @@ fn ui_command_can_toggle_individual_surfaces() {
     assert!(app.ui_surfaces.instruments);
 
     let result = app.handle_slash_command("/ui toggle tree", &tx);
-    assert!(matches!(result, SlashResult::Display(ref text) if text.contains("Unknown UI surface: tree")));
+    assert!(
+        matches!(result, SlashResult::Display(ref text) if text.contains("Unknown UI surface: tree"))
+    );
 
     let result = app.handle_slash_command("/ui toggle status", &tx);
-    assert!(matches!(result, SlashResult::Display(ref text) if text.contains("Unknown UI surface: status")));
+    assert!(
+        matches!(result, SlashResult::Display(ref text) if text.contains("Unknown UI surface: status"))
+    );
 }
 
 #[test]
@@ -1927,7 +1931,10 @@ fn slash_help_lists_ui_and_runtime_mode_commands() {
     assert!(text.contains("detail|density"), "{text}");
     assert!(text.contains("/stats"), "{text}");
     assert!(!text.contains("/bench"), "{text}");
-    assert!(!text.contains("/detail       tool output density"), "{text}");
+    assert!(
+        !text.contains("/detail       tool output density"),
+        "{text}"
+    );
     assert!(!text.contains("/shackle"), "{text}");
     assert!(!text.contains("/unshackle"), "{text}");
     assert!(!text.contains("/warp"), "{text}");
@@ -2714,13 +2721,7 @@ fn slash_auth_login_redirects_to_top_level_login() {
     let mut app = test_app();
     let tx = test_tx();
     let result = app.handle_slash_command("/auth login anthropic", &tx);
-    let SlashResult::Display(text) = result else {
-        panic!("expected Display result");
-    };
-    assert!(
-        text.contains("Use /login <provider> or /logout <provider>"),
-        "got: {text}"
-    );
+    assert!(matches!(result, SlashResult::Handled));
 }
 
 #[test]
@@ -4523,7 +4524,7 @@ fn recovery_hint_rate_limit() {
 #[test]
 fn recovery_hint_unauthorized() {
     let hint = App::recovery_hint(None, "HTTP 401 Unauthorized");
-    assert!(hint.contains("/login"), "should suggest login: {hint}");
+    assert!(hint.contains("/auth login"), "should suggest login: {hint}");
 }
 
 #[test]
