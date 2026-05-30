@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Changed
 
+- Update first-party GitHub Actions workflow dependencies to Node 24-backed major releases (`checkout@v6`, `setup-node@v6`, `upload-artifact@v6`, `download-artifact@v6`) and keep the daemon smoke job timeout aligned with cold build time.
 - Split Rust CI into focused build, unit, integration, standalone-crate, extension-install, daemon-smoke, and benchmark-validation jobs so hangs identify the failing bucket instead of cancelling the entire test sequence.
 
 ### Fixed

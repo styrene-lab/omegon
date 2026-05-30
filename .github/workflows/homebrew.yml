@@ -21,12 +21,12 @@ jobs:
 
     steps:
       - name: Checkout omegon (for release_manifest.py)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: omegon
 
       - name: Checkout homebrew-tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: styrene-lab/homebrew-tap
           token: ${{ secrets.RELEASE_GITHUB_TOKEN }}
