@@ -56,7 +56,7 @@ jobs:
             archive: tar.gz
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag_name || github.ref }}
 
@@ -199,7 +199,7 @@ jobs:
           fi
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-${{ matrix.target }}
           path: |
@@ -217,7 +217,7 @@ jobs:
     timeout-minutes: 40
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag_name || github.ref }}
 
@@ -276,7 +276,7 @@ jobs:
           sha256sum "$EXT_ARCHIVE" > "$EXT_ARCHIVE.sha256"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-aarch64-unknown-linux-gnu
           path: |
@@ -299,7 +299,7 @@ jobs:
       OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
       OLLAMA_HOST: ${{ secrets.OLLAMA_HOST }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag_name || github.ref }}
 
@@ -314,7 +314,7 @@ jobs:
 
       - name: Upload live upstream smoke log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: live-upstream-smoke-log
           path: /tmp/live-upstream-smoke.log
@@ -353,7 +353,7 @@ jobs:
             install_cmd: dnf install -y glibc libgcc file ca-certificates
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: build-x86_64-unknown-linux-gnu
           path: abi-artifacts
@@ -391,10 +391,10 @@ jobs:
       attestations: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download primary build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: artifacts
           pattern: build-*
@@ -566,7 +566,7 @@ jobs:
             description: "Full-stack agent"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag_name || github.ref }}
 
