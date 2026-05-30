@@ -231,7 +231,7 @@ impl Editor {
     }
 
     fn projected_cursor(&self) -> usize {
-        let (cursor_row, cursor_col) = self.textarea.cursor();
+        let ratatui_textarea::DataCursor(cursor_row, cursor_col) = self.textarea.cursor();
         let mut idx = 0usize;
         for (row_idx, line) in self.textarea.lines().iter().enumerate() {
             if row_idx < cursor_row {
@@ -247,7 +247,7 @@ impl Editor {
     fn set_projected_cursor(&mut self, projected_idx: usize) {
         self.textarea
             .move_cursor(ratatui_textarea::CursorMove::Head);
-        while self.textarea.cursor().0 > 0 {
+        while self.cursor_row() > 0 {
             self.textarea.move_cursor(ratatui_textarea::CursorMove::Up);
             self.textarea
                 .move_cursor(ratatui_textarea::CursorMove::Head);
@@ -666,7 +666,7 @@ impl Editor {
     /// Kill to end of line (Ctrl+K).
     pub fn kill_to_end(&mut self) {
         // Select to end of line and cut
-        let (row, col) = self.textarea.cursor();
+        let ratatui_textarea::DataCursor(row, col) = self.textarea.cursor();
         let line = self
             .textarea
             .lines()
@@ -730,7 +730,7 @@ impl Editor {
 
     /// Get cursor column position (display width).
     pub fn cursor_position(&self) -> usize {
-        let (_, col) = self.textarea.cursor();
+        let ratatui_textarea::DataCursor(_, col) = self.textarea.cursor();
         col
     }
 
@@ -856,7 +856,7 @@ impl Editor {
     /// the text origin is at `x` (no left border) and `y + 1` (one top border).
     /// Match that geometry exactly or the terminal cursor drifts by one column.
     pub fn raw_cursor_screen_position(&self, editor_area: Rect) -> (u16, u16) {
-        let (row, col) = self.textarea.cursor();
+        let ratatui_textarea::DataCursor(row, col) = self.textarea.cursor();
         let inner_x = editor_area.x;
         let inner_y = editor_area.y.saturating_add(1);
         let inner_w = editor_area.width.max(1);
@@ -888,7 +888,8 @@ impl Editor {
     /// Current cursor row (0-based). Used to decide if Up/Down should navigate
     /// within the editor or fall through to history/scroll.
     pub fn cursor_row(&self) -> usize {
-        self.textarea.cursor().0
+        let ratatui_textarea::DataCursor(row, _) = self.textarea.cursor();
+        row
     }
 
     /// Compute the wrapped text used for multiline rendering.
@@ -902,7 +903,7 @@ impl Editor {
     /// Uses `wrap_chars_at` — same algorithm as the renderer — so the
     /// terminal cursor always points to the correct visual cell.
     pub fn cursor_screen_position(&mut self, editor_area: Rect) -> (u16, u16) {
-        let (cursor_row, cursor_col) = self.textarea.cursor();
+        let ratatui_textarea::DataCursor(cursor_row, cursor_col) = self.textarea.cursor();
         // Normal editor mode uses Borders::TOP only: no left/right border,
         // one top border row. Cursor math must match that exact geometry.
         let content_width = editor_area.width.max(1) as usize;
