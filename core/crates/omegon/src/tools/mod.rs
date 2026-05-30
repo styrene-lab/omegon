@@ -1661,13 +1661,13 @@ mod tests {
         assert!(!tool_names.contains("list_local_models"));
         assert!(!tool_names.contains("manage_ollama"));
 
-        // 13 registered core tools. trust_directory is internal-only and not in
+        // 14 registered core tools. trust_directory is internal-only and not in
         // tool_defs; change is registered for harness batching but hidden from
         // the model-facing tool surface by EventBus filtering.
         assert_eq!(
             tool_names.len(),
-            13,
-            "Expected 13 registered core tools, got {}",
+            14,
+            "Expected 14 registered core tools, got {}",
             tool_names.len()
         );
     }

@@ -182,6 +182,18 @@ impl ProcessHandles {
     }
 }
 
+impl Drop for ProcessHandles {
+    fn drop(&mut self) {
+        // Extension processes are long-lived JSON-RPC peers. Dropping the
+        // final host-side handle must not leave shell-script/native extension
+        // children alive, because Tokio waits for managed child processes and
+        // `cargo test` can hang after assertions complete. Respawn paths still
+        // perform explicit async kill/wait; this synchronous drop path is the
+        // deterministic backstop for tests and normal shutdown.
+        let _ = self.child.start_kill();
+    }
+}
+
 fn host_rpc_response_for_extension_request(
     manifest: &ExtensionManifest,
     extension_name: &str,
@@ -854,13 +866,25 @@ async fn handshake(
 
     // 1. Optional initialize handshake metadata. Older extensions may not
     // implement this method; absence must not prevent startup.
-    let metadata = match handles
-        .rpc_call_with_notifications("initialize", json!({}), notification_sink)
-        .await
+    let metadata = match tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        handles.rpc_call_with_notifications("initialize", json!({}), notification_sink),
+    )
+    .await
     {
-        Ok(value) => Some(value),
-        Err(e) => {
+        Ok(Ok(value)) => Some(value),
+        Ok(Err(e)) => {
             tracing::debug!(extension = name, error = %e, "extension initialize metadata unavailable");
+            None
+        }
+        Err(_) => {
+            // Older extensions may not implement `initialize` at all. The
+            // optional probe must not strand startup, and because no response
+            // arrived for the probe id, reset discovery to id=1 so legacy test
+            // fixtures and simple SDK examples that return fixed ids still
+            // complete the required get_tools handshake.
+            handles.next_id = 1;
+            tracing::debug!(extension = name, "extension initialize metadata timed out");
             None
         }
     };

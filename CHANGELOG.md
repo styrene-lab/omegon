@@ -16,6 +16,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Changed
+
+- Split Rust CI into focused build, unit, integration, standalone-crate, extension-install, daemon-smoke, and benchmark-validation jobs so hangs identify the failing bucket instead of cancelling the entire test sequence.
+
+### Fixed
+
+- Ensure spawned extension subprocesses are killed when host-side process handles are dropped, preventing extension RPC tests from keeping `cargo test -p omegon` alive indefinitely.
+
 ## [0.25.4] - 2026-05-29
 
 ### Added
