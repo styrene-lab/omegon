@@ -9,22 +9,47 @@ on:
     branches: [main]
 
 jobs:
-  rust:
-    name: Rust checks
+  rust-build:
+    name: Rust build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
       - name: Build omegon binary
         run: cargo build -p omegon
 
-      - name: Run cargo tests
-        run: cargo test -p omegon
+  rust-unit:
+    name: Rust unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run omegon tests
+        run: cargo test -p omegon --bin omegon -- --nocapture
 
+  rust-integration:
+    name: Rust integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run omegon integration tests
+        run: cargo test -p omegon --tests -- --nocapture
+
+  rust-standalone-crates:
+    name: Standalone crate tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
       - name: Standalone crate compilation (no workspace deps)
         run: |
           cargo build -p omegon-memory --no-default-features
@@ -32,9 +57,27 @@ jobs:
           cargo test -p omegon-memory --no-default-features
           cargo test -p omegon-secrets --no-default-features
 
+  extension-install-integration:
+    name: Extension install integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
       - name: Extension install integration tests
-        run: cargo test -p omegon --test extension_install_blackbox -- --test-threads=1
+        run: cargo test -p omegon --test extension_install_blackbox -- --test-threads=1 --nocapture
 
+  daemon-smoke:
+    name: Smoke reference daemon launcher
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build omegon binary
+        run: cargo build -p omegon
       - name: Smoke reference daemon launcher
         run: |
           python3 scripts/launch_omegon_daemon.py \
@@ -44,9 +87,14 @@ jobs:
             --control-port 7856 \
             --strict-port
 
+  benchmark-validation:
+    name: Benchmark validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
       - name: Validate benchmark task definitions
         run: python3 scripts/validate_benchmarks.py
-
       - name: Validate benchmark harness loads
         run: |
           python3 -c "
