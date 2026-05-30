@@ -16,13 +16,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.25.5] - 2026-05-30
+
 ### Changed
 
+- Refresh compatible Rust dependency lockfile entries, including `omegon-extension` 0.25.1 and the Ratatui 0.31-compatible stack.
 - Update first-party GitHub Actions workflow dependencies to Node 24-backed major releases (`checkout@v6`, `setup-node@v6`, `upload-artifact@v6`, `download-artifact@v6`) and keep the daemon smoke job timeout aligned with cold build time.
 - Split Rust CI into focused build, unit, integration, standalone-crate, extension-install, daemon-smoke, and benchmark-validation jobs so hangs identify the failing bucket instead of cancelling the entire test sequence.
 
 ### Fixed
 
+- Accept explicit `background_session` terminal placement from `omegon-extension` 0.25.1 host action requests.
 - Ensure spawned extension subprocesses are killed when host-side process handles are dropped, preventing extension RPC tests from keeping `cargo test -p omegon` alive indefinitely.
 
 ## [0.25.4] - 2026-05-29
