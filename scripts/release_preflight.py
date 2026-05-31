@@ -70,6 +70,27 @@ def workflows_use_release_manifest(repo_root: Path) -> bool:
     return "release-manifest.json" in release_workflow and "release-manifest.json" in homebrew_workflow
 
 
+def release_gaps_clear(repo_root: Path) -> bool:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_release_gaps.py",
+            "--repo",
+            "styrene-lab/omegon",
+            "--since",
+            "v0.25.0",
+        ],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        details = (completed.stdout + completed.stderr).strip()
+        raise PreflightError(f"stable tag release gap check failed: {details}")
+    return True
+
+
 def git_stdout(repo_root: Path, *args: str) -> str:
     completed = subprocess.run(
         ["git", *args],
@@ -154,6 +175,11 @@ def collect_failures(repo_root: Path) -> list[str]:
 
     if not workflows_use_release_manifest(repo_root):
         failures.append("release workflows are not consistently wired through release-manifest.json")
+
+    try:
+        release_gaps_clear(repo_root)
+    except PreflightError as err:
+        failures.append(str(err))
 
     return failures
 

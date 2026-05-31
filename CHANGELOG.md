@@ -16,11 +16,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-## [0.25.6] - 2026-05-30
+## [0.25.6] - 2026-05-31
 
 ### Changed
 
 - Upgrade ACP dependencies to the 0.12 SDK and matching schema updates while preserving existing stdio/WebSocket behavior.
+- Preserve Omegon's local single-thread ACP/runtime ownership through a local JSON-RPC adapter rather than forcing ACP handlers into shared `Send` runtime state.
+
+### Fixed
+
+- Harden ACP host request handling so local adapter requests send JSON-RPC error responses instead of terminating the receive loop before replying.
+- Prevent ACP host proxy requests from holding the shared client connection borrow across awaited host RPCs.
+- Document the `self_cell` Apache-2.0 license selection so stable releases pass third-party license audit.
+
+### Added
+
+- Add a release-gap check that fails preflight when an upstream stable tag exists without a matching GitHub Release.
 
 ## [0.25.5] - 2026-05-30
 
