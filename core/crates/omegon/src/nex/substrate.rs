@@ -3,6 +3,7 @@
 //! Omegon consumes Nex as the source of truth for deterministic substrate
 //! discovery and adds an advisory policy overlay for agent/runtime decisions.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -23,6 +24,8 @@ pub struct NexSubstrateReport {
     pub path: String,
     pub mode: String,
     pub reports: NexSubstrateReports,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<NexSubstrateDelegation>,
     pub policy: NexSubstratePolicy,
     pub diagnostics: Vec<String>,
 }
@@ -31,6 +34,15 @@ pub struct NexSubstrateReport {
 pub struct NexSubstrateReports {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub devenv_import: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NexSubstrateDelegation {
+    pub provider: String,
+    pub command_id: String,
+    pub tool: String,
+    pub mutability: String,
+    pub output_schema: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -155,9 +167,43 @@ pub async fn inspect_devenv(path: &Path) -> NexSubstrateReport {
         reports: NexSubstrateReports {
             devenv_import: Some(report_json),
         },
+        delegation: None,
         policy,
         diagnostics,
     }
+}
+
+pub fn delegation_for_mode(
+    extension_metadata: &BTreeMap<String, Value>,
+    mode: &str,
+) -> Option<NexSubstrateDelegation> {
+    let command_id = match mode {
+        "devenv" => "devenv.inspect",
+        _ => return None,
+    };
+    let nex = extension_metadata
+        .values()
+        .find_map(|metadata| metadata.pointer("/delegations/nex"))?;
+    let provider = nex
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("omegon-nex");
+    let commands = nex.get("commands")?.as_array()?;
+    let command = commands.iter().find(|command| {
+        command.get("id").and_then(Value::as_str) == Some(command_id)
+            && command.get("mutability").and_then(Value::as_str) == Some("read-only")
+    })?;
+    Some(NexSubstrateDelegation {
+        provider: provider.to_string(),
+        command_id: command_id.to_string(),
+        tool: command.get("tool")?.as_str()?.to_string(),
+        mutability: command.get("mutability")?.as_str()?.to_string(),
+        output_schema: command
+            .get("output_schema")
+            .and_then(Value::as_str)
+            .unwrap_or(NEX_DEVENV_REPORT_SCHEMA)
+            .to_string(),
+    })
 }
 
 pub fn derive_policy(devenv_report: &Value) -> NexSubstratePolicy {
@@ -331,6 +377,7 @@ fn unavailable_report(path: String, mode: String) -> NexSubstrateReport {
         path,
         mode,
         reports: NexSubstrateReports::default(),
+        delegation: None,
         policy,
         diagnostics: Vec::new(),
     }
@@ -461,5 +508,56 @@ mod tests {
         let policy = derive_policy(&json!({"schema": "other", "items": []}));
         assert_eq!(policy.summary.warnings, 1);
         assert_eq!(policy.findings[0].code, "schema_unknown");
+    }
+
+    #[test]
+    fn discovers_omegon_nex_devenv_delegation_metadata() {
+        let metadata = BTreeMap::from([(
+            "omegon-nex".to_string(),
+            json!({
+                "delegations": {
+                    "nex": {
+                        "schema": "io.styrene.omegon-nex.delegations.v1",
+                        "provider": "omegon-nex",
+                        "commands": [{
+                            "id": "devenv.inspect",
+                            "tool": "nex_devenv_inspect",
+                            "command": ["nex", "devenv", "inspect", "<path>", "--json"],
+                            "mutability": "read-only",
+                            "output_schema": NEX_DEVENV_REPORT_SCHEMA
+                        }]
+                    }
+                }
+            }),
+        )]);
+
+        let delegation = delegation_for_mode(&metadata, "devenv").expect("delegation");
+        assert_eq!(delegation.provider, "omegon-nex");
+        assert_eq!(delegation.command_id, "devenv.inspect");
+        assert_eq!(delegation.tool, "nex_devenv_inspect");
+        assert_eq!(delegation.mutability, "read-only");
+        assert_eq!(delegation.output_schema, NEX_DEVENV_REPORT_SCHEMA);
+    }
+
+    #[test]
+    fn ignores_mutating_delegation_metadata() {
+        let metadata = BTreeMap::from([(
+            "omegon-nex".to_string(),
+            json!({
+                "delegations": {
+                    "nex": {
+                        "provider": "omegon-nex",
+                        "commands": [{
+                            "id": "devenv.inspect",
+                            "tool": "nex_devenv_inspect",
+                            "mutability": "state-changing",
+                            "output_schema": NEX_DEVENV_REPORT_SCHEMA
+                        }]
+                    }
+                }
+            }),
+        )]);
+
+        assert!(delegation_for_mode(&metadata, "devenv").is_none());
     }
 }
