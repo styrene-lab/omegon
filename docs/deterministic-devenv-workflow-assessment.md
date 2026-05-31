@@ -9,7 +9,10 @@ open_questions:
   - "Should devenv.sh own only interactive developer shells, or should CI/release workflows also consume the same lockfile/config to prevent drift?"
   - "How should macOS signing/notarization and Linux cross-build dependencies be represented without leaking secrets or requiring heavyweight release-only tools for every contributor shell?"
 dependencies: []
-related: []
+related:
+  - nex-substrate-tool-boundary
+  - nex-deterministic-substrate-boundary
+
 ---
 
 # Assess devenv.sh for deterministic Omegon developer workflow

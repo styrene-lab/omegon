@@ -13,6 +13,7 @@ related:
   - session-secret-cache-preflight
   - repo-agent-runtime-profile
   - nex-deterministic-substrate-boundary
+  - nex-substrate-tool-boundary
 ---
 
 # Secrets-Pack Deterministic Credential Workflow

@@ -14,6 +14,7 @@ related:
   - deterministic-devenv-workflow-assessment
   - session-secret-cache-preflight
   - runtime-facade-command-event-model
+  - nex-substrate-tool-boundary
 ---
 
 # Repo Agent Runtime Profile

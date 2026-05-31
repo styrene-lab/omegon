@@ -12,6 +12,7 @@ dependencies: []
 related:
   - repo-agent-runtime-profile
   - deterministic-devenv-workflow-assessment
+  - nex-substrate-tool-boundary
 ---
 
 # Nex Deterministic Substrate Boundary
@@ -69,17 +70,18 @@ Omegon should own:
 
 ## Next implementation slice
 
-Add an Omegon-side read-only Nex substrate ingestion surface before enforcing behavior:
+Add an Omegon-side read-only Nex substrate ingestion surface before enforcing behavior. The concrete boundary is designed in [[nex-substrate-tool-boundary|Omegon Nex Substrate Tool Boundary]] and should be a separate `nex_substrate` tool rather than another `nex_capability` action.
+
+First slice command mapping:
 
 ```text
-omegon nex substrate inspect --path . --json
+nex_substrate { action: "inspect", path: ".", mode: "devenv" }
 ```
 
-or extend existing `nex_capability` with a substrate/profile mode that shells out to Nex when available:
+Under the hood Omegon should call:
 
 ```text
-nex_capability { action: "profile.inspect", path: "." }
-nex_capability { action: "secrets.check", profile: "release" }
+nex devenv inspect <path> --json
 ```
 
-The first slice should only ingest and display/report Nex facts. It should not yet mutate the runtime, install packages, or grant secrets.
+The first slice should only ingest and display/report Nex facts. It should not yet mutate the runtime, install packages, enforce policy, or grant secrets.
