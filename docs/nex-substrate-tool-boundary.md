@@ -7,7 +7,6 @@ open_questions:
   - "Should the public agent tool be named `nex_substrate`, `substrate_inspect`, or grouped under a future `runtime_profile` tool surface?"
   - "Should first-slice missing Nex behavior be a structured report with `nex_available=false`, or should headless/release modes fail the tool call outright?"
   - "Which policy findings become blockers in v1: `requires_review`, `unsupported`, `secret-value-runtime`, privileged/destructive safety tags, or only explicit release/headless mode checks?"
-  - "Should Omegon call the external `nex` binary, an embedded library crate, or both with binary-first fallback-to-library later?"
 related:
   - nex-deterministic-substrate-boundary
   - repo-agent-runtime-profile
@@ -25,7 +24,8 @@ This is deliberately separate from `nex_capability`. `nex_capability` answers "i
 
 ## Design goals
 
-- Consume Nex as the source of truth for substrate discovery, classification, and report schemas.
+- Consume Nex as the source of truth for substrate discovery, classification, and report schemas when a Nex provider is explicitly available.
+- Preserve Omegon's single-binary functional default: core startup, normal chat/coding, and default validation workflows must work without Nex, devenv, Nix, or `omegon-nex` installed.
 - Keep the first Omegon slice read-only and non-enforcing except for explicit tool-call error handling.
 - Preserve raw Nex reports in machine-readable `details` so future UI/release/headless policies can build on the same evidence.
 - Produce a small Omegon policy overlay that identifies findings relevant to agent autonomy, release preflight, headless execution, and secret grants.
@@ -33,11 +33,36 @@ This is deliberately separate from `nex_capability`. `nex_capability` answers "i
 
 ## Non-goals
 
+- Do not create default-operation, startup, release, or build dependencies on Nex or Nix.
 - Do not parse `devenv.nix`, `devenv.yaml`, or `secretspec.toml` in Omegon.
 - Do not install Nex, Nix, devenv, packages, extensions, or secrets providers.
 - Do not inject secrets into agent processes.
 - Do not treat Nex reports as authorization grants.
 - Do not replace the existing `nex_capability` single-capability resolver.
+
+## Core dependency invariant
+
+Omegon core must remain a single-binary functional runtime by default. A fresh operator must be able to install and run `omegon` without installing Nex, devenv, Nix, package managers beyond the host baseline, `omegon-nex`, MCP servers, ACP peers, or any optional provider. Optional integrations can improve determinism, provisioning, and substrate awareness, but they cannot become implicit prerequisites for startup, chat/coding operation, ordinary tool use, or default validation.
+
+This implies a hard routing rule:
+
+```text
+If a capability requires an external dependency, it must be one of:
+
+1. extension-owned / ACP-owned / MCP-owned provider behavior;
+2. explicit user-invoked core tool with graceful degraded result;
+3. repo/workflow-policy-gated requirement that fails only after explicit opt-in.
+```
+
+It must not be:
+
+```text
+core startup requirement
+unconditional session preflight
+unconditional release preflight
+compile-time Rust dependency on Nex internals
+silent background probe that changes default behavior
+```
 
 ## Public tool surface
 
@@ -149,7 +174,7 @@ When Nex is unavailable:
 }
 ```
 
-For the initial interactive agent tool, missing Nex should be a structured warning, not a hard error. Release/headless preflight can later promote `nex_unavailable` to a blocker when a repo profile requires Nex substrate verification.
+For the initial interactive agent tool, missing Nex should be a structured warning, not a hard error. Release/headless preflight can later promote `nex_unavailable` to a blocker only when a repo profile explicitly requires Nex substrate verification. Without that explicit policy, missing Nex remains advisory.
 
 ## Policy overlay
 
@@ -186,11 +211,35 @@ Initial mapping from Nex `io.styrene.nex.devenv-import-report.v1`:
 
 The first slice should not know whether the current prompt is release/headless. It should expose enough structured findings for later runtime policy to make that decision.
 
+## Delegation/extension routing
+
+The long-term owner for Nex CLI delegation actions is the `omegon-nex` extension, not core. Core may retain a tiny advisory fallback for explicit `nex_substrate` tool calls, but any workflow that requires Nex execution beyond optional inspection should go through an extension/ACP/MCP provider boundary.
+
+Ownership split:
+
+```text
+omegon-nex extension
+  - fixed Nex command wrappers
+  - host-action install/apply plans
+  - raw Nex report retrieval
+  - provider health/degraded status
+
+Omegon core
+  - optional tool registration
+  - policy overlay derivation
+  - repo/runtime/release enforcement only after explicit policy opt-in
+  - no hard dependency on Nex binaries, crates, or services
+```
+
+If `omegon-nex` is installed, core should prefer it for Nex operation delegation once an extension-to-core substrate provider path exists. If it is not installed, core must continue to operate normally and may return `nex_unavailable` for explicit substrate inspections.
+
 ## Runtime behavior
 
 1. Resolve `path` against the workspace boundary using existing path safety helpers where possible.
-2. Locate `nex` via PATH.
-3. If missing, return `nex_available=false` report.
+2. Locate a Nex provider:
+   - future preferred path: installed `omegon-nex` extension/ACP/MCP provider;
+   - first-slice fallback: direct `nex` binary on PATH for explicit user-invoked inspection only.
+3. If no provider is available, return `nex_available=false` report.
 4. Run `nex devenv inspect <path> --json` with bounded timeout and captured stdout/stderr.
 5. Parse stdout as JSON.
 6. Preserve the raw Nex JSON under `reports.devenv_import`.
@@ -235,11 +284,17 @@ Policy: warning nex_unavailable — install or expose `nex` to enable determinis
 
 **Rationale:** Capability resolution and substrate inspection have different shapes. A capability check is a single-key availability query; substrate inspection is a project-wide report with nested evidence and policy findings. Keeping them separate avoids schema ambiguity and keeps future enforcement clearer.
 
-### Binary-first integration for first slice
+### Binary fallback is allowed only for explicit advisory inspection
 
 **Status:** candidate
 
-**Rationale:** The sister project already exposes `nex devenv inspect --json`. Calling the binary keeps ownership in Nex, avoids vendoring unstable internals into Omegon, and exercises the same CLI/API boundary that UI and operators will use. A library crate can be considered later when Nex stabilizes a Rust API.
+**Rationale:** Calling `nex devenv inspect --json` directly from core is acceptable as a narrow first-slice fallback because it is explicit, read-only, bounded, and advisory. It must not grow into a general core dependency on Nex. Any required or mutating Nex-backed workflow should be routed through the extension system or another provider boundary.
+
+### Core remains single-binary functional by default
+
+**Status:** candidate
+
+**Rationale:** Omegon's core value proposition is a self-contained agent harness. Deterministic substrate integrations are valuable, but they cannot impose Nex/devenv/Nix/extension installation on operators who are using ordinary Omegon workflows. Missing optional providers are degraded capabilities unless a repo/workflow policy explicitly opts into requiring them.
 
 ### Missing Nex is warning-only for interactive inspection
 
@@ -255,17 +310,17 @@ Policy: warning nex_unavailable — install or expose `nex` to enable determinis
 
 ## First implementation tasks
 
-1. Add `core/crates/omegon/src/nex/substrate.rs` with wrapper report structs and policy mapping helpers.
-2. Add `nex_substrate` to `tool_registry.rs` and `CoreTools::definitions()` as a read-only repo-inspection tool.
-3. Implement `CoreTools::execute()` branch for `nex_substrate` using `nex devenv inspect <path> --json`.
-4. Add unit tests for policy mapping using synthetic Nex import reports.
-5. Add a missing-Nex test around the command runner boundary if command execution is injectable; otherwise keep first tests pure and cover execution with focused manual validation.
-6. Update `CHANGELOG.md` `[Unreleased]` when behavior lands.
+1. Keep the current core `nex_substrate` implementation narrow: explicit `inspect`, `devenv` mode only, advisory report only.
+2. Add tests/guards that missing Nex remains a degraded report and never affects startup/default operation.
+3. Extend `omegon-nex` with `nex_devenv_inspect` as the preferred long-term Nex delegation provider.
+4. Add an extension/provider bridge so core policy code can consume raw Nex reports from `omegon-nex` when installed.
+5. Keep pure policy mapping helpers in core so runtime/release/headless policy does not live in the extension.
+6. Update `CHANGELOG.md` when behavior changes.
 
 ## Later slices
 
 - Add repo runtime profile field that requires Nex substrate verification.
 - Consume future `nex secrets check --json` once available.
-- Promote selected findings to blockers in headless/release mode.
+- Promote selected findings to blockers in headless/release mode, but only when repo/workflow policy explicitly requires Nex substrate verification.
 - Surface findings in session preflight and release preflight.
 - Add A2A/child-agent grant policy derived from secret contracts.

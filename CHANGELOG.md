@@ -18,7 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Added
 
-- Add the `nex_substrate` read-only tool boundary for consuming Nex project substrate reports and deriving Omegon policy findings without duplicating devenv or SecretSpec parsing.
+- Add the `nex_substrate` read-only tool boundary for consuming Nex project substrate reports and deriving Omegon policy findings without duplicating devenv or SecretSpec parsing while preserving Omegon's single-binary default operation when Nex is absent.
 
 ## [0.25.6] - 2026-05-31
 

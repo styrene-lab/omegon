@@ -6,7 +6,7 @@ tags: [nex, substrate, tooling, secrets, capabilities, architecture]
 open_questions:
   - "Which existing Omegon host checks should move behind Nex first: release toolchain checks, package install HostActions, secrets-pack preflight, `nex_capability`, or provider/tool availability probes?"
   - "What structured contract should Nex return to Omegon: capability status only, remediation plans, exact versions/sources, export plans for secrets, or provenance/attestation data?"
-  - "How should Omegon degrade when Nex is unavailable: direct local checks, warning-only mode, fail-fast for release/headless workflows, or install prompt?"
+  - "How should Omegon degrade when Nex is unavailable: warning-only for explicit interactive inspection, extension-provider unavailable diagnostics, or fail-fast only when repo/workflow policy explicitly requires Nex verification?"
   - "Which policy decisions must remain in Omegon even if Nex can resolve/provision the substrate: approvals, scope enforcement, changelog/version release policy, delegation grants, and runtime lifecycle transitions?"
 dependencies: []
 related:
@@ -29,11 +29,17 @@ Define the boundary between Nex and Omegon for deterministic host substrate mana
 
 **Rationale:** Nex should report whether a host can satisfy a requirement and how to remediate it. Omegon should decide whether an agent action is allowed, whether a credential may be granted, and whether a workflow should proceed.
 
+### Omegon core remains single-binary functional by default
+
+**Status:** candidate
+
+**Rationale:** Nex-backed determinism is optional substrate enrichment, not a prerequisite for using Omegon. Core must not require Nex, devenv, Nix, MCP/ACP peers, or `omegon-nex` for startup, normal agent operation, or default validation. External-dependency-backed workflows become required only through explicit repo/workflow policy opt-in and should preferentially route through extension/provider boundaries.
+
 ## Open Questions
 
 - Which existing Omegon host checks should move behind Nex first: release toolchain checks, package install HostActions, secrets-pack preflight, `nex_capability`, or provider/tool availability probes?
 - What structured contract should Nex return to Omegon: capability status only, remediation plans, exact versions/sources, export plans for secrets, or provenance/attestation data?
-- How should Omegon degrade when Nex is unavailable: direct local checks, warning-only mode, fail-fast for release/headless workflows, or install prompt?
+- How should Omegon degrade when Nex is unavailable: warning-only for explicit interactive inspection, extension-provider unavailable diagnostics, or fail-fast only when repo/workflow policy explicitly requires Nex verification?
 - Which policy decisions must remain in Omegon even if Nex can resolve/provision the substrate: approvals, scope enforcement, changelog/version release policy, delegation grants, and runtime lifecycle transitions?
 
 ## Research: Nex ownership evidence from sister project

@@ -53,7 +53,7 @@ Nex has already started adopting SecretSpec-style semantics in design and code:
 - `src/devenv_import.rs` already detects `secretspec.toml` and emits `SecretContract` items into the devenv import report.
 - `src/machine_profile.rs` already supports `required` and `optional` secret names for machine profiles.
 
-These facts support treating Nex as the owner of secrets-pack availability and resolver-health checks. Omegon should not duplicate SecretSpec parsing unless Nex is unavailable and a minimal fallback is required.
+These facts support treating Nex as the owner of secrets-pack availability and resolver-health checks. Omegon should not duplicate SecretSpec parsing. If Nex or a Nex-backed extension/provider is unavailable, core should return degraded/advisory status unless the repo/workflow explicitly requires secrets-pack verification.
 
 ## Ownership refinement
 
@@ -62,4 +62,4 @@ Secrets-pack should be a shared contract surface, but ownership should split thi
 - Nex: parse/import/check/generate/run substrate secrets; report missing or unhealthy providers; avoid Nix-store and global-env leakage.
 - Omegon: decide grant policy, session cache policy, child/A2A forwarding, approval requirements, and redaction enforcement.
 
-For headless work, Omegon should ask Nex for a no-values check report before work begins, then either fail fast or request an explicit operator grant.
+For headless work, Omegon should ask a Nex provider for a no-values check report before work begins only when the repo/workflow policy requires that verification. Without explicit opt-in, missing Nex remains a degraded capability rather than a global blocker.
