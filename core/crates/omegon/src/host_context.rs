@@ -373,7 +373,6 @@ async fn acp_request_permission(
 // pump's longer-lived borrows during RPC round-trips.
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::await_holding_refcell_ref)]
 pub fn spawn_proxy_pump(
     mut rx: mpsc::Receiver<HostProxyRequest>,
     conn: crate::acp::SharedAcpClientConnection,
@@ -422,7 +421,8 @@ pub fn spawn_proxy_pump(
 
             match req {
                 HostProxyRequest::ReadTextFile { path, reply } => {
-                    let result = acp_read_text_file(&client, session_id.clone(), path.clone()).await;
+                    let result =
+                        acp_read_text_file(&client, session_id.clone(), path.clone()).await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp.content),
                         Err(e) => Err(anyhow::anyhow!(

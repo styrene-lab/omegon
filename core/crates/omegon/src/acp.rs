@@ -59,7 +59,8 @@ impl AcpClientConnection {
     {
         let untyped = notification.to_untyped_message()?;
         let params: Option<agent_client_protocol::jsonrpcmsg::Params> =
-            serde_json::from_value(untyped.params).map_err(agent_client_protocol::Error::into_internal_error)?;
+            serde_json::from_value(untyped.params)
+                .map_err(agent_client_protocol::Error::into_internal_error)?;
         self.tx
             .unbounded_send(Ok(JsonRpcMessage::Request(
                 agent_client_protocol::jsonrpcmsg::Request::new_v2(untyped.method, params, None),
@@ -67,7 +68,10 @@ impl AcpClientConnection {
             .map_err(agent_client_protocol::Error::into_internal_error)
     }
 
-    pub(crate) async fn send_request<Req>(&self, request: Req) -> agent_client_protocol::Result<Req::Response>
+    pub(crate) async fn send_request<Req>(
+        &self,
+        request: Req,
+    ) -> agent_client_protocol::Result<Req::Response>
     where
         Req: JsonRpcRequest,
     {
@@ -75,7 +79,8 @@ impl AcpClientConnection {
         let id = uuid::Uuid::new_v4().to_string();
         let untyped = request.to_untyped_message()?;
         let params: Option<agent_client_protocol::jsonrpcmsg::Params> =
-            serde_json::from_value(untyped.params).map_err(agent_client_protocol::Error::into_internal_error)?;
+            serde_json::from_value(untyped.params)
+                .map_err(agent_client_protocol::Error::into_internal_error)?;
         let (tx, rx) = futures::channel::oneshot::channel();
         self.pending.borrow_mut().insert(id.clone(), tx);
         if let Err(error) = self.tx.unbounded_send(Ok(JsonRpcMessage::Request(
@@ -90,7 +95,11 @@ impl AcpClientConnection {
         }
         let value = rx
             .await
-            .map_err(|_| agent_client_protocol::util::internal_error(format!("ACP request `{method}` response channel closed")))??;
+            .map_err(|_| {
+                agent_client_protocol::util::internal_error(format!(
+                    "ACP request `{method}` response channel closed"
+                ))
+            })??;
         Req::Response::from_value(&method, value)
     }
 
@@ -102,14 +111,17 @@ impl AcpClientConnection {
             return;
         };
         let result = if let Some(error) = response.error {
-            Err(agent_client_protocol::Error::new(
-                error.code,
-                error.message,
-            ).data(error.data))
+            Err(agent_client_protocol::Error::new(error.code, error.message).data(error.data))
         } else {
             Ok(response.result.unwrap_or(serde_json::Value::Null))
         };
         let _ = tx.send(result);
+    }
+
+    fn fail_pending(&self, error: agent_client_protocol::Error) {
+        for (_, tx) in std::mem::take(&mut *self.pending.borrow_mut()) {
+            let _ = tx.send(Err(error.clone()));
+        }
     }
 }
 
@@ -148,7 +160,10 @@ pub(crate) fn connect_acp_agent(
                         let agent = agent.clone();
                         tokio::task::spawn_local(async move {
                             if let Err(error) = handle_acp_request(agent, &tx, request).await {
-                                tracing::warn!(?error, "ACP request handler failed before response send");
+                                tracing::warn!(
+                                    ?error,
+                                    "ACP request handler failed before response send"
+                                );
                             }
                         });
                     }
@@ -158,10 +173,13 @@ pub(crate) fn connect_acp_agent(
                 }
             }
         }
-        io_task
+        let result = io_task
             .await
-            .map_err(agent_client_protocol::Error::into_internal_error)??;
-        Ok(())
+            .map_err(agent_client_protocol::Error::into_internal_error)?;
+        if let Err(error) = &result {
+            client.fail_pending(error.clone());
+        }
+        result
     }
 }
 
@@ -241,7 +259,10 @@ async fn handle_acp_request_result(
         }
         m if SetSessionConfigOptionRequest::matches_method(m) => {
             let req = SetSessionConfigOptionRequest::parse_message(method, params)?;
-            SetSessionConfigOptionResponse::into_json(agent.set_session_config_option(req).await?, method)
+            SetSessionConfigOptionResponse::into_json(
+                agent.set_session_config_option(req).await?,
+                method,
+            )
         }
         _ => Err(agent_client_protocol::Error::method_not_found()),
     }
