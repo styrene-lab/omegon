@@ -40,9 +40,10 @@ The vast majority of Omegon's dependencies are licensed under permissive terms:
 | Unicode-3.0 / Unicode-DFS-2016 | ~18 packages | Unicode data tables |
 | CDLA-Permissive-2.0 | 2 packages | Community data license, permissive |
 | MPL-2.0 | 7 packages | See section below — file-level copyleft |
+| Apache-2.0 OR GPL-2.0 | 1 package | `self_cell` is used under Apache-2.0; GPL option not selected |
 | WTFPL | 1 package | Unconditionally permissive |
 
-Packages licensed `Apache-2.0 OR LGPL-2.1-or-later OR MIT` (r-efi) are used under the Apache-2.0 OR MIT option. No LGPL or GPL code is compiled into the Omegon binary.
+Packages licensed `Apache-2.0 OR LGPL-2.1-or-later OR MIT` (r-efi) are used under the Apache-2.0 OR MIT option. Packages licensed `Apache-2.0 OR GPL-2.0` (self_cell) are used under the Apache-2.0 option. No LGPL or GPL code is compiled into the Omegon binary.
 
 ---
 
@@ -114,6 +115,21 @@ CSS selector matching and parsing.
 - **Copyright:** © The Servo Project Developers
 - **Source:** https://github.com/servo/stylo
 - **crates.io:** https://crates.io/crates/selectors
+
+---
+
+## Apache-2.0 OR GPL-2.0 Components
+
+The following package offers a GPL license alternative, but Omegon uses it under the permissive Apache-2.0 option. The GPL option is not selected for Omegon distribution.
+
+### self_cell v1.2.2
+
+Safe-to-use proc-macro-free self-referential structs in stable Rust.
+
+- **License:** Apache-2.0 OR GPL-2.0; Omegon uses Apache-2.0
+- **Copyright:** © self_cell contributors
+- **Source:** https://github.com/Voultapher/self_cell
+- **crates.io:** https://crates.io/crates/self_cell
 
 ---
 

@@ -32,6 +32,9 @@ ACKNOWLEDGED = {
     "cssparser-macros": "0.6.1",
     "dtoa-short":       "0.3.5",
     "selectors":        "0.26.0",
+    # Apache-2.0 OR GPL-2.0 — documented in THIRD_PARTY_NOTICES.md;
+    # Omegon selects Apache-2.0, not GPL-2.0.
+    "self_cell":        "1.2.2",
 }
 
 # ── Own crates ─────────────────────────────────────────────────────────────
