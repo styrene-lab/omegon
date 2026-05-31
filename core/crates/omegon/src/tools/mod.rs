@@ -366,6 +366,7 @@ pub struct CoreTools {
     /// Workspace boundary enforcer — shared with other tool providers.
     boundary: WorkspaceBoundary,
     terminal_tool_enabled: bool,
+    nex_delegations: Vec<crate::nex::substrate::NexSubstrateDelegation>,
 }
 
 impl CoreTools {
@@ -376,6 +377,7 @@ impl CoreTools {
             repo_model: None,
             boundary,
             terminal_tool_enabled: true,
+            nex_delegations: Vec::new(),
         }
     }
 
@@ -390,6 +392,7 @@ impl CoreTools {
             repo_model: Some(repo_model),
             boundary,
             terminal_tool_enabled: true,
+            nex_delegations: Vec::new(),
         }
     }
 
@@ -397,6 +400,15 @@ impl CoreTools {
     pub fn with_settings(mut self, settings: crate::settings::SharedSettings) -> Self {
         self.terminal_tool_enabled = settings.lock().map(|s| s.terminal_tool).unwrap_or(true);
         self.boundary = self.boundary.with_settings(settings);
+        self
+    }
+
+    /// Attach read-only Nex delegations discovered from extension metadata.
+    pub fn with_nex_delegations(
+        mut self,
+        delegations: Vec<crate::nex::substrate::NexSubstrateDelegation>,
+    ) -> Self {
+        self.nex_delegations = delegations;
         self
     }
 
@@ -1304,7 +1316,11 @@ impl ToolProvider for CoreTools {
                     Some(path) => self.resolve_path(path)?,
                     None => self.cwd.clone(),
                 };
-                let report = crate::nex::substrate::inspect_devenv(&path).await;
+                let mut report = crate::nex::substrate::inspect_devenv(&path).await;
+                report.delegation = crate::nex::substrate::delegation_for_command(
+                    &self.nex_delegations,
+                    "devenv.inspect",
+                );
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text {
                         text: crate::nex::substrate::summary_text(&report),

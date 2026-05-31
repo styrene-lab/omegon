@@ -316,24 +316,11 @@ impl AgentSetup {
             None
         };
 
-        // ─── Core tools (bash, read, write, edit, commit; hidden internal change) ──
-        let core_tools = if let Some(ref model) = repo_model {
-            tools::CoreTools::with_repo_model(cwd.clone(), model.clone())
+        let boundary = if let Some(ref s) = settings {
+            tools::WorkspaceBoundary::new(cwd.clone()).with_settings(s.clone())
         } else {
-            tools::CoreTools::new(cwd.clone())
+            tools::WorkspaceBoundary::new(cwd.clone())
         };
-        let core_tools = if let Some(ref s) = settings {
-            core_tools.with_settings(s.clone())
-        } else {
-            core_tools
-        };
-        let boundary = core_tools.boundary().clone();
-        bus.register(Box::new(features::adapter::ToolAdapter::new(
-            "core-tools",
-            Box::new(core_tools),
-        )));
-        // Register internal tools that the dispatch layer calls but the LLM never sees.
-        bus.register_internal_tool(crate::tool_registry::core::TRUST_DIRECTORY, "core-tools");
 
         // ─── Feature tool providers ─────────────────────────────────────
         bus.register(Box::new(features::adapter::ToolAdapter::new(
@@ -762,6 +749,26 @@ impl AgentSetup {
                 (vec![], vec![], vec![], vec![], vec![], Default::default())
             }
         };
+
+        // ─── Core tools (bash, read, write, edit, commit; hidden internal change) ──
+        let core_tools = if let Some(ref model) = repo_model {
+            tools::CoreTools::with_repo_model(cwd.clone(), model.clone())
+        } else {
+            tools::CoreTools::new(cwd.clone())
+        };
+        let core_tools = if let Some(ref s) = settings {
+            core_tools.with_settings(s.clone())
+        } else {
+            core_tools
+        };
+        let nex_delegations = crate::nex::substrate::read_only_delegations(&extension_metadata);
+        let core_tools = core_tools.with_nex_delegations(nex_delegations);
+        bus.register(Box::new(features::adapter::ToolAdapter::new(
+            "core-tools",
+            Box::new(core_tools),
+        )));
+        // Register internal tools that the dispatch layer calls but the LLM never sees.
+        bus.register_internal_tool(crate::tool_registry::core::TRUST_DIRECTORY, "core-tools");
 
         // ─── External plugins (TOML manifests) ────────────────────────
         let plugin_filter = crate::plugins::PluginSelectionFilter {
