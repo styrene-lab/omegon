@@ -1371,7 +1371,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Commands::Auth { ref action }) => run_auth_command(action).await,
-        Some(Commands::Tdd { ref action }) => run_tdd_command(action),
+        Some(Commands::Tdd { ref action }) => run_tdd_command(action).await,
         Some(Commands::Cleave {
             ref plan,
             ref directive,
@@ -6475,7 +6475,36 @@ async fn maybe_run_injected_cleave_smoke_child(
     }
 }
 
-fn run_tdd_command(action: &TddAction) -> anyhow::Result<()> {
+async fn call_tdd_savepoint_extension(
+    tool_name: &str,
+    args: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    let ext_dir = crate::extension_cli::extensions_dir()?.join("omegon-tdd-savepoint");
+    if !ext_dir.join("manifest.toml").is_file() {
+        anyhow::bail!("omegon-tdd-savepoint extension is not installed");
+    }
+    let spawned = crate::extensions::spawn_from_manifest(&ext_dir, &[]).await?;
+    let result = spawned
+        .feature
+        .execute(
+            tool_name,
+            "cli-tdd",
+            args,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await?;
+    if result
+        .details
+        .get("is_error")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        anyhow::bail!("extension tool {tool_name} failed: {:?}", result.content);
+    }
+    Ok(result.details)
+}
+
+async fn run_tdd_command(action: &TddAction) -> anyhow::Result<()> {
     match action {
         TddAction::Watch {
             filetype,
@@ -6515,44 +6544,80 @@ fn run_tdd_command(action: &TddAction) -> anyhow::Result<()> {
             json,
         } => {
             let cwd = std::env::current_dir()?;
-            let current_diff_hash = if *current {
-                Some(tdd::current_diff_hash(&cwd, scopes))
-            } else {
-                current_diff_hash.clone()
-            };
-            let query = tdd::EvidenceQuery {
-                command_hash: command_hash.clone(),
-                change: change.clone(),
-                scenario: scenario.clone(),
-                task: task.clone(),
-                current_diff_hash,
-            };
-            let events = tdd::read_events(&cwd, &query)?;
-            let status = tdd::classify_evidence(&events, &query);
-            if *json {
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "status": status,
-                        "events": events,
-                    })
-                );
-            } else {
-                println!("status: {:?}", status);
-                println!("events: {}", events.len());
-                for event in events.iter().rev().take(5) {
-                    println!(
-                        "- {} {} command={} change={:?} scenario={:?} task={:?}",
-                        event.event_id,
-                        event.transition,
-                        event.command_hash,
-                        event.change,
-                        event.scenario,
-                        event.task
+            let ext_args = serde_json::json!({
+                "cwd": cwd,
+                "command_hash": command_hash,
+                "change": change,
+                "scenario": scenario,
+                "task": task,
+                "current_diff_hash": current_diff_hash,
+                "current": current,
+                "scopes": scopes,
+            });
+            match call_tdd_savepoint_extension("tdd_savepoint_evidence", ext_args).await {
+                Ok(details) => {
+                    if *json {
+                        println!("{}", details);
+                    } else {
+                        let status = details
+                            .get("status_label")
+                            .and_then(serde_json::Value::as_str)
+                            .or_else(|| details.get("status").and_then(serde_json::Value::as_str))
+                            .unwrap_or("unknown");
+                        let event_count = details
+                            .get("events")
+                            .and_then(serde_json::Value::as_array)
+                            .map(Vec::len)
+                            .unwrap_or(0);
+                        println!("status: {status}");
+                        println!("events: {event_count}");
+                    }
+                    Ok(())
+                }
+                Err(err) => {
+                    eprintln!(
+                        "omegon tdd evidence is moving to the omegon-tdd-savepoint extension; falling back to legacy core evidence reader ({err})"
                     );
+                    let current_diff_hash = if *current {
+                        Some(tdd::current_diff_hash(&cwd, scopes))
+                    } else {
+                        current_diff_hash.clone()
+                    };
+                    let query = tdd::EvidenceQuery {
+                        command_hash: command_hash.clone(),
+                        change: change.clone(),
+                        scenario: scenario.clone(),
+                        task: task.clone(),
+                        current_diff_hash,
+                    };
+                    let events = tdd::read_events(&cwd, &query)?;
+                    let status = tdd::classify_evidence(&events, &query);
+                    if *json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "status": status,
+                                "events": events,
+                            })
+                        );
+                    } else {
+                        println!("status: {:?}", status);
+                        println!("events: {}", events.len());
+                        for event in events.iter().rev().take(5) {
+                            println!(
+                                "- {} {} command={} change={:?} scenario={:?} task={:?}",
+                                event.event_id,
+                                event.transition,
+                                event.command_hash,
+                                event.change,
+                                event.scenario,
+                                event.task
+                            );
+                        }
+                    }
+                    Ok(())
                 }
             }
-            Ok(())
         }
     }
 }
