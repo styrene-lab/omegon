@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::extensions::approval::{HostActionApprovalDecision, decision_from_permission_outcome};
-use agent_client_protocol::*;
+use agent_client_protocol::schema::*;
 use omegon_traits::{ContentBlock, ToolResult};
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
@@ -255,7 +255,7 @@ async fn acp_read_text_file(
     path: PathBuf,
 ) -> agent_client_protocol::Result<ReadTextFileResponse> {
     client
-        .read_text_file(ReadTextFileRequest::new(session_id, path))
+        .send_request(ReadTextFileRequest::new(session_id, path))
         .await
 }
 
@@ -266,7 +266,7 @@ async fn acp_write_text_file(
     content: String,
 ) -> agent_client_protocol::Result<WriteTextFileResponse> {
     client
-        .write_text_file(WriteTextFileRequest::new(session_id, path, content))
+        .send_request(WriteTextFileRequest::new(session_id, path, content))
         .await
 }
 
@@ -288,7 +288,7 @@ async fn acp_create_terminal(
     if let Some(limit) = output_byte_limit {
         request = request.output_byte_limit(limit);
     }
-    client.create_terminal(request).await
+    client.send_request(request).await
 }
 
 async fn acp_terminal_output(
@@ -297,7 +297,7 @@ async fn acp_terminal_output(
     terminal_id: TerminalId,
 ) -> agent_client_protocol::Result<TerminalOutputResponse> {
     client
-        .terminal_output(TerminalOutputRequest::new(session_id, terminal_id))
+        .send_request(TerminalOutputRequest::new(session_id, terminal_id))
         .await
 }
 
@@ -307,7 +307,7 @@ async fn acp_wait_for_terminal_exit(
     terminal_id: TerminalId,
 ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
     client
-        .wait_for_terminal_exit(WaitForTerminalExitRequest::new(session_id, terminal_id))
+        .send_request(WaitForTerminalExitRequest::new(session_id, terminal_id))
         .await
 }
 
@@ -317,7 +317,7 @@ async fn acp_kill_terminal(
     terminal_id: TerminalId,
 ) -> agent_client_protocol::Result<KillTerminalResponse> {
     client
-        .kill_terminal(KillTerminalRequest::new(session_id, terminal_id))
+        .send_request(KillTerminalRequest::new(session_id, terminal_id))
         .await
 }
 
@@ -327,7 +327,7 @@ async fn acp_release_terminal(
     terminal_id: TerminalId,
 ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
     client
-        .release_terminal(ReleaseTerminalRequest::new(session_id, terminal_id))
+        .send_request(ReleaseTerminalRequest::new(session_id, terminal_id))
         .await
 }
 
@@ -355,7 +355,7 @@ async fn acp_request_permission(
         PermissionOption::new("reject_once", "Reject", PermissionOptionKind::RejectOnce),
     ];
     client
-        .request_permission(RequestPermissionRequest::new(
+        .send_request(RequestPermissionRequest::new(
             session_id, tool_call, options,
         ))
         .await
@@ -381,9 +381,8 @@ pub fn spawn_proxy_pump(
 ) {
     tokio::task::spawn_local(async move {
         while let Some(req) = rx.recv().await {
-            let guard = conn.borrow();
-            let Some(client) = guard.as_ref() else {
-                drop(guard);
+            let client = conn.borrow().as_ref().cloned();
+            let Some(client) = client else {
                 macro_rules! no_conn {
                     () => {
                         Err(anyhow::anyhow!("no ACP connection"))
@@ -423,7 +422,7 @@ pub fn spawn_proxy_pump(
 
             match req {
                 HostProxyRequest::ReadTextFile { path, reply } => {
-                    let result = acp_read_text_file(client, session_id.clone(), path.clone()).await;
+                    let result = acp_read_text_file(&client, session_id.clone(), path.clone()).await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp.content),
                         Err(e) => Err(anyhow::anyhow!(
@@ -439,7 +438,7 @@ pub fn spawn_proxy_pump(
                     reply,
                 } => {
                     let result =
-                        acp_write_text_file(client, session_id.clone(), path.clone(), content)
+                        acp_write_text_file(&client, session_id.clone(), path.clone(), content)
                             .await;
                     let _ = reply.send(match result {
                         Ok(_) => Ok(()),
@@ -458,7 +457,7 @@ pub fn spawn_proxy_pump(
                     reply,
                 } => {
                     let result = acp_create_terminal(
-                        client,
+                        &client,
                         session_id.clone(),
                         command,
                         args,
@@ -472,7 +471,8 @@ pub fn spawn_proxy_pump(
                     });
                 }
                 HostProxyRequest::TerminalOutput { terminal_id, reply } => {
-                    let result = acp_terminal_output(client, session_id.clone(), terminal_id).await;
+                    let result =
+                        acp_terminal_output(&client, session_id.clone(), terminal_id).await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp),
                         Err(e) => Err(anyhow::anyhow!("host terminal_output: {}", e.message)),
@@ -480,7 +480,7 @@ pub fn spawn_proxy_pump(
                 }
                 HostProxyRequest::WaitForTerminalExit { terminal_id, reply } => {
                     let result =
-                        acp_wait_for_terminal_exit(client, session_id.clone(), terminal_id).await;
+                        acp_wait_for_terminal_exit(&client, session_id.clone(), terminal_id).await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(resp),
                         Err(e) => Err(anyhow::anyhow!(
@@ -490,7 +490,7 @@ pub fn spawn_proxy_pump(
                     });
                 }
                 HostProxyRequest::KillTerminal { terminal_id, reply } => {
-                    let result = acp_kill_terminal(client, session_id.clone(), terminal_id).await;
+                    let result = acp_kill_terminal(&client, session_id.clone(), terminal_id).await;
                     let _ = reply.send(match result {
                         Ok(_) => Ok(()),
                         Err(e) => Err(anyhow::anyhow!("host kill_terminal: {}", e.message)),
@@ -498,7 +498,7 @@ pub fn spawn_proxy_pump(
                 }
                 HostProxyRequest::ReleaseTerminal { terminal_id, reply } => {
                     let result =
-                        acp_release_terminal(client, session_id.clone(), terminal_id).await;
+                        acp_release_terminal(&client, session_id.clone(), terminal_id).await;
                     let _ = reply.send(match result {
                         Ok(_) => Ok(()),
                         Err(e) => Err(anyhow::anyhow!("host release_terminal: {}", e.message)),
@@ -511,7 +511,7 @@ pub fn spawn_proxy_pump(
                     reply,
                 } => {
                     let result = acp_request_permission(
-                        client,
+                        &client,
                         session_id.clone(),
                         tool_call_id,
                         tool_name,
@@ -524,7 +524,7 @@ pub fn spawn_proxy_pump(
                     });
                 }
                 HostProxyRequest::RequestHostActionApproval { request, reply } => {
-                    let result = client.request_permission(*request).await;
+                    let result = client.send_request(*request).await;
                     let _ = reply.send(match result {
                         Ok(resp) => Ok(decision_from_permission_outcome(resp.outcome)),
                         Err(e) => Err(anyhow::anyhow!(
@@ -534,7 +534,6 @@ pub fn spawn_proxy_pump(
                     });
                 }
             }
-            drop(guard);
         }
     });
 }

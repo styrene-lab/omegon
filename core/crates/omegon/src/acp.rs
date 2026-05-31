@@ -10,6 +10,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use agent_client_protocol::*;
+use agent_client_protocol::JsonRpcMessage as _;
+use agent_client_protocol::schema::*;
 use anyhow::Context;
 
 use crate::acp_worker::{self, WorkerEvent, WorkerHandle, WorkerRequest};
@@ -28,34 +30,236 @@ use model_options::{
 };
 use resource_context::prompt_blocks_to_text;
 
-pub(crate) type AcpClientConnection = AgentSideConnection;
+type JsonRpcMessage = agent_client_protocol::jsonrpcmsg::Message;
+type JsonRpcTx =
+    futures::channel::mpsc::UnboundedSender<agent_client_protocol::Result<JsonRpcMessage>>;
+type PendingResponseTx =
+    futures::channel::oneshot::Sender<agent_client_protocol::Result<serde_json::Value>>;
+type PendingResponses = Rc<RefCell<std::collections::BTreeMap<String, PendingResponseTx>>>;
+
 pub(crate) type SharedAcpClientConnection = Rc<RefCell<Option<AcpClientConnection>>>;
+
+#[derive(Clone)]
+pub(crate) struct AcpClientConnection {
+    tx: JsonRpcTx,
+    pending: PendingResponses,
+}
+
+impl AcpClientConnection {
+    fn new(tx: JsonRpcTx) -> Self {
+        Self {
+            tx,
+            pending: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
+        }
+    }
+
+    pub(crate) fn send_notification<N>(&self, notification: N) -> agent_client_protocol::Result<()>
+    where
+        N: JsonRpcNotification,
+    {
+        let untyped = notification.to_untyped_message()?;
+        let params: Option<agent_client_protocol::jsonrpcmsg::Params> =
+            serde_json::from_value(untyped.params).map_err(agent_client_protocol::Error::into_internal_error)?;
+        self.tx
+            .unbounded_send(Ok(JsonRpcMessage::Request(
+                agent_client_protocol::jsonrpcmsg::Request::new_v2(untyped.method, params, None),
+            )))
+            .map_err(agent_client_protocol::Error::into_internal_error)
+    }
+
+    pub(crate) async fn send_request<Req>(&self, request: Req) -> agent_client_protocol::Result<Req::Response>
+    where
+        Req: JsonRpcRequest,
+    {
+        let method = request.method().to_string();
+        let id = uuid::Uuid::new_v4().to_string();
+        let untyped = request.to_untyped_message()?;
+        let params: Option<agent_client_protocol::jsonrpcmsg::Params> =
+            serde_json::from_value(untyped.params).map_err(agent_client_protocol::Error::into_internal_error)?;
+        let (tx, rx) = futures::channel::oneshot::channel();
+        self.pending.borrow_mut().insert(id.clone(), tx);
+        if let Err(error) = self.tx.unbounded_send(Ok(JsonRpcMessage::Request(
+            agent_client_protocol::jsonrpcmsg::Request::new_v2(
+                untyped.method,
+                params,
+                Some(agent_client_protocol::jsonrpcmsg::Id::String(id.clone())),
+            ),
+        ))) {
+            self.pending.borrow_mut().remove(&id);
+            return Err(agent_client_protocol::Error::into_internal_error(error));
+        }
+        let value = rx
+            .await
+            .map_err(|_| agent_client_protocol::util::internal_error(format!("ACP request `{method}` response channel closed")))??;
+        Req::Response::from_value(&method, value)
+    }
+
+    fn handle_response(&self, response: agent_client_protocol::jsonrpcmsg::Response) {
+        let Some(agent_client_protocol::jsonrpcmsg::Id::String(id)) = response.id else {
+            return;
+        };
+        let Some(tx) = self.pending.borrow_mut().remove(&id) else {
+            return;
+        };
+        let result = if let Some(error) = response.error {
+            Err(agent_client_protocol::Error::new(
+                error.code,
+                error.message,
+            ).data(error.data))
+        } else {
+            Ok(response.result.unwrap_or(serde_json::Value::Null))
+        };
+        let _ = tx.send(result);
+    }
+}
 
 pub(crate) async fn send_session_update(
     conn: &AcpClientConnection,
     session_id: SessionId,
     update: SessionUpdate,
 ) -> agent_client_protocol::Result<()> {
-    conn.session_notification(SessionNotification::new(session_id, update))
-        .await
+    conn.send_notification(SessionNotification::new(session_id, update))
 }
 
-pub(crate) fn connect_acp_agent<AgentHandler, Outgoing, Incoming, SpawnFn>(
-    agent: AgentHandler,
-    outgoing: Outgoing,
-    incoming: Incoming,
-    spawn: SpawnFn,
-) -> (
-    AcpClientConnection,
-    impl std::future::Future<Output = agent_client_protocol::Result<()>>,
-)
-where
-    AgentHandler: Agent + 'static,
-    Outgoing: futures::AsyncWrite + Unpin + 'static,
-    Incoming: futures::AsyncRead + Unpin + 'static,
-    SpawnFn: Fn(futures::future::LocalBoxFuture<'static, ()>) + 'static,
-{
-    AgentSideConnection::new(agent, outgoing, incoming, spawn)
+pub(crate) fn connect_acp_agent(
+    agent: Rc<OmegonAcpAgent>,
+    outgoing: impl futures::AsyncWrite + Send + Unpin + 'static,
+    incoming: impl futures::AsyncRead + Send + Unpin + 'static,
+    _spawn: impl Fn(futures::future::LocalBoxFuture<'static, ()>) + 'static,
+) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> {
+    use agent_client_protocol::ConnectTo;
+    use futures::StreamExt;
+
+    let (mut channel, io_task) = <ByteStreams<_, _> as ConnectTo<Agent>>::into_channel_and_future(
+        ByteStreams::new(outgoing, incoming),
+    );
+    let client = AcpClientConnection::new(channel.tx.clone());
+    agent.set_client(client.clone());
+
+    async move {
+        let io_task = tokio::task::spawn_local(io_task);
+        while let Some(message) = channel.rx.next().await {
+            match message? {
+                JsonRpcMessage::Request(request) => {
+                    if request.id.is_none() {
+                        handle_acp_notification(agent.clone(), request).await?;
+                    } else {
+                        let tx = channel.tx.clone();
+                        let agent = agent.clone();
+                        tokio::task::spawn_local(async move {
+                            if let Err(error) = handle_acp_request(agent, &tx, request).await {
+                                tracing::warn!(?error, "ACP request handler failed before response send");
+                            }
+                        });
+                    }
+                }
+                JsonRpcMessage::Response(response) => {
+                    client.handle_response(response);
+                }
+            }
+        }
+        io_task
+            .await
+            .map_err(agent_client_protocol::Error::into_internal_error)??;
+        Ok(())
+    }
+}
+
+fn request_params(params: Option<agent_client_protocol::jsonrpcmsg::Params>) -> serde_json::Value {
+    serde_json::to_value(params).unwrap_or(serde_json::Value::Null)
+}
+
+fn send_json_response(
+    tx: &JsonRpcTx,
+    id: Option<agent_client_protocol::jsonrpcmsg::Id>,
+    result: agent_client_protocol::Result<serde_json::Value>,
+) -> agent_client_protocol::Result<()> {
+    let response = match result {
+        Ok(value) => agent_client_protocol::jsonrpcmsg::Response::success_v2(value, id),
+        Err(error) => agent_client_protocol::jsonrpcmsg::Response::error_v2(
+            agent_client_protocol::jsonrpcmsg::Error {
+                code: i32::from(error.code),
+                message: error.message,
+                data: error.data,
+            },
+            id,
+        ),
+    };
+    tx.unbounded_send(Ok(JsonRpcMessage::Response(response)))
+        .map_err(agent_client_protocol::Error::into_internal_error)
+}
+
+async fn handle_acp_request(
+    agent: Rc<OmegonAcpAgent>,
+    tx: &JsonRpcTx,
+    request: agent_client_protocol::jsonrpcmsg::Request,
+) -> agent_client_protocol::Result<()> {
+    let method = request.method.clone();
+    let id = request.id.clone();
+    let params = request_params(request.params);
+    let result = handle_acp_request_result(agent, &method, &params).await;
+    send_json_response(tx, id, result)
+}
+
+async fn handle_acp_request_result(
+    agent: Rc<OmegonAcpAgent>,
+    method: &str,
+    params: &serde_json::Value,
+) -> agent_client_protocol::Result<serde_json::Value> {
+    match method {
+        m if InitializeRequest::matches_method(m) => {
+            let req = InitializeRequest::parse_message(method, params)?;
+            InitializeResponse::into_json(agent.initialize(req).await?, method)
+        }
+        m if AuthenticateRequest::matches_method(m) => {
+            let req = AuthenticateRequest::parse_message(method, params)?;
+            AuthenticateResponse::into_json(agent.authenticate(req).await?, method)
+        }
+        m if NewSessionRequest::matches_method(m) => {
+            let req = NewSessionRequest::parse_message(method, params)?;
+            NewSessionResponse::into_json(agent.new_session(req).await?, method)
+        }
+        m if PromptRequest::matches_method(m) => {
+            let req = PromptRequest::parse_message(method, params)?;
+            PromptResponse::into_json(agent.prompt(req).await?, method)
+        }
+        m if LoadSessionRequest::matches_method(m) => {
+            let req = LoadSessionRequest::parse_message(method, params)?;
+            LoadSessionResponse::into_json(agent.load_session(req).await?, method)
+        }
+        m if ListSessionsRequest::matches_method(m) => {
+            let req = ListSessionsRequest::parse_message(method, params)?;
+            ListSessionsResponse::into_json(agent.list_sessions(req).await?, method)
+        }
+        m if CloseSessionRequest::matches_method(m) => {
+            let req = CloseSessionRequest::parse_message(method, params)?;
+            CloseSessionResponse::into_json(agent.close_session(req).await?, method)
+        }
+        m if SetSessionModeRequest::matches_method(m) => {
+            let req = SetSessionModeRequest::parse_message(method, params)?;
+            SetSessionModeResponse::into_json(agent.set_session_mode(req).await?, method)
+        }
+        m if SetSessionConfigOptionRequest::matches_method(m) => {
+            let req = SetSessionConfigOptionRequest::parse_message(method, params)?;
+            SetSessionConfigOptionResponse::into_json(agent.set_session_config_option(req).await?, method)
+        }
+        _ => Err(agent_client_protocol::Error::method_not_found()),
+    }
+}
+
+async fn handle_acp_notification(
+    agent: Rc<OmegonAcpAgent>,
+    request: agent_client_protocol::jsonrpcmsg::Request,
+) -> agent_client_protocol::Result<()> {
+    let method = request.method.clone();
+    let params = request_params(request.params);
+    if CancelNotification::matches_method(&method) {
+        let notification = CancelNotification::parse_message(&method, &params)?;
+        agent.cancel(notification).await?;
+    } else {
+        tracing::debug!(method, "Ignoring unsupported ACP notification");
+    }
+    Ok(())
 }
 
 pub(crate) fn plan_entries_from_snapshot_json(
@@ -441,8 +645,7 @@ impl OmegonAcpAgent {
     }
 }
 
-#[async_trait::async_trait(?Send)]
-impl Agent for OmegonAcpAgent {
+impl OmegonAcpAgent {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         *self.host_caps.borrow_mut() = HostCapabilities::from_client(&args.client_capabilities);
 
@@ -733,7 +936,7 @@ impl Agent for OmegonAcpAgent {
                             let text = redact(&text);
                             if let Some(c) = conn.borrow().as_ref() {
                                 let content =
-                                    ToolCallContent::Content(agent_client_protocol::Content::new(
+                                    ToolCallContent::Content(Content::new(
                                         ContentBlock::Text(TextContent::new(text)),
                                     ));
                                 let fields = ToolCallUpdateFields::new().content(vec![content]);
@@ -877,7 +1080,11 @@ impl Agent for OmegonAcpAgent {
         args: SetSessionConfigOptionRequest,
     ) -> Result<SetSessionConfigOptionResponse> {
         let config_id = args.config_id.0.to_string();
-        let value = args.value.0.to_string();
+        let value = match &args.value {
+            SessionConfigOptionValue::ValueId { value } => value.0.to_string(),
+            SessionConfigOptionValue::Boolean { value } => value.to_string(),
+            _ => return Err(Error::invalid_params()),
+        };
 
         // Use ack so we read shared_settings AFTER the worker has applied the
         // mutation. Without this the response would race the worker thread
@@ -2360,7 +2567,7 @@ fn convert_acp_mcp_server(
 #[cfg(test)]
 mod extension_metadata_tests {
     use super::*;
-    use agent_client_protocol::{InitializeRequest, ProtocolVersion};
+    use agent_client_protocol::schema::{InitializeRequest, ProtocolVersion};
 
     #[tokio::test]
     async fn initialize_includes_extension_metadata() {
@@ -2395,12 +2602,9 @@ pub async fn run(model: &str, agent_id: Option<&str>, cwd: &std::path::Path) -> 
     let stdout = tokio::io::stdout().compat_write();
     let stdin = tokio::io::stdin().compat();
 
-    let agent_clone = agent.clone();
-    let (conn, io_task) = connect_acp_agent(agent_clone, stdout, stdin, |fut| {
+    let io_task = connect_acp_agent(agent.clone(), stdout, stdin, |fut| {
         tokio::task::spawn_local(fut);
     });
-
-    agent.set_client(conn);
 
     io_task.await.context("ACP IO task ended")?;
 
