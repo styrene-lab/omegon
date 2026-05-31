@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.25.6] - 2026-05-30
+
+### Changed
+
+- Upgrade ACP dependencies to the 0.12 SDK and matching schema updates while preserving existing stdio/WebSocket behavior.
+
 ## [0.25.5] - 2026-05-30
 
 ### Changed

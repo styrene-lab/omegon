@@ -2498,7 +2498,7 @@ async fn execute_tool_invocation(
                 let proxy = proxy.clone();
                 Box::pin(async move {
                     let request = match serde_json::from_value::<
-                        agent_client_protocol::RequestPermissionRequest,
+                        agent_client_protocol::schema::RequestPermissionRequest,
                     >(request_json)
                     {
                         Ok(request) => request,
@@ -2704,14 +2704,14 @@ async fn execute_tool_invocation(
                     .await
                 {
                     Ok(outcome) => match outcome {
-                        agent_client_protocol::RequestPermissionOutcome::Selected(sel) => {
+                        agent_client_protocol::schema::RequestPermissionOutcome::Selected(sel) => {
                             match sel.option_id.0.as_ref() {
                                 "allow_always" => omegon_traits::PermissionResponse::AlwaysAllow,
                                 "allow_once" => omegon_traits::PermissionResponse::Allow,
                                 _ => omegon_traits::PermissionResponse::Deny,
                             }
                         }
-                        agent_client_protocol::RequestPermissionOutcome::Cancelled => {
+                        agent_client_protocol::schema::RequestPermissionOutcome::Cancelled => {
                             omegon_traits::PermissionResponse::Deny
                         }
                         _ => omegon_traits::PermissionResponse::Deny,

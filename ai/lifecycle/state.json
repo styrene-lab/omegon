@@ -872,6 +872,66 @@
       "bound_change": null,
       "created_at": "2026-05-22T02:25:14Z",
       "updated_at": "2026-05-22T02:25:14Z"
+    },
+    {
+      "id": "browser-integration-system-fallback-approval",
+      "title": "Browser Integration Pattern for Manual System Fallback Approval",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-05-29T15:49:47Z",
+      "updated_at": "2026-05-29T15:49:47Z"
+    },
+    {
+      "id": "browser-hostaction-domain-split",
+      "title": "Browser HostAction Domain Split",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-05-29T15:57:56Z",
+      "updated_at": "2026-05-29T15:57:56Z"
+    },
+    {
+      "id": "package-install-hostaction",
+      "title": "package.install@1 HostAction",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-05-29T19:20:38Z",
+      "updated_at": "2026-05-29T19:20:38Z"
+    },
+    {
+      "id": "acp-send-vs-local-runtime-ownership-assessment",
+      "title": "ACP Send handlers vs local single-thread runtime ownership assessment",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-05-31T00:06:11Z",
+      "updated_at": "2026-05-31T00:06:11Z"
     }
   ],
   "changes": [
@@ -885,7 +945,7 @@
       "tasks_total": 8,
       "tasks_done": 0,
       "created_at": "2026-05-21T20:14:08Z",
-      "updated_at": "2026-05-23T05:02:35Z"
+      "updated_at": "2026-05-30T01:57:39Z"
     },
     {
       "name": "omega-daemon-runtime-v1",
@@ -900,7 +960,7 @@
       "tasks_total": 0,
       "tasks_done": 0,
       "created_at": "2026-05-21T20:14:08Z",
-      "updated_at": "2026-05-23T05:02:35Z"
+      "updated_at": "2026-05-30T01:57:39Z"
     },
     {
       "name": "splash-systems-integration",
@@ -912,7 +972,7 @@
       "tasks_total": 29,
       "tasks_done": 0,
       "created_at": "2026-05-21T20:14:08Z",
-      "updated_at": "2026-05-23T05:02:35Z"
+      "updated_at": "2026-05-30T01:57:39Z"
     },
     {
       "name": "styrene-identity-secrets",
@@ -924,7 +984,115 @@
       "tasks_total": 3,
       "tasks_done": 0,
       "created_at": "2026-05-21T20:14:08Z",
-      "updated_at": "2026-05-23T05:02:35Z"
+      "updated_at": "2026-05-30T01:57:39Z"
+    },
+    {
+      "name": "host-actions-core-runtime",
+      "title": "host-actions-core-runtime",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 29,
+      "tasks_done": 29,
+      "created_at": "2026-05-24T23:11:54Z",
+      "updated_at": "2026-05-30T01:57:39Z"
+    },
+    {
+      "name": "terminal-create-host-action",
+      "title": "terminal-create-host-action",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 18,
+      "tasks_done": 18,
+      "created_at": "2026-05-24T23:11:54Z",
+      "updated_at": "2026-05-30T01:57:39Z"
+    },
+    {
+      "name": "extension-push-notification-routing",
+      "title": "extension-push-notification-routing",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 17,
+      "tasks_done": 17,
+      "created_at": "2026-05-25T02:03:16Z",
+      "updated_at": "2026-05-30T01:57:39Z"
+    },
+    {
+      "name": "voice-mvp-integration-tests",
+      "title": "voice-mvp-integration-tests",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 12,
+      "tasks_done": 12,
+      "created_at": "2026-05-25T11:22:26Z",
+      "updated_at": "2026-05-30T01:57:39Z"
+    },
+    {
+      "name": "terminal-backend-registry",
+      "title": "terminal-backend-registry",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 13,
+      "tasks_done": 13,
+      "created_at": "2026-05-25T18:19:32Z",
+      "updated_at": "2026-05-30T01:57:39Z"
+    },
+    {
+      "name": "plan-refinement",
+      "title": "plan-refinement",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 38,
+      "tasks_done": 13,
+      "created_at": "2026-05-25T21:24:32Z",
+      "updated_at": "2026-05-30T01:57:39Z"
+    },
+    {
+      "name": "acp-hostaction-approval",
+      "title": "acp-hostaction-approval",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 22,
+      "tasks_done": 22,
+      "created_at": "2026-05-26T01:03:24Z",
+      "updated_at": "2026-05-30T01:57:39Z"
+    },
+    {
+      "name": "extension-operator-surface-contributions",
+      "title": "extension-operator-surface-contributions",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 27,
+      "tasks_done": 0,
+      "created_at": "2026-05-27T02:46:16Z",
+      "updated_at": "2026-05-27T18:13:06Z"
+    },
+    {
+      "name": "0.25-extension-surfaces",
+      "title": "0.25-extension-surfaces",
+      "state": "proposed",
+      "bound_node": null,
+      "specs": [],
+      "test_files": [],
+      "tasks_total": 6,
+      "tasks_done": 6,
+      "created_at": "2026-05-27T12:08:51Z",
+      "updated_at": "2026-05-27T18:12:46Z"
     }
   ],
   "milestones": [],
@@ -2040,6 +2208,159 @@
       "timestamp": "2026-05-22T02:25:14Z",
       "entity_type": "node",
       "entity_id": "acp-0-12-upgrade-0-23-2",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-05-24T23:11:54Z",
+      "entity_type": "change",
+      "entity_id": "host-actions-core-runtime",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-24T23:11:54Z",
+      "entity_type": "change",
+      "entity_id": "terminal-create-host-action",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-25T02:03:16Z",
+      "entity_type": "change",
+      "entity_id": "extension-push-notification-routing",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-25T11:22:26Z",
+      "entity_type": "change",
+      "entity_id": "voice-mvp-integration-tests",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-25T18:19:32Z",
+      "entity_type": "change",
+      "entity_id": "terminal-backend-registry",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-25T21:24:32Z",
+      "entity_type": "change",
+      "entity_id": "plan-refinement",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-26T01:03:24Z",
+      "entity_type": "change",
+      "entity_id": "acp-hostaction-approval",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-27T02:46:16Z",
+      "entity_type": "change",
+      "entity_id": "extension-operator-surface-contributions",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-27T12:08:51Z",
+      "entity_type": "change",
+      "entity_id": "0.25-extension-surfaces",
+      "from_state": "(new)",
+      "to_state": "proposed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-29T15:49:47Z",
+      "entity_type": "node",
+      "entity_id": "browser-integration-system-fallback-approval",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-29T15:49:47Z",
+      "entity_type": "node",
+      "entity_id": "browser-integration-system-fallback-approval",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-05-29T15:57:56Z",
+      "entity_type": "node",
+      "entity_id": "browser-hostaction-domain-split",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-29T15:57:56Z",
+      "entity_type": "node",
+      "entity_id": "browser-hostaction-domain-split",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-05-29T19:20:38Z",
+      "entity_type": "node",
+      "entity_id": "package-install-hostaction",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-29T19:20:38Z",
+      "entity_type": "node",
+      "entity_id": "package-install-hostaction",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-05-31T00:06:11Z",
+      "entity_type": "node",
+      "entity_id": "acp-send-vs-local-runtime-ownership-assessment",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-31T00:06:11Z",
+      "entity_type": "node",
+      "entity_id": "acp-send-vs-local-runtime-ownership-assessment",
       "from_state": "seed",
       "to_state": "exploring",
       "reason": "initial status on create",

@@ -1,4 +1,4 @@
-use agent_client_protocol::*;
+use agent_client_protocol::schema::*;
 
 const ACP_RESOURCE_MAX_LINES: usize = 2000;
 const ACP_RESOURCE_MAX_BYTES: usize = 50 * 1024;

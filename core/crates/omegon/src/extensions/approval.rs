@@ -1,4 +1,4 @@
-use agent_client_protocol::{
+use agent_client_protocol::schema::{
     Meta, PermissionOption, PermissionOptionId, PermissionOptionKind, RequestPermissionOutcome,
     RequestPermissionRequest, SessionId, ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
 };
@@ -159,7 +159,7 @@ pub(crate) fn denied_approval_outcome(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::{RequestPermissionOutcome, SelectedPermissionOutcome};
+    use agent_client_protocol::schema::{RequestPermissionOutcome, SelectedPermissionOutcome};
     use omegon_extension::HostActionExecution;
 
     fn scoped(kind: HostActionOriginKind) -> ScopedHostActionId {
