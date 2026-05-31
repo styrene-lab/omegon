@@ -208,6 +208,69 @@ Docs can cite scenarios by ID and detect drift when scenario content changes.
 
 Runtime incidents can reference impacted scenario IDs, making regression triage lifecycle-aware.
 
+
+## Hard Seam: What Is a Scenario?
+
+A scenario is the smallest durable behavioral contract in OpenSpec. It is not a test, task, implementation slice, or evidence record. It is the lifecycle object that says: given this precondition, when this action occurs, then this observable outcome must hold.
+
+The scenario seam is:
+
+```text
+Scenario = stable identity + behavioral contract + metadata + evidence attachment point
+```
+
+### Scenario owns
+
+- stable ID (`<!-- id: ... -->` preferred)
+- human-readable title
+- Given/When/Then behavioral text
+- scenario-local metadata such as risk, tags, dependencies, and external references
+- links to provider-neutral evidence summaries
+
+### Scenario does not own
+
+- test runner implementation
+- TDD savepoint raw logs
+- command execution policy
+- task decomposition state
+- implementation file ownership
+- archive policy itself
+
+Those belong to adjacent systems that reference the scenario by ID.
+
+### Boundary examples
+
+A scenario should be phrased as an observable behavior:
+
+```markdown
+#### Scenario: Expired token rejected
+<!-- id: auth/token-expired -->
+Given a user has an expired token
+When they request a protected resource
+Then the response is 401
+And the body contains `token_expired`
+```
+
+The following are not scenarios:
+
+- `Add JwtValidator struct` — implementation task
+- `Write pytest for expired tokens` — test task
+- `cargo test auth_expired` — command/evidence provider detail
+- `JWT auth feature` — requirement/change/feature scope
+- `Fix auth bug` — task/change scope
+
+### Scenario identity rule
+
+Scenario IDs should be stable across wording edits. If behavior remains the same, keep the ID. If behavior materially changes, either update the scenario body and mark evidence stale, or create a new scenario ID when the old behavior no longer represents the same contract.
+
+### Scenario evidence rule
+
+Evidence attaches to scenarios; it does not define them. A TDD red→green event, coverage report, manual QA approval, or security review proves or qualifies a scenario, but the scenario remains the behavioral contract.
+
+### Scenario task rule
+
+Tasks implement, verify, or document scenarios. A task can own one or more scenarios; a scenario can require several tasks. Task completion is not scenario verification unless required evidence exists.
+
 ## Implementation Notes
 
 ### Core-owned scope
