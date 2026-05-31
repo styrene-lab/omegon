@@ -932,6 +932,66 @@
       "bound_change": null,
       "created_at": "2026-05-31T00:06:11Z",
       "updated_at": "2026-05-31T00:06:11Z"
+    },
+    {
+      "id": "deterministic-devenv-workflow-assessment",
+      "title": "Assess devenv.sh for deterministic Omegon developer workflow",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-05-31T12:32:20Z",
+      "updated_at": "2026-05-31T12:32:20Z"
+    },
+    {
+      "id": "repo-agent-runtime-profile",
+      "title": "Repo Agent Runtime Profile",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-05-31T13:19:23Z",
+      "updated_at": "2026-05-31T13:19:23Z"
+    },
+    {
+      "id": "nex-deterministic-substrate-boundary",
+      "title": "Nex Deterministic Substrate Boundary",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-05-31T13:20:49Z",
+      "updated_at": "2026-05-31T13:20:49Z"
+    },
+    {
+      "id": "secrets-pack-deterministic-credential-workflow",
+      "title": "Secrets-Pack Deterministic Credential Workflow",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-05-31T13:21:39Z",
+      "updated_at": "2026-05-31T13:21:39Z"
     }
   ],
   "changes": [
@@ -2361,6 +2421,78 @@
       "timestamp": "2026-05-31T00:06:11Z",
       "entity_type": "node",
       "entity_id": "acp-send-vs-local-runtime-ownership-assessment",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-05-31T12:32:20Z",
+      "entity_type": "node",
+      "entity_id": "deterministic-devenv-workflow-assessment",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-31T12:32:20Z",
+      "entity_type": "node",
+      "entity_id": "deterministic-devenv-workflow-assessment",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-05-31T13:19:23Z",
+      "entity_type": "node",
+      "entity_id": "repo-agent-runtime-profile",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-31T13:19:23Z",
+      "entity_type": "node",
+      "entity_id": "repo-agent-runtime-profile",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-05-31T13:20:49Z",
+      "entity_type": "node",
+      "entity_id": "nex-deterministic-substrate-boundary",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-31T13:20:49Z",
+      "entity_type": "node",
+      "entity_id": "nex-deterministic-substrate-boundary",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-05-31T13:21:39Z",
+      "entity_type": "node",
+      "entity_id": "secrets-pack-deterministic-credential-workflow",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-05-31T13:21:39Z",
+      "entity_type": "node",
+      "entity_id": "secrets-pack-deterministic-credential-workflow",
       "from_state": "seed",
       "to_state": "exploring",
       "reason": "initial status on create",
