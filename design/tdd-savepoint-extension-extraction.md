@@ -8,10 +8,8 @@ issue_type = "architecture"
 priority = 1
 dependencies = ["8d214819-082b-4742-8b4b-bcca1c528a9c", "scenario-ids-lifecycle-targets"]
 open_questions = [
-  "Should long-running watch mode be implemented as a background child process in v1 or deferred until after run/evidence/plan tools prove the model?",
   "Should the extension ship as bundled in-tree first, or immediately as a separate Armory repository?",
-  "Should project config live only at .omegon/tdd-savepoint.toml, or should OpenSpec-local config also be supported?",
-  "What should the initial policy be for shell execution: unsupported, disabled by default, or allowed only from project config?"
+  "Should project config live only at .omegon/tdd-savepoint.toml, or should OpenSpec-local config also be supported?"
 ]
 +++
 
@@ -70,7 +68,7 @@ Use a native Rust extension named `omegon-tdd-savepoint`. The name is explicit, 
 
 The extension decides pass/fail only from configured process exit semantics. It must not parse pytest/cargo/vitest/go/maven output in v1. Language support is provided through presets and command templates, not bespoke semantic parsers.
 
-### Decision: Configuration uses four-layer precedence
+### Decision: Configuration uses five-layer precedence
 
 **Status:** decided
 
@@ -98,7 +96,19 @@ Every resolved run must be inspectable through a plan/dry-run tool that shows fi
 - `tdd_savepoint_run`
 - `tdd_savepoint_evidence`
 
-True background `tdd_savepoint_watch` should either return a watcher handle or be deferred until the extension has a clear background process/session story.
+True background `tdd_savepoint_watch` is explicitly deferred until `plan`, `run`, and `evidence` are stable. Watch must not block JSON-RPC indefinitely. When implemented, it should either request a host background terminal/session or spawn an extension-owned worker process and return a watcher handle.
+
+### Decision: Command execution is argv-only in v1
+
+**Status:** decided
+
+The initial extension execution policy is argv-only: no shell strings, no package installation, bounded stdout/stderr tails, explicit timeout, canonicalized `cwd`, and project-root path constraints. Shell mode can be reconsidered later only behind explicit project configuration and policy checks.
+
+### Decision: Core CLI becomes a compatibility wrapper
+
+**Status:** decided
+
+Core must stop owning savepoint execution. The migration path is: try the `omegon-tdd-savepoint` extension first for bounded commands, fall back to the legacy core implementation while emitting a deprecation hint, then delete the core kernel once the extension run/evidence/watch path is stable.
 
 ### Decision: Core owns generic scenario identity and evidence, not TDD-specific status
 
@@ -251,6 +261,174 @@ Long-running watch mode. V1 should not block a JSON-RPC call indefinitely. Optio
 1. defer watch until run/evidence/plan are proven;
 2. spawn a child watcher process and return a handle;
 3. use host terminal/background-session support when available.
+
+
+## Execution Ownership Design
+
+The next extraction boundary is command execution. Core should no longer grow `core/crates/omegon/src/tdd.rs`; that file is now legacy compatibility code until the extension proves equivalent behavior.
+
+Ownership split:
+
+| Area | Owner | Notes |
+|---|---|---|
+| OpenSpec parsing | core | Scenario identity remains lifecycle-neutral. |
+| Scenario ID derivation | core | Explicit IDs and fallback IDs are not TDD-specific. |
+| Generic evidence read model | core | Reads provider-neutral summaries from `evidence/*.jsonl`. |
+| Command hashing | extension | Part of execution identity, not lifecycle identity. |
+| Process spawning | extension | Bounded argv execution only. |
+| Red/green capture | extension | Provider-specific evidence semantics. |
+| Raw JSONL logs | extension | Stored under `.omegon/lifecycle/savepoints/` for now. |
+| Projected scenario evidence | extension | Written under `openspec/changes/<change>/evidence/`. |
+| Watch orchestration | extension | Deferred until bounded run/evidence are stable. |
+
+### `tdd_savepoint_plan`
+
+`plan` is the trust boundary. It resolves what would run without executing or mutating state. Every resolved field must report its source.
+
+Initial v1 input should accept direct per-call values plus an optional built-in preset:
+
+```json
+{
+  "cwd": ".",
+  "change": "jwt-auth",
+  "scenario": "auth/token-expired",
+  "task": "2.1",
+  "preset": "rust-cargo",
+  "command": ["cargo", "test", "-p", "omegon", "auth_token_expired"],
+  "watch_paths": ["core/crates/omegon/src/auth", "core/crates/omegon/tests"],
+  "filetype": "rs",
+  "timeout_secs": 60,
+  "emit_baseline": true,
+  "persist_failures": true,
+  "current_diff_hash": true
+}
+```
+
+Output shape:
+
+```json
+{
+  "resolved": {
+    "project_root": "/abs/project",
+    "cwd": "/abs/project",
+    "command": ["cargo", "test", "-p", "omegon", "auth_token_expired"],
+    "command_hash": "sha256:...",
+    "watch_paths": ["core/crates/omegon/src/auth", "core/crates/omegon/tests"],
+    "filetype": "rs",
+    "timeout_secs": 60,
+    "emit_baseline": true,
+    "persist_failures": true,
+    "max_output_chars": 8192,
+    "change": "jwt-auth",
+    "scenario": "auth/token-expired",
+    "task": "2.1"
+  },
+  "sources": {
+    "command": "per-call",
+    "watch_paths": "per-call",
+    "filetype": "preset:rust-cargo",
+    "timeout_secs": "per-call",
+    "emit_baseline": "default",
+    "persist_failures": "per-call",
+    "max_output_chars": "default"
+  },
+  "warnings": []
+}
+```
+
+Plan must fail if no command can be resolved. It should not run a command, append evidence, or start watchers.
+
+### `tdd_savepoint_run`
+
+`run` executes the resolved plan once and optionally records evidence. It is the first real transfer of execution ownership from core to extension.
+
+Modes:
+
+| Mode | Behavior |
+|---|---|
+| `record=false` | Execute only; return outcome, no evidence mutation. |
+| `baseline=true` | Record a baseline event for the current outcome. |
+| `persist_failures=true` and current fails | Record/dedupe a `fail` event. |
+| current passes after prior red evidence | Record `failing_to_passing`. |
+
+Non-watch red→green detection uses prior evidence rather than in-process watcher state:
+
+```text
+current command passes
+AND prior matching evidence contains baseline/fail with non-zero exit
+→ record failing_to_passing
+```
+
+The matching key is:
+
+```text
+command_hash + change? + scenario? + task?
+```
+
+If scenario is provided, it narrows the match. If not, command hash alone is acceptable for command-level evidence.
+
+### Runner constraints
+
+V1 execution policy:
+
+- command must be an argv array; shell strings are rejected
+- timeout is always set; default 60 seconds
+- stdout/stderr tails are bounded; default 8192 characters
+- explicit `cwd` canonicalizes to an existing directory
+- project root is `git rev-parse --show-toplevel` when available
+- run `cwd`, watch paths, raw event paths, and projected evidence paths must remain under project root
+- no package installation or implicit dependency fetching
+
+When moving runner code, replace byte-index string tailing with character-safe truncation:
+
+```rust
+fn tail_string(s: &str, max_chars: usize) -> String {
+    let len = s.chars().count();
+    if len <= max_chars {
+        s.to_string()
+    } else {
+        s.chars().skip(len - max_chars).collect()
+    }
+}
+```
+
+## Core Compatibility Wrapper
+
+Migration stages:
+
+### Stage A — Legacy core kernel
+
+Current state. `omegon tdd watch` and `omegon tdd evidence` call `crate::tdd` directly.
+
+### Stage B — Extension-first bounded commands
+
+Core CLI tries the extension first for bounded commands such as evidence and run. If the extension is missing or disabled, core falls back to legacy implementation and prints a deprecation hint:
+
+```text
+omegon tdd is moving to the omegon-tdd-savepoint extension.
+Install/enable it with:
+  omegon extension install ./extensions/omegon-tdd-savepoint
+```
+
+Migrate `evidence` before `watch` because it is bounded and low risk.
+
+### Stage C — Remove execution from core
+
+Once extension `plan`, `run`, and `evidence` are stable, delete process execution, command hashing, watcher orchestration, and raw event writing from core. Core keeps only CLI argument parsing, extension dispatch, and generic evidence reading.
+
+### Stage D — Pure alias
+
+Eventually, `omegon tdd ...` becomes a user-facing alias for extension tools. No TDD execution kernel remains in core.
+
+## Next Implementation Sequence
+
+1. Add `tdd_savepoint_plan` with defaults, built-in presets, per-call overrides, command hashing, source map, and no mutation.
+2. Add `tdd_savepoint_run` with bounded argv execution, baseline/fail/red→green recording, and evidence classification.
+3. Dispatch `omegon tdd evidence` through the extension first, falling back to legacy core.
+4. Replace `Scenario.tdd_evidence` with provider-neutral scenario evidence summaries.
+5. Implement watch handles only after bounded run/evidence prove stable.
+
+Do not implement watch mode next. The next implementation step is `plan`, then `run`.
 
 ## Configuration Model
 
@@ -527,17 +705,17 @@ require_project_config_for_watch = false
 - Add `manifest.toml`, README, Cargo.toml, and extension main.
 - Expose status, presets, plan, run, and evidence tools.
 
-### Phase 3 — Move kernel
+### Phase 3 — Move bounded execution
 
-- Move command hash, runner, git state, evidence, and config resolution from core prototype into extension modules.
+- Add `tdd_savepoint_plan` with defaults, built-in presets, per-call overrides, command hashing, and source mapping.
+- Add `tdd_savepoint_run` with bounded argv execution, timeout, output tails, baseline/fail/red→green recording, and evidence classification.
 - Keep tests with ecosystem-neutral commands.
 
 ### Phase 4 — Config resolver
 
-- Implement built-in presets.
 - Load `.omegon/tdd-savepoint.toml`.
 - Parse scenario metadata overrides.
-- Produce resolved config with source map.
+- Produce resolved config with source map across all five layers.
 
 ### Phase 5 — Evidence projection and core read model
 
@@ -547,7 +725,9 @@ require_project_config_for_watch = false
 
 ### Phase 6 — Watch mode
 
-- Implement background watcher handles or defer until host background execution is clearly supported.
+- Implement watch only after `plan`, `run`, and `evidence` are stable.
+- Prefer host background terminal/session support; otherwise spawn an extension-owned worker and return a watcher handle.
+- Add list/stop tools if the extension owns watcher child processes.
 - Do not block RPC indefinitely.
 
 ### Phase 7 — Armory packaging
