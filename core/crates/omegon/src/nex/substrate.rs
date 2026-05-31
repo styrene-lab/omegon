@@ -173,6 +173,71 @@ pub async fn inspect_devenv(path: &Path) -> NexSubstrateReport {
     }
 }
 
+pub const READ_ONLY_DELEGATION_COMMANDS: &[&str] = &[
+    "devenv.inspect",
+    "devenv.explain",
+    "machine-profile.inspect",
+];
+
+pub fn read_only_delegations(
+    extension_metadata: &BTreeMap<String, Value>,
+) -> Vec<NexSubstrateDelegation> {
+    let mut delegations = Vec::new();
+    for metadata in extension_metadata.values() {
+        let Some(nex) = metadata.pointer("/delegations/nex") else {
+            continue;
+        };
+        let provider = nex
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or("omegon-nex");
+        let Some(commands) = nex.get("commands").and_then(Value::as_array) else {
+            continue;
+        };
+        for command in commands {
+            let Some(command_id) = command.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            if !READ_ONLY_DELEGATION_COMMANDS.contains(&command_id) {
+                continue;
+            }
+            if command.get("mutability").and_then(Value::as_str) != Some("read-only") {
+                continue;
+            }
+            let Some(tool) = command.get("tool").and_then(Value::as_str) else {
+                continue;
+            };
+            if tool.trim().is_empty() {
+                continue;
+            }
+            let Some(output_schema) = command.get("output_schema").and_then(Value::as_str) else {
+                continue;
+            };
+            if output_schema.trim().is_empty() {
+                continue;
+            }
+            delegations.push(NexSubstrateDelegation {
+                provider: provider.to_string(),
+                command_id: command_id.to_string(),
+                tool: tool.to_string(),
+                mutability: "read-only".to_string(),
+                output_schema: output_schema.to_string(),
+            });
+        }
+    }
+    delegations
+}
+
+pub fn delegation_for_command(
+    delegations: &[NexSubstrateDelegation],
+    command_id: &str,
+) -> Option<NexSubstrateDelegation> {
+    delegations
+        .iter()
+        .find(|delegation| delegation.command_id == command_id)
+        .cloned()
+}
+
 pub fn delegation_for_mode(
     extension_metadata: &BTreeMap<String, Value>,
     mode: &str,
@@ -181,29 +246,7 @@ pub fn delegation_for_mode(
         "devenv" => "devenv.inspect",
         _ => return None,
     };
-    let nex = extension_metadata
-        .values()
-        .find_map(|metadata| metadata.pointer("/delegations/nex"))?;
-    let provider = nex
-        .get("provider")
-        .and_then(Value::as_str)
-        .unwrap_or("omegon-nex");
-    let commands = nex.get("commands")?.as_array()?;
-    let command = commands.iter().find(|command| {
-        command.get("id").and_then(Value::as_str) == Some(command_id)
-            && command.get("mutability").and_then(Value::as_str) == Some("read-only")
-    })?;
-    Some(NexSubstrateDelegation {
-        provider: provider.to_string(),
-        command_id: command_id.to_string(),
-        tool: command.get("tool")?.as_str()?.to_string(),
-        mutability: command.get("mutability")?.as_str()?.to_string(),
-        output_schema: command
-            .get("output_schema")
-            .and_then(Value::as_str)
-            .unwrap_or(NEX_DEVENV_REPORT_SCHEMA)
-            .to_string(),
-    })
+    delegation_for_command(&read_only_delegations(extension_metadata), command_id)
 }
 
 pub fn derive_policy(devenv_report: &Value) -> NexSubstratePolicy {
@@ -511,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn discovers_omegon_nex_devenv_delegation_metadata() {
+    fn catalogs_omegon_nex_read_only_delegation_metadata() {
         let metadata = BTreeMap::from([(
             "omegon-nex".to_string(),
             json!({
@@ -519,45 +562,77 @@ mod tests {
                     "nex": {
                         "schema": "io.styrene.omegon-nex.delegations.v1",
                         "provider": "omegon-nex",
-                        "commands": [{
-                            "id": "devenv.inspect",
-                            "tool": "nex_devenv_inspect",
-                            "command": ["nex", "devenv", "inspect", "<path>", "--json"],
-                            "mutability": "read-only",
-                            "output_schema": NEX_DEVENV_REPORT_SCHEMA
-                        }]
+                        "commands": [
+                            {
+                                "id": "devenv.inspect",
+                                "tool": "nex_devenv_inspect",
+                                "command": ["nex", "devenv", "inspect", "<path>", "--json"],
+                                "mutability": "read-only",
+                                "output_schema": NEX_DEVENV_REPORT_SCHEMA
+                            },
+                            {
+                                "id": "devenv.explain",
+                                "tool": "nex_devenv_explain",
+                                "mutability": "read-only",
+                                "output_schema": NEX_DEVENV_REPORT_SCHEMA
+                            },
+                            {
+                                "id": "machine-profile.inspect",
+                                "tool": "nex_machine_profile_inspect",
+                                "mutability": "read-only",
+                                "output_schema": "io.styrene.nex.machine-profile-inspect.v1"
+                            }
+                        ]
                     }
                 }
             }),
         )]);
 
-        let delegation = delegation_for_mode(&metadata, "devenv").expect("delegation");
+        let delegations = read_only_delegations(&metadata);
+        assert_eq!(delegations.len(), 3);
+        let delegation = delegation_for_command(&delegations, "devenv.inspect")
+            .expect("devenv.inspect delegation");
         assert_eq!(delegation.provider, "omegon-nex");
-        assert_eq!(delegation.command_id, "devenv.inspect");
         assert_eq!(delegation.tool, "nex_devenv_inspect");
         assert_eq!(delegation.mutability, "read-only");
         assert_eq!(delegation.output_schema, NEX_DEVENV_REPORT_SCHEMA);
+        assert!(delegation_for_mode(&metadata, "devenv").is_some());
     }
 
     #[test]
-    fn ignores_mutating_delegation_metadata() {
+    fn ignores_unsafe_or_malformed_delegation_metadata() {
         let metadata = BTreeMap::from([(
             "omegon-nex".to_string(),
             json!({
                 "delegations": {
                     "nex": {
                         "provider": "omegon-nex",
-                        "commands": [{
-                            "id": "devenv.inspect",
-                            "tool": "nex_devenv_inspect",
-                            "mutability": "state-changing",
-                            "output_schema": NEX_DEVENV_REPORT_SCHEMA
-                        }]
+                        "commands": [
+                            {
+                                "id": "devenv.inspect",
+                                "tool": "nex_devenv_inspect",
+                                "mutability": "state-changing",
+                                "output_schema": NEX_DEVENV_REPORT_SCHEMA
+                            },
+                            {
+                                "id": "devenv.explain",
+                                "tool": "",
+                                "mutability": "read-only",
+                                "output_schema": NEX_DEVENV_REPORT_SCHEMA
+                            },
+                            {
+                                "id": "nex.apply",
+                                "tool": "nex_apply",
+                                "mutability": "read-only",
+                                "output_schema": "io.example.unsafe"
+                            }
+                        ]
                     }
                 }
             }),
         )]);
 
+        assert!(read_only_delegations(&metadata).is_empty());
         assert!(delegation_for_mode(&metadata, "devenv").is_none());
     }
 }
