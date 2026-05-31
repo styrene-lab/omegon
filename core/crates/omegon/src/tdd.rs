@@ -388,7 +388,9 @@ fn project_openspec_summary(cwd: &Path, event: &SavepointEvent) -> Result<()> {
     if !dir.is_dir() {
         return Ok(());
     }
-    let path = dir.join("tdd-savepoints.jsonl");
+    let evidence_dir = dir.join("evidence");
+    fs::create_dir_all(&evidence_dir)?;
+    let path = evidence_dir.join("tdd-savepoints.jsonl");
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
     serde_json::to_writer(&mut file, &SavepointSummary::from(event))?;
     file.write_all(b"\n")?;
@@ -401,8 +403,14 @@ pub fn read_events(cwd: &Path, query: &EvidenceQuery) -> Result<Vec<SavepointEve
         let path = cwd
             .join("openspec/changes")
             .join(change)
+            .join("evidence")
             .join("tdd-savepoints.jsonl");
         read_event_file(&path, query, &mut events)?;
+        let legacy_path = cwd
+            .join("openspec/changes")
+            .join(change)
+            .join("tdd-savepoints.jsonl");
+        read_event_file(&legacy_path, query, &mut events)?;
         return Ok(events);
     }
 
@@ -767,7 +775,7 @@ mod tests {
         append_event(dir.path(), &event).unwrap();
         let text = fs::read_to_string(
             dir.path()
-                .join("openspec/changes/demo-change/tdd-savepoints.jsonl"),
+                .join("openspec/changes/demo-change/evidence/tdd-savepoints.jsonl"),
         )
         .unwrap();
         assert!(text.contains("redgreen-demo"));

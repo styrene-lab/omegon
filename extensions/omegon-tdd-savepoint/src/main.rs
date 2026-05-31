@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use omegon_extension::{Error, Extension, SDK_CONTRACT_VERSION};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 mod kernel;
 
@@ -14,8 +14,13 @@ struct SavepointExtension;
 
 #[async_trait]
 impl Extension for SavepointExtension {
-    fn name(&self) -> &str { NAME }
-    fn version(&self) -> &str { VERSION }
+    fn name(&self) -> &str {
+        NAME
+    }
+
+    fn version(&self) -> &str {
+        VERSION
+    }
 
     async fn handle_rpc(&self, method: &str, params: Value) -> omegon_extension::Result<Value> {
         match method {
@@ -58,6 +63,13 @@ impl Extension for SavepointExtension {
 fn tool_defs() -> Vec<Value> {
     vec![
         json!({
+            "name": "tdd_savepoint_status",
+            "description": "Check TDD savepoint extension readiness for a project.",
+            "input_schema": schema(json!({
+                "cwd": {"type": "string", "description": "Project working directory. Defaults to the current process directory."}
+            }), vec![])
+        }),
+        json!({
             "name": "tdd_savepoint_current_diff_hash",
             "description": "Compute the current git worktree diff hash used for TDD stale-pass detection.",
             "input_schema": schema(json!({
@@ -78,20 +90,69 @@ fn tool_defs() -> Vec<Value> {
                 "current": {"type": "boolean", "description": "Compute current_diff_hash from the worktree."},
                 "scopes": {"type": "array", "items": {"type": "string"}}
             }), vec![])
-        })
+        }),
     ]
 }
 
 fn schema(properties: Value, required: Vec<&str>) -> Value {
-    json!({"type": "object", "properties": properties, "required": required, "additionalProperties": false})
+    json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false
+    })
 }
 
 fn execute_tool(name: &str, args: Value) -> omegon_extension::Result<Value> {
     match name {
+        "tdd_savepoint_status" => status(args),
         "tdd_savepoint_current_diff_hash" => current_diff_hash(args),
         "tdd_savepoint_evidence" => evidence(args),
         _ => Err(Error::method_not_found(&format!("tool '{name}'"))),
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct StatusArgs {
+    cwd: Option<PathBuf>,
+}
+
+fn status(args: Value) -> omegon_extension::Result<Value> {
+    let args: StatusArgs = parse_args(args)?;
+    let cwd = cwd_or_current(args.cwd)?;
+    let git_available = std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    let git_repository = std::process::Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(&cwd)
+        .output()
+        .map(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true"
+        })
+        .unwrap_or(false);
+    let openspec_present = cwd.join("openspec/changes").is_dir();
+    let project_config = cwd.join(".omegon/tdd-savepoint.toml");
+    Ok(json!({
+        "ready": git_available && git_repository,
+        "cwd": cwd,
+        "git_available": git_available,
+        "git_repository": git_repository,
+        "openspec_present": openspec_present,
+        "project_config": {
+            "path": project_config,
+            "present": project_config.is_file()
+        },
+        "raw_event_dir": ".omegon/lifecycle/savepoints",
+        "project_evidence_path": "openspec/changes/{change}/evidence/tdd-savepoints.jsonl",
+        "tools": [
+            "tdd_savepoint_status",
+            "tdd_savepoint_current_diff_hash",
+            "tdd_savepoint_evidence"
+        ]
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -147,9 +208,19 @@ fn parse_args<T: for<'de> Deserialize<'de>>(args: Value) -> omegon_extension::Re
 
 fn cwd_or_current(cwd: Option<PathBuf>) -> omegon_extension::Result<PathBuf> {
     match cwd {
-        Some(path) => Ok(path),
+        Some(path) => constrain_existing_dir(&path),
         None => std::env::current_dir().map_err(|err| Error::internal_error(err.to_string())),
     }
+}
+
+fn constrain_existing_dir(path: &Path) -> omegon_extension::Result<PathBuf> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|err| Error::invalid_params(format!("cwd must be an existing directory: {err}")))?;
+    if !canonical.is_dir() {
+        return Err(Error::invalid_params("cwd must be a directory"));
+    }
+    Ok(canonical)
 }
 
 #[tokio::main]
