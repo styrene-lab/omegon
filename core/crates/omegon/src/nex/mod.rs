@@ -26,6 +26,7 @@ mod manifest;
 mod profile;
 mod registry;
 pub mod spawn;
+pub mod substrate;
 
 pub use container::materialize_container;
 pub use manifest::NexManifest;

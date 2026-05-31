@@ -872,6 +872,32 @@ impl ToolProvider for CoreTools {
                 }),
                 capabilities: vec![omegon_traits::ToolCapability::RepoInspection],
             },
+            ToolDefinition {
+                name: reg::NEX_SUBSTRATE.into(),
+                label: reg::NEX_SUBSTRATE.into(),
+                description: "Read-only Nex substrate inspection. Calls Nex to inspect project devenv/SecretSpec substrate facts and returns an advisory Omegon policy overlay without mutating tools, profiles, or secrets.".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["inspect"],
+                            "description": "Read-only substrate action to perform"
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "Project directory to inspect; defaults to the current workspace root"
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["devenv"],
+                            "description": "Substrate report family; first slice supports only devenv"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+                capabilities: vec![omegon_traits::ToolCapability::RepoInspection],
+            },
             // trust_directory is NOT in the tool schema — it's internal harness
             // plumbing called via bus.execute_internal() by the permission
             // dispatch layer. The handler is in CoreTools::execute().
@@ -1257,6 +1283,33 @@ impl ToolProvider for CoreTools {
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text }],
                     details: serde_json::to_value(&resolution)?,
+                })
+            }
+            reg::NEX_SUBSTRATE => {
+                let action = args["action"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing 'action' argument"))?;
+                if action != "inspect" {
+                    anyhow::bail!(
+                        "unsupported nex_substrate action: {action}; MVP is read-only and supports only inspect"
+                    );
+                }
+                let mode = args["mode"].as_str().unwrap_or("devenv");
+                if mode != "devenv" {
+                    anyhow::bail!(
+                        "unsupported nex_substrate mode: {mode}; MVP supports only devenv"
+                    );
+                }
+                let path = match args["path"].as_str() {
+                    Some(path) => self.resolve_path(path)?,
+                    None => self.cwd.clone(),
+                };
+                let report = crate::nex::substrate::inspect_devenv(&path).await;
+                Ok(ToolResult {
+                    content: vec![ContentBlock::Text {
+                        text: crate::nex::substrate::summary_text(&report),
+                    }],
+                    details: serde_json::to_value(&report)?,
                 })
             }
             reg::TRUST_DIRECTORY => {

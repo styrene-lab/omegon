@@ -31,6 +31,7 @@ pub mod core {
     pub const TERMINAL: &str = "terminal";
     pub const TRUST_DIRECTORY: &str = "trust_directory";
     pub const NEX_CAPABILITY: &str = "nex_capability";
+    pub const NEX_SUBSTRATE: &str = "nex_substrate";
     pub const PLAN: &str = "plan";
     pub const WAIT_FOR_OPERATOR: &str = "wait_for_operator";
 }
@@ -168,11 +169,11 @@ pub mod mutation {
 /// **Maintenance rule**: every `pub const` above MUST appear here.
 /// The `registry_count_is_current` test will catch omissions.
 /// Number of statically registered tools (for splash screen display).
-pub const TOOL_COUNT: usize = 66;
+pub const TOOL_COUNT: usize = 67;
 
 pub fn all_static_names() -> Vec<&'static str> {
     vec![
-        // core (15)
+        // core (16)
         core::BASH,
         core::READ,
         core::WRITE,
@@ -186,6 +187,7 @@ pub fn all_static_names() -> Vec<&'static str> {
         core::TERMINAL,
         core::TRUST_DIRECTORY,
         core::NEX_CAPABILITY,
+        core::NEX_SUBSTRATE,
         core::PLAN,
         core::WAIT_FOR_OPERATOR,
         // view (1)
