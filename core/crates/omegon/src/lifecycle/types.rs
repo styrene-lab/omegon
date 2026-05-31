@@ -9,6 +9,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::tdd::TddEvidenceStatus;
+
 // ─── Design-Tree Types ──────────────────────────────────────────────────────
 
 /// Status of a design node in the exploration lifecycle.
@@ -226,11 +228,13 @@ impl ChangeStage {
 /// A Given/When/Then scenario.
 #[derive(Debug, Clone)]
 pub struct Scenario {
+    pub id: String,
     pub title: String,
     pub given: String,
     pub when: String,
     pub then: String,
     pub and_clauses: Vec<String>,
+    pub tdd_evidence: Option<TddEvidenceStatus>,
 }
 
 /// A requirement grouping scenarios.

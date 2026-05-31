@@ -56,6 +56,7 @@ mod skills;
 mod smoke;
 mod switch;
 mod task_spawn;
+mod tdd;
 pub mod tool_schema;
 mod update;
 mod upstream_errors;
@@ -315,6 +316,87 @@ enum AuthAction {
 }
 
 #[derive(Subcommand)]
+enum TddAction {
+    /// Watch a command and emit deterministic red→green TDD savepoint events.
+    Watch {
+        /// Filename extension to watch, such as rs, js, py, go, java, or txt.
+        #[arg(short, long, alias = "ext")]
+        filetype: Option<String>,
+
+        /// Path to watch, relative to --cwd. Defaults to the current directory.
+        #[arg(long = "watch", value_name = "PATH")]
+        watch_paths: Vec<PathBuf>,
+
+        /// OpenSpec change to attribute savepoints to.
+        #[arg(long)]
+        change: Option<String>,
+
+        /// OpenSpec scenario id to attribute savepoints to.
+        #[arg(long)]
+        scenario: Option<String>,
+
+        /// Task id to attribute savepoints to.
+        #[arg(long)]
+        task: Option<String>,
+
+        /// Run once to establish baseline and exit.
+        #[arg(long)]
+        once: bool,
+
+        /// Emit the baseline run as a raw savepoint event.
+        #[arg(long)]
+        emit_baseline: bool,
+
+        /// Persist failing runs as explicit failure evidence.
+        #[arg(long)]
+        persist_failures: bool,
+
+        /// Kill the test command after this many seconds and classify it as failing.
+        #[arg(long)]
+        timeout_secs: Option<u64>,
+
+        /// Command to run. Place after --.
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+
+    /// Query recorded TDD evidence.
+    Evidence {
+        /// Command hash to query.
+        #[arg(long)]
+        command_hash: Option<String>,
+
+        /// OpenSpec change to query.
+        #[arg(long)]
+        change: Option<String>,
+
+        /// OpenSpec scenario id to query.
+        #[arg(long)]
+        scenario: Option<String>,
+
+        /// Task id to query.
+        #[arg(long)]
+        task: Option<String>,
+
+        /// Current worktree diff hash for stale-pass detection.
+        #[arg(long)]
+        current_diff_hash: Option<String>,
+
+        /// Compute the current worktree diff hash for stale-pass detection.
+        #[arg(long)]
+        current: bool,
+
+        /// Scope paths used when computing --current.
+        #[arg(long = "scope", value_name = "PATH")]
+        scopes: Vec<PathBuf>,
+
+        /// Emit JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum Commands {
     /// Run interactive TUI session — ratatui-based terminal interface.
     Interactive,
@@ -503,6 +585,12 @@ enum Commands {
         /// Agent manifest (Pkl file or bundle directory).
         #[arg(long)]
         manifest: Option<String>,
+    },
+
+    /// Run deterministic, language-agnostic TDD red→green savepoint workflows.
+    Tdd {
+        #[command(subcommand)]
+        action: TddAction,
     },
 
     /// Manage Ollama integration — register, status, diagnostics.
@@ -1283,6 +1371,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Commands::Auth { ref action }) => run_auth_command(action).await,
+        Some(Commands::Tdd { ref action }) => run_tdd_command(action),
         Some(Commands::Cleave {
             ref plan,
             ref directive,
@@ -6383,6 +6472,88 @@ async fn maybe_run_injected_cleave_smoke_child(
             std::process::exit(2);
         }
         other => anyhow::bail!("unknown OMEGON_CLEAVE_SMOKE_CHILD_MODE: {other}"),
+    }
+}
+
+fn run_tdd_command(action: &TddAction) -> anyhow::Result<()> {
+    match action {
+        TddAction::Watch {
+            filetype,
+            watch_paths,
+            change,
+            scenario,
+            task,
+            once,
+            emit_baseline,
+            persist_failures,
+            timeout_secs,
+            command,
+        } => {
+            let command = tdd::TddCommand::new(command.clone())?;
+            tdd::watch(tdd::WatchOptions {
+                cwd: std::env::current_dir()?,
+                filetype: filetype.clone(),
+                watch_paths: watch_paths.clone(),
+                command,
+                change: change.clone(),
+                scenario: scenario.clone(),
+                task: task.clone(),
+                once: *once,
+                emit_baseline: *emit_baseline,
+                persist_failures: *persist_failures,
+                timeout: timeout_secs.map(std::time::Duration::from_secs),
+            })
+        }
+        TddAction::Evidence {
+            command_hash,
+            change,
+            scenario,
+            task,
+            current_diff_hash,
+            current,
+            scopes,
+            json,
+        } => {
+            let cwd = std::env::current_dir()?;
+            let current_diff_hash = if *current {
+                Some(tdd::current_diff_hash(&cwd, scopes))
+            } else {
+                current_diff_hash.clone()
+            };
+            let query = tdd::EvidenceQuery {
+                command_hash: command_hash.clone(),
+                change: change.clone(),
+                scenario: scenario.clone(),
+                task: task.clone(),
+                current_diff_hash,
+            };
+            let events = tdd::read_events(&cwd, &query)?;
+            let status = tdd::classify_evidence(&events, &query);
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "status": status,
+                        "events": events,
+                    })
+                );
+            } else {
+                println!("status: {:?}", status);
+                println!("events: {}", events.len());
+                for event in events.iter().rev().take(5) {
+                    println!(
+                        "- {} {} command={} change={:?} scenario={:?} task={:?}",
+                        event.event_id,
+                        event.transition,
+                        event.command_hash,
+                        event.change,
+                        event.scenario,
+                        event.task
+                    );
+                }
+            }
+            Ok(())
+        }
     }
 }
 

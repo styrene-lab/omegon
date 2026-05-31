@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::types::*;
+use crate::tdd::{self, EvidenceQuery};
 
 /// Locate the openspec/ directory in a repository.
 pub fn find_openspec_dir(repo_path: &Path) -> Option<PathBuf> {
@@ -144,6 +145,74 @@ fn read_change(change_dir: &Path, name: &str) -> Option<ChangeInfo> {
         task_groups,
         specs,
     })
+    .map(|mut change| {
+        annotate_tdd_evidence(change_dir, &mut change);
+        change
+    })
+}
+
+fn scenario_evidence_ids(domain: &str, _requirement: &str, scenario: &Scenario) -> [String; 2] {
+    [
+        scenario.id.clone(),
+        format!("{}/{}", domain, scenario.title),
+    ]
+}
+
+fn stable_scenario_id(domain: &str, requirement: &str, scenario: &str) -> String {
+    format!(
+        "{}/{}/{}",
+        slug_component(domain),
+        slug_component(requirement),
+        slug_component(scenario)
+    )
+}
+
+fn slug_component(input: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in input.chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+fn annotate_tdd_evidence(change_dir: &Path, change: &mut ChangeInfo) {
+    let Some(repo_path) = change_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+    else {
+        return;
+    };
+    for spec in &mut change.specs {
+        for requirement in &mut spec.requirements {
+            for scenario in &mut requirement.scenarios {
+                let ids = scenario_evidence_ids(&spec.domain, &requirement.title, scenario);
+                let status = ids
+                    .iter()
+                    .find_map(|id| {
+                        tdd::evidence_status(
+                            repo_path,
+                            &EvidenceQuery {
+                                change: Some(change.name.clone()),
+                                scenario: Some(id.clone()),
+                                ..EvidenceQuery::default()
+                            },
+                        )
+                        .ok()
+                        .filter(|status| *status != tdd::TddEvidenceStatus::NoEvidence)
+                    })
+                    .unwrap_or(tdd::TddEvidenceStatus::NoEvidence);
+                scenario.tdd_evidence = Some(status);
+            }
+        }
+    }
 }
 
 /// Compute the lifecycle stage from file presence and task counts.
@@ -294,7 +363,7 @@ pub fn parse_specs_dir(specs_dir: &Path) -> Vec<SpecFile> {
             Err(_) => continue,
         };
 
-        let requirements = parse_spec_content(&content);
+        let requirements = parse_spec_content_with_domain(&domain, &content);
         specs.push(SpecFile {
             domain,
             file_path: path,
@@ -323,7 +392,7 @@ pub fn parse_specs_dir(specs_dir: &Path) -> Vec<SpecFile> {
                             Ok(c) => c,
                             Err(_) => continue,
                         };
-                        let requirements = parse_spec_content(&content);
+                        let requirements = parse_spec_content_with_domain(&domain, &content);
                         specs.push(SpecFile {
                             domain,
                             file_path: sub_path,
@@ -348,6 +417,10 @@ pub fn parse_specs_dir(specs_dir: &Path) -> Vec<SpecFile> {
 ///   Then <expected>
 ///   And <additional>
 pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
+    parse_spec_content_with_domain("", content)
+}
+
+pub fn parse_spec_content_with_domain(domain: &str, content: &str) -> Vec<Requirement> {
     let mut requirements = Vec::new();
     let mut current_req: Option<(String, String, Vec<Scenario>)> = None;
     let mut current_scenario: Option<ScenarioBuilder> = None;
@@ -360,9 +433,15 @@ pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
             let rest = &trimmed[4..];
             let title = rest.strip_prefix("Requirement:").unwrap_or(rest).trim();
             // Flush previous
+            let req_title = current_req
+                .as_ref()
+                .map(|r| r.0.clone())
+                .unwrap_or_default();
             flush_scenario(
                 &mut current_scenario,
                 current_req.as_mut().map(|r| &mut r.2),
+                domain,
+                &req_title,
             );
             if let Some((t, d, s)) = current_req.take() {
                 requirements.push(Requirement {
@@ -378,11 +457,18 @@ pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
         // New scenario: "#### Scenario: <title>" or bare "#### <title>"
         if let Some(after) = trimmed.strip_prefix("#### ") {
             let rest = after.strip_prefix("Scenario:").unwrap_or(after).trim();
+            let req_title = current_req
+                .as_ref()
+                .map(|r| r.0.clone())
+                .unwrap_or_default();
             flush_scenario(
                 &mut current_scenario,
                 current_req.as_mut().map(|r| &mut r.2),
+                domain,
+                &req_title,
             );
             current_scenario = Some(ScenarioBuilder {
+                id: None,
                 title: rest.trim().to_string(),
                 given: String::new(),
                 when: String::new(),
@@ -393,7 +479,14 @@ pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
         }
 
         if let Some(ref mut builder) = current_scenario {
-            if let Some(rest) = trimmed.strip_prefix("Given ") {
+            if let Some(id) = trimmed
+                .strip_prefix("<!-- id:")
+                .and_then(|rest| rest.strip_suffix("-->"))
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+            {
+                builder.id = Some(id.to_string());
+            } else if let Some(rest) = trimmed.strip_prefix("Given ") {
                 builder.given = rest.to_string();
             } else if let Some(rest) = trimmed.strip_prefix("When ") {
                 builder.when = rest.to_string();
@@ -412,9 +505,15 @@ pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
     }
 
     // Flush final
+    let req_title = current_req
+        .as_ref()
+        .map(|r| r.0.clone())
+        .unwrap_or_default();
     flush_scenario(
         &mut current_scenario,
         current_req.as_mut().map(|r| &mut r.2),
+        domain,
+        &req_title,
     );
     if let Some((t, d, s)) = current_req {
         requirements.push(Requirement {
@@ -428,6 +527,7 @@ pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
 }
 
 struct ScenarioBuilder {
+    id: Option<String>,
     title: String,
     given: String,
     when: String,
@@ -435,17 +535,26 @@ struct ScenarioBuilder {
     and_clauses: Vec<String>,
 }
 
-fn flush_scenario(builder: &mut Option<ScenarioBuilder>, target: Option<&mut Vec<Scenario>>) {
+fn flush_scenario(
+    builder: &mut Option<ScenarioBuilder>,
+    target: Option<&mut Vec<Scenario>>,
+    domain: &str,
+    requirement_title: &str,
+) {
     if let Some(b) = builder.take()
         && (!b.given.is_empty() || !b.when.is_empty() || !b.then.is_empty())
         && let Some(scenarios) = target
     {
+        let id =
+            b.id.unwrap_or_else(|| stable_scenario_id(domain, requirement_title, &b.title));
         scenarios.push(Scenario {
+            id,
             title: b.title,
             given: b.given,
             when: b.when,
             then: b.then,
             and_clauses: b.and_clauses,
+            tdd_evidence: None,
         });
     }
 }
@@ -488,9 +597,31 @@ pub fn build_context_injection(changes: &[ChangeInfo]) -> String {
                 let scenario_count: usize =
                     spec.requirements.iter().map(|r| r.scenarios.len()).sum();
                 if scenario_count > 0 {
+                    let mut evidence_counts = std::collections::BTreeMap::new();
+                    for scenario in spec
+                        .requirements
+                        .iter()
+                        .flat_map(|requirement| &requirement.scenarios)
+                    {
+                        if let Some(status) = scenario.tdd_evidence {
+                            *evidence_counts.entry(status.as_str()).or_insert(0usize) += 1;
+                        }
+                    }
+                    let evidence = if evidence_counts.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            " [{}]",
+                            evidence_counts
+                                .iter()
+                                .map(|(status, count)| format!("{status}:{count}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    };
                     lines.push(format!(
-                        "    specs/{}: {} scenarios",
-                        spec.domain, scenario_count
+                        "    specs/{}: {} scenarios{}",
+                        spec.domain, scenario_count, evidence
                     ));
                 }
             }
@@ -738,6 +869,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parse_spec_content_accepts_explicit_scenario_id() {
+        let content = r#"# auth
+
+### Requirement: Token Validation
+
+#### Scenario: Expired token rejected
+<!-- id: auth/token-expired -->
+Given expired token
+When request happens
+Then response is 401
+"#;
+        let reqs = parse_spec_content_with_domain("auth/api", content);
+        assert_eq!(reqs[0].scenarios[0].id, "auth/token-expired");
+    }
+
+    #[test]
+    fn parse_spec_content_with_domain_sets_stable_scenario_id() {
+        let content = r#"# auth
+
+### Requirement: Token Validation
+
+#### Scenario: Expired token rejected
+Given expired token
+When request happens
+Then response is 401
+"#;
+        let reqs = parse_spec_content_with_domain("auth/api", content);
+        assert_eq!(
+            reqs[0].scenarios[0].id,
+            "auth-api/token-validation/expired-token-rejected"
+        );
+    }
+
+    #[test]
     fn parse_spec_content_basic() {
         let content = r#"# progress
 
@@ -941,11 +1106,13 @@ Then sharedState.cleave.children[i].status becomes running
                     title: "Auth".into(),
                     description: String::new(),
                     scenarios: vec![Scenario {
+                        id: "auth/auth/login".into(),
                         title: "Login".into(),
                         given: "user".into(),
                         when: "login".into(),
                         then: "success".into(),
                         and_clauses: vec![],
+                        tdd_evidence: None,
                     }],
                 }],
             }],
