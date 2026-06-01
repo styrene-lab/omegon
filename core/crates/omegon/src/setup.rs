@@ -772,6 +772,7 @@ impl AgentSetup {
             Box::new(
                 {
                     let provider = tools::nex_substrate::NexSubstrateProvider::new(cwd.clone())
+                        .with_boundary(boundary.clone())
                         .with_delegations(nex_delegations);
                     if let Some(executor) = nex_delegation_executor {
                         provider.with_executor(executor)

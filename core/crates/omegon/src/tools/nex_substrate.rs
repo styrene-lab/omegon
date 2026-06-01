@@ -7,10 +7,12 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::nex::substrate::NexSubstrateDelegation;
+use crate::tools::WorkspaceBoundary;
 use crate::tool_registry::core as reg;
 
 pub struct NexSubstrateProvider {
     cwd: PathBuf,
+    boundary: Option<WorkspaceBoundary>,
     delegations: Vec<NexSubstrateDelegation>,
     executor: Option<Arc<dyn NexDelegationExecutor>>,
 }
@@ -28,9 +30,15 @@ impl NexSubstrateProvider {
     pub fn new(cwd: PathBuf) -> Self {
         Self {
             cwd,
+            boundary: None,
             delegations: Vec::new(),
             executor: None,
         }
+    }
+
+    pub fn with_boundary(mut self, boundary: WorkspaceBoundary) -> Self {
+        self.boundary = Some(boundary);
+        self
     }
 
     pub fn with_delegations(mut self, delegations: Vec<NexSubstrateDelegation>) -> Self {
@@ -44,6 +52,9 @@ impl NexSubstrateProvider {
     }
 
     fn resolve_path(&self, path: &str) -> anyhow::Result<PathBuf> {
+        if let Some(boundary) = &self.boundary {
+            return boundary.check_path(path);
+        }
         let path = expand_tilde(path);
         let path = if path.is_absolute() {
             path
@@ -191,4 +202,28 @@ fn report_from_delegated_result(path: &Path, result: ToolResult) -> anyhow::Resu
         policy,
         diagnostics,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omegon_traits::ToolProvider;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn rejects_paths_outside_workspace_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let provider = NexSubstrateProvider::new(dir.path().to_path_buf())
+            .with_boundary(WorkspaceBoundary::new(dir.path().to_path_buf()));
+        let result = provider
+            .execute(
+                reg::NEX_SUBSTRATE,
+                "test",
+                json!({"action": "inspect", "path": "/etc"}),
+                CancellationToken::new(),
+            )
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("PERMISSION REQUIRED"));
+    }
 }
