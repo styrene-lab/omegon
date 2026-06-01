@@ -1,3 +1,8 @@
+//! Native extension for deterministic TDD savepoint evidence.
+//!
+//! The extension exposes tools for planning, running, and querying TDD evidence
+//! while projecting normalized records into `.omegon/evidence`.
+
 use async_trait::async_trait;
 use omegon_extension::{Error, Extension, SDK_CONTRACT_VERSION};
 use serde::{Deserialize, Serialize};

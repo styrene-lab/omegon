@@ -14,6 +14,7 @@ use std::sync::mpsc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
+/// Command identity for a TDD savepoint run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TddCommand {
     pub argv: Vec<String>,
@@ -21,6 +22,7 @@ pub struct TddCommand {
 }
 
 impl TddCommand {
+    /// Build a command identity from a non-empty argv vector.
     pub fn new(argv: Vec<String>) -> Result<Self> {
         if argv.is_empty() {
             bail!("missing command after --");
@@ -41,12 +43,14 @@ fn normalize_command(argv: &[String]) -> Vec<String> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Exit-code-derived command state.
 pub enum TddState {
     Passing,
     Failing,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Bounded command execution result captured for evidence.
 pub struct RunOutcome {
     pub exit_code: Option<i32>,
     pub state: TddState,
@@ -57,6 +61,7 @@ pub struct RunOutcome {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// Git/worktree identity captured around evidence-producing commands.
 pub struct GitIdentity {
     pub branch: Option<String>,
     pub head: Option<String>,
@@ -66,6 +71,7 @@ pub struct GitIdentity {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Classified status for queried TDD evidence.
 pub enum TddEvidenceStatus {
     NoEvidence,
     RedCaptured,
@@ -76,6 +82,7 @@ pub enum TddEvidenceStatus {
 }
 
 impl TddEvidenceStatus {
+    /// Return the stable wire/status label for this evidence status.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::NoEvidence => "no-evidence",
@@ -89,6 +96,7 @@ impl TddEvidenceStatus {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Query filters for raw and projected TDD evidence.
 pub struct EvidenceQuery {
     pub command_hash: Option<String>,
     pub change: Option<String>,
@@ -98,6 +106,7 @@ pub struct EvidenceQuery {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Manifest describing the project-wide `.omegon/evidence` streams.
 pub struct EvidenceManifest {
     pub schema: String,
     pub generator: EvidenceGenerator,
@@ -109,18 +118,21 @@ pub struct EvidenceManifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Generator identity recorded in an evidence manifest.
 pub struct EvidenceGenerator {
     pub name: String,
     pub version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Project identity recorded in an evidence manifest.
 pub struct EvidenceProject {
     pub root: String,
     pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Source-control state associated with evidence generation.
 pub struct EvidenceSourceState {
     pub git_head: Option<String>,
     pub branch: Option<String>,
@@ -129,6 +141,7 @@ pub struct EvidenceSourceState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Canonical evidence stream filenames.
 pub struct EvidenceFiles {
     pub records: String,
     pub surfaces: String,
@@ -137,6 +150,7 @@ pub struct EvidenceFiles {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Provider declaration for records emitted into the evidence map.
 pub struct EvidenceProvider {
     pub id: String,
     pub kind: String,
@@ -144,6 +158,7 @@ pub struct EvidenceProvider {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Normalized evidence record written to `.omegon/evidence/records.jsonl`.
 pub struct EvidenceRecord {
     pub schema: String,
     pub id: String,
@@ -158,11 +173,13 @@ pub struct EvidenceRecord {
     pub metadata: Value,
 }
 
+/// Compute the scoped worktree diff hash used for stale-pass detection.
 pub fn current_diff_hash(cwd: &Path, scopes: &[PathBuf]) -> String {
     capture_git_identity(cwd, scopes).diff_hash
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Compact OpenSpec-local projection of a savepoint event.
 pub struct SavepointSummary {
     pub kind: String,
     pub event_id: String,
@@ -221,6 +238,7 @@ impl From<SavepointSummary> for SavepointEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Raw TDD savepoint event persisted as JSONL.
 pub struct SavepointEvent {
     pub kind: String,
     pub event_id: String,
@@ -245,6 +263,7 @@ pub struct SavepointEvent {
 }
 
 #[derive(Debug, Clone)]
+/// Options for the legacy in-process TDD watch loop.
 pub struct WatchOptions {
     pub cwd: PathBuf,
     pub filetype: Option<String>,
@@ -259,10 +278,12 @@ pub struct WatchOptions {
     pub timeout: Option<Duration>,
 }
 
+/// Run a TDD command without an explicit timeout.
 pub fn run_command(cwd: &Path, command: &TddCommand) -> Result<RunOutcome> {
     run_command_with_timeout(cwd, command, None)
 }
 
+/// Run a TDD command with optional timeout and bounded output capture.
 pub fn run_command_with_timeout(
     cwd: &Path,
     command: &TddCommand,
@@ -348,6 +369,7 @@ fn tail_string(s: &str, max: usize) -> String {
     }
 }
 
+/// Capture branch, head, dirtiness, staged state, and scoped diff hash.
 pub fn capture_git_identity(cwd: &Path, scopes: &[PathBuf]) -> GitIdentity {
     let branch = git_output(cwd, &["branch", "--show-current"])
         .ok()
@@ -429,6 +451,7 @@ fn duplicate_failure_event_exists(cwd: &Path, event: &SavepointEvent) -> Result<
     }))
 }
 
+/// Append a raw savepoint event and project it into evidence streams.
 pub fn append_event(cwd: &Path, event: &SavepointEvent) -> Result<PathBuf> {
     let dir = cwd.join(".omegon/lifecycle/savepoints");
     fs::create_dir_all(&dir)?;
@@ -603,6 +626,7 @@ fn project_openspec_summary(cwd: &Path, event: &SavepointEvent) -> Result<()> {
     Ok(())
 }
 
+/// Read raw or projected savepoint events matching the query.
 pub fn read_events(cwd: &Path, query: &EvidenceQuery) -> Result<Vec<SavepointEvent>> {
     let mut events = Vec::new();
     if let Some(change) = &query.change {
@@ -685,6 +709,7 @@ fn event_matches(event: &SavepointEvent, query: &EvidenceQuery) -> bool {
             .is_none_or(|v| event.task.as_ref() == Some(v))
 }
 
+/// Classify matching savepoint events into a stable evidence status.
 pub fn classify_evidence(events: &[SavepointEvent], query: &EvidenceQuery) -> TddEvidenceStatus {
     if events.iter().any(|e| e.transition == "failing_to_passing") {
         if let Some(current) = &query.current_diff_hash {
@@ -720,11 +745,13 @@ pub fn classify_evidence(events: &[SavepointEvent], query: &EvidenceQuery) -> Td
     }
 }
 
+/// Read and classify savepoint evidence for a query.
 pub fn evidence_status(cwd: &Path, query: &EvidenceQuery) -> Result<TddEvidenceStatus> {
     let events = read_events(cwd, query)?;
     Ok(classify_evidence(&events, query))
 }
 
+/// Legacy blocking filesystem watcher that records red/green savepoints.
 pub fn watch(opts: WatchOptions) -> Result<()> {
     let mut previous_git = capture_git_identity(&opts.cwd, &opts.watch_paths);
     let mut previous = run_command_with_timeout(&opts.cwd, &opts.command, opts.timeout)?;
