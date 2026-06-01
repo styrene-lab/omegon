@@ -1,5 +1,5 @@
 {
-  "created_at_ms": 1780277144071,
+  "created_at_ms": 1780277553343,
   "files": {
     "artifacts": "artifacts.jsonl",
     "edges": "edges.jsonl",
@@ -8,7 +8,7 @@
   },
   "generator": {
     "name": "omegon-surface-prototype",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "project": {
     "name": "omegon-secundus",
@@ -27,7 +27,7 @@
   "source_state": {
     "branch": "exploration/rust-savepoint-tdd",
     "dirty": true,
-    "git_head": "9d4b4b2aaecb26ae72701aafa02679ec714fbdcb",
-    "worktree_diff_hash": "sha256:55af4a12cdf6ff623c3171d09dad2467de829b80980d7ee577a6038123fff454"
+    "git_head": "1ca33cc96bd96b447396e4a265f7be63234b10bb",
+    "worktree_diff_hash": "sha256:5824c28d50d096e047c2f4bfd49cefabb900627cbb57ecf3a770fdb6349c307f"
   }
 }
