@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::types::*;
+use crate::evidence::EvidenceStore;
 use crate::tdd::{self, EvidenceQuery};
 
 /// Locate the openspec/ directory in a repository.
@@ -180,6 +181,62 @@ fn slug_component(input: &str) -> String {
         }
     }
     out.trim_matches('-').to_string()
+}
+
+fn evidence_claim_ids(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let body = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
+            let claim = body.strip_prefix("evidence-claim:")?.trim();
+            (!claim.is_empty()).then(|| claim.to_string())
+        })
+        .collect()
+}
+
+fn annotate_claim_evidence(change_dir: &Path, change: &mut ChangeInfo) {
+    let Some(repo_path) = change_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+    else {
+        return;
+    };
+    let Ok(store) = EvidenceStore::load(repo_path) else {
+        return;
+    };
+    for spec in &mut change.specs {
+        for requirement in &mut spec.requirements {
+            let mut requirement_claims = evidence_claim_ids(&requirement.description);
+            for scenario in &mut requirement.scenarios {
+                let mut claims = requirement_claims.clone();
+                claims.extend(evidence_claim_ids(&scenario.given));
+                claims.extend(evidence_claim_ids(&scenario.when));
+                claims.extend(evidence_claim_ids(&scenario.then));
+                for and_clause in &scenario.and_clauses {
+                    claims.extend(evidence_claim_ids(and_clause));
+                }
+                claims.sort();
+                claims.dedup();
+                scenario.evidence_support = claims
+                    .iter()
+                    .map(|claim_id| {
+                        let summary = store.support_summary(claim_id);
+                        ClaimEvidenceSupport {
+                            claim_id: claim_id.clone(),
+                            status: summary.status,
+                            supports: summary.supports.len(),
+                            refutes: summary.refutes.len(),
+                            stale: summary.stale.len(),
+                            supersedes: summary.supersedes.len(),
+                        }
+                    })
+                    .collect();
+                scenario.evidence_claims = claims;
+            }
+            requirement_claims.clear();
+        }
+    }
 }
 
 fn annotate_tdd_evidence(change_dir: &Path, change: &mut ChangeInfo) {
@@ -555,6 +612,8 @@ fn flush_scenario(
             then: b.then,
             and_clauses: b.and_clauses,
             tdd_evidence: None,
+            evidence_claims: Vec::new(),
+            evidence_support: Vec::new(),
         });
     }
 }
@@ -1113,6 +1172,8 @@ Then sharedState.cleave.children[i].status becomes running
                         then: "success".into(),
                         and_clauses: vec![],
                         tdd_evidence: None,
+                        evidence_claims: Vec::new(),
+                        evidence_support: Vec::new(),
                     }],
                 }],
             }],

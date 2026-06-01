@@ -235,6 +235,19 @@ pub struct Scenario {
     pub then: String,
     pub and_clauses: Vec<String>,
     pub tdd_evidence: Option<TddEvidenceStatus>,
+    pub evidence_claims: Vec<String>,
+    pub evidence_support: Vec<ClaimEvidenceSupport>,
+}
+
+/// Provider-neutral support summary for a claim referenced by OpenSpec content.
+#[derive(Debug, Clone)]
+pub struct ClaimEvidenceSupport {
+    pub claim_id: String,
+    pub status: crate::evidence::ClaimSupportStatus,
+    pub supports: usize,
+    pub refutes: usize,
+    pub stale: usize,
+    pub supersedes: usize,
 }
 
 /// A requirement grouping scenarios.
