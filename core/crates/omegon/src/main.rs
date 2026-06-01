@@ -71,6 +71,7 @@ mod checkpoint;
 mod child_agent;
 mod conversation;
 mod eval;
+mod evidence;
 mod extension_cli;
 mod extension_registry;
 mod lifecycle;
