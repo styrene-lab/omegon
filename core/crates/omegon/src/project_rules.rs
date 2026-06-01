@@ -225,7 +225,9 @@ fn evaluate_evidence_map_parses(
     }
     let manifest_result = fs::read_to_string(root.join("manifest.json"))
         .map_err(anyhow::Error::from)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).map_err(anyhow::Error::from));
+        .and_then(|text| {
+            serde_json::from_str::<serde_json::Value>(&text).map_err(anyhow::Error::from)
+        });
     if let Err(err) = manifest_result.and_then(|_| EvidenceStore::load(repo_path).map(|_| ())) {
         findings.push(ProjectRuleFinding {
             rule_id: rule.id.clone(),

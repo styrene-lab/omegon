@@ -819,7 +819,10 @@ mod tests {
             created_at_ms: 0,
         };
         assert_eq!(
-            classify_evidence(&[baseline_red.clone()], &EvidenceQuery::default()),
+            classify_evidence(
+                std::slice::from_ref(&baseline_red),
+                &EvidenceQuery::default()
+            ),
             TddEvidenceStatus::RedCaptured
         );
 
