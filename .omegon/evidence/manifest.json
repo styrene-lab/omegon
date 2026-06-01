@@ -1,10 +1,11 @@
 {
-  "created_at_ms": 1780297467163,
+  "created_at_ms": 1780317558323,
   "files": {
     "artifacts": "artifacts.jsonl",
     "claims": "claims.jsonl",
     "edges": "edges.jsonl",
     "records": "records.jsonl",
+    "summaries": "summaries/",
     "surfaces": "surfaces.jsonl"
   },
   "generator": {
@@ -35,7 +36,7 @@
   "source_state": {
     "branch": "exploration/rust-savepoint-tdd",
     "dirty": true,
-    "git_head": "cdcafb7d68b25ce9c5b0aa98aaffcb54a2dd2caa",
-    "worktree_diff_hash": "sha256:1fd279054f81e358721490556e2104ae696398eb447b44b6ed889cbd52e988e9"
+    "git_head": "7bce17e7d060e3c42b8683243256a63ea533b864",
+    "worktree_diff_hash": "sha256:add437f6b84233eddf14ec5b20337320bdd5fe69f87af461f14c09e98c70fe75"
   }
 }

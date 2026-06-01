@@ -20,6 +20,7 @@ STREAMS = {
     "surfaces": "surfaces.jsonl",
     "edges": "edges.jsonl",
     "artifacts": "artifacts.jsonl",
+    "summaries": "summaries/",
 }
 PROTOTYPE_VERSION = "0.3.0"
 DEFAULT_MANIFEST = pathlib.Path("extensions/omegon-tdd-savepoint/Cargo.toml")
@@ -299,19 +300,35 @@ def jsonl_rows(path: pathlib.Path) -> list[dict[str, Any]]:
 
 
 
+def legacy_provider_ids(provider: str) -> set[str]:
+    return {provider, "surface-map"}
+
+
 def compact_provider_records(path: pathlib.Path, provider: str) -> None:
-    existing = [row for row in jsonl_rows(path) if row.get("provider") != provider]
+    providers = legacy_provider_ids(provider)
+    existing = [row for row in jsonl_rows(path) if row.get("provider") not in providers]
     write_jsonl(path, existing)
 
 
 def trim_provider_history(path: pathlib.Path, provider: str, max_records: int) -> None:
+    providers = legacy_provider_ids(provider)
     rows = jsonl_rows(path)
-    provider_rows = [row for row in rows if row.get("provider") == provider]
+    provider_rows = [row for row in rows if row.get("provider") in providers]
     if len(provider_rows) <= max_records:
         return
     keep_ids = {row.get("id") for row in provider_rows[-max_records:]}
-    trimmed = [row for row in rows if row.get("provider") != provider or row.get("id") in keep_ids]
+    trimmed = [row for row in rows if row.get("provider") not in providers or row.get("id") in keep_ids]
     write_jsonl(path, trimmed)
+
+
+def prune_legacy_provider_edges(path: pathlib.Path) -> None:
+    rows = [
+        row
+        for row in jsonl_rows(path)
+        if "evidence:surface-map:" not in row.get("from", "")
+        and "evidence:surface-map:" not in row.get("to", "")
+    ]
+    write_jsonl(path, rows)
 
 def init_sqlite_index(evidence_dir: pathlib.Path) -> None:
     import sqlite3
@@ -397,22 +414,59 @@ def generate_edges(
     return edges
 
 
+def artifact_record(path: pathlib.Path, project_root: pathlib.Path, kind: str, created_at_ms: int, open_with: str = "editor") -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    rel = str(path.relative_to(project_root))
+    return {
+        "schema": "artifact-record/v1",
+        "id": artifact_id_for_path(rel),
+        "kind": kind,
+        "provider": PROVIDER_ID,
+        "path": rel,
+        "open_with": open_with,
+        "hash": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+        "created_at_ms": created_at_ms,
+    }
+
+
 def generate_artifacts(doc_json: pathlib.Path, project_root: pathlib.Path, created_at_ms: int) -> list[dict[str, Any]]:
-    if not doc_json.exists():
-        return []
-    rel = str(doc_json.relative_to(project_root))
-    return [
-        {
-            "schema": "artifact-record/v1",
-            "id": artifact_id_for_path(rel),
-            "kind": "rustdoc-json",
-            "provider": PROVIDER_ID,
-            "path": rel,
-            "open_with": "editor",
-            "hash": "sha256:" + hashlib.sha256(doc_json.read_bytes()).hexdigest(),
-            "created_at_ms": created_at_ms,
-        }
+    record = artifact_record(doc_json, project_root, "rustdoc-json", created_at_ms)
+    return [record] if record else []
+
+
+def write_doc_coverage_summary(path: pathlib.Path, surfaces: list[dict[str, Any]], coverage: dict[str, Any], crate_name: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    missing_ids = set(coverage.get("metadata", {}).get("public_missing_docs", []))
+    by_id = {surface["id"]: surface for surface in surfaces}
+    lines = [
+        "# Rust Documentation Coverage",
+        "",
+        f"Crate: `{crate_name}`",
+        "",
+        f"Status: `{coverage['status']}`",
+        f"Public surfaces: {coverage['metadata']['public_surface_count']}",
+        f"Documented public surfaces: {coverage['metadata']['public_documented_count']}",
+        f"Missing public docs: {coverage['metadata']['public_missing_docs_count']}",
+        "",
+        f"Claim: `{coverage['claims'][0]}`",
+        f"Evidence: `{coverage['id']}`",
+        "",
+        "## Missing public docs",
+        "",
     ]
+    if not missing_ids:
+        lines.append("All public surfaces have rustdoc comments.")
+    else:
+        for sid in sorted(missing_ids):
+            surface = by_id.get(sid, {})
+            span = surface.get("source_span") or {}
+            source = surface.get("source_path") or "<unknown>"
+            line = span.get("start_line")
+            anchor = f"{source}:{line}" if line else source
+            lines.append(f"- `{sid}` — {anchor}")
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def public_docs_claim(crate_name: str, created_at_ms: int) -> dict[str, Any]:
@@ -501,6 +555,11 @@ def main() -> int:
     surface_evidence_id = f"evidence:{provider_slug}:rust:{created}"
     artifacts = generate_artifacts(doc_json, root, created)
     coverage = doc_coverage_evidence(surfaces, root.name, args.crate_name, state, created)
+    summary_path = evidence_dir / "summaries" / "rust-doc-coverage.md"
+    write_doc_coverage_summary(summary_path, surfaces, coverage, args.crate_name)
+    summary_artifact = artifact_record(summary_path, root, "doc-coverage-summary", created, "markdown")
+    if summary_artifact:
+        artifacts.append(summary_artifact)
     claims = [public_docs_claim(args.crate_name, created)]
     edges = generate_edges(
         surfaces,
@@ -515,6 +574,8 @@ def main() -> int:
 
     write_jsonl(evidence_dir / "claims.jsonl", claims)
     write_jsonl(evidence_dir / "surfaces.jsonl", surfaces)
+    if summary_artifact:
+        edges.append(make_edge(coverage["id"], summary_artifact["id"], "summarized_by", created))
     write_jsonl(evidence_dir / "artifacts.jsonl", artifacts)
     write_jsonl(evidence_dir / "edges.jsonl", edges)
     manifest_doc = {
@@ -558,6 +619,7 @@ def main() -> int:
     }
     if args.replace_provider_records:
         compact_provider_records(evidence_dir / "records.jsonl", PROVIDER_ID)
+        prune_legacy_provider_edges(evidence_dir / "edges.jsonl")
     with (evidence_dir / "records.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n")
         f.write(json.dumps(coverage, sort_keys=True, separators=(",", ":")) + "\n")
