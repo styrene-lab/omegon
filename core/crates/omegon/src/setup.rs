@@ -762,10 +762,16 @@ impl AgentSetup {
             core_tools
         };
         let nex_delegations = crate::nex::substrate::read_only_delegations(&extension_metadata);
-        let core_tools = core_tools.with_nex_delegations(nex_delegations);
         bus.register(Box::new(features::adapter::ToolAdapter::new(
             "core-tools",
             Box::new(core_tools),
+        )));
+        bus.register(Box::new(features::adapter::ToolAdapter::new(
+            "nex-substrate",
+            Box::new(
+                tools::nex_substrate::NexSubstrateProvider::new(cwd.clone())
+                    .with_delegations(nex_delegations),
+            ),
         )));
         // Register internal tools that the dispatch layer calls but the LLM never sees.
         bus.register_internal_tool(crate::tool_registry::core::TRUST_DIRECTORY, "core-tools");
