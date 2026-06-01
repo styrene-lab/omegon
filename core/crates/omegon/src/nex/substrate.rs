@@ -187,10 +187,18 @@ pub fn read_only_delegations(
         let Some(nex) = metadata.pointer("/delegations/nex") else {
             continue;
         };
+        if nex.get("schema").and_then(Value::as_str)
+            != Some("io.styrene.omegon-nex.delegations.v1")
+        {
+            continue;
+        }
         let provider = nex
             .get("provider")
             .and_then(Value::as_str)
             .unwrap_or("omegon-nex");
+        if provider != "omegon-nex" {
+            continue;
+        }
         let Some(commands) = nex.get("commands").and_then(Value::as_array) else {
             continue;
         };
@@ -596,6 +604,8 @@ mod tests {
                 "delegations": {
                     "nex": {
                         "schema": "io.styrene.omegon-nex.delegations.v1",
+                        "schema": "io.styrene.omegon-nex.delegations.v1",
+                        "schema": "io.styrene.omegon-nex.delegations.v1",
                         "provider": "omegon-nex",
                         "commands": [
                             {
@@ -680,5 +690,39 @@ mod tests {
 
         assert!(read_only_delegations(&metadata).is_empty());
         assert!(delegation_for_mode(&metadata, "devenv").is_none());
+    }
+
+    #[test]
+    fn ignores_wrong_schema_or_provider_delegation_metadata() {
+        for nex in [
+            json!({
+                "schema": "io.example.other",
+                "provider": "omegon-nex",
+                "commands": [{
+                    "id": "devenv.inspect",
+                    "tool": "nex_devenv_inspect",
+                    "command": ["nex", "devenv", "inspect", "<path>", "--json"],
+                    "mutability": "read-only",
+                    "output_schema": NEX_DEVENV_REPORT_SCHEMA
+                }]
+            }),
+            json!({
+                "schema": "io.styrene.omegon-nex.delegations.v1",
+                "provider": "other-provider",
+                "commands": [{
+                    "id": "devenv.inspect",
+                    "tool": "nex_devenv_inspect",
+                    "command": ["nex", "devenv", "inspect", "<path>", "--json"],
+                    "mutability": "read-only",
+                    "output_schema": NEX_DEVENV_REPORT_SCHEMA
+                }]
+            }),
+        ] {
+            let metadata = BTreeMap::from([(
+                "provider".to_string(),
+                json!({"delegations": {"nex": nex}}),
+            )]);
+            assert!(read_only_delegations(&metadata).is_empty());
+        }
     }
 }
