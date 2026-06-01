@@ -11,8 +11,8 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::process::Command;
 
-const REPORT_SCHEMA: &str = "io.styrene.omegon.nex-substrate-report.v1";
-const NEX_DEVENV_REPORT_SCHEMA: &str = "io.styrene.nex.devenv-import-report.v1";
+pub const REPORT_SCHEMA: &str = "io.styrene.omegon.nex-substrate-report.v1";
+pub const NEX_DEVENV_REPORT_SCHEMA: &str = "io.styrene.nex.devenv-import-report.v1";
 const NEX_TIMEOUT: Duration = Duration::from_secs(20);
 const OUTPUT_LIMIT: usize = 2 * 1024 * 1024;
 
