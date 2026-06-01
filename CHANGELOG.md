@@ -19,7 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 
 - Add the `nex_substrate` read-only tool boundary for consuming Nex project substrate reports and deriving Omegon policy findings without duplicating devenv or SecretSpec parsing while preserving Omegon's single-binary default operation when Nex is absent.
-- Catalog `omegon-nex` read-only delegation metadata for `devenv.inspect`, `devenv.explain`, and `machine-profile.inspect` and thread that catalog into `nex_substrate` reports, while keeping direct Nex binary inspection as an explicit advisory fallback.
+- Catalog `omegon-nex` read-only delegation metadata for `devenv.inspect`, `devenv.explain`, and `machine-profile.inspect`, validate the advertised tool/schema/argv contract before accepting it, and thread that catalog into `nex_substrate` reports while keeping direct Nex binary inspection as an explicit advisory fallback.
 
 ## [0.25.6] - 2026-05-31
 

@@ -207,13 +207,21 @@ pub fn read_only_delegations(
             let Some(tool) = command.get("tool").and_then(Value::as_str) else {
                 continue;
             };
-            if tool.trim().is_empty() {
+            let Some(expected) = expected_delegation(command_id) else {
+                continue;
+            };
+            if tool != expected.tool {
                 continue;
             }
             let Some(output_schema) = command.get("output_schema").and_then(Value::as_str) else {
                 continue;
             };
-            if output_schema.trim().is_empty() {
+            if output_schema != expected.output_schema {
+                continue;
+            }
+            if command.get("command").and_then(Value::as_array).is_some_and(|argv| {
+                argv.iter().filter_map(Value::as_str).collect::<Vec<_>>() != expected.argv
+            }) {
                 continue;
             }
             delegations.push(NexSubstrateDelegation {
@@ -226,6 +234,33 @@ pub fn read_only_delegations(
         }
     }
     delegations
+}
+
+struct ExpectedDelegation {
+    tool: &'static str,
+    output_schema: &'static str,
+    argv: &'static [&'static str],
+}
+
+fn expected_delegation(command_id: &str) -> Option<ExpectedDelegation> {
+    match command_id {
+        "devenv.inspect" => Some(ExpectedDelegation {
+            tool: "nex_devenv_inspect",
+            output_schema: NEX_DEVENV_REPORT_SCHEMA,
+            argv: &["nex", "devenv", "inspect", "<path>", "--json"],
+        }),
+        "devenv.explain" => Some(ExpectedDelegation {
+            tool: "nex_devenv_explain",
+            output_schema: NEX_DEVENV_REPORT_SCHEMA,
+            argv: &["nex", "devenv", "explain", "<path>", "--json"],
+        }),
+        "machine-profile.inspect" => Some(ExpectedDelegation {
+            tool: "nex_machine_profile_inspect",
+            output_schema: "io.styrene.nex.machine-profile-inspect.v1",
+            argv: &["nex", "machine-profile", "inspect", "<path>", "--json"],
+        }),
+        _ => None,
+    }
 }
 
 pub fn delegation_for_command(
@@ -573,12 +608,14 @@ mod tests {
                             {
                                 "id": "devenv.explain",
                                 "tool": "nex_devenv_explain",
+                                "command": ["nex", "devenv", "explain", "<path>", "--json"],
                                 "mutability": "read-only",
                                 "output_schema": NEX_DEVENV_REPORT_SCHEMA
                             },
                             {
                                 "id": "machine-profile.inspect",
                                 "tool": "nex_machine_profile_inspect",
+                                "command": ["nex", "machine-profile", "inspect", "<path>", "--json"],
                                 "mutability": "read-only",
                                 "output_schema": "io.styrene.nex.machine-profile-inspect.v1"
                             }
@@ -616,13 +653,22 @@ mod tests {
                             },
                             {
                                 "id": "devenv.explain",
-                                "tool": "",
+                                "tool": "nex_devenv_inspect",
+                                "command": ["nex", "devenv", "inspect", "<path>", "--json"],
                                 "mutability": "read-only",
                                 "output_schema": NEX_DEVENV_REPORT_SCHEMA
                             },
                             {
+                                "id": "machine-profile.inspect",
+                                "tool": "nex_machine_profile_inspect",
+                                "command": ["nex", "profile", "inspect", "<path>", "--json"],
+                                "mutability": "read-only",
+                                "output_schema": "io.styrene.nex.machine-profile-inspect.v1"
+                            },
+                            {
                                 "id": "nex.apply",
                                 "tool": "nex_apply",
+                                "command": ["nex", "profile", "apply", "<path>"],
                                 "mutability": "read-only",
                                 "output_schema": "io.example.unsafe"
                             }
