@@ -921,12 +921,99 @@ fn parse_task_line_for_write(line: &str) -> Option<(bool, String, String, usize,
     ))
 }
 
+/// Policy decision for OpenSpec evidence claim gates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvidenceGateDecision {
+    Pass,
+    Warn,
+    Block,
+}
+
+/// A single evidence-claim gate finding for a scenario.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvidenceGateFinding {
+    pub scenario_id: String,
+    pub claim_id: String,
+    pub status: crate::evidence::ClaimSupportStatus,
+    pub decision: EvidenceGateDecision,
+    pub detail: String,
+}
+
+/// Evaluate provider-neutral evidence claims attached to OpenSpec scenarios.
+///
+/// Default policy is intentionally conservative:
+/// - refuted or mixed claims block archiving;
+/// - unknown or unsupported claims warn;
+/// - supported claims pass.
+///
+/// This keeps evidence opt-in by requiring an explicit `evidence-claim` marker,
+/// but prevents knowingly refuted evidence from being archived silently.
+pub fn evaluate_evidence_gates(change: &ChangeInfo) -> Vec<EvidenceGateFinding> {
+    let mut findings = Vec::new();
+    for spec in &change.specs {
+        for requirement in &spec.requirements {
+            for scenario in &requirement.scenarios {
+                for support in &scenario.evidence_support {
+                    let decision = match support.status {
+                        crate::evidence::ClaimSupportStatus::Supported => {
+                            EvidenceGateDecision::Pass
+                        }
+                        crate::evidence::ClaimSupportStatus::Refuted
+                        | crate::evidence::ClaimSupportStatus::Mixed => EvidenceGateDecision::Block,
+                        crate::evidence::ClaimSupportStatus::Unsupported
+                        | crate::evidence::ClaimSupportStatus::Unknown => {
+                            EvidenceGateDecision::Warn
+                        }
+                    };
+                    if decision == EvidenceGateDecision::Pass {
+                        continue;
+                    }
+                    findings.push(EvidenceGateFinding {
+                        scenario_id: scenario.id.clone(),
+                        claim_id: support.claim_id.clone(),
+                        status: support.status,
+                        decision,
+                        detail: format!(
+                            "claim {} is {:?} for scenario {} (supports={}, refutes={}, stale={}, supersedes={})",
+                            support.claim_id,
+                            support.status,
+                            scenario.id,
+                            support.supports,
+                            support.refutes,
+                            support.stale,
+                            support.supersedes
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    findings
+}
+
 /// Archive a change by moving it to openspec/archive/.
 pub fn archive_change(repo_path: &Path, change_name: &str) -> anyhow::Result<()> {
     let change_dir = repo_path.join("openspec/changes").join(change_name);
 
     if !change_dir.exists() {
         anyhow::bail!("Change '{change_name}' does not exist");
+    }
+
+    if let Some(change) = read_change(&change_dir, change_name) {
+        let blockers: Vec<_> = evaluate_evidence_gates(&change)
+            .into_iter()
+            .filter(|finding| finding.decision == EvidenceGateDecision::Block)
+            .collect();
+        if !blockers.is_empty() {
+            anyhow::bail!(
+                "Change '{change_name}' has refuted evidence claims and cannot be archived: {}",
+                blockers
+                    .iter()
+                    .map(|finding| finding.detail.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+        }
     }
 
     let archive_dir = repo_path.join("openspec/archive");
@@ -1351,6 +1438,81 @@ mod mutation_tests {
     }
 
     #[test]
+    fn evidence_gate_blocks_refuted_claims() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        let evidence_dir = repo.join(".omegon/evidence");
+        fs::create_dir_all(&evidence_dir).unwrap();
+        fs::write(
+            evidence_dir.join("claims.jsonl"),
+            serde_json::json!({
+                "schema": "claim-record/v1",
+                "id": "claim:docs-ready",
+                "kind": "documentation-quality",
+                "text": "Docs are ready",
+                "status": "asserted",
+                "scope": [],
+                "created_at_ms": 1,
+                "metadata": {}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        fs::write(
+            evidence_dir.join("records.jsonl"),
+            serde_json::json!({
+                "schema": "evidence-record/v1",
+                "id": "evidence:docs-not-ready",
+                "provider": "code-evidence",
+                "kind": "rust-doc-coverage",
+                "status": "docs-warnings",
+                "subjects": [],
+                "claims": ["claim:docs-ready"],
+                "artifacts": [],
+                "source_state": {},
+                "created_at_ms": 1,
+                "metadata": {}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        fs::write(
+            evidence_dir.join("edges.jsonl"),
+            serde_json::json!({
+                "schema": "evidence-edge/v1",
+                "from": "evidence:docs-not-ready",
+                "to": "claim:docs-ready",
+                "kind": "refutes",
+                "created_at_ms": 1
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+
+        propose_change(repo, "evidence-demo", "Evidence Demo", "intent").unwrap();
+        add_spec(
+            repo,
+            "evidence-demo",
+            "docs",
+            "# docs\n\n### Requirement: Docs are ready\n\nevidence-claim: claim:docs-ready\n\n#### Scenario: Documentation claim is supported\n\nGiven docs exist\nWhen evidence is evaluated\nThen the claim is supported\n",
+        )
+        .unwrap();
+
+        let change = list_changes(repo).remove(0);
+        let findings = evaluate_evidence_gates(&change);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].decision, EvidenceGateDecision::Block);
+        assert_eq!(
+            findings[0].status,
+            crate::evidence::ClaimSupportStatus::Refuted
+        );
+        let err = archive_change(repo, "evidence-demo").unwrap_err();
+        assert!(err.to_string().contains("refuted evidence claims"));
+    }
+
     fn list_changes_annotates_evidence_claim_support() {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path();
