@@ -21,6 +21,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add the `nex_substrate` read-only tool boundary for consuming Nex project substrate reports and deriving Omegon policy findings without duplicating devenv or SecretSpec parsing while preserving Omegon's single-binary default operation when Nex is absent.
 - Extract `nex_substrate` into a dedicated provider, catalog `omegon-nex` read-only delegation metadata for `devenv.inspect`, `devenv.explain`, and `machine-profile.inspect`, validate the advertised schema/provider/tool/output/argv contract before accepting it, prefer the narrow provider-routed `devenv.inspect` executor when available, enforce workspace-boundary path checks before inspection, and test that missing Nex remains an advisory degraded report rather than a startup/default-operation dependency while keeping direct Nex binary inspection as an explicit fallback.
 
+### Fixed
+
+- Ensure the Omegon build script watches the workspace manifest and the correct workspace `.git` paths so release binaries refresh embedded version and git metadata when the workspace version or HEAD changes.
+
 ## [0.25.6] - 2026-05-31
 
 ### Changed

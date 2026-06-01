@@ -86,10 +86,11 @@ fn main() {
     // Only re-run when the commit changes (HEAD moves), not on every
     // git status/stage/stash. Watching .git/index causes full recompiles
     // on every incremental build because the index changes constantly.
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
-    // Also watch the ref that HEAD points to (e.g. refs/heads/main)
+    println!("cargo:rerun-if-changed=../../../Cargo.toml");
+    println!("cargo:rerun-if-changed=../../../.git/HEAD");
+    // Also watch the ref that HEAD points to (e.g. refs/heads/main).
     if let Some(head_ref) = git(&["symbolic-ref", "--short", "HEAD"]) {
-        let ref_path = format!("../../.git/refs/heads/{head_ref}");
+        let ref_path = format!("../../../.git/refs/heads/{head_ref}");
         println!("cargo:rerun-if-changed={ref_path}");
     }
 }
