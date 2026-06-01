@@ -1,7 +1,8 @@
 {
-  "created_at_ms": 1780279456882,
+  "created_at_ms": 1780283616958,
   "files": {
     "artifacts": "artifacts.jsonl",
+    "claims": "claims.jsonl",
     "edges": "edges.jsonl",
     "records": "records.jsonl",
     "surfaces": "surfaces.jsonl"
@@ -9,6 +10,13 @@
   "generator": {
     "name": "omegon-surface-prototype",
     "version": "0.3.0"
+  },
+  "indexes": {
+    "sqlite": {
+      "derived": true,
+      "kind": "sqlite",
+      "path": ".omegon/evidence/indexes/evidence.sqlite"
+    }
   },
   "project": {
     "name": "omegon-secundus",
@@ -27,7 +35,7 @@
   "source_state": {
     "branch": "exploration/rust-savepoint-tdd",
     "dirty": true,
-    "git_head": "e9149e0016a5e2d0ae6d4b83f87efc955183e79a",
-    "worktree_diff_hash": "sha256:98d1825b902b7d2a636faf37cb33a6ce33e0f9c623a6602a720cd295cdf7de24"
+    "git_head": "5ba527772d1f9caa3439d0ac3df43b438d6f3916",
+    "worktree_diff_hash": "sha256:881250a7b23ee6f3a0624d910946dd712daa9c03803a7ddaf82d2136ce7f742b"
   }
 }

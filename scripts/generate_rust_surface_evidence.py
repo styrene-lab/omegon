@@ -14,6 +14,7 @@ import time
 from typing import Any
 
 STREAMS = {
+    "claims": "claims.jsonl",
     "records": "records.jsonl",
     "surfaces": "surfaces.jsonl",
     "edges": "edges.jsonl",
@@ -177,6 +178,7 @@ def signature(item: dict[str, Any], kind: str) -> str | None:
 
 def generate_surfaces(doc: dict[str, Any], project_root: pathlib.Path, crate_name: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
     created = now_ms()
     for item_id, item in doc.get("index", {}).items():
         inner = item.get("inner") or {}
@@ -202,6 +204,9 @@ def generate_surfaces(doc: dict[str, Any], project_root: pathlib.Path, crate_nam
             # the high-level evidence map; the owning types remain represented.
             continue
         sid = f"surface:rust:{full}"
+        if sid in seen_ids:
+            sid = f"{sid}:rustdoc-{item_id}"
+        seen_ids.add(sid)
         resolved_source = resolve_source_path(project_root, filename)
         record = {
             "schema": "surface-record/v1",
@@ -264,6 +269,65 @@ def write_jsonl(path: pathlib.Path, rows: list[dict[str, Any]]) -> None:
         for row in rows:
             f.write(json.dumps(row, sort_keys=True, separators=(",", ":")))
             f.write("\n")
+
+
+def jsonl_rows(path: pathlib.Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not path.is_file():
+        return rows
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            rows.append(json.loads(line))
+    return rows
+
+
+def init_sqlite_index(evidence_dir: pathlib.Path) -> None:
+    import sqlite3
+
+    index_dir = evidence_dir / "indexes"
+    index_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(index_dir / "evidence.sqlite")
+    try:
+        conn.executescript("""
+            PRAGMA journal_mode=WAL;
+            CREATE TABLE IF NOT EXISTS claims (id TEXT PRIMARY KEY, kind TEXT, text TEXT, status TEXT, created_at_ms INTEGER, raw_json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS evidence_records (id TEXT PRIMARY KEY, provider TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, created_at_ms INTEGER, source_git_head TEXT, source_diff_hash TEXT, raw_json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS surfaces (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, source_path TEXT, start_line INTEGER, end_line INTEGER, visibility TEXT, source_hash TEXT, extractor TEXT, created_at_ms INTEGER, raw_json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, provider TEXT, kind TEXT NOT NULL, path TEXT, uri TEXT, open_with TEXT, hash TEXT, created_at_ms INTEGER, raw_json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS edges (id INTEGER PRIMARY KEY AUTOINCREMENT, from_id TEXT NOT NULL, to_id TEXT NOT NULL, kind TEXT NOT NULL, created_at_ms INTEGER, raw_json TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_id);
+            CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_id);
+            CREATE INDEX IF NOT EXISTS idx_edges_kind ON edges(kind);
+            CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(id, kind, text, content);
+        """)
+        for table in ["claims", "evidence_records", "surfaces", "artifacts", "edges", "evidence_fts"]:
+            conn.execute(f"DELETE FROM {table}")
+        load_sqlite_index(conn, evidence_dir)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_sqlite_index(conn: Any, evidence_dir: pathlib.Path) -> None:
+    for row in jsonl_rows(evidence_dir / "claims.jsonl"):
+        raw = json.dumps(row, sort_keys=True)
+        conn.execute("INSERT OR REPLACE INTO claims VALUES (?, ?, ?, ?, ?, ?)", (row.get("id"), row.get("kind"), row.get("text"), row.get("status"), row.get("created_at_ms"), raw))
+        conn.execute("INSERT INTO evidence_fts VALUES (?, ?, ?, ?)", (row.get("id"), row.get("kind"), row.get("text", ""), raw))
+    for row in jsonl_rows(evidence_dir / "records.jsonl"):
+        raw = json.dumps(row, sort_keys=True)
+        source = row.get("source_state") or {}
+        conn.execute("INSERT OR REPLACE INTO evidence_records VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (row.get("id"), row.get("provider"), row.get("kind"), row.get("status"), row.get("created_at_ms"), source.get("git_head"), source.get("worktree_diff_hash"), raw))
+        conn.execute("INSERT INTO evidence_fts VALUES (?, ?, ?, ?)", (row.get("id"), row.get("kind"), " ".join(row.get("subjects") or []), raw))
+    for row in jsonl_rows(evidence_dir / "surfaces.jsonl"):
+        raw = json.dumps(row, sort_keys=True)
+        span = row.get("source_span") or {}
+        conn.execute("INSERT OR REPLACE INTO surfaces VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (row.get("id"), row.get("kind"), row.get("name"), row.get("source_path"), span.get("start_line"), span.get("end_line"), row.get("visibility"), row.get("source_hash"), row.get("extractor"), row.get("created_at_ms"), raw))
+        conn.execute("INSERT INTO evidence_fts VALUES (?, ?, ?, ?)", (row.get("id"), row.get("kind"), row.get("signature") or row.get("name") or "", raw))
+    for row in jsonl_rows(evidence_dir / "artifacts.jsonl"):
+        raw = json.dumps(row, sort_keys=True)
+        conn.execute("INSERT OR REPLACE INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (row.get("id"), row.get("provider"), row.get("kind"), row.get("path"), row.get("uri"), row.get("open_with"), row.get("hash"), row.get("created_at_ms"), raw))
+    for row in jsonl_rows(evidence_dir / "edges.jsonl"):
+        conn.execute("INSERT INTO edges(from_id, to_id, kind, created_at_ms, raw_json) VALUES (?, ?, ?, ?, ?)", (row.get("from"), row.get("to"), row.get("kind"), row.get("created_at_ms"), json.dumps(row, sort_keys=True)))
 
 
 def generate_edges(surfaces: list[dict[str, Any]], evidence_id: str, artifact_id: str, crate_name: str, created_at_ms: int) -> list[dict[str, Any]]:
@@ -376,6 +440,7 @@ def main() -> int:
     artifacts = generate_artifacts(doc_json, root, created)
     edges = generate_edges(surfaces, surface_evidence_id, rustdoc_artifact_id, args.crate_name, created)
 
+    write_jsonl(evidence_dir / "claims.jsonl", [])
     write_jsonl(evidence_dir / "surfaces.jsonl", surfaces)
     write_jsonl(evidence_dir / "artifacts.jsonl", artifacts)
     write_jsonl(evidence_dir / "edges.jsonl", edges)
@@ -386,6 +451,13 @@ def main() -> int:
         "created_at_ms": created,
         "source_state": state,
         "files": STREAMS,
+        "indexes": {
+            "sqlite": {
+                "kind": "sqlite",
+                "path": ".omegon/evidence/indexes/evidence.sqlite",
+                "derived": True,
+            }
+        },
         "providers": [
             {"id": "surface-map", "kind": "surface-index", "raw_roots": [str(doc_json.relative_to(root)) if doc_json.exists() else str(doc_json)]},
         ],
@@ -415,7 +487,8 @@ def main() -> int:
     with (evidence_dir / "records.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n")
         f.write(json.dumps(coverage, sort_keys=True, separators=(",", ":")) + "\n")
-    print(json.dumps({"status": status, "surface_count": len(surfaces), "edge_count": len(edges), "artifact_count": len(artifacts), "doc_coverage_status": coverage["status"], "evidence_dir": str(evidence_dir)}, indent=2))
+    init_sqlite_index(evidence_dir)
+    print(json.dumps({"status": status, "surface_count": len(surfaces), "edge_count": len(edges), "artifact_count": len(artifacts), "doc_coverage_status": coverage["status"], "sqlite_index": str(evidence_dir / "indexes/evidence.sqlite"), "evidence_dir": str(evidence_dir)}, indent=2))
     return 0 if status != "surface-fail" else 1
 
 

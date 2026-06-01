@@ -95,6 +95,7 @@ Minimal v1:
 ```text
 .omegon/evidence/
 ├── manifest.json
+├── claims.jsonl
 ├── records.jsonl
 ├── surfaces.jsonl
 ├── edges.jsonl
@@ -107,7 +108,7 @@ Minimal v1:
     └── by_scenario.json
 ```
 
-`indexes/` is derived and rebuildable. The canonical portable substrate is the manifest and JSONL streams.
+`indexes/` is derived and rebuildable. The canonical portable substrate is the manifest and JSONL streams. SQLite/FTS indexes are runtime query accelerators, not canonical truth. If JSONL and SQLite disagree, JSONL wins and the index must be rebuilt.
 
 ## Manifest Schema — `omegon-evidence-manifest/v1`
 
@@ -140,10 +141,18 @@ Schema sketch:
     "dirty": true
   },
   "files": {
+    "claims": "claims.jsonl",
     "records": "records.jsonl",
     "surfaces": "surfaces.jsonl",
     "edges": "edges.jsonl",
     "artifacts": "artifacts.jsonl"
+  },
+  "indexes": {
+    "sqlite": {
+      "kind": "sqlite",
+      "path": ".omegon/evidence/indexes/evidence.sqlite",
+      "derived": true
+    }
   },
   "providers": [
     {
@@ -185,6 +194,49 @@ Optional but recommended:
 | `project.id` | Stable project fingerprint. |
 | `project.name` | Human-readable project name. |
 | `source_state` | Source checkout/freshness anchor. |
+
+
+## Claim Record Schema — `claim-record/v1`
+
+File:
+
+```text
+.omegon/evidence/claims.jsonl
+```
+
+One JSON object per line. Claims are explicit assertions that evidence may support, refute, assert, stale, or supersede. This lets generated evidence, memory facts, academic citations, vendor references, design decisions, and runtime observations participate in the same graph without treating every source as automatic truth.
+
+Schema sketch:
+
+```json
+{
+  "schema": "claim-record/v1",
+  "id": "claim:memory:changelog-required",
+  "kind": "memory-fact",
+  "text": "Behavior, tooling, public API, and operator workflow changes update CHANGELOG.md.",
+  "status": "accepted",
+  "scope": ["CHANGELOG.md"],
+  "created_at_ms": 1780000000000,
+  "metadata": {
+    "provider": "omegon-memory",
+    "confidence": "high"
+  }
+}
+```
+
+Common claim statuses:
+
+```text
+asserted
+accepted
+validated
+stale
+superseded
+refuted
+archived
+```
+
+Evidence edges connect evidence to claims with kinds such as `asserts`, `supports`, `refutes`, `stale_against`, and `supersedes`.
 
 ## Evidence Record Schema — `evidence-record/v1`
 
@@ -466,6 +518,40 @@ if <project-root>/.omegon/evidence/manifest.json exists:
 ```
 
 Flynt should not be required to generate or validate these records initially. It can ingest them opportunistically, show freshness/source state, and let high-level Flynt documents cite evidence and surface IDs.
+
+## Runtime Indexes
+
+Evidence streams are plaintext-first, not plaintext-only. The canonical project-portable truth is:
+
+```text
+.omegon/evidence/manifest.json
+.omegon/evidence/*.jsonl
+```
+
+Runtime query surfaces may build derived indexes such as:
+
+```text
+.omegon/evidence/indexes/evidence.sqlite
+$OMEGON_HOME/evidence-indexes/<project-id>/evidence.sqlite
+```
+
+The SQLite shape is intentionally a read model over JSONL:
+
+```text
+claims
+evidence_records
+surfaces
+artifacts
+edges
+evidence_fts
+```
+
+Rules:
+
+- JSONL wins over SQLite on disagreement.
+- Indexes are rebuildable and should be gitignored by default.
+- Flynt may build its own index; it does not need to share Omegon's SQLite file.
+- Agents should query SQLite/FTS for speed but cite canonical record IDs from JSONL.
 
 ## Persistence Policy
 
