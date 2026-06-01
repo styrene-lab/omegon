@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add a native `omegon-tdd-savepoint` extension scaffold exposing TDD savepoint diff hashing, readiness status, and evidence classification tools while preserving the existing core CLI kernel during extraction.
 - Document the next TDD savepoint extraction stage: argv-only extension execution, deferred watch mode, plan/run ownership, and the core CLI compatibility-wrapper migration.
 - Add a native `omegon-tdd-savepoint` extension scaffold exposing TDD savepoint presets, plan/run operations, diff hashing, readiness status, and evidence classification tools while preserving the existing core CLI kernel during extraction.
+- Add a native `omegon-tdd-savepoint` extension scaffold exposing TDD savepoint presets, plan/run operations, diff hashing, readiness status, evidence classification tools, and `.omegon/evidence/` normalized record projection while preserving the existing core CLI kernel during extraction.
 - Define `.omegon/evidence/` manifest, evidence, surface, edge, and artifact schemas as the project-wide generated evidence-map substrate for Flynt and other consumers.
 - Route `omegon tdd evidence` through the native savepoint extension first with a legacy core fallback during the extraction window.
 - Add scenario projection design and implementation plan covering external project tracking, test-condition modeling, provider-neutral evidence, readiness aggregation, and opt-in archive gates.

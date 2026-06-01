@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, bail};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
@@ -94,6 +95,67 @@ pub struct EvidenceQuery {
     pub scenario: Option<String>,
     pub task: Option<String>,
     pub current_diff_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceManifest {
+    pub schema: String,
+    pub generator: EvidenceGenerator,
+    pub project: EvidenceProject,
+    pub created_at_ms: u128,
+    pub source_state: EvidenceSourceState,
+    pub files: EvidenceFiles,
+    pub providers: Vec<EvidenceProvider>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceGenerator {
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceProject {
+    pub root: String,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceSourceState {
+    pub git_head: Option<String>,
+    pub branch: Option<String>,
+    pub worktree_diff_hash: String,
+    pub dirty: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceFiles {
+    pub records: String,
+    pub surfaces: String,
+    pub edges: String,
+    pub artifacts: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceProvider {
+    pub id: String,
+    pub kind: String,
+    pub raw_roots: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceRecord {
+    pub schema: String,
+    pub id: String,
+    pub provider: String,
+    pub kind: String,
+    pub status: String,
+    pub subjects: Vec<String>,
+    pub claims: Vec<String>,
+    pub artifacts: Vec<String>,
+    pub source_state: EvidenceSourceState,
+    pub created_at_ms: u128,
+    pub metadata: Value,
 }
 
 pub fn current_diff_hash(cwd: &Path, scopes: &[PathBuf]) -> String {
@@ -379,7 +441,149 @@ pub fn append_event(cwd: &Path, event: &SavepointEvent) -> Result<PathBuf> {
     serde_json::to_writer(&mut file, event)?;
     file.write_all(b"\n")?;
     project_openspec_summary(cwd, event)?;
+    project_omegon_evidence_record(cwd, event, &path)?;
     Ok(path)
+}
+
+fn project_omegon_evidence_record(
+    cwd: &Path,
+    event: &SavepointEvent,
+    raw_path: &Path,
+) -> Result<()> {
+    let dir = cwd.join(".omegon/evidence");
+    fs::create_dir_all(&dir)?;
+    write_evidence_manifest(cwd, &dir)?;
+    let record = EvidenceRecord::from_savepoint(cwd, event, raw_path);
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("records.jsonl"))?;
+    serde_json::to_writer(&mut file, &record)?;
+    file.write_all(b"\n")?;
+    touch_empty_streams(&dir)?;
+    Ok(())
+}
+
+fn write_evidence_manifest(cwd: &Path, dir: &Path) -> Result<()> {
+    let source = capture_git_identity(cwd, &[]);
+    let manifest = EvidenceManifest {
+        schema: "omegon-evidence-manifest/v1".to_string(),
+        generator: EvidenceGenerator {
+            name: "omegon".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+        project: EvidenceProject {
+            root: ".".to_string(),
+            name: cwd
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string()),
+        },
+        created_at_ms: now_ms(),
+        source_state: EvidenceSourceState::from_git(source),
+        files: EvidenceFiles {
+            records: "records.jsonl".to_string(),
+            surfaces: "surfaces.jsonl".to_string(),
+            edges: "edges.jsonl".to_string(),
+            artifacts: "artifacts.jsonl".to_string(),
+        },
+        providers: vec![EvidenceProvider {
+            id: "tdd-savepoint".to_string(),
+            kind: "behavior-evidence".to_string(),
+            raw_roots: vec![".omegon/lifecycle/savepoints".to_string()],
+        }],
+    };
+    let tmp = dir.join("manifest.json.tmp");
+    let mut file = File::create(&tmp)?;
+    serde_json::to_writer_pretty(&mut file, &manifest)?;
+    file.write_all(b"\n")?;
+    fs::rename(tmp, dir.join("manifest.json"))?;
+    Ok(())
+}
+
+fn touch_empty_streams(dir: &Path) -> Result<()> {
+    for file in ["surfaces.jsonl", "edges.jsonl", "artifacts.jsonl"] {
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join(file))?;
+    }
+    Ok(())
+}
+
+impl EvidenceSourceState {
+    fn from_git(git: GitIdentity) -> Self {
+        Self {
+            git_head: git.head,
+            branch: git.branch,
+            worktree_diff_hash: git.diff_hash,
+            dirty: git.dirty,
+        }
+    }
+}
+
+impl EvidenceRecord {
+    fn from_savepoint(cwd: &Path, event: &SavepointEvent, raw_path: &Path) -> Self {
+        let status = match event.transition.as_str() {
+            "failing_to_passing" => "tdd-pass",
+            "baseline" if event.current_exit != Some(0) => "red",
+            "baseline" => "pass-no-red",
+            "fail" => "fail",
+            _ if event.current_exit != Some(0) => "fail",
+            _ => "no-evidence",
+        };
+        let mut subjects = Vec::new();
+        if let Some(scenario) = &event.scenario {
+            subjects.push(format!("scenario:{scenario}"));
+        }
+        if let Some(task) = &event.task {
+            subjects.push(format!("task:{task}"));
+        }
+        subjects.push(format!("command:{}", event.command_hash));
+
+        let mut claims = Vec::new();
+        if let (Some(change), Some(scenario)) = (&event.change, &event.scenario) {
+            claims.push(format!("openspec:{change}:{scenario}"));
+        }
+        let artifact_path = raw_path
+            .strip_prefix(cwd)
+            .unwrap_or(raw_path)
+            .to_string_lossy()
+            .to_string();
+        Self {
+            schema: "evidence-record/v1".to_string(),
+            id: format!("evidence:tdd-savepoint:{}", event.event_id),
+            provider: "tdd-savepoint".to_string(),
+            kind: "red-green".to_string(),
+            status: status.to_string(),
+            subjects,
+            claims,
+            artifacts: vec![format!("path:{artifact_path}")],
+            source_state: EvidenceSourceState {
+                git_head: event.head_after.clone(),
+                branch: event.branch.clone(),
+                worktree_diff_hash: event.worktree_diff_hash_after.clone(),
+                dirty: event.dirty_after,
+            },
+            created_at_ms: event.created_at_ms,
+            metadata: json!({
+                "event_id": event.event_id,
+                "transition": event.transition,
+                "command_hash": event.command_hash,
+                "previous_exit": event.previous_exit,
+                "current_exit": event.current_exit,
+                "change": event.change,
+                "scenario": event.scenario,
+                "task": event.task,
+            }),
+        }
+    }
+}
+
+fn now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
 }
 
 fn project_openspec_summary(cwd: &Path, event: &SavepointEvent) -> Result<()> {
@@ -646,10 +850,7 @@ fn build_event(opts: &WatchOptions, build: EventBuild<'_>) -> SavepointEvent {
         change: opts.change.clone(),
         scenario: opts.scenario.clone(),
         task: opts.task.clone(),
-        created_at_ms: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis(),
+        created_at_ms: now_ms(),
     }
 }
 
@@ -782,6 +983,13 @@ mod tests {
         .unwrap();
         assert!(text.contains("redgreen-demo"));
         assert!(text.contains("demo/scenario"));
+        let manifest_text =
+            fs::read_to_string(dir.path().join(".omegon/evidence/manifest.json")).unwrap();
+        assert!(manifest_text.contains("omegon-evidence-manifest/v1"));
+        let records_text =
+            fs::read_to_string(dir.path().join(".omegon/evidence/records.jsonl")).unwrap();
+        assert!(records_text.contains("evidence-record/v1"));
+        assert!(records_text.contains("scenario:demo/scenario"));
 
         let status = evidence_status(
             dir.path(),
