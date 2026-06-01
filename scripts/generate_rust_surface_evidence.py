@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import time
 from typing import Any
@@ -23,12 +24,28 @@ STREAMS = {
 PROTOTYPE_VERSION = "0.3.0"
 DEFAULT_MANIFEST = pathlib.Path("extensions/omegon-tdd-savepoint/Cargo.toml")
 DEFAULT_CRATE = "omegon-tdd-savepoint"
-DEFAULT_RUSTDOC_JSON = pathlib.Path("extensions/omegon-tdd-savepoint/target/doc/omegon_tdd_savepoint.json")
-SOURCE_PREFIX_CANDIDATES = [pathlib.Path("extensions/omegon-tdd-savepoint")]
+PROVIDER_ID = "code-evidence"
+MAX_RECORD_HISTORY = 20
 
 
 def run(cmd: list[str], cwd: pathlib.Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=False)
+
+
+def crate_doc_stem(crate_name: str) -> str:
+    return crate_name.replace("-", "_")
+
+
+def rustdoc_json_path(manifest: pathlib.Path, crate_name: str, root: pathlib.Path) -> pathlib.Path:
+    return root / manifest.parent / "target" / "doc" / f"{crate_doc_stem(crate_name)}.json"
+
+
+def source_prefix_candidates(manifest: pathlib.Path) -> list[pathlib.Path]:
+    return [manifest.parent]
+
+
+def safe_id_component(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.:-]+", "-", value).strip("-") or "unknown"
 
 
 def git_output(cwd: pathlib.Path, args: list[str]) -> str | None:
@@ -84,7 +101,7 @@ def surface_kind(kind: str) -> str:
     }.get(kind, f"rust-{kind}")
 
 
-def resolve_source_path(project_root: pathlib.Path, filename: str | None) -> pathlib.Path | None:
+def resolve_source_path(project_root: pathlib.Path, filename: str | None, prefixes: list[pathlib.Path]) -> pathlib.Path | None:
     if not filename:
         return None
     path = pathlib.Path(filename)
@@ -94,7 +111,7 @@ def resolve_source_path(project_root: pathlib.Path, filename: str | None) -> pat
     if direct.is_file():
         return direct
     return next(
-        (candidate for prefix in SOURCE_PREFIX_CANDIDATES if (candidate := project_root / prefix / path).is_file()),
+        (candidate for prefix in prefixes if (candidate := project_root / prefix / path).is_file()),
         None,
     )
 
@@ -108,10 +125,10 @@ def project_relative(project_root: pathlib.Path, path: pathlib.Path | None, fall
         return fallback or str(path)
 
 
-def source_hash(project_root: pathlib.Path, span: dict[str, Any] | None) -> str | None:
+def source_hash(project_root: pathlib.Path, span: dict[str, Any] | None, prefixes: list[pathlib.Path]) -> str | None:
     if not span:
         return None
-    path = resolve_source_path(project_root, span.get("filename"))
+    path = resolve_source_path(project_root, span.get("filename"), prefixes)
     if path is None:
         return None
     try:
@@ -176,7 +193,7 @@ def signature(item: dict[str, Any], kind: str) -> str | None:
     return None
 
 
-def generate_surfaces(doc: dict[str, Any], project_root: pathlib.Path, crate_name: str) -> list[dict[str, Any]]:
+def generate_surfaces(doc: dict[str, Any], project_root: pathlib.Path, crate_name: str, prefixes: list[pathlib.Path]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     created = now_ms()
@@ -207,7 +224,7 @@ def generate_surfaces(doc: dict[str, Any], project_root: pathlib.Path, crate_nam
         if sid in seen_ids:
             sid = f"{sid}:rustdoc-{item_id}"
         seen_ids.add(sid)
-        resolved_source = resolve_source_path(project_root, filename)
+        resolved_source = resolve_source_path(project_root, filename, prefixes)
         record = {
             "schema": "surface-record/v1",
             "id": sid,
@@ -219,7 +236,7 @@ def generate_surfaces(doc: dict[str, Any], project_root: pathlib.Path, crate_nam
             "signature": signature(item, kind),
             "description": item.get("docs"),
             "extractor": "rustdoc-json",
-            "source_hash": source_hash(project_root, span if isinstance(span, dict) else None),
+            "source_hash": source_hash(project_root, span if isinstance(span, dict) else None, prefixes),
             "created_at_ms": created,
             "metadata": {
                 "crate": crate_name,
@@ -280,6 +297,21 @@ def jsonl_rows(path: pathlib.Path) -> list[dict[str, Any]]:
             rows.append(json.loads(line))
     return rows
 
+
+
+def compact_provider_records(path: pathlib.Path, provider: str) -> None:
+    existing = [row for row in jsonl_rows(path) if row.get("provider") != provider]
+    write_jsonl(path, existing)
+
+
+def trim_provider_history(path: pathlib.Path, provider: str, max_records: int) -> None:
+    rows = jsonl_rows(path)
+    provider_rows = [row for row in rows if row.get("provider") == provider]
+    if len(provider_rows) <= max_records:
+        return
+    keep_ids = {row.get("id") for row in provider_rows[-max_records:]}
+    trimmed = [row for row in rows if row.get("provider") != provider or row.get("id") in keep_ids]
+    write_jsonl(path, trimmed)
 
 def init_sqlite_index(evidence_dir: pathlib.Path) -> None:
     import sqlite3
@@ -374,7 +406,7 @@ def generate_artifacts(doc_json: pathlib.Path, project_root: pathlib.Path, creat
             "schema": "artifact-record/v1",
             "id": artifact_id_for_path(rel),
             "kind": "rustdoc-json",
-            "provider": "surface-map",
+            "provider": PROVIDER_ID,
             "path": rel,
             "open_with": "editor",
             "hash": "sha256:" + hashlib.sha256(doc_json.read_bytes()).hexdigest(),
@@ -392,7 +424,7 @@ def public_docs_claim(crate_name: str, created_at_ms: int) -> dict[str, Any]:
         "status": "asserted",
         "scope": [crate_id(crate_name)],
         "created_at_ms": created_at_ms,
-        "metadata": {"provider": "surface-map", "threshold": "all public surfaces have rustdoc docs"},
+        "metadata": {"provider": PROVIDER_ID, "threshold": "all public surfaces have rustdoc docs"},
     }
 
 
@@ -403,8 +435,8 @@ def doc_coverage_evidence(surfaces: list[dict[str, Any]], root_name: str, crate_
     status = "docs-pass" if not public_missing else "docs-warnings"
     return {
         "schema": "evidence-record/v1",
-        "id": f"evidence:surface-map:rust-doc-coverage:{created_at_ms}",
-        "provider": "surface-map",
+        "id": f"evidence:{PROVIDER_ID}:rust-doc-coverage:{created_at_ms}",
+        "provider": PROVIDER_ID,
         "kind": "rust-doc-coverage",
         "status": status,
         "subjects": [f"project:{root_name}", crate_id(crate_name)],
@@ -427,12 +459,16 @@ def main() -> int:
     ap.add_argument("--manifest-path", default=str(DEFAULT_MANIFEST))
     ap.add_argument("--crate-name", default=DEFAULT_CRATE)
     ap.add_argument("--project-root", default=".")
+    ap.add_argument("--output-dir", default=".omegon/evidence")
+    ap.add_argument("--replace-provider-records", action="store_true", default=True)
+    ap.add_argument("--append-records", dest="replace_provider_records", action="store_false")
     ap.add_argument("--no-run-rustdoc", action="store_true")
     args = ap.parse_args()
 
     root = pathlib.Path(args.project_root).resolve()
     manifest = pathlib.Path(args.manifest_path)
-    doc_json = root / DEFAULT_RUSTDOC_JSON
+    doc_json = rustdoc_json_path(manifest, args.crate_name, root)
+    prefixes = source_prefix_candidates(manifest)
 
     stderr_tail = ""
     status = "surface-pass"
@@ -451,8 +487,8 @@ def main() -> int:
     else:
         doc = json.loads(doc_json.read_text())
 
-    surfaces = generate_surfaces(doc, root, args.crate_name) if status != "surface-fail" else []
-    evidence_dir = root / ".omegon/evidence"
+    surfaces = generate_surfaces(doc, root, args.crate_name, prefixes) if status != "surface-fail" else []
+    evidence_dir = root / args.output_dir
     evidence_dir.mkdir(parents=True, exist_ok=True)
     for name in STREAMS.values():
         (evidence_dir / name).touch()
@@ -461,7 +497,8 @@ def main() -> int:
     state = source_state(root, scopes)
     created = now_ms()
     rustdoc_artifact_id = artifact_id_for_path(str(doc_json.relative_to(root))) if doc_json.exists() else "artifact:rustdoc-json:missing"
-    surface_evidence_id = f"evidence:surface-map:rust:{created}"
+    provider_slug = safe_id_component(PROVIDER_ID)
+    surface_evidence_id = f"evidence:{provider_slug}:rust:{created}"
     artifacts = generate_artifacts(doc_json, root, created)
     coverage = doc_coverage_evidence(surfaces, root.name, args.crate_name, state, created)
     claims = [public_docs_claim(args.crate_name, created)]
@@ -482,7 +519,7 @@ def main() -> int:
     write_jsonl(evidence_dir / "edges.jsonl", edges)
     manifest_doc = {
         "schema": "omegon-evidence-manifest/v1",
-        "generator": {"name": "omegon-surface-prototype", "version": PROTOTYPE_VERSION},
+        "generator": {"name": "omegon-code-evidence-prototype", "version": PROTOTYPE_VERSION},
         "project": {"root": ".", "name": root.name},
         "created_at_ms": created,
         "source_state": state,
@@ -495,7 +532,7 @@ def main() -> int:
             }
         },
         "providers": [
-            {"id": "surface-map", "kind": "surface-index", "raw_roots": [str(doc_json.relative_to(root)) if doc_json.exists() else str(doc_json)]},
+            {"id": PROVIDER_ID, "kind": "surface-index", "raw_roots": [str(doc_json.relative_to(root)) if doc_json.exists() else str(doc_json)]},
         ],
     }
     (evidence_dir / "manifest.json").write_text(json.dumps(manifest_doc, indent=2, sort_keys=True) + "\n")
@@ -503,7 +540,7 @@ def main() -> int:
     evidence = {
         "schema": "evidence-record/v1",
         "id": surface_evidence_id,
-        "provider": "surface-map",
+        "provider": PROVIDER_ID,
         "kind": "rust-surface",
         "status": status,
         "subjects": [f"project:{root.name}", f"crate:{args.crate_name}"],
@@ -519,9 +556,12 @@ def main() -> int:
             "stderr_tail": stderr_tail,
         },
     }
+    if args.replace_provider_records:
+        compact_provider_records(evidence_dir / "records.jsonl", PROVIDER_ID)
     with (evidence_dir / "records.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n")
         f.write(json.dumps(coverage, sort_keys=True, separators=(",", ":")) + "\n")
+    trim_provider_history(evidence_dir / "records.jsonl", PROVIDER_ID, MAX_RECORD_HISTORY)
     init_sqlite_index(evidence_dir)
     print(json.dumps({"status": status, "surface_count": len(surfaces), "edge_count": len(edges), "artifact_count": len(artifacts), "doc_coverage_status": coverage["status"], "sqlite_index": str(evidence_dir / "indexes/evidence.sqlite"), "evidence_dir": str(evidence_dir)}, indent=2))
     return 0 if status != "surface-fail" else 1

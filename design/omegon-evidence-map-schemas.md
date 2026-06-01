@@ -161,7 +161,7 @@ Schema sketch:
       "raw_roots": [".omegon/lifecycle/savepoints"]
     },
     {
-      "id": "surface-map",
+      "id": "code-evidence",
       "kind": "surface-index",
       "raw_roots": []
     },
@@ -281,7 +281,7 @@ Required v1 fields:
 |---|---|
 | `schema` | Exact schema identifier. |
 | `id` | Stable evidence ID within the project. |
-| `provider` | Producer/provider ID, e.g. `tdd-savepoint`, `surface-map`, `doxygen`. |
+| `provider` | Producer/provider ID, e.g. `tdd-savepoint`, `code-evidence`, `doxygen`. |
 | `kind` | Provider-specific evidence kind, e.g. `red-green`, `api-reference`, `surface-current`. |
 | `status` | Provider-specific status string. |
 | `created_at_ms` | Event/generation timestamp. |
@@ -579,6 +579,6 @@ The project policy is intentionally not universal because audit-heavy projects, 
 
 1. Add schema constants/types for `evidence-record/v1` and manifest writing in the TDD savepoint extension.
 2. Update `append_event()` to also append `.omegon/evidence/records.jsonl` and create/update `.omegon/evidence/manifest.json`.
-3. Add a future `surface-map` provider for extension tool schemas, CLI commands, config schemas, and language API extractors.
+3. Add a future `code-evidence` provider for extension tool schemas, CLI commands, config schemas, and language API extractors.
 4. Replace core `Scenario.tdd_evidence` with provider-neutral `Scenario.evidence: Vec<ScenarioEvidenceSummary>`.
 5. Coordinate with Flynt so `.omegon/evidence/manifest.json` is recognized as a known evidence source.

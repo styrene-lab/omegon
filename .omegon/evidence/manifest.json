@@ -1,5 +1,5 @@
 {
-  "created_at_ms": 1780284983035,
+  "created_at_ms": 1780297467163,
   "files": {
     "artifacts": "artifacts.jsonl",
     "claims": "claims.jsonl",
@@ -8,7 +8,7 @@
     "surfaces": "surfaces.jsonl"
   },
   "generator": {
-    "name": "omegon-surface-prototype",
+    "name": "omegon-code-evidence-prototype",
     "version": "0.3.0"
   },
   "indexes": {
@@ -24,7 +24,7 @@
   },
   "providers": [
     {
-      "id": "surface-map",
+      "id": "code-evidence",
       "kind": "surface-index",
       "raw_roots": [
         "extensions/omegon-tdd-savepoint/target/doc/omegon_tdd_savepoint.json"
@@ -35,7 +35,7 @@
   "source_state": {
     "branch": "exploration/rust-savepoint-tdd",
     "dirty": true,
-    "git_head": "3204adda56d74feb6544b6c208a4aa7e27bc4367",
-    "worktree_diff_hash": "sha256:117675b927cada5d008eb2905d743f05361f733bbcc26ea55b3ded3a56161343"
+    "git_head": "cdcafb7d68b25ce9c5b0aa98aaffcb54a2dd2caa",
+    "worktree_diff_hash": "sha256:1fd279054f81e358721490556e2104ae696398eb447b44b6ed889cbd52e988e9"
   }
 }
