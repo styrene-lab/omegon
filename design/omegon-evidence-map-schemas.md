@@ -519,6 +519,131 @@ if <project-root>/.omegon/evidence/manifest.json exists:
 
 Flynt should not be required to generate or validate these records initially. It can ingest them opportunistically, show freshness/source state, and let high-level Flynt documents cite evidence and surface IDs.
 
+
+## Core/OpenSpec Boundary Decision
+
+OpenSpec remains core because it is a general lifecycle grammar, not a code-only evidence generator. The useful abstraction is:
+
+```text
+intent -> requirements -> scenarios -> tasks -> evidence -> readiness -> archive
+```
+
+That lifecycle applies to code, documentation, design decisions, runbooks, reviews, research, diagrams, operations, releases, external citations, and manual QA. Provider-specific evidence generation should leave core; provider-neutral evidence consumption and lifecycle interpretation should remain in core.
+
+Boundary:
+
+```text
+Core Omegon owns:
+  - OpenSpec lifecycle semantics
+  - design-tree lifecycle semantics
+  - provider-neutral claim/evidence/edge read model
+  - claim support/refutation summaries
+  - readiness/archive policy
+  - mapping evidence claims to OpenSpec requirements/scenarios
+
+Extensions/providers own:
+  - generating observations
+  - parsing provider-specific artifacts
+  - normalizing those artifacts into evidence streams
+  - provider-specific summaries and artifacts
+  - optional derived indexes for their own output
+```
+
+Core must consume evidence through generic graph semantics, not provider-specific branches. OpenSpec readiness should ask questions like:
+
+```text
+Is claim C supported?
+Is claim C refuted?
+Is claim C mixed/stale/unsupported?
+```
+
+It should not ask:
+
+```text
+Did rustdoc provider X emit status Y?
+```
+
+This keeps providers reusable outside OpenSpec and keeps OpenSpec policy centralized.
+
+### Planned core read model
+
+Core should grow a provider-neutral evidence read model before extracting `omegon-code-evidence` fully:
+
+```text
+core/crates/omegon/src/evidence/
+├── mod.rs
+├── schema.rs
+├── store.rs
+└── support.rs
+```
+
+Minimal API sketch:
+
+```rust
+pub struct EvidenceStore {
+    root: PathBuf,
+}
+
+impl EvidenceStore {
+    pub fn load(project_root: &Path) -> Result<Self>;
+    pub fn claim(&self, id: &str) -> Result<Option<ClaimRecord>>;
+    pub fn support_summary(&self, claim_id: &str) -> Result<ClaimSupportSummary>;
+    pub fn records_for_subject(&self, subject: &str) -> Result<Vec<EvidenceRecord>>;
+    pub fn neighbors(&self, id: &str) -> Result<EvidenceNeighborhood>;
+}
+```
+
+Support summary shape:
+
+```rust
+pub struct ClaimSupportSummary {
+    pub claim_id: String,
+    pub supports: Vec<EvidenceRecord>,
+    pub refutes: Vec<EvidenceRecord>,
+    pub stale: Vec<EvidenceRecord>,
+    pub supersedes: Vec<EvidenceRecord>,
+    pub status: ClaimSupportStatus,
+}
+
+pub enum ClaimSupportStatus {
+    Supported,
+    Refuted,
+    Mixed,
+    Unsupported,
+    Unknown,
+}
+```
+
+OpenSpec can later reference claims through comments or metadata such as:
+
+```markdown
+<!-- evidence-claim: claim:crate:omegon-tdd-savepoint:public-api-documented -->
+```
+
+OpenSpec then consumes `ClaimSupportSummary`; it does not invoke or understand `code-evidence`, `tdd-savepoint`, Doxygen, rustdoc, citations, or browser providers directly.
+
+### Extraction rule
+
+Extract this into provider extensions:
+
+```text
+rustdoc/Doxygen/TypeDoc/Sphinx parsing
+test/browser/coverage/citation import execution
+provider-specific normalization
+provider-specific summaries/artifacts
+```
+
+Keep this in core:
+
+```text
+OpenSpec scenario matching
+claim requirement policy
+readiness aggregation
+archive gates
+design-tree state
+generic evidence querying
+```
+
 ## Runtime Indexes
 
 Evidence streams are plaintext-first, not plaintext-only. The canonical project-portable truth is:
