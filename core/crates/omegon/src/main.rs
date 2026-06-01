@@ -83,6 +83,7 @@ mod paths;
 mod pkl_modules;
 mod plugin_cli;
 mod plugins;
+mod project_rules;
 mod prompt;
 mod providers;
 pub mod routing;
@@ -398,6 +399,20 @@ enum TddAction {
 }
 
 #[derive(Subcommand)]
+enum ProjectRulesAction {
+    /// Check project rules against current evidence and OpenSpec read models.
+    Check {
+        /// Evaluation context, such as default, local, ci, release, or archive.
+        #[arg(long, default_value = "default")]
+        context: String,
+
+        /// Emit JSON instead of human-readable text.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum Commands {
     /// Run interactive TUI session — ratatui-based terminal interface.
     Interactive,
@@ -592,6 +607,12 @@ enum Commands {
     Tdd {
         #[command(subcommand)]
         action: TddAction,
+    },
+
+    /// Evaluate project-scoped rules against evidence and lifecycle read models.
+    ProjectRules {
+        #[command(subcommand)]
+        action: ProjectRulesAction,
     },
 
     /// Manage Ollama integration — register, status, diagnostics.
@@ -1373,6 +1394,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Auth { ref action }) => run_auth_command(action).await,
         Some(Commands::Tdd { ref action }) => run_tdd_command(action).await,
+        Some(Commands::ProjectRules { ref action }) => run_project_rules_command(&cli, action),
         Some(Commands::Cleave {
             ref plan,
             ref directive,
@@ -6503,6 +6525,41 @@ async fn call_tdd_savepoint_extension(
         anyhow::bail!("extension tool {tool_name} failed: {:?}", result.content);
     }
     Ok(result.details)
+}
+
+fn run_project_rules_command(cli: &Cli, action: &ProjectRulesAction) -> anyhow::Result<()> {
+    match action {
+        ProjectRulesAction::Check { context, json } => {
+            let cwd = std::fs::canonicalize(&cli.cwd)?;
+            let report = project_rules::check(&cwd, context);
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "project rules: context={} mode={:?} passed={} findings={}",
+                    report.context,
+                    report.mode,
+                    report.passed,
+                    report.findings.len()
+                );
+                for finding in &report.findings {
+                    println!(
+                        "- {:?} {} enforced={} subject={} — {}",
+                        finding.severity,
+                        finding.rule_id,
+                        finding.enforced,
+                        finding.subject,
+                        finding.message
+                    );
+                }
+            }
+            if report.passed {
+                Ok(())
+            } else {
+                anyhow::bail!("project rules failed")
+            }
+        }
+    }
 }
 
 async fn run_tdd_command(action: &TddAction) -> anyhow::Result<()> {

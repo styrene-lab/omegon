@@ -1,0 +1,30 @@
+schema_version = 1
+mode = "warn"
+
+[contexts.default]
+mode = "warn"
+
+[contexts.ci]
+mode = "enforce"
+
+[[rules]]
+id = "no-refuted-evidence-claims"
+kind = "no-refuted-evidence-claims"
+description = "Explicitly attached OpenSpec evidence claims should not be refuted."
+severity = "block"
+contexts = ["default", "ci"]
+
+[[rules]]
+id = "evidence-map-parses"
+kind = "evidence-map-parses"
+description = "The canonical .omegon/evidence streams should parse."
+severity = "block"
+contexts = ["default", "ci"]
+
+[[rules]]
+id = "savepoint-public-api-documented"
+kind = "claim-supported"
+description = "The TDD savepoint extension public API documentation claim should stay supported."
+claim = "claim:crate:omegon-tdd-savepoint:public-api-documented"
+severity = "warn"
+contexts = ["default", "ci"]
