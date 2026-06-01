@@ -301,3 +301,155 @@ Project Rules can then require CI claims in release contexts without OpenSpec ha
 - Local default mode warns.
 - CI/release contexts can later enforce.
 - Flynt can display rule findings as project governance evidence rather than hidden command behavior.
+
+## Adversarial Assessment
+
+### Risk: Project Rules becomes a second lifecycle system
+
+If Project Rules starts owning task state, archive state, or scenario state, it will duplicate OpenSpec and create contradictory lifecycle truth.
+
+Mitigation:
+
+```text
+Project Rules consumes read models and emits reports only.
+OpenSpec remains the lifecycle structure.
+Evidence streams remain the factual substrate.
+```
+
+### Risk: The policy DSL grows before the use cases are stable
+
+A broad selector/query language would be easy to overbuild and hard to make safe. It would also make policies opaque to agents.
+
+Mitigation:
+
+- Start with named selectors only.
+- Prefer explicit rule kinds over arbitrary expressions.
+- Add selector power only after dogfood rules prove the shape.
+
+### Risk: `block` severity is confused with immediate command denial
+
+The term `block` can sound imperative. In this design it means "blocking when evaluated in an enforcing context," not "OpenSpec must deny the action."
+
+Mitigation:
+
+- Reports must include both `severity` and `enforced`.
+- Local/default context starts with `mode = "warn"`.
+- Only explicit `project-rules check --context <enforcing-context>` exits non-zero.
+
+### Risk: Evidence providers launder weak facts into policy failures
+
+A provider can emit a claim or edge, but that does not make it authoritative. Poor provider output could create false failures.
+
+Mitigation:
+
+- Claims and evidence are separate records.
+- Rules select accepted providers/statuses explicitly when needed.
+- Project Rules should support provider allowlists before hard enforcement.
+
+### Risk: Missing evidence becomes impossible to distinguish from passing evidence
+
+If the project only checks refutations, then "no claims" or "no evidence" can look clean.
+
+Mitigation:
+
+Dogfood a distinct rule family for sufficiency:
+
+```text
+required-claims-present
+required-providers-present
+minimum-supporting-evidence
+max-stale-evidence-age
+```
+
+These rules should be opt-in and project-specific.
+
+### Risk: CI context is overfit to GitHub Actions
+
+Hardcoding one forge/CI system would make Project Rules less useful for Forgejo, GitLab, local CI, and non-code projects.
+
+Mitigation:
+
+- CI is a context name, not a provider implementation.
+- CI systems emit evidence through provider-specific extensions.
+- Rules target provider-neutral claims or configured provider IDs.
+
+### Risk: Generated indexes become treated as canonical policy truth
+
+SQLite/FTS indexes are useful for speed but can be stale or absent.
+
+Mitigation:
+
+- Project Rules reads canonical JSONL or validates index freshness first.
+- SQLite is a derived read model only.
+- CI can rebuild the index before policy evaluation.
+
+### Risk: Policy output is too noisy for agents
+
+If every advisory finding floods the prompt, agents will ignore the report or spend turns chasing irrelevant warnings.
+
+Mitigation:
+
+- Reports should group by rule and severity.
+- Default agent context should include only enforced failures and top warnings.
+- Full detail remains available through explicit commands.
+
+## Hardened First Implementation Slice
+
+Do not start with enforcement. Start with an explicit, read-only checker:
+
+```text
+omegon project-rules check --context default --format text
+omegon project-rules check --context ci --format json
+```
+
+Minimum implementation:
+
+1. Parse `.omegon/project-rules.toml` if present.
+2. Fall back to built-in warn-mode defaults when absent.
+3. Load OpenSpec read model and EvidenceStore.
+4. Evaluate only these rule kinds:
+   - `no-refuted-evidence-claims`
+   - `evidence-map-parses`
+   - `claim-supported`
+5. Emit a report with:
+   - rule id
+   - severity
+   - enforced bool
+   - subject id
+   - evidence ids
+   - message
+6. Exit non-zero only when mode/context is enforcing and an enforced block finding exists.
+
+## Dogfood Configuration Candidate
+
+```toml
+schema_version = 1
+mode = "warn"
+
+[contexts.default]
+mode = "warn"
+
+[contexts.ci]
+mode = "warn" # switch to enforce after report quality is stable
+
+[[rules]]
+id = "no-refuted-evidence-claims"
+kind = "no-refuted-evidence-claims"
+severity = "block"
+contexts = ["default", "ci"]
+
+[[rules]]
+id = "evidence-map-parses"
+kind = "evidence-map-parses"
+severity = "block"
+contexts = ["default", "ci"]
+
+[[rules]]
+id = "savepoint-public-api-documented"
+kind = "claim-supported"
+claim = "claim:crate:omegon-tdd-savepoint:public-api-documented"
+severity = "warn"
+contexts = ["default", "ci"]
+```
+
+Keep `contexts.ci.mode = "warn"` until the report is stable across several local runs.
