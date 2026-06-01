@@ -1,0 +1,33 @@
+{
+  "created_at_ms": 1780277144071,
+  "files": {
+    "artifacts": "artifacts.jsonl",
+    "edges": "edges.jsonl",
+    "records": "records.jsonl",
+    "surfaces": "surfaces.jsonl"
+  },
+  "generator": {
+    "name": "omegon-surface-prototype",
+    "version": "0.1.0"
+  },
+  "project": {
+    "name": "omegon-secundus",
+    "root": "."
+  },
+  "providers": [
+    {
+      "id": "surface-map",
+      "kind": "surface-index",
+      "raw_roots": [
+        "extensions/omegon-tdd-savepoint/target/doc/omegon_tdd_savepoint.json"
+      ]
+    }
+  ],
+  "schema": "omegon-evidence-manifest/v1",
+  "source_state": {
+    "branch": "exploration/rust-savepoint-tdd",
+    "dirty": true,
+    "git_head": "9d4b4b2aaecb26ae72701aafa02679ec714fbdcb",
+    "worktree_diff_hash": "sha256:55af4a12cdf6ff623c3171d09dad2467de829b80980d7ee577a6038123fff454"
+  }
+}
