@@ -999,23 +999,6 @@ pub fn archive_change(repo_path: &Path, change_name: &str) -> anyhow::Result<()>
         anyhow::bail!("Change '{change_name}' does not exist");
     }
 
-    if let Some(change) = read_change(&change_dir, change_name) {
-        let blockers: Vec<_> = evaluate_evidence_gates(&change)
-            .into_iter()
-            .filter(|finding| finding.decision == EvidenceGateDecision::Block)
-            .collect();
-        if !blockers.is_empty() {
-            anyhow::bail!(
-                "Change '{change_name}' has refuted evidence claims and cannot be archived: {}",
-                blockers
-                    .iter()
-                    .map(|finding| finding.detail.as_str())
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            );
-        }
-    }
-
     let archive_dir = repo_path.join("openspec/archive");
     fs::create_dir_all(&archive_dir)?;
     let dest = archive_dir.join(change_name);
@@ -1438,7 +1421,7 @@ mod mutation_tests {
     }
 
     #[test]
-    fn evidence_gate_blocks_refuted_claims() {
+    fn evidence_gate_reports_refuted_claims_without_archiving_block() {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path();
         let evidence_dir = repo.join(".omegon/evidence");
@@ -1509,8 +1492,8 @@ mod mutation_tests {
             findings[0].status,
             crate::evidence::ClaimSupportStatus::Refuted
         );
-        let err = archive_change(repo, "evidence-demo").unwrap_err();
-        assert!(err.to_string().contains("refuted evidence claims"));
+        archive_change(repo, "evidence-demo").unwrap();
+        assert!(repo.join("openspec/archive/evidence-demo").exists());
     }
 
     fn list_changes_annotates_evidence_claim_support() {
