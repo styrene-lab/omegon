@@ -148,6 +148,7 @@ fn read_change(change_dir: &Path, name: &str) -> Option<ChangeInfo> {
     })
     .map(|mut change| {
         annotate_tdd_evidence(change_dir, &mut change);
+        annotate_claim_evidence(change_dir, &mut change);
         change
     })
 }
@@ -185,13 +186,21 @@ fn slug_component(input: &str) -> String {
 
 fn evidence_claim_ids(text: &str) -> Vec<String> {
     text.lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            let body = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
-            let claim = body.strip_prefix("evidence-claim:")?.trim();
-            (!claim.is_empty()).then(|| claim.to_string())
-        })
+        .filter_map(|line| evidence_claim_id_from_line(line.trim()))
         .collect()
+}
+
+fn evidence_claim_id_from_line(trimmed: &str) -> Option<String> {
+    if let Some(body) = trimmed
+        .strip_prefix("<!--")
+        .and_then(|body| body.strip_suffix("-->"))
+        .map(str::trim)
+    {
+        let claim = body.strip_prefix("evidence-claim:")?.trim();
+        return (!claim.is_empty()).then(|| claim.to_string());
+    }
+    let claim = trimmed.strip_prefix("evidence-claim:")?.trim();
+    (!claim.is_empty()).then(|| claim.to_string())
 }
 
 fn annotate_claim_evidence(change_dir: &Path, change: &mut ChangeInfo) {
@@ -207,7 +216,7 @@ fn annotate_claim_evidence(change_dir: &Path, change: &mut ChangeInfo) {
     };
     for spec in &mut change.specs {
         for requirement in &mut spec.requirements {
-            let mut requirement_claims = evidence_claim_ids(&requirement.description);
+            let requirement_claims = evidence_claim_ids(&requirement.description);
             for scenario in &mut requirement.scenarios {
                 let mut claims = requirement_claims.clone();
                 claims.extend(evidence_claim_ids(&scenario.given));
@@ -234,7 +243,6 @@ fn annotate_claim_evidence(change_dir: &Path, change: &mut ChangeInfo) {
                     .collect();
                 scenario.evidence_claims = claims;
             }
-            requirement_claims.clear();
         }
     }
 }
@@ -543,6 +551,8 @@ pub fn parse_spec_content_with_domain(domain: &str, content: &str) -> Vec<Requir
                 .filter(|id| !id.is_empty())
             {
                 builder.id = Some(id.to_string());
+            } else if let Some(claim) = evidence_claim_id_from_line(trimmed) {
+                builder.and_clauses.push(format!("evidence-claim: {claim}"));
             } else if let Some(rest) = trimmed.strip_prefix("Given ") {
                 builder.given = rest.to_string();
             } else if let Some(rest) = trimmed.strip_prefix("When ") {
@@ -554,7 +564,11 @@ pub fn parse_spec_content_with_domain(domain: &str, content: &str) -> Vec<Requir
             }
         } else if let Some(ref mut req) = current_req {
             // Description lines (between requirement header and first scenario)
-            if !trimmed.is_empty() {
+            if let Some(claim) = evidence_claim_id_from_line(trimmed) {
+                req.1.push_str("evidence-claim: ");
+                req.1.push_str(&claim);
+                req.1.push('\n');
+            } else if !trimmed.is_empty() {
                 req.1.push_str(trimmed);
                 req.1.push('\n');
             }
@@ -1334,6 +1348,82 @@ mod mutation_tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "listed");
         assert_eq!(changes[0].stage, ChangeStage::Proposed);
+    }
+
+    #[test]
+    fn list_changes_annotates_evidence_claim_support() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        let evidence_dir = repo.join(".omegon/evidence");
+        fs::create_dir_all(&evidence_dir).unwrap();
+        fs::write(
+            evidence_dir.join("claims.jsonl"),
+            serde_json::json!({
+                "schema": "claim-record/v1",
+                "id": "claim:docs-ready",
+                "kind": "documentation-quality",
+                "text": "Docs are ready.",
+                "status": "asserted",
+                "scope": [],
+                "created_at_ms": 1,
+                "metadata": {}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        fs::write(
+            evidence_dir.join("records.jsonl"),
+            serde_json::json!({
+                "schema": "evidence-record/v1",
+                "id": "evidence:docs-ready",
+                "provider": "test",
+                "kind": "manual-review",
+                "status": "pass",
+                "subjects": ["claim:docs-ready"],
+                "claims": ["claim:docs-ready"],
+                "artifacts": [],
+                "source_state": {},
+                "created_at_ms": 1,
+                "metadata": {}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        fs::write(
+            evidence_dir.join("edges.jsonl"),
+            serde_json::json!({
+                "schema": "evidence-edge/v1",
+                "from": "evidence:docs-ready",
+                "to": "claim:docs-ready",
+                "kind": "supports",
+                "created_at_ms": 1
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+
+        propose_change(repo, "evidence-demo", "Evidence Demo", "intent").unwrap();
+        add_spec(
+            repo,
+            "evidence-demo",
+            "docs",
+            "# docs\n\n### Requirement: Docs are ready\n\nevidence-claim: claim:docs-ready\n\n#### Scenario: Documentation claim is supported\n\nGiven docs exist\nWhen evidence is evaluated\nThen the claim is supported\n",
+        )
+        .unwrap();
+
+        let changes = list_changes(repo);
+        let scenario = &changes[0].specs[0].requirements[0].scenarios[0];
+        assert_eq!(scenario.evidence_claims, vec!["claim:docs-ready"]);
+        assert_eq!(scenario.evidence_support.len(), 1);
+        assert_eq!(
+            scenario.evidence_support[0].status,
+            crate::evidence::ClaimSupportStatus::Supported
+        );
+        assert_eq!(scenario.evidence_support[0].supports, 1);
+        assert_eq!(scenario.evidence_support[0].refutes, 0);
     }
 
     #[test]
