@@ -330,7 +330,16 @@ def load_sqlite_index(conn: Any, evidence_dir: pathlib.Path) -> None:
         conn.execute("INSERT INTO edges(from_id, to_id, kind, created_at_ms, raw_json) VALUES (?, ?, ?, ?, ?)", (row.get("from"), row.get("to"), row.get("kind"), row.get("created_at_ms"), json.dumps(row, sort_keys=True)))
 
 
-def generate_edges(surfaces: list[dict[str, Any]], evidence_id: str, artifact_id: str, crate_name: str, created_at_ms: int) -> list[dict[str, Any]]:
+def generate_edges(
+    surfaces: list[dict[str, Any]],
+    evidence_id: str,
+    artifact_id: str,
+    crate_name: str,
+    created_at_ms: int,
+    doc_coverage_id: str | None = None,
+    public_docs_claim_id: str | None = None,
+    doc_coverage_status: str | None = None,
+) -> list[dict[str, Any]]:
     edges: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
 
@@ -350,6 +359,9 @@ def generate_edges(surfaces: list[dict[str, Any]], evidence_id: str, artifact_id
         if surface.get("source_path"):
             add(sid, source_id_for_path(surface["source_path"]), "declared_in")
         add(sid, artifact_id, "generated_from")
+    if doc_coverage_id and public_docs_claim_id:
+        add(doc_coverage_id, crate, "subjects")
+        add(doc_coverage_id, public_docs_claim_id, "supports" if doc_coverage_status == "docs-pass" else "refutes")
     return edges
 
 
@@ -371,6 +383,19 @@ def generate_artifacts(doc_json: pathlib.Path, project_root: pathlib.Path, creat
     ]
 
 
+def public_docs_claim(crate_name: str, created_at_ms: int) -> dict[str, Any]:
+    return {
+        "schema": "claim-record/v1",
+        "id": f"claim:crate:{crate_name}:public-api-documented",
+        "kind": "documentation-quality",
+        "text": f"Public Rust API surfaces for crate {crate_name} are documented.",
+        "status": "asserted",
+        "scope": [crate_id(crate_name)],
+        "created_at_ms": created_at_ms,
+        "metadata": {"provider": "surface-map", "threshold": "all public surfaces have rustdoc docs"},
+    }
+
+
 def doc_coverage_evidence(surfaces: list[dict[str, Any]], root_name: str, crate_name: str, state: dict[str, Any], created_at_ms: int) -> dict[str, Any]:
     public_surfaces = [s for s in surfaces if s.get("visibility") == "public"]
     public_missing = [s["id"] for s in public_surfaces if not s.get("metadata", {}).get("docs_present")]
@@ -383,7 +408,7 @@ def doc_coverage_evidence(surfaces: list[dict[str, Any]], root_name: str, crate_
         "kind": "rust-doc-coverage",
         "status": status,
         "subjects": [f"project:{root_name}", crate_id(crate_name)],
-        "claims": [],
+        "claims": [f"claim:crate:{crate_name}:public-api-documented"],
         "artifacts": ["path:.omegon/evidence/surfaces.jsonl"],
         "source_state": state,
         "created_at_ms": created_at_ms,
@@ -438,9 +463,20 @@ def main() -> int:
     rustdoc_artifact_id = artifact_id_for_path(str(doc_json.relative_to(root))) if doc_json.exists() else "artifact:rustdoc-json:missing"
     surface_evidence_id = f"evidence:surface-map:rust:{created}"
     artifacts = generate_artifacts(doc_json, root, created)
-    edges = generate_edges(surfaces, surface_evidence_id, rustdoc_artifact_id, args.crate_name, created)
+    coverage = doc_coverage_evidence(surfaces, root.name, args.crate_name, state, created)
+    claims = [public_docs_claim(args.crate_name, created)]
+    edges = generate_edges(
+        surfaces,
+        surface_evidence_id,
+        rustdoc_artifact_id,
+        args.crate_name,
+        created,
+        coverage["id"],
+        claims[0]["id"],
+        coverage["status"],
+    )
 
-    write_jsonl(evidence_dir / "claims.jsonl", [])
+    write_jsonl(evidence_dir / "claims.jsonl", claims)
     write_jsonl(evidence_dir / "surfaces.jsonl", surfaces)
     write_jsonl(evidence_dir / "artifacts.jsonl", artifacts)
     write_jsonl(evidence_dir / "edges.jsonl", edges)
@@ -483,7 +519,6 @@ def main() -> int:
             "stderr_tail": stderr_tail,
         },
     }
-    coverage = doc_coverage_evidence(surfaces, root.name, args.crate_name, state, created)
     with (evidence_dir / "records.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n")
         f.write(json.dumps(coverage, sort_keys=True, separators=(",", ":")) + "\n")
