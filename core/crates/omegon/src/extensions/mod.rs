@@ -245,6 +245,7 @@ struct ExtensionRuntimeContext {
 
 /// Wrapper Feature for any extension (native or OCI).
 /// Manages RPC communication via stdin/stdout, agnostic to runtime type.
+#[derive(Clone)]
 pub struct ExtensionFeature {
     runtime: ExtensionRuntimeContext,
     tools: Vec<ToolDefinition>,
@@ -729,6 +730,7 @@ impl Feature for ExtensionFeature {
 /// Result of spawning an extension: feature + widgets
 pub struct SpawnedExtension {
     pub feature: Box<dyn Feature>,
+    pub nex_delegation_executor: Option<std::sync::Arc<ExtensionFeature>>,
     pub widgets: Vec<ExtensionTabWidget>,
     pub widget_rx: broadcast::Receiver<WidgetEvent>,
     /// Optional metadata returned by the extension initialize handshake.
@@ -739,6 +741,36 @@ pub struct SpawnedExtension {
     pub voice_polling_handle: Option<ExtensionPollingHandle>,
     /// Push notification receiver for voice-capable extensions.
     pub voice_notification_rx: Option<mpsc::UnboundedReceiver<ExtensionNotification>>,
+}
+
+fn nex_delegation_executor(feature: &ExtensionFeature) -> Option<std::sync::Arc<ExtensionFeature>> {
+    if feature.runtime.name == "omegon-nex"
+        && feature.tools.iter().any(|tool| tool.name == "nex_devenv_inspect")
+    {
+        Some(std::sync::Arc::new(feature.clone()))
+    } else {
+        None
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::tools::nex_substrate::NexDelegationExecutor for ExtensionFeature {
+    async fn execute_devenv_inspect(
+        &self,
+        tool: &str,
+        path: &Path,
+    ) -> anyhow::Result<ToolResult> {
+        if self.runtime.name != "omegon-nex" || tool != "nex_devenv_inspect" {
+            anyhow::bail!("unsupported Nex delegation tool: {tool}");
+        }
+        self.execute(
+            "nex_devenv_inspect",
+            "nex-substrate-delegation",
+            json!({"path": path.display().to_string()}),
+            CancellationToken::new(),
+        )
+        .await
+    }
 }
 
 /// Spawn an extension from its manifest directory.
@@ -1164,11 +1196,13 @@ async fn spawn_native(
         None
     };
 
+    let nex_delegation_executor = nex_delegation_executor(&feature);
     Ok(SpawnedExtension {
         feature: Box::new(feature),
         widgets: tab_widgets,
         widget_rx,
         metadata: handshake.metadata,
+        nex_delegation_executor,
         vox_polling_handle,
         voice_polling_handle,
         voice_notification_rx: notification_pair.1,
@@ -1256,11 +1290,13 @@ async fn spawn_container(
         None
     };
 
+    let nex_delegation_executor = nex_delegation_executor(&feature);
     Ok(SpawnedExtension {
         feature: Box::new(feature),
         widgets: tab_widgets,
         widget_rx,
         metadata: handshake.metadata,
+        nex_delegation_executor,
         vox_polling_handle,
         voice_polling_handle,
         voice_notification_rx: notification_pair.1,
