@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-06-01
+
 ### Added
 
 - Add the `nex_substrate` read-only tool boundary for consuming Nex project substrate reports and deriving Omegon policy findings without duplicating devenv or SecretSpec parsing while preserving Omegon's single-binary default operation when Nex is absent.
@@ -30,6 +32,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add rustdoc comments to the public `omegon-tdd-savepoint` evidence kernel surfaces so the dogfood `public-api-documented` claim is supported by regenerated code evidence.
 - Add a provider-neutral core evidence read model that loads `.omegon/evidence` claims, records, and edges, summarizes claim support/refutation, annotates OpenSpec scenarios with `evidence-claim` support metadata, and reports refuted/mixed scenario evidence claims for future project-rules enforcement without hard-blocking core archive operations.
 - Harden the Project Rules policy boundary and add a warn-mode `omegon project-rules check` dogfood command/config so OpenSpec remains descriptive, evidence findings stay advisory by default, and per-project/CI contexts own hard-deny behavior.
+- Document the experimental evidence map, OpenSpec evidence-claim annotations, dogfood code-evidence generator, query helper, and deterministic project-rules checks.
 - Route `omegon tdd evidence` through the native savepoint extension first with a legacy core fallback during the extraction window.
 - Add scenario projection design and implementation plan covering external project tracking, test-condition modeling, provider-neutral evidence, readiness aggregation, and opt-in archive gates.
 - Add an initial deterministic language-agnostic `omegon tdd watch` savepoint kernel that hashes command identity, captures failing-to-passing transitions, records git/worktree evidence, supports command timeouts and explicit baseline event emission, projects stable attributed summaries into OpenSpec change evidence directories, reads raw/projected JSONL evidence, classifies TDD evidence status, annotates parsed OpenSpec scenarios with TDD evidence, supports explicit failing-run persistence, explicit scenario IDs with stable derived fallback, automatic current diff hashing for evidence queries, and appends raw JSONL lifecycle events under `.omegon/lifecycle/savepoints/`.
