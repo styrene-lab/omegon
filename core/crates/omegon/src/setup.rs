@@ -742,12 +742,34 @@ impl AgentSetup {
         ) = match discover_and_register_extensions(&cwd, &mut bus, std::sync::Arc::clone(&secrets))
             .await
         {
-            Ok((widgets, receivers, handles, voice_receivers, voice_handles, metadata, nex_executor)) => {
-                (widgets, receivers, handles, voice_receivers, voice_handles, metadata, nex_executor)
-            }
+            Ok((
+                widgets,
+                receivers,
+                handles,
+                voice_receivers,
+                voice_handles,
+                metadata,
+                nex_executor,
+            )) => (
+                widgets,
+                receivers,
+                handles,
+                voice_receivers,
+                voice_handles,
+                metadata,
+                nex_executor,
+            ),
             Err(e) => {
                 tracing::warn!("extension discovery failed: {}", e);
-                (vec![], vec![], vec![], vec![], vec![], Default::default(), None)
+                (
+                    vec![],
+                    vec![],
+                    vec![],
+                    vec![],
+                    vec![],
+                    Default::default(),
+                    None,
+                )
             }
         };
 
@@ -769,18 +791,16 @@ impl AgentSetup {
         )));
         bus.register(Box::new(features::adapter::ToolAdapter::new(
             "nex-substrate",
-            Box::new(
-                {
-                    let provider = tools::nex_substrate::NexSubstrateProvider::new(cwd.clone())
-                        .with_boundary(boundary.clone())
-                        .with_delegations(nex_delegations);
-                    if let Some(executor) = nex_delegation_executor {
-                        provider.with_executor(executor)
-                    } else {
-                        provider
-                    }
-                },
-            ),
+            Box::new({
+                let provider = tools::nex_substrate::NexSubstrateProvider::new(cwd.clone())
+                    .with_boundary(boundary.clone())
+                    .with_delegations(nex_delegations);
+                if let Some(executor) = nex_delegation_executor {
+                    provider.with_executor(executor)
+                } else {
+                    provider
+                }
+            }),
         )));
         // Register internal tools that the dispatch layer calls but the LLM never sees.
         bus.register_internal_tool(crate::tool_registry::core::TRUST_DIRECTORY, "core-tools");
@@ -1523,7 +1543,15 @@ async fn discover_and_register_extensions(
 
     if !ext_dir.exists() {
         tracing::debug!("extension directory not found: {}", ext_dir.display());
-        return Ok((vec![], vec![], vec![], vec![], vec![], Default::default(), None));
+        return Ok((
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            Default::default(),
+            None,
+        ));
     }
 
     let profile = crate::settings::Profile::load(cwd);
@@ -1536,7 +1564,9 @@ async fn discover_and_register_extensions(
     let mut voice_notification_receivers = vec![];
     let mut voice_polling_handles = vec![];
     let mut extension_metadata = std::collections::BTreeMap::new();
-    let mut nex_delegation_executor: Option<std::sync::Arc<dyn crate::tools::nex_substrate::NexDelegationExecutor>> = None;
+    let mut nex_delegation_executor: Option<
+        std::sync::Arc<dyn crate::tools::nex_substrate::NexDelegationExecutor>,
+    > = None;
     for entry in std::fs::read_dir(&ext_dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -1613,7 +1643,12 @@ async fn discover_and_register_extensions(
                     extension_metadata.insert(ext_name.to_string(), metadata);
                 }
                 if nex_delegation_executor.is_none() {
-                    nex_delegation_executor = spawned.nex_delegation_executor.map(|executor| executor as std::sync::Arc<dyn crate::tools::nex_substrate::NexDelegationExecutor>);
+                    nex_delegation_executor = spawned.nex_delegation_executor.map(|executor| {
+                        executor
+                            as std::sync::Arc<
+                                dyn crate::tools::nex_substrate::NexDelegationExecutor,
+                            >
+                    });
                 }
                 bus.register(spawned.feature);
                 // Collect widgets and receivers for TUI

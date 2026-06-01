@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::nex::substrate::NexSubstrateDelegation;
-use crate::tools::WorkspaceBoundary;
 use crate::tool_registry::core as reg;
+use crate::tools::WorkspaceBoundary;
 
 pub struct NexSubstrateProvider {
     cwd: PathBuf,
@@ -19,11 +19,7 @@ pub struct NexSubstrateProvider {
 
 #[async_trait]
 pub trait NexDelegationExecutor: Send + Sync {
-    async fn execute_devenv_inspect(
-        &self,
-        tool: &str,
-        path: &Path,
-    ) -> anyhow::Result<ToolResult>;
+    async fn execute_devenv_inspect(&self, tool: &str, path: &Path) -> anyhow::Result<ToolResult>;
 }
 
 impl NexSubstrateProvider {
@@ -122,10 +118,9 @@ impl ToolProvider for NexSubstrateProvider {
             Some(path) => self.resolve_path(path)?,
             None => self.cwd.clone(),
         };
-        let mut report = if let Some(delegation) = crate::nex::substrate::delegation_for_command(
-            &self.delegations,
-            "devenv.inspect",
-        ) {
+        let mut report = if let Some(delegation) =
+            crate::nex::substrate::delegation_for_command(&self.delegations, "devenv.inspect")
+        {
             if let Some(executor) = &self.executor {
                 match executor
                     .execute_devenv_inspect(&delegation.tool, &path)
@@ -134,9 +129,9 @@ impl ToolProvider for NexSubstrateProvider {
                     Ok(result) => report_from_delegated_result(&path, result)?,
                     Err(error) => {
                         let mut report = crate::nex::substrate::inspect_devenv(&path).await;
-                        report
-                            .diagnostics
-                            .push(format!("omegon-nex delegation failed; used direct fallback: {error}"));
+                        report.diagnostics.push(format!(
+                            "omegon-nex delegation failed; used direct fallback: {error}"
+                        ));
                         report
                     }
                 }
@@ -146,10 +141,8 @@ impl ToolProvider for NexSubstrateProvider {
         } else {
             crate::nex::substrate::inspect_devenv(&path).await
         };
-        report.delegation = crate::nex::substrate::delegation_for_command(
-            &self.delegations,
-            "devenv.inspect",
-        );
+        report.delegation =
+            crate::nex::substrate::delegation_for_command(&self.delegations, "devenv.inspect");
         Ok(ToolResult {
             content: vec![ContentBlock::Text {
                 text: crate::nex::substrate::summary_text(&report),
@@ -171,14 +164,19 @@ fn expand_tilde(path: &str) -> PathBuf {
     Path::new(path).to_path_buf()
 }
 
-fn report_from_delegated_result(path: &Path, result: ToolResult) -> anyhow::Result<crate::nex::substrate::NexSubstrateReport> {
+fn report_from_delegated_result(
+    path: &Path,
+    result: ToolResult,
+) -> anyhow::Result<crate::nex::substrate::NexSubstrateReport> {
     let report_json = result
         .details
         .get("data")
         .and_then(|data| data.get("report"))
         .cloned()
         .or_else(|| result.details.get("report").cloned())
-        .ok_or_else(|| anyhow::anyhow!("delegated nex_devenv_inspect result did not include data.report"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("delegated nex_devenv_inspect result did not include data.report")
+        })?;
     let policy = crate::nex::substrate::derive_policy(&report_json);
     let mut diagnostics = Vec::new();
     if let Some(text) = result
@@ -224,6 +222,54 @@ mod tests {
             )
             .await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("PERMISSION REQUIRED"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("PERMISSION REQUIRED")
+        );
+    }
+
+    #[tokio::test]
+    async fn initializes_tool_and_returns_degraded_report_without_delegation_or_nex() {
+        static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = PATH_LOCK.lock().unwrap();
+        let original_path = std::env::var_os("PATH");
+        unsafe { std::env::set_var("PATH", "") };
+
+        let dir = tempfile::tempdir().unwrap();
+        let provider = NexSubstrateProvider::new(dir.path().to_path_buf());
+        assert_eq!(provider.tools().len(), 1);
+
+        let result = provider
+            .execute(
+                reg::NEX_SUBSTRATE,
+                "test",
+                json!({"action": "inspect"}),
+                CancellationToken::new(),
+            )
+            .await;
+
+        match original_path {
+            Some(path) => unsafe { std::env::set_var("PATH", path) },
+            None => unsafe { std::env::remove_var("PATH") },
+        }
+
+        let result = result.expect("missing Nex should degrade, not fail the tool call");
+        assert!(
+            matches!(result.content.first(), Some(ContentBlock::Text { text }) if text.contains("Nex substrate inspection: unavailable"))
+        );
+        assert_eq!(
+            result.details["schema"],
+            crate::nex::substrate::REPORT_SCHEMA
+        );
+        assert_eq!(result.details["nex_available"], false);
+        assert_eq!(result.details["policy"]["enforcement"], "advisory");
+        let findings = result.details["policy"]["findings"].as_array().unwrap();
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding["code"] == "nex_unavailable")
+        );
     }
 }

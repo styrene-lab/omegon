@@ -244,7 +244,10 @@ fn find_on_path(command: &str, path_override: Option<&str>) -> Option<PathBuf> {
     let paths = path_override
         .map(std::env::split_paths)
         .map(Iterator::collect::<Vec<_>>)
-        .unwrap_or_else(|| std::env::var_os("PATH").map_or_else(Vec::new, |path| std::env::split_paths(&path).collect()));
+        .unwrap_or_else(|| {
+            std::env::var_os("PATH")
+                .map_or_else(Vec::new, |path| std::env::split_paths(&path).collect())
+        });
 
     paths
         .into_iter()
@@ -320,6 +323,11 @@ mod tests {
             None,
         );
         assert!(matches!(resolution.status, CapabilityStatus::Unknown));
-        assert!(resolution.diagnostics.iter().any(|d| d.contains("no catalog entry")));
+        assert!(
+            resolution
+                .diagnostics
+                .iter()
+                .any(|d| d.contains("no catalog entry"))
+        );
     }
 }

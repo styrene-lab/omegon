@@ -1258,7 +1258,10 @@ impl ToolProvider for CoreTools {
                     .ok_or_else(|| anyhow::anyhow!("missing 'capability' argument"))?;
                 let profile = args["profile"].as_str().map(str::to_string);
                 let resolver = crate::nex::capabilities::CapabilityResolver::bundled()?;
-                let context = crate::nex::capabilities::CapabilityContext { path: None, profile };
+                let context = crate::nex::capabilities::CapabilityContext {
+                    path: None,
+                    profile,
+                };
                 let resolution = match action {
                     "check" => resolver.check(capability, context, None),
                     "resolve" => resolver.resolve(capability, context, None),

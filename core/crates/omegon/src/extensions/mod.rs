@@ -745,7 +745,10 @@ pub struct SpawnedExtension {
 
 fn nex_delegation_executor(feature: &ExtensionFeature) -> Option<std::sync::Arc<ExtensionFeature>> {
     if feature.runtime.name == "omegon-nex"
-        && feature.tools.iter().any(|tool| tool.name == "nex_devenv_inspect")
+        && feature
+            .tools
+            .iter()
+            .any(|tool| tool.name == "nex_devenv_inspect")
     {
         Some(std::sync::Arc::new(feature.clone()))
     } else {
@@ -755,11 +758,7 @@ fn nex_delegation_executor(feature: &ExtensionFeature) -> Option<std::sync::Arc<
 
 #[async_trait::async_trait]
 impl crate::tools::nex_substrate::NexDelegationExecutor for ExtensionFeature {
-    async fn execute_devenv_inspect(
-        &self,
-        tool: &str,
-        path: &Path,
-    ) -> anyhow::Result<ToolResult> {
+    async fn execute_devenv_inspect(&self, tool: &str, path: &Path) -> anyhow::Result<ToolResult> {
         if self.runtime.name != "omegon-nex" || tool != "nex_devenv_inspect" {
             anyhow::bail!("unsupported Nex delegation tool: {tool}");
         }
@@ -1159,8 +1158,13 @@ async fn spawn_native(
         notification_sink: notification_pair.0,
     };
 
-    let (feature, widget_rx) =
-        ExtensionFeature::new(runtime, handshake.tools.clone(), widgets.clone(), handles, state);
+    let (feature, widget_rx) = ExtensionFeature::new(
+        runtime,
+        handshake.tools.clone(),
+        widgets.clone(),
+        handles,
+        state,
+    );
 
     // Extract polling handle if this extension provides vox_route
     let vox_polling_handle = if handshake.tools.iter().any(|t| t.name == "vox_route") {
@@ -1258,8 +1262,13 @@ async fn spawn_container(
         notification_sink: notification_pair.0,
     };
 
-    let (feature, widget_rx) =
-        ExtensionFeature::new(runtime, handshake.tools.clone(), widgets.clone(), handles, state);
+    let (feature, widget_rx) = ExtensionFeature::new(
+        runtime,
+        handshake.tools.clone(),
+        widgets.clone(),
+        handles,
+        state,
+    );
 
     let vox_polling_handle = if handshake.tools.iter().any(|t| t.name == "vox_route") {
         Some(feature.polling_handle())

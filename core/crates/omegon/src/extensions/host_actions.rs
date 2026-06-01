@@ -381,7 +381,8 @@ pub(super) fn process_host_action_candidate(
     if action.action_type == PACKAGE_INSTALL_V1
         && let Some(policy) = executors.package_install_policy.as_ref()
     {
-        let outcome = execute_package_install(&action, policy, executors.terminal_create_registry.as_ref());
+        let outcome =
+            execute_package_install(&action, policy, executors.terminal_create_registry.as_ref());
         audit_host_action_outcome(
             &scoped_id,
             Some(&action.action_type),
@@ -792,7 +793,6 @@ impl TerminalCreateBackend for RealTerminalCreateBackend {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub(super) struct PackageInstallPolicy {
     enabled: bool,
@@ -813,9 +813,24 @@ impl PackageInstallPolicy {
             enabled: true,
             allowed_providers: BTreeSet::from(["omegon-nex".to_string()]),
             allowed_tools: BTreeMap::from([
-                ("micro".to_string(), PackageToolPolicy { package: "micro".to_string() }),
-                ("hx".to_string(), PackageToolPolicy { package: "hx".to_string() }),
-                ("nvim".to_string(), PackageToolPolicy { package: "nvim".to_string() }),
+                (
+                    "micro".to_string(),
+                    PackageToolPolicy {
+                        package: "micro".to_string(),
+                    },
+                ),
+                (
+                    "hx".to_string(),
+                    PackageToolPolicy {
+                        package: "hx".to_string(),
+                    },
+                ),
+                (
+                    "nvim".to_string(),
+                    PackageToolPolicy {
+                        package: "nvim".to_string(),
+                    },
+                ),
             ]),
             allowed_scopes: BTreeSet::from(["user".to_string()]),
             allow_privilege_escalation: true,
@@ -824,7 +839,10 @@ impl PackageInstallPolicy {
 
     #[cfg(test)]
     fn disabled() -> Self {
-        Self { enabled: false, ..Self::default_enabled() }
+        Self {
+            enabled: false,
+            ..Self::default_enabled()
+        }
     }
 }
 
@@ -858,34 +876,84 @@ fn execute_package_install(
     };
 
     if !policy.enabled {
-        return outcome(action.id.clone(), HostActionStatus::Denied, "package_install_denied", "package install is disabled by host policy");
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Denied,
+            "package_install_denied",
+            "package install is disabled by host policy",
+        );
     }
     if !policy.allowed_providers.contains(&params.provider) {
-        return outcome(action.id.clone(), HostActionStatus::Denied, "package_provider_denied", format!("package provider '{}' is not allowlisted", params.provider));
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Denied,
+            "package_provider_denied",
+            format!("package provider '{}' is not allowlisted", params.provider),
+        );
     }
     let Some(tool_policy) = policy.allowed_tools.get(&params.tool) else {
-        return outcome(action.id.clone(), HostActionStatus::Invalid, "package_tool_denied", format!("package tool '{}' is not allowlisted", params.tool));
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Invalid,
+            "package_tool_denied",
+            format!("package tool '{}' is not allowlisted", params.tool),
+        );
     };
     if params.package != tool_policy.package {
-        return outcome(action.id.clone(), HostActionStatus::Invalid, "package_tool_mismatch", format!("provider {} maps tool {} to package {}; received package {}", params.provider, params.tool, tool_policy.package, params.package));
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Invalid,
+            "package_tool_mismatch",
+            format!(
+                "provider {} maps tool {} to package {}; received package {}",
+                params.provider, params.tool, tool_policy.package, params.package
+            ),
+        );
     }
     if !policy.allowed_scopes.contains(&params.scope) {
-        return outcome(action.id.clone(), HostActionStatus::Invalid, "package_scope_denied", format!("package install scope '{}' is not allowlisted", params.scope));
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Invalid,
+            "package_scope_denied",
+            format!(
+                "package install scope '{}' is not allowlisted",
+                params.scope
+            ),
+        );
     }
     if params.may_require_privilege && !policy.allow_privilege_escalation {
-        return outcome(action.id.clone(), HostActionStatus::Denied, "package_privilege_denied", "package install may require privilege escalation, which host policy disallows");
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Denied,
+            "package_privilege_denied",
+            "package install may require privilege escalation, which host policy disallows",
+        );
     }
 
     let Some(registry) = terminal_registry else {
-        return outcome(action.id.clone(), HostActionStatus::Unsupported, "package_install_executor_unavailable", "managed-terminal package install requires a terminal backend");
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Unsupported,
+            "package_install_executor_unavailable",
+            "managed-terminal package install requires a terminal backend",
+        );
     };
     let Some(backend) = registry.select(TerminalPlacementCapability::BackgroundSession) else {
-        return outcome(action.id.clone(), HostActionStatus::Unsupported, "terminal_backend_unavailable", "no terminal backend is available for package install");
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Unsupported,
+            "terminal_backend_unavailable",
+            "no terminal backend is available for package install",
+        );
     };
 
     let plan = TerminalCreateLaunchPlan {
         command: "nex".to_string(),
-        args: vec!["install".to_string(), "--nix".to_string(), params.package.clone()],
+        args: vec![
+            "install".to_string(),
+            "--nix".to_string(),
+            params.package.clone(),
+        ],
         cwd: None,
         env: Vec::new(),
         placement: Some(omegon_extension::actions::terminal::TerminalPlacement::Default),
@@ -894,7 +962,12 @@ fn execute_package_install(
 
     match backend.create(plan) {
         Ok(result) => outcome_completed_package_install(action, params, result),
-        Err(reason) => outcome(action.id.clone(), HostActionStatus::Unsupported, "terminal_backend_unavailable", reason),
+        Err(reason) => outcome(
+            action.id.clone(),
+            HostActionStatus::Unsupported,
+            "terminal_backend_unavailable",
+            reason,
+        ),
     }
 }
 
@@ -1230,7 +1303,6 @@ allowed = [{allowed}]
         HostActionExecutorRegistry::default_supported()
     }
 
-
     fn package_action(tool: &str, package: &str) -> HostAction {
         HostAction::new(
             format!("install-{tool}"),
@@ -1287,7 +1359,12 @@ allowed = [{allowed}]
             serde_json::to_value(package_action("micro", "curl")).unwrap(),
             &manifest(&[PACKAGE_INSTALL_V1]),
             scoped(),
-            &RuntimeHostActionPolicy { operator_approved: true, project_allows_auto: true, runtime_allows_auto: true, origin_trusted_for_auto: true },
+            &RuntimeHostActionPolicy {
+                operator_approved: true,
+                project_allows_auto: true,
+                runtime_allows_auto: true,
+                origin_trusted_for_auto: true,
+            },
             &package_registry_with_fake_terminal(),
         );
 
@@ -1301,7 +1378,12 @@ allowed = [{allowed}]
             serde_json::to_value(package_action("micro", "micro")).unwrap(),
             &manifest(&[PACKAGE_INSTALL_V1]),
             scoped(),
-            &RuntimeHostActionPolicy { operator_approved: true, project_allows_auto: true, runtime_allows_auto: true, origin_trusted_for_auto: true },
+            &RuntimeHostActionPolicy {
+                operator_approved: true,
+                project_allows_auto: true,
+                runtime_allows_auto: true,
+                origin_trusted_for_auto: true,
+            },
             &package_registry_with_fake_terminal(),
         );
 

@@ -119,14 +119,17 @@ pub async fn inspect_devenv(path: &Path) -> NexSubstrateReport {
         Ok(Ok(output)) => output,
         Ok(Err(error)) => {
             let mut report = unavailable_report(path_display, "devenv".to_string());
-            report.diagnostics.push(format!("failed to execute nex: {error}"));
+            report
+                .diagnostics
+                .push(format!("failed to execute nex: {error}"));
             return report;
         }
         Err(_) => {
             let mut report = unavailable_report(path_display, "devenv".to_string());
-            report
-                .diagnostics
-                .push(format!("nex devenv inspect timed out after {}s", NEX_TIMEOUT.as_secs()));
+            report.diagnostics.push(format!(
+                "nex devenv inspect timed out after {}s",
+                NEX_TIMEOUT.as_secs()
+            ));
             return report;
         }
     };
@@ -139,7 +142,10 @@ pub async fn inspect_devenv(path: &Path) -> NexSubstrateReport {
         );
     }
     if output.stderr.len() > OUTPUT_LIMIT {
-        diagnostics.push(format!("nex stderr exceeded {} bytes and was truncated", OUTPUT_LIMIT));
+        diagnostics.push(format!(
+            "nex stderr exceeded {} bytes and was truncated",
+            OUTPUT_LIMIT
+        ));
     } else if !output.stderr.is_empty() {
         diagnostics.push(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
@@ -153,7 +159,10 @@ pub async fn inspect_devenv(path: &Path) -> NexSubstrateReport {
     let report_json: Value = match serde_json::from_slice(&output.stdout) {
         Ok(value) => value,
         Err(error) => {
-            return execution_error_report(path_display, format!("nex emitted invalid JSON: {error}"));
+            return execution_error_report(
+                path_display,
+                format!("nex emitted invalid JSON: {error}"),
+            );
         }
     };
 
@@ -187,8 +196,7 @@ pub fn read_only_delegations(
         let Some(nex) = metadata.pointer("/delegations/nex") else {
             continue;
         };
-        if nex.get("schema").and_then(Value::as_str)
-            != Some("io.styrene.omegon-nex.delegations.v1")
+        if nex.get("schema").and_then(Value::as_str) != Some("io.styrene.omegon-nex.delegations.v1")
         {
             continue;
         }
@@ -227,9 +235,13 @@ pub fn read_only_delegations(
             if output_schema != expected.output_schema {
                 continue;
             }
-            if command.get("command").and_then(Value::as_array).is_some_and(|argv| {
-                argv.iter().filter_map(Value::as_str).collect::<Vec<_>>() != expected.argv
-            }) {
+            if command
+                .get("command")
+                .and_then(Value::as_array)
+                .is_some_and(|argv| {
+                    argv.iter().filter_map(Value::as_str).collect::<Vec<_>>() != expected.argv
+                })
+            {
                 continue;
             }
             delegations.push(NexSubstrateDelegation {
@@ -393,7 +405,9 @@ fn derive_item_findings(item: &Value, policy: &mut NexSubstratePolicy) {
             source.clone(),
         ));
     }
-    if safety.contains(&"destructive-disk-operation") || safety.contains(&"hardware-driver-mutation") {
+    if safety.contains(&"destructive-disk-operation")
+        || safety.contains(&"hardware-driver-mutation")
+    {
         policy.findings.push(finding(
             "warning",
             "destructive_mutation",
@@ -424,9 +438,18 @@ fn item_source(item: &Value) -> Option<NexSubstrateFindingSource> {
     let source = item.get("source")?;
     Some(NexSubstrateFindingSource {
         report: "devenv_import",
-        item_id: item.get("id").and_then(Value::as_str).map(ToString::to_string),
-        file: source.get("file").and_then(Value::as_str).map(ToString::to_string),
-        path: source.get("path").and_then(Value::as_str).map(ToString::to_string),
+        item_id: item
+            .get("id")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        file: source
+            .get("file")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        path: source
+            .get("path")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
     })
 }
 
@@ -493,7 +516,11 @@ pub fn summary_text(report: &NexSubstrateReport) -> String {
     let mut lines = Vec::new();
     lines.push(format!(
         "Nex substrate inspection: {}",
-        if report.nex_available { "available" } else { "unavailable" }
+        if report.nex_available {
+            "available"
+        } else {
+            "unavailable"
+        }
     ));
     lines.push(format!("Path: {}", report.path));
     if let Some(schema) = report
@@ -514,13 +541,22 @@ pub fn summary_text(report: &NexSubstrateReport) -> String {
         lines.push(format!(
             "Items: portable={} project={} machine={} review={} unsupported={}",
             summary.get("portable").and_then(Value::as_u64).unwrap_or(0),
-            summary.get("projectScoped").and_then(Value::as_u64).unwrap_or(0),
+            summary
+                .get("projectScoped")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
             summary
                 .get("machineScopedCandidate")
                 .and_then(Value::as_u64)
                 .unwrap_or(0),
-            summary.get("requiresReview").and_then(Value::as_u64).unwrap_or(0),
-            summary.get("unsupported").and_then(Value::as_u64).unwrap_or(0),
+            summary
+                .get("requiresReview")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            summary
+                .get("unsupported")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
         ));
     }
     lines.push(format!(
@@ -585,8 +621,18 @@ mod tests {
         assert_eq!(policy.summary.warnings, 2);
         assert_eq!(policy.summary.review_items, 1);
         assert_eq!(policy.summary.secret_contracts, 1);
-        assert!(policy.findings.iter().any(|finding| finding.code == "arbitrary_command"));
-        assert!(policy.findings.iter().any(|finding| finding.code == "secret_contract"));
+        assert!(
+            policy
+                .findings
+                .iter()
+                .any(|finding| finding.code == "arbitrary_command")
+        );
+        assert!(
+            policy
+                .findings
+                .iter()
+                .any(|finding| finding.code == "secret_contract")
+        );
     }
 
     #[test]
@@ -594,6 +640,44 @@ mod tests {
         let policy = derive_policy(&json!({"schema": "other", "items": []}));
         assert_eq!(policy.summary.warnings, 1);
         assert_eq!(policy.findings[0].code, "schema_unknown");
+    }
+
+    #[tokio::test]
+    async fn missing_nex_returns_advisory_degraded_report() {
+        static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = PATH_LOCK.lock().unwrap();
+        let original_path = std::env::var_os("PATH");
+        unsafe { std::env::set_var("PATH", "") };
+
+        let dir = tempfile::tempdir().unwrap();
+        let report = inspect_devenv(dir.path()).await;
+
+        match original_path {
+            Some(path) => unsafe { std::env::set_var("PATH", path) },
+            None => unsafe { std::env::remove_var("PATH") },
+        }
+
+        assert_eq!(report.schema, REPORT_SCHEMA);
+        assert_eq!(report.source, "nex");
+        assert!(!report.nex_available);
+        assert_eq!(report.mode, "devenv");
+        assert!(report.reports.devenv_import.is_none());
+        assert_eq!(report.policy.enforcement, "advisory");
+        assert_eq!(report.policy.summary.blockers, 0);
+        assert_eq!(report.policy.summary.warnings, 1);
+        assert!(
+            report
+                .policy
+                .findings
+                .iter()
+                .any(|finding| finding.code == "nex_unavailable")
+        );
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.contains("install or expose `nex`"))
+        );
     }
 
     #[test]
@@ -718,10 +802,8 @@ mod tests {
                 }]
             }),
         ] {
-            let metadata = BTreeMap::from([(
-                "provider".to_string(),
-                json!({"delegations": {"nex": nex}}),
-            )]);
+            let metadata =
+                BTreeMap::from([("provider".to_string(), json!({"delegations": {"nex": nex}}))]);
             assert!(read_only_delegations(&metadata).is_empty());
         }
     }

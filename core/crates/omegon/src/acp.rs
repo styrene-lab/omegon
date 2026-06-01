@@ -9,9 +9,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use agent_client_protocol::*;
 use agent_client_protocol::JsonRpcMessage as _;
 use agent_client_protocol::schema::*;
+use agent_client_protocol::*;
 use anyhow::Context;
 
 use crate::acp_worker::{self, WorkerEvent, WorkerHandle, WorkerRequest};
@@ -93,13 +93,11 @@ impl AcpClientConnection {
             self.pending.borrow_mut().remove(&id);
             return Err(agent_client_protocol::Error::into_internal_error(error));
         }
-        let value = rx
-            .await
-            .map_err(|_| {
-                agent_client_protocol::util::internal_error(format!(
-                    "ACP request `{method}` response channel closed"
-                ))
-            })??;
+        let value = rx.await.map_err(|_| {
+            agent_client_protocol::util::internal_error(format!(
+                "ACP request `{method}` response channel closed"
+            ))
+        })??;
         Req::Response::from_value(&method, value)
     }
 
@@ -956,10 +954,9 @@ impl OmegonAcpAgent {
                         Ok(WorkerEvent::ToolOutput { id, text }) => {
                             let text = redact(&text);
                             if let Some(c) = conn.borrow().as_ref() {
-                                let content =
-                                    ToolCallContent::Content(Content::new(
-                                        ContentBlock::Text(TextContent::new(text)),
-                                    ));
+                                let content = ToolCallContent::Content(Content::new(
+                                    ContentBlock::Text(TextContent::new(text)),
+                                ));
                                 let fields = ToolCallUpdateFields::new().content(vec![content]);
                                 let _ = send_session_update(
                                     c,
@@ -2583,7 +2580,6 @@ fn convert_acp_mcp_server(
 }
 
 // ── Entry point ────────────────────────────────────────────────────────
-
 
 #[cfg(test)]
 mod extension_metadata_tests {
