@@ -156,10 +156,10 @@ fn expand_tilde(path: &str) -> PathBuf {
     if path == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from(path));
     }
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
     }
     Path::new(path).to_path_buf()
 }
@@ -233,9 +233,12 @@ mod tests {
     #[tokio::test]
     async fn initializes_tool_and_returns_degraded_report_without_delegation_or_nex() {
         static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = PATH_LOCK.lock().unwrap();
-        let original_path = std::env::var_os("PATH");
-        unsafe { std::env::set_var("PATH", "") };
+        let original_path = {
+            let _guard = PATH_LOCK.lock().unwrap();
+            let original_path = std::env::var_os("PATH");
+            unsafe { std::env::set_var("PATH", "") };
+            original_path
+        };
 
         let dir = tempfile::tempdir().unwrap();
         let provider = NexSubstrateProvider::new(dir.path().to_path_buf());
@@ -250,10 +253,12 @@ mod tests {
             )
             .await;
 
+        let _guard = PATH_LOCK.lock().unwrap();
         match original_path {
             Some(path) => unsafe { std::env::set_var("PATH", path) },
             None => unsafe { std::env::remove_var("PATH") },
         }
+        drop(_guard);
 
         let result = result.expect("missing Nex should degrade, not fail the tool call");
         assert!(
