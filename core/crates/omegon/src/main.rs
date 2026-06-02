@@ -56,6 +56,7 @@ mod skills;
 mod smoke;
 mod switch;
 mod task_spawn;
+mod tdd;
 pub mod tool_schema;
 mod update;
 mod upstream_errors;
@@ -70,6 +71,7 @@ mod checkpoint;
 mod child_agent;
 mod conversation;
 mod eval;
+mod evidence;
 mod extension_cli;
 mod extension_registry;
 mod lifecycle;
@@ -81,6 +83,7 @@ mod paths;
 mod pkl_modules;
 mod plugin_cli;
 mod plugins;
+mod project_rules;
 mod prompt;
 mod providers;
 pub mod routing;
@@ -315,6 +318,101 @@ enum AuthAction {
 }
 
 #[derive(Subcommand)]
+enum TddAction {
+    /// Watch a command and emit deterministic red→green TDD savepoint events.
+    Watch {
+        /// Filename extension to watch, such as rs, js, py, go, java, or txt.
+        #[arg(short, long, alias = "ext")]
+        filetype: Option<String>,
+
+        /// Path to watch, relative to --cwd. Defaults to the current directory.
+        #[arg(long = "watch", value_name = "PATH")]
+        watch_paths: Vec<PathBuf>,
+
+        /// OpenSpec change to attribute savepoints to.
+        #[arg(long)]
+        change: Option<String>,
+
+        /// OpenSpec scenario id to attribute savepoints to.
+        #[arg(long)]
+        scenario: Option<String>,
+
+        /// Task id to attribute savepoints to.
+        #[arg(long)]
+        task: Option<String>,
+
+        /// Run once to establish baseline and exit.
+        #[arg(long)]
+        once: bool,
+
+        /// Emit the baseline run as a raw savepoint event.
+        #[arg(long)]
+        emit_baseline: bool,
+
+        /// Persist failing runs as explicit failure evidence.
+        #[arg(long)]
+        persist_failures: bool,
+
+        /// Kill the test command after this many seconds and classify it as failing.
+        #[arg(long)]
+        timeout_secs: Option<u64>,
+
+        /// Command to run. Place after --.
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+
+    /// Query recorded TDD evidence.
+    Evidence {
+        /// Command hash to query.
+        #[arg(long)]
+        command_hash: Option<String>,
+
+        /// OpenSpec change to query.
+        #[arg(long)]
+        change: Option<String>,
+
+        /// OpenSpec scenario id to query.
+        #[arg(long)]
+        scenario: Option<String>,
+
+        /// Task id to query.
+        #[arg(long)]
+        task: Option<String>,
+
+        /// Current worktree diff hash for stale-pass detection.
+        #[arg(long)]
+        current_diff_hash: Option<String>,
+
+        /// Compute the current worktree diff hash for stale-pass detection.
+        #[arg(long)]
+        current: bool,
+
+        /// Scope paths used when computing --current.
+        #[arg(long = "scope", value_name = "PATH")]
+        scopes: Vec<PathBuf>,
+
+        /// Emit JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectRulesAction {
+    /// Check project rules against current evidence and OpenSpec read models.
+    Check {
+        /// Evaluation context, such as default, local, ci, release, or archive.
+        #[arg(long, default_value = "default")]
+        context: String,
+
+        /// Emit JSON instead of human-readable text.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum Commands {
     /// Run interactive TUI session — ratatui-based terminal interface.
     Interactive,
@@ -503,6 +601,18 @@ enum Commands {
         /// Agent manifest (Pkl file or bundle directory).
         #[arg(long)]
         manifest: Option<String>,
+    },
+
+    /// Run deterministic, language-agnostic TDD red→green savepoint workflows.
+    Tdd {
+        #[command(subcommand)]
+        action: TddAction,
+    },
+
+    /// Evaluate project-scoped rules against evidence and lifecycle read models.
+    ProjectRules {
+        #[command(subcommand)]
+        action: ProjectRulesAction,
     },
 
     /// Manage Ollama integration — register, status, diagnostics.
@@ -1283,6 +1393,8 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Commands::Auth { ref action }) => run_auth_command(action).await,
+        Some(Commands::Tdd { ref action }) => run_tdd_command(action).await,
+        Some(Commands::ProjectRules { ref action }) => run_project_rules_command(&cli, action),
         Some(Commands::Cleave {
             ref plan,
             ref directive,
@@ -6383,6 +6495,188 @@ async fn maybe_run_injected_cleave_smoke_child(
             std::process::exit(2);
         }
         other => anyhow::bail!("unknown OMEGON_CLEAVE_SMOKE_CHILD_MODE: {other}"),
+    }
+}
+
+async fn call_tdd_savepoint_extension(
+    tool_name: &str,
+    args: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    let ext_dir = crate::extension_cli::extensions_dir()?.join("omegon-tdd-savepoint");
+    if !ext_dir.join("manifest.toml").is_file() {
+        anyhow::bail!("omegon-tdd-savepoint extension is not installed");
+    }
+    let spawned = crate::extensions::spawn_from_manifest(&ext_dir, &[]).await?;
+    let result = spawned
+        .feature
+        .execute(
+            tool_name,
+            "cli-tdd",
+            args,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await?;
+    if result
+        .details
+        .get("is_error")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        anyhow::bail!("extension tool {tool_name} failed: {:?}", result.content);
+    }
+    Ok(result.details)
+}
+
+fn run_project_rules_command(cli: &Cli, action: &ProjectRulesAction) -> anyhow::Result<()> {
+    match action {
+        ProjectRulesAction::Check { context, json } => {
+            let cwd = std::fs::canonicalize(&cli.cwd)?;
+            let report = project_rules::check(&cwd, context);
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "project rules: context={} mode={:?} passed={} findings={}",
+                    report.context,
+                    report.mode,
+                    report.passed,
+                    report.findings.len()
+                );
+                for finding in &report.findings {
+                    println!(
+                        "- {:?} {} enforced={} subject={} — {}",
+                        finding.severity,
+                        finding.rule_id,
+                        finding.enforced,
+                        finding.subject,
+                        finding.message
+                    );
+                }
+            }
+            if report.passed {
+                Ok(())
+            } else {
+                anyhow::bail!("project rules failed")
+            }
+        }
+    }
+}
+
+async fn run_tdd_command(action: &TddAction) -> anyhow::Result<()> {
+    match action {
+        TddAction::Watch {
+            filetype,
+            watch_paths,
+            change,
+            scenario,
+            task,
+            once,
+            emit_baseline,
+            persist_failures,
+            timeout_secs,
+            command,
+        } => {
+            let command = tdd::TddCommand::new(command.clone())?;
+            tdd::watch(tdd::WatchOptions {
+                cwd: std::env::current_dir()?,
+                filetype: filetype.clone(),
+                watch_paths: watch_paths.clone(),
+                command,
+                change: change.clone(),
+                scenario: scenario.clone(),
+                task: task.clone(),
+                once: *once,
+                emit_baseline: *emit_baseline,
+                persist_failures: *persist_failures,
+                timeout: timeout_secs.map(std::time::Duration::from_secs),
+            })
+        }
+        TddAction::Evidence {
+            command_hash,
+            change,
+            scenario,
+            task,
+            current_diff_hash,
+            current,
+            scopes,
+            json,
+        } => {
+            let cwd = std::env::current_dir()?;
+            let ext_args = serde_json::json!({
+                "cwd": cwd,
+                "command_hash": command_hash,
+                "change": change,
+                "scenario": scenario,
+                "task": task,
+                "current_diff_hash": current_diff_hash,
+                "current": current,
+                "scopes": scopes,
+            });
+            match call_tdd_savepoint_extension("tdd_savepoint_evidence", ext_args).await {
+                Ok(details) => {
+                    if *json {
+                        println!("{}", details);
+                    } else {
+                        let status = details
+                            .get("status_label")
+                            .and_then(serde_json::Value::as_str)
+                            .or_else(|| details.get("status").and_then(serde_json::Value::as_str))
+                            .unwrap_or("unknown");
+                        let event_count = details
+                            .get("events")
+                            .and_then(serde_json::Value::as_array)
+                            .map(Vec::len)
+                            .unwrap_or(0);
+                        println!("status: {status}");
+                        println!("events: {event_count}");
+                    }
+                    Ok(())
+                }
+                Err(err) => {
+                    eprintln!(
+                        "omegon tdd evidence is moving to the omegon-tdd-savepoint extension; falling back to legacy core evidence reader ({err})"
+                    );
+                    let current_diff_hash = if *current {
+                        Some(tdd::current_diff_hash(&cwd, scopes))
+                    } else {
+                        current_diff_hash.clone()
+                    };
+                    let query = tdd::EvidenceQuery {
+                        command_hash: command_hash.clone(),
+                        change: change.clone(),
+                        scenario: scenario.clone(),
+                        task: task.clone(),
+                        current_diff_hash,
+                    };
+                    let events = tdd::read_events(&cwd, &query)?;
+                    let status = tdd::classify_evidence(&events, &query);
+                    if *json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "status": status,
+                                "events": events,
+                            })
+                        );
+                    } else {
+                        println!("status: {:?}", status);
+                        println!("events: {}", events.len());
+                        for event in events.iter().rev().take(5) {
+                            println!(
+                                "- {} {} command={} change={:?} scenario={:?} task={:?}",
+                                event.event_id,
+                                event.transition,
+                                event.command_hash,
+                                event.change,
+                                event.scenario,
+                                event.task
+                            );
+                        }
+                    }
+                    Ok(())
+                }
+            }
+        }
     }
 }
 

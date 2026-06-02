@@ -1,0 +1,12 @@
+[extension]
+name = "omegon-tdd-savepoint"
+version = "0.1.0"
+description = "Deterministic TDD savepoint evidence tools"
+
+[runtime]
+type = "native"
+binary = "target/release/omegon-tdd-savepoint"
+
+[startup]
+ping_method = "get_tools"
+timeout_ms = 5000

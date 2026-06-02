@@ -71,3 +71,6 @@ target/
 *.jsonl
 !.pi/memory/facts.jsonl
 !catalog/*/mind/facts.jsonl
+# Omegon evidence map derived indexes/cache
+.omegon/evidence/indexes/
+.omegon/evidence/cache/

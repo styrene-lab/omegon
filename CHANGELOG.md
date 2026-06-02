@@ -16,12 +16,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
-## [0.25.7] - 2026-06-01
+## [0.26.0] - 2026-06-01
 
 ### Added
 
 - Add the `nex_substrate` read-only tool boundary for consuming Nex project substrate reports and deriving Omegon policy findings without duplicating devenv or SecretSpec parsing while preserving Omegon's single-binary default operation when Nex is absent.
 - Extract `nex_substrate` into a dedicated provider, catalog `omegon-nex` read-only delegation metadata for `devenv.inspect`, `devenv.explain`, and `machine-profile.inspect`, validate the advertised schema/provider/tool/output/argv contract before accepting it, prefer the narrow provider-routed `devenv.inspect` executor when available, enforce workspace-boundary path checks before inspection, and test that missing Nex remains an advisory degraded report rather than a startup/default-operation dependency while keeping direct Nex binary inspection as an explicit fallback.
+- Add a native `omegon-tdd-savepoint` extension scaffold exposing TDD savepoint presets, plan/run operations, diff hashing, readiness status, evidence classification tools, and `.omegon/evidence/` normalized record projection while preserving the existing core CLI kernel during extraction.
+- Document the next TDD savepoint extraction stage: argv-only extension execution, deferred watch mode, plan/run ownership, and the core CLI compatibility-wrapper migration.
+- Define `.omegon/evidence/` manifest, evidence, surface, edge, and artifact schemas as the project-wide generated evidence-map substrate for Flynt and other consumers, including the core/OpenSpec boundary for provider-neutral claim consumption.
+- Add and harden a dogfood Rust surface evidence generator that uses nightly rustdoc JSON to populate `.omegon/evidence/surfaces.jsonl`, resolve source paths/hashes, filter derive noise, render basic signatures, append `code-evidence` records, emit source/artifact edges, report Rust doc coverage warnings, build a derived SQLite/FTS query index, connect documentation coverage evidence to an explicit claim record, generate a markdown coverage summary artifact, support bounded provider-record replacement, and provide a lightweight evidence query helper.
+- Define the Omegon Agentic Development Kit extension suite and choose `omegon-code-evidence` as the less ambiguous home for code/API/tool/config surface evidence generation.
+- Add rustdoc comments to the public `omegon-tdd-savepoint` evidence kernel surfaces so the dogfood `public-api-documented` claim is supported by regenerated code evidence.
+- Add a provider-neutral core evidence read model that loads `.omegon/evidence` claims, records, and edges, summarizes claim support/refutation, annotates OpenSpec scenarios with `evidence-claim` support metadata, and reports refuted/mixed scenario evidence claims for future project-rules enforcement without hard-blocking core archive operations.
+- Harden the Project Rules policy boundary and add a warn-mode `omegon project-rules check` dogfood command/config so OpenSpec remains descriptive, evidence findings stay advisory by default, and per-project/CI contexts own hard-deny behavior.
+- Document the experimental evidence map, OpenSpec evidence-claim annotations, dogfood code-evidence generator, query helper, and deterministic project-rules checks.
+- Add a local sandbox evidence-substrate smoke suite that copies evidence/project-rule inputs into temporary directories, verifies query helpers, checks unsupported/refuted claim behavior, proves auth-free/Nex-degraded operation, and dry-runs the Rust evidence generator in a detached worktree.
+- Route `omegon tdd evidence` through the native savepoint extension first with a legacy core fallback during the extraction window.
+- Add scenario projection design and implementation plan covering external project tracking, test-condition modeling, provider-neutral evidence, readiness aggregation, and opt-in archive gates.
+- Add an initial deterministic language-agnostic `omegon tdd watch` savepoint kernel that hashes command identity, captures failing-to-passing transitions, records git/worktree evidence, supports command timeouts and explicit baseline event emission, projects stable attributed summaries into OpenSpec change evidence directories, reads raw/projected JSONL evidence, classifies TDD evidence status, annotates parsed OpenSpec scenarios with TDD evidence, supports explicit failing-run persistence, explicit scenario IDs with stable derived fallback, automatic current diff hashing for evidence queries, and appends raw JSONL lifecycle events under `.omegon/lifecycle/savepoints/`.
 
 ### Fixed
 

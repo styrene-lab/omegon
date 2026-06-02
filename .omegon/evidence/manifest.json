@@ -1,0 +1,42 @@
+{
+  "created_at_ms": 1780349482529,
+  "files": {
+    "artifacts": "artifacts.jsonl",
+    "claims": "claims.jsonl",
+    "edges": "edges.jsonl",
+    "records": "records.jsonl",
+    "summaries": "summaries/",
+    "surfaces": "surfaces.jsonl"
+  },
+  "generator": {
+    "name": "omegon-code-evidence-prototype",
+    "version": "0.3.0"
+  },
+  "indexes": {
+    "sqlite": {
+      "derived": true,
+      "kind": "sqlite",
+      "path": ".omegon/evidence/indexes/evidence.sqlite"
+    }
+  },
+  "project": {
+    "name": "omegon-secundus",
+    "root": "."
+  },
+  "providers": [
+    {
+      "id": "code-evidence",
+      "kind": "surface-index",
+      "raw_roots": [
+        "extensions/omegon-tdd-savepoint/target/doc/omegon_tdd_savepoint.json"
+      ]
+    }
+  ],
+  "schema": "omegon-evidence-manifest/v1",
+  "source_state": {
+    "branch": "exploration/rust-savepoint-tdd",
+    "dirty": true,
+    "git_head": "ea670402a1a68bbfffda058b1e3cda1d4f283250",
+    "worktree_diff_hash": "sha256:272dd683734c0c2a19ad7fe846b532cacbebd776e124299607c2d47db5ea070e"
+  }
+}

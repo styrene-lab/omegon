@@ -7,6 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::types::*;
+use crate::evidence::EvidenceStore;
+use crate::tdd::{self, EvidenceQuery};
 
 /// Locate the openspec/ directory in a repository.
 pub fn find_openspec_dir(repo_path: &Path) -> Option<PathBuf> {
@@ -144,6 +146,138 @@ fn read_change(change_dir: &Path, name: &str) -> Option<ChangeInfo> {
         task_groups,
         specs,
     })
+    .map(|mut change| {
+        annotate_tdd_evidence(change_dir, &mut change);
+        annotate_claim_evidence(change_dir, &mut change);
+        change
+    })
+}
+
+fn scenario_evidence_ids(domain: &str, _requirement: &str, scenario: &Scenario) -> [String; 2] {
+    [
+        scenario.id.clone(),
+        format!("{}/{}", domain, scenario.title),
+    ]
+}
+
+fn stable_scenario_id(domain: &str, requirement: &str, scenario: &str) -> String {
+    format!(
+        "{}/{}/{}",
+        slug_component(domain),
+        slug_component(requirement),
+        slug_component(scenario)
+    )
+}
+
+fn slug_component(input: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in input.chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+fn evidence_claim_ids(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| evidence_claim_id_from_line(line.trim()))
+        .collect()
+}
+
+fn evidence_claim_id_from_line(trimmed: &str) -> Option<String> {
+    if let Some(body) = trimmed
+        .strip_prefix("<!--")
+        .and_then(|body| body.strip_suffix("-->"))
+        .map(str::trim)
+    {
+        let claim = body.strip_prefix("evidence-claim:")?.trim();
+        return (!claim.is_empty()).then(|| claim.to_string());
+    }
+    let claim = trimmed.strip_prefix("evidence-claim:")?.trim();
+    (!claim.is_empty()).then(|| claim.to_string())
+}
+
+fn annotate_claim_evidence(change_dir: &Path, change: &mut ChangeInfo) {
+    let Some(repo_path) = change_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+    else {
+        return;
+    };
+    let Ok(store) = EvidenceStore::load(repo_path) else {
+        return;
+    };
+    for spec in &mut change.specs {
+        for requirement in &mut spec.requirements {
+            let requirement_claims = evidence_claim_ids(&requirement.description);
+            for scenario in &mut requirement.scenarios {
+                let mut claims = requirement_claims.clone();
+                claims.extend(evidence_claim_ids(&scenario.given));
+                claims.extend(evidence_claim_ids(&scenario.when));
+                claims.extend(evidence_claim_ids(&scenario.then));
+                for and_clause in &scenario.and_clauses {
+                    claims.extend(evidence_claim_ids(and_clause));
+                }
+                claims.sort();
+                claims.dedup();
+                scenario.evidence_support = claims
+                    .iter()
+                    .map(|claim_id| {
+                        let summary = store.support_summary(claim_id);
+                        ClaimEvidenceSupport {
+                            claim_id: claim_id.clone(),
+                            status: summary.status,
+                            supports: summary.supports.len(),
+                            refutes: summary.refutes.len(),
+                            stale: summary.stale.len(),
+                            supersedes: summary.supersedes.len(),
+                        }
+                    })
+                    .collect();
+                scenario.evidence_claims = claims;
+            }
+        }
+    }
+}
+
+fn annotate_tdd_evidence(change_dir: &Path, change: &mut ChangeInfo) {
+    let Some(repo_path) = change_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+    else {
+        return;
+    };
+    for spec in &mut change.specs {
+        for requirement in &mut spec.requirements {
+            for scenario in &mut requirement.scenarios {
+                let ids = scenario_evidence_ids(&spec.domain, &requirement.title, scenario);
+                let status = ids
+                    .iter()
+                    .find_map(|id| {
+                        tdd::evidence_status(
+                            repo_path,
+                            &EvidenceQuery {
+                                change: Some(change.name.clone()),
+                                scenario: Some(id.clone()),
+                                ..EvidenceQuery::default()
+                            },
+                        )
+                        .ok()
+                        .filter(|status| *status != tdd::TddEvidenceStatus::NoEvidence)
+                    })
+                    .unwrap_or(tdd::TddEvidenceStatus::NoEvidence);
+                scenario.tdd_evidence = Some(status);
+            }
+        }
+    }
 }
 
 /// Compute the lifecycle stage from file presence and task counts.
@@ -294,7 +428,7 @@ pub fn parse_specs_dir(specs_dir: &Path) -> Vec<SpecFile> {
             Err(_) => continue,
         };
 
-        let requirements = parse_spec_content(&content);
+        let requirements = parse_spec_content_with_domain(&domain, &content);
         specs.push(SpecFile {
             domain,
             file_path: path,
@@ -323,7 +457,7 @@ pub fn parse_specs_dir(specs_dir: &Path) -> Vec<SpecFile> {
                             Ok(c) => c,
                             Err(_) => continue,
                         };
-                        let requirements = parse_spec_content(&content);
+                        let requirements = parse_spec_content_with_domain(&domain, &content);
                         specs.push(SpecFile {
                             domain,
                             file_path: sub_path,
@@ -348,6 +482,10 @@ pub fn parse_specs_dir(specs_dir: &Path) -> Vec<SpecFile> {
 ///   Then <expected>
 ///   And <additional>
 pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
+    parse_spec_content_with_domain("", content)
+}
+
+pub fn parse_spec_content_with_domain(domain: &str, content: &str) -> Vec<Requirement> {
     let mut requirements = Vec::new();
     let mut current_req: Option<(String, String, Vec<Scenario>)> = None;
     let mut current_scenario: Option<ScenarioBuilder> = None;
@@ -360,9 +498,15 @@ pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
             let rest = &trimmed[4..];
             let title = rest.strip_prefix("Requirement:").unwrap_or(rest).trim();
             // Flush previous
+            let req_title = current_req
+                .as_ref()
+                .map(|r| r.0.clone())
+                .unwrap_or_default();
             flush_scenario(
                 &mut current_scenario,
                 current_req.as_mut().map(|r| &mut r.2),
+                domain,
+                &req_title,
             );
             if let Some((t, d, s)) = current_req.take() {
                 requirements.push(Requirement {
@@ -378,11 +522,18 @@ pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
         // New scenario: "#### Scenario: <title>" or bare "#### <title>"
         if let Some(after) = trimmed.strip_prefix("#### ") {
             let rest = after.strip_prefix("Scenario:").unwrap_or(after).trim();
+            let req_title = current_req
+                .as_ref()
+                .map(|r| r.0.clone())
+                .unwrap_or_default();
             flush_scenario(
                 &mut current_scenario,
                 current_req.as_mut().map(|r| &mut r.2),
+                domain,
+                &req_title,
             );
             current_scenario = Some(ScenarioBuilder {
+                id: None,
                 title: rest.trim().to_string(),
                 given: String::new(),
                 when: String::new(),
@@ -393,7 +544,16 @@ pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
         }
 
         if let Some(ref mut builder) = current_scenario {
-            if let Some(rest) = trimmed.strip_prefix("Given ") {
+            if let Some(id) = trimmed
+                .strip_prefix("<!-- id:")
+                .and_then(|rest| rest.strip_suffix("-->"))
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+            {
+                builder.id = Some(id.to_string());
+            } else if let Some(claim) = evidence_claim_id_from_line(trimmed) {
+                builder.and_clauses.push(format!("evidence-claim: {claim}"));
+            } else if let Some(rest) = trimmed.strip_prefix("Given ") {
                 builder.given = rest.to_string();
             } else if let Some(rest) = trimmed.strip_prefix("When ") {
                 builder.when = rest.to_string();
@@ -404,7 +564,11 @@ pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
             }
         } else if let Some(ref mut req) = current_req {
             // Description lines (between requirement header and first scenario)
-            if !trimmed.is_empty() {
+            if let Some(claim) = evidence_claim_id_from_line(trimmed) {
+                req.1.push_str("evidence-claim: ");
+                req.1.push_str(&claim);
+                req.1.push('\n');
+            } else if !trimmed.is_empty() {
                 req.1.push_str(trimmed);
                 req.1.push('\n');
             }
@@ -412,9 +576,15 @@ pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
     }
 
     // Flush final
+    let req_title = current_req
+        .as_ref()
+        .map(|r| r.0.clone())
+        .unwrap_or_default();
     flush_scenario(
         &mut current_scenario,
         current_req.as_mut().map(|r| &mut r.2),
+        domain,
+        &req_title,
     );
     if let Some((t, d, s)) = current_req {
         requirements.push(Requirement {
@@ -428,6 +598,7 @@ pub fn parse_spec_content(content: &str) -> Vec<Requirement> {
 }
 
 struct ScenarioBuilder {
+    id: Option<String>,
     title: String,
     given: String,
     when: String,
@@ -435,17 +606,28 @@ struct ScenarioBuilder {
     and_clauses: Vec<String>,
 }
 
-fn flush_scenario(builder: &mut Option<ScenarioBuilder>, target: Option<&mut Vec<Scenario>>) {
+fn flush_scenario(
+    builder: &mut Option<ScenarioBuilder>,
+    target: Option<&mut Vec<Scenario>>,
+    domain: &str,
+    requirement_title: &str,
+) {
     if let Some(b) = builder.take()
         && (!b.given.is_empty() || !b.when.is_empty() || !b.then.is_empty())
         && let Some(scenarios) = target
     {
+        let id =
+            b.id.unwrap_or_else(|| stable_scenario_id(domain, requirement_title, &b.title));
         scenarios.push(Scenario {
+            id,
             title: b.title,
             given: b.given,
             when: b.when,
             then: b.then,
             and_clauses: b.and_clauses,
+            tdd_evidence: None,
+            evidence_claims: Vec::new(),
+            evidence_support: Vec::new(),
         });
     }
 }
@@ -488,9 +670,31 @@ pub fn build_context_injection(changes: &[ChangeInfo]) -> String {
                 let scenario_count: usize =
                     spec.requirements.iter().map(|r| r.scenarios.len()).sum();
                 if scenario_count > 0 {
+                    let mut evidence_counts = std::collections::BTreeMap::new();
+                    for scenario in spec
+                        .requirements
+                        .iter()
+                        .flat_map(|requirement| &requirement.scenarios)
+                    {
+                        if let Some(status) = scenario.tdd_evidence {
+                            *evidence_counts.entry(status.as_str()).or_insert(0usize) += 1;
+                        }
+                    }
+                    let evidence = if evidence_counts.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            " [{}]",
+                            evidence_counts
+                                .iter()
+                                .map(|(status, count)| format!("{status}:{count}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    };
                     lines.push(format!(
-                        "    specs/{}: {} scenarios",
-                        spec.domain, scenario_count
+                        "    specs/{}: {} scenarios{}",
+                        spec.domain, scenario_count, evidence
                     ));
                 }
             }
@@ -717,6 +921,76 @@ fn parse_task_line_for_write(line: &str) -> Option<(bool, String, String, usize,
     ))
 }
 
+/// Policy decision for OpenSpec evidence claim gates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvidenceGateDecision {
+    Pass,
+    Warn,
+    Block,
+}
+
+/// A single evidence-claim gate finding for a scenario.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvidenceGateFinding {
+    pub scenario_id: String,
+    pub claim_id: String,
+    pub status: crate::evidence::ClaimSupportStatus,
+    pub decision: EvidenceGateDecision,
+    pub detail: String,
+}
+
+/// Evaluate provider-neutral evidence claims attached to OpenSpec scenarios.
+///
+/// Default policy is intentionally conservative:
+/// - refuted or mixed claims block archiving;
+/// - unknown or unsupported claims warn;
+/// - supported claims pass.
+///
+/// This keeps evidence opt-in by requiring an explicit `evidence-claim` marker,
+/// but prevents knowingly refuted evidence from being archived silently.
+pub fn evaluate_evidence_gates(change: &ChangeInfo) -> Vec<EvidenceGateFinding> {
+    let mut findings = Vec::new();
+    for spec in &change.specs {
+        for requirement in &spec.requirements {
+            for scenario in &requirement.scenarios {
+                for support in &scenario.evidence_support {
+                    let decision = match support.status {
+                        crate::evidence::ClaimSupportStatus::Supported => {
+                            EvidenceGateDecision::Pass
+                        }
+                        crate::evidence::ClaimSupportStatus::Refuted
+                        | crate::evidence::ClaimSupportStatus::Mixed => EvidenceGateDecision::Block,
+                        crate::evidence::ClaimSupportStatus::Unsupported
+                        | crate::evidence::ClaimSupportStatus::Unknown => {
+                            EvidenceGateDecision::Warn
+                        }
+                    };
+                    if decision == EvidenceGateDecision::Pass {
+                        continue;
+                    }
+                    findings.push(EvidenceGateFinding {
+                        scenario_id: scenario.id.clone(),
+                        claim_id: support.claim_id.clone(),
+                        status: support.status,
+                        decision,
+                        detail: format!(
+                            "claim {} is {:?} for scenario {} (supports={}, refutes={}, stale={}, supersedes={})",
+                            support.claim_id,
+                            support.status,
+                            scenario.id,
+                            support.supports,
+                            support.refutes,
+                            support.stale,
+                            support.supersedes
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    findings
+}
+
 /// Archive a change by moving it to openspec/archive/.
 pub fn archive_change(repo_path: &Path, change_name: &str) -> anyhow::Result<()> {
     let change_dir = repo_path.join("openspec/changes").join(change_name);
@@ -736,6 +1010,40 @@ pub fn archive_change(repo_path: &Path, change_name: &str) -> anyhow::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_spec_content_accepts_explicit_scenario_id() {
+        let content = r#"# auth
+
+### Requirement: Token Validation
+
+#### Scenario: Expired token rejected
+<!-- id: auth/token-expired -->
+Given expired token
+When request happens
+Then response is 401
+"#;
+        let reqs = parse_spec_content_with_domain("auth/api", content);
+        assert_eq!(reqs[0].scenarios[0].id, "auth/token-expired");
+    }
+
+    #[test]
+    fn parse_spec_content_with_domain_sets_stable_scenario_id() {
+        let content = r#"# auth
+
+### Requirement: Token Validation
+
+#### Scenario: Expired token rejected
+Given expired token
+When request happens
+Then response is 401
+"#;
+        let reqs = parse_spec_content_with_domain("auth/api", content);
+        assert_eq!(
+            reqs[0].scenarios[0].id,
+            "auth-api/token-validation/expired-token-rejected"
+        );
+    }
 
     #[test]
     fn parse_spec_content_basic() {
@@ -941,11 +1249,15 @@ Then sharedState.cleave.children[i].status becomes running
                     title: "Auth".into(),
                     description: String::new(),
                     scenarios: vec![Scenario {
+                        id: "auth/auth/login".into(),
                         title: "Login".into(),
                         given: "user".into(),
                         when: "login".into(),
                         then: "success".into(),
                         and_clauses: vec![],
+                        tdd_evidence: None,
+                        evidence_claims: Vec::new(),
+                        evidence_support: Vec::new(),
                     }],
                 }],
             }],
@@ -1106,6 +1418,157 @@ mod mutation_tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].name, "listed");
         assert_eq!(changes[0].stage, ChangeStage::Proposed);
+    }
+
+    #[test]
+    fn evidence_gate_reports_refuted_claims_without_archiving_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        let evidence_dir = repo.join(".omegon/evidence");
+        fs::create_dir_all(&evidence_dir).unwrap();
+        fs::write(
+            evidence_dir.join("claims.jsonl"),
+            serde_json::json!({
+                "schema": "claim-record/v1",
+                "id": "claim:docs-ready",
+                "kind": "documentation-quality",
+                "text": "Docs are ready",
+                "status": "asserted",
+                "scope": [],
+                "created_at_ms": 1,
+                "metadata": {}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        fs::write(
+            evidence_dir.join("records.jsonl"),
+            serde_json::json!({
+                "schema": "evidence-record/v1",
+                "id": "evidence:docs-not-ready",
+                "provider": "code-evidence",
+                "kind": "rust-doc-coverage",
+                "status": "docs-warnings",
+                "subjects": [],
+                "claims": ["claim:docs-ready"],
+                "artifacts": [],
+                "source_state": {},
+                "created_at_ms": 1,
+                "metadata": {}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        fs::write(
+            evidence_dir.join("edges.jsonl"),
+            serde_json::json!({
+                "schema": "evidence-edge/v1",
+                "from": "evidence:docs-not-ready",
+                "to": "claim:docs-ready",
+                "kind": "refutes",
+                "created_at_ms": 1
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+
+        propose_change(repo, "evidence-demo", "Evidence Demo", "intent").unwrap();
+        add_spec(
+            repo,
+            "evidence-demo",
+            "docs",
+            "# docs\n\n### Requirement: Docs are ready\n\nevidence-claim: claim:docs-ready\n\n#### Scenario: Documentation claim is supported\n\nGiven docs exist\nWhen evidence is evaluated\nThen the claim is supported\n",
+        )
+        .unwrap();
+
+        let change = list_changes(repo).remove(0);
+        let findings = evaluate_evidence_gates(&change);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].decision, EvidenceGateDecision::Block);
+        assert_eq!(
+            findings[0].status,
+            crate::evidence::ClaimSupportStatus::Refuted
+        );
+        archive_change(repo, "evidence-demo").unwrap();
+        assert!(repo.join("openspec/archive/evidence-demo").exists());
+    }
+
+    fn list_changes_annotates_evidence_claim_support() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        let evidence_dir = repo.join(".omegon/evidence");
+        fs::create_dir_all(&evidence_dir).unwrap();
+        fs::write(
+            evidence_dir.join("claims.jsonl"),
+            serde_json::json!({
+                "schema": "claim-record/v1",
+                "id": "claim:docs-ready",
+                "kind": "documentation-quality",
+                "text": "Docs are ready.",
+                "status": "asserted",
+                "scope": [],
+                "created_at_ms": 1,
+                "metadata": {}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        fs::write(
+            evidence_dir.join("records.jsonl"),
+            serde_json::json!({
+                "schema": "evidence-record/v1",
+                "id": "evidence:docs-ready",
+                "provider": "test",
+                "kind": "manual-review",
+                "status": "pass",
+                "subjects": ["claim:docs-ready"],
+                "claims": ["claim:docs-ready"],
+                "artifacts": [],
+                "source_state": {},
+                "created_at_ms": 1,
+                "metadata": {}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        fs::write(
+            evidence_dir.join("edges.jsonl"),
+            serde_json::json!({
+                "schema": "evidence-edge/v1",
+                "from": "evidence:docs-ready",
+                "to": "claim:docs-ready",
+                "kind": "supports",
+                "created_at_ms": 1
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+
+        propose_change(repo, "evidence-demo", "Evidence Demo", "intent").unwrap();
+        add_spec(
+            repo,
+            "evidence-demo",
+            "docs",
+            "# docs\n\n### Requirement: Docs are ready\n\nevidence-claim: claim:docs-ready\n\n#### Scenario: Documentation claim is supported\n\nGiven docs exist\nWhen evidence is evaluated\nThen the claim is supported\n",
+        )
+        .unwrap();
+
+        let changes = list_changes(repo);
+        let scenario = &changes[0].specs[0].requirements[0].scenarios[0];
+        assert_eq!(scenario.evidence_claims, vec!["claim:docs-ready"]);
+        assert_eq!(scenario.evidence_support.len(), 1);
+        assert_eq!(
+            scenario.evidence_support[0].status,
+            crate::evidence::ClaimSupportStatus::Supported
+        );
+        assert_eq!(scenario.evidence_support[0].supports, 1);
+        assert_eq!(scenario.evidence_support[0].refutes, 0);
     }
 
     #[test]

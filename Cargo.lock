@@ -4359,9 +4359,9 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lzma-rust2"
-version = "0.15.8"
+version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e20f57f9918e5bd7bc58c22cdd70a6afc7375d4dd9683af5f2b34bd3d2bba619"
+checksum = "1670343e58806300d87950e3401e820b519b9384281bbabfb15e3636689ffd69"
 
 [[package]]
 name = "mac"
@@ -4956,7 +4956,7 @@ dependencies = [
 
 [[package]]
 name = "omegon"
-version = "0.25.7"
+version = "0.26.0"
 dependencies = [
  "agent-client-protocol",
  "ansi-to-tui",
@@ -5048,7 +5048,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-codescan"
-version = "0.25.7"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "git2",
@@ -5089,7 +5089,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-git"
-version = "0.25.7"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -5102,7 +5102,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-memory"
-version = "0.25.7"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5121,7 +5121,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-opsx"
-version = "0.25.7"
+version = "0.26.0"
 dependencies = [
  "libc",
  "serde",
@@ -5133,7 +5133,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-secrets"
-version = "0.25.7"
+version = "0.26.0"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -5163,7 +5163,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-traits"
-version = "0.25.7"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5176,7 +5176,7 @@ dependencies = [
 
 [[package]]
 name = "omegon-web"
-version = "0.25.7"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
