@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Fixed
+
+- Strip TOML frontmatter from design lifecycle documents and generated site legal/changelog pages so publication metadata does not leak into rendered content or duplicate design-node titles.
+
 ## [0.26.6] - 2026-06-05
 
 ### Fixed

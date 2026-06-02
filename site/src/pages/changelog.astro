@@ -1,17 +1,12 @@
 ---
 import Docs from "../layouts/Docs.astro";
+import { stripFrontmatter } from "../lib/markdown";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const changelogPath = resolve(here, "../../../CHANGELOG.md");
-
-function stripFrontmatter(markdown: string): string {
-  const text = markdown.replace(/^\uFEFF/, "");
-  const match = text.match(/^(---|\+\+\+)\r?\n[\s\S]*?\r?\n\1\r?\n?/);
-  return match ? text.slice(match[0].length) : text;
-}
 
 let raw = "";
 try {

@@ -16,9 +16,9 @@ test('install docs use canonical snippets for all channels', () => {
   const content = readDoc('install.astro');
 
   // Uses snippet system, not hardcoded commands
-  assert.match(content, /snippet\("install\.install_rc"\)/);
-  assert.match(content, /snippet\("install\.install_nightly"\)/);
   assert.match(content, /snippet\("install\.quick_install"\)/);
+  assert.match(content, /snippet\("install\.install_nightly"\)/);
+  assert.match(content, /snippet\("install\.install_version"\)/);
   assert.doesNotMatch(content, /omegon\.styrene\.dev/);
   // Auth commands use correct form
   assert.match(content, /snippet\("auth\.login_anthropic"\)/);
@@ -66,12 +66,18 @@ test('site builds successfully', () => {
   });
 
   const changelogHtml = readFileSync(resolve(here, '../dist/changelog/index.html'), 'utf8');
+  const privacyHtml = readFileSync(resolve(here, '../dist/privacy/index.html'), 'utf8');
+  const termsHtml = readFileSync(resolve(here, '../dist/terms/index.html'), 'utf8');
   const rootChangelog = readFileSync(resolve(here, '../../CHANGELOG.md'), 'utf8');
 
   assert.match(rootChangelog, /^\+\+\+/);
-  assert.doesNotMatch(changelogHtml, /imported_reference/);
-  assert.doesNotMatch(changelogHtml, /\[publication\]/);
-  assert.match(changelogHtml, /Strict clippy hygiene/);
+  for (const rendered of [changelogHtml, privacyHtml, termsHtml]) {
+    assert.doesNotMatch(rendered, /imported_reference/);
+    assert.doesNotMatch(rendered, /\[publication\]/);
+    assert.doesNotMatch(rendered, /^\+\+\+/m);
+    assert.doesNotMatch(rendered, /^---$/m);
+  }
+  assert.match(changelogHtml, /local sandbox evidence-substrate smoke suite/);
   for (const version of [
     '0.19.6',
     '0.19.5',
