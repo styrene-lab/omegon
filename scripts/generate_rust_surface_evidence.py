@@ -542,7 +542,9 @@ def main() -> int:
         doc = json.loads(doc_json.read_text())
 
     surfaces = generate_surfaces(doc, root, args.crate_name, prefixes) if status != "surface-fail" else []
-    evidence_dir = root / args.output_dir
+    output_dir = pathlib.Path(args.output_dir)
+    evidence_dir = output_dir if output_dir.is_absolute() else root / output_dir
+    evidence_dir = evidence_dir.resolve()
     evidence_dir.mkdir(parents=True, exist_ok=True)
     for name in STREAMS.values():
         (evidence_dir / name).touch()

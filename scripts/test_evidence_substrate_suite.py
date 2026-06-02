@@ -95,7 +95,27 @@ def test_baseline_rules(binary: pathlib.Path, sandbox: pathlib.Path) -> None:
 
 def test_query_helper(root: pathlib.Path, sandbox: pathlib.Path) -> None:
     print_step("evidence query helper")
-    db = sandbox / ".omegon" / "evidence" / "indexes" / "evidence.sqlite"
+    evidence_dir = sandbox / ".omegon" / "evidence"
+    db = evidence_dir / "indexes" / "evidence.sqlite"
+    if not db.is_file():
+        proc = run(
+            [
+                sys.executable,
+                str(root / "scripts" / "generate_rust_surface_evidence.py"),
+                "--project-root",
+                str(sandbox),
+                "--output-dir",
+                str(evidence_dir),
+                "--no-run-rustdoc",
+            ],
+            cwd=root,
+        )
+        if proc.returncode != 0 and not db.is_file():
+            raise AssertionError(
+                f"failed to rebuild derived evidence index:\n{proc.stdout}\n{proc.stderr}"
+            )
+        if proc.stdout.strip():
+            print(f"ok: rebuilt derived evidence index -> {load_json(proc.stdout)['sqlite_index']}")
     query = root / "scripts" / "query_evidence.py"
     for args in [
         ["claims"],
