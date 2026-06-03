@@ -19,6 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 
 - Enforce extension SDK contract compatibility during extension startup, accepting the current `0.25` contract, warning for legacy/missing or `0.24` compatibility-window metadata, rejecting malformed/unsupported/newer contracts, and surfacing SDK compatibility diagnostics through extension metadata.
+- Add `resource.open@1` HostAction support to the extension host pipeline, including SDK-backed manifest policy consumption, secure `${workspace}` file-root enforcement, backend registry scaffolding, deterministic unavailable-backend fallback, and fake-backend routing coverage for Flynt, Zed, terminal, and fallback resource classes.
 
 ## [0.26.0] - 2026-06-01
 

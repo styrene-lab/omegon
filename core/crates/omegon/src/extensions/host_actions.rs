@@ -6,6 +6,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 const PACKAGE_INSTALL_V1: &str = "package.install@1";
+const RESOURCE_OPEN_V1: &str = omegon_extension::actions::resource::RESOURCE_OPEN_V1;
 
 /// Host-attached origin for an untrusted HostAction candidate.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +72,8 @@ pub(super) struct HostActionExecutorRegistry {
     supported_types: Vec<String>,
     terminal_create_registry: Option<TerminalBackendRegistry>,
     package_install_policy: Option<PackageInstallPolicy>,
+    resource_open_registry: Option<ResourceBackendRegistry>,
+    workspace_cwd: std::path::PathBuf,
 }
 
 impl HostActionExecutorRegistry {
@@ -79,11 +82,14 @@ impl HostActionExecutorRegistry {
             supported_types: types.into_iter().map(Into::into).collect(),
             terminal_create_registry: None,
             package_install_policy: None,
+            resource_open_registry: None,
+            workspace_cwd: std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from(".")),
         }
     }
 
     pub fn default_supported() -> Self {
-        Self::with_supported_types(["terminal.create@1", PACKAGE_INSTALL_V1])
+        Self::with_supported_types(["terminal.create@1", PACKAGE_INSTALL_V1, RESOURCE_OPEN_V1])
     }
 
     pub(super) fn with_terminal_backend(
@@ -95,19 +101,25 @@ impl HostActionExecutorRegistry {
             ],
             terminal_create_registry: Some(TerminalBackendRegistry::new(vec![backend])),
             package_install_policy: None,
+            resource_open_registry: None,
+            workspace_cwd: std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from(".")),
         }
     }
 
     pub fn with_real_terminal_backend(workspace_cwd: impl Into<std::path::PathBuf>) -> Self {
-        Self::with_terminal_registry(TerminalBackendRegistry::new(vec![Box::new(
-            RealTerminalCreateBackend {
-                workspace_cwd: workspace_cwd.into(),
-            },
-        )]))
+        let workspace_cwd = workspace_cwd.into();
+        Self::with_terminal_registry(
+            TerminalBackendRegistry::new(vec![Box::new(RealTerminalCreateBackend {
+                workspace_cwd: workspace_cwd.clone(),
+            })]),
+            workspace_cwd,
+        )
     }
 
     pub(super) fn with_terminal_registry(
         terminal_create_registry: TerminalBackendRegistry,
+        workspace_cwd: impl Into<std::path::PathBuf>,
     ) -> Self {
         Self {
             supported_types: vec![
@@ -116,6 +128,12 @@ impl HostActionExecutorRegistry {
             ],
             terminal_create_registry: Some(terminal_create_registry),
             package_install_policy: Some(PackageInstallPolicy::default_enabled()),
+            resource_open_registry: Some(ResourceBackendRegistry::new(vec![Box::new(
+                UnavailableResourceOpenBackend {
+                    reason: "no resource.open@1 backend is configured".to_string(),
+                },
+            )])),
+            workspace_cwd: workspace_cwd.into(),
         }
     }
 
@@ -383,6 +401,24 @@ pub(super) fn process_host_action_candidate(
     {
         let outcome =
             execute_package_install(&action, policy, executors.terminal_create_registry.as_ref());
+        audit_host_action_outcome(
+            &scoped_id,
+            Some(&action.action_type),
+            &outcome.action_id,
+            &outcome.status,
+            outcome
+                .error
+                .as_ref()
+                .map(|error| error.code.as_str())
+                .unwrap_or("completed"),
+        );
+        return outcome;
+    }
+
+    if action.action_type == RESOURCE_OPEN_V1
+        && let Some(registry) = executors.resource_open_registry.as_ref()
+    {
+        let outcome = execute_resource_open(&action, manifest, &executors.workspace_cwd, registry);
         audit_host_action_outcome(
             &scoped_id,
             Some(&action.action_type),
@@ -791,6 +827,332 @@ impl TerminalCreateBackend for RealTerminalCreateBackend {
             warnings,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ResourceBackendKind {
+    Flynt,
+    Zed,
+    Terminal,
+    Fallback,
+}
+
+fn resource_backend_kind_name(kind: ResourceBackendKind) -> &'static str {
+    match kind {
+        ResourceBackendKind::Flynt => "flynt",
+        ResourceBackendKind::Zed => "zed",
+        ResourceBackendKind::Terminal => "terminal",
+        ResourceBackendKind::Fallback => "fallback",
+    }
+}
+
+fn preferred_resource_backend_kind(
+    params: &omegon_extension::actions::resource::ResourceOpenParams,
+) -> ResourceBackendKind {
+    use omegon_extension::actions::resource::ResourceKind;
+    match params.kind {
+        Some(ResourceKind::Markdown | ResourceKind::Diagram | ResourceKind::Image) => {
+            ResourceBackendKind::Flynt
+        }
+        Some(ResourceKind::Code | ResourceKind::Text | ResourceKind::Directory) => {
+            ResourceBackendKind::Zed
+        }
+        Some(ResourceKind::Ebook | ResourceKind::Pdf) => ResourceBackendKind::Terminal,
+        Some(ResourceKind::Unknown) | None => ResourceBackendKind::Fallback,
+    }
+}
+
+pub(super) trait ResourceOpenBackend {
+    fn name(&self) -> &'static str;
+
+    fn kind(&self) -> ResourceBackendKind;
+
+    fn supports(&self, params: &omegon_extension::actions::resource::ResourceOpenParams) -> bool;
+
+    fn open(
+        &self,
+        params: omegon_extension::actions::resource::ResourceOpenParams,
+    ) -> Result<omegon_extension::actions::resource::ResourceOpenResult, String>;
+}
+
+pub(super) struct ResourceBackendRegistry {
+    backends: Vec<Box<dyn ResourceOpenBackend + Send + Sync>>,
+}
+
+impl ResourceBackendRegistry {
+    pub(super) fn new(backends: Vec<Box<dyn ResourceOpenBackend + Send + Sync>>) -> Self {
+        Self { backends }
+    }
+
+    fn select(
+        &self,
+        params: &omegon_extension::actions::resource::ResourceOpenParams,
+    ) -> Option<&(dyn ResourceOpenBackend + Send + Sync)> {
+        let preferred = preferred_resource_backend_kind(params);
+        self.backends
+            .iter()
+            .find(|backend| backend.kind() == preferred && backend.supports(params))
+            .or_else(|| {
+                self.backends.iter().find(|backend| {
+                    backend.kind() == ResourceBackendKind::Fallback && backend.supports(params)
+                })
+            })
+            .or_else(|| {
+                self.backends
+                    .iter()
+                    .find(|backend| backend.supports(params))
+            })
+            .map(|backend| backend.as_ref())
+    }
+}
+
+pub(super) struct UnavailableResourceOpenBackend {
+    pub reason: String,
+}
+
+impl ResourceOpenBackend for UnavailableResourceOpenBackend {
+    fn name(&self) -> &'static str {
+        "unavailable"
+    }
+
+    fn kind(&self) -> ResourceBackendKind {
+        ResourceBackendKind::Fallback
+    }
+
+    fn supports(&self, _params: &omegon_extension::actions::resource::ResourceOpenParams) -> bool {
+        true
+    }
+
+    fn open(
+        &self,
+        _params: omegon_extension::actions::resource::ResourceOpenParams,
+    ) -> Result<omegon_extension::actions::resource::ResourceOpenResult, String> {
+        Err(self.reason.clone())
+    }
+}
+
+#[cfg(test)]
+pub(super) struct FakeResourceOpenBackend {
+    pub kind: ResourceBackendKind,
+    pub result: omegon_extension::actions::resource::ResourceOpenResult,
+}
+
+#[cfg(test)]
+impl ResourceOpenBackend for FakeResourceOpenBackend {
+    fn name(&self) -> &'static str {
+        "fake"
+    }
+
+    fn kind(&self) -> ResourceBackendKind {
+        self.kind
+    }
+
+    fn supports(&self, _params: &omegon_extension::actions::resource::ResourceOpenParams) -> bool {
+        true
+    }
+
+    fn open(
+        &self,
+        _params: omegon_extension::actions::resource::ResourceOpenParams,
+    ) -> Result<omegon_extension::actions::resource::ResourceOpenResult, String> {
+        Ok(self.result.clone())
+    }
+}
+
+fn execute_resource_open(
+    action: &HostAction,
+    manifest: &ExtensionManifest,
+    workspace_cwd: &std::path::Path,
+    registry: &ResourceBackendRegistry,
+) -> HostActionOutcome {
+    use omegon_extension::actions::resource::ResourceOpenParams;
+
+    let params: ResourceOpenParams = match serde_json::from_value(action.params.clone()) {
+        Ok(params) => params,
+        Err(err) => {
+            return outcome(
+                action.id.clone(),
+                HostActionStatus::Invalid,
+                "invalid_resource_open_params",
+                format!("invalid resource.open@1 params: {err}"),
+            );
+        }
+    };
+
+    let policy = &manifest.permissions.host_actions.resource_open;
+    if !policy.allow {
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Denied,
+            "resource_open_denied",
+            "manifest resource_open policy does not allow resource.open@1",
+        );
+    }
+
+    let scheme = params
+        .uri
+        .split_once(':')
+        .map(|(scheme, _)| scheme)
+        .unwrap_or("");
+    if scheme.is_empty() {
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Invalid,
+            "invalid_resource_uri",
+            "resource.open@1 uri must include a scheme",
+        );
+    }
+    if !policy.allowed_schemes.is_empty()
+        && !policy
+            .allowed_schemes
+            .iter()
+            .any(|allowed| allowed == scheme)
+    {
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Denied,
+            "scheme_denied",
+            format!("manifest does not allow resource.open@1 scheme '{scheme}'"),
+        );
+    }
+
+    if let Some(intent) = params.intent.as_ref() {
+        let intent = serde_json::to_value(intent)
+            .ok()
+            .and_then(|value| value.as_str().map(ToString::to_string))
+            .unwrap_or_default();
+        if !policy.allowed_intents.is_empty()
+            && !policy
+                .allowed_intents
+                .iter()
+                .any(|allowed| allowed == &intent)
+        {
+            return outcome(
+                action.id.clone(),
+                HostActionStatus::Denied,
+                "intent_denied",
+                format!("manifest does not allow resource.open@1 intent '{intent}'"),
+            );
+        }
+    }
+
+    if let Some(kind) = params.kind.as_ref() {
+        let kind = serde_json::to_value(kind)
+            .ok()
+            .and_then(|value| value.as_str().map(ToString::to_string))
+            .unwrap_or_default();
+        if !policy.allowed_kinds.is_empty()
+            && !policy.allowed_kinds.iter().any(|allowed| allowed == &kind)
+        {
+            return outcome(
+                action.id.clone(),
+                HostActionStatus::Denied,
+                "kind_denied",
+                format!("manifest does not allow resource.open@1 kind '{kind}'"),
+            );
+        }
+    }
+
+    if scheme == "file" && !policy.allowed_roots.is_empty() {
+        let Some(path) = file_uri_path(&params.uri) else {
+            return outcome(
+                action.id.clone(),
+                HostActionStatus::Invalid,
+                "invalid_file_uri",
+                "resource.open@1 file uri must start with file://",
+            );
+        };
+        let path = std::path::PathBuf::from(path);
+        if !path_allowed_by_roots(&path, &policy.allowed_roots, workspace_cwd) {
+            return outcome(
+                action.id.clone(),
+                HostActionStatus::Denied,
+                "file_root_denied",
+                format!(
+                    "manifest does not allow resource.open@1 file path '{}'",
+                    path.display()
+                ),
+            );
+        }
+    }
+
+    let Some(backend) = registry.select(&params) else {
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Unsupported,
+            "resource_backend_unavailable",
+            "resource.open@1 validated successfully, but no resource backend is configured",
+        );
+    };
+    match backend.open(params) {
+        Ok(result) => HostActionOutcome {
+            action_id: action.id.clone(),
+            status: HostActionStatus::Completed,
+            result: Some(serde_json::to_value(result).unwrap_or_else(|_| serde_json::json!({}))),
+            error: None,
+        },
+        Err(message) => outcome(
+            action.id.clone(),
+            HostActionStatus::Unsupported,
+            "resource_backend_unavailable",
+            message,
+        ),
+    }
+}
+
+fn file_uri_path(uri: &str) -> Option<String> {
+    uri.strip_prefix("file://").map(|path| path.to_string())
+}
+
+fn path_allowed_by_roots(
+    path: &std::path::Path,
+    roots: &[String],
+    workspace_cwd: &std::path::Path,
+) -> bool {
+    let Some(candidate) = normalize_absolute_path(path) else {
+        return false;
+    };
+    roots.iter().any(|root| {
+        let root_path = if root == "${workspace}" {
+            workspace_cwd.to_path_buf()
+        } else {
+            let declared = std::path::PathBuf::from(root);
+            if declared.is_absolute() {
+                declared
+            } else {
+                workspace_cwd.join(declared)
+            }
+        };
+        normalize_absolute_path(&root_path)
+            .map(|allowed| candidate == allowed || candidate.starts_with(&allowed))
+            .unwrap_or(false)
+    })
+}
+
+fn normalize_absolute_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        return None;
+    };
+    if let Ok(canonical) = absolute.canonicalize() {
+        return Some(canonical);
+    }
+    let mut normalized = std::path::PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            std::path::Component::RootDir => normalized.push(std::path::MAIN_SEPARATOR.to_string()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !normalized.pop() {
+                    return None;
+                }
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+        }
+    }
+    Some(normalized)
 }
 
 #[derive(Debug, Clone)]
@@ -1290,6 +1652,71 @@ allowed = [{allowed}]
         .unwrap()
     }
 
+    fn resource_manifest(
+        roots: &[&str],
+        schemes: &[&str],
+        intents: &[&str],
+        kinds: &[&str],
+    ) -> ExtensionManifest {
+        let roots = roots
+            .iter()
+            .map(|value| format!("\"{value}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let schemes = schemes
+            .iter()
+            .map(|value| format!("\"{value}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let intents = intents
+            .iter()
+            .map(|value| format!("\"{value}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let kinds = kinds
+            .iter()
+            .map(|value| format!("\"{value}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        toml::from_str(&format!(
+            r#"
+[extension]
+name = "reader"
+version = "0.1.0"
+
+[runtime]
+type = "native"
+binary = "target/release/reader"
+
+[permissions.host_actions]
+allowed = ["resource.open@1"]
+
+[permissions.host_actions.resource_open]
+allow = true
+allowed_schemes = [{schemes}]
+allowed_roots = [{roots}]
+allowed_intents = [{intents}]
+allowed_kinds = [{kinds}]
+"#
+        ))
+        .unwrap()
+    }
+
+    fn unavailable_resource_registry() -> ResourceBackendRegistry {
+        ResourceBackendRegistry::new(vec![Box::new(UnavailableResourceOpenBackend {
+            reason: "no resource.open@1 backend is configured".to_string(),
+        })])
+    }
+
+    fn resource_action(uri: String, intent: &str, kind: &str) -> HostAction {
+        HostAction::new(
+            "open-resource",
+            RESOURCE_OPEN_V1,
+            json!({"uri": uri, "intent": intent, "kind": kind}),
+        )
+        .unwrap()
+    }
+
     fn scoped() -> ScopedHostActionId {
         ScopedHostActionId {
             origin: HostActionOrigin::native_extension("reader"),
@@ -1336,6 +1763,9 @@ allowed = [{allowed}]
                 },
             )])),
             package_install_policy: Some(PackageInstallPolicy::default_enabled()),
+            resource_open_registry: None,
+            workspace_cwd: std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from(".")),
         }
     }
 
@@ -1576,6 +2006,238 @@ allowed = [{allowed}]
 
         assert_eq!(outcomes[0]["status"], "denied");
         assert_eq!(outcomes[0]["error"]["code"], "manifest_denied");
+    }
+
+    #[test]
+    fn resource_open_allows_workspace_file_after_real_root_check() {
+        let workspace = tempfile::tempdir().unwrap();
+        let doc = workspace.path().join("docs/readme.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# readme").unwrap();
+        let manifest = resource_manifest(&["${workspace}"], &["file"], &["view"], &["markdown"]);
+        let action = resource_action(format!("file://{}", doc.display()), "view", "markdown");
+
+        let outcome = execute_resource_open(
+            &action,
+            &manifest,
+            workspace.path(),
+            &unavailable_resource_registry(),
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Unsupported);
+        assert_eq!(outcome.error.unwrap().code, "resource_backend_unavailable");
+    }
+
+    #[test]
+    fn resource_open_denies_file_outside_workspace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let manifest = resource_manifest(&["${workspace}"], &["file"], &["view"], &["markdown"]);
+        let action = resource_action("file:///etc/passwd".to_string(), "view", "markdown");
+
+        let outcome = execute_resource_open(
+            &action,
+            &manifest,
+            workspace.path(),
+            &unavailable_resource_registry(),
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "file_root_denied");
+    }
+
+    #[test]
+    fn resource_open_denies_parent_escape_from_workspace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let manifest = resource_manifest(&["${workspace}"], &["file"], &["view"], &["markdown"]);
+        let action = resource_action(
+            format!(
+                "file://{}",
+                workspace.path().join("../outside-secret.txt").display()
+            ),
+            "view",
+            "markdown",
+        );
+
+        let outcome = execute_resource_open(
+            &action,
+            &manifest,
+            workspace.path(),
+            &unavailable_resource_registry(),
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Denied);
+        assert_eq!(outcome.error.unwrap().code, "file_root_denied");
+    }
+
+    #[test]
+    fn resource_open_denies_disallowed_scheme_intent_and_kind() {
+        let workspace = tempfile::tempdir().unwrap();
+        let manifest = resource_manifest(&["${workspace}"], &["file"], &["view"], &["markdown"]);
+
+        let scheme = execute_resource_open(
+            &resource_action("https://example.com/doc.md".to_string(), "view", "markdown"),
+            &manifest,
+            workspace.path(),
+            &unavailable_resource_registry(),
+        );
+        assert_eq!(scheme.status, HostActionStatus::Denied);
+        assert_eq!(scheme.error.unwrap().code, "scheme_denied");
+
+        let intent = execute_resource_open(
+            &resource_action(
+                format!("file://{}", workspace.path().join("doc.md").display()),
+                "edit",
+                "markdown",
+            ),
+            &manifest,
+            workspace.path(),
+            &unavailable_resource_registry(),
+        );
+        assert_eq!(intent.status, HostActionStatus::Denied);
+        assert_eq!(intent.error.unwrap().code, "intent_denied");
+
+        let kind = execute_resource_open(
+            &resource_action(
+                format!("file://{}", workspace.path().join("doc.rs").display()),
+                "view",
+                "code",
+            ),
+            &manifest,
+            workspace.path(),
+            &unavailable_resource_registry(),
+        );
+        assert_eq!(kind.status, HostActionStatus::Denied);
+        assert_eq!(kind.error.unwrap().code, "kind_denied");
+    }
+
+    #[test]
+    fn resource_open_rejects_uri_without_scheme() {
+        let workspace = tempfile::tempdir().unwrap();
+        let manifest = resource_manifest(&["${workspace}"], &["file"], &["view"], &["markdown"]);
+        let action = resource_action("docs/readme.md".to_string(), "view", "markdown");
+
+        let outcome = execute_resource_open(
+            &action,
+            &manifest,
+            workspace.path(),
+            &unavailable_resource_registry(),
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Invalid);
+        assert_eq!(outcome.error.unwrap().code, "invalid_resource_uri");
+    }
+
+    #[test]
+    fn resource_open_valid_policy_executes_fake_backend() {
+        let workspace = tempfile::tempdir().unwrap();
+        let doc = workspace.path().join("docs/readme.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# readme").unwrap();
+        let manifest = resource_manifest(&["${workspace}"], &["file"], &["view"], &["markdown"]);
+        let action = resource_action(format!("file://{}", doc.display()), "view", "markdown");
+        let registry = ResourceBackendRegistry::new(vec![Box::new(FakeResourceOpenBackend {
+            kind: ResourceBackendKind::Flynt,
+            result: omegon_extension::actions::resource::ResourceOpenResult {
+                resource_id: "res_123".to_string(),
+                backend: "flynt".to_string(),
+                actual_placement: "main_tab".to_string(),
+                handle: Some(serde_json::json!({"tab_id": "tab-1"})),
+                warnings: vec![],
+            },
+        })]);
+
+        let outcome = execute_resource_open(&action, &manifest, workspace.path(), &registry);
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        let result = outcome.result.as_ref().unwrap();
+        assert_eq!(result["resource_id"], "res_123");
+        assert_eq!(result["backend"], "flynt");
+        assert_eq!(result["actual_placement"], "main_tab");
+        assert_eq!(result["handle"]["tab_id"], "tab-1");
+    }
+
+    fn resource_registry_for_routes() -> ResourceBackendRegistry {
+        ResourceBackendRegistry::new(vec![
+            Box::new(FakeResourceOpenBackend {
+                kind: ResourceBackendKind::Zed,
+                result: omegon_extension::actions::resource::ResourceOpenResult {
+                    resource_id: "zed_res".to_string(),
+                    backend: "zed".to_string(),
+                    actual_placement: "editor".to_string(),
+                    handle: None,
+                    warnings: vec![],
+                },
+            }),
+            Box::new(FakeResourceOpenBackend {
+                kind: ResourceBackendKind::Flynt,
+                result: omegon_extension::actions::resource::ResourceOpenResult {
+                    resource_id: "flynt_res".to_string(),
+                    backend: "flynt".to_string(),
+                    actual_placement: "main_tab".to_string(),
+                    handle: None,
+                    warnings: vec![],
+                },
+            }),
+            Box::new(FakeResourceOpenBackend {
+                kind: ResourceBackendKind::Terminal,
+                result: omegon_extension::actions::resource::ResourceOpenResult {
+                    resource_id: "terminal_res".to_string(),
+                    backend: "terminal".to_string(),
+                    actual_placement: "background_session".to_string(),
+                    handle: None,
+                    warnings: vec!["opened through terminal backend".to_string()],
+                },
+            }),
+            Box::new(FakeResourceOpenBackend {
+                kind: ResourceBackendKind::Fallback,
+                result: omegon_extension::actions::resource::ResourceOpenResult {
+                    resource_id: "fallback_res".to_string(),
+                    backend: "fallback".to_string(),
+                    actual_placement: "default".to_string(),
+                    handle: None,
+                    warnings: vec!["preferred backend unavailable; used fallback".to_string()],
+                },
+            }),
+        ])
+    }
+
+    fn assert_resource_route(kind: &str, expected_backend: &str) {
+        let workspace = tempfile::tempdir().unwrap();
+        let file = workspace.path().join(format!("resource-{kind}"));
+        std::fs::write(&file, "content").unwrap();
+        let manifest = resource_manifest(
+            &["${workspace}"],
+            &["file"],
+            &["view"],
+            &["markdown", "code", "ebook", "unknown"],
+        );
+        let action = resource_action(format!("file://{}", file.display()), "view", kind);
+        let registry = resource_registry_for_routes();
+
+        let outcome = execute_resource_open(&action, &manifest, workspace.path(), &registry);
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        assert_eq!(outcome.result.unwrap()["backend"], expected_backend);
+    }
+
+    #[test]
+    fn resource_open_routes_markdown_to_flynt_backend() {
+        assert_resource_route("markdown", "flynt");
+    }
+
+    #[test]
+    fn resource_open_routes_code_to_zed_backend() {
+        assert_resource_route("code", "zed");
+    }
+
+    #[test]
+    fn resource_open_routes_ebook_to_terminal_backend() {
+        assert_resource_route("ebook", "terminal");
+    }
+
+    #[test]
+    fn resource_open_routes_unknown_to_fallback_backend() {
+        assert_resource_route("unknown", "fallback");
     }
 
     #[test]
