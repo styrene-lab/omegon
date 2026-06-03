@@ -27,6 +27,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Report selected/preferred `resource.open@1` backend diagnostics when a backend is unavailable or fails after policy validation.
 - Route ebook/pdf `resource.open@1` requests through the terminal/Bookokrat backend when the real terminal executor is configured, with Flynt/Zed retaining explicit unavailable diagnostics.
 - Parse `resource.open@1` `file://` URIs with `url::Url` before workspace-root checks, including encoded path handling and non-local host rejection.
+- Scope #125 to terminal/Bookokrat real backend completion and split real Flynt/Zed backends into follow-up design nodes.
 
 ## [0.26.0] - 2026-06-01
 
