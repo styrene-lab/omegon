@@ -109,12 +109,38 @@ impl HostActionExecutorRegistry {
 
     pub fn with_real_terminal_backend(workspace_cwd: impl Into<std::path::PathBuf>) -> Self {
         let workspace_cwd = workspace_cwd.into();
-        Self::with_terminal_registry(
-            TerminalBackendRegistry::new(vec![Box::new(RealTerminalCreateBackend {
-                workspace_cwd: workspace_cwd.clone(),
-            })]),
+        Self {
+            supported_types: vec![
+                omegon_extension::actions::terminal::TERMINAL_CREATE_V1.to_string(),
+                PACKAGE_INSTALL_V1.to_string(),
+                RESOURCE_OPEN_V1.to_string(),
+            ],
+            terminal_create_registry: Some(TerminalBackendRegistry::new(vec![Box::new(
+                RealTerminalCreateBackend {
+                    workspace_cwd: workspace_cwd.clone(),
+                },
+            )])),
+            package_install_policy: Some(PackageInstallPolicy::default_enabled()),
+            resource_open_registry: Some(ResourceBackendRegistry::new(vec![
+                Box::new(TerminalReaderResourceOpenBackend {
+                    terminal_backend: Box::new(RealTerminalCreateBackend {
+                        workspace_cwd: workspace_cwd.clone(),
+                    }),
+                }),
+                Box::new(DiagnosticUnavailableResourceOpenBackend {
+                    kind: ResourceBackendKind::Flynt,
+                    reason: "Flynt resource-open surface is not attached".to_string(),
+                }),
+                Box::new(DiagnosticUnavailableResourceOpenBackend {
+                    kind: ResourceBackendKind::Zed,
+                    reason: "Zed resource-open surface is not attached".to_string(),
+                }),
+                Box::new(UnavailableResourceOpenBackend {
+                    reason: "no fallback resource.open@1 backend is configured".to_string(),
+                }),
+            ])),
             workspace_cwd,
-        )
+        }
     }
 
     pub(super) fn with_terminal_registry(
@@ -975,6 +1001,74 @@ impl ResourceOpenBackend for DiagnosticUnavailableResourceOpenBackend {
         _params: omegon_extension::actions::resource::ResourceOpenParams,
     ) -> Result<omegon_extension::actions::resource::ResourceOpenResult, String> {
         Err(self.reason.clone())
+    }
+}
+
+pub(super) struct TerminalReaderResourceOpenBackend {
+    pub terminal_backend: Box<dyn TerminalCreateBackend + Send + Sync>,
+}
+
+impl ResourceOpenBackend for TerminalReaderResourceOpenBackend {
+    fn name(&self) -> &'static str {
+        "terminal_reader"
+    }
+
+    fn kind(&self) -> ResourceBackendKind {
+        ResourceBackendKind::Terminal
+    }
+
+    fn supports(&self, params: &omegon_extension::actions::resource::ResourceOpenParams) -> bool {
+        use omegon_extension::actions::resource::ResourceKind;
+        matches!(params.kind, Some(ResourceKind::Ebook | ResourceKind::Pdf))
+    }
+
+    fn open(
+        &self,
+        params: omegon_extension::actions::resource::ResourceOpenParams,
+    ) -> Result<omegon_extension::actions::resource::ResourceOpenResult, String> {
+        let Some(path) = file_uri_path(&params.uri) else {
+            return Err("terminal reader backend only supports file:// resources".to_string());
+        };
+        let requested_placement = match params.placement {
+            Some(omegon_extension::actions::resource::ResourceOpenPlacement::SidePane) => {
+                Some(omegon_extension::actions::terminal::TerminalPlacement::SidePane)
+            }
+            Some(omegon_extension::actions::resource::ResourceOpenPlacement::Editor)
+            | Some(omegon_extension::actions::resource::ResourceOpenPlacement::MainTab) => {
+                Some(omegon_extension::actions::terminal::TerminalPlacement::NewTab)
+            }
+            Some(omegon_extension::actions::resource::ResourceOpenPlacement::BackgroundSession)
+            | Some(omegon_extension::actions::resource::ResourceOpenPlacement::Default)
+            | None => Some(omegon_extension::actions::terminal::TerminalPlacement::BackgroundSession),
+        };
+        let title = params
+            .title
+            .clone()
+            .or_else(|| params.reuse_key.clone())
+            .unwrap_or_else(|| "reader".to_string());
+        let plan = TerminalCreateLaunchPlan {
+            command: "bookokrat".to_string(),
+            args: vec![path.clone()],
+            cwd: None,
+            env: Vec::new(),
+            placement: requested_placement,
+            name: Some(title),
+        };
+        let result = self.terminal_backend.create(plan)?;
+        let mut warnings = result.warnings;
+        warnings.push("opened resource through terminal.create@1 Bookokrat backend".to_string());
+        Ok(omegon_extension::actions::resource::ResourceOpenResult {
+            resource_id: result.terminal_id.clone(),
+            backend: "terminal".to_string(),
+            actual_placement: result.actual_placement,
+            handle: Some(serde_json::json!({
+                "terminal_id": result.terminal_id,
+                "terminal_backend": result.backend,
+                "command": "bookokrat",
+                "args": [path],
+            })),
+            warnings,
+        })
     }
 }
 
@@ -2353,6 +2447,44 @@ allowed_kinds = [{kinds}]
         assert_eq!(error.code, "resource_backend_unavailable");
         assert!(error.message.contains("preferred 'fallback' resource backend selected 'fallback'"));
         assert!(error.message.contains("no specialized backend accepted this resource"));
+    }
+
+    #[test]
+    fn resource_open_terminal_reader_uses_terminal_create_backend() {
+        let workspace = tempfile::tempdir().unwrap();
+        let book = workspace.path().join("books/book.epub");
+        std::fs::create_dir_all(book.parent().unwrap()).unwrap();
+        std::fs::write(&book, "book").unwrap();
+        let manifest = resource_manifest(&["${workspace}"], &["file"], &["read"], &["ebook"]);
+        let mut action = resource_action(format!("file://{}", book.display()), "read", "ebook");
+        action.params["placement"] = json!("side_pane");
+        action.params["title"] = json!("Book");
+        let registry = ResourceBackendRegistry::new(vec![Box::new(TerminalReaderResourceOpenBackend {
+            terminal_backend: Box::new(FakeTerminalCreateBackend {
+                result: omegon_extension::actions::terminal::TerminalCreateResult {
+                    terminal_id: "term_123".to_string(),
+                    backend: "fake_terminal".to_string(),
+                    actual_placement: "side_pane".to_string(),
+                    warnings: vec![],
+                },
+            }),
+        })]);
+
+        let outcome = execute_resource_open(&action, &manifest, workspace.path(), &registry);
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        let result = outcome.result.unwrap();
+        assert_eq!(result["resource_id"], "term_123");
+        assert_eq!(result["backend"], "terminal");
+        assert_eq!(result["actual_placement"], "side_pane");
+        assert_eq!(result["handle"]["terminal_id"], "term_123");
+        assert_eq!(result["handle"]["terminal_backend"], "fake_terminal");
+        assert_eq!(result["handle"]["command"], "bookokrat");
+        assert_eq!(result["handle"]["args"][0], book.display().to_string());
+        assert!(result["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("terminal.create@1 Bookokrat"));
     }
 
     #[test]
