@@ -992,6 +992,21 @@
       "bound_change": null,
       "created_at": "2026-05-31T13:21:39Z",
       "updated_at": "2026-05-31T13:21:39Z"
+    },
+    {
+      "id": "resource-open-real-backends-125",
+      "title": "Implement real resource.open@1 backends for Flynt, Zed, and terminal reader",
+      "state": "seed",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-03T20:06:37Z",
+      "updated_at": "2026-06-03T20:06:37Z"
     }
   ],
   "changes": [
@@ -2497,6 +2512,15 @@
       "to_state": "exploring",
       "reason": "initial status on create",
       "forced": true
+    },
+    {
+      "timestamp": "2026-06-03T20:06:37Z",
+      "entity_type": "node",
+      "entity_id": "resource-open-real-backends-125",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
     }
   ]
 }
