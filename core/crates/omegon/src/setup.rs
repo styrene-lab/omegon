@@ -1639,9 +1639,13 @@ async fn discover_and_register_extensions(
                 if let Some(rx) = spawned.voice_notification_rx {
                     voice_notification_receivers.push(rx);
                 }
-                if let Some(metadata) = spawned.metadata {
-                    extension_metadata.insert(ext_name.to_string(), metadata);
-                }
+                extension_metadata.insert(
+                    ext_name.to_string(),
+                    crate::extensions::metadata_with_sdk_compatibility(
+                        spawned.metadata,
+                        &spawned.sdk_compatibility,
+                    ),
+                );
                 if nex_delegation_executor.is_none() {
                     nex_delegation_executor = spawned.nex_delegation_executor.map(|executor| {
                         executor

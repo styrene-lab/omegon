@@ -27,6 +27,7 @@ pub mod config_store;
 pub(crate) mod host_actions;
 pub mod manifest;
 pub mod mind;
+pub(crate) mod sdk_compat;
 pub mod state;
 mod tool_result;
 pub mod voice_bridge;
@@ -36,6 +37,7 @@ pub use manifest::{
     ConnectionMode, ExtensionManifest, McpConfig, McpTransport, RuntimeConfig, WidgetConfig,
 };
 pub use mind::{ExtensionMind, MindStats};
+pub use sdk_compat::SdkCompatibilityDiagnostic;
 pub use state::{ExtensionState, StabilityMetrics};
 pub use widgets::{ExtensionTabWidget, WidgetDeclaration, WidgetEvent};
 
@@ -735,6 +737,8 @@ pub struct SpawnedExtension {
     pub widget_rx: broadcast::Receiver<WidgetEvent>,
     /// Optional metadata returned by the extension initialize handshake.
     pub metadata: Option<Value>,
+    /// SDK contract compatibility classification derived from initialize metadata.
+    pub sdk_compatibility: SdkCompatibilityDiagnostic,
     /// Polling handle for extensions that provide `vox_route` (event bridge).
     pub vox_polling_handle: Option<ExtensionPollingHandle>,
     /// Idle notification pump for voice-capable extensions.
@@ -920,6 +924,22 @@ async fn handshake(
         }
     };
 
+    let sdk_compatibility = sdk_compat::classify_initialize_metadata(metadata.as_ref());
+    if sdk_compatibility.is_blocking() {
+        return Err(anyhow!(
+            "extension '{}' SDK contract is incompatible: {}",
+            name,
+            sdk_compatibility.message
+        ));
+    }
+    if sdk_compatibility.status == sdk_compat::SdkCompatibilityStatus::MissingLegacy {
+        tracing::warn!(
+            extension = name,
+            supported_sdk_contract = %sdk_compatibility.supported_version,
+            "extension did not advertise SDK contract version; treating as legacy"
+        );
+    }
+
     // 2. Discover tools
     let tools_response = handles
         .rpc_call_with_notifications("get_tools", json!({}), notification_sink)
@@ -989,12 +1009,35 @@ async fn handshake(
         }
     }
 
-    Ok(ExtensionHandshake { tools, metadata })
+    Ok(ExtensionHandshake {
+        tools,
+        metadata,
+        sdk_compatibility,
+    })
 }
 
 struct ExtensionHandshake {
     tools: Vec<ToolDefinition>,
     metadata: Option<Value>,
+    sdk_compatibility: SdkCompatibilityDiagnostic,
+}
+
+pub(crate) fn metadata_with_sdk_compatibility(
+    metadata: Option<Value>,
+    diagnostic: &SdkCompatibilityDiagnostic,
+) -> Value {
+    let sdk_compatibility = serde_json::to_value(diagnostic)
+        .unwrap_or_else(|_| serde_json::json!({"status": "serialization_failed"}));
+    let mut metadata = metadata.unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = metadata.as_object_mut() {
+        obj.insert("sdk_compatibility".to_string(), sdk_compatibility);
+        metadata
+    } else {
+        serde_json::json!({
+            "initialize": metadata,
+            "sdk_compatibility": sdk_compatibility,
+        })
+    }
 }
 
 fn normalize_extension_tool_definitions(value: &Value) -> Result<Vec<ToolDefinition>> {
@@ -1206,6 +1249,7 @@ async fn spawn_native(
         widgets: tab_widgets,
         widget_rx,
         metadata: handshake.metadata,
+        sdk_compatibility: handshake.sdk_compatibility,
         nex_delegation_executor,
         vox_polling_handle,
         voice_polling_handle,
@@ -1305,6 +1349,7 @@ async fn spawn_container(
         widgets: tab_widgets,
         widget_rx,
         metadata: handshake.metadata,
+        sdk_compatibility: handshake.sdk_compatibility,
         nex_delegation_executor,
         vox_polling_handle,
         voice_polling_handle,
@@ -1834,5 +1879,155 @@ binary = "voice-extension.sh"
             capabilities: omegon_extension::Capabilities::default(),
             permissions: omegon_extension::ManifestPermissions::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod sdk_compat_metadata_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn supported() -> SdkCompatibilityDiagnostic {
+        sdk_compat::classify_sdk_version(Some(sdk_compat::SUPPORTED_SDK_CONTRACT_VERSION))
+    }
+
+    #[test]
+    fn metadata_helper_inserts_sdk_compatibility_into_object_metadata() {
+        let metadata = metadata_with_sdk_compatibility(
+            Some(json!({"extension_info": {"name": "demo"}})),
+            &supported(),
+        );
+        assert_eq!(metadata["extension_info"]["name"], "demo");
+        assert_eq!(metadata["sdk_compatibility"]["status"], "supported");
+        assert_eq!(metadata["sdk_compatibility"]["supported_version"], "0.25");
+    }
+
+    #[test]
+    fn metadata_helper_creates_metadata_for_legacy_missing_initialize() {
+        let diagnostic = sdk_compat::classify_sdk_version(None);
+        let metadata = metadata_with_sdk_compatibility(None, &diagnostic);
+        assert_eq!(metadata["sdk_compatibility"]["status"], "missing_legacy");
+        assert_eq!(metadata["sdk_compatibility"]["severity"], "warning");
+    }
+
+    #[test]
+    fn metadata_helper_wraps_non_object_initialize_payload() {
+        let metadata = metadata_with_sdk_compatibility(Some(json!("legacy")), &supported());
+        assert_eq!(metadata["initialize"], "legacy");
+        assert_eq!(metadata["sdk_compatibility"]["status"], "supported");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod sdk_compat_spawn_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn write_sdk_extension(dir: &Path, sdk_version: Option<&str>) -> PathBuf {
+        let script = dir.join("sdk-extension.sh");
+        let initialize = match sdk_version {
+            Some(version) => format!(
+                "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"protocol_version\":2,\"extension_info\":{{\"name\":\"sdk-test\",\"version\":\"0.1.0\",\"sdk_version\":\"{version}\"}},\"capabilities\":{{\"tools\":true}},\"tools\":[]}}}}'"
+            ),
+            None => "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}'".to_string(),
+        };
+        let body = format!(
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *initialize*)
+      {initialize}
+      ;;
+    *get_tools*)
+      printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":[{{"name":"status","description":"Status","inputSchema":{{"type":"object","properties":{{}}}}}}]}}'
+      ;;
+  esac
+done
+"#
+        );
+        std::fs::write(&script, body).unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        std::fs::write(
+            dir.join("manifest.toml"),
+            r#"
+[extension]
+name = "sdk-test"
+version = "0.1.0"
+description = "SDK compatibility test extension"
+
+[runtime]
+type = "native"
+binary = "sdk-extension.sh"
+"#,
+        )
+        .unwrap();
+        script
+    }
+
+    #[tokio::test]
+    async fn spawn_accepts_current_sdk_contract() {
+        let temp = tempfile::tempdir().unwrap();
+        write_sdk_extension(
+            temp.path(),
+            Some(sdk_compat::SUPPORTED_SDK_CONTRACT_VERSION),
+        );
+        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
+        assert_eq!(
+            spawned.sdk_compatibility.status,
+            sdk_compat::SdkCompatibilityStatus::Supported
+        );
+    }
+
+    #[tokio::test]
+    async fn spawn_allows_older_compatible_sdk_contract_with_warning() {
+        let temp = tempfile::tempdir().unwrap();
+        write_sdk_extension(
+            temp.path(),
+            Some(sdk_compat::MIN_COMPATIBLE_SDK_CONTRACT_VERSION),
+        );
+        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
+        assert_eq!(
+            spawned.sdk_compatibility.status,
+            sdk_compat::SdkCompatibilityStatus::OlderCompatible
+        );
+        assert!(!spawned.sdk_compatibility.is_blocking());
+    }
+
+    #[tokio::test]
+    async fn spawn_rejects_newer_unknown_sdk_contract() {
+        let temp = tempfile::tempdir().unwrap();
+        write_sdk_extension(temp.path(), Some("0.26"));
+        let err = match spawn_from_manifest(temp.path(), &[]).await {
+            Ok(_) => panic!("newer SDK contract should fail spawn"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("SDK contract is incompatible"));
+        assert!(err.to_string().contains("newer than supported contract"));
+        assert!(err.to_string().contains("newer than supported contract"));
+    }
+
+    #[tokio::test]
+    async fn spawn_rejects_malformed_sdk_contract() {
+        let temp = tempfile::tempdir().unwrap();
+        write_sdk_extension(temp.path(), Some("banana"));
+        let err = match spawn_from_manifest(temp.path(), &[]).await {
+            Ok(_) => panic!("malformed SDK contract should fail spawn"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("SDK contract is incompatible"));
+        assert!(err.to_string().contains("malformed SDK contract version"));
+    }
+
+    #[tokio::test]
+    async fn spawn_allows_missing_initialize_as_legacy_warning() {
+        let temp = tempfile::tempdir().unwrap();
+        write_sdk_extension(temp.path(), None);
+        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
+        assert_eq!(
+            spawned.sdk_compatibility.status,
+            sdk_compat::SdkCompatibilityStatus::MissingLegacy
+        );
     }
 }

@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+- Enforce extension SDK contract compatibility during extension startup, accepting the current `0.25` contract, warning for legacy/missing or `0.24` compatibility-window metadata, rejecting malformed/unsupported/newer contracts, and surfacing SDK compatibility diagnostics through extension metadata.
+
 ## [0.26.0] - 2026-06-01
 
 ### Added
