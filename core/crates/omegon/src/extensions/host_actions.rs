@@ -1263,7 +1263,11 @@ fn execute_resource_open(
 }
 
 fn file_uri_path(uri: &str) -> Option<String> {
-    uri.strip_prefix("file://").map(|path| path.to_string())
+    let parsed = url::Url::parse(uri).ok()?;
+    if parsed.scheme() != "file" {
+        return None;
+    }
+    parsed.to_file_path().ok().map(|path| path.to_string_lossy().into_owned())
 }
 
 fn path_allowed_by_roots(
@@ -2270,6 +2274,49 @@ allowed_kinds = [{kinds}]
         );
         assert_eq!(kind.status, HostActionStatus::Denied);
         assert_eq!(kind.error.unwrap().code, "kind_denied");
+    }
+
+    #[test]
+    fn resource_open_decodes_file_uri_paths_before_root_check() {
+        let workspace = tempfile::tempdir().unwrap();
+        let doc = workspace.path().join("docs/read me.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# readme").unwrap();
+        let manifest = resource_manifest(&["${workspace}"], &["file"], &["view"], &["markdown"]);
+        let uri_path = doc.to_string_lossy().replace(' ', "%20");
+        let action = resource_action(format!("file://{uri_path}"), "view", "markdown");
+        let registry = ResourceBackendRegistry::new(vec![Box::new(FakeResourceOpenBackend {
+            kind: ResourceBackendKind::Flynt,
+            result: omegon_extension::actions::resource::ResourceOpenResult {
+                resource_id: "res_decoded".to_string(),
+                backend: "flynt".to_string(),
+                actual_placement: "main_tab".to_string(),
+                handle: None,
+                warnings: vec![],
+            },
+        })]);
+
+        let outcome = execute_resource_open(&action, &manifest, workspace.path(), &registry);
+
+        assert_eq!(outcome.status, HostActionStatus::Completed);
+        assert_eq!(outcome.result.unwrap()["resource_id"], "res_decoded");
+    }
+
+    #[test]
+    fn resource_open_rejects_malformed_file_uri_for_root_check() {
+        let workspace = tempfile::tempdir().unwrap();
+        let manifest = resource_manifest(&["${workspace}"], &["file"], &["view"], &["markdown"]);
+        let action = resource_action("file://example.com/workspace/doc.md".to_string(), "view", "markdown");
+
+        let outcome = execute_resource_open(
+            &action,
+            &manifest,
+            workspace.path(),
+            &unavailable_resource_registry(),
+        );
+
+        assert_eq!(outcome.status, HostActionStatus::Invalid);
+        assert_eq!(outcome.error.unwrap().code, "invalid_file_uri");
     }
 
     #[test]

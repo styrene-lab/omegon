@@ -5042,6 +5042,7 @@ dependencies = [
  "tui-tree-widget",
  "unicode-truncate",
  "unicode-width",
+ "url",
  "uuid",
  "x509-parser",
 ]
