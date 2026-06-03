@@ -869,6 +869,13 @@ pub(super) trait ResourceOpenBackend {
 
     fn supports(&self, params: &omegon_extension::actions::resource::ResourceOpenParams) -> bool;
 
+    fn unavailable_reason(
+        &self,
+        _params: &omegon_extension::actions::resource::ResourceOpenParams,
+    ) -> Option<String> {
+        None
+    }
+
     fn open(
         &self,
         params: omegon_extension::actions::resource::ResourceOpenParams,
@@ -921,6 +928,46 @@ impl ResourceOpenBackend for UnavailableResourceOpenBackend {
 
     fn supports(&self, _params: &omegon_extension::actions::resource::ResourceOpenParams) -> bool {
         true
+    }
+
+    fn unavailable_reason(
+        &self,
+        _params: &omegon_extension::actions::resource::ResourceOpenParams,
+    ) -> Option<String> {
+        Some(self.reason.clone())
+    }
+
+    fn open(
+        &self,
+        _params: omegon_extension::actions::resource::ResourceOpenParams,
+    ) -> Result<omegon_extension::actions::resource::ResourceOpenResult, String> {
+        Err(self.reason.clone())
+    }
+}
+
+pub(super) struct DiagnosticUnavailableResourceOpenBackend {
+    pub kind: ResourceBackendKind,
+    pub reason: String,
+}
+
+impl ResourceOpenBackend for DiagnosticUnavailableResourceOpenBackend {
+    fn name(&self) -> &'static str {
+        resource_backend_kind_name(self.kind)
+    }
+
+    fn kind(&self) -> ResourceBackendKind {
+        self.kind
+    }
+
+    fn supports(&self, _params: &omegon_extension::actions::resource::ResourceOpenParams) -> bool {
+        true
+    }
+
+    fn unavailable_reason(
+        &self,
+        _params: &omegon_extension::actions::resource::ResourceOpenParams,
+    ) -> Option<String> {
+        Some(self.reason.clone())
     }
 
     fn open(
@@ -1076,14 +1123,31 @@ fn execute_resource_open(
         }
     }
 
+    let preferred_backend = preferred_resource_backend_kind(&params);
     let Some(backend) = registry.select(&params) else {
         return outcome(
             action.id.clone(),
             HostActionStatus::Unsupported,
             "resource_backend_unavailable",
-            "resource.open@1 validated successfully, but no resource backend is configured",
+            format!(
+                "resource.open@1 validated successfully, but no '{}' resource backend is configured",
+                resource_backend_kind_name(preferred_backend)
+            ),
         );
     };
+    let selected_backend = backend.kind();
+    if let Some(reason) = backend.unavailable_reason(&params) {
+        return outcome(
+            action.id.clone(),
+            HostActionStatus::Unsupported,
+            "resource_backend_unavailable",
+            format!(
+                "preferred '{}' resource backend selected '{}', but it is unavailable: {reason}",
+                resource_backend_kind_name(preferred_backend),
+                backend.name()
+            ),
+        );
+    }
     match backend.open(params) {
         Ok(result) => HostActionOutcome {
             action_id: action.id.clone(),
@@ -1095,7 +1159,11 @@ fn execute_resource_open(
             action.id.clone(),
             HostActionStatus::Unsupported,
             "resource_backend_unavailable",
-            message,
+            format!(
+                "preferred '{}' resource backend selected '{}', but opening failed: {message}",
+                resource_backend_kind_name(preferred_backend),
+                resource_backend_kind_name(selected_backend)
+            ),
         ),
     }
 }
@@ -2238,6 +2306,53 @@ allowed_kinds = [{kinds}]
     #[test]
     fn resource_open_routes_unknown_to_fallback_backend() {
         assert_resource_route("unknown", "fallback");
+    }
+
+    #[test]
+    fn resource_open_reports_preferred_backend_unavailable() {
+        let workspace = tempfile::tempdir().unwrap();
+        let doc = workspace.path().join("docs/readme.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# readme").unwrap();
+        let manifest = resource_manifest(&["${workspace}"], &["file"], &["view"], &["markdown"]);
+        let action = resource_action(format!("file://{}", doc.display()), "view", "markdown");
+        let registry = ResourceBackendRegistry::new(vec![Box::new(
+            DiagnosticUnavailableResourceOpenBackend {
+                kind: ResourceBackendKind::Flynt,
+                reason: "Flynt resource-open surface is not attached".to_string(),
+            },
+        )]);
+
+        let outcome = execute_resource_open(&action, &manifest, workspace.path(), &registry);
+
+        assert_eq!(outcome.status, HostActionStatus::Unsupported);
+        let error = outcome.error.unwrap();
+        assert_eq!(error.code, "resource_backend_unavailable");
+        assert!(error.message.contains("preferred 'flynt' resource backend selected 'flynt'"));
+        assert!(error.message.contains("Flynt resource-open surface is not attached"));
+    }
+
+    #[test]
+    fn resource_open_reports_fallback_selection_for_unknown_kind() {
+        let workspace = tempfile::tempdir().unwrap();
+        let file = workspace.path().join("resource.bin");
+        std::fs::write(&file, "content").unwrap();
+        let manifest = resource_manifest(&["${workspace}"], &["file"], &["view"], &["unknown"]);
+        let action = resource_action(format!("file://{}", file.display()), "view", "unknown");
+        let registry = ResourceBackendRegistry::new(vec![Box::new(
+            DiagnosticUnavailableResourceOpenBackend {
+                kind: ResourceBackendKind::Fallback,
+                reason: "no specialized backend accepted this resource".to_string(),
+            },
+        )]);
+
+        let outcome = execute_resource_open(&action, &manifest, workspace.path(), &registry);
+
+        assert_eq!(outcome.status, HostActionStatus::Unsupported);
+        let error = outcome.error.unwrap();
+        assert_eq!(error.code, "resource_backend_unavailable");
+        assert!(error.message.contains("preferred 'fallback' resource backend selected 'fallback'"));
+        assert!(error.message.contains("no specialized backend accepted this resource"));
     }
 
     #[test]

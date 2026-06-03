@@ -24,6 +24,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Changed
 
 - Document the #125 `resource.open@1` real-backend implementation decisions for Flynt, Zed, terminal/Bookokrat ownership, availability diagnostics, file URI parsing, and workspace-root handling.
+- Report selected/preferred `resource.open@1` backend diagnostics when a backend is unavailable or fails after policy validation.
 
 ## [0.26.0] - 2026-06-01
 
