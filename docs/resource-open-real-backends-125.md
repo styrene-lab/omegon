@@ -6,7 +6,6 @@ tags: [0.27.0, host-actions, extensions, resource-open]
 open_questions:
   - "[assumption] Flynt can expose a host-side resource-open surface or adapter without requiring extensions to know Flynt internals."
   - "[assumption] Zed invocation can be implemented as a policy-gated host opener without weakening existing HostAction process-spawn controls."
-  - "[assumption] Bookokrat/reader opening can be reached through the existing terminal.create@1 backend registry rather than a separate process-spawn path."
 dependencies:
   - workstream/0.27-sdk-contract
 related:
@@ -27,8 +26,9 @@ Observed in `core/crates/omegon/src/extensions/host_actions.rs`:
 - `ResourceOpenBackend` owns the backend interface: `name`, `kind`, `supports`, and `open`.
 - `ResourceBackendRegistry::select` prefers the routed backend kind, then fallback, then any supporting backend.
 - `execute_resource_open` validates params, manifest allow flag, scheme, intent, kind, and file roots before selecting any backend.
-- `file_uri_path` is currently simple `file://` prefix stripping.
+- `file_uri_path` uses `url::Url` for `file://` parsing, including encoded path decoding and non-local host rejection before workspace-root checks.
 - `path_allowed_by_roots` uses the executor `workspace_cwd` for `${workspace}` resolution and normalizes/canonicalizes absolute file paths.
+- The real terminal executor registry wires ebook/pdf resources to the terminal/Bookokrat backend, keeps Flynt/Zed as explicit unavailable diagnostics, and keeps unknown resources on explicit fallback unavailable behavior.
 
 ## Decisions to carry into implementation
 
@@ -36,7 +36,7 @@ Observed in `core/crates/omegon/src/extensions/host_actions.rs`:
 
 - Flynt owns rendered/document resources: markdown, diagrams, and images. If the current host runtime cannot address Flynt directly, the Flynt backend must report explicit unavailability rather than silently pretending success.
 - Zed owns editor-oriented resources: code, text, and directories. It should be implemented as a host opener/CLI integration only after command/path policy is explicit.
-- Terminal owns reader-oriented resources: ebooks and PDFs. The first real backend should translate eligible `resource.open@1` requests into the existing `terminal.create@1`/Bookokrat execution path so process execution remains covered by terminal HostAction policy.
+- Terminal owns reader-oriented resources: ebooks and PDFs. The first real backend translates eligible `resource.open@1` requests into the existing `terminal.create@1`/Bookokrat execution path so process execution remains covered by terminal HostAction policy.
 - Fallback remains an explicit diagnostic backend, not a hidden catch-all success path.
 
 ### Runtime availability model
@@ -45,7 +45,7 @@ Backends should distinguish selection from availability. The registry may preser
 
 ### URI parsing
 
-Introduce `url::Url` for `file://` parsing before broadening real backend support. The current prefix-stripping is acceptable for the #83 substrate tests but is too weak for real backend UX because encoded paths, hosts, and platform-specific path forms need explicit handling.
+`file://` parsing now uses `url::Url` before broadening real backend support. This covers encoded paths and rejects non-local file URI hosts before workspace-root checks.
 
 ### Workspace root source
 
