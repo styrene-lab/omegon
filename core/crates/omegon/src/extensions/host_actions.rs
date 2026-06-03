@@ -1039,7 +1039,9 @@ impl ResourceOpenBackend for TerminalReaderResourceOpenBackend {
             }
             Some(omegon_extension::actions::resource::ResourceOpenPlacement::BackgroundSession)
             | Some(omegon_extension::actions::resource::ResourceOpenPlacement::Default)
-            | None => Some(omegon_extension::actions::terminal::TerminalPlacement::BackgroundSession),
+            | None => {
+                Some(omegon_extension::actions::terminal::TerminalPlacement::BackgroundSession)
+            }
         };
         let title = params
             .title
@@ -1267,7 +1269,10 @@ fn file_uri_path(uri: &str) -> Option<String> {
     if parsed.scheme() != "file" {
         return None;
     }
-    parsed.to_file_path().ok().map(|path| path.to_string_lossy().into_owned())
+    parsed
+        .to_file_path()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 fn path_allowed_by_roots(
@@ -2306,7 +2311,11 @@ allowed_kinds = [{kinds}]
     fn resource_open_rejects_malformed_file_uri_for_root_check() {
         let workspace = tempfile::tempdir().unwrap();
         let manifest = resource_manifest(&["${workspace}"], &["file"], &["view"], &["markdown"]);
-        let action = resource_action("file://example.com/workspace/doc.md".to_string(), "view", "markdown");
+        let action = resource_action(
+            "file://example.com/workspace/doc.md".to_string(),
+            "view",
+            "markdown",
+        );
 
         let outcome = execute_resource_open(
             &action,
@@ -2469,8 +2478,16 @@ allowed_kinds = [{kinds}]
         assert_eq!(outcome.status, HostActionStatus::Unsupported);
         let error = outcome.error.unwrap();
         assert_eq!(error.code, "resource_backend_unavailable");
-        assert!(error.message.contains("preferred 'flynt' resource backend selected 'flynt'"));
-        assert!(error.message.contains("Flynt resource-open surface is not attached"));
+        assert!(
+            error
+                .message
+                .contains("preferred 'flynt' resource backend selected 'flynt'")
+        );
+        assert!(
+            error
+                .message
+                .contains("Flynt resource-open surface is not attached")
+        );
     }
 
     #[test]
@@ -2492,8 +2509,16 @@ allowed_kinds = [{kinds}]
         assert_eq!(outcome.status, HostActionStatus::Unsupported);
         let error = outcome.error.unwrap();
         assert_eq!(error.code, "resource_backend_unavailable");
-        assert!(error.message.contains("preferred 'fallback' resource backend selected 'fallback'"));
-        assert!(error.message.contains("no specialized backend accepted this resource"));
+        assert!(
+            error
+                .message
+                .contains("preferred 'fallback' resource backend selected 'fallback'")
+        );
+        assert!(
+            error
+                .message
+                .contains("no specialized backend accepted this resource")
+        );
     }
 
     #[test]
@@ -2506,16 +2531,17 @@ allowed_kinds = [{kinds}]
         let mut action = resource_action(format!("file://{}", book.display()), "read", "ebook");
         action.params["placement"] = json!("side_pane");
         action.params["title"] = json!("Book");
-        let registry = ResourceBackendRegistry::new(vec![Box::new(TerminalReaderResourceOpenBackend {
-            terminal_backend: Box::new(FakeTerminalCreateBackend {
-                result: omegon_extension::actions::terminal::TerminalCreateResult {
-                    terminal_id: "term_123".to_string(),
-                    backend: "fake_terminal".to_string(),
-                    actual_placement: "side_pane".to_string(),
-                    warnings: vec![],
-                },
-            }),
-        })]);
+        let registry =
+            ResourceBackendRegistry::new(vec![Box::new(TerminalReaderResourceOpenBackend {
+                terminal_backend: Box::new(FakeTerminalCreateBackend {
+                    result: omegon_extension::actions::terminal::TerminalCreateResult {
+                        terminal_id: "term_123".to_string(),
+                        backend: "fake_terminal".to_string(),
+                        actual_placement: "side_pane".to_string(),
+                        warnings: vec![],
+                    },
+                }),
+            })]);
 
         let outcome = execute_resource_open(&action, &manifest, workspace.path(), &registry);
 
@@ -2528,10 +2554,12 @@ allowed_kinds = [{kinds}]
         assert_eq!(result["handle"]["terminal_backend"], "fake_terminal");
         assert_eq!(result["handle"]["command"], "bookokrat");
         assert_eq!(result["handle"]["args"][0], book.display().to_string());
-        assert!(result["warnings"][0]
-            .as_str()
-            .unwrap()
-            .contains("terminal.create@1 Bookokrat"));
+        assert!(
+            result["warnings"][0]
+                .as_str()
+                .unwrap()
+                .contains("terminal.create@1 Bookokrat")
+        );
     }
 
     #[test]
@@ -2562,9 +2590,11 @@ allowed_kinds = [{kinds}]
         assert_eq!(markdown_outcome.status, HostActionStatus::Unsupported);
         let markdown_error = markdown_outcome.error.unwrap();
         assert_eq!(markdown_error.code, "resource_backend_unavailable");
-        assert!(markdown_error
-            .message
-            .contains("preferred 'flynt' resource backend selected 'flynt'"));
+        assert!(
+            markdown_error
+                .message
+                .contains("preferred 'flynt' resource backend selected 'flynt'")
+        );
 
         let code_outcome = execute_resource_open(
             &resource_action(format!("file://{}", code.display()), "view", "code"),
@@ -2575,9 +2605,11 @@ allowed_kinds = [{kinds}]
         assert_eq!(code_outcome.status, HostActionStatus::Unsupported);
         let code_error = code_outcome.error.unwrap();
         assert_eq!(code_error.code, "resource_backend_unavailable");
-        assert!(code_error
-            .message
-            .contains("preferred 'zed' resource backend selected 'zed'"));
+        assert!(
+            code_error
+                .message
+                .contains("preferred 'zed' resource backend selected 'zed'")
+        );
 
         let unknown_outcome = execute_resource_open(
             &resource_action(format!("file://{}", unknown.display()), "view", "unknown"),
@@ -2588,9 +2620,11 @@ allowed_kinds = [{kinds}]
         assert_eq!(unknown_outcome.status, HostActionStatus::Unsupported);
         let unknown_error = unknown_outcome.error.unwrap();
         assert_eq!(unknown_error.code, "resource_backend_unavailable");
-        assert!(unknown_error
-            .message
-            .contains("preferred 'fallback' resource backend selected 'unavailable'"));
+        assert!(
+            unknown_error
+                .message
+                .contains("preferred 'fallback' resource backend selected 'unavailable'")
+        );
     }
 
     #[test]
