@@ -2535,6 +2535,65 @@ allowed_kinds = [{kinds}]
     }
 
     #[test]
+    fn real_executor_registry_wires_resource_open_backends() {
+        let workspace = tempfile::tempdir().unwrap();
+        let markdown = workspace.path().join("doc.md");
+        let code = workspace.path().join("main.rs");
+        let unknown = workspace.path().join("blob.bin");
+        std::fs::write(&markdown, "# doc").unwrap();
+        std::fs::write(&code, "fn main() {}").unwrap();
+        std::fs::write(&unknown, "blob").unwrap();
+        let executors = HostActionExecutorRegistry::with_real_terminal_backend(workspace.path());
+        let registry = executors.resource_open_registry.as_ref().unwrap();
+
+        let manifest = resource_manifest(
+            &["${workspace}"],
+            &["file"],
+            &["view"],
+            &["markdown", "code", "unknown"],
+        );
+
+        let markdown_outcome = execute_resource_open(
+            &resource_action(format!("file://{}", markdown.display()), "view", "markdown"),
+            &manifest,
+            workspace.path(),
+            registry,
+        );
+        assert_eq!(markdown_outcome.status, HostActionStatus::Unsupported);
+        let markdown_error = markdown_outcome.error.unwrap();
+        assert_eq!(markdown_error.code, "resource_backend_unavailable");
+        assert!(markdown_error
+            .message
+            .contains("preferred 'flynt' resource backend selected 'flynt'"));
+
+        let code_outcome = execute_resource_open(
+            &resource_action(format!("file://{}", code.display()), "view", "code"),
+            &manifest,
+            workspace.path(),
+            registry,
+        );
+        assert_eq!(code_outcome.status, HostActionStatus::Unsupported);
+        let code_error = code_outcome.error.unwrap();
+        assert_eq!(code_error.code, "resource_backend_unavailable");
+        assert!(code_error
+            .message
+            .contains("preferred 'zed' resource backend selected 'zed'"));
+
+        let unknown_outcome = execute_resource_open(
+            &resource_action(format!("file://{}", unknown.display()), "view", "unknown"),
+            &manifest,
+            workspace.path(),
+            registry,
+        );
+        assert_eq!(unknown_outcome.status, HostActionStatus::Unsupported);
+        let unknown_error = unknown_outcome.error.unwrap();
+        assert_eq!(unknown_error.code, "resource_backend_unavailable");
+        assert!(unknown_error
+            .message
+            .contains("preferred 'fallback' resource backend selected 'unavailable'"));
+    }
+
+    #[test]
     fn terminal_create_backend_unavailable_returns_unsupported() {
         let manifest = terminal_manifest(&["bookokrat"], &[], &[]);
         let action = terminal_action(json!({"command": "bookokrat"}));
