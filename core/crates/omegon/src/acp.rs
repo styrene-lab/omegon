@@ -1654,6 +1654,8 @@ impl OmegonAcpAgent {
                 let items =
                     crate::armory::browse(crate::armory::BrowseOptions::new(kind, query, &cwd))
                         .await?;
+                let items: Vec<serde_json::Value> =
+                    items.into_iter().map(armory_search_item_json).collect();
                 Ok(serde_json::json!({ "items": items }))
             }
 
@@ -1671,7 +1673,11 @@ impl OmegonAcpAgent {
                     .unwrap_or(crate::armory::ArmoryInstallKind::Auto);
                 let cwd = std::env::current_dir().unwrap_or_default();
                 let result = crate::armory::install(target, kind, &cwd).await?;
-                Ok(serde_json::json!({ "ok": true, "result": result }))
+                Ok(serde_json::json!({
+                    "ok": true,
+                    "installed": armory_install_result_json(&result),
+                    "result": result,
+                }))
             }
 
             "extensions/search" => {
@@ -2549,6 +2555,40 @@ fn parse_armory_kind(kind: &str) -> anyhow::Result<crate::armory::ArmoryKind> {
     }
 }
 
+fn armory_item_kind_name(kind: crate::armory::ArmoryItemKind) -> &'static str {
+    match kind {
+        crate::armory::ArmoryItemKind::Extension => "extensions",
+        crate::armory::ArmoryItemKind::Plugin => "plugins",
+        crate::armory::ArmoryItemKind::Skill => "skills",
+        crate::armory::ArmoryItemKind::Agent => "agents",
+    }
+}
+
+fn armory_search_item_json(item: crate::armory::ArmoryItem) -> serde_json::Value {
+    serde_json::json!({
+        "id": item.id,
+        "kind": armory_item_kind_name(item.kind),
+        "name": item.name,
+        "version": item.version,
+        "description": item.description,
+        "source": item.source,
+        "tags": [item.category],
+        "category": item.category,
+        "manifest_id": item.manifest_id,
+        "installed": item.installed,
+        "install_hint": item.install_hint,
+    })
+}
+
+fn armory_install_result_json(result: &crate::armory::ArmoryInstallResult) -> serde_json::Value {
+    serde_json::json!({
+        "id": result.id,
+        "kind": armory_item_kind_name(result.kind),
+        "path": result.path,
+        "message": result.message,
+    })
+}
+
 fn convert_acp_mcp_server(
     server: McpServer,
 ) -> Option<(String, crate::plugins::mcp::McpServerConfig)> {
@@ -2628,6 +2668,49 @@ mod extension_metadata_tests {
             "local"
         );
         assert!(meta.get("flynt").is_none());
+    }
+
+    #[test]
+    fn armory_search_item_json_matches_flynt_contract() {
+        let item = crate::armory::ArmoryItem {
+            kind: crate::armory::ArmoryItemKind::Extension,
+            id: "recro/recro-omegon".to_string(),
+            name: "recro-omegon".to_string(),
+            description: "Recro integration".to_string(),
+            category: "integrations".to_string(),
+            version: Some("1.2.3".to_string()),
+            source: "https://github.com/recro/recro-omegon".to_string(),
+            manifest_id: Some("recro".to_string()),
+            installed: false,
+            install_hint: "armory install recro/recro-omegon".to_string(),
+        };
+
+        let json = armory_search_item_json(item);
+
+        assert_eq!(json["id"], "recro/recro-omegon");
+        assert_eq!(json["kind"], "extensions");
+        assert_eq!(json["name"], "recro-omegon");
+        assert_eq!(json["version"], "1.2.3");
+        assert_eq!(json["description"], "Recro integration");
+        assert_eq!(json["source"], "https://github.com/recro/recro-omegon");
+        assert_eq!(json["tags"][0], "integrations");
+    }
+
+    #[test]
+    fn armory_install_result_json_matches_flynt_contract() {
+        let result = crate::armory::ArmoryInstallResult {
+            kind: crate::armory::ArmoryItemKind::Extension,
+            id: "recro/recro-omegon".to_string(),
+            path: Some("/tmp/extensions/recro-omegon".to_string()),
+            message: "Installed extension".to_string(),
+        };
+
+        let json = armory_install_result_json(&result);
+
+        assert_eq!(json["id"], "recro/recro-omegon");
+        assert_eq!(json["kind"], "extensions");
+        assert_eq!(json["path"], "/tmp/extensions/recro-omegon");
+        assert_eq!(json["message"], "Installed extension");
     }
 }
 

@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.2] - 2026-06-04
+
+### Fixed
+
+- Shape ACP `armory/search` results and `armory/install` responses for Flynt's Armory UI while preserving the existing Armory service-layer delegation.
+
 ## [0.26.1] - 2026-06-04
 
 ### Fixed
