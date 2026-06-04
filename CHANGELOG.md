@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-06-04
+
+### Fixed
+
+- Expose Flynt deployment metadata through ACP initialize and session metadata using both the canonical `omegon/extensions.flynt` namespace and the Flynt compatibility alias so Flynt preflight can verify deployment status.
+
 ## [0.26.0] - 2026-06-01
 
 ### Added

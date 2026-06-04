@@ -664,6 +664,21 @@ impl OmegonAcpAgent {
     }
 }
 
+fn extension_metadata_meta(
+    metadata: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut meta = serde_json::Map::from_iter([(
+        "omegon/extensions".to_string(),
+        serde_json::json!(metadata),
+    )]);
+
+    if let Some(flynt) = metadata.get("flynt") {
+        meta.insert("flynt".to_string(), flynt.clone());
+    }
+
+    meta
+}
+
 impl OmegonAcpAgent {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         *self.host_caps.borrow_mut() = HostCapabilities::from_client(&args.client_capabilities);
@@ -693,10 +708,7 @@ impl OmegonAcpAgent {
                 .description("Run `omegon auth login` in a terminal or set API keys."),
         )];
         if !self.extension_metadata.is_empty() {
-            response.meta = Some(serde_json::Map::from_iter([(
-                "omegon/extensions".to_string(),
-                serde_json::json!(self.extension_metadata),
-            )]));
+            response.meta = Some(extension_metadata_meta(&self.extension_metadata));
         }
         Ok(response)
     }
@@ -999,10 +1011,7 @@ impl OmegonAcpAgent {
                         }
                         Ok(WorkerEvent::ExtensionMetadata(metadata)) => {
                             if let Some(c) = conn.borrow().as_ref() {
-                                let meta = serde_json::Map::from_iter([(
-                                    "omegon/extensions".to_string(),
-                                    serde_json::json!(metadata),
-                                )]);
+                                let meta = extension_metadata_meta(&metadata);
                                 let _ = send_session_update(
                                     c,
                                     stream_sid.clone(),
@@ -2603,18 +2612,42 @@ mod extension_metadata_tests {
             meta["omegon/extensions"]["flynt"]["deployment"]["kind"],
             "local"
         );
+        assert_eq!(meta["flynt"]["deployment"]["kind"], "local");
+    }
+
+    #[test]
+    fn extension_metadata_meta_omits_flynt_alias_when_absent() {
+        let metadata = std::collections::BTreeMap::from([(
+            "other".to_string(),
+            serde_json::json!({"deployment": {"kind": "local"}}),
+        )]);
+        let meta = extension_metadata_meta(&metadata);
+
+        assert_eq!(
+            meta["omegon/extensions"]["other"]["deployment"]["kind"],
+            "local"
+        );
+        assert!(meta.get("flynt").is_none());
     }
 }
 
 pub async fn run(model: &str, agent_id: Option<&str>, cwd: &std::path::Path) -> anyhow::Result<()> {
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-    if let Some(id) = agent_id {
+    let extension_metadata = if let Some(id) = agent_id {
         let shared_settings = crate::settings::shared(model);
         crate::apply_agent_manifest_pre_setup(id, cwd, &shared_settings)?;
-    }
+        crate::setup::AgentSetup::new(cwd, None, Some(shared_settings))
+            .await?
+            .extension_metadata
+    } else {
+        Default::default()
+    };
 
-    let agent = Rc::new(OmegonAcpAgent::new(model));
+    let agent = Rc::new(OmegonAcpAgent::new_with_extension_metadata(
+        model,
+        extension_metadata,
+    ));
 
     let stdout = tokio::io::stdout().compat_write();
     let stdin = tokio::io::stdin().compat();
