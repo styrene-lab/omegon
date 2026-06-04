@@ -262,8 +262,29 @@ async fn handle_acp_request_result(
                 method,
             )
         }
+        m if m.starts_with('_') => route_ext_method(agent, m, params).await,
         _ => Err(agent_client_protocol::Error::method_not_found()),
     }
+}
+
+async fn route_ext_method(
+    agent: Rc<OmegonAcpAgent>,
+    method: &str,
+    params: &serde_json::Value,
+) -> agent_client_protocol::Result<serde_json::Value> {
+    let ext_method = method
+        .strip_prefix('_')
+        .filter(|name| !name.is_empty())
+        .ok_or_else(agent_client_protocol::Error::method_not_found)?;
+    let raw = serde_json::value::RawValue::from_string(
+        serde_json::to_string(params).map_err(agent_client_protocol::Error::into_internal_error)?,
+    )
+    .map_err(agent_client_protocol::Error::into_internal_error)?;
+    let response = agent
+        .ext_method(ExtRequest::new(ext_method.to_string(), raw.into()))
+        .await?;
+    serde_json::from_str(response.0.get())
+        .map_err(agent_client_protocol::Error::into_internal_error)
 }
 
 async fn handle_acp_notification(
@@ -2711,6 +2732,20 @@ mod extension_metadata_tests {
         assert_eq!(json["kind"], "extensions");
         assert_eq!(json["path"], "/tmp/extensions/recro-omegon");
         assert_eq!(json["message"], "Installed extension");
+    }
+
+    #[tokio::test]
+    async fn underscore_extension_method_routes_to_ext_method() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_armory/install",
+            &serde_json::json!({ "kind": "extensions" }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["error"], "missing 'target' field");
     }
 }
 

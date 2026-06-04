@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.3] - 2026-06-04
+
+### Fixed
+
+- Route raw ACP extension-method requests with leading `_` through `ext_method` so Flynt can call Armory, extension, skills, personas, catalog, and future custom methods over the ACP wire format.
+
 ## [0.26.2] - 2026-06-04
 
 ### Fixed
