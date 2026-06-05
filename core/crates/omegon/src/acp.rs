@@ -262,8 +262,29 @@ async fn handle_acp_request_result(
                 method,
             )
         }
+        m if m.starts_with('_') => route_ext_method(agent, m, params).await,
         _ => Err(agent_client_protocol::Error::method_not_found()),
     }
+}
+
+async fn route_ext_method(
+    agent: Rc<OmegonAcpAgent>,
+    method: &str,
+    params: &serde_json::Value,
+) -> agent_client_protocol::Result<serde_json::Value> {
+    let ext_method = method
+        .strip_prefix('_')
+        .filter(|name| !name.is_empty())
+        .ok_or_else(agent_client_protocol::Error::method_not_found)?;
+    let raw = serde_json::value::RawValue::from_string(
+        serde_json::to_string(params).map_err(agent_client_protocol::Error::into_internal_error)?,
+    )
+    .map_err(agent_client_protocol::Error::into_internal_error)?;
+    let response = agent
+        .ext_method(ExtRequest::new(ext_method.to_string(), raw.into()))
+        .await?;
+    serde_json::from_str(response.0.get())
+        .map_err(agent_client_protocol::Error::into_internal_error)
 }
 
 async fn handle_acp_notification(
@@ -1665,6 +1686,30 @@ impl OmegonAcpAgent {
                 Ok(serde_json::json!({ "ok": true, "result": result }))
             }
 
+            "packages/plan" => {
+                let request = crate::packages::request_from_params(&params)?;
+                Ok(serde_json::to_value(crate::packages::plan(&request))?)
+            }
+
+            "packages/install" => {
+                let request = crate::packages::request_from_params(&params)?;
+                let cwd = std::env::current_dir().unwrap_or_default();
+                Ok(serde_json::to_value(
+                    crate::packages::install(request, &cwd).await?,
+                )?)
+            }
+
+            "packages/search" => {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                crate::packages::search(&params, &cwd).await
+            }
+
+            "packages/list" => crate::packages::list(),
+
+            "packages/remove" => crate::packages::remove(&params),
+
+            "packages/update" => crate::packages::update(&params),
+
             "extensions/search" => {
                 let query = params.get("query").and_then(|v| v.as_str());
                 let cwd = std::env::current_dir().unwrap_or_default();
@@ -2603,6 +2648,69 @@ mod extension_metadata_tests {
             meta["omegon/extensions"]["flynt"]["deployment"]["kind"],
             "local"
         );
+    }
+
+    #[tokio::test]
+    async fn underscore_packages_plan_routes_to_ext_method() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_packages/plan",
+            &serde_json::json!({
+                "source": "https://github.com/recro/recro-omegon",
+                "kind_hint": "skill"
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["ok"], true);
+        assert_eq!(response["package"]["id"], "recro-omegon");
+        assert_eq!(response["contributions"][0]["kind"], "skill");
+    }
+
+    #[tokio::test]
+    async fn underscore_packages_install_installs_local_plugin_package() {
+        let home = tempfile::tempdir().unwrap();
+        let package = tempfile::tempdir().unwrap();
+        std::fs::write(
+            package.path().join("plugin.toml"),
+            "[plugin]\nid = \"recro-omegon\"\nname = \"recro-omegon\"\ntype = \"skill\"\nversion = \"0.1.0\"\ndescription = \"Recro workflows\"\n",
+        )
+        .unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe {
+            std::env::set_var("OMEGON_HOME", home.path());
+        }
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_packages/install",
+            &serde_json::json!({
+                "source": package.path().display().to_string(),
+                "kind_hint": "plugin"
+            }),
+        )
+        .await
+        .unwrap();
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        assert_eq!(response["ok"], true, "{response:#}");
+        assert_eq!(response["package"]["id"], "recro-omegon", "{response:#}");
+        assert_eq!(
+            response["contributions"][0]["kind"], "skill",
+            "{response:#}"
+        );
+        assert_eq!(
+            response["contributions"][0]["status"], "installed",
+            "{response:#}"
+        );
+        assert!(home.path().join("plugins/recro-omegon").is_symlink());
     }
 }
 

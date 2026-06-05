@@ -79,6 +79,7 @@ mod r#loop;
 mod model_registry;
 mod mqtt_bridge;
 mod ollama;
+mod packages;
 mod paths;
 mod pkl_modules;
 mod plugin_cli;
@@ -1281,7 +1282,9 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Some(Commands::Plugin { ref action }) => {
             match action {
-                PluginAction::Install { uri } => plugin_cli::install(uri)?,
+                PluginAction::Install { uri } => {
+                    plugin_cli::install(uri)?;
+                }
                 PluginAction::List => plugin_cli::list()?,
                 PluginAction::Remove { name } => plugin_cli::remove(name)?,
                 PluginAction::Update { name } => plugin_cli::update(name.as_deref())?,

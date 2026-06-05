@@ -36,8 +36,15 @@ use std::path::{Path, PathBuf};
 
 use crate::plugins::armory::ArmoryManifest;
 
+/// Install result for a plugin package source.
+#[derive(Debug, Clone)]
+pub(crate) struct PluginInstallResult {
+    pub name: String,
+    pub path: PathBuf,
+}
+
 /// Install a plugin from a git URI or local path.
-pub fn install(uri: &str) -> anyhow::Result<()> {
+pub fn install(uri: &str) -> anyhow::Result<PluginInstallResult> {
     let plugins_dir = plugins_dir()?;
     std::fs::create_dir_all(&plugins_dir)?;
 
@@ -210,7 +217,7 @@ pub(crate) fn plugins_dir() -> anyhow::Result<PathBuf> {
     Ok(crate::paths::omegon_home()?.join("plugins"))
 }
 
-fn install_local(plugins_dir: &Path, local_path: &Path) -> anyhow::Result<()> {
+fn install_local(plugins_dir: &Path, local_path: &Path) -> anyhow::Result<PluginInstallResult> {
     let manifest = std::fs::read_to_string(local_path.join("plugin.toml"))?;
     let parsed = ArmoryManifest::parse(&manifest)?;
     let name = &parsed.plugin.name;
@@ -226,10 +233,13 @@ fn install_local(plugins_dir: &Path, local_path: &Path) -> anyhow::Result<()> {
     std::os::windows::fs::symlink_dir(local_path, &target)?;
 
     println!("Linked local plugin '{}' → {}", name, local_path.display());
-    Ok(())
+    Ok(PluginInstallResult {
+        name: name.to_string(),
+        path: target,
+    })
 }
 
-fn install_git(plugins_dir: &Path, uri: &str) -> anyhow::Result<()> {
+fn install_git(plugins_dir: &Path, uri: &str) -> anyhow::Result<PluginInstallResult> {
     let name = infer_plugin_name(uri)?;
     let target = plugins_dir.join(&name);
 
@@ -263,7 +273,10 @@ fn install_git(plugins_dir: &Path, uri: &str) -> anyhow::Result<()> {
     }
 
     println!("Installed plugin '{}' from {uri}", parsed.plugin.name);
-    Ok(())
+    Ok(PluginInstallResult {
+        name: parsed.plugin.name,
+        path: target,
+    })
 }
 
 fn infer_plugin_name(uri: &str) -> anyhow::Result<String> {

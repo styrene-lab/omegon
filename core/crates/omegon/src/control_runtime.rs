@@ -2988,9 +2988,13 @@ pub async fn plugin_view_response() -> SlashCommandResponse {
 
 pub async fn plugin_install_response(uri: &str) -> SlashCommandResponse {
     match crate::plugin_cli::install(uri.trim()) {
-        Ok(()) => SlashCommandResponse {
+        Ok(result) => SlashCommandResponse {
             accepted: true,
-            output: Some(format!("Installed plugin from {}", uri.trim())),
+            output: Some(format!(
+                "Installed plugin {} from {}",
+                result.name,
+                uri.trim()
+            )),
         },
         Err(err) => SlashCommandResponse {
             accepted: false,
