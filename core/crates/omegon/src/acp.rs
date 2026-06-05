@@ -685,6 +685,21 @@ impl OmegonAcpAgent {
     }
 }
 
+fn extension_metadata_meta(
+    metadata: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut meta = serde_json::Map::from_iter([(
+        "omegon/extensions".to_string(),
+        serde_json::json!(metadata),
+    )]);
+
+    if let Some(flynt) = metadata.get("flynt") {
+        meta.insert("flynt".to_string(), flynt.clone());
+    }
+
+    meta
+}
+
 impl OmegonAcpAgent {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         *self.host_caps.borrow_mut() = HostCapabilities::from_client(&args.client_capabilities);
@@ -714,10 +729,7 @@ impl OmegonAcpAgent {
                 .description("Run `omegon auth login` in a terminal or set API keys."),
         )];
         if !self.extension_metadata.is_empty() {
-            response.meta = Some(serde_json::Map::from_iter([(
-                "omegon/extensions".to_string(),
-                serde_json::json!(self.extension_metadata),
-            )]));
+            response.meta = Some(extension_metadata_meta(&self.extension_metadata));
         }
         Ok(response)
     }
@@ -1020,10 +1032,7 @@ impl OmegonAcpAgent {
                         }
                         Ok(WorkerEvent::ExtensionMetadata(metadata)) => {
                             if let Some(c) = conn.borrow().as_ref() {
-                                let meta = serde_json::Map::from_iter([(
-                                    "omegon/extensions".to_string(),
-                                    serde_json::json!(metadata),
-                                )]);
+                                let meta = extension_metadata_meta(&metadata);
                                 let _ = send_session_update(
                                     c,
                                     stream_sid.clone(),
@@ -1666,6 +1675,8 @@ impl OmegonAcpAgent {
                 let items =
                     crate::armory::browse(crate::armory::BrowseOptions::new(kind, query, &cwd))
                         .await?;
+                let items: Vec<serde_json::Value> =
+                    items.into_iter().map(armory_search_item_json).collect();
                 Ok(serde_json::json!({ "items": items }))
             }
 
@@ -1683,7 +1694,11 @@ impl OmegonAcpAgent {
                     .unwrap_or(crate::armory::ArmoryInstallKind::Auto);
                 let cwd = std::env::current_dir().unwrap_or_default();
                 let result = crate::armory::install(target, kind, &cwd).await?;
-                Ok(serde_json::json!({ "ok": true, "result": result }))
+                Ok(serde_json::json!({
+                    "ok": true,
+                    "installed": armory_install_result_json(&result),
+                    "result": result,
+                }))
             }
 
             "packages/plan" => {
@@ -2585,6 +2600,40 @@ fn parse_armory_kind(kind: &str) -> anyhow::Result<crate::armory::ArmoryKind> {
     }
 }
 
+fn armory_item_kind_name(kind: crate::armory::ArmoryItemKind) -> &'static str {
+    match kind {
+        crate::armory::ArmoryItemKind::Extension => "extensions",
+        crate::armory::ArmoryItemKind::Plugin => "plugins",
+        crate::armory::ArmoryItemKind::Skill => "skills",
+        crate::armory::ArmoryItemKind::Agent => "agents",
+    }
+}
+
+fn armory_search_item_json(item: crate::armory::ArmoryItem) -> serde_json::Value {
+    serde_json::json!({
+        "id": item.id,
+        "kind": armory_item_kind_name(item.kind),
+        "name": item.name,
+        "version": item.version,
+        "description": item.description,
+        "source": item.source,
+        "tags": [item.category],
+        "category": item.category,
+        "manifest_id": item.manifest_id,
+        "installed": item.installed,
+        "install_hint": item.install_hint,
+    })
+}
+
+fn armory_install_result_json(result: &crate::armory::ArmoryInstallResult) -> serde_json::Value {
+    serde_json::json!({
+        "id": result.id,
+        "kind": armory_item_kind_name(result.kind),
+        "path": result.path,
+        "message": result.message,
+    })
+}
+
 fn convert_acp_mcp_server(
     server: McpServer,
 ) -> Option<(String, crate::plugins::mcp::McpServerConfig)> {
@@ -2648,6 +2697,79 @@ mod extension_metadata_tests {
             meta["omegon/extensions"]["flynt"]["deployment"]["kind"],
             "local"
         );
+        assert_eq!(meta["flynt"]["deployment"]["kind"], "local");
+    }
+
+    #[test]
+    fn extension_metadata_meta_omits_flynt_alias_when_absent() {
+        let metadata = std::collections::BTreeMap::from([(
+            "other".to_string(),
+            serde_json::json!({"deployment": {"kind": "local"}}),
+        )]);
+        let meta = extension_metadata_meta(&metadata);
+
+        assert_eq!(
+            meta["omegon/extensions"]["other"]["deployment"]["kind"],
+            "local"
+        );
+        assert!(meta.get("flynt").is_none());
+    }
+
+    #[test]
+    fn armory_search_item_json_matches_flynt_contract() {
+        let item = crate::armory::ArmoryItem {
+            kind: crate::armory::ArmoryItemKind::Extension,
+            id: "recro/recro-omegon".to_string(),
+            name: "recro-omegon".to_string(),
+            description: "Recro integration".to_string(),
+            category: "integrations".to_string(),
+            version: Some("1.2.3".to_string()),
+            source: "https://github.com/recro/recro-omegon".to_string(),
+            manifest_id: Some("recro".to_string()),
+            installed: false,
+            install_hint: "armory install recro/recro-omegon".to_string(),
+        };
+
+        let json = armory_search_item_json(item);
+
+        assert_eq!(json["id"], "recro/recro-omegon");
+        assert_eq!(json["kind"], "extensions");
+        assert_eq!(json["name"], "recro-omegon");
+        assert_eq!(json["version"], "1.2.3");
+        assert_eq!(json["description"], "Recro integration");
+        assert_eq!(json["source"], "https://github.com/recro/recro-omegon");
+        assert_eq!(json["tags"][0], "integrations");
+    }
+
+    #[test]
+    fn armory_install_result_json_matches_flynt_contract() {
+        let result = crate::armory::ArmoryInstallResult {
+            kind: crate::armory::ArmoryItemKind::Extension,
+            id: "recro/recro-omegon".to_string(),
+            path: Some("/tmp/extensions/recro-omegon".to_string()),
+            message: "Installed extension".to_string(),
+        };
+
+        let json = armory_install_result_json(&result);
+
+        assert_eq!(json["id"], "recro/recro-omegon");
+        assert_eq!(json["kind"], "extensions");
+        assert_eq!(json["path"], "/tmp/extensions/recro-omegon");
+        assert_eq!(json["message"], "Installed extension");
+    }
+
+    #[tokio::test]
+    async fn underscore_extension_method_routes_to_ext_method() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_armory/install",
+            &serde_json::json!({ "kind": "extensions" }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["error"], "missing 'target' field");
     }
 
     #[tokio::test]
@@ -2717,12 +2839,20 @@ mod extension_metadata_tests {
 pub async fn run(model: &str, agent_id: Option<&str>, cwd: &std::path::Path) -> anyhow::Result<()> {
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-    if let Some(id) = agent_id {
+    let extension_metadata = if let Some(id) = agent_id {
         let shared_settings = crate::settings::shared(model);
         crate::apply_agent_manifest_pre_setup(id, cwd, &shared_settings)?;
-    }
+        crate::setup::AgentSetup::new(cwd, None, Some(shared_settings))
+            .await?
+            .extension_metadata
+    } else {
+        Default::default()
+    };
 
-    let agent = Rc::new(OmegonAcpAgent::new(model));
+    let agent = Rc::new(OmegonAcpAgent::new_with_extension_metadata(
+        model,
+        extension_metadata,
+    ));
 
     let stdout = tokio::io::stdout().compat_write();
     let stdin = tokio::io::stdin().compat();

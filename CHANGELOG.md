@@ -33,6 +33,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Parse `resource.open@1` `file://` URIs with `url::Url` before workspace-root checks, including encoded path handling and non-local host rejection.
 - Scope #125 to terminal/Bookokrat real backend completion and split real Flynt/Zed backends into follow-up design nodes.
 
+## [0.26.3] - 2026-06-04
+
+### Fixed
+
+- Route raw ACP extension-method requests with leading `_` through `ext_method` so Flynt can call Armory, extension, skills, personas, catalog, and future custom methods over the ACP wire format.
+
+## [0.26.2] - 2026-06-04
+
+### Fixed
+
+- Shape ACP `armory/search` results and `armory/install` responses for Flynt's Armory UI while preserving the existing Armory service-layer delegation.
+
+## [0.26.1] - 2026-06-04
+
+### Fixed
+
+- Expose Flynt deployment metadata through ACP initialize and session metadata using both the canonical `omegon/extensions.flynt` namespace and the Flynt compatibility alias so Flynt preflight can verify deployment status.
+
 ## [0.26.0] - 2026-06-01
 
 ### Added
