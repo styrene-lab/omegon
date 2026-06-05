@@ -16,6 +16,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.4] - 2026-06-04
+
 ### Added
 
 - Add an ACP package substrate (`packages/plan`, `packages/install`, `packages/search`, `packages/list`, `packages/remove`, and `packages/update`) that models installs as packages materializing typed contributions, with Armory, legacy plugin, skill, extension, catalog, and local package stores becoming adapters behind the package facade; package removal/update IDs are validated against path traversal.
