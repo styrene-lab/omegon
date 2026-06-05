@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "changeName": "extension-push-notification-routing",
+  "assessmentKind": "spec-lifecycle-cleanup",
+  "outcome": "pass",
+  "timestamp": "2026-06-05T19:20:58Z",
+  "summary": "Archived completed OpenSpec change extension-push-notification-routing. The tasks.md checklist was fully checked off before archival; this cleanup removes completed lifecycle debt from active changes after the 0.26.4 release baseline.",
+  "snapshot": {
+    "gitHead": "bb41af313f9826f0b83ced0f4f90c611f3c3f2ae",
+    "dirty": false,
+    "scopedPaths": [
+      "openspec/changes/extension-push-notification-routing"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/extension-push-notification-routing/design.md",
+        "exists": true,
+        "size": 620
+      },
+      {
+        "path": "openspec/changes/extension-push-notification-routing/proposal.md",
+        "exists": true,
+        "size": 801
+      },
+      {
+        "path": "openspec/changes/extension-push-notification-routing/specs/extensions/push-notifications.md",
+        "exists": true,
+        "size": 1438
+      },
+      {
+        "path": "openspec/changes/extension-push-notification-routing/specs/extensions/voice-state-observability.md",
+        "exists": true,
+        "size": 1969
+      },
+      {
+        "path": "openspec/changes/extension-push-notification-routing/specs/extensions/voice-transcription-routing.md",
+        "exists": true,
+        "size": 1126
+      },
+      {
+        "path": "openspec/changes/extension-push-notification-routing/tasks.md",
+        "exists": true,
+        "size": 1744
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "openspec/changes/extension-push-notification-routing"
+    ],
+    "constraints": [
+      "Archive only completed task sets; leave partially complete workstreams active."
+    ],
+    "recommendedAction": null
+  }
+}

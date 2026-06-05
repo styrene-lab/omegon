@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "changeName": "voice-mvp-integration-tests",
+  "assessmentKind": "spec-lifecycle-cleanup",
+  "outcome": "pass",
+  "timestamp": "2026-06-05T19:20:58Z",
+  "summary": "Archived completed OpenSpec change voice-mvp-integration-tests. The tasks.md checklist was fully checked off before archival; this cleanup removes completed lifecycle debt from active changes after the 0.26.4 release baseline.",
+  "snapshot": {
+    "gitHead": "bb41af313f9826f0b83ced0f4f90c611f3c3f2ae",
+    "dirty": false,
+    "scopedPaths": [
+      "openspec/changes/voice-mvp-integration-tests"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/voice-mvp-integration-tests/design.md",
+        "exists": true,
+        "size": 60
+      },
+      {
+        "path": "openspec/changes/voice-mvp-integration-tests/proposal.md",
+        "exists": true,
+        "size": 565
+      },
+      {
+        "path": "openspec/changes/voice-mvp-integration-tests/specs/extensions/voice-mvp-tests.md",
+        "exists": true,
+        "size": 2123
+      },
+      {
+        "path": "openspec/changes/voice-mvp-integration-tests/tasks.md",
+        "exists": true,
+        "size": 1191
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "openspec/changes/voice-mvp-integration-tests"
+    ],
+    "constraints": [
+      "Archive only completed task sets; leave partially complete workstreams active."
+    ],
+    "recommendedAction": null
+  }
+}

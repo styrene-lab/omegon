@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "changeName": "acp-hostaction-approval",
+  "assessmentKind": "spec-lifecycle-cleanup",
+  "outcome": "pass",
+  "timestamp": "2026-06-05T19:20:58Z",
+  "summary": "Archived completed OpenSpec change acp-hostaction-approval. The tasks.md checklist was fully checked off before archival; this cleanup removes completed lifecycle debt from active changes after the 0.26.4 release baseline.",
+  "snapshot": {
+    "gitHead": "bb41af313f9826f0b83ced0f4f90c611f3c3f2ae",
+    "dirty": false,
+    "scopedPaths": [
+      "openspec/changes/acp-hostaction-approval"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/acp-hostaction-approval/design.md",
+        "exists": true,
+        "size": 607
+      },
+      {
+        "path": "openspec/changes/acp-hostaction-approval/proposal.md",
+        "exists": true,
+        "size": 1293
+      },
+      {
+        "path": "openspec/changes/acp-hostaction-approval/specs/extensions/hostaction-approval.md",
+        "exists": true,
+        "size": 2753
+      },
+      {
+        "path": "openspec/changes/acp-hostaction-approval/tasks.md",
+        "exists": true,
+        "size": 2123
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "openspec/changes/acp-hostaction-approval"
+    ],
+    "constraints": [
+      "Archive only completed task sets; leave partially complete workstreams active."
+    ],
+    "recommendedAction": null
+  }
+}

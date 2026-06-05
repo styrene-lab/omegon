@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "changeName": "terminal-create-host-action",
+  "assessmentKind": "spec-lifecycle-cleanup",
+  "outcome": "pass",
+  "timestamp": "2026-06-05T19:20:58Z",
+  "summary": "Archived completed OpenSpec change terminal-create-host-action. The tasks.md checklist was fully checked off before archival; this cleanup removes completed lifecycle debt from active changes after the 0.26.4 release baseline.",
+  "snapshot": {
+    "gitHead": "bb41af313f9826f0b83ced0f4f90c611f3c3f2ae",
+    "dirty": false,
+    "scopedPaths": [
+      "openspec/changes/terminal-create-host-action"
+    ],
+    "files": [
+      {
+        "path": "openspec/changes/terminal-create-host-action/design.md",
+        "exists": true,
+        "size": 2082
+      },
+      {
+        "path": "openspec/changes/terminal-create-host-action/proposal.md",
+        "exists": true,
+        "size": 878
+      },
+      {
+        "path": "openspec/changes/terminal-create-host-action/specs/extensions/terminal-create.md",
+        "exists": true,
+        "size": 2470
+      },
+      {
+        "path": "openspec/changes/terminal-create-host-action/tasks.md",
+        "exists": true,
+        "size": 1567
+      }
+    ]
+  },
+  "reconciliation": {
+    "reopen": false,
+    "changedFiles": [
+      "openspec/changes/terminal-create-host-action"
+    ],
+    "constraints": [
+      "Archive only completed task sets; leave partially complete workstreams active."
+    ],
+    "recommendedAction": null
+  }
+}
