@@ -203,6 +203,35 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
         AgentEvent::SystemNotification { message } => Some(IpcEventPayload::SystemNotification {
             message: message.clone(),
         }),
+        AgentEvent::ProviderRetry {
+            provider,
+            model,
+            attempt,
+            delay_ms,
+            reason,
+            message,
+            recoverable,
+        } => Some(IpcEventPayload::SystemNotification {
+            message: format!(
+                "provider retry: {provider}/{model} attempt {attempt} delay {delay_ms}ms reason={reason} recoverable={recoverable}: {message}"
+            ),
+        }),
+        AgentEvent::ProviderFailure {
+            provider,
+            model,
+            reason,
+            attempts,
+            message,
+            retryable,
+            recommended_action,
+        } => Some(IpcEventPayload::SystemNotification {
+            message: format!(
+                "provider failure: {provider}/{model} attempts {attempts} reason={reason} retryable={retryable}: {message}; {recommended_action}"
+            ),
+        }),
+        AgentEvent::TurnCancelled { reason } => Some(IpcEventPayload::SystemNotification {
+            message: format!("turn cancelled: {reason}"),
+        }),
         AgentEvent::FamilyVitalSignsUpdated { signs } => {
             Some(IpcEventPayload::FamilyVitalSignsUpdated {
                 signs: signs.clone(),

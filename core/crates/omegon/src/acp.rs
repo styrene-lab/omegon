@@ -131,6 +131,79 @@ pub(crate) async fn send_session_update(
     conn.send_notification(SessionNotification::new(session_id, update))
 }
 
+fn send_acp_ext_notification(
+    conn: &AcpClientConnection,
+    method: &str,
+    params: serde_json::Value,
+) -> agent_client_protocol::Result<()> {
+    let raw = serde_json::value::RawValue::from_string(params.to_string())
+        .map_err(agent_client_protocol::Error::into_internal_error)?;
+    conn.send_notification(AgentNotification::ExtNotification(ExtNotification::new(
+        method,
+        std::sync::Arc::from(raw),
+    )))
+}
+
+#[derive(Debug, Clone)]
+struct ProviderRetryPayload {
+    session_id: String,
+    provider: String,
+    model: String,
+    attempt: u32,
+    delay_ms: u64,
+    reason: String,
+    message: String,
+    recoverable: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ProviderFailurePayload {
+    session_id: String,
+    provider: String,
+    model: String,
+    reason: String,
+    attempts: u32,
+    message: String,
+    retryable: bool,
+    recommended_action: String,
+}
+
+fn provider_retry_payload(payload: ProviderRetryPayload) -> serde_json::Value {
+    serde_json::json!({
+        "sessionId": payload.session_id,
+        "provider": payload.provider,
+        "model": payload.model,
+        "attempt": payload.attempt,
+        "delayMs": payload.delay_ms,
+        "reason": payload.reason,
+        "message": payload.message,
+        "recoverable": payload.recoverable,
+    })
+}
+
+fn provider_failure_payload(payload: ProviderFailurePayload) -> serde_json::Value {
+    serde_json::json!({
+        "sessionId": payload.session_id,
+        "provider": payload.provider,
+        "model": payload.model,
+        "reason": payload.reason,
+        "attempts": payload.attempts,
+        "message": payload.message,
+        "retryable": payload.retryable,
+        "recommendedAction": payload.recommended_action,
+    })
+}
+
+fn turn_cancelled_payload(
+    session_id: impl Into<String>,
+    reason: impl Into<String>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "sessionId": session_id.into(),
+        "reason": reason.into(),
+    })
+}
+
 pub(crate) fn connect_acp_agent(
     agent: Rc<OmegonAcpAgent>,
     outgoing: impl futures::AsyncWrite + Send + Unpin + 'static,
@@ -415,6 +488,10 @@ fn acp_status_message_text(msg: &str) -> Option<String> {
     }
 
     Some(trimmed.to_string())
+}
+
+fn acp_status_is_provider_telemetry(msg: &str) -> bool {
+    msg.contains("— retrying") || msg.contains("transient upstream failures")
 }
 
 pub struct OmegonAcpAgent {
@@ -948,6 +1025,9 @@ impl OmegonAcpAgent {
                             let Some(msg) = acp_status_message_text(&msg) else {
                                 continue;
                             };
+                            if acp_status_is_provider_telemetry(&msg) {
+                                continue;
+                            }
                             if let Some(c) = conn.borrow().as_ref() {
                                 let _ = send_session_update(
                                     c,
@@ -1018,6 +1098,59 @@ impl OmegonAcpAgent {
                                 .await;
                             }
                         }
+                        Ok(WorkerEvent::ProviderRetry {
+                            provider,
+                            model,
+                            attempt,
+                            delay_ms,
+                            reason,
+                            message,
+                            recoverable,
+                        }) => {
+                            if let Some(c) = conn.borrow().as_ref() {
+                                let payload = provider_retry_payload(ProviderRetryPayload {
+                                    session_id: stream_sid.to_string(),
+                                    provider,
+                                    model,
+                                    attempt,
+                                    delay_ms,
+                                    reason,
+                                    message: redact(&message),
+                                    recoverable,
+                                });
+                                let _ = send_acp_ext_notification(c, "_provider/retry", payload);
+                            }
+                        }
+                        Ok(WorkerEvent::ProviderFailure {
+                            provider,
+                            model,
+                            reason,
+                            attempts,
+                            message,
+                            retryable,
+                            recommended_action,
+                        }) => {
+                            if let Some(c) = conn.borrow().as_ref() {
+                                let payload = provider_failure_payload(ProviderFailurePayload {
+                                    session_id: stream_sid.to_string(),
+                                    provider,
+                                    model,
+                                    reason,
+                                    attempts,
+                                    message: redact(&message),
+                                    retryable,
+                                    recommended_action,
+                                });
+                                let _ = send_acp_ext_notification(c, "_provider/failure", payload);
+                            }
+                        }
+                        Ok(WorkerEvent::TurnCancelled { reason }) => {
+                            if let Some(c) = conn.borrow().as_ref() {
+                                let payload =
+                                    turn_cancelled_payload(stream_sid.to_string(), reason);
+                                let _ = send_acp_ext_notification(c, "_turn/cancelled", payload);
+                            }
+                        }
                         Ok(WorkerEvent::SessionTitle(title)) => {
                             if let Some(c) = conn.borrow().as_ref() {
                                 let _ = send_session_update(
@@ -1079,10 +1212,20 @@ impl OmegonAcpAgent {
             });
         }
 
-        Ok(PromptResponse::new(StopReason::EndTurn))
+        let stop_reason = if worker_resp.cancelled {
+            StopReason::Cancelled
+        } else {
+            StopReason::EndTurn
+        };
+        Ok(PromptResponse::new(stop_reason))
     }
 
-    async fn cancel(&self, _args: CancelNotification) -> Result<()> {
+    async fn cancel(&self, args: CancelNotification) -> Result<()> {
+        if let Some(active) = self.session_id.borrow().as_ref()
+            && active != &args.session_id
+        {
+            return Err(Error::invalid_params());
+        }
         self.send_to_worker(WorkerRequest::Cancel).await;
         Ok(())
     }
@@ -3166,6 +3309,115 @@ Progress: 1/2"
             Some("Request aborted")
         );
         assert_eq!(acp_status_message_text("   "), None);
+    }
+
+    #[test]
+    fn acp_status_identifies_provider_retry_telemetry() {
+        assert!(acp_status_is_provider_telemetry(
+            "⚠ Upstream stream_stalled — retrying (attempt 2, delay 1000ms): idle"
+        ));
+        assert!(acp_status_is_provider_telemetry(
+            "⚠ anthropic is seeing repeated transient upstream failures: 10 consecutive failures"
+        ));
+        assert!(!acp_status_is_provider_telemetry("Plan executing."));
+    }
+
+    #[test]
+    fn provider_retry_ext_notification_serializes_as_acp_extension_event() {
+        let raw = serde_json::value::RawValue::from_string(
+            serde_json::json!({
+                "sessionId": "s-1",
+                "provider": "anthropic",
+                "model": "claude",
+                "attempt": 2,
+                "delayMs": 1000,
+                "reason": "stream_idle",
+                "message": "idle",
+                "recoverable": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let notification = AgentNotification::ExtNotification(ExtNotification::new(
+            "_provider/retry",
+            std::sync::Arc::from(raw),
+        ));
+        let untyped = notification.to_untyped_message().unwrap();
+
+        assert_eq!(untyped.method, "_provider/retry");
+        assert_eq!(untyped.params["sessionId"], "s-1");
+        assert_eq!(untyped.params["provider"], "anthropic");
+        assert_eq!(untyped.params["delayMs"], 1000);
+        assert_eq!(untyped.params["recoverable"], true);
+    }
+
+    #[test]
+    fn provider_failure_payload_matches_flynt_contract() {
+        let payload = provider_failure_payload(ProviderFailurePayload {
+            session_id: "s-1".to_string(),
+            provider: "anthropic".to_string(),
+            model: "claude".to_string(),
+            reason: "stream_idle".to_string(),
+            attempts: 8,
+            message: "idle".to_string(),
+            retryable: false,
+            recommended_action: "switch_model".to_string(),
+        });
+
+        assert_eq!(payload["sessionId"], "s-1");
+        assert_eq!(payload["provider"], "anthropic");
+        assert_eq!(payload["model"], "claude");
+        assert_eq!(payload["reason"], "stream_idle");
+        assert_eq!(payload["attempts"], 8);
+        assert_eq!(payload["message"], "idle");
+        assert_eq!(payload["retryable"], false);
+        assert_eq!(payload["recommendedAction"], "switch_model");
+    }
+
+    #[test]
+    fn turn_cancelled_payload_matches_flynt_contract() {
+        let payload = turn_cancelled_payload("s-1", "operator_cancelled");
+
+        assert_eq!(payload["sessionId"], "s-1");
+        assert_eq!(payload["reason"], "operator_cancelled");
+    }
+
+    #[test]
+    fn cancelled_worker_response_maps_to_cancelled_stop_reason() {
+        let response = crate::acp_worker::WorkerResponse {
+            text: String::new(),
+            error: None,
+            cancelled: true,
+        };
+        let stop_reason = if response.cancelled {
+            StopReason::Cancelled
+        } else {
+            StopReason::EndTurn
+        };
+
+        assert_eq!(stop_reason, StopReason::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn cancel_accepts_matching_session_id() {
+        let agent = OmegonAcpAgent::new("test-model");
+        let sid = SessionId::new("session-a");
+        *agent.session_id.borrow_mut() = Some(sid.clone());
+
+        agent.cancel(CancelNotification::new(sid)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancel_rejects_wrong_session_id() {
+        let agent = OmegonAcpAgent::new("test-model");
+        *agent.session_id.borrow_mut() = Some(SessionId::new("session-a"));
+
+        let err = agent
+            .cancel(CancelNotification::new(SessionId::new("session-b")))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code, ErrorCode::InvalidParams);
     }
 
     #[test]

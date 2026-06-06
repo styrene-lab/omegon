@@ -1685,6 +1685,15 @@ async fn stream_with_retry(
                 "{reason}: {err_msg}"
             );
             let advice = exhaustion_advice(transient_kind, rate_limit_exhausted, stall_exhausted);
+            let _ = events.send(AgentEvent::ProviderFailure {
+                provider: provider.clone(),
+                model: model.clone(),
+                reason: kind_label.to_string(),
+                attempts: attempt,
+                message: err_msg.clone(),
+                retryable: false,
+                recommended_action: advice.to_string(),
+            });
             let _ = events.send(AgentEvent::SystemNotification {
                 message: format!(
                     "🛑 {provider} {reason}: {attempt} consecutive {kind_label} failures over {:.0}s. {advice}",
@@ -1735,6 +1744,15 @@ async fn stream_with_retry(
             "⚠ Upstream {kind_label} — retrying (attempt {attempt}, delay {}ms): {operator_detail}",
             delay
         );
+        let _ = events.send(AgentEvent::ProviderRetry {
+            provider: provider.clone(),
+            model: model.clone(),
+            attempt,
+            delay_ms: delay,
+            reason: kind_label.to_string(),
+            message: operator_detail.clone(),
+            recoverable: true,
+        });
         let _ = events.send(AgentEvent::SystemNotification { message: msg });
         tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
         delay = delay.saturating_mul(2).min(15_000); // exponential backoff, cap at 15s

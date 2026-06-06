@@ -1007,6 +1007,66 @@
       "bound_change": null,
       "created_at": "2026-06-03T20:06:37Z",
       "updated_at": "2026-06-03T20:06:37Z"
+    },
+    {
+      "id": "acp-128-turn-control-telemetry",
+      "title": "Issue 128: ACP turn cancellation and provider telemetry",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-05T23:42:53Z",
+      "updated_at": "2026-06-05T23:42:53Z"
+    },
+    {
+      "id": "acp-128-session-cancel",
+      "title": "Use standard ACP session/cancel for scoped turn cancellation",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-05T23:43:14Z",
+      "updated_at": "2026-06-05T23:43:14Z"
+    },
+    {
+      "id": "acp-128-provider-events",
+      "title": "Emit provider retry/failure as ACP extension notifications",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-05T23:43:14Z",
+      "updated_at": "2026-06-05T23:43:14Z"
+    },
+    {
+      "id": "acp-128-event-plumbing",
+      "title": "Broaden ACP event plumbing for system events",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-05T23:43:14Z",
+      "updated_at": "2026-06-05T23:43:14Z"
     }
   ],
   "changes": [
@@ -2521,6 +2581,78 @@
       "to_state": "seed",
       "reason": null,
       "forced": false
+    },
+    {
+      "timestamp": "2026-06-05T23:42:53Z",
+      "entity_type": "node",
+      "entity_id": "acp-128-turn-control-telemetry",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-05T23:42:53Z",
+      "entity_type": "node",
+      "entity_id": "acp-128-turn-control-telemetry",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-06-05T23:43:14Z",
+      "entity_type": "node",
+      "entity_id": "acp-128-session-cancel",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-05T23:43:14Z",
+      "entity_type": "node",
+      "entity_id": "acp-128-session-cancel",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-06-05T23:43:14Z",
+      "entity_type": "node",
+      "entity_id": "acp-128-provider-events",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-05T23:43:14Z",
+      "entity_type": "node",
+      "entity_id": "acp-128-provider-events",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-06-05T23:43:14Z",
+      "entity_type": "node",
+      "entity_id": "acp-128-event-plumbing",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-05T23:43:14Z",
+      "entity_type": "node",
+      "entity_id": "acp-128-event-plumbing",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
     }
   ]
 }

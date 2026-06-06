@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.5] - 2026-06-05
+
+### Fixed
+
+- Add structured ACP turn-control telemetry for Flynt: validate standard `session/cancel` by active session, return `StopReason::Cancelled` for cancelled prompts, emit `_turn/cancelled`, and move provider retry/failure telemetry to `_provider/retry` and `_provider/failure` extension notifications instead of assistant-authored text.
+
 ## [0.26.4] - 2026-06-04
 
 ### Added
