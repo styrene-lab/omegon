@@ -429,23 +429,81 @@ pub async fn run(
             .force_compact
             .as_ref()
             .is_some_and(|flag| flag.swap(false, std::sync::atomic::Ordering::SeqCst));
-        if (forced_compact || conversation.needs_compaction(context_window, 0.75))
-            && let Some((payload, evict_count)) = conversation.build_compaction_payload()
-        {
-            tracing::info!(
-                estimated_tokens = conversation.estimate_tokens(),
-                evict_count,
-                forced = forced_compact,
-                "Context compaction requested"
-            );
-            // Use the bridge to summarize the evictable messages
-            match compact_via_llm(bridge, &payload, &base_stream_options).await {
-                Ok(summary) => {
-                    conversation.apply_compaction(summary);
+        if forced_compact || conversation.needs_compaction(context_window, 0.75) {
+            let before_tokens = conversation.estimate_tokens() as u64;
+            let trigger = if forced_compact {
+                omegon_traits::ContextCompactionTrigger::ForcedLoop
+            } else {
+                omegon_traits::ContextCompactionTrigger::AutoTier2
+            };
+            if let Some((payload, evict_count)) = conversation.build_compaction_payload() {
+                tracing::info!(
+                    estimated_tokens = before_tokens,
+                    evict_count,
+                    forced = forced_compact,
+                    "Context compaction requested"
+                );
+                emit_context_compaction_event(
+                    events,
+                    context_compaction_event(
+                        trigger,
+                        omegon_traits::ContextCompactionStatus::Started,
+                        before_tokens,
+                        None,
+                        Some(evict_count),
+                        None,
+                        None,
+                    ),
+                );
+                match compact_via_llm(bridge, &payload, &base_stream_options).await {
+                    Ok(summary) => {
+                        let summary_chars = summary.chars().count();
+                        conversation.apply_compaction(summary);
+                        emit_context_compaction_event(
+                            events,
+                            context_compaction_event(
+                                trigger,
+                                omegon_traits::ContextCompactionStatus::Succeeded,
+                                before_tokens,
+                                Some(conversation.estimate_tokens() as u64),
+                                Some(evict_count),
+                                Some(summary_chars),
+                                None,
+                            ),
+                        );
+                    }
+                    Err(e) => {
+                        let message = e.to_string();
+                        emit_context_compaction_event(
+                            events,
+                            context_compaction_event(
+                                trigger,
+                                omegon_traits::ContextCompactionStatus::Failed,
+                                before_tokens,
+                                None,
+                                Some(evict_count),
+                                None,
+                                Some(message.clone()),
+                            ),
+                        );
+                        tracing::warn!(
+                            "LLM compaction failed: {message} — continuing with decay only"
+                        );
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("LLM compaction failed: {e} — continuing with decay only");
-                }
+            } else {
+                emit_context_compaction_event(
+                    events,
+                    context_compaction_event(
+                        trigger,
+                        omegon_traits::ContextCompactionStatus::NoPayload,
+                        before_tokens,
+                        Some(before_tokens),
+                        Some(0),
+                        None,
+                        Some("no evictable messages older than decay window".to_string()),
+                    ),
+                );
             }
         }
 
@@ -585,18 +643,60 @@ pub async fn run(
                         let _ = events.send(AgentEvent::SystemNotification {
                             message: "Context overflow — compacting conversation and retrying…".into(),
                         });
+                        let before_tokens = conversation.estimate_tokens() as u64;
                         if let Some((payload, evict_count)) = conversation.build_compaction_payload() {
                             tracing::info!(evict_count, "Emergency compaction: evicting messages");
+                            emit_context_compaction_event(events, context_compaction_event(
+                                omegon_traits::ContextCompactionTrigger::ContextOverflow,
+                                omegon_traits::ContextCompactionStatus::Started,
+                                before_tokens,
+                                None,
+                                Some(evict_count),
+                                None,
+                                None,
+                            ));
                             match compact_via_llm(bridge, &payload, &base_stream_options).await {
-                                Ok(summary) => conversation.apply_compaction(summary),
+                                Ok(summary) => {
+                                    let summary_chars = summary.chars().count();
+                                    conversation.apply_compaction(summary);
+                                    emit_context_compaction_event(events, context_compaction_event(
+                                        omegon_traits::ContextCompactionTrigger::ContextOverflow,
+                                        omegon_traits::ContextCompactionStatus::Succeeded,
+                                        before_tokens,
+                                        Some(conversation.estimate_tokens() as u64),
+                                        Some(evict_count),
+                                        Some(summary_chars),
+                                        None,
+                                    ));
+                                }
                                 Err(ce) => {
-                                    tracing::warn!("Emergency LLM compaction failed: {ce} — applying decay");
+                                    let message = ce.to_string();
+                                    tracing::warn!("Emergency LLM compaction failed: {message} — applying decay");
                                     conversation.decay_oldest(evict_count);
+                                    emit_context_compaction_event(events, context_compaction_event(
+                                        omegon_traits::ContextCompactionTrigger::ContextOverflow,
+                                        omegon_traits::ContextCompactionStatus::Decayed,
+                                        before_tokens,
+                                        Some(conversation.estimate_tokens() as u64),
+                                        Some(evict_count),
+                                        None,
+                                        Some(message),
+                                    ));
                                 }
                             }
                         } else {
                             // Can't build compaction payload — decay aggressively
-                            conversation.decay_oldest(conversation.message_count() / 2);
+                            let evict_count = conversation.message_count() / 2;
+                            conversation.decay_oldest(evict_count);
+                            emit_context_compaction_event(events, context_compaction_event(
+                                omegon_traits::ContextCompactionTrigger::ContextOverflow,
+                                omegon_traits::ContextCompactionStatus::Decayed,
+                                before_tokens,
+                                Some(conversation.estimate_tokens() as u64),
+                                Some(evict_count),
+                                None,
+                                Some("no compaction payload available; applied aggressive decay".to_string()),
+                            ));
                         }
                         // Rebuild messages and retry once
                         let llm_messages = conversation.build_llm_view();
@@ -1285,17 +1385,71 @@ pub async fn run(
                 }
                 omegon_traits::BusRequest::RequestCompaction => {
                     tracing::info!("Bus: tier 2 compaction requested by feature");
-                    if let Some((payload, _evict_count)) = conversation.build_compaction_payload() {
+                    let before_tokens = conversation.estimate_tokens() as u64;
+                    if let Some((payload, evict_count)) = conversation.build_compaction_payload() {
+                        emit_context_compaction_event(
+                            events,
+                            context_compaction_event(
+                                omegon_traits::ContextCompactionTrigger::AutoTier2,
+                                omegon_traits::ContextCompactionStatus::Started,
+                                before_tokens,
+                                None,
+                                Some(evict_count),
+                                None,
+                                None,
+                            ),
+                        );
                         match compact_via_llm(bridge, &payload, &base_stream_options).await {
                             Ok(summary) => {
+                                let summary_chars = summary.chars().count();
                                 conversation.apply_compaction(summary);
+                                emit_context_compaction_event(
+                                    events,
+                                    context_compaction_event(
+                                        omegon_traits::ContextCompactionTrigger::AutoTier2,
+                                        omegon_traits::ContextCompactionStatus::Succeeded,
+                                        before_tokens,
+                                        Some(conversation.estimate_tokens() as u64),
+                                        Some(evict_count),
+                                        Some(summary_chars),
+                                        None,
+                                    ),
+                                );
                                 bus.emit(&omegon_traits::BusEvent::Compacted);
                             }
                             Err(e) => {
-                                tracing::warn!(error = %e, "auto-compaction failed");
+                                let message = e.to_string();
+                                emit_context_compaction_event(
+                                    events,
+                                    context_compaction_event(
+                                        omegon_traits::ContextCompactionTrigger::AutoTier2,
+                                        omegon_traits::ContextCompactionStatus::Failed,
+                                        before_tokens,
+                                        None,
+                                        Some(evict_count),
+                                        None,
+                                        Some(message.clone()),
+                                    ),
+                                );
+                                tracing::warn!(error = %message, "auto-compaction failed");
                             }
                         }
                     } else {
+                        emit_context_compaction_event(
+                            events,
+                            context_compaction_event(
+                                omegon_traits::ContextCompactionTrigger::AutoTier2,
+                                omegon_traits::ContextCompactionStatus::NoPayload,
+                                before_tokens,
+                                Some(before_tokens),
+                                Some(0),
+                                None,
+                                Some(
+                                    "auto-compaction requested but nothing was eligible to compact"
+                                        .to_string(),
+                                ),
+                            ),
+                        );
                         tracing::debug!(
                             "auto-compaction requested but nothing was eligible to compact"
                         );
@@ -1476,6 +1630,33 @@ fn plan_status_notification(calls: &[ToolCall], intent: &IntentDocument) -> Opti
 
 fn work_plan_snapshot_changed(before: &serde_json::Value, after: &serde_json::Value) -> bool {
     before != after
+}
+
+fn emit_context_compaction_event(
+    events: &broadcast::Sender<AgentEvent>,
+    event: omegon_traits::ContextCompactionEvent,
+) {
+    let _ = events.send(AgentEvent::ContextCompaction(event));
+}
+
+fn context_compaction_event(
+    trigger: omegon_traits::ContextCompactionTrigger,
+    status: omegon_traits::ContextCompactionStatus,
+    before_tokens: u64,
+    after_tokens: Option<u64>,
+    evicted_messages: Option<usize>,
+    summary_chars: Option<usize>,
+    reason: Option<String>,
+) -> omegon_traits::ContextCompactionEvent {
+    omegon_traits::ContextCompactionEvent {
+        trigger,
+        status,
+        before_tokens,
+        after_tokens,
+        evicted_messages,
+        summary_chars,
+        reason,
+    }
 }
 
 /// Request an LLM-driven compaction summary for old conversation messages.

@@ -2213,6 +2213,17 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "context_class": context_class,
             "thinking_level": thinking_level,
         }),
+        AgentEvent::ContextCompaction(event) => json!({
+            "type": "context_compaction",
+            "event_name": "context.compaction",
+            "trigger": event.trigger,
+            "status": event.status,
+            "before_tokens": event.before_tokens,
+            "after_tokens": event.after_tokens,
+            "evicted_messages": event.evicted_messages,
+            "summary_chars": event.summary_chars,
+            "reason": event.reason,
+        }),
         AgentEvent::SessionReset => json!({
             "type": "session_reset",
             "event_name": "session.reset",
@@ -2746,6 +2757,7 @@ mod tests {
             AgentEvent::HarnessStatusChanged { .. } => {}
             AgentEvent::WebDashboardStarted { .. } => {}
             AgentEvent::ContextUpdated { .. } => {}
+            AgentEvent::ContextCompaction(_) => {}
             AgentEvent::SessionReset => {}
             AgentEvent::PermissionRequest { .. } => {}
             AgentEvent::OperatorWaitRequest { .. } => {}
@@ -2875,6 +2887,15 @@ mod tests {
                 context_class: "Squad".into(),
                 thinking_level: "Low".into(),
             },
+            AgentEvent::ContextCompaction(omegon_traits::ContextCompactionEvent {
+                trigger: omegon_traits::ContextCompactionTrigger::Manual,
+                status: omegon_traits::ContextCompactionStatus::NoPayload,
+                before_tokens: 1000,
+                after_tokens: Some(1000),
+                evicted_messages: Some(0),
+                summary_chars: None,
+                reason: Some("no payload".into()),
+            }),
             AgentEvent::SessionReset,
         ];
         for event in &events {

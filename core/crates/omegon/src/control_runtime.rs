@@ -670,6 +670,7 @@ pub async fn execute_control(
                 ctx.agent,
                 ctx.shared_settings,
                 ctx.bridge,
+                ctx.events_tx,
             )
             .await
         }
@@ -1701,6 +1702,7 @@ pub async fn context_compact_response(
     agent: &mut InteractiveAgentHost,
     shared_settings: &settings::SharedSettings,
     bridge: &Arc<tokio::sync::RwLock<Box<dyn LlmBridge>>>,
+    events_tx: &broadcast::Sender<AgentEvent>,
 ) -> SlashCommandResponse {
     let bridge_guard = bridge.read().await;
     let stream_options = {
@@ -1712,10 +1714,23 @@ pub async fn context_compact_response(
             ..Default::default()
         }
     };
-    if let Some((payload, _)) = runtime_state.conversation.build_compaction_payload() {
+    let before_tokens = runtime_state.conversation.estimate_tokens() as u64;
+    if let Some((payload, evict_count)) = runtime_state.conversation.build_compaction_payload() {
+        let _ = events_tx.send(AgentEvent::ContextCompaction(
+            omegon_traits::ContextCompactionEvent {
+                trigger: omegon_traits::ContextCompactionTrigger::Manual,
+                status: omegon_traits::ContextCompactionStatus::Started,
+                before_tokens,
+                after_tokens: None,
+                evicted_messages: Some(evict_count),
+                summary_chars: None,
+                reason: None,
+            },
+        ));
         match crate::r#loop::compact_via_llm(bridge_guard.as_ref(), &payload, &stream_options).await
         {
             Ok(summary) => {
+                let summary_chars = summary.chars().count();
                 runtime_state.conversation.apply_compaction(summary);
                 let est = runtime_state.conversation.estimate_tokens();
                 let settings = shared_settings.lock().unwrap();
@@ -1727,17 +1742,53 @@ pub async fn context_compact_response(
                         settings.thinking.as_str(),
                     );
                 }
+                let _ = events_tx.send(AgentEvent::ContextCompaction(
+                    omegon_traits::ContextCompactionEvent {
+                        trigger: omegon_traits::ContextCompactionTrigger::Manual,
+                        status: omegon_traits::ContextCompactionStatus::Succeeded,
+                        before_tokens,
+                        after_tokens: Some(est as u64),
+                        evicted_messages: Some(evict_count),
+                        summary_chars: Some(summary_chars),
+                        reason: None,
+                    },
+                ));
                 SlashCommandResponse {
                     accepted: true,
                     output: Some(format!("Context compressed. Now using {est} tokens.")),
                 }
             }
-            Err(e) => SlashCommandResponse {
-                accepted: false,
-                output: Some(format!("Compression failed: {e}")),
-            },
+            Err(e) => {
+                let message = e.to_string();
+                let _ = events_tx.send(AgentEvent::ContextCompaction(
+                    omegon_traits::ContextCompactionEvent {
+                        trigger: omegon_traits::ContextCompactionTrigger::Manual,
+                        status: omegon_traits::ContextCompactionStatus::Failed,
+                        before_tokens,
+                        after_tokens: None,
+                        evicted_messages: Some(evict_count),
+                        summary_chars: None,
+                        reason: Some(message.clone()),
+                    },
+                ));
+                SlashCommandResponse {
+                    accepted: false,
+                    output: Some(format!("Compression failed: {message}")),
+                }
+            }
         }
     } else {
+        let _ = events_tx.send(AgentEvent::ContextCompaction(
+            omegon_traits::ContextCompactionEvent {
+                trigger: omegon_traits::ContextCompactionTrigger::Manual,
+                status: omegon_traits::ContextCompactionStatus::NoPayload,
+                before_tokens,
+                after_tokens: Some(before_tokens),
+                evicted_messages: Some(0),
+                summary_chars: None,
+                reason: Some("no evictable messages older than decay window".to_string()),
+            },
+        ));
         SlashCommandResponse {
             accepted: true,
             output: Some(
@@ -3909,5 +3960,153 @@ mod tests {
         assert!(rendered.contains("Auth file"));
         assert!(rendered.contains("Provider Status"));
         assert!(rendered.contains("openai-codex"));
+    }
+}
+
+#[cfg(test)]
+mod context_compaction_tests {
+    use super::*;
+    use crate::bridge::{LlmEvent, MockBridge};
+
+    fn test_runtime_state_with_evictable_context() -> InteractiveAgentState {
+        let mut conversation = crate::conversation::ConversationState::new();
+        conversation.push_user("old context".into());
+        conversation.intent.stats.turns = 99;
+        InteractiveAgentState {
+            bus: crate::bus::EventBus::new(),
+            context_manager: crate::context::ContextManager::new(String::new(), Vec::new()),
+            conversation,
+        }
+    }
+
+    fn test_agent() -> InteractiveAgentHost {
+        use crate::workspace::types::{
+            Mutability, WorkspaceBackendKind, WorkspaceBindings, WorkspaceKind, WorkspaceLease,
+            WorkspaceRole,
+        };
+        let cwd = tempfile::tempdir().unwrap().keep();
+        let secrets =
+            std::sync::Arc::new(omegon_secrets::SecretsManager::new(&cwd.join("secrets")).unwrap());
+        InteractiveAgentHost {
+            session_id: crate::session::allocate_session_id(),
+            instance_id: "test-instance".into(),
+            context_metrics: crate::features::context::SharedContextMetrics::new(),
+            cwd: cwd.clone(),
+            secrets,
+            web_auth_state: crate::web::WebAuthState::ephemeral_generated("test-token".into()),
+            dashboard_handles: Default::default(),
+            resume_info: None,
+            workspace_state: crate::setup::WorkspaceStartupState {
+                lease: WorkspaceLease {
+                    project_id: "test-project".into(),
+                    workspace_id: "test-workspace".into(),
+                    label: "test".into(),
+                    path: cwd.display().to_string(),
+                    backend_kind: WorkspaceBackendKind::LocalDir,
+                    vcs_ref: None,
+                    bindings: WorkspaceBindings::default(),
+                    branch: "main".into(),
+                    role: WorkspaceRole::Primary,
+                    workspace_kind: WorkspaceKind::Code,
+                    mutability: Mutability::Mutable,
+                    owner_session_id: Some("test-session".into()),
+                    owner_agent_id: Some("test-agent".into()),
+                    created_at: "2026-05-14T00:00:00Z".into(),
+                    last_heartbeat: "2026-05-14T00:00:00Z".into(),
+                    archived: false,
+                    archived_at: None,
+                    archive_reason: None,
+                    parent_workspace_id: None,
+                    source: "test".into(),
+                },
+                admission: crate::workspace::types::AdmissionOutcome::GrantedMutable,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn manual_context_compact_emits_no_payload_diagnostic() {
+        let mut state = InteractiveAgentState {
+            bus: crate::bus::EventBus::new(),
+            context_manager: crate::context::ContextManager::new(String::new(), Vec::new()),
+            conversation: crate::conversation::ConversationState::new(),
+        };
+        let mut agent = test_agent();
+        let settings = crate::settings::shared("test:model");
+        let bridge = Arc::new(tokio::sync::RwLock::new(
+            Box::new(MockBridge { events: vec![] }) as Box<dyn LlmBridge>,
+        ));
+        let (events_tx, mut events_rx) = broadcast::channel(8);
+
+        let response =
+            context_compact_response(&mut state, &mut agent, &settings, &bridge, &events_tx).await;
+
+        assert!(response.accepted);
+        let event = events_rx.recv().await.unwrap();
+        match event {
+            AgentEvent::ContextCompaction(event) => {
+                assert_eq!(
+                    event.trigger,
+                    omegon_traits::ContextCompactionTrigger::Manual
+                );
+                assert_eq!(
+                    event.status,
+                    omegon_traits::ContextCompactionStatus::NoPayload
+                );
+                assert_eq!(event.evicted_messages, Some(0));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn manual_context_compact_emits_started_and_succeeded_diagnostics() {
+        let mut state = test_runtime_state_with_evictable_context();
+        let mut agent = test_agent();
+        let settings = crate::settings::shared("test:model");
+        let bridge = Arc::new(tokio::sync::RwLock::new(Box::new(MockBridge {
+            events: vec![
+                LlmEvent::TextDelta {
+                    delta: "summary".into(),
+                },
+                LlmEvent::Done {
+                    message: serde_json::json!({}),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                    provider_telemetry: None,
+                },
+            ],
+        }) as Box<dyn LlmBridge>));
+        let (events_tx, mut events_rx) = broadcast::channel(8);
+
+        let response =
+            context_compact_response(&mut state, &mut agent, &settings, &bridge, &events_tx).await;
+
+        assert!(response.accepted, "{response:?}");
+        let first = events_rx.recv().await.unwrap();
+        let second = events_rx.recv().await.unwrap();
+        match first {
+            AgentEvent::ContextCompaction(event) => {
+                assert_eq!(
+                    event.status,
+                    omegon_traits::ContextCompactionStatus::Started
+                );
+                assert_eq!(event.evicted_messages, Some(1));
+            }
+            other => panic!("unexpected first event: {other:?}"),
+        }
+        match second {
+            AgentEvent::ContextCompaction(event) => {
+                assert_eq!(
+                    event.status,
+                    omegon_traits::ContextCompactionStatus::Succeeded
+                );
+                assert_eq!(event.summary_chars, Some(7));
+                assert!(event.after_tokens.is_some());
+            }
+            other => panic!("unexpected second event: {other:?}"),
+        }
     }
 }

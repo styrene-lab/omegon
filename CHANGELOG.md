@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.7] - 2026-06-05
+
+### Added
+
+- Add structured context compaction diagnostics across manual, forced-loop, auto, bus-requested, and context-overflow compaction paths, including WebSocket `context.compaction` events and tests for manual no-payload/success outcomes.
+
 ## [0.26.6] - 2026-06-05
 
 ### Fixed
