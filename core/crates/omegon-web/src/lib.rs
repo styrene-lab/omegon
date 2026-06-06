@@ -1,8 +1,9 @@
 //! Zero-config web search and content extraction.
 //!
-//! Provides web search via Google, Bing, and DuckDuckGo HTML scraping —
-//! no API keys required. Each engine parses search result pages with
-//! CSS selectors via the `scraper` crate for robustness against markup changes.
+//! Provides best-effort zero-key web search via DuckDuckGo HTML scraping.
+//! The scraper parses DuckDuckGo's static HTML endpoint with CSS selectors via
+//! the `scraper` crate. Configure authenticated providers in Omegon for
+//! reliable search.
 //!
 //! # Usage
 //!
@@ -18,9 +19,9 @@
 //!
 //! # Privacy
 //!
-//! Free search engines send queries to Google, Bing, and DuckDuckGo servers.
-//! Your IP address and search terms are visible to those services.
-//! For better privacy, configure API-based providers (Tavily, Serper, Brave).
+//! Zero-key search sends queries to DuckDuckGo servers. Your IP address and
+//! search terms are visible to DuckDuckGo. For better reliability and privacy
+//! controls, configure API-based providers (Tavily, Serper, Brave, Firecrawl).
 
 mod engines;
 mod extract;
@@ -94,7 +95,7 @@ impl WebClient {
         opts: &SearchOptions,
     ) -> Result<Vec<SearchResult>, SearchError> {
         let engines = if opts.engines.is_empty() {
-            vec![Engine::Google, Engine::Bing, Engine::DuckDuckGo]
+            vec![Engine::DuckDuckGo]
         } else {
             opts.engines.clone()
         };
