@@ -18,6 +18,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ### Fixed
 
+- Make harness secret storage idempotent across recipes, keyring values, session caches, redaction, and process-env projection so named secret repairs can recover orphaned keychain entries without scanning the whole keychain.
 - Strip TOML frontmatter from design lifecycle documents and generated site legal/changelog pages so publication metadata does not leak into rendered content or duplicate design-node titles.
 
 ## [0.26.3] - 2026-06-04

@@ -286,11 +286,10 @@ pub fn parse_sections(body: &str) -> DocumentSections {
 
     for (heading, content) in h2_blocks {
         match heading {
-            "" => {
-                if sections.overview.is_empty() {
-                    sections.overview = content.trim().to_string();
-                }
+            "" if sections.overview.is_empty() => {
+                sections.overview = content.trim().to_string();
             }
+            "" => {}
             "Overview" => sections.overview = content.trim().to_string(),
             "Research" => sections.research = parse_research(&content),
             "Decisions" => sections.decisions = parse_decisions(&content),

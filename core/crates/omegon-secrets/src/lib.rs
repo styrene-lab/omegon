@@ -62,6 +62,30 @@ pub struct SessionSecretDiagnostic {
     pub used_by: Vec<SecretUse>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecretRecipeStatus {
+    Resolved,
+    Missing,
+    Deferred,
+}
+
+impl SecretRecipeStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Resolved => "resolves",
+            Self::Missing => "missing",
+            Self::Deferred => "deferred",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SecretRecipeDiagnostic {
+    pub name: String,
+    pub recipe: String,
+    pub status: SecretRecipeStatus,
+}
+
 /// Central secrets manager — owns the redaction set, recipes, guards, and Vault client.
 pub struct SecretsManager {
     /// Resolved secret values for redaction (name → SecretString).
@@ -589,6 +613,42 @@ impl SecretsManager {
             .collect()
     }
 
+    /// List configured secret recipes with bounded diagnostics.
+    ///
+    /// This checks only declared recipes, never the whole keychain. Vault recipes
+    /// are marked deferred because they require async resolution and may depend
+    /// on external service availability.
+    pub fn list_recipe_diagnostics(&self) -> Vec<SecretRecipeDiagnostic> {
+        let recipes: Vec<(String, crate::recipes::Recipe)> = self
+            .recipes
+            .read()
+            .unwrap()
+            .iter()
+            .map(|(name, recipe)| (name.clone(), recipe.clone()))
+            .collect();
+
+        let mut diagnostics: Vec<_> = recipes
+            .into_iter()
+            .map(|(name, recipe)| {
+                let recipe_text = recipe.as_string();
+                let status = if recipe.is_vault() {
+                    SecretRecipeStatus::Deferred
+                } else if resolve::execute_recipe(&name, &recipe).is_some() {
+                    SecretRecipeStatus::Resolved
+                } else {
+                    SecretRecipeStatus::Missing
+                };
+                SecretRecipeDiagnostic {
+                    name,
+                    recipe: recipe_text,
+                    status,
+                }
+            })
+            .collect();
+        diagnostics.sort_by(|a, b| a.name.cmp(&b.name));
+        diagnostics
+    }
+
     /// Resolve well-known provider secrets into process environment variables
     /// so legacy env-based integrations (web search, provider clients) can use
     /// secrets stored in Omegon's keyring/recipe system.
@@ -619,19 +679,37 @@ impl SecretsManager {
 
     /// Store a raw value in the OS keyring and create a keyring: recipe for it.
     pub fn set_keyring_secret(&self, name: &str, value: &str) -> anyhow::Result<()> {
-        // Store in keyring
+        // Upsert in keyring first. If a previous run left an orphaned keychain
+        // item without a recipe, this still succeeds and repairs the metadata.
         store_in_keyring(name, value)?;
-        // Create recipe pointing to keyring
-        self.set_recipe(name, &format!("keyring:{name}"))?;
-        // Inject the value directly — refresh_redaction_set() skips keyring:
-        // recipes to avoid prompts, but here we already have the raw value.
+        self.recipes
+            .write()
+            .unwrap()
+            .set_string(name.to_string(), format!("keyring:{name}"))?;
+
+        let secret = SecretString::from(value.to_string());
         self.redaction_set
             .write()
             .unwrap()
-            .insert(name.to_string(), SecretString::from(value));
-        // Rebuild the Aho-Corasick automaton so redact() catches this value
-        // immediately. Without this, the automaton is stale and the secret
-        // passes through unredacted until the next preflight.
+            .insert(name.to_string(), secret.clone());
+        self.session_cache
+            .write()
+            .unwrap()
+            .insert(name.to_string(), secret);
+        self.session_meta
+            .write()
+            .unwrap()
+            .entry(name.to_string())
+            .and_modify(|m| {
+                m.warmed = true;
+                m.used_by.insert(SecretUse::Other);
+            })
+            .or_insert_with(|| CachedSecretMeta {
+                source: "keyring",
+                warmed: true,
+                required_at_startup: false,
+                used_by: HashSet::from([SecretUse::Other]),
+            });
         self.rebuild_redactor();
         self.hydrate_process_env();
         Ok(())
@@ -661,11 +739,15 @@ impl SecretsManager {
         tracing::info!(evicted = ?names, "evicted secrets from session cache");
     }
 
-    /// Delete a secret recipe (and try to remove from keyring if applicable).
+    /// Delete a secret recipe and any same-name keyring entry.
+    ///
+    /// Deletion is idempotent across the secrets surface: absent recipes and
+    /// absent keychain entries are success states. The same-name keyring cleanup
+    /// handles repaired/orphaned harness-managed secrets without keychain scans.
     pub fn delete_recipe(&self, name: &str) -> anyhow::Result<()> {
-        // Try to remove from keyring
-        let _ = delete_from_keyring(name); // best-effort
+        delete_from_keyring(name)?;
         self.recipes.write().unwrap().remove(name).map(|_| ())?;
+        self.evict_secrets(&[name]);
         self.refresh_redaction_set();
         if resolve::STATIC_SECRET_ENVS.contains(&name)
             || resolve::REFRESHABLE_OAUTH_SECRET_ENVS.contains(&name)
@@ -777,6 +859,91 @@ mod tests {
         let client = secrets.vault_client().await;
         assert!(client.is_some());
         assert!(client.as_ref().unwrap().is_authenticated());
+    }
+
+    #[test]
+    fn keyring_secret_set_repairs_missing_recipe_and_is_idempotent() {
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = SecretsManager::new(dir.path()).unwrap();
+
+        // Simulate the split-brain state: secure storage has a value, but the
+        // recipe store has no declaration for the secret.
+        store_in_keyring("BRAVE_API_KEY", "old-value").unwrap();
+        assert!(mgr.list_recipes().is_empty());
+        assert!(mgr.resolve("BRAVE_API_KEY").is_none());
+
+        mgr.set_keyring_secret("BRAVE_API_KEY", "new-value")
+            .unwrap();
+        assert_eq!(
+            mgr.list_recipes(),
+            vec![(
+                "BRAVE_API_KEY".to_string(),
+                "keyring:BRAVE_API_KEY".to_string()
+            )]
+        );
+        assert_eq!(mgr.resolve("BRAVE_API_KEY").as_deref(), Some("new-value"));
+        assert_eq!(
+            std::env::var("BRAVE_API_KEY").ok().as_deref(),
+            Some("new-value")
+        );
+        assert_eq!(
+            mgr.redact("Authorization: Bearer new-value"),
+            "Authorization: Bearer [REDACTED:BRAVE_API_KEY]"
+        );
+
+        mgr.set_keyring_secret("BRAVE_API_KEY", "newer-value")
+            .unwrap();
+        assert_eq!(mgr.resolve("BRAVE_API_KEY").as_deref(), Some("newer-value"));
+
+        // SAFETY: cleanup for isolated test env vars.
+        unsafe { std::env::remove_var("BRAVE_API_KEY") };
+    }
+
+    #[test]
+    fn delete_recipe_is_idempotent_and_clears_same_name_keyring_secret() {
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = SecretsManager::new(dir.path()).unwrap();
+
+        mgr.set_keyring_secret("BRAVE_API_KEY", "delete-me")
+            .unwrap();
+        assert_eq!(mgr.resolve("BRAVE_API_KEY").as_deref(), Some("delete-me"));
+
+        mgr.delete_recipe("BRAVE_API_KEY").unwrap();
+        mgr.delete_recipe("BRAVE_API_KEY").unwrap();
+
+        assert!(mgr.resolve("BRAVE_API_KEY").is_none());
+        assert!(mgr.list_recipes().is_empty());
+        assert!(std::env::var("BRAVE_API_KEY").is_err());
+        assert_eq!(mgr.redact("delete-me"), "delete-me");
+    }
+
+    #[test]
+    fn list_recipe_diagnostics_reports_bounded_status() {
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = SecretsManager::new(dir.path()).unwrap();
+
+        mgr.set_keyring_secret("BRAVE_API_KEY", "diagnostic-value")
+            .unwrap();
+        mgr.set_recipe("TAVILY_API_KEY", "env:OMEGON_TEST_MISSING_TAVILY")
+            .unwrap();
+
+        let diagnostics = mgr.list_recipe_diagnostics();
+        assert!(diagnostics.iter().any(|entry| {
+            entry.name == "BRAVE_API_KEY"
+                && entry.recipe == "keyring:BRAVE_API_KEY"
+                && entry.status == SecretRecipeStatus::Resolved
+        }));
+        assert!(diagnostics.iter().any(|entry| {
+            entry.name == "TAVILY_API_KEY"
+                && entry.recipe == "env:OMEGON_TEST_MISSING_TAVILY"
+                && entry.status == SecretRecipeStatus::Missing
+        }));
+
+        // SAFETY: cleanup for isolated test env vars.
+        unsafe { std::env::remove_var("BRAVE_API_KEY") };
     }
 
     #[test]
