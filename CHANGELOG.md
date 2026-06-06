@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.9] - 2026-06-06
+
+### Added
+
+- Complete ACP issue #132 P0 runtime observability with `_runtime/status`, `_provider/status`, truthful `_runtime/capabilities`, extension load/callability diagnostics, and generic `_extensions/call` for live extension RPC control-plane access.
+
 ## [0.26.8] - 2026-06-06
 
 ### Added

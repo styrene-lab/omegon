@@ -499,9 +499,12 @@ pub struct OmegonAcpAgent {
     worker: RefCell<Option<WorkerHandle>>,
     conn: SharedAcpClientConnection,
     session_id: RefCell<Option<SessionId>>,
+    session_cwd: RefCell<Option<std::path::PathBuf>>,
     secrets: RefCell<Option<std::sync::Arc<omegon_secrets::SecretsManager>>>,
     host_caps: RefCell<HostCapabilities>,
     extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    extension_rpc_handles:
+        Rc<RefCell<std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>>>,
 }
 
 impl OmegonAcpAgent {
@@ -518,9 +521,11 @@ impl OmegonAcpAgent {
             worker: RefCell::new(None),
             conn: Rc::new(RefCell::new(None)),
             session_id: RefCell::new(None),
+            session_cwd: RefCell::new(None),
             secrets: RefCell::new(None),
             host_caps: RefCell::new(HostCapabilities::default()),
             extension_metadata,
+            extension_rpc_handles: Rc::new(RefCell::new(Default::default())),
         }
     }
 
@@ -765,6 +770,79 @@ impl OmegonAcpAgent {
         }
         (self.model.clone(), "minimal".into(), "fabricator".into())
     }
+
+    fn runtime_status_json(&self) -> serde_json::Value {
+        let (model, thinking, posture) = self.current_settings();
+        let cwd = std::env::current_dir().ok();
+        let session_cwd = self.session_cwd.borrow().clone().or_else(|| cwd.clone());
+        let session_id = self.session_id.borrow().as_ref().map(|id| id.to_string());
+        let binary = std::env::current_exe().ok();
+        serde_json::json!({
+            "runtime": {
+                "name": "omegon",
+                "version": env!("CARGO_PKG_VERSION"),
+                "commit": env!("OMEGON_GIT_SHA"),
+                "build_date": env!("OMEGON_BUILD_DATE"),
+                "binary": binary.as_ref().map(|p| p.display().to_string()),
+                "cwd": cwd.as_ref().map(|p| p.display().to_string())
+            },
+            "acp": {
+                "protocol_version": 1,
+                "transport": "stdio",
+                "session_id": session_id,
+                "session_cwd": session_cwd.as_ref().map(|p| p.display().to_string()),
+                "connected": self.conn.borrow().is_some()
+            },
+            "agent": {
+                "id": "default",
+                "profile": serde_json::Value::Null,
+                "model": model,
+                "thinking": thinking,
+                "posture": posture
+            },
+            "memory": {
+                "scope": "project",
+                "root": session_cwd.as_ref().map(|p| p.join(".omegon").display().to_string())
+            }
+        })
+    }
+
+    fn provider_status_json(&self) -> serde_json::Value {
+        let (model, _thinking, _posture) = self.current_settings();
+        let active_provider_id = crate::providers::infer_provider_id(&model);
+        let providers: Vec<serde_json::Value> = crate::auth::PROVIDERS
+            .iter()
+            .map(|provider| {
+                let status = crate::auth::provider_session_status(provider);
+                let status_text = match status {
+                    crate::auth::ProviderSessionStatus::Configured => "authenticated",
+                    crate::auth::ProviderSessionStatus::Expired => "expired",
+                    crate::auth::ProviderSessionStatus::Missing => "missing",
+                };
+                serde_json::json!({
+                    "id": provider.id,
+                    "name": provider.display_name,
+                    "status": status_text,
+                    "expires_at": serde_json::Value::Null,
+                    "models": []
+                })
+            })
+            .collect();
+        let active_status = crate::auth::provider_by_id(&active_provider_id)
+            .map(crate::auth::provider_session_status);
+        let ready = matches!(
+            active_status,
+            Some(crate::auth::ProviderSessionStatus::Configured)
+        ) || active_provider_id == "ollama";
+        serde_json::json!({
+            "providers": providers,
+            "active": {
+                "provider": active_provider_id,
+                "model": model,
+                "ready": ready
+            }
+        })
+    }
 }
 
 fn extension_metadata_meta(
@@ -822,6 +900,7 @@ impl OmegonAcpAgent {
 
     async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
         let cwd = args.cwd;
+        *self.session_cwd.borrow_mut() = Some(cwd.clone());
 
         // Create session ID *before* ensure_worker so the proxy pump
         // receives the correct session ID for host RPC calls.
@@ -969,6 +1048,7 @@ impl OmegonAcpAgent {
             let conn = self.conn.clone();
             let stream_sid = sid.clone();
             let secrets_ref = self.secrets.clone();
+            let extension_rpc_handles = self.extension_rpc_handles.clone();
             tokio::task::spawn_local(async move {
                 // Closure to redact text through the secrets manager if available.
                 let redact = |text: &str| -> String {
@@ -1180,6 +1260,9 @@ impl OmegonAcpAgent {
                                 )
                                 .await;
                             }
+                        }
+                        Ok(WorkerEvent::ExtensionHandles(handles)) => {
+                            *extension_rpc_handles.borrow_mut() = handles;
                         }
                         Ok(WorkerEvent::TurnComplete) => break,
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -1410,6 +1493,10 @@ impl OmegonAcpAgent {
         let extensions_dir = crate::extension_cli::extensions_dir()?;
 
         match method {
+            "runtime/status" => Ok(self.runtime_status_json()),
+
+            "provider/status" => Ok(self.provider_status_json()),
+
             "runtime/capabilities" => Ok(serde_json::json!({
                 "surfaces": {
                     "_runtime/capabilities": { "version": 1 },
@@ -1518,11 +1605,32 @@ impl OmegonAcpAgent {
                                 .collect()
                         };
 
+                        let id = manifest.extension.name.clone();
+                        let metadata = self
+                            .extension_metadata
+                            .get(&id)
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
+                        let callable = self.extension_rpc_handles.borrow().contains_key(&id);
+                        let loaded = callable || self.extension_metadata.contains_key(&id);
                         extensions.push(serde_json::json!({
+                            "id": id,
                             "name": manifest.extension.name,
                             "version": manifest.extension.version,
                             "description": manifest.extension.description,
                             "enabled": state.enabled,
+                            "loaded": loaded,
+                            "callable": callable,
+                            "path": dir.display().to_string(),
+                            "source": "installed",
+                            "capabilities": {
+                                "tools": false,
+                                "resources": false,
+                                "prompts": false,
+                                "voice": manifest.capabilities.voice,
+                            },
+                            "metadata": metadata,
+                            "last_error": state.stability.last_error,
                             "config_schema": config_schema,
                             "secrets": {
                                 "required": secret_status(&manifest.secrets.required),
@@ -1533,6 +1641,32 @@ impl OmegonAcpAgent {
                 }
                 extensions.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
                 Ok(serde_json::json!({ "extensions": extensions }))
+            }
+
+            "extensions/call" => {
+                let extension = params["extension"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("invalid_request: missing 'extension' field"))?;
+                let rpc_method = params["method"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("invalid_request: missing 'method' field"))?;
+                if rpc_method.trim().is_empty() {
+                    anyhow::bail!("invalid_request: 'method' field must not be empty");
+                }
+                let rpc_params = params
+                    .get("params")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                let handle = self.extension_rpc_handles.borrow().get(extension).cloned();
+                let Some(handle) = handle else {
+                    anyhow::bail!(
+                        "extension_not_loaded: extension '{extension}' is not loaded or is not callable"
+                    );
+                };
+                handle
+                    .rpc_call(rpc_method, rpc_params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!("method_failed: {err}"))
             }
 
             "extensions/get" => {
@@ -2965,6 +3099,45 @@ mod extension_metadata_tests {
     }
 
     #[tokio::test]
+    async fn runtime_status_reports_session_and_agent_snapshot() {
+        let agent = Rc::new(OmegonAcpAgent::new("anthropic:claude-opus-4-6"));
+        let response = handle_acp_request_result(agent, "_runtime/status", &serde_json::json!({}))
+            .await
+            .unwrap();
+
+        assert_eq!(response["runtime"]["name"], "omegon");
+        assert_eq!(response["runtime"]["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(response["acp"]["protocol_version"], 1);
+        assert_eq!(response["acp"]["transport"], "stdio");
+        assert_eq!(response["acp"]["connected"], false);
+        assert_eq!(response["agent"]["model"], "anthropic:claude-opus-4-6");
+        assert_eq!(response["agent"]["thinking"], "minimal");
+        assert_eq!(response["agent"]["posture"], "fabricator");
+        assert_eq!(response["memory"]["scope"], "project");
+    }
+
+    #[tokio::test]
+    async fn provider_status_reports_active_model_without_prompting() {
+        let agent = Rc::new(OmegonAcpAgent::new("anthropic:claude-opus-4-6"));
+        let response = handle_acp_request_result(agent, "_provider/status", &serde_json::json!({}))
+            .await
+            .unwrap();
+
+        assert_eq!(response["active"]["provider"], "anthropic");
+        assert_eq!(response["active"]["model"], "anthropic:claude-opus-4-6");
+        assert!(response["active"]["ready"].is_boolean());
+        assert!(
+            response["providers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|provider| {
+                    provider["id"] == "anthropic" && provider["models"].as_array().is_some()
+                })
+        );
+    }
+
+    #[tokio::test]
     async fn runtime_capabilities_advertise_secret_surfaces() {
         let agent = Rc::new(OmegonAcpAgent::new("test-model"));
         let response =
@@ -2972,9 +3145,148 @@ mod extension_metadata_tests {
                 .await
                 .unwrap();
 
+        assert_eq!(response["surfaces"]["_runtime/status"]["version"], 1);
+        assert_eq!(response["surfaces"]["_provider/status"]["version"], 1);
+        assert_eq!(response["surfaces"]["_extensions/list"]["version"], 1);
+        assert_eq!(response["surfaces"]["_extensions/call"]["version"], 1);
         assert_eq!(response["surfaces"]["_secrets/capabilities"]["version"], 1);
         assert_eq!(response["surfaces"]["_secrets/list"]["version"], 1);
+        assert_eq!(response["features"]["extensions"], true);
         assert_eq!(response["features"]["secrets"], true);
+    }
+
+    #[tokio::test]
+    async fn extensions_list_reports_installed_not_callable_extension() {
+        let home = tempfile::tempdir().unwrap();
+        let ext_dir = home.path().join("extensions").join("dummy-ext");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        std::fs::write(
+            ext_dir.join("manifest.toml"),
+            r#"[extension]
+name = "dummy-ext"
+version = "0.1.0"
+description = "Dummy extension"
+
+[runtime]
+type = "native"
+binary = "bin/dummy"
+
+[capabilities]
+voice = true
+
+[secrets]
+required = ["DUMMY_TOKEN"]
+optional = ["DUMMY_OPTIONAL"]
+"#,
+        )
+        .unwrap();
+
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(agent, "_extensions/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        let extensions = response["extensions"].as_array().unwrap();
+        let ext = extensions
+            .iter()
+            .find(|entry| entry["id"] == "dummy-ext")
+            .expect("dummy extension listed");
+        assert_eq!(ext["name"], "dummy-ext");
+        assert_eq!(ext["version"], "0.1.0");
+        assert_eq!(ext["enabled"], true);
+        assert_eq!(ext["loaded"], false);
+        assert_eq!(ext["callable"], false);
+        assert_eq!(ext["capabilities"]["voice"], true);
+        assert_eq!(ext["last_error"], serde_json::Value::Null);
+        assert_eq!(ext["secrets"]["required"][0]["name"], "DUMMY_TOKEN");
+    }
+
+    #[tokio::test]
+    async fn extensions_call_missing_extension_returns_structured_error() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_extensions/call",
+            &serde_json::json!({
+                "extension": "missing-extension",
+                "method": "ping",
+                "params": {}
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("extension_not_loaded:")
+        );
+    }
+
+    #[tokio::test]
+    async fn extensions_call_rejects_empty_method() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_extensions/call",
+            &serde_json::json!({ "extension": "flynt", "method": "   " }),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("invalid_request:")
+        );
+    }
+
+    #[tokio::test]
+    async fn extensions_call_defaults_missing_params_to_object_before_lookup() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_extensions/call",
+            &serde_json::json!({ "extension": "missing-extension", "method": "ping" }),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("extension_not_loaded:")
+        );
+    }
+
+    #[tokio::test]
+    async fn extensions_call_rejects_missing_method() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_extensions/call",
+            &serde_json::json!({ "extension": "flynt" }),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("invalid_request:")
+        );
     }
 
     #[tokio::test]

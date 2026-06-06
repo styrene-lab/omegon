@@ -8214,6 +8214,7 @@ mod tests {
             },
             extension_widgets: vec![],
             extension_metadata: Default::default(),
+            extension_rpc_handles: Default::default(),
             widget_receivers: vec![],
             cleave_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
             delegate_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),

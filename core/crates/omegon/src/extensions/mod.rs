@@ -493,6 +493,14 @@ pub struct ExtensionPollingHandle {
     notification_sink: Option<ExtensionNotificationSink>,
 }
 
+impl std::fmt::Debug for ExtensionPollingHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExtensionPollingHandle")
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
+}
+
 impl ExtensionPollingHandle {
     pub async fn pump_notifications_for(&self, idle_timeout: std::time::Duration) -> Result<()> {
         let mut guard = self.handles.lock().await;
@@ -739,6 +747,8 @@ pub struct SpawnedExtension {
     pub metadata: Option<Value>,
     /// SDK contract compatibility classification derived from initialize metadata.
     pub sdk_compatibility: SdkCompatibilityDiagnostic,
+    /// Generic RPC handle for ACP/runtime control-plane calls.
+    pub rpc_polling_handle: ExtensionPollingHandle,
     /// Polling handle for extensions that provide `vox_route` (event bridge).
     pub vox_polling_handle: Option<ExtensionPollingHandle>,
     /// Idle notification pump for voice-capable extensions.
@@ -1244,6 +1254,7 @@ async fn spawn_native(
     };
 
     let nex_delegation_executor = nex_delegation_executor(&feature);
+    let rpc_polling_handle = feature.polling_handle();
     Ok(SpawnedExtension {
         feature: Box::new(feature),
         widgets: tab_widgets,
@@ -1251,6 +1262,7 @@ async fn spawn_native(
         metadata: handshake.metadata,
         sdk_compatibility: handshake.sdk_compatibility,
         nex_delegation_executor,
+        rpc_polling_handle,
         vox_polling_handle,
         voice_polling_handle,
         voice_notification_rx: notification_pair.1,
@@ -1344,6 +1356,7 @@ async fn spawn_container(
     };
 
     let nex_delegation_executor = nex_delegation_executor(&feature);
+    let rpc_polling_handle = feature.polling_handle();
     Ok(SpawnedExtension {
         feature: Box::new(feature),
         widgets: tab_widgets,
@@ -1351,6 +1364,7 @@ async fn spawn_container(
         metadata: handshake.metadata,
         sdk_compatibility: handshake.sdk_compatibility,
         nex_delegation_executor,
+        rpc_polling_handle,
         vox_polling_handle,
         voice_polling_handle,
         voice_notification_rx: notification_pair.1,

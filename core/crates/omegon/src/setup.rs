@@ -76,6 +76,9 @@ pub struct AgentSetup {
     pub extension_widgets: Vec<crate::extensions::ExtensionTabWidget>,
     /// Extension deployment metadata discovered during startup.
     pub extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Loaded extension RPC handles keyed by extension id/name for ACP control-plane calls.
+    pub extension_rpc_handles:
+        std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>,
     /// Extension widget event receivers discovered during setup.
     pub widget_receivers: Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
     /// Slot the AgentEvent broadcast sender gets written into once main.rs
@@ -738,6 +741,7 @@ impl AgentSetup {
             voice_notification_receivers,
             voice_polling_handles,
             extension_metadata,
+            extension_rpc_handles,
             nex_delegation_executor,
         ) = match discover_and_register_extensions(&cwd, &mut bus, std::sync::Arc::clone(&secrets))
             .await
@@ -749,6 +753,7 @@ impl AgentSetup {
                 voice_receivers,
                 voice_handles,
                 metadata,
+                rpc_handles,
                 nex_executor,
             )) => (
                 widgets,
@@ -757,6 +762,7 @@ impl AgentSetup {
                 voice_receivers,
                 voice_handles,
                 metadata,
+                rpc_handles,
                 nex_executor,
             ),
             Err(e) => {
@@ -767,6 +773,7 @@ impl AgentSetup {
                     vec![],
                     vec![],
                     vec![],
+                    Default::default(),
                     Default::default(),
                     None,
                 )
@@ -1197,6 +1204,7 @@ impl AgentSetup {
             initial_harness_status: initial_harness_status.clone(),
             extension_widgets,
             extension_metadata,
+            extension_rpc_handles,
             widget_receivers,
             dashboard_handles: crate::tui::dashboard::DashboardHandles {
                 lifecycle: Some(lifecycle_handle),
@@ -1537,6 +1545,7 @@ async fn discover_and_register_extensions(
     Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
     Vec<crate::extensions::ExtensionPollingHandle>,
     std::collections::BTreeMap<String, serde_json::Value>,
+    std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>,
     Option<std::sync::Arc<dyn crate::tools::nex_substrate::NexDelegationExecutor>>,
 )> {
     let ext_dir = crate::paths::omegon_home()?.join("extensions");
@@ -1549,6 +1558,7 @@ async fn discover_and_register_extensions(
             vec![],
             vec![],
             vec![],
+            Default::default(),
             Default::default(),
             None,
         ));
@@ -1564,6 +1574,7 @@ async fn discover_and_register_extensions(
     let mut voice_notification_receivers = vec![];
     let mut voice_polling_handles = vec![];
     let mut extension_metadata = std::collections::BTreeMap::new();
+    let mut extension_rpc_handles = std::collections::BTreeMap::new();
     let mut nex_delegation_executor: Option<
         std::sync::Arc<dyn crate::tools::nex_substrate::NexDelegationExecutor>,
     > = None;
@@ -1646,6 +1657,7 @@ async fn discover_and_register_extensions(
                         &spawned.sdk_compatibility,
                     ),
                 );
+                extension_rpc_handles.insert(ext_name.to_string(), spawned.rpc_polling_handle);
                 if nex_delegation_executor.is_none() {
                     nex_delegation_executor = spawned.nex_delegation_executor.map(|executor| {
                         executor
@@ -1686,6 +1698,7 @@ async fn discover_and_register_extensions(
         voice_notification_receivers,
         voice_polling_handles,
         extension_metadata,
+        extension_rpc_handles,
         nex_delegation_executor,
     ))
 }
