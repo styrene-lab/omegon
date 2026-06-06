@@ -16,6 +16,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Changed
+
+- Remove Google and Bing from zero-key web search: automatic free search now uses only DuckDuckGo, while reliable search remains available through configured Brave, Tavily, Serper, or Firecrawl API keys.
+
+### Fixed
+
+- Classify DuckDuckGo zero-key search responses before parsing so no-result pages, bot/challenge pages, consent/region interstitials, and unexpected HTML shells produce actionable diagnostics instead of a generic parser failure.
+- Stop advertising Brotli in zero-key web-search requests so DuckDuckGo does not return `br`-encoded HTML that the current reqwest client cannot decode before parsing.
+
 ## [0.26.16] - 2026-06-07
 
 ### Added
@@ -64,7 +73,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Added
 
 - Complete ACP issue #132 P0 runtime observability with `_runtime/status`, `_provider/status`, truthful `_runtime/capabilities`, extension load/callability diagnostics, and generic `_extensions/call` for live extension RPC control-plane access.
-
 ## [0.26.8] - 2026-06-06
 
 ### Added

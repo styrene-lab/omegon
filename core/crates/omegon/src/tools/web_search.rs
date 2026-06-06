@@ -63,9 +63,9 @@ impl WebSearchProvider {
         if self.resolve_key("FIRECRAWL_API_KEY").is_some() {
             providers.push("firecrawl");
         }
-        // Free engines — always available, no API key
-        providers.push("google");
-        providers.push("bing");
+        // Best-effort zero-key engine. Google/Bing HTML scraping is deliberately
+        // not exposed: Google serves anti-automation retry shells, and Microsoft's
+        // Bing Search API docs are retired with no current free search API tier.
         providers.push("ddg");
         providers
     }
@@ -298,12 +298,8 @@ impl WebSearchProvider {
             "tavily" => self.search_tavily(query, max_results, topic).await,
             "serper" => self.search_serper(query, max_results, topic).await,
             "firecrawl" => self.search_firecrawl(query, max_results).await,
-            "google" | "bing" | "ddg" => {
-                let engine = match provider {
-                    "google" => omegon_web::Engine::Google,
-                    "bing" => omegon_web::Engine::Bing,
-                    _ => omegon_web::Engine::DuckDuckGo,
-                };
+            "ddg" => {
+                let engine = omegon_web::Engine::DuckDuckGo;
                 let results = self
                     .web
                     .search(
@@ -404,7 +400,7 @@ fn auto_provider_order(available: &[&'static str]) -> Vec<&'static str> {
     auto_api_provider_order(available)
         .into_iter()
         .chain(
-            ["ddg", "bing", "google"]
+            ["ddg"]
                 .into_iter()
                 .filter(|provider| available.contains(provider)),
         )
@@ -419,13 +415,11 @@ fn auto_api_provider_order(available: &[&'static str]) -> Vec<&'static str> {
 }
 
 fn free_engines_from_available(available: &[&'static str]) -> Vec<omegon_web::Engine> {
-    ["ddg", "bing", "google"]
+    ["ddg"]
         .into_iter()
         .filter(|provider| available.contains(provider))
         .map(|provider| match provider {
             "ddg" => omegon_web::Engine::DuckDuckGo,
-            "bing" => omegon_web::Engine::Bing,
-            "google" => omegon_web::Engine::Google,
             _ => unreachable!("filtered to known free engines"),
         })
         .collect()
@@ -585,12 +579,12 @@ impl ToolProvider for WebSearchProvider {
             ToolDefinition {
                 name: crate::tool_registry::web_search::WEB_SEARCH.into(),
                 label: "Web Search".into(),
-                description: "Search the web. Works out of the box via Google, Bing, and DuckDuckGo (no API keys). API keys (brave, tavily, serper, firecrawl) optional for premium results.".into(),
+                description: "Search the web. Best-effort zero-key search uses DuckDuckGo only. Configure Brave, Tavily, Serper, or Firecrawl API keys for reliable search.".into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "query": { "type": "string", "description": "Search query" },
-                        "provider": { "type": "string", "enum": ["brave", "tavily", "serper", "firecrawl", "google", "bing", "ddg"], "description": "Specific provider. Omit to auto-select." },
+                        "provider": { "type": "string", "enum": ["brave", "tavily", "serper", "firecrawl", "ddg"], "description": "Specific provider. Omit to auto-select." },
                         "mode": { "type": "string", "enum": ["quick", "deep", "compare"], "description": "Search mode. Default: quick" },
                         "max_results": { "type": "number", "description": "Max results per provider. Default: 5", "minimum": 1, "maximum": 20 },
                         "topic": { "type": "string", "enum": ["general", "news"], "description": "Search topic. Default: general" },
@@ -900,25 +894,18 @@ mod tests {
 
     #[test]
     fn auto_provider_order_prefers_api_then_free_failover() {
+        assert_eq!(auto_provider_order(&["ddg"]), vec!["ddg"]);
         assert_eq!(
-            auto_provider_order(&["google", "bing", "ddg"]),
-            vec!["ddg", "bing", "google"]
-        );
-        assert_eq!(
-            auto_provider_order(&["google", "tavily", "brave", "ddg"]),
-            vec!["tavily", "brave", "ddg", "google"]
+            auto_provider_order(&["tavily", "brave", "ddg"]),
+            vec!["tavily", "brave", "ddg"]
         );
     }
 
     #[test]
     fn free_engines_preserve_parallel_failover_order() {
         assert_eq!(
-            free_engines_from_available(&["google", "bing", "ddg"]),
-            vec![
-                omegon_web::Engine::DuckDuckGo,
-                omegon_web::Engine::Bing,
-                omegon_web::Engine::Google
-            ]
+            free_engines_from_available(&["ddg"]),
+            vec![omegon_web::Engine::DuckDuckGo]
         );
     }
 }

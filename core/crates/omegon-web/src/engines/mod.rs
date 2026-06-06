@@ -1,23 +1,17 @@
-//! Search engine implementations — Google, Bing, DuckDuckGo.
+//! Search engine implementations — DuckDuckGo zero-key search.
 
-mod bing;
 mod duckduckgo;
-mod google;
 
 use crate::SearchOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Engine {
-    Google,
-    Bing,
     DuckDuckGo,
 }
 
 impl Engine {
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Google => "google",
-            Self::Bing => "bing",
             Self::DuckDuckGo => "ddg",
         }
     }
@@ -29,8 +23,6 @@ impl Engine {
         opts: &SearchOptions,
     ) -> Result<Vec<SearchResult>, SearchError> {
         let result = match self {
-            Self::Google => google::search(client, query, opts).await,
-            Self::Bing => bing::search(client, query, opts).await,
             Self::DuckDuckGo => duckduckgo::search(client, query, opts).await,
         };
         result.map_err(|e| classify_error(self.name(), e))
@@ -85,7 +77,10 @@ fn classify_error(engine: &str, err: anyhow::Error) -> SearchError {
         SearchError::RateLimited {
             engine: engine.into(),
         }
-    } else if msg.contains("no results parsed") {
+    } else if msg.contains("no results parsed")
+        || msg.contains("unexpected HTML shell")
+        || msg.contains("no results returned")
+    {
         SearchError::ParseFailed {
             engine: engine.into(),
         }

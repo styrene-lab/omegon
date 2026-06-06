@@ -26,10 +26,7 @@ pub fn browser_headers() -> HeaderMap {
         "Accept-Language",
         HeaderValue::from_static("en-US,en;q=0.9"),
     );
-    h.insert(
-        "Accept-Encoding",
-        HeaderValue::from_static("gzip, deflate, br"),
-    );
+    h.insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate"));
     // Sec-Fetch headers — required by modern browsers
     h.insert("Sec-Fetch-Dest", HeaderValue::from_static("document"));
     h.insert("Sec-Fetch-Mode", HeaderValue::from_static("navigate"));
