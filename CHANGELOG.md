@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.11] - 2026-06-06
+
+### Fixed
+
+- Keep ACP stdio runtime logs file-only by default so startup/runtime tracing and ANSI escapes do not leak into ACP client transcripts or destabilize client request handling.
+
 ## [0.26.10] - 2026-06-06
 
 ### Fixed

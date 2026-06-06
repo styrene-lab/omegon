@@ -1201,21 +1201,26 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(model = %model, "using Ollama-provided model");
     }
 
-    // Priority: RUST_LOG env > --log-level flag > "info" default
-    // Interactive mode: no subcommand (default) or explicit `interactive`.
-    // In both cases ratatui owns stderr — tracing must go to file only.
+    // Priority: RUST_LOG env > --log-level flag > "info" default.
+    // Interactive mode owns stderr via ratatui. ACP stdio owns stdout/stdin
+    // for JSON-RPC, and some clients surface stderr in transcripts, so keep
+    // stdio ACP logs file-only as well. ACP websocket/server mode can log to
+    // stderr because stdout is not the protocol transport there.
     let is_interactive = matches!(cli.command, Some(Commands::Interactive) | None)
         && cli.prompt.is_none()
         && cli.prompt_file.is_none();
+    let is_acp_stdio = matches!(cli.command, Some(Commands::Acp { listen: None, .. }));
+    let logs_file_only = is_interactive || is_acp_stdio;
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cli.log_level));
 
-    // Interactive mode: tracing MUST NOT go to stderr (ratatui owns it).
+    // File-only modes: tracing MUST NOT go to stderr. Interactive TUI owns
+    // stderr, and ACP stdio clients may serialize stderr as user-visible text.
     // Logs go to --log-file or ~/.config/omegon/omegon.log as default.
-    // Headless mode: stderr is fine.
+    // Other headless modes: stderr is fine.
     let _guard: Option<tracing_appender::non_blocking::WorkerGuard>;
 
-    if is_interactive {
+    if logs_file_only {
         let log_path = cli.log_file.clone().unwrap_or_else(|| {
             let dir = dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
