@@ -9,13 +9,37 @@ use std::path::{Path, PathBuf};
 
 use super::types::*;
 
-/// Parse YAML frontmatter from a markdown document.
+/// Parse YAML or TOML frontmatter from a markdown document.
 /// Returns None if no frontmatter delimiter found.
 pub fn parse_frontmatter(content: &str) -> Option<HashMap<String, FrontmatterValue>> {
-    let rest = content.strip_prefix("---\n")?;
-    let end = rest.find("\n---")?;
-    let yaml = &rest[..end];
+    let (kind, frontmatter, _body) = split_markdown_frontmatter(content)?;
+    match kind {
+        FrontmatterKind::Yaml => Some(parse_yaml_frontmatter(frontmatter)),
+        FrontmatterKind::Toml => Some(parse_toml_frontmatter(frontmatter)),
+    }
+}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrontmatterKind {
+    Yaml,
+    Toml,
+}
+
+fn split_markdown_frontmatter(content: &str) -> Option<(FrontmatterKind, &str, &str)> {
+    if let Some(rest) = content.strip_prefix("---\n") {
+        let end = rest.find("\n---")?;
+        let body = rest[end + 4..].trim_start_matches('\n');
+        return Some((FrontmatterKind::Yaml, &rest[..end], body));
+    }
+    if let Some(rest) = content.strip_prefix("+++\n") {
+        let end = rest.find("\n+++")?;
+        let body = rest[end + 4..].trim_start_matches('\n');
+        return Some((FrontmatterKind::Toml, &rest[..end], body));
+    }
+    None
+}
+
+fn parse_yaml_frontmatter(yaml: &str) -> HashMap<String, FrontmatterValue> {
     let mut result = HashMap::new();
     let mut current_key: Option<String> = None;
     let mut current_array: Vec<String> = Vec::new();
@@ -72,7 +96,53 @@ pub fn parse_frontmatter(content: &str) -> Option<HashMap<String, FrontmatterVal
         result.insert(key, FrontmatterValue::List(current_array));
     }
 
-    Some(result)
+    result
+}
+
+fn parse_toml_frontmatter(toml: &str) -> HashMap<String, FrontmatterValue> {
+    let mut result = HashMap::new();
+    let mut section: Option<&str> = None;
+
+    for line in toml.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = Some(line.trim_matches(&['[', ']'][..]).trim());
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+
+        // Codex/Flynt exports put lifecycle fields under [data], while older
+        // docs put them at the top level. Publication metadata is deliberately
+        // ignored by the design lifecycle parser.
+        if section.is_some_and(|name| name != "data") {
+            continue;
+        }
+
+        let value = value.trim();
+        let parsed = if value == "[]" {
+            FrontmatterValue::List(vec![])
+        } else if value.starts_with('[') && value.ends_with(']') {
+            FrontmatterValue::List(
+                value[1..value.len() - 1]
+                    .split(',')
+                    .map(|s| strip_quotes(s.trim()))
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+            )
+        } else {
+            FrontmatterValue::Scalar(strip_quotes(value))
+        };
+        result.entry(key.to_string()).or_insert(parsed);
+    }
+
+    result
 }
 
 /// A frontmatter value — either scalar or list.
@@ -108,18 +178,11 @@ fn strip_quotes(s: &str) -> String {
     }
 }
 
-/// Extract the body after the frontmatter.
+/// Extract the body after YAML or TOML frontmatter.
 pub fn extract_body(content: &str) -> &str {
-    if let Some(rest) = content.strip_prefix("---\n") {
-        if let Some(end) = rest.find("\n---") {
-            let after = &rest[end + 4..];
-            after.trim_start_matches('\n')
-        } else {
-            content
-        }
-    } else {
-        content
-    }
+    split_markdown_frontmatter(content)
+        .map(|(_kind, _frontmatter, body)| body)
+        .unwrap_or(content)
 }
 
 /// Build a DesignNode from parsed frontmatter.
@@ -193,12 +256,18 @@ pub fn node_from_frontmatter(
 pub fn parse_sections(body: &str) -> DocumentSections {
     let mut sections = DocumentSections::default();
 
-    // Split body into h2 sections
+    // Split body into h2 sections. Ignore an existing top-level document title;
+    // serialize_document writes the canonical title from frontmatter.
     let mut current_heading = "";
     let mut current_content = String::new();
     let mut h2_blocks: Vec<(&str, String)> = Vec::new();
 
     for line in body.lines() {
+        if current_heading.is_empty() && current_content.trim().is_empty() && line.starts_with("# ")
+        {
+            continue;
+        }
+
         if let Some(heading) = line.strip_prefix("## ") {
             if !current_heading.is_empty() || !current_content.trim().is_empty() {
                 h2_blocks.push((current_heading, std::mem::take(&mut current_content)));
@@ -210,12 +279,17 @@ pub fn parse_sections(body: &str) -> DocumentSections {
             current_content.push('\n');
         }
     }
+
     if !current_heading.is_empty() || !current_content.trim().is_empty() {
         h2_blocks.push((current_heading, current_content));
     }
 
     for (heading, content) in h2_blocks {
         match heading {
+            "" if sections.overview.is_empty() => {
+                sections.overview = content.trim().to_string();
+            }
+            "" => {}
             "Overview" => sections.overview = content.trim().to_string(),
             "Research" => sections.research = parse_research(&content),
             "Decisions" => sections.decisions = parse_decisions(&content),
@@ -952,6 +1026,86 @@ Content of the second topic.
         let body = extract_body(SAMPLE_DOC);
         assert!(body.starts_with("# Test Node"));
         assert!(!body.contains("---\nid:"));
+    }
+
+    #[test]
+    fn parses_toml_frontmatter_and_strips_it_from_body() {
+        let content = r#"+++
+id = "toml-node"
+kind = "design_node"
+tags = ["docs", "hygiene"]
+
+[publication]
+enabled = false
+visibility = "private"
+
+[data]
+title = "TOML Node"
+status = "exploring"
+open_questions = ["What remains?"]
++++
+
+# TOML Node
+
+## Overview
+
+Body text.
+"#;
+        let fm = parse_frontmatter(content).unwrap();
+        assert_eq!(fm.get("id").unwrap().as_str(), Some("toml-node"));
+        assert_eq!(fm.get("title").unwrap().as_str(), Some("TOML Node"));
+        assert_eq!(fm.get("status").unwrap().as_str(), Some("exploring"));
+        assert_eq!(fm.get("tags").unwrap().as_list(), &["docs", "hygiene"]);
+        assert_eq!(
+            fm.get("open_questions").unwrap().as_list(),
+            &["What remains?"]
+        );
+        let body = extract_body(content);
+        assert!(body.starts_with("# TOML Node"));
+        assert!(!body.contains("[publication]"));
+        assert!(!body.contains("+++"));
+    }
+
+    #[test]
+    fn parse_sections_ignores_existing_top_level_title() {
+        let sections = parse_sections("# Existing Title\n\n## Overview\n\nClean overview.\n");
+        assert_eq!(sections.overview, "Clean overview.");
+    }
+
+    #[test]
+    fn parse_sections_uses_plain_body_as_overview_when_no_sections_exist() {
+        let sections = parse_sections("Plain body without headings.\n");
+        assert_eq!(sections.overview, "Plain body without headings.");
+    }
+
+    #[test]
+    fn serialize_document_is_idempotent_for_toml_converted_body() {
+        let content = r#"+++
+id = "toml-node"
+title = "TOML Node"
+status = "exploring"
+open_questions = ["What remains?"]
++++
+
+# TOML Node
+
+## Overview
+
+Body text.
+
+## Open Questions
+
+- What remains?
+"#;
+        let fm = parse_frontmatter(content).unwrap();
+        let node = node_from_frontmatter(&fm, PathBuf::from("docs/toml-node.md")).unwrap();
+        let once = serialize_document(&node, &parse_sections(extract_body(content)));
+        let twice = serialize_document(&node, &parse_sections(extract_body(&once)));
+        assert_eq!(once, twice);
+        assert_eq!(once.matches("# TOML Node").count(), 1);
+        assert_eq!(once.matches("## Overview").count(), 1);
+        assert_eq!(once.matches("## Open Questions").count(), 1);
+        assert!(!once.contains("+++"));
     }
 
     #[test]

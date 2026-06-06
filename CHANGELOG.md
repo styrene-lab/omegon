@@ -22,6 +22,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - Add ACP-facing secret capability discovery and non-resolving recipe descriptors so settings panels can guide operators through keyring/Vault/env/cmd/file-backed secret setup without exposing resolved values or executing recipes during list/status rendering; setting recipes now records metadata without resolving side-effectful `cmd:`/`file:`/Vault recipes.
 
+### Fixed
+
+- Make harness secret storage idempotent across recipes, keyring values, session caches, redaction, and process-env projection so named secret repairs can recover orphaned keychain entries without scanning the whole keychain.
+- Strip TOML frontmatter from design lifecycle documents and generated site legal/changelog pages so publication metadata does not leak into rendered content or duplicate design-node titles.
+
 ## [0.26.7] - 2026-06-05
 
 ### Added
@@ -50,9 +55,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - Enforce extension SDK contract compatibility during extension startup, accepting the current `0.25` contract, warning for legacy/missing or `0.24` compatibility-window metadata, rejecting malformed/unsupported/newer contracts, and surfacing SDK compatibility diagnostics through extension metadata.
 - Add `resource.open@1` HostAction support to the extension host pipeline, including SDK-backed manifest policy consumption, secure `${workspace}` file-root enforcement, backend registry scaffolding, deterministic unavailable-backend fallback, and fake-backend routing coverage for Flynt, Zed, terminal, and fallback resource classes.
-
-### Changed
-
 - Document the #125 `resource.open@1` real-backend implementation decisions for Flynt, Zed, terminal/Bookokrat ownership, availability diagnostics, file URI parsing, and workspace-root handling.
 - Report selected/preferred `resource.open@1` backend diagnostics when a backend is unavailable or fails after policy validation.
 - Route ebook/pdf `resource.open@1` requests through the terminal/Bookokrat backend when the real terminal executor is configured, with Flynt/Zed retaining explicit unavailable diagnostics.

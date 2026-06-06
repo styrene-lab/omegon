@@ -965,6 +965,7 @@ mod tests {
     }
 
     #[test]
+
     fn set_recipe_does_not_resolve_side_effectful_recipes() {
         let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
@@ -1019,6 +1020,7 @@ mod tests {
     }
 
     #[test]
+
     fn list_recipe_diagnostics_reports_bounded_status() {
         let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
