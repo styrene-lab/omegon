@@ -392,17 +392,48 @@ pub async fn resolve_vault_secret(
     }
 }
 
-/// Store a secret value in the cross-platform keyring.
+/// Store or replace a secret value in the cross-platform keyring.
+///
+/// Keychain backends differ on whether `set_password` overwrites existing
+/// entries or returns a duplicate-item error. Treat `store_in_keyring` as an
+/// idempotent upsert so callers can repair missing recipe metadata even when
+/// the sensitive value already exists in secure storage.
 pub fn store_in_keyring(name: &str, value: &str) -> anyhow::Result<()> {
-    keyring_set(KEYRING_SERVICE, name, value)?;
-    tracing::info!(name = name, "stored secret in keyring");
-    Ok(())
+    match keyring_set(KEYRING_SERVICE, name, value) {
+        Ok(()) => {
+            tracing::info!(name = name, "stored secret in keyring");
+            Ok(())
+        }
+        Err(first_err) => {
+            tracing::debug!(
+                name = name,
+                error = %first_err,
+                "initial keyring write failed; retrying as delete-then-set upsert"
+            );
+            let _ = keyring_delete(KEYRING_SERVICE, name);
+            keyring_set(KEYRING_SERVICE, name, value).map_err(|retry_err| {
+                anyhow::anyhow!(
+                    "keyring upsert failed for {name}: initial write failed: {first_err}; retry failed: {retry_err}"
+                )
+            })?;
+            tracing::info!(name = name, "replaced existing secret in keyring");
+            Ok(())
+        }
+    }
 }
 
 /// Delete a secret from the cross-platform keyring.
+///
+/// Deletion is intentionally idempotent: absent keychain entries should not
+/// make higher-level cleanup fail after recipe metadata has already drifted.
 pub fn delete_from_keyring(name: &str) -> anyhow::Result<()> {
-    keyring_delete(KEYRING_SERVICE, name)?;
-    Ok(())
+    match keyring_delete(KEYRING_SERVICE, name) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            tracing::debug!(name = name, error = %e, "keyring delete skipped or entry absent");
+            Ok(())
+        }
+    }
 }
 
 /// Expose a SecretString's value for operations that need it (e.g., redaction set building).

@@ -128,19 +128,34 @@ impl ToolProvider for SecretToolsProvider {
                 }
             }
             crate::tool_registry::secrets::SECRET_LIST => {
-                let entries = self.secrets.list_recipes();
+                let entries = self.secrets.list_recipe_diagnostics();
                 let text = if entries.is_empty() {
                     "No harness-managed secrets configured.".to_string()
                 } else {
                     let mut out = String::from("Harness-managed secrets:\n");
-                    for (name, recipe) in &entries {
-                        out.push_str(&format!("- {name}: {recipe}\n"));
+                    for entry in &entries {
+                        out.push_str(&format!(
+                            "- {}: {} [{}]\n",
+                            entry.name,
+                            entry.recipe,
+                            entry.status.as_str()
+                        ));
                     }
                     out.trim_end().to_string()
                 };
+                let details = json!({
+                    "count": entries.len(),
+                    "entries": entries.iter().map(|entry| {
+                        json!({
+                            "name": entry.name,
+                            "recipe": entry.recipe,
+                            "status": entry.status.as_str(),
+                        })
+                    }).collect::<Vec<_>>()
+                });
                 Ok(ToolResult {
                     content: vec![ContentBlock::Text { text }],
-                    details: json!({ "count": entries.len() }),
+                    details,
                 })
             }
             crate::tool_registry::secrets::SECRET_DELETE => {
@@ -212,6 +227,41 @@ mod tests {
             .unwrap();
         let text = listed.content[0].as_text().unwrap();
         assert!(text.contains("BRAVE_API_KEY: env:BRAVE_API_KEY"));
+    }
+
+    #[tokio::test]
+    async fn secret_set_value_is_idempotent_and_repairs_listing() {
+        let provider = provider();
+        provider
+            .execute(
+                crate::tool_registry::secrets::SECRET_SET,
+                "tc-idempotent-1",
+                json!({"name": "BRAVE_API_KEY", "value": "first"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        provider
+            .execute(
+                crate::tool_registry::secrets::SECRET_SET,
+                "tc-idempotent-2",
+                json!({"name": "BRAVE_API_KEY", "value": "second"}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let listed = provider
+            .execute(
+                crate::tool_registry::secrets::SECRET_LIST,
+                "tc-idempotent-3",
+                json!({}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let text = listed.content[0].as_text().unwrap();
+        assert!(text.contains("BRAVE_API_KEY: keyring:BRAVE_API_KEY [resolves]"));
     }
 
     #[tokio::test]
