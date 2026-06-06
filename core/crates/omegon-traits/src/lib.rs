@@ -1260,6 +1260,36 @@ pub struct BusEventTurnEnd {
     pub progress_signal: ProgressSignal,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextCompactionTrigger {
+    Manual,
+    AutoTier2,
+    ForcedLoop,
+    ContextOverflow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextCompactionStatus {
+    NoPayload,
+    Started,
+    Succeeded,
+    Failed,
+    Decayed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextCompactionEvent {
+    pub trigger: ContextCompactionTrigger,
+    pub status: ContextCompactionStatus,
+    pub before_tokens: u64,
+    pub after_tokens: Option<u64>,
+    pub evicted_messages: Option<usize>,
+    pub summary_chars: Option<usize>,
+    pub reason: Option<String>,
+}
+
 /// Events emitted by the agent loop and delivered to features.
 ///
 /// These are the typed replacement for pi's `pi.on("event_name")` strings.
@@ -2064,6 +2094,8 @@ pub enum AgentEvent {
         context_class: String,
         thinking_level: String,
     },
+    /// Context compaction diagnostic event emitted for manual, forced, auto, and emergency compaction paths.
+    ContextCompaction(ContextCompactionEvent),
     /// Session was reset mid-session via /new. TUI clears its display.
     SessionReset,
 }

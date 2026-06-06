@@ -21,6 +21,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Make harness secret storage idempotent across recipes, keyring values, session caches, redaction, and process-env projection so named secret repairs can recover orphaned keychain entries without scanning the whole keychain.
 - Strip TOML frontmatter from design lifecycle documents and generated site legal/changelog pages so publication metadata does not leak into rendered content or duplicate design-node titles.
 
+## [0.26.7] - 2026-06-05
+
+### Added
+
+- Add structured context compaction diagnostics across manual, forced-loop, auto, bus-requested, and context-overflow compaction paths, including WebSocket `context.compaction` events and tests for manual no-payload/success outcomes.
+
 ## [0.26.6] - 2026-06-05
 
 ### Fixed

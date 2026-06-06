@@ -1012,6 +1012,17 @@ fn project_event(ev: &AgentEvent) -> Option<IpcEventPayload> {
                 })
         }
         AgentEvent::ContextUpdated { .. } => None,
+        AgentEvent::ContextCompaction(event) => Some(IpcEventPayload::SystemNotification {
+            message: format!(
+                "Context compaction: {:?} {:?} before={} after={:?} evicted={:?} reason={}",
+                event.trigger,
+                event.status,
+                event.before_tokens,
+                event.after_tokens,
+                event.evicted_messages,
+                event.reason.as_deref().unwrap_or("none")
+            ),
+        }),
         AgentEvent::WebDashboardStarted { .. } => None,
     }
 }
