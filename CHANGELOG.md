@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.6] - 2026-06-05
+
+### Fixed
+
+- Make `_packages/install` idempotent for already-installed plugin-backed packages by returning structured `already_installed` package metadata and explicit `version_check` information instead of a bare error envelope.
+
 ## [0.26.5] - 2026-06-05
 
 ### Fixed

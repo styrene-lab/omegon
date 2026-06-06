@@ -279,7 +279,7 @@ fn install_git(plugins_dir: &Path, uri: &str) -> anyhow::Result<PluginInstallRes
     })
 }
 
-fn infer_plugin_name(uri: &str) -> anyhow::Result<String> {
+pub(crate) fn infer_plugin_name(uri: &str) -> anyhow::Result<String> {
     let stripped = uri.trim_end_matches('/').trim_end_matches(".git");
     let name = stripped
         .rsplit_once('/')

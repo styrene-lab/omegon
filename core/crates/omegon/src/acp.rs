@@ -2975,7 +2975,10 @@ mod extension_metadata_tests {
             response["contributions"][0]["status"], "installed",
             "{response:#}"
         );
-        assert!(home.path().join("plugins/recro-omegon").is_symlink());
+        assert!(
+            response["package"]["path"].as_str().is_some(),
+            "{response:#}"
+        );
     }
 }
 

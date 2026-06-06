@@ -70,6 +70,16 @@ pub struct PackageRef {
     pub id: String,
     pub source: String,
     pub source_kind: PackageSourceKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub package_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installed_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,9 +94,31 @@ pub struct ContributionReport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageReport {
     pub ok: bool,
+    pub status: PackageInstallStatus,
     pub package: PackageRef,
     pub contributions: Vec<ContributionReport>,
     pub warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_check: Option<VersionCheck>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageInstallStatus {
+    Planned,
+    Installed,
+    AlreadyInstalled,
+    UpdateAvailable,
+    Updated,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionCheck {
+    pub relation: String,
+    pub installed: Option<String>,
+    pub candidate: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -158,9 +190,11 @@ pub fn plan(request: &PackageInstallRequest) -> PackageReport {
     };
     PackageReport {
         ok: true,
+        status: PackageInstallStatus::Planned,
         package,
         contributions,
         warnings,
+        version_check: None,
     }
 }
 
@@ -195,10 +229,13 @@ pub async fn install(request: PackageInstallRequest, cwd: &Path) -> anyhow::Resu
         | PackageKindHint::LegacyPlugin
         | PackageKindHint::Auto
         | PackageKindHint::Persona
-        | PackageKindHint::Tone => {
-            let result = crate::plugin_cli::install(&request.source)?;
-            Ok(report_from_plugin_install(&request.source, result))
-        }
+        | PackageKindHint::Tone => match crate::plugin_cli::install(&request.source) {
+            Ok(result) => Ok(report_from_plugin_install(&request.source, result)),
+            Err(error) if is_already_installed_error(&error) => {
+                already_installed_plugin_report(&request.source)
+            }
+            Err(error) => Err(error),
+        },
     }
 }
 
@@ -390,6 +427,11 @@ fn package_ref(source: &str) -> PackageRef {
         id: infer_package_id(source),
         source: source.to_string(),
         source_kind: infer_source_kind(source),
+        name: None,
+        package_type: None,
+        installed_version: None,
+        candidate_version: None,
+        path: None,
     }
 }
 
@@ -500,6 +542,7 @@ fn report_from_install(
 ) -> PackageReport {
     PackageReport {
         ok: true,
+        status: PackageInstallStatus::Installed,
         package: package_ref(source),
         contributions: vec![ContributionReport {
             kind,
@@ -509,6 +552,7 @@ fn report_from_install(
             status: ContributionStatus::Installed,
         }],
         warnings: Vec::new(),
+        version_check: None,
     }
 }
 
@@ -516,9 +560,23 @@ fn report_from_plugin_install(
     source: &str,
     result: crate::plugin_cli::PluginInstallResult,
 ) -> PackageReport {
-    let contributions = detect_local_contributions(&result.path.display().to_string())
+    let contributions = plugin_manifest_summary(&result.path.join("plugin.toml"))
         .ok()
-        .flatten()
+        .map(|summary| {
+            let kind = contribution_kind_for_plugin_type(&summary.plugin_type);
+            vec![ContributionReport {
+                kind,
+                id: None,
+                path: Some(result.path.join("plugin.toml").display().to_string()),
+                risk: risk_for_contribution(kind),
+                status: ContributionStatus::Planned,
+            }]
+        })
+        .or_else(|| {
+            detect_local_contributions(&result.path.display().to_string())
+                .ok()
+                .flatten()
+        })
         .unwrap_or_else(|| vec![planned_contribution(PackageKindHint::LegacyPlugin)]);
     let contributions = contributions
         .into_iter()
@@ -531,13 +589,20 @@ fn report_from_plugin_install(
 
     PackageReport {
         ok: true,
+        status: PackageInstallStatus::Installed,
         package: PackageRef {
             id: result.name,
             source: source.to_string(),
             source_kind: infer_source_kind(source),
+            name: None,
+            package_type: None,
+            installed_version: None,
+            candidate_version: None,
+            path: Some(result.path.display().to_string()),
         },
         contributions,
         warnings: Vec::new(),
+        version_check: None,
     }
 }
 
@@ -548,6 +613,7 @@ fn report_from_armory_result(
     let kind = contribution_kind_for_armory(result.kind);
     PackageReport {
         ok: true,
+        status: PackageInstallStatus::Installed,
         package: package_ref(source),
         contributions: vec![ContributionReport {
             kind,
@@ -557,6 +623,139 @@ fn report_from_armory_result(
             status: ContributionStatus::Installed,
         }],
         warnings: vec![result.message],
+        version_check: None,
+    }
+}
+
+fn is_already_installed_error(error: &anyhow::Error) -> bool {
+    let text = error.to_string().to_ascii_lowercase();
+    text.contains("already exists") || text.contains("already installed")
+}
+
+fn already_installed_plugin_report(source: &str) -> anyhow::Result<PackageReport> {
+    already_installed_plugin_report_in(source, &crate::plugin_cli::plugins_dir()?)
+}
+
+fn already_installed_plugin_report_in(
+    source: &str,
+    plugins_dir: &Path,
+) -> anyhow::Result<PackageReport> {
+    let candidate_manifest = plugin_manifest_path_for_source(source);
+    let candidate_summary = candidate_manifest
+        .as_deref()
+        .and_then(|path| plugin_manifest_summary(path).ok());
+    let name = candidate_summary
+        .as_ref()
+        .map(|summary| summary.name.clone())
+        .or_else(|| crate::plugin_cli::infer_plugin_name(source).ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!("could not infer installed package name from source: {source}")
+        })?;
+    let path = plugins_dir.join(&name);
+    if !path.exists() && !path.is_symlink() {
+        anyhow::bail!("package '{name}' is not installed at {}", path.display());
+    }
+    let installed_summary = plugin_manifest_summary(&path.join("plugin.toml")).ok();
+    let installed_version = installed_summary
+        .as_ref()
+        .map(|summary| summary.version.clone());
+    let candidate_version = candidate_summary
+        .as_ref()
+        .map(|summary| summary.version.clone())
+        .or_else(|| installed_version.clone());
+    let relation = if installed_version.is_some() && candidate_version.is_some() {
+        if installed_version == candidate_version {
+            "same"
+        } else {
+            "unknown"
+        }
+    } else {
+        "unknown"
+    };
+    let kind = installed_summary
+        .as_ref()
+        .map(|summary| contribution_kind_for_plugin_type(&summary.plugin_type))
+        .unwrap_or_else(|| contribution_kind_for_hint(PackageKindHint::LegacyPlugin));
+    Ok(PackageReport {
+        ok: true,
+        status: PackageInstallStatus::AlreadyInstalled,
+        package: PackageRef {
+            id: name.clone(),
+            source: source.to_string(),
+            source_kind: infer_source_kind(source),
+            name: installed_summary
+                .as_ref()
+                .map(|summary| summary.name.clone()),
+            package_type: installed_summary
+                .as_ref()
+                .map(|summary| summary.plugin_type.clone()),
+            installed_version: installed_version.clone(),
+            candidate_version: candidate_version.clone(),
+            path: Some(path.display().to_string()),
+        },
+        contributions: vec![ContributionReport {
+            kind,
+            id: Some(name),
+            path: Some(path.display().to_string()),
+            risk: risk_for_contribution(kind),
+            status: ContributionStatus::Installed,
+        }],
+        warnings: Vec::new(),
+        version_check: Some(VersionCheck {
+            relation: relation.to_string(),
+            installed: installed_version,
+            candidate: candidate_version,
+            previous: None,
+        }),
+    })
+}
+
+struct PluginManifestSummary {
+    name: String,
+    plugin_type: String,
+    version: String,
+}
+
+fn plugin_manifest_path_for_source(source: &str) -> Option<PathBuf> {
+    let path = Path::new(source);
+    if path.exists() {
+        let manifest = path.join("plugin.toml");
+        if manifest.exists() {
+            return Some(manifest);
+        }
+    }
+    None
+}
+
+fn plugin_manifest_summary(path: &Path) -> anyhow::Result<PluginManifestSummary> {
+    let content = std::fs::read_to_string(path)?;
+    let parsed = crate::plugins::armory::ArmoryManifest::parse(&content)?;
+    Ok(PluginManifestSummary {
+        name: parsed.plugin.name,
+        plugin_type: plugin_type_from_manifest_text(&content)
+            .unwrap_or_else(|| parsed.plugin.plugin_type.to_string()),
+        version: parsed.plugin.version,
+    })
+}
+
+fn plugin_type_from_manifest_text(text: &str) -> Option<String> {
+    if text.contains("type = \"skill\"") || text.contains("type='skill'") {
+        Some("skill".to_string())
+    } else if text.contains("type = \"persona\"") || text.contains("type='persona'") {
+        Some("persona".to_string())
+    } else if text.contains("type = \"tone\"") || text.contains("type='tone'") {
+        Some("tone".to_string())
+    } else {
+        None
+    }
+}
+
+fn contribution_kind_for_plugin_type(plugin_type: &str) -> ContributionKind {
+    match plugin_type.trim().to_ascii_lowercase().as_str() {
+        "skill" => ContributionKind::Skill,
+        "persona" => ContributionKind::Persona,
+        "tone" => ContributionKind::Tone,
+        _ => ContributionKind::LegacyPlugin,
     }
 }
 
@@ -757,6 +956,50 @@ mod tests {
         assert_eq!(json["contributions"][0], "skill");
         assert_eq!(json["legacy_kind"], "skill");
         assert_eq!(json["source"], "skills/recro/plugin.toml");
+    }
+
+    #[tokio::test]
+    async fn install_reports_already_installed_plugin_as_structured_status() {
+        let home = tempfile::tempdir().unwrap();
+        let installed = home.path().join("plugins/recro-omegon");
+        std::fs::create_dir_all(&installed).unwrap();
+        std::fs::write(
+            installed.join("plugin.toml"),
+            "[plugin]\nid = \"recro-omegon\"\nname = \"recro-omegon\"\ntype = \"skill\"\nversion = \"0.1.0\"\ndescription = \"Recro workflows\"\n",
+        )
+        .unwrap();
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe {
+            std::env::set_var("OMEGON_HOME", home.path());
+        }
+
+        let request = PackageInstallRequest {
+            source: "https://github.com/recro/recro-omegon".to_string(),
+            kind_hint: PackageKindHint::Auto,
+        };
+        let second = install(request, Path::new(".")).await.unwrap();
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        assert_eq!(second.status, PackageInstallStatus::AlreadyInstalled);
+        assert_eq!(second.package.id, "recro-omegon");
+        assert_eq!(second.package.name.as_deref(), Some("recro-omegon"));
+        assert_eq!(second.package.package_type.as_deref(), Some("skill"));
+        assert_eq!(second.package.installed_version.as_deref(), Some("0.1.0"));
+        assert_eq!(second.package.candidate_version.as_deref(), Some("0.1.0"));
+        assert_eq!(second.version_check.as_ref().unwrap().relation, "same");
+        assert_eq!(second.contributions[0].kind, ContributionKind::Skill);
+        assert!(
+            second
+                .package
+                .path
+                .as_deref()
+                .unwrap()
+                .ends_with("plugins/recro-omegon")
+        );
     }
 
     #[test]
