@@ -142,7 +142,29 @@ fn parse_toml_frontmatter(toml: &str) -> HashMap<String, FrontmatterValue> {
         result.entry(key.to_string()).or_insert(parsed);
     }
 
+    if result
+        .get("id")
+        .and_then(FrontmatterValue::as_str)
+        .is_some_and(|id| looks_like_uuid(id))
+        && let Some(alias) = result
+            .get("aliases")
+            .and_then(|value| value.as_list().first())
+            .cloned()
+    {
+        result.insert("id".to_string(), FrontmatterValue::Scalar(alias));
+    }
+
     result
+}
+
+fn looks_like_uuid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 36
+        && [8, 13, 18, 23].iter().all(|idx| bytes[*idx] == b'-')
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(idx, byte)| [8, 13, 18, 23].contains(&idx) || byte.is_ascii_hexdigit())
 }
 
 /// A frontmatter value — either scalar or list.
@@ -194,8 +216,14 @@ pub fn node_from_frontmatter(
     let title = fm
         .get("title")
         .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            file_path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("untitled")
+                .to_string()
+        });
     let status_str = fm.get("status").and_then(|v| v.as_str()).unwrap_or("seed");
     let status = NodeStatus::parse(status_str).unwrap_or(NodeStatus::Seed);
 
@@ -456,7 +484,14 @@ pub fn scan_design_docs(docs_dir: &Path) -> HashMap<String, DesignNode> {
         if let Some(fm) = parse_frontmatter(&content)
             && let Some(node) = node_from_frontmatter(&fm, path)
         {
-            nodes.insert(node.id.clone(), node);
+            nodes.insert(node.id.clone(), node.clone());
+            for alias in fm
+                .get("aliases")
+                .map(FrontmatterValue::as_list)
+                .unwrap_or(&[])
+            {
+                nodes.insert(alias.clone(), node.clone());
+            }
         }
     }
 
@@ -477,7 +512,14 @@ pub fn scan_design_docs(docs_dir: &Path) -> HashMap<String, DesignNode> {
             if let Some(fm) = parse_frontmatter(&content)
                 && let Some(node) = node_from_frontmatter(&fm, path)
             {
-                nodes.insert(node.id.clone(), node);
+                nodes.insert(node.id.clone(), node.clone());
+                for alias in fm
+                    .get("aliases")
+                    .map(FrontmatterValue::as_list)
+                    .unwrap_or(&[])
+                {
+                    nodes.insert(alias.clone(), node.clone());
+                }
             }
         }
     }
@@ -1166,6 +1208,8 @@ mod integration_tests {
     fn scan_real_docs_directory() {
         // Test against the actual Omegon docs/ directory
         let docs_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
             .parent()
             .unwrap()
             .parent()
