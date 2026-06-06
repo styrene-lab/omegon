@@ -528,6 +528,11 @@ impl OmegonAcpAgent {
         *self.conn.borrow_mut() = Some(c);
     }
 
+    #[cfg(test)]
+    fn set_secrets_for_test(&self, secrets: std::sync::Arc<omegon_secrets::SecretsManager>) {
+        *self.secrets.borrow_mut() = Some(secrets);
+    }
+
     fn modes() -> SessionModeState {
         SessionModeState::new(
             "code",
@@ -1405,6 +1410,33 @@ impl OmegonAcpAgent {
         let extensions_dir = crate::extension_cli::extensions_dir()?;
 
         match method {
+            "runtime/capabilities" => Ok(serde_json::json!({
+                "surfaces": {
+                    "_runtime/capabilities": { "version": 1 },
+                    "_runtime/status": { "version": 1 },
+                    "_extensions/list": { "version": 1 },
+                    "_extensions/call": { "version": 1 },
+                    "_provider/status": { "version": 1 },
+                    "_packages/list": { "version": 1 },
+                    "_secrets/capabilities": { "version": 1 },
+                    "_secrets/list": { "version": 1 },
+                    "_secrets/check": { "version": 1 },
+                    "_secrets/set_value": { "version": 1 },
+                    "_secrets/set_recipe": { "version": 1 }
+                },
+                "features": {
+                    "packages": true,
+                    "extensions": true,
+                    "host_actions": true,
+                    "secrets": true,
+                    "tools": true,
+                    "memory": true
+                },
+                "protocols": {
+                    "acp": ["1"]
+                }
+            })),
+
             "extensions/list" => {
                 let mut extensions = Vec::new();
                 if extensions_dir.exists() {
@@ -1676,12 +1708,43 @@ impl OmegonAcpAgent {
                 }
             }
 
+            "secrets/capabilities" => Ok(serde_json::json!({
+                "version": 1,
+                "operations": {
+                    "list": true,
+                    "check": true,
+                    "set_value": true,
+                    "set_recipe": true,
+                    "extension_secret_set": true
+                },
+                "recipe_kinds": ["env", "keyring", "keychain", "vault", "file", "cmd", "unknown"],
+                "storage": {
+                    "preferred": "keyring",
+                    "recipes": true,
+                    "vault": true,
+                    "env_fallback": true
+                },
+                "safety": {
+                    "values_write_only": true,
+                    "list_resolves_values": false,
+                    "list_executes_recipes": false,
+                    "check_returns_value": false
+                }
+            })),
+
             "secrets/list" => {
                 if let Some(ref mgr) = *self.secrets.borrow() {
                     let items: Vec<serde_json::Value> = mgr
-                        .list_recipes()
+                        .list_recipe_descriptors()
                         .into_iter()
-                        .map(|(name, recipe)| serde_json::json!({ "name": name, "recipe": recipe }))
+                        .map(|entry| {
+                            serde_json::json!({
+                                "name": entry.name,
+                                "recipe": entry.recipe,
+                                "kind": entry.kind,
+                                "payload": entry.payload,
+                            })
+                        })
                         .collect();
                     Ok(serde_json::json!({ "items": items }))
                 } else {
@@ -2899,6 +2962,66 @@ mod extension_metadata_tests {
         assert_eq!(json["kind"], "extensions");
         assert_eq!(json["path"], "/tmp/extensions/recro-omegon");
         assert_eq!(json["message"], "Installed extension");
+    }
+
+    #[tokio::test]
+    async fn runtime_capabilities_advertise_secret_surfaces() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response =
+            handle_acp_request_result(agent, "_runtime/capabilities", &serde_json::json!({}))
+                .await
+                .unwrap();
+
+        assert_eq!(response["surfaces"]["_secrets/capabilities"]["version"], 1);
+        assert_eq!(response["surfaces"]["_secrets/list"]["version"], 1);
+        assert_eq!(response["features"]["secrets"], true);
+    }
+
+    #[tokio::test]
+    async fn secrets_capabilities_describe_non_resolving_list_surface() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response =
+            handle_acp_request_result(agent, "_secrets/capabilities", &serde_json::json!({}))
+                .await
+                .unwrap();
+
+        assert_eq!(response["version"], 1);
+        assert_eq!(response["operations"]["list"], true);
+        assert_eq!(response["safety"]["values_write_only"], true);
+        assert_eq!(response["safety"]["list_resolves_values"], false);
+        assert_eq!(response["safety"]["list_executes_recipes"], false);
+        assert!(
+            response["recipe_kinds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|kind| kind == "vault")
+        );
+    }
+
+    #[tokio::test]
+    async fn secrets_list_returns_recipe_descriptors_without_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = std::sync::Arc::new(omegon_secrets::SecretsManager::new(dir.path()).unwrap());
+        secrets
+            .set_recipe("BRAVE_API_KEY", "env:OMEGON_TEST_BRAVE_KEY")
+            .unwrap();
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        agent.set_secrets_for_test(secrets);
+        let response = handle_acp_request_result(agent, "_secrets/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+
+        let items = response["items"].as_array().unwrap();
+        let item = items
+            .iter()
+            .find(|item| item["name"] == "BRAVE_API_KEY")
+            .expect("BRAVE_API_KEY descriptor");
+        assert_eq!(item["recipe"], "env:OMEGON_TEST_BRAVE_KEY");
+        assert_eq!(item["kind"], "env");
+        assert_eq!(item["payload"], "OMEGON_TEST_BRAVE_KEY");
+        assert!(!response.to_string().contains("brave-test-key"));
     }
 
     #[tokio::test]

@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.8] - 2026-06-06
+
+### Added
+
+- Add ACP-facing secret capability discovery and non-resolving recipe descriptors so settings panels can guide operators through keyring/Vault/env/cmd/file-backed secret setup without exposing resolved values or executing recipes during list/status rendering; setting recipes now records metadata without resolving side-effectful `cmd:`/`file:`/Vault recipes.
+
 ## [0.26.7] - 2026-06-05
 
 ### Added
