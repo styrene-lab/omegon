@@ -69,6 +69,7 @@ pub enum WorkerRequest {
 pub struct WorkerResponse {
     pub text: String,
     pub error: Option<String>,
+    pub cancelled: bool,
 }
 
 /// Event streamed from the worker during prompt execution.
@@ -103,6 +104,30 @@ pub enum WorkerEvent {
     SessionTitle(String),
     /// Status update from the agent loop (e.g., "Loading model into memory…")
     StatusUpdate(String),
+    /// Structured provider retry telemetry.
+    ProviderRetry {
+        provider: String,
+        model: String,
+        attempt: u32,
+        delay_ms: u64,
+        reason: String,
+        message: String,
+        recoverable: bool,
+    },
+    /// Structured provider terminal failure telemetry.
+    ProviderFailure {
+        provider: String,
+        model: String,
+        reason: String,
+        attempts: u32,
+        message: String,
+        retryable: bool,
+        recommended_action: String,
+    },
+    /// Structured turn cancellation telemetry.
+    TurnCancelled {
+        reason: String,
+    },
     TurnComplete,
 }
 
@@ -259,6 +284,7 @@ async fn worker_loop(
                                 "No LLM provider available for {current_model}. \
                                  Check Ollama is running or set an API key."
                             )),
+                            cancelled: false,
                         });
                         continue;
                     }
@@ -347,6 +373,43 @@ async fn worker_loop(
                             omegon_traits::AgentEvent::SystemNotification { message } => {
                                 Some(WorkerEvent::StatusUpdate(message))
                             }
+                            omegon_traits::AgentEvent::ProviderRetry {
+                                provider,
+                                model,
+                                attempt,
+                                delay_ms,
+                                reason,
+                                message,
+                                recoverable,
+                            } => Some(WorkerEvent::ProviderRetry {
+                                provider,
+                                model,
+                                attempt,
+                                delay_ms,
+                                reason,
+                                message,
+                                recoverable,
+                            }),
+                            omegon_traits::AgentEvent::ProviderFailure {
+                                provider,
+                                model,
+                                reason,
+                                attempts,
+                                message,
+                                retryable,
+                                recommended_action,
+                            } => Some(WorkerEvent::ProviderFailure {
+                                provider,
+                                model,
+                                reason,
+                                attempts,
+                                message,
+                                retryable,
+                                recommended_action,
+                            }),
+                            omegon_traits::AgentEvent::TurnCancelled { reason } => {
+                                Some(WorkerEvent::TurnCancelled { reason })
+                            }
                             omegon_traits::AgentEvent::MessageAbort { reason } => {
                                 let msg = reason.unwrap_or_else(|| "Request aborted".into());
                                 Some(WorkerEvent::StatusUpdate(format!("[Error: {msg}]")))
@@ -399,8 +462,10 @@ async fn worker_loop(
 
                 let response_text = conversation.last_assistant_text().unwrap_or("").to_string();
 
+                let cancelled = cancel.is_cancelled();
                 let error = match result {
                     Ok(()) => None,
+                    Err(_e) if cancelled => None,
                     Err(e) => {
                         let raw = e.to_string();
                         let model_name = shared_settings
@@ -418,11 +483,18 @@ async fn worker_loop(
                 let _ = response_tx.send(WorkerResponse {
                     text: response_text,
                     error,
+                    cancelled,
                 });
+                if cancelled {
+                    cancel = CancellationToken::new();
+                }
             }
 
             WorkerRequest::Cancel => {
                 cancel.cancel();
+                let _ = event_tx.send(WorkerEvent::TurnCancelled {
+                    reason: "operator_cancelled".to_string(),
+                });
             }
 
             WorkerRequest::SetModel { value, ack } => {
@@ -511,7 +583,11 @@ async fn worker_loop(
                         Err(e) => text = format!("Persona switch failed: {e}"),
                     }
                 }
-                let _ = response_tx.send(WorkerResponse { text, error: None });
+                let _ = response_tx.send(WorkerResponse {
+                    text,
+                    error: None,
+                    cancelled: false,
+                });
             }
 
             WorkerRequest::ConnectMcpServers { servers } => {

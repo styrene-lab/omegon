@@ -2152,6 +2152,49 @@ fn serialize_agent_event(event: &AgentEvent) -> Value {
             "event_name": "system.notification",
             "message": escape_html(message),
         }),
+        AgentEvent::ProviderRetry {
+            provider,
+            model,
+            attempt,
+            delay_ms,
+            reason,
+            message,
+            recoverable,
+        } => json!({
+            "type": "provider_retry",
+            "event_name": "provider.retry",
+            "provider": provider,
+            "model": model,
+            "attempt": attempt,
+            "delay_ms": delay_ms,
+            "reason": reason,
+            "message": escape_html(message),
+            "recoverable": recoverable,
+        }),
+        AgentEvent::ProviderFailure {
+            provider,
+            model,
+            reason,
+            attempts,
+            message,
+            retryable,
+            recommended_action,
+        } => json!({
+            "type": "provider_failure",
+            "event_name": "provider.failure",
+            "provider": provider,
+            "model": model,
+            "reason": reason,
+            "attempts": attempts,
+            "message": escape_html(message),
+            "retryable": retryable,
+            "recommended_action": recommended_action,
+        }),
+        AgentEvent::TurnCancelled { reason } => json!({
+            "type": "turn_cancelled",
+            "event_name": "turn.cancelled",
+            "reason": reason,
+        }),
         AgentEvent::HarnessStatusChanged { status_json } => json!({
             "type": "harness_status_changed",
             "event_name": "harness.changed",
@@ -2697,6 +2740,9 @@ mod tests {
             AgentEvent::FamilyVitalSignsUpdated { .. } => {}
             AgentEvent::PlanUpdated { .. } => {}
             AgentEvent::SystemNotification { .. } => {}
+            AgentEvent::ProviderRetry { .. } => {}
+            AgentEvent::ProviderFailure { .. } => {}
+            AgentEvent::TurnCancelled { .. } => {}
             AgentEvent::HarnessStatusChanged { .. } => {}
             AgentEvent::WebDashboardStarted { .. } => {}
             AgentEvent::ContextUpdated { .. } => {}

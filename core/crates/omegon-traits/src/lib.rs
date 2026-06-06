@@ -2016,6 +2016,30 @@ pub enum AgentEvent {
     SystemNotification {
         message: String,
     },
+    /// Structured provider retry telemetry — renderers must not treat this as assistant-authored content.
+    ProviderRetry {
+        provider: String,
+        model: String,
+        attempt: u32,
+        delay_ms: u64,
+        reason: String,
+        message: String,
+        recoverable: bool,
+    },
+    /// Structured provider terminal failure telemetry — renderers must not treat this as assistant-authored content.
+    ProviderFailure {
+        provider: String,
+        model: String,
+        reason: String,
+        attempts: u32,
+        message: String,
+        retryable: bool,
+        recommended_action: String,
+    },
+    /// Structured turn cancellation telemetry.
+    TurnCancelled {
+        reason: String,
+    },
     /// Structured session plan snapshot. Renderers should prefer this over
     /// reparsing human-readable plan notifications.
     PlanUpdated {
