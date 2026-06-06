@@ -90,8 +90,14 @@ impl ExtensionState {
     pub fn mark_enabled(&mut self) {
         self.enabled = true;
         self.last_enabled_at = Some(Utc::now().to_rfc3339());
-        // Reset session crashes (new session of extension being active)
+        // Enabling is an explicit recovery action. Clear stale auto-disable
+        // state so ACP clients can recover extensions without editing state
+        // files or spawning extension binaries themselves.
         self.stability.crashes_this_session = 0;
+        self.stability.health_check_failures = 0;
+        self.stability.last_error = None;
+        self.stability.last_error_at = None;
+        self.stability.auto_disabled = false;
     }
 
     /// Mark extension as disabled (called when user disables it).
@@ -176,9 +182,21 @@ mod tests {
     fn test_mark_enabled() {
         let mut state = ExtensionState::new();
         state.enabled = false;
+        state.stability.crashes_this_session = 4;
+        state.stability.health_check_failures = 2;
+        state.stability.last_error = Some("transport failure".to_string());
+        state.stability.last_error_at = Some("2026-06-06T01:46:31Z".to_string());
+        state.stability.auto_disabled = true;
+
         state.mark_enabled();
+
         assert!(state.enabled);
         assert!(state.last_enabled_at.is_some());
+        assert_eq!(state.stability.crashes_this_session, 0);
+        assert_eq!(state.stability.health_check_failures, 0);
+        assert_eq!(state.stability.last_error, None);
+        assert_eq!(state.stability.last_error_at, None);
+        assert!(!state.stability.auto_disabled);
     }
 
     #[test]

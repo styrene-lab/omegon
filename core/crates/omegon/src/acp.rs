@@ -1631,6 +1631,13 @@ impl OmegonAcpAgent {
                             },
                             "metadata": metadata,
                             "last_error": state.stability.last_error,
+                            "stability": {
+                                "crashes_this_session": state.stability.crashes_this_session,
+                                "health_check_failures": state.stability.health_check_failures,
+                                "last_error": state.stability.last_error,
+                                "last_error_at": state.stability.last_error_at,
+                                "auto_disabled": state.stability.auto_disabled,
+                            },
                             "config_schema": config_schema,
                             "secrets": {
                                 "required": secret_status(&manifest.secrets.required),
@@ -1752,6 +1759,7 @@ impl OmegonAcpAgent {
                         "crashes_this_session": state.stability.crashes_this_session,
                         "health_check_failures": state.stability.health_check_failures,
                         "last_error": state.stability.last_error,
+                        "last_error_at": state.stability.last_error_at,
                         "auto_disabled": state.stability.auto_disabled,
                     },
                     "config_schema": config_schema,
@@ -3206,7 +3214,88 @@ optional = ["DUMMY_OPTIONAL"]
         assert_eq!(ext["callable"], false);
         assert_eq!(ext["capabilities"]["voice"], true);
         assert_eq!(ext["last_error"], serde_json::Value::Null);
+        assert_eq!(ext["stability"]["crashes_this_session"], 0);
+        assert_eq!(ext["stability"]["health_check_failures"], 0);
+        assert_eq!(ext["stability"]["last_error"], serde_json::Value::Null);
+        assert_eq!(ext["stability"]["last_error_at"], serde_json::Value::Null);
+        assert_eq!(ext["stability"]["auto_disabled"], false);
         assert_eq!(ext["secrets"]["required"][0]["name"], "DUMMY_TOKEN");
+    }
+
+    #[tokio::test]
+    async fn extensions_enable_clears_auto_disabled_stability_state() {
+        let home = tempfile::tempdir().unwrap();
+        let ext_dir = home.path().join("extensions").join("flynt");
+        std::fs::create_dir_all(ext_dir.join(".omegon")).unwrap();
+        std::fs::write(
+            ext_dir.join("manifest.toml"),
+            r#"[extension]
+name = "flynt"
+version = "0.1.0"
+description = "Flynt"
+
+[runtime]
+type = "native"
+binary = "bin/flynt"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            ext_dir.join(".omegon").join("state.toml"),
+            r#"enabled = false
+
+[stability]
+crashes_this_session = 4
+health_check_failures = 2
+last_error = "transport failure: Broken pipe (os error 32)"
+last_error_at = "2026-06-06T01:46:31.022584+00:00"
+auto_disabled = true
+"#,
+        )
+        .unwrap();
+
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent.clone(),
+            "_extensions/enable",
+            &serde_json::json!({ "extension": "flynt" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response["ok"], true);
+
+        let list = handle_acp_request_result(agent, "_extensions/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        let state = crate::extensions::ExtensionState::load(&ext_dir).unwrap();
+        assert!(state.enabled);
+        assert_eq!(state.stability.crashes_this_session, 0);
+        assert_eq!(state.stability.health_check_failures, 0);
+        assert_eq!(state.stability.last_error, None);
+        assert_eq!(state.stability.last_error_at, None);
+        assert!(!state.stability.auto_disabled);
+
+        let ext = list["extensions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == "flynt")
+            .expect("flynt listed");
+        assert_eq!(ext["enabled"], true);
+        assert_eq!(ext["stability"]["crashes_this_session"], 0);
+        assert_eq!(ext["stability"]["health_check_failures"], 0);
+        assert_eq!(ext["stability"]["last_error"], serde_json::Value::Null);
+        assert_eq!(ext["stability"]["last_error_at"], serde_json::Value::Null);
+        assert_eq!(ext["stability"]["auto_disabled"], false);
     }
 
     #[tokio::test]

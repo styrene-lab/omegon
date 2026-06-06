@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.10] - 2026-06-06
+
+### Fixed
+
+- Make `_extensions/enable` fully recover auto-disabled extensions by clearing stale crash, health-check, last-error, and auto-disable state; expose full extension stability diagnostics from `_extensions/list` so ACP clients can render recovery UI without direct state-file edits.
+
 ## [0.26.9] - 2026-06-06
 
 ### Added
