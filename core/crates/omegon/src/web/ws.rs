@@ -2917,8 +2917,8 @@ mod tests {
         }
         assert_eq!(
             events.len(),
-            22,
-            "should cover all 22 AgentEvent variants — see _exhaustive_agent_event_serialization_coverage"
+            23,
+            "should cover all 23 AgentEvent variants — see _exhaustive_agent_event_serialization_coverage"
         );
     }
 
