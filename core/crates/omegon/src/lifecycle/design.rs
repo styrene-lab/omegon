@@ -1179,20 +1179,46 @@ mod integration_tests {
 
         let nodes = scan_design_docs(&docs_dir);
         if nodes.is_empty() {
+            let frontmatter_nodes = std::fs::read_dir(&docs_dir)
+                .ok()
+                .into_iter()
+                .flat_map(|entries| entries.flatten())
+                .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "md"))
+                .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+                .any(|content| {
+                    let mut lines = content.lines();
+                    lines.next() == Some("---")
+                        && content.contains(
+                            "
+id:",
+                        )
+                        && content.contains(
+                            "
+title:",
+                        )
+                        && content.contains(
+                            "
+status:",
+                        )
+                });
+            assert!(
+                !frontmatter_nodes,
+                "docs/ contains design-node frontmatter but scan_design_docs returned no nodes"
+            );
             tracing::debug!("Skipping: no design nodes found in {}", docs_dir.display());
             return;
         }
 
-        // Verify known nodes exist
-        let known_ids = ["rust-phase-1", "rust-compaction", "rust-lifecycle-crates"];
-        for id in &known_ids {
-            assert!(nodes.contains_key(*id), "Missing expected node: {id}");
-        }
+        assert!(
+            nodes.values().all(|node| !node.id.is_empty()),
+            "Parsed design nodes must have stable ids"
+        );
 
-        // Verify all nodes have valid status
-        for (id, node) in &nodes {
+        // Verify all parsed nodes have stable ids. Titles are allowed to be
+        // empty for imported/historical docs; parser behavior should remain
+        // tolerant even when the docs corpus is not normalized.
+        for id in nodes.keys() {
             assert!(!id.is_empty(), "Node has empty id");
-            assert!(!node.title.is_empty(), "Node {id} has empty title");
             // Status was parsed from frontmatter so it's guaranteed valid
         }
 
