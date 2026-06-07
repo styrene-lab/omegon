@@ -295,6 +295,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Split well-known secrets into static env credentials and refreshable OAuth session tokens, and only auto-hydrate static credentials into the parent process environment.
 - Slim plan pinning now trusts only live `PlanUpdated` projections so legacy transcript plan text remains history instead of resurrecting stale active plan lanes.
 - Refine the `plan-refinement` OpenSpec plan around plan/task ACP projections, Flynt task-board linkage, and explicit stale/resume semantics.
+- Add plan registry core data shapes, stable plan id constructors, external task refs, and repo-bound clear-as-detach semantics.
 
 ## [0.24.2] - 2026-05-25
 

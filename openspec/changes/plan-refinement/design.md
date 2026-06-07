@@ -219,6 +219,59 @@ This keeps three surfaces aligned without merging their responsibilities:
 2. OpenSpec/design = lifecycle source of truth.
 3. Flynt task board = external board that can link to plan tasks and lifecycle artifacts without owning Omegon internals.
 
+### Implementation sequence
+
+Execute the remaining work in four slices. Each slice must leave `/plan list` and existing snapshot JSON backward-compatible.
+
+#### Slice A — Registry core and stale-safe detach
+
+Scope: `conversation.rs`, `main.rs`, focused tests.
+
+- Add stable id constructor helpers for session, OpenSpec, design, hybrid, and branch plan ids.
+- Extend `PlanBinding` with optional external task refs but keep default serde compatibility.
+- Add `TaskCompletionPolicy`, `EvidenceRef`, `PlanEventSource`, `PlanEvent`, and `CompletionLedgerEntry` data shapes behind session-local state.
+- Make `PlanAction::Clear` scope-aware: session plans clear; repo-bound plans become detached and preserve binding summary.
+- Add stale/degraded copy helpers and tests for clear/detach not mutating OpenSpec/design files.
+
+Acceptance: existing plan tests pass; new tests prove repo-bound clear detaches and never deletes durable artifacts.
+
+#### Slice B — Read-only registry and task projections
+
+Scope: `conversation.rs`, `tools/mod.rs`, `main.rs`, `lifecycle/design.rs`.
+
+- Implement `PlanRegistry` read model from visible plan, last completed plan, OpenSpec task groups, design candidates, and branch/worktree hints.
+- Convert visible items and OpenSpec task groups into `PlanItemProjection` rows with parent `plan_id`.
+- Add external task refs to item projections, not Flynt-specific fields.
+- Update `/plan list` and `/plan show` to render from registry/projected tasks.
+- Mark missing backing files/nodes as `Stale` with last summary when available.
+
+Acceptance: `/plan list` remains read-only, includes OpenSpec/design candidates, and exposes source/scope/status/progress without parsing durable files for mutation.
+
+#### Slice C — Resume, background, ledger UX
+
+Scope: `conversation.rs`, `main.rs`, `loop.rs`, TUI dashboard/Slim plan lane.
+
+- Add session-local registry view state for backgrounded/detached/dismissed/last-visible/resume hints.
+- Implement `/plan switch`, `/plan resume`, `/plan background`, `/plan detach`, `/plan ledger`, and `/plan show`.
+- Add resume ranking: active foreground, backgrounded/blocked lifecycle-bound, incomplete OpenSpec/design, recent completed context.
+- Record background/completion events without replacing the visible plan.
+- Surface resume candidates in dashboard/Slim lane with explicit operator choice.
+
+Acceptance: completed/backgrounded/stale plans never become foreground on startup without explicit `/plan switch` or `/plan resume`.
+
+#### Slice D — ACP plan/task projection surfaces
+
+Scope: `acp.rs`, `acp_worker.rs`, `conversation.rs`, tests.
+
+- Advertise `_plans/*` and `_tasks/*` in `runtime/capabilities`.
+- Implement `_plans/list`, `_plans/show`, `_plans/events`, `_plans/switch`, `_plans/detach`.
+- Implement `_tasks/list`, `_tasks/show`, `_tasks/bind`, `_tasks/events`.
+- Ensure read methods are mutation-free and safe for Flynt polling.
+- Ensure `_tasks/bind` only stores external task refs on task projections/session metadata; no OpenSpec/design completion mutation.
+- Add ACP tests for capability advertisement, read-only list/show, switch/detach semantics, and external task binding.
+
+Acceptance: Flynt can render plans as task-composed rows through ACP without parsing slash text or owning lifecycle completion.
+
 ### Acceptance gates
 
 - `/plan list` remains read-only and lists visible, backgrounded, completed, OpenSpec, design, and stale candidates with source/scope/status/progress.

@@ -4,6 +4,7 @@
 //! and the LLM-facing view with decay applied for context efficiency.
 
 use crate::bridge::{ImageAttachment, LlmMessage, WireToolCall};
+pub use crate::plan::*;
 use indexmap::IndexSet;
 use omegon_traits::LifecyclePhase;
 use serde::{Deserialize, Serialize};
@@ -153,6 +154,12 @@ pub struct IntentDocument {
     pub plan_mode: PlanMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_plan: Option<VisiblePlanState>,
+    #[serde(default, skip_serializing_if = "PlanRegistryViewState::is_empty")]
+    pub plan_registry_view: PlanRegistryViewState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plan_events: Vec<PlanEvent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub completion_ledger: Vec<CompletionLedgerEntry>,
 
     pub constraints_discovered: Vec<String>,
     pub failed_approaches: Vec<FailedApproach>,
@@ -165,6 +172,12 @@ pub struct IntentDocument {
 pub struct WorkItem {
     pub description: String,
     pub status: WorkItemStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent: Option<TaskIntent>,
+    #[serde(default)]
+    pub completion_policy: TaskCompletionPolicy,
+    #[serde(default)]
+    pub evidence: Vec<EvidenceRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -235,112 +248,6 @@ impl PlanSource {
             Self::Hybrid => "hybrid",
         }
     }
-}
-
-impl PlanStatus {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Active => "active",
-            Self::Backgrounded => "backgrounded",
-            Self::Blocked => "blocked",
-            Self::Completed => "completed",
-            Self::Detached => "detached",
-            Self::Archived => "archived",
-            Self::Stale => "stale",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(default)]
-pub struct PlanBinding {
-    pub design_node_id: Option<String>,
-    pub openspec_change: Option<String>,
-    pub openspec_task_group: Option<String>,
-    pub branch: Option<String>,
-    pub session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum PlanStatus {
-    #[default]
-    Active,
-    Backgrounded,
-    Blocked,
-    Completed,
-    Detached,
-    Archived,
-    Stale,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskIntent {
-    #[default]
-    Unspecified,
-    Research,
-    Design,
-    Spec,
-    Implementation,
-    Validation,
-    Documentation,
-    Operations,
-    Review,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(default)]
-pub struct ProgressSummary {
-    pub completed: usize,
-    pub total: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(default)]
-pub struct PlanRegistryEntry {
-    pub plan_id: String,
-    pub title: String,
-    pub scope: PlanScope,
-    pub source: PlanSource,
-    pub status: PlanStatus,
-    pub binding: PlanBinding,
-    pub progress: ProgressSummary,
-    pub resume_hint: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-pub struct PlanItemProjection {
-    pub id: String,
-    pub label: String,
-    pub status: WorkItemStatus,
-    pub intent: TaskIntent,
-    pub writable: bool,
-}
-
-impl Default for PlanItemProjection {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            label: String::new(),
-            status: WorkItemStatus::Pending,
-            intent: TaskIntent::Unspecified,
-            writable: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlanAction {
-    View,
-    Set { items: Vec<String> },
-    Approve,
-    Execute,
-    Advance,
-    Complete { index: usize },
-    Skip,
-    Clear,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -549,392 +456,6 @@ impl IntentDocument {
         if !normalized.is_empty() && !self.open_questions.iter().any(|q| q == normalized) {
             self.open_questions.push(normalized.to_string());
         }
-    }
-
-    /// Set the work plan, replacing any existing plan.
-    pub fn set_work_plan(&mut self, items: Vec<String>) {
-        self.apply_plan_action(PlanAction::Set { items });
-    }
-
-    pub fn apply_plan_action(&mut self, action: PlanAction) {
-        match action {
-            PlanAction::View => self.normalize_visible_plan(),
-            PlanAction::Set { items } => self.set_work_plan_inner(items),
-            PlanAction::Approve => self.approve_work_plan_inner(),
-            PlanAction::Execute => self.execute_work_plan_inner(),
-            PlanAction::Advance => self.advance_work_plan_inner(),
-            PlanAction::Complete { index } => self.complete_work_item_inner(index),
-            PlanAction::Skip => self.skip_work_item_inner(),
-            PlanAction::Clear => {
-                self.clear_work_plan_inner();
-                return;
-            }
-        }
-        self.sync_visible_plan_from_legacy();
-    }
-
-    fn set_work_plan_inner(&mut self, items: Vec<String>) {
-        self.work_plan = items
-            .into_iter()
-            .filter_map(|desc| {
-                let desc = desc.trim();
-                (!desc.is_empty()).then(|| desc.to_string())
-            })
-            .map(|desc| WorkItem {
-                description: desc,
-                status: WorkItemStatus::Pending,
-            })
-            .collect();
-        if let Some(first) = self.work_plan.first_mut() {
-            first.status = WorkItemStatus::Active;
-            self.plan_mode = PlanMode::Planning;
-        } else {
-            self.plan_mode = PlanMode::Off;
-        }
-    }
-
-    /// Approve the current work plan without starting execution.
-    pub fn approve_work_plan(&mut self) {
-        self.apply_plan_action(PlanAction::Approve);
-    }
-
-    fn approve_work_plan_inner(&mut self) {
-        if !self.work_plan.is_empty() && !self.work_plan_complete() {
-            self.plan_mode = PlanMode::Approved;
-        }
-    }
-
-    /// Move an approved plan into execution.
-    pub fn execute_work_plan(&mut self) {
-        self.apply_plan_action(PlanAction::Execute);
-    }
-
-    fn execute_work_plan_inner(&mut self) {
-        if !self.work_plan.is_empty() && !self.work_plan_complete() {
-            self.plan_mode = PlanMode::Executing;
-            if !self
-                .work_plan
-                .iter()
-                .any(|w| w.status == WorkItemStatus::Active)
-                && let Some(next) = self
-                    .work_plan
-                    .iter_mut()
-                    .find(|w| w.status == WorkItemStatus::Pending)
-            {
-                next.status = WorkItemStatus::Active;
-            }
-        }
-    }
-
-    /// Clear the active work plan and disable the plan gate.
-    pub fn clear_work_plan(&mut self) {
-        self.apply_plan_action(PlanAction::Clear);
-    }
-
-    fn clear_work_plan_inner(&mut self) {
-        self.work_plan.clear();
-        self.plan_mode = PlanMode::Off;
-        self.visible_plan = None;
-    }
-
-    /// Advance the work plan: mark the current active item done and activate the next.
-    pub fn advance_work_plan(&mut self) {
-        self.apply_plan_action(PlanAction::Advance);
-    }
-
-    fn advance_work_plan_inner(&mut self) {
-        let active_idx = self
-            .work_plan
-            .iter()
-            .position(|w| w.status == WorkItemStatus::Active);
-        if let Some(idx) = active_idx {
-            self.work_plan[idx].status = WorkItemStatus::Done;
-            if let Some(next) = self.work_plan.get_mut(idx + 1)
-                && next.status == WorkItemStatus::Pending
-            {
-                next.status = WorkItemStatus::Active;
-            }
-            self.clear_if_work_plan_complete();
-        }
-    }
-
-    /// Mark a specific work item by index as done.
-    pub fn complete_work_item(&mut self, index: usize) {
-        self.apply_plan_action(PlanAction::Complete { index });
-    }
-
-    fn complete_work_item_inner(&mut self, index: usize) {
-        if let Some(item) = self.work_plan.get_mut(index) {
-            item.status = WorkItemStatus::Done;
-        }
-        // If no active item remains, activate the first pending
-        if !self
-            .work_plan
-            .iter()
-            .any(|w| w.status == WorkItemStatus::Active)
-            && let Some(next) = self
-                .work_plan
-                .iter_mut()
-                .find(|w| w.status == WorkItemStatus::Pending)
-        {
-            next.status = WorkItemStatus::Active;
-        }
-        self.clear_if_work_plan_complete();
-    }
-
-    /// Skip the current active item and activate the next.
-    pub fn skip_work_item(&mut self) {
-        self.apply_plan_action(PlanAction::Skip);
-    }
-
-    fn skip_work_item_inner(&mut self) {
-        let active_idx = self
-            .work_plan
-            .iter()
-            .position(|w| w.status == WorkItemStatus::Active);
-        if let Some(idx) = active_idx {
-            self.work_plan[idx].status = WorkItemStatus::Skipped;
-            if let Some(next) = self.work_plan.get_mut(idx + 1)
-                && next.status == WorkItemStatus::Pending
-            {
-                next.status = WorkItemStatus::Active;
-            }
-            self.clear_if_work_plan_complete();
-        }
-    }
-
-    fn clear_if_work_plan_complete(&mut self) {
-        if self.work_plan_complete() {
-            self.record_completed_work_plan();
-            self.plan_mode = PlanMode::Complete;
-        }
-    }
-
-    fn normalize_visible_plan(&mut self) {
-        self.sync_visible_plan_from_legacy();
-    }
-
-    fn sync_visible_plan_from_legacy(&mut self) {
-        if self.work_plan.is_empty() {
-            if self.plan_mode == PlanMode::Off {
-                self.visible_plan = None;
-            }
-            return;
-        }
-
-        self.visible_plan = Some(VisiblePlanState {
-            plan_id: self
-                .visible_plan
-                .as_ref()
-                .map(|plan| plan.plan_id.clone())
-                .unwrap_or_else(|| "session:current".to_string()),
-            scope: PlanScope::Session,
-            source: PlanSource::Ephemeral,
-            binding: self
-                .visible_plan
-                .as_ref()
-                .map(|plan| plan.binding.clone())
-                .unwrap_or_default(),
-            mode: self.plan_mode,
-            items: self.work_plan.clone(),
-        });
-    }
-
-    fn record_completed_work_plan(&mut self) {
-        if self.work_plan.is_empty() {
-            return;
-        }
-        if self
-            .completed_work_plans
-            .last()
-            .is_some_and(|record| record.items == self.work_plan)
-        {
-            return;
-        }
-        self.completed_work_plans.push(CompletedWorkPlan {
-            items: self.work_plan.clone(),
-            completed_turn: self.stats.turns,
-        });
-        const MAX_COMPLETED_WORK_PLANS: usize = 5;
-        let overflow = self
-            .completed_work_plans
-            .len()
-            .saturating_sub(MAX_COMPLETED_WORK_PLANS);
-        if overflow > 0 {
-            self.completed_work_plans.drain(0..overflow);
-        }
-    }
-
-    pub fn last_completed_work_plan(&self) -> Option<&CompletedWorkPlan> {
-        self.completed_work_plans.last()
-    }
-
-    /// True when all work items are terminal (done or skipped).
-    pub fn work_plan_complete(&self) -> bool {
-        !self.work_plan.is_empty()
-            && self
-                .work_plan
-                .iter()
-                .all(|w| matches!(w.status, WorkItemStatus::Done | WorkItemStatus::Skipped))
-    }
-
-    /// Render the work plan as a compact one-line summary.
-    pub fn work_plan_summary(&self) -> Option<String> {
-        if self.work_plan.is_empty() {
-            return None;
-        }
-        let parts: Vec<String> = self
-            .work_plan
-            .iter()
-            .map(|w| format!("{} {}", w.status.icon(), w.description))
-            .collect();
-        Some(parts.join("  "))
-    }
-
-    /// Render the last completed work plan, if one exists.
-    pub fn render_last_completed_work_plan(&self) -> Option<String> {
-        let record = self.last_completed_work_plan()?;
-        let mut lines = vec![
-            "Plan mode: complete".to_string(),
-            "Last completed work plan.".to_string(),
-            format!("Progress: {}/{}", record.items.len(), record.items.len()),
-            String::new(),
-        ];
-        for (idx, item) in record.items.iter().enumerate() {
-            lines.push(format!(
-                "{}. {} {}",
-                idx + 1,
-                item.status.icon(),
-                item.description
-            ));
-        }
-        Some(lines.join("\n"))
-    }
-
-    /// Render the active work plan with mode and approval-gate guidance.
-    pub fn render_work_plan(&self) -> String {
-        if self.work_plan.is_empty() {
-            return "Plan mode: off\nNo active work plan.".into();
-        }
-        let done = self
-            .work_plan
-            .iter()
-            .filter(|w| matches!(w.status, WorkItemStatus::Done))
-            .count();
-        let mut lines = vec![
-            format!("Plan mode: {}", self.plan_mode.label()),
-            self.plan_mode.guidance().to_string(),
-            format!("Progress: {done}/{}", self.work_plan.len()),
-            String::new(),
-        ];
-        for (idx, item) in self.work_plan.iter().enumerate() {
-            lines.push(format!(
-                "{}. {} {}",
-                idx + 1,
-                item.status.icon(),
-                item.description
-            ));
-        }
-        lines.join("\n")
-    }
-
-    pub fn work_plan_snapshot_json(&self) -> serde_json::Value {
-        let done = self
-            .work_plan
-            .iter()
-            .filter(|w| matches!(w.status, WorkItemStatus::Done))
-            .count();
-        let items: Vec<serde_json::Value> = self
-            .work_plan
-            .iter()
-            .map(|item| {
-                serde_json::json!({
-                    "description": item.description,
-                    "status": item.status.label(),
-                })
-            })
-            .collect();
-
-        serde_json::json!({
-            "mode": self.plan_mode.label(),
-            "guidance": self.plan_mode.guidance(),
-            "completed": done,
-            "total": self.work_plan.len(),
-            "items": items,
-            "plan_id": self
-                .visible_plan
-                .as_ref()
-                .map(|plan| plan.plan_id.as_str())
-                .unwrap_or("session:current"),
-            "scope": self
-                .visible_plan
-                .as_ref()
-                .map(|plan| plan.scope.label())
-                .unwrap_or("session"),
-            "source": self
-                .visible_plan
-                .as_ref()
-                .map(|plan| plan.source.label())
-                .unwrap_or("session"),
-        })
-    }
-
-    pub fn visible_plan_registry_entry(&self) -> Option<PlanRegistryEntry> {
-        let plan = self.visible_plan.as_ref()?;
-        let completed = plan
-            .items
-            .iter()
-            .filter(|item| matches!(item.status, WorkItemStatus::Done))
-            .count();
-        let status = if plan.mode == PlanMode::Complete {
-            PlanStatus::Completed
-        } else {
-            PlanStatus::Active
-        };
-
-        Some(PlanRegistryEntry {
-            plan_id: plan.plan_id.clone(),
-            title: plan
-                .items
-                .iter()
-                .find(|item| item.status == WorkItemStatus::Active)
-                .or_else(|| plan.items.first())
-                .map(|item| item.description.clone())
-                .unwrap_or_else(|| "Session plan".to_string()),
-            scope: plan.scope,
-            source: plan.source,
-            status,
-            binding: plan.binding.clone(),
-            progress: ProgressSummary {
-                completed,
-                total: plan.items.len(),
-            },
-            resume_hint: Some(format!(
-                "{} · {}/{}",
-                plan.source.label(),
-                completed,
-                plan.items.len()
-            )),
-        })
-    }
-
-    pub fn visible_plan_items(&self) -> Vec<PlanItemProjection> {
-        self.visible_plan
-            .as_ref()
-            .map(|plan| {
-                plan.items
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, item)| PlanItemProjection {
-                        id: format!("{}:{}", plan.plan_id, idx + 1),
-                        label: item.description.clone(),
-                        status: item.status,
-                        intent: TaskIntent::Unspecified,
-                        writable: plan.scope == PlanScope::Session,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
     }
 }
 
@@ -4146,11 +3667,7 @@ mod tests {
     #[test]
     fn work_plan_set_and_advance() {
         let mut intent = IntentDocument::default();
-        intent.set_work_plan(vec![
-            "Read code".into(),
-            "Design".into(),
-            "Implement".into(),
-        ]);
+        intent.set_work_plan(vec!["Read code".into(), "Patch".into(), "Implement".into()]);
 
         assert_eq!(intent.work_plan.len(), 3);
         assert_eq!(intent.work_plan[0].status, WorkItemStatus::Active);
@@ -4327,6 +3844,76 @@ mod tests {
     }
 
     #[test]
+    fn repo_bound_clear_detaches_visible_plan_without_deleting_binding() {
+        let mut intent = IntentDocument::default();
+        intent.work_plan = vec![WorkItem {
+            description: "Backed task".into(),
+            status: WorkItemStatus::Active,
+            intent: Some(TaskIntent::Implementation),
+            completion_policy: TaskCompletionPolicy::Manual,
+            evidence: Vec::new(),
+        }];
+        intent.plan_mode = PlanMode::Executing;
+        intent.visible_plan = Some(VisiblePlanState {
+            plan_id: PlanBinding::openspec_plan_id("plan-refinement", None),
+            scope: PlanScope::Repo,
+            source: PlanSource::OpenSpec,
+            binding: PlanBinding {
+                openspec_change: Some("plan-refinement".into()),
+                ..PlanBinding::default()
+            },
+            mode: PlanMode::Executing,
+            items: intent.work_plan.clone(),
+        });
+
+        intent.apply_plan_action(PlanAction::Clear);
+
+        assert!(intent.work_plan.is_empty());
+        assert_eq!(intent.plan_mode, PlanMode::Off);
+        let visible = intent
+            .visible_plan
+            .as_ref()
+            .expect("detached plan remains visible");
+        assert_eq!(visible.plan_id, "openspec:plan-refinement");
+        assert_eq!(visible.scope, PlanScope::Repo);
+        assert_eq!(visible.source, PlanSource::OpenSpec);
+        assert_eq!(
+            visible.binding.openspec_change.as_deref(),
+            Some("plan-refinement")
+        );
+        assert_eq!(visible.mode, PlanMode::Off);
+        assert!(visible.items.is_empty());
+
+        let entry = intent
+            .visible_plan_registry_entry()
+            .expect("detached registry entry");
+        assert_eq!(entry.status, PlanStatus::Detached);
+        assert_eq!(
+            entry.binding.openspec_change.as_deref(),
+            Some("plan-refinement")
+        );
+    }
+
+    #[test]
+    fn plan_id_constructors_are_stable() {
+        assert_eq!(PlanBinding::session_plan_id(), "session:current");
+        assert_eq!(
+            PlanBinding::openspec_plan_id("plan-refinement", None),
+            "openspec:plan-refinement"
+        );
+        assert_eq!(
+            PlanBinding::openspec_plan_id("plan-refinement", Some("2")),
+            "openspec:plan-refinement:group:2"
+        );
+        assert_eq!(PlanBinding::design_plan_id("node-a"), "design:node-a");
+        assert_eq!(
+            PlanBinding::hybrid_plan_id("change-a", "node-a"),
+            "hybrid:change-a:node-a"
+        );
+        assert_eq!(PlanBinding::branch_plan_id("main"), "branch:main");
+    }
+
+    #[test]
     fn visible_plan_registry_entry_projects_session_plan() {
         let mut intent = IntentDocument::default();
         intent.apply_plan_action(PlanAction::Set {
@@ -4361,6 +3948,204 @@ mod tests {
         assert_eq!(entry.status, PlanStatus::Completed);
         assert_eq!(entry.progress.completed, 1);
         assert_eq!(entry.progress.total, 1);
+        assert_eq!(intent.completion_ledger.len(), 1);
+        assert_eq!(intent.completion_ledger[0].plan_id, "session:current");
+        assert_eq!(intent.completion_ledger[0].item_count, 1);
+    }
+
+    #[test]
+    fn switch_resume_request_does_not_replace_visible_plan() {
+        let mut intent = IntentDocument::default();
+        intent.apply_plan_action(PlanAction::Set {
+            items: vec!["Foreground".into()],
+        });
+        let before = intent.visible_plan.as_ref().unwrap().plan_id.clone();
+
+        let output = intent.switch_visible_plan("openspec:other-change");
+
+        assert!(output.contains("openspec:other-change"));
+        assert_eq!(
+            intent.visible_plan.as_ref().unwrap().plan_id,
+            before,
+            "resume/switch requests must not silently replace the foreground plan"
+        );
+        assert!(
+            intent
+                .plan_registry_view
+                .entries
+                .iter()
+                .any(|entry| entry.plan_id == "openspec:other-change"
+                    && entry.status == PlanStatus::Active)
+        );
+    }
+
+    #[test]
+    fn evidence_required_items_do_not_complete_without_evidence() {
+        let mut intent = IntentDocument::default();
+        intent.apply_plan_action(PlanAction::Set {
+            items: vec!["Research citations for plan surface".into()],
+        });
+
+        intent.apply_plan_action(PlanAction::Complete { index: 0 });
+        assert_eq!(intent.work_plan[0].status, WorkItemStatus::Active);
+        assert!(
+            intent
+                .plan_events
+                .iter()
+                .any(|event| event.summary.contains("evidence is required"))
+        );
+
+        intent.add_plan_item_evidence(0, EvidenceRef::Citation("docs/design.md".into()));
+        intent.apply_plan_action(PlanAction::Complete { index: 0 });
+        assert_eq!(intent.work_plan[0].status, WorkItemStatus::Done);
+    }
+
+    #[test]
+    fn plan_item_evidence_binds_to_projection_and_events() {
+        let mut intent = IntentDocument::default();
+        intent.apply_plan_action(PlanAction::Set {
+            items: vec!["Research citations for plan surface".into()],
+        });
+
+        let task_id = intent
+            .add_plan_item_evidence(0, EvidenceRef::Citation("docs/design.md".into()))
+            .expect("task id");
+
+        assert_eq!(task_id, "session:current:1");
+        let items = intent.visible_plan_items();
+        assert_eq!(
+            items[0].evidence,
+            vec![EvidenceRef::Citation("docs/design.md".into())]
+        );
+        assert_eq!(intent.plan_events.len(), 1);
+        assert_eq!(
+            intent.plan_events[0].task_id.as_deref(),
+            Some("session:current:1")
+        );
+    }
+
+    #[test]
+    fn work_plan_items_infer_non_coding_intents_and_policies() {
+        let mut intent = IntentDocument::default();
+        intent.apply_plan_action(PlanAction::Set {
+            items: vec![
+                "Research citations for auth flow".into(),
+                "Design architecture decision".into(),
+                "Run validation smoke test".into(),
+                "Implement code patch".into(),
+            ],
+        });
+
+        let items = intent.visible_plan_items();
+        assert_eq!(items[0].intent, TaskIntent::Research);
+        assert_eq!(
+            items[0].completion_policy,
+            TaskCompletionPolicy::EvidenceRequired
+        );
+        assert_eq!(items[1].intent, TaskIntent::Design);
+        assert_eq!(
+            items[1].completion_policy,
+            TaskCompletionPolicy::EvidenceRequired
+        );
+        assert_eq!(items[2].intent, TaskIntent::Validation);
+        assert_eq!(
+            items[2].completion_policy,
+            TaskCompletionPolicy::EvidenceRequired
+        );
+        assert_eq!(items[3].intent, TaskIntent::Implementation);
+        assert_eq!(items[3].completion_policy, TaskCompletionPolicy::Manual);
+    }
+
+    #[test]
+    fn resume_candidates_rank_active_before_stale_and_completed() {
+        let mut intent = IntentDocument::default();
+        intent.apply_plan_action(PlanAction::Set {
+            items: vec!["Visible".into()],
+        });
+        let candidates = intent.ranked_resume_candidates(vec![
+            PlanRegistryEntry {
+                plan_id: "openspec:stale".into(),
+                title: "Stale".into(),
+                scope: PlanScope::Repo,
+                source: PlanSource::OpenSpec,
+                status: PlanStatus::Stale,
+                binding: PlanBinding::default(),
+                progress: ProgressSummary {
+                    completed: 0,
+                    total: 1,
+                },
+                resume_hint: Some(STALE_PLAN_COPY.to_string()),
+            },
+            PlanRegistryEntry {
+                plan_id: "session:last-completed".into(),
+                title: "Done".into(),
+                scope: PlanScope::Session,
+                source: PlanSource::Ephemeral,
+                status: PlanStatus::Completed,
+                binding: PlanBinding::default(),
+                progress: ProgressSummary {
+                    completed: 1,
+                    total: 1,
+                },
+                resume_hint: Some("completed context".into()),
+            },
+        ]);
+
+        assert_eq!(candidates[0].plan_id, "session:current");
+        assert_eq!(candidates[0].rank, 0);
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.hint == STALE_PLAN_COPY)
+        );
+        assert_eq!(
+            intent.visible_plan.as_ref().unwrap().plan_id,
+            "session:current"
+        );
+    }
+
+    #[test]
+    fn reconciliation_detects_missing_openspec_projection() {
+        let intent = IntentDocument {
+            visible_plan: Some(VisiblePlanState {
+                plan_id: PlanBinding::openspec_plan_id("missing", None),
+                scope: PlanScope::Repo,
+                source: PlanSource::OpenSpec,
+                binding: PlanBinding {
+                    openspec_change: Some("missing".into()),
+                    ..PlanBinding::default()
+                },
+                mode: PlanMode::Executing,
+                items: Vec::new(),
+            }),
+            ..IntentDocument::default()
+        };
+
+        let issues = intent.reconcile_plan_registry(&[]);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].kind, PlanReconciliationIssueKind::MissingTasks);
+    }
+
+    #[test]
+    fn promotion_nudges_identify_durable_session_work() {
+        let mut intent = IntentDocument::default();
+        intent.apply_plan_action(PlanAction::Set {
+            items: vec![
+                "Research options".into(),
+                "Design decision".into(),
+                "Validate smoke test".into(),
+                "Implement patch".into(),
+            ],
+        });
+
+        let nudges = intent.promotion_nudges();
+        assert!(nudges.iter().any(|nudge| nudge.contains("durable-work")));
+        assert!(nudges.iter().any(|nudge| nudge.contains("design node")));
+        assert!(
+            nudges
+                .iter()
+                .any(|nudge| nudge.contains("Operations/validation"))
+        );
     }
 
     #[test]

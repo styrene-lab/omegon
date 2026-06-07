@@ -1514,6 +1514,99 @@ impl OmegonAcpAgent {
 }
 
 impl OmegonAcpAgent {
+    fn acp_plan_projection_json(&self) -> serde_json::Value {
+        let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
+        let repo_root = crate::setup::find_project_root(&cwd);
+        let projection = crate::tools::lifecycle_plan_projection(&repo_root);
+        serde_json::json!({
+            "plans": projection.entries,
+            "tasks": projection.tasks,
+        })
+    }
+
+    fn acp_plan_show_json(&self, params: serde_json::Value) -> serde_json::Value {
+        let plan_id = params.get("plan_id").and_then(|v| v.as_str()).unwrap_or("");
+        let projection = self.acp_plan_projection_json();
+        let plans = projection
+            .get("plans")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([]));
+        let tasks = projection
+            .get("tasks")
+            .and_then(|v| v.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter(|task| task.get("plan_id").and_then(|v| v.as_str()) == Some(plan_id))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        serde_json::json!({
+            "plan": plans.as_array().and_then(|items| items.iter().find(|plan| plan.get("plan_id").and_then(|v| v.as_str()) == Some(plan_id))).cloned(),
+            "tasks": tasks,
+            "stale_copy": if plan_id.is_empty() { serde_json::Value::Null } else { serde_json::json!(crate::conversation::STALE_PLAN_COPY) },
+        })
+    }
+
+    async fn acp_plan_control_json(&self, command: String) -> serde_json::Value {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let worker_tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
+        let Some(worker_tx) = worker_tx else {
+            return serde_json::json!({
+                "accepted": false,
+                "error": "ACP worker is not initialized",
+            });
+        };
+        if worker_tx
+            .send(WorkerRequest::ControlRequest {
+                command,
+                response_tx: tx,
+            })
+            .await
+            .is_err()
+        {
+            return serde_json::json!({
+                "accepted": false,
+                "error": "ACP worker is not accepting requests",
+            });
+        }
+        match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+            Ok(Ok(resp)) => serde_json::json!({
+                "accepted": resp.error.is_none(),
+                "text": resp.text,
+                "error": resp.error,
+                "cancelled": resp.cancelled,
+                "mutation": "session_view_only",
+            }),
+            Ok(Err(_)) => serde_json::json!({
+                "accepted": false,
+                "error": "ACP worker dropped plan control response",
+            }),
+            Err(_) => serde_json::json!({
+                "accepted": false,
+                "error": "ACP plan control request timed out",
+            }),
+        }
+    }
+
+    fn acp_task_show_json(&self, params: serde_json::Value) -> serde_json::Value {
+        let task_id = params.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+        let projection = self.acp_plan_projection_json();
+        let task = projection
+            .get("tasks")
+            .and_then(|v| v.as_array())
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|task| task.get("id").and_then(|v| v.as_str()) == Some(task_id))
+            })
+            .cloned();
+        serde_json::json!({ "task": task })
+    }
+
     async fn handle_ext_method(
         &self,
         method: &str,
@@ -1528,6 +1621,77 @@ impl OmegonAcpAgent {
 
             "provider/status" => Ok(self.provider_status_json()),
 
+            "plans/list" | "_plans/list" => Ok(self.acp_plan_projection_json()),
+            "plans/show" | "_plans/show" => Ok(self.acp_plan_show_json(params)),
+            "plans/events" | "_plans/events" => Ok(serde_json::json!({
+                "events": [],
+                "source": "lifecycle_projection_only",
+                "note": "Live session plan events are available through the worker session state after a turn; this read surface is intentionally mutation-free."
+            })),
+            "plans/switch" | "_plans/switch" => {
+                let plan_id = params
+                    .get("plan_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
+                if plan_id.is_empty() {
+                    Ok(serde_json::json!({ "accepted": false, "error": "plan_id is required" }))
+                } else {
+                    Ok(self
+                        .acp_plan_control_json(format!("plan switch {plan_id}"))
+                        .await)
+                }
+            }
+            "plans/detach" | "_plans/detach" => {
+                let command = params
+                    .get("plan_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(|id| format!("plan detach {id}"))
+                    .unwrap_or_else(|| "plan detach".to_string());
+                Ok(self.acp_plan_control_json(command).await)
+            }
+            "tasks/list" | "_tasks/list" => Ok(
+                serde_json::json!({ "tasks": self.acp_plan_projection_json().get("tasks").cloned().unwrap_or_else(|| serde_json::json!([])) }),
+            ),
+            "tasks/show" | "_tasks/show" => Ok(self.acp_task_show_json(params)),
+            "tasks/bind" | "_tasks/bind" => {
+                let task_id = params
+                    .get("task_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
+                let system = params
+                    .get("system")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("external")
+                    .trim();
+                let external_id = params
+                    .get("external_task_id")
+                    .or_else(|| params.get("flynt_task_id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
+                if task_id.is_empty() || external_id.is_empty() {
+                    Ok(serde_json::json!({
+                        "accepted": false,
+                        "error": "task_id and external_task_id are required"
+                    }))
+                } else {
+                    Ok(self
+                        .acp_plan_control_json(format!(
+                            "plan bind task:{task_id} {system}:{external_id}"
+                        ))
+                        .await)
+                }
+            }
+            "tasks/events" | "_tasks/events" => Ok(serde_json::json!({
+                "events": [],
+                "source": "lifecycle_projection_only",
+                "note": "Live task events are recorded in session state; this read surface is intentionally mutation-free."
+            })),
+
             "runtime/capabilities" => Ok(serde_json::json!({
                 "surfaces": {
                     "_runtime/capabilities": { "version": 1 },
@@ -1540,7 +1704,16 @@ impl OmegonAcpAgent {
                     "_secrets/list": { "version": 1 },
                     "_secrets/check": { "version": 1 },
                     "_secrets/set_value": { "version": 1 },
-                    "_secrets/set_recipe": { "version": 1 }
+                    "_secrets/set_recipe": { "version": 1 },
+                    "_plans/list": { "version": 1 },
+                    "_plans/show": { "version": 1 },
+                    "_plans/events": { "version": 1 },
+                    "_plans/switch": { "version": 1 },
+                    "_plans/detach": { "version": 1 },
+                    "_tasks/list": { "version": 1 },
+                    "_tasks/show": { "version": 1 },
+                    "_tasks/bind": { "version": 1 },
+                    "_tasks/events": { "version": 1 }
                 },
                 "features": {
                     "packages": true,
@@ -1548,7 +1721,9 @@ impl OmegonAcpAgent {
                     "host_actions": true,
                     "secrets": true,
                     "tools": true,
-                    "memory": true
+                    "memory": true,
+                    "plans": true,
+                    "plan_tasks": true
                 },
                 "protocols": {
                     "acp": ["1"]
@@ -3191,8 +3366,69 @@ mod extension_metadata_tests {
         assert_eq!(response["surfaces"]["_extensions/call"]["version"], 1);
         assert_eq!(response["surfaces"]["_secrets/capabilities"]["version"], 1);
         assert_eq!(response["surfaces"]["_secrets/list"]["version"], 1);
+        assert_eq!(response["surfaces"]["_plans/list"]["version"], 1);
+        assert_eq!(response["surfaces"]["_plans/show"]["version"], 1);
+        assert_eq!(response["surfaces"]["_plans/events"]["version"], 1);
+        assert_eq!(response["surfaces"]["_plans/switch"]["version"], 1);
+        assert_eq!(response["surfaces"]["_plans/detach"]["version"], 1);
+        assert_eq!(response["surfaces"]["_tasks/list"]["version"], 1);
+        assert_eq!(response["surfaces"]["_tasks/show"]["version"], 1);
+        assert_eq!(response["surfaces"]["_tasks/bind"]["version"], 1);
+        assert_eq!(response["surfaces"]["_tasks/events"]["version"], 1);
         assert_eq!(response["features"]["extensions"], true);
         assert_eq!(response["features"]["secrets"], true);
+        assert_eq!(response["features"]["plans"], true);
+        assert_eq!(response["features"]["plan_tasks"], true);
+    }
+
+    #[tokio::test]
+    async fn acp_plan_and_task_surfaces_are_read_only_shapes() {
+        let home = tempfile::tempdir().unwrap();
+        let change_dir = home.path().join("openspec/changes/demo");
+        std::fs::create_dir_all(&change_dir).unwrap();
+        std::fs::write(
+            change_dir.join("proposal.md"),
+            "# Demo
+",
+        )
+        .unwrap();
+        std::fs::write(
+            change_dir.join("tasks.md"),
+            "## 1. Group
+
+- [ ] 1.1 Pending
+",
+        )
+        .unwrap();
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        *agent.session_cwd.borrow_mut() = Some(home.path().to_path_buf());
+
+        let plans = handle_acp_request_result(agent.clone(), "_plans/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(plans["plans"][0]["plan_id"], "openspec:demo");
+        assert_eq!(plans["tasks"][0]["plan_id"], "openspec:demo");
+
+        let shown = handle_acp_request_result(
+            agent.clone(),
+            "_plans/show",
+            &serde_json::json!({ "plan_id": "openspec:demo" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(shown["plan"]["plan_id"], "openspec:demo");
+        assert_eq!(shown["tasks"].as_array().unwrap().len(), 1);
+
+        let task_id = plans["tasks"][0]["id"].as_str().unwrap().to_string();
+        let task = handle_acp_request_result(
+            agent,
+            "_tasks/show",
+            &serde_json::json!({ "task_id": task_id }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(task["task"]["plan_id"], "openspec:demo");
     }
 
     #[tokio::test]

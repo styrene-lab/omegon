@@ -45,6 +45,139 @@ pub const PLAN_LIST_VISIBLE_ITEM_LIMIT: usize = 5;
 pub const PLAN_LIST_CHANGE_LIMIT: usize = 12;
 pub const PLAN_LIST_GROUP_LIMIT: usize = 4;
 
+#[derive(Debug, Clone)]
+pub struct LifecyclePlanProjection {
+    pub entries: Vec<crate::conversation::PlanRegistryEntry>,
+    pub tasks: Vec<crate::conversation::PlanItemProjection>,
+}
+
+pub fn lifecycle_plan_projection(repo_root: &Path) -> LifecyclePlanProjection {
+    use crate::conversation::{
+        PlanBinding, PlanItemProjection, PlanRegistryEntry, PlanScope, PlanSource, PlanStatus,
+        ProgressSummary, TaskCompletionPolicy, TaskIntent, WorkItemStatus,
+    };
+
+    let mut entries = Vec::new();
+    let mut tasks = Vec::new();
+    for change in crate::lifecycle::spec::list_changes(repo_root) {
+        let plan_id = PlanBinding::openspec_plan_id(&change.name, None);
+        let binding = PlanBinding {
+            openspec_change: Some(change.name.clone()),
+            ..PlanBinding::default()
+        };
+        let status = if change.has_tasks {
+            if change.total_tasks > 0 && change.done_tasks >= change.total_tasks {
+                PlanStatus::Completed
+            } else {
+                PlanStatus::Active
+            }
+        } else {
+            PlanStatus::Stale
+        };
+        entries.push(PlanRegistryEntry {
+            plan_id: plan_id.clone(),
+            title: change.name.clone(),
+            scope: PlanScope::Repo,
+            source: PlanSource::OpenSpec,
+            status,
+            binding: binding.clone(),
+            progress: ProgressSummary {
+                completed: change.done_tasks,
+                total: change.total_tasks,
+            },
+            resume_hint: Some(format!("OpenSpec · {}", change.stage.as_str())),
+        });
+        for group in &change.task_groups {
+            let group_plan_id = PlanBinding::openspec_plan_id(&change.name, Some(&group.title));
+            for task in &group.tasks {
+                tasks.push(PlanItemProjection {
+                    id: format!("{}:{}", group_plan_id, task.id),
+                    plan_id: plan_id.clone(),
+                    label: task.description.clone(),
+                    status: if task.done {
+                        WorkItemStatus::Done
+                    } else {
+                        WorkItemStatus::Pending
+                    },
+                    intent: TaskIntent::Spec,
+                    completion_policy: TaskCompletionPolicy::LifecycleStateReached,
+                    evidence: Vec::new(),
+                    external_task_refs: binding.external_task_refs.clone(),
+                    writable: false,
+                });
+            }
+        }
+    }
+    let design_nodes = crate::lifecycle::design::scan_design_docs(&repo_root.join("docs"));
+    for node in design_nodes.values() {
+        if !matches!(
+            node.status,
+            crate::lifecycle::types::NodeStatus::Exploring
+                | crate::lifecycle::types::NodeStatus::Decided
+                | crate::lifecycle::types::NodeStatus::Implementing
+                | crate::lifecycle::types::NodeStatus::Blocked
+        ) {
+            continue;
+        }
+        let plan_id = PlanBinding::design_plan_id(&node.id);
+        let status = match node.status {
+            crate::lifecycle::types::NodeStatus::Blocked => PlanStatus::Blocked,
+            crate::lifecycle::types::NodeStatus::Implemented => PlanStatus::Completed,
+            _ => PlanStatus::Active,
+        };
+        let binding = PlanBinding {
+            design_node_id: Some(node.id.clone()),
+            openspec_change: node.openspec_change.clone(),
+            ..PlanBinding::default()
+        };
+        let total = node.open_questions.len().max(1);
+        let completed = if node.open_questions.is_empty() { 1 } else { 0 };
+        entries.push(PlanRegistryEntry {
+            plan_id: plan_id.clone(),
+            title: node.title.clone(),
+            scope: PlanScope::Repo,
+            source: if node.openspec_change.is_some() {
+                PlanSource::Hybrid
+            } else {
+                PlanSource::Design
+            },
+            status,
+            binding: binding.clone(),
+            progress: ProgressSummary { completed, total },
+            resume_hint: Some(format!("Design · {}", node.status.as_str())),
+        });
+        if node.open_questions.is_empty() {
+            tasks.push(PlanItemProjection {
+                id: format!("{}:decision", plan_id),
+                plan_id: plan_id.clone(),
+                label: "Record or verify design decision evidence".to_string(),
+                status: WorkItemStatus::Pending,
+                intent: TaskIntent::Design,
+                completion_policy: TaskCompletionPolicy::EvidenceRequired,
+                evidence: Vec::new(),
+                external_task_refs: binding.external_task_refs.clone(),
+                writable: false,
+            });
+        } else {
+            for (idx, question) in node.open_questions.iter().enumerate() {
+                tasks.push(PlanItemProjection {
+                    id: format!("{}:question:{}", plan_id, idx + 1),
+                    plan_id: plan_id.clone(),
+                    label: question.clone(),
+                    status: WorkItemStatus::Pending,
+                    intent: TaskIntent::Design,
+                    completion_policy: TaskCompletionPolicy::EvidenceRequired,
+                    evidence: Vec::new(),
+                    external_task_refs: binding.external_task_refs.clone(),
+                    writable: false,
+                });
+            }
+        }
+    }
+
+    LifecyclePlanProjection { entries, tasks }
+}
+
 pub fn render_lifecycle_plan_list(repo_root: &Path) -> String {
     let changes = crate::lifecycle::spec::list_changes(repo_root);
     let mut lines = vec!["OpenSpec".to_string()];
@@ -1380,6 +1513,98 @@ fn warn_git_mutation_via_bash(has_repo_model: bool, command: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lifecycle_plan_projection_projects_openspec_tasks() {
+        let dir = tempfile::tempdir().unwrap();
+        let change_dir = dir.path().join("openspec/changes/demo");
+        std::fs::create_dir_all(&change_dir).unwrap();
+        std::fs::write(
+            change_dir.join("proposal.md"),
+            "# Demo
+",
+        )
+        .unwrap();
+        std::fs::write(
+            change_dir.join("tasks.md"),
+            "## 1. Group
+
+- [x] 1.1 Done task
+- [ ] 1.2 Pending task
+",
+        )
+        .unwrap();
+
+        let projection = lifecycle_plan_projection(dir.path());
+
+        assert_eq!(projection.entries.len(), 1);
+        let entry = &projection.entries[0];
+        assert_eq!(entry.plan_id, "openspec:demo");
+        assert_eq!(entry.scope, crate::conversation::PlanScope::Repo);
+        assert_eq!(entry.source, crate::conversation::PlanSource::OpenSpec);
+        assert_eq!(entry.progress.completed, 1);
+        assert_eq!(entry.progress.total, 2);
+
+        assert_eq!(projection.tasks.len(), 2);
+        assert_eq!(projection.tasks[0].plan_id, "openspec:demo");
+        assert_eq!(
+            projection.tasks[0].intent,
+            crate::conversation::TaskIntent::Spec
+        );
+        assert_eq!(
+            projection.tasks[0].completion_policy,
+            crate::conversation::TaskCompletionPolicy::LifecycleStateReached
+        );
+        assert!(!projection.tasks[0].writable);
+        assert_eq!(
+            projection.tasks[0].status,
+            crate::conversation::WorkItemStatus::Done
+        );
+        assert_eq!(
+            projection.tasks[1].status,
+            crate::conversation::WorkItemStatus::Pending
+        );
+    }
+
+    #[test]
+    fn lifecycle_plan_projection_projects_design_candidates() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(
+            docs.join("design-node.md"),
+            "---
+id: plan-node
+title: Plan Node
+status: exploring
+open_questions:
+  - What evidence is needed?
+---
+
+# Plan Node
+",
+        )
+        .unwrap();
+
+        let projection = lifecycle_plan_projection(dir.path());
+
+        let entry = projection
+            .entries
+            .iter()
+            .find(|entry| entry.plan_id == "design:plan-node")
+            .expect("design entry");
+        assert_eq!(entry.source, crate::conversation::PlanSource::Design);
+        assert_eq!(entry.scope, crate::conversation::PlanScope::Repo);
+        assert_eq!(entry.binding.design_node_id.as_deref(), Some("plan-node"));
+
+        let task = projection
+            .tasks
+            .iter()
+            .find(|task| task.plan_id == "design:plan-node")
+            .expect("design task");
+        assert_eq!(task.intent, crate::conversation::TaskIntent::Design);
+        assert_eq!(task.label, "What evidence is needed?");
+    }
 
     #[test]
     fn path_traversal_blocked() {
