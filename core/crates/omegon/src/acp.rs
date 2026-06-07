@@ -502,7 +502,7 @@ pub struct OmegonAcpAgent {
     session_cwd: RefCell<Option<std::path::PathBuf>>,
     secrets: RefCell<Option<std::sync::Arc<omegon_secrets::SecretsManager>>>,
     host_caps: RefCell<HostCapabilities>,
-    extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    extension_metadata: Rc<RefCell<std::collections::BTreeMap<String, serde_json::Value>>>,
     extension_rpc_handles:
         Rc<RefCell<std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>>>,
 }
@@ -524,7 +524,7 @@ impl OmegonAcpAgent {
             session_cwd: RefCell::new(None),
             secrets: RefCell::new(None),
             host_caps: RefCell::new(HostCapabilities::default()),
-            extension_metadata,
+            extension_metadata: Rc::new(RefCell::new(extension_metadata)),
             extension_rpc_handles: Rc::new(RefCell::new(Default::default())),
         }
     }
@@ -727,6 +727,43 @@ impl OmegonAcpAgent {
                     *secrets_cell.borrow_mut() = Some(mgr);
                 }
             });
+
+            // Persistent lifecycle subscriber. Worker setup can emit extension
+            // metadata/handles before any prompt is sent; prompt-time subscribers
+            // are too late and broadcast receivers do not replay old events.
+            let mut lifecycle_rx = handle.event_rx.resubscribe();
+            let extension_metadata = self.extension_metadata.clone();
+            let extension_rpc_handles = self.extension_rpc_handles.clone();
+            let conn = self.conn.clone();
+            let session_id = self.session_id.borrow().clone();
+            tokio::task::spawn_local(async move {
+                loop {
+                    match lifecycle_rx.recv().await {
+                        Ok(WorkerEvent::ExtensionMetadata(metadata)) => {
+                            *extension_metadata.borrow_mut() = metadata.clone();
+                            if let (Some(c), Some(sid)) =
+                                (conn.borrow().as_ref(), session_id.clone())
+                            {
+                                let meta = extension_metadata_meta(&metadata);
+                                let _ = send_session_update(
+                                    c,
+                                    sid,
+                                    SessionUpdate::SessionInfoUpdate(
+                                        SessionInfoUpdate::new().meta(meta),
+                                    ),
+                                )
+                                .await;
+                            }
+                        }
+                        Ok(WorkerEvent::ExtensionHandles(handles)) => {
+                            *extension_rpc_handles.borrow_mut() = handles;
+                        }
+                        Ok(_) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    }
+                }
+            });
             *self.worker.borrow_mut() = Some(handle);
         }
     }
@@ -888,8 +925,8 @@ impl OmegonAcpAgent {
             AuthMethodAgent::new("omegon-auth", "Omegon Authentication")
                 .description("Run `omegon auth login` in a terminal or set API keys."),
         )];
-        if !self.extension_metadata.is_empty() {
-            response.meta = Some(extension_metadata_meta(&self.extension_metadata));
+        if !self.extension_metadata.borrow().is_empty() {
+            response.meta = Some(extension_metadata_meta(&self.extension_metadata.borrow()));
         }
         Ok(response)
     }
@@ -1048,7 +1085,6 @@ impl OmegonAcpAgent {
             let conn = self.conn.clone();
             let stream_sid = sid.clone();
             let secrets_ref = self.secrets.clone();
-            let extension_rpc_handles = self.extension_rpc_handles.clone();
             tokio::task::spawn_local(async move {
                 // Closure to redact text through the secrets manager if available.
                 let redact = |text: &str| -> String {
@@ -1248,21 +1284,12 @@ impl OmegonAcpAgent {
                                 .await;
                             }
                         }
-                        Ok(WorkerEvent::ExtensionMetadata(metadata)) => {
-                            if let Some(c) = conn.borrow().as_ref() {
-                                let meta = extension_metadata_meta(&metadata);
-                                let _ = send_session_update(
-                                    c,
-                                    stream_sid.clone(),
-                                    SessionUpdate::SessionInfoUpdate(
-                                        SessionInfoUpdate::new().meta(meta),
-                                    ),
-                                )
-                                .await;
-                            }
-                        }
-                        Ok(WorkerEvent::ExtensionHandles(handles)) => {
-                            *extension_rpc_handles.borrow_mut() = handles;
+                        Ok(WorkerEvent::ExtensionMetadata(_))
+                        | Ok(WorkerEvent::ExtensionHandles(_)) => {
+                            // Setup/lifecycle extension state is handled by the persistent
+                            // worker-event forwarder started in ensure_worker(). Prompt
+                            // streaming subscribers may start after setup events and must not
+                            // be the sole owner of this state.
                         }
                         Ok(WorkerEvent::TurnComplete) => break,
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -1608,11 +1635,12 @@ impl OmegonAcpAgent {
                         let id = manifest.extension.name.clone();
                         let metadata = self
                             .extension_metadata
+                            .borrow()
                             .get(&id)
                             .cloned()
                             .unwrap_or(serde_json::Value::Null);
                         let callable = self.extension_rpc_handles.borrow().contains_key(&id);
-                        let loaded = callable || self.extension_metadata.contains_key(&id);
+                        let loaded = callable || self.extension_metadata.borrow().contains_key(&id);
                         extensions.push(serde_json::json!({
                             "id": id,
                             "name": manifest.extension.name,

@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.12] - 2026-06-06
+
+### Fixed
+
+- Preserve worker-emitted extension metadata and live RPC handles before the first prompt by starting a persistent ACP worker-event subscriber during worker creation, allowing `_extensions/list` and `_extensions/call` to report/call loaded extensions immediately after `new_session`.
+
 ## [0.26.11] - 2026-06-06
 
 ### Fixed
