@@ -1422,6 +1422,14 @@ fn hydrate_provider_auth_env_from_auth_json(
             continue;
         }
         if let Some(creds) = crate::auth::read_credentials(provider.auth_key) {
+            if creds.cred_type == "oauth" && creds.is_expired() {
+                tracing::debug!(
+                    provider = provider.id,
+                    env = primary_env,
+                    "skipping expired provider OAuth env hydration from auth.json"
+                );
+                continue;
+            }
             secrets.register_redaction_secret(primary_env, &creds.access);
             secrets.register_redaction_secret(
                 &format!("{}_AUTH_JSON_ACCESS", provider.id),
@@ -1806,6 +1814,62 @@ mod tests {
         assert_eq!(
             find_project_root(&member),
             dir.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn provider_auth_hydration_skips_expired_oauth_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth_path = dir.path().join("auth.json");
+        let expired = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            - 1_000;
+        std::fs::write(
+            &auth_path,
+            serde_json::json!({
+                "openai-codex": {
+                    "type": "oauth",
+                    "access": "expired-codex-token",
+                    "refresh": "refresh-token",
+                    "expires": expired,
+                    "accountId": "acct_123"
+                },
+                "brave": {
+                    "type": "api-key",
+                    "access": "brave-token",
+                    "refresh": "",
+                    "expires": u64::MAX
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+        unsafe { std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path) };
+        let secrets = omegon_secrets::SecretsManager::new(dir.path()).expect("secrets manager");
+        let mut session_secret_env = Vec::new();
+        hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
+                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+            }
+        }
+
+        assert!(
+            !session_secret_env.iter().any(
+                |(name, value)| name == "CHATGPT_OAUTH_TOKEN" && value == "expired-codex-token"
+            ),
+            "expired Codex OAuth must not be inherited by child sessions"
+        );
+        assert!(
+            session_secret_env
+                .iter()
+                .any(|(name, value)| name == "BRAVE_API_KEY" && value == "brave-token"),
+            "static credentials should still be hydrated"
         );
     }
 

@@ -291,6 +291,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Shorten pre-content provider/SSE idle detection from five minutes to 90 seconds, with environment overrides, so stale provider sessions surface as failures instead of apparent hangs.
 - Read Codex CLI JWT `exp` claims and refresh OpenAI OAuth tokens five minutes early so adopted CLI credentials do not wait for stale `last_refresh` timestamps before re-authentication.
 - Stop promoting persisted OAuth credentials into the parent process environment, so one Omegon session no longer shadows shared auth.json refreshes with a stale per-process token.
+- Skip expired OAuth entries when hydrating provider auth for child/delegate sessions, preventing stale Codex `CHATGPT_OAUTH_TOKEN` inheritance from bypassing auth.json refresh/re-login state.
 - Split well-known secrets into static env credentials and refreshable OAuth session tokens, and only auto-hydrate static credentials into the parent process environment.
 - Slim plan pinning now trusts only live `PlanUpdated` projections so legacy transcript plan text remains history instead of resurrecting stale active plan lanes.
 
