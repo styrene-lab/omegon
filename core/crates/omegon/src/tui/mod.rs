@@ -7597,12 +7597,24 @@ impl App {
             }
             AgentEvent::TurnEnd(te) => {
                 self.turn = te.turn;
-                self.slim_turn_state = SlimTurnState::Finished(match te.turn_end_reason {
+                let turn_end_reason = te.turn_end_reason;
+                self.slim_turn_state = SlimTurnState::Finished(match turn_end_reason {
                     omegon_traits::TurnEndReason::AssistantCompleted => "done",
                     omegon_traits::TurnEndReason::ToolContinuation => "continuing",
                     omegon_traits::TurnEndReason::ProgressNudge => "nudged",
                     omegon_traits::TurnEndReason::Cancelled => "cancelled",
                 });
+                if matches!(
+                    turn_end_reason,
+                    omegon_traits::TurnEndReason::AssistantCompleted
+                        | omegon_traits::TurnEndReason::Cancelled
+                ) {
+                    // A live slim plan lane is turn-scoped UI, not durable history.
+                    // If no completion PlanUpdated arrives before the assistant turn
+                    // finishes, clear it rather than leaving stale "plan active" chrome
+                    // pinned under a "turn done" status line.
+                    self.slim_plan_snapshot = None;
+                }
                 // Update status line with behavioral signals
                 self.status_line.phase = te.dominant_phase;
                 self.status_line.drift = te.drift_kind;

@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.15] - 2026-06-07
+
+### Fixed
+
+- Clear stale Slim pinned plan lanes when assistant turns complete or cancel without a final plan-complete update, preventing old plan progress from lingering under a `turn done` status.
+
 ## [0.26.14] - 2026-06-06
 
 ### Fixed

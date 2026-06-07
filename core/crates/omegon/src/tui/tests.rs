@@ -1102,6 +1102,57 @@ fn completed_plan_update_reattaches_detached_slim_viewport() {
 }
 
 #[test]
+fn assistant_completed_turn_clears_stale_live_plan_lane() {
+    let mut app = test_app();
+    app.handle_agent_event(AgentEvent::PlanUpdated {
+        snapshot_json: serde_json::json!({
+            "mode": "planning",
+            "completed": 3,
+            "total": 4,
+            "items": [
+                {"status": "active", "description": "Harden set_recipe"},
+                {"status": "done", "description": "Add regression test"},
+                {"status": "done", "description": "Validate tests"},
+                {"status": "done", "description": "Update changelog"}
+            ]
+        }),
+    });
+    assert!(app.slim_plan_snapshot.is_some());
+
+    app.handle_agent_event(AgentEvent::TurnEnd(Box::new(
+        omegon_traits::AgentEventTurnEnd {
+            turn: 1,
+            turn_end_reason: omegon_traits::TurnEndReason::AssistantCompleted,
+            model: None,
+            provider: None,
+            estimated_tokens: 0,
+            context_window: 0,
+            context_composition: omegon_traits::ContextComposition::default(),
+            actual_input_tokens: 0,
+            actual_output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            provider_telemetry: None,
+            dominant_phase: None,
+            drift_kind: None,
+            progress_nudge_reason: None,
+            intent_task: None,
+            intent_phase: None,
+            files_read_count: 0,
+            files_modified_count: 0,
+            stats_tool_calls: 0,
+            streaks: omegon_traits::ControllerStreaks::default(),
+        },
+    )));
+
+    assert!(app.slim_plan_snapshot.is_none());
+    let text = render_app_to_string(&mut app, 140, 18);
+    assert!(!text.contains("plan active"), "{text}");
+    assert!(!text.contains("Harden set_recipe"), "{text}");
+    assert!(text.contains("turn done"), "{text}");
+}
+
+#[test]
 fn slim_status_line_marks_turn_state() {
     let mut app = test_app();
     app.handle_agent_event(AgentEvent::TurnStart { turn: 1 });
