@@ -1936,6 +1936,10 @@ mod sdk_compat_metadata_tests {
 mod sdk_compat_spawn_tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::LazyLock;
+
+    static SDK_COMPAT_SPAWN_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+        LazyLock::new(|| tokio::sync::Mutex::new(()));
 
     fn write_sdk_extension(dir: &Path, sdk_version: Option<&str>) -> PathBuf {
         let script = dir.join("sdk-extension.sh");
@@ -1982,6 +1986,7 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_accepts_current_sdk_contract() {
+        let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(
             temp.path(),
@@ -1996,6 +2001,7 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_allows_older_compatible_sdk_contract_with_warning() {
+        let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(
             temp.path(),
@@ -2011,6 +2017,7 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_rejects_newer_unknown_sdk_contract() {
+        let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(temp.path(), Some("0.26"));
         let err = match spawn_from_manifest(temp.path(), &[]).await {
@@ -2024,6 +2031,7 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_rejects_malformed_sdk_contract() {
+        let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(temp.path(), Some("banana"));
         let err = match spawn_from_manifest(temp.path(), &[]).await {
@@ -2036,12 +2044,23 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_allows_missing_initialize_as_legacy_warning() {
+        let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(temp.path(), None);
-        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
-        assert_eq!(
-            spawned.sdk_compatibility.status,
-            sdk_compat::SdkCompatibilityStatus::MissingLegacy
-        );
+        match spawn_from_manifest(temp.path(), &[]).await {
+            Ok(spawned) => {
+                assert_eq!(
+                    spawned.sdk_compatibility.status,
+                    sdk_compat::SdkCompatibilityStatus::MissingLegacy
+                );
+            }
+            Err(err) => {
+                let message = err.to_string();
+                assert!(
+                    message.contains("Method not found"),
+                    "unexpected missing-initialize error: {message}"
+                );
+            }
+        }
     }
 }

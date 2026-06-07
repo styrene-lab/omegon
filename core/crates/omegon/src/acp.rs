@@ -3233,6 +3233,10 @@ fn convert_acp_mcp_server(
 #[cfg(test)]
 mod extension_metadata_tests {
     use super::*;
+    use std::sync::LazyLock;
+
+    static ACP_TEST_ENV_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+        LazyLock::new(|| tokio::sync::Mutex::new(()));
     use agent_client_protocol::schema::{InitializeRequest, ProtocolVersion};
 
     #[tokio::test]
@@ -3433,6 +3437,7 @@ mod extension_metadata_tests {
 
     #[tokio::test]
     async fn extensions_list_reports_installed_not_callable_extension() {
+        let _guard = ACP_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let ext_dir = home.path().join("extensions").join("dummy-ext");
         std::fs::create_dir_all(&ext_dir).unwrap();
@@ -3492,6 +3497,7 @@ optional = ["DUMMY_OPTIONAL"]
 
     #[tokio::test]
     async fn extensions_enable_clears_auto_disabled_stability_state() {
+        let _guard = ACP_TEST_ENV_LOCK.lock().await;
         let home = tempfile::tempdir().unwrap();
         let ext_dir = home.path().join("extensions").join("flynt");
         std::fs::create_dir_all(ext_dir.join(".omegon")).unwrap();
