@@ -16,9 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.16] - 2026-06-07
+
 ### Added
 
-- Add design nodes for the ACP plan/task durability, stable identity, binding store, mutation, revision/event, status/error/pagination, external work surface, and ecosystem capability contracts needed before Flynt or future ACP clients can treat task links as authoritative.
+- Add ACP lifecycle task binding surfaces for Flynt and future ACP clients, including stable task identities, task revisions, source metadata, repo/session binding durability, task identity findings, filtered task listings, and session external-task imports.
+- Add design nodes for the ACP plan/task durability, stable identity, binding store, mutation, revision/event, status/error/pagination, external work surface, external task promotion, and ecosystem capability contracts needed before clients can treat task links as authoritative.
 
 ## [0.26.15] - 2026-06-07
 
