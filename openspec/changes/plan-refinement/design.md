@@ -157,6 +157,76 @@ Each intent has different completion evidence. Research completes with findings 
 
 Non-coding work should usually bind to design-tree nodes first when it is still exploratory and question-heavy. OpenSpec is appropriate once the work has durable lifecycle value, acceptance criteria, review checkpoints, or completion evidence to track. That includes research, design, operations, validation, documentation, review, and implementation; OpenSpec is work tracking, not code-only tracking.
 
+## Targeted remainder
+
+The remaining implementation is scoped to `plan-refinement` only. The target is not a new durable task database; it is a registry/read-model plus session-local view state that prevents stale foreground plans and makes lifecycle bindings explicit.
+
+### Decisions now closed
+
+- Foreground labels are canonical: `Plan · session`, `Plan · OpenSpec:CHANGE`, `Plan · Design:NODE`, and `Plan · Hybrid:CHANGE/NODE`.
+- Completing an OpenSpec-backed item through `/plan` is runtime-only unless it explicitly delegates to `openspec_manage` task-status mutation with a stable numeric task id. `/plan` must not edit `tasks.md` directly.
+- `/plan clear` is scope-sensitive: session plans clear runtime state; repo-bound plans detach the visible projection and report that durable artifacts are unchanged.
+- Missing or changed backing artifacts degrade to `Stale`; the UI keeps a last summary and asks for explicit `/plan sync`, `/plan rebind`, or `/plan detach`.
+
+### Implementation target
+
+1. Finish repo-bound detach/reconciliation around the existing `VisiblePlanState` and `apply_plan_action` boundary.
+2. Add a read-only `PlanRegistry` builder that derives entries from visible session state, OpenSpec tasks, design-tree state, and git context.
+3. Add session-local registry view state for background/detached/dismissed/last-visible/resume hints. This state is cache/UI state, not task truth.
+4. Add a session-local completion ledger shape for evidence and summaries. Do not add tracked JSONL storage in this change.
+5. Add explicit resume/switch/background/detach/show/ledger UX. Startup may present candidates but must not silently foreground stale or completed work.
+6. Thread `PlanScope`, `TaskIntent`, `TaskCompletionPolicy`, and `EvidenceRef` through projections and snapshots so non-coding task completion has first-class evidence semantics.
+
+### Primary files
+
+- `core/crates/omegon/src/conversation.rs` — data model, visible state, registry entries, ledger/event structs, snapshot compatibility.
+- `core/crates/omegon/src/main.rs` — `/plan` slash command handlers and remote slash behavior.
+- `core/crates/omegon/src/loop.rs` — plan tool/list enrichment, notification behavior, no-focus-steal behavior.
+- `core/crates/omegon/src/lifecycle/design.rs` — design-node candidate projection and evidence binding hooks.
+- `core/crates/omegon/src/tui/dashboard.rs` / Slim plan lane surfaces — resume candidates, stale/degraded copy, foreground labels.
+- `openspec/changes/plan-refinement/tasks.md` — authoritative remaining task breakdown.
+
+### ACP and Flynt task-board exposure
+
+Flynt should see the same plan registry as the TUI, not a second task system. ACP exposes plan surfaces as typed methods, and treats a plan as a composition of task projections. Some tasks may be backed by OpenSpec/design items, some may be session-local, and some may be linked to Flynt board tasks. Omegon owns the plan/task projection contract; Flynt owns its board UI and task records.
+
+Advertise these capabilities from `runtime/capabilities`:
+
+```text
+_plans/list       read-only registry rows for visible/backgrounded/completed/stale plans
+_plans/show       read-only detail for one plan id, including task projections and evidence refs
+_plans/events     recent session-local plan/task events and completion ledger rows
+_plans/switch     make an existing registry entry foreground; explicit operator action
+_plans/detach     detach foreground or selected repo-bound projection; never edits durable artifacts
+_tasks/list       read-only task projections, optionally filtered by plan id or lifecycle binding
+_tasks/show       read-only detail for one task projection
+_tasks/bind       bind an external task id, such as a Flynt board task, to a plan task projection
+_tasks/events     recent task-level coordination/evidence events
+```
+
+Method semantics:
+
+- ACP read methods (`_plans/list`, `_plans/show`, `_plans/events`, `_tasks/list`, `_tasks/show`, `_tasks/events`) are safe for Flynt to poll and render in sidebars, boards, and lenses. They must not mutate OpenSpec, design-tree, git, or task-board state.
+- ACP mutation methods (`_plans/switch`, `_plans/detach`, `_tasks/bind`) mutate only Omegon session/view binding metadata unless they delegate to an existing lifecycle tool with explicit intent.
+- Task projections carry stable ids, labels, status, intent, completion policy, evidence refs, and parent `plan_id`. They are not a new durable task table; they are the item-level view of the plan registry.
+- External task linkage is metadata on a task projection/binding, e.g. `external_task_refs: [{ system: "flynt", board_id, task_id }]`. The Flynt task can represent coordination/status, but OpenSpec/design remains authoritative for lifecycle task completion.
+- Completing a Flynt board task must not silently check OpenSpec boxes. The safe bridge is: Flynt task completion records a task event/evidence ref; durable OpenSpec mutation still goes through `openspec_manage` stable task-id mutation.
+- ACP plan entries should include `plan_id`, title, source, scope, status, binding summary, progress, stale flag, and resume hint. ACP task entries should include parent `plan_id`, lifecycle binding, external task refs, task intent, completion policy, evidence refs, and writable/runtime-only status.
+
+This keeps three surfaces aligned without merging their responsibilities:
+
+1. TUI small plan = foreground cockpit over selected plan/task projections.
+2. OpenSpec/design = lifecycle source of truth.
+3. Flynt task board = external board that can link to plan tasks and lifecycle artifacts without owning Omegon internals.
+
+### Acceptance gates
+
+- `/plan list` remains read-only and lists visible, backgrounded, completed, OpenSpec, design, and stale candidates with source/scope/status/progress.
+- `/plan clear` on OpenSpec/design/hybrid state does not mutate lifecycle files.
+- Backgrounded/completed plans never replace the visible plan without `/plan switch` or `/plan resume`.
+- Stale backing artifacts are visible as stale, not silently resurrected as active foreground work.
+- Research/design/validation/operations tasks can require evidence without requiring code diffs.
+
 ## Data model sketch
 
 The runtime should separate durable source identity from visible projection state:
