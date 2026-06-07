@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.14] - 2026-06-06
+
+### Fixed
+
+- Preserve the tail of long assistant responses in the TUI by removing the legacy 400-row assistant measurement cap and hardening conversation scroll height arithmetic against overflow.
+
 ## [0.26.13] - 2026-06-06
 
 ### Fixed

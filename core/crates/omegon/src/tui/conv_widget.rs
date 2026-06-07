@@ -143,7 +143,10 @@ impl ConvState {
 
     /// Total height of all segments.
     fn total_height(&self) -> u16 {
-        self.heights.iter().copied().sum()
+        self.heights
+            .iter()
+            .copied()
+            .fold(0u16, |acc, h| acc.saturating_add(h))
     }
 
     /// Compute on-screen areas for Image segments visible in the viewport.
@@ -170,7 +173,7 @@ impl ConvState {
         for (i, segment) in segments.iter().enumerate() {
             let seg_height = self.heights[i];
             let seg_top = y_cursor;
-            let seg_bottom = y_cursor + seg_height;
+            let seg_bottom = y_cursor.saturating_add(seg_height);
             y_cursor = seg_bottom;
 
             if seg_bottom <= top_offset {
@@ -300,7 +303,7 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
         for (i, segment) in self.segments.iter().enumerate() {
             let seg_height = state.heights[i];
             let seg_top = y_cursor;
-            let seg_bottom = y_cursor + seg_height;
+            let seg_bottom = y_cursor.saturating_add(seg_height);
             y_cursor = seg_bottom;
 
             // Skip segments entirely above the viewport

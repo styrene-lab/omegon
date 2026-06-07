@@ -1701,9 +1701,12 @@ impl Segment {
             _ => 4,
         };
 
-        // Render into temp buffer — cap at 400 rows to avoid absurd allocations.
-        // Slim mode can intentionally hide segments such as pinned plan snapshots
-        // from the scrollback, so allow a zero-height estimate there.
+        // Render into a temp buffer and scan actual used rows. Assistant responses from
+        // high-verbosity models can legitimately exceed a few hundred wrapped rows;
+        // capping them at 400 made the measured height too short and clipped the tail
+        // in the conversation pane. Keep a high safety cap to avoid absurd allocations
+        // while preserving normal long-form answers.
+        const MAX_MEASURE_ROWS: u16 = 4000;
         let h = match (&self.content, mode) {
             // Assistant markdown rendering performs structural transforms (code fences,
             // tables, inline highlighting) before Ratatui wraps the final Line values.
@@ -1714,10 +1717,10 @@ impl Segment {
             // unused rows. Plain short prose should keep the old tight estimate.
             (AssistantText { text, thinking, .. }, SegmentRenderMode::Slim) => estimate
                 .saturating_add(assistant_measurement_slack(text, thinking))
-                .min(400),
+                .min(MAX_MEASURE_ROWS),
             (AssistantText { text, thinking, .. }, _) => estimate
                 .saturating_add(assistant_measurement_slack(text, thinking))
-                .clamp(4, 400),
+                .clamp(4, MAX_MEASURE_ROWS),
             (_, SegmentRenderMode::Slim) => estimate.min(400),
             _ => estimate.clamp(4, 400),
         };
@@ -6022,6 +6025,42 @@ After fence text.
             "{text}"
         );
         assert!(text.contains("After fence text."), "{text}");
+    }
+
+    #[test]
+    fn assistant_height_preserves_tail_beyond_legacy_400_row_cap() {
+        let mut body = String::new();
+        for i in 0..520 {
+            body.push_str(&format!(
+                "line {i:03}: full response content must remain visible\n"
+            ));
+        }
+        body.push_str("FINAL-LINE-SHOULD-BE-VISIBLE");
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::AssistantText {
+                text: body,
+                thinking: String::new(),
+                complete: true,
+            },
+        };
+
+        let height = seg.height_in_mode(96, &Alpharius, SegmentRenderMode::Slim);
+        assert!(
+            height > 400,
+            "long assistant responses must not be clipped to the old 400-row cap: {height}"
+        );
+        let (area, mut buf) = make_buf(96, height);
+        seg.render(
+            area,
+            &mut buf,
+            &Alpharius,
+            SegmentRenderMode::Slim,
+            crate::settings::ToolDetail::Detailed,
+        );
+        let text = buf_text(&buf, area);
+        assert!(text.contains("line 519"), "{text}");
+        assert!(text.contains("FINAL-LINE-SHOULD-BE-VISIBLE"), "{text}");
     }
 
     #[test]
