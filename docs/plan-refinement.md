@@ -38,6 +38,10 @@ Locked scope model: session plans are for immediate/disposable execution and liv
 
 Assessment found major implementation risks: loose plan_scope/plan_binding fields beside legacy work_plan/plan_mode would worsen divergence; OpenSpec write-through is unsafe until stable task identity exists; registry status mixes derived artifact state with view/session state; background plan events need explicit sources or stale detection; non-coding task intents require completion evidence policies; session snapshot migration must preserve legacy work_plan/plan_mode; TUI snapshot JSON must remain backward-compatible; branch/worktree registry entries need noise filters; tracked ledger storage is deferred until evidence boundaries are clear.
 
+### Flynt-owned ACP task mapping contract
+
+Flynt now documents `docs/omegon-plan-task-acp-mapping.md` in its repository. The important boundary is that Flynt 0.12.x stores local links in `Task.external_refs` using `omegon-plan:<json>`, but that link is Flynt-owned and does not prove Omegon persisted a reciprocal binding. Direct/bidirectional mapping requires new Omegon contract work: stable task identity, revision/concurrency tokens, durable bind responses, explicit supported mutations, status enum mapping, real events or revision polling, pagination/filtering, and structured errors. Follow-up nodes: [[acp-task-durability-contract]], [[acp-task-stable-identity]], [[acp-task-binding-store]], [[acp-task-mutation-contract]], [[acp-task-status-error-pagination-contract]], [[acp-plan-task-revision-events]], [[external-work-surface-integration]], and [[acp-ecosystem-capability-negotiation]].
+
 ## Decisions
 
 ### Use binding-aware projections instead of a new durable task source
@@ -111,6 +115,12 @@ Assessment found major implementation risks: loose plan_scope/plan_binding field
 **Status:** accepted
 
 **Rationale:** A tracked JSONL ledger could create repo churn and merge conflicts; an untracked ledger would not support cross-machine resume. First implementation should keep ledger/event state as local/session cache and write durable summaries to existing lifecycle artifacts where appropriate.
+
+### Keep Flynt 0.12.x in read-only + manual-link mode
+
+**Status:** accepted
+
+**Rationale:** Flynt can safely render Omegon plan/task projections and store Flynt-local `omegon-plan:<json>` references, but authoritative bidirectional mapping is unsafe until Omegon exposes stable ids, revision tokens, durable bind responses, explicit mutation lists, and event/revision polling.
 
 ## Open Questions
 

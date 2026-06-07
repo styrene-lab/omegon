@@ -320,6 +320,32 @@ fn count_tasks(path: &Path) -> (usize, usize) {
 }
 
 /// Parse OpenSpec tasks.md into groups and checkbox task lines.
+fn parse_task_stable_id_marker(description: &str) -> Option<String> {
+    let marker_start = description.find("<!-- task-id:")?;
+    let rest = &description[marker_start + "<!-- task-id:".len()..];
+    let marker_end = rest.find("-->")?;
+    let id = rest[..marker_end].trim();
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+fn strip_task_stable_id_marker(description: &str) -> String {
+    let Some(marker_start) = description.find("<!-- task-id:") else {
+        return description.trim().to_string();
+    };
+    let rest = &description[marker_start + "<!-- task-id:".len()..];
+    let Some(marker_end) = rest.find("-->") else {
+        return description.trim().to_string();
+    };
+    let after = marker_start + "<!-- task-id:".len() + marker_end + "-->".len();
+    format!(
+        "{}{}",
+        description[..marker_start].trim_end(),
+        description[after..].trim_start()
+    )
+    .trim()
+    .to_string()
+}
+
 pub fn parse_task_groups(path: &Path) -> Vec<TaskGroup> {
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
@@ -374,12 +400,18 @@ pub fn parse_task_groups(path: &Path) -> Vec<TaskGroup> {
                 .unwrap_or(trimmed)
                 .trim()
                 .to_string();
-            let id = description
+            let stable_id = parse_task_stable_id_marker(&description);
+            let description_without_marker = strip_task_stable_id_marker(&description);
+            let id = description_without_marker
                 .split_whitespace()
                 .next()
                 .filter(|token| token.chars().all(|ch| ch.is_ascii_digit() || ch == '.'))
                 .map(|token| token.trim_end_matches('.').to_string())
-                .unwrap_or_else(|| description.to_ascii_lowercase().replace(' ', "-"));
+                .unwrap_or_else(|| {
+                    description_without_marker
+                        .to_ascii_lowercase()
+                        .replace(' ', "-")
+                });
             current.get_or_insert_with(|| TaskGroup {
                 title: "Tasks".to_string(),
                 specs: Vec::new(),
@@ -388,7 +420,8 @@ pub fn parse_task_groups(path: &Path) -> Vec<TaskGroup> {
             if let Some(group) = current.as_mut() {
                 group.tasks.push(TaskLine {
                     id,
-                    description,
+                    stable_id,
+                    description: description_without_marker,
                     done,
                 });
             }
@@ -813,6 +846,76 @@ pub struct TaskWriteReport {
     pub description: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskStableIdValidationReport {
+    pub path: PathBuf,
+    pub findings: Vec<TaskStableIdFinding>,
+}
+
+impl TaskStableIdValidationReport {
+    pub fn is_ok(&self) -> bool {
+        self.findings.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct TaskStableIdFinding {
+    pub line: usize,
+    pub task_id: String,
+    pub stable_id: String,
+    pub message: String,
+}
+
+pub fn validate_task_stable_ids(path: &Path) -> anyhow::Result<TaskStableIdValidationReport> {
+    let content = fs::read_to_string(path)?;
+    let mut seen: std::collections::BTreeMap<String, (usize, String)> =
+        std::collections::BTreeMap::new();
+    let mut findings = Vec::new();
+
+    for (idx, line) in content.lines().enumerate() {
+        let Some((_, task_id, description, _, _)) = parse_task_line_for_write(line) else {
+            continue;
+        };
+        let Some(stable_id) = parse_task_stable_id_marker(&description) else {
+            continue;
+        };
+        if !is_valid_task_stable_id(&stable_id) {
+            findings.push(TaskStableIdFinding {
+                line: idx + 1,
+                task_id: task_id.clone(),
+                stable_id: stable_id.clone(),
+                message:
+                    "task-id marker must contain only ASCII letters, digits, '.', '_', ':' or '-'"
+                        .to_string(),
+            });
+        }
+        if let Some((first_line, first_task_id)) =
+            seen.insert(stable_id.clone(), (idx + 1, task_id.clone()))
+        {
+            findings.push(TaskStableIdFinding {
+                line: idx + 1,
+                task_id,
+                stable_id: stable_id.clone(),
+                message: format!(
+                    "duplicate task-id marker also used by task {first_task_id} on line {first_line}"
+                ),
+            });
+        }
+    }
+
+    Ok(TaskStableIdValidationReport {
+        path: path.to_path_buf(),
+        findings,
+    })
+}
+
+fn is_valid_task_stable_id(stable_id: &str) -> bool {
+    !stable_id.is_empty()
+        && stable_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | ':' | '-'))
+}
+
 pub fn set_task_checkbox_status(
     repo_path: &Path,
     change_name: &str,
@@ -1088,6 +1191,86 @@ Then sharedState.cleave.children[i].status becomes running
 
         assert_eq!(reqs[1].title, "TS wrapper maps events");
         assert_eq!(reqs[1].scenarios.len(), 1);
+    }
+
+    #[test]
+    fn validate_task_stable_ids_reports_duplicates_and_invalid_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tasks.md");
+        std::fs::write(
+            &path,
+            "## 1. Group
+
+- [ ] 1.1 First <!-- task-id: stable-alpha -->
+- [ ] 1.2 Second <!-- task-id: stable-alpha -->
+- [ ] 1.3 Bad <!-- task-id: bad id -->
+",
+        )
+        .unwrap();
+        let report = validate_task_stable_ids(&path).unwrap();
+        assert!(!report.is_ok());
+        assert_eq!(report.findings.len(), 2);
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.message.contains("duplicate task-id marker"))
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.message.contains("ASCII letters"))
+        );
+    }
+
+    #[test]
+    fn set_task_checkbox_status_preserves_stable_task_id_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_dir = dir.path().join("openspec/changes/demo");
+        std::fs::create_dir_all(&task_dir).unwrap();
+        std::fs::write(
+            task_dir.join("tasks.md"),
+            "## 1. Group
+
+- [ ] 1.1 Pending <!-- task-id: stable-alpha -->
+",
+        )
+        .unwrap();
+
+        let report = set_task_checkbox_status(
+            dir.path(),
+            "demo",
+            "1. Group",
+            "1.1",
+            TaskCheckboxStatus::Done,
+        )
+        .unwrap();
+        assert_eq!(report.description, "Pending <!-- task-id: stable-alpha -->");
+        let content = std::fs::read_to_string(task_dir.join("tasks.md")).unwrap();
+        assert!(content.contains("- [x] 1.1 Pending <!-- task-id: stable-alpha -->"));
+    }
+
+    #[test]
+    fn parse_task_groups_reads_stable_task_id_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tasks.md");
+        std::fs::write(
+            &path,
+            "## 1. Group
+
+- [ ] 1.1 Validate behavior <!-- task-id: stable-alpha -->
+",
+        )
+        .unwrap();
+        let groups = parse_task_groups(&path);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].tasks[0].id, "1.1");
+        assert_eq!(
+            groups[0].tasks[0].stable_id.as_deref(),
+            Some("stable-alpha")
+        );
+        assert_eq!(groups[0].tasks[0].description, "1.1 Validate behavior");
     }
 
     #[test]

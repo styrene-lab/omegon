@@ -353,10 +353,138 @@ pub struct PlanRegistryEntry {
     pub resume_hint: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskBindingDurability {
+    #[default]
+    None,
+    Session,
+    Repo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct TaskBindingRecord {
+    pub stable_id: String,
+    pub task_id: String,
+    pub system: String,
+    pub external_task_id: String,
+    pub source: PlanTaskSourceRef,
+    pub revision: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct TaskBindingStore {
+    pub version: u16,
+    pub bindings: Vec<TaskBindingRecord>,
+}
+
+impl Default for TaskBindingStore {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            bindings: Vec::new(),
+        }
+    }
+}
+
+impl TaskBindingStore {
+    pub const FILE_NAME: &'static str = "task-bindings.v1.json";
+
+    pub fn path(repo_root: &std::path::Path) -> std::path::PathBuf {
+        repo_root.join(".omegon").join(Self::FILE_NAME)
+    }
+
+    pub fn load(repo_root: &std::path::Path) -> anyhow::Result<Self> {
+        let path = Self::path(repo_root);
+        match std::fs::read_to_string(&path) {
+            Ok(content) => serde_json::from_str(&content)
+                .map_err(|err| anyhow::anyhow!("failed to parse {}: {err}", path.display())),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(err) => Err(anyhow::anyhow!("failed to read {}: {err}", path.display())),
+        }
+    }
+
+    pub fn save(&self, repo_root: &std::path::Path) -> anyhow::Result<()> {
+        let path = Self::path(repo_root);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let content = serde_json::to_string_pretty(self)?;
+        std::fs::write(
+            &path,
+            format!(
+                "{content}
+"
+            ),
+        )?;
+        Ok(())
+    }
+
+    pub fn upsert(&mut self, record: TaskBindingRecord) {
+        if let Some(existing) = self.bindings.iter_mut().find(|existing| {
+            existing.stable_id == record.stable_id
+                && existing.system == record.system
+                && existing.external_task_id == record.external_task_id
+        }) {
+            let created_at = existing.created_at.clone();
+            *existing = record;
+            existing.created_at = created_at;
+        } else {
+            self.bindings.push(record);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct SessionTaskBinding {
+    pub task_id: String,
+    pub stable_id: Option<String>,
+    pub system: String,
+    pub external_task_id: String,
+    pub revision: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanTaskStableIdQuality {
+    Explicit,
+    #[default]
+    Fallback,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct PlanTaskSourceRef {
+    pub kind: String,
+    pub path: Option<String>,
+    pub anchor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanTaskMutation {
+    BindExternalRef,
+    SetStatus,
+    AppendEvidence,
+    Complete,
+    Reopen,
+    Detach,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct PlanItemProjection {
     pub id: String,
+    pub stable_id: String,
+    pub stable_id_quality: PlanTaskStableIdQuality,
+    pub revision: String,
+    pub source: PlanTaskSourceRef,
+    pub supported_mutations: Vec<PlanTaskMutation>,
     pub plan_id: String,
     pub label: String,
     pub status: WorkItemStatus,
@@ -371,6 +499,11 @@ impl Default for PlanItemProjection {
     fn default() -> Self {
         Self {
             id: String::new(),
+            stable_id: String::new(),
+            stable_id_quality: PlanTaskStableIdQuality::Fallback,
+            revision: String::new(),
+            source: PlanTaskSourceRef::default(),
+            supported_mutations: Vec::new(),
             plan_id: String::new(),
             label: String::new(),
             status: WorkItemStatus::Pending,
@@ -1012,6 +1145,21 @@ impl crate::conversation::IntentDocument {
             .enumerate()
             .map(|(idx, item)| PlanItemProjection {
                 id: format!("{}:{}", plan_id, idx + 1),
+                stable_id: format!("{}:{}", plan_id, idx + 1),
+                stable_id_quality: PlanTaskStableIdQuality::Fallback,
+                revision: format!("session:{}:{}", plan_id, idx + 1),
+                source: PlanTaskSourceRef {
+                    kind: "session".to_string(),
+                    path: None,
+                    anchor: Some(format!("item:{}", idx + 1)),
+                },
+                supported_mutations: vec![
+                    PlanTaskMutation::BindExternalRef,
+                    PlanTaskMutation::SetStatus,
+                    PlanTaskMutation::AppendEvidence,
+                    PlanTaskMutation::Complete,
+                    PlanTaskMutation::Reopen,
+                ],
                 plan_id: plan_id.to_string(),
                 label: item.description.clone(),
                 status: item.status,
@@ -1250,3 +1398,67 @@ impl crate::conversation::IntentDocument {
 // on that state directly. That would let conversation.rs own only intent and
 // transcript-derived context while plan.rs owns all plan lifecycle/session view
 // behavior without reaching across the full IntentDocument shape.
+
+#[cfg(test)]
+mod binding_store_tests {
+    use super::*;
+
+    #[test]
+    fn task_binding_store_round_trips_and_upserts() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = TaskBindingStore::default();
+        store.upsert(TaskBindingRecord {
+            stable_id: "openspec:demo:task:1.1".to_string(),
+            task_id: "openspec:demo:group:Group:1.1".to_string(),
+            system: "flynt".to_string(),
+            external_task_id: "flynt-1".to_string(),
+            source: PlanTaskSourceRef {
+                kind: "openspec".to_string(),
+                path: Some("openspec/changes/demo/tasks.md".to_string()),
+                anchor: Some("1.1".to_string()),
+            },
+            revision: "source-v1:test".to_string(),
+            created_at: "created".to_string(),
+            updated_at: "created".to_string(),
+        });
+        store.save(dir.path()).unwrap();
+
+        let mut loaded = TaskBindingStore::load(dir.path()).unwrap();
+        assert_eq!(loaded.version, 1);
+        assert_eq!(loaded.bindings.len(), 1);
+        assert_eq!(loaded.bindings[0].external_task_id, "flynt-1");
+
+        loaded.upsert(TaskBindingRecord {
+            stable_id: "openspec:demo:task:1.1".to_string(),
+            task_id: "openspec:demo:group:Group:1.1".to_string(),
+            system: "flynt".to_string(),
+            external_task_id: "flynt-1".to_string(),
+            source: PlanTaskSourceRef::default(),
+            revision: "source-v1:updated".to_string(),
+            created_at: "new-created-ignored".to_string(),
+            updated_at: "updated".to_string(),
+        });
+        assert_eq!(loaded.bindings.len(), 1);
+        assert_eq!(loaded.bindings[0].created_at, "created");
+        assert_eq!(loaded.bindings[0].updated_at, "updated");
+        assert_eq!(loaded.bindings[0].revision, "source-v1:updated");
+    }
+
+    #[test]
+    fn task_binding_store_missing_file_loads_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let loaded = TaskBindingStore::load(dir.path()).unwrap();
+        assert_eq!(loaded.version, 1);
+        assert!(loaded.bindings.is_empty());
+    }
+
+    #[test]
+    fn task_binding_store_corrupt_file_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = TaskBindingStore::path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "not json").unwrap();
+        let err = TaskBindingStore::load(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("failed to parse"));
+    }
+}

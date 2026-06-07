@@ -505,6 +505,7 @@ pub struct OmegonAcpAgent {
     extension_metadata: Rc<RefCell<std::collections::BTreeMap<String, serde_json::Value>>>,
     extension_rpc_handles:
         Rc<RefCell<std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>>>,
+    session_task_bindings: RefCell<Vec<crate::conversation::SessionTaskBinding>>,
 }
 
 impl OmegonAcpAgent {
@@ -526,6 +527,7 @@ impl OmegonAcpAgent {
             host_caps: RefCell::new(HostCapabilities::default()),
             extension_metadata: Rc::new(RefCell::new(extension_metadata)),
             extension_rpc_handles: Rc::new(RefCell::new(Default::default())),
+            session_task_bindings: RefCell::new(Vec::new()),
         }
     }
 
@@ -1519,36 +1521,24 @@ impl OmegonAcpAgent {
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
         });
         let repo_root = crate::setup::find_project_root(&cwd);
-        let projection = crate::tools::lifecycle_plan_projection(&repo_root);
-        serde_json::json!({
-            "plans": projection.entries,
-            "tasks": projection.tasks,
-        })
+        crate::acp_plan_tasks::projection_json(&repo_root)
+    }
+
+    fn repo_relative_path(&self, path: &std::path::Path) -> String {
+        let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
+        let repo_root = crate::setup::find_project_root(&cwd);
+        path.strip_prefix(&repo_root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string()
     }
 
     fn acp_plan_show_json(&self, params: serde_json::Value) -> serde_json::Value {
         let plan_id = params.get("plan_id").and_then(|v| v.as_str()).unwrap_or("");
         let projection = self.acp_plan_projection_json();
-        let plans = projection
-            .get("plans")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!([]));
-        let tasks = projection
-            .get("tasks")
-            .and_then(|v| v.as_array())
-            .map(|items| {
-                items
-                    .iter()
-                    .filter(|task| task.get("plan_id").and_then(|v| v.as_str()) == Some(plan_id))
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        serde_json::json!({
-            "plan": plans.as_array().and_then(|items| items.iter().find(|plan| plan.get("plan_id").and_then(|v| v.as_str()) == Some(plan_id))).cloned(),
-            "tasks": tasks,
-            "stale_copy": if plan_id.is_empty() { serde_json::Value::Null } else { serde_json::json!(crate::conversation::STALE_PLAN_COPY) },
-        })
+        crate::acp_plan_tasks::plan_show_json(&projection, plan_id)
     }
 
     async fn acp_plan_control_json(&self, command: String) -> serde_json::Value {
@@ -1592,19 +1582,277 @@ impl OmegonAcpAgent {
         }
     }
 
-    fn acp_task_show_json(&self, params: serde_json::Value) -> serde_json::Value {
-        let task_id = params.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+    fn acp_task_list_json(&self, params: serde_json::Value) -> serde_json::Value {
+        let projection = self.acp_plan_projection_json();
+        crate::acp_plan_tasks::task_list_json(&projection, &params)
+    }
+
+    fn acp_external_task_import_json(&self, params: serde_json::Value) -> serde_json::Value {
+        let system = params
+            .get("system")
+            .and_then(|v| v.as_str())
+            .unwrap_or("external")
+            .trim();
+        let external_id = params
+            .get("external_task_id")
+            .or_else(|| params.get("flynt_task_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let title = params
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if external_id.is_empty() || title.is_empty() {
+            return crate::acp_plan_tasks::task_error(
+                "target_required",
+                "external_task_id and title are required",
+                None,
+            );
+        }
+        let target_kind = params
+            .get("target")
+            .and_then(|v| v.get("kind"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("session");
+        if target_kind != "session" {
+            return crate::acp_plan_tasks::task_error(
+                "unsupported_source",
+                "external task import currently supports only target.kind=session; use the Flynt agent promotion prompt for OpenSpec/design promotion",
+                None,
+            );
+        }
+
+        let body = params.get("body").and_then(|v| v.as_str()).unwrap_or("");
+        let stable_id = format!(
+            "external:{}:{}",
+            crate::acp_plan_tasks::sanitize_external_id(system),
+            crate::acp_plan_tasks::sanitize_external_id(external_id)
+        );
+        let revision =
+            crate::acp_plan_tasks::external_import_revision(system, external_id, title, body);
+        let task_id = format!("session:external:{}", stable_id);
+        self.session_task_bindings
+            .borrow_mut()
+            .push(crate::conversation::SessionTaskBinding {
+                task_id: task_id.clone(),
+                stable_id: Some(stable_id.clone()),
+                system: system.to_string(),
+                external_task_id: external_id.to_string(),
+                revision: revision.clone(),
+            });
+
+        serde_json::json!({
+            "accepted": true,
+            "durability": "session",
+            "created": {
+                "task_id": task_id,
+                "stable_id": stable_id,
+                "revision": revision,
+                "source": {
+                    "kind": "session",
+                    "path": serde_json::Value::Null,
+                    "anchor": external_id
+                },
+                "title": title,
+                "body": body
+            },
+            "binding": {
+                "system": system,
+                "external_task_id": external_id,
+                "durability": "session"
+            },
+            "review": {
+                "required": true,
+                "reason": "Imported as session-local external task context; promote through the Flynt agent prompt for durable OpenSpec/design lifecycle state."
+            }
+        })
+    }
+
+    fn acp_task_bind_json(&self, params: serde_json::Value) -> serde_json::Value {
+        let task_id = params
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let system = params
+            .get("system")
+            .and_then(|v| v.as_str())
+            .unwrap_or("external")
+            .trim();
+        let external_id = params
+            .get("external_task_id")
+            .or_else(|| params.get("flynt_task_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if task_id.is_empty() || external_id.is_empty() {
+            return crate::acp_plan_tasks::task_error(
+                "not_found",
+                "task_id and external_task_id are required",
+                None,
+            );
+        }
+
         let projection = self.acp_plan_projection_json();
         let task = projection
             .get("tasks")
             .and_then(|v| v.as_array())
             .and_then(|items| {
-                items
-                    .iter()
-                    .find(|task| task.get("id").and_then(|v| v.as_str()) == Some(task_id))
-            })
-            .cloned();
-        serde_json::json!({ "task": task })
+                items.iter().find(|task| {
+                    task.get("id").and_then(|v| v.as_str()) == Some(task_id)
+                        || task.get("stable_id").and_then(|v| v.as_str()) == Some(task_id)
+                })
+            });
+        let Some(task) = task else {
+            return crate::acp_plan_tasks::task_error(
+                "not_found",
+                "task projection not found",
+                None,
+            );
+        };
+
+        let revision = task.get("revision").and_then(|v| v.as_str()).unwrap_or("");
+        if let Some(expected) = params.get("expected_revision").and_then(|v| v.as_str())
+            && !expected.is_empty()
+            && expected != revision
+        {
+            return crate::acp_plan_tasks::task_error(
+                "stale_revision",
+                "task revision does not match expected_revision",
+                Some(revision),
+            );
+        }
+
+        let requested_durability = crate::acp_plan_tasks::requested_bind_durability(&params);
+
+        let resolved_task_id = task
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(task_id)
+            .to_string();
+        let stable_id = task
+            .get("stable_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let binding = serde_json::json!({
+            "task_id": resolved_task_id,
+            "stable_id": stable_id,
+            "system": system,
+            "external_task_id": external_id
+        });
+
+        if requested_durability == crate::conversation::TaskBindingDurability::Repo {
+            let Some(stable_id) = binding.get("stable_id").and_then(|v| v.as_str()) else {
+                return crate::acp_plan_tasks::task_error(
+                    "unsupported_source",
+                    "repo-durable task bindings require stable_id",
+                    Some(revision),
+                );
+            };
+            if task.get("stable_id_quality").and_then(|v| v.as_str()) != Some("explicit") {
+                return crate::acp_plan_tasks::task_error(
+                    "unsupported_source",
+                    "repo-durable task bindings require explicit stable task-id markers",
+                    Some(revision),
+                );
+            }
+            let source: crate::conversation::PlanTaskSourceRef = match serde_json::from_value(
+                task.get("source")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({})),
+            ) {
+                Ok(source) => source,
+                Err(err) => {
+                    return crate::acp_plan_tasks::task_error(
+                        "unsupported_source",
+                        &format!("task source metadata is invalid: {err}"),
+                        Some(revision),
+                    );
+                }
+            };
+            if source.kind == "session" || source.kind.is_empty() {
+                return crate::acp_plan_tasks::task_error(
+                    "unsupported_source",
+                    "repo-durable task bindings require a repo-backed task source",
+                    Some(revision),
+                );
+            }
+            let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
+            let repo_root = crate::setup::find_project_root(&cwd);
+            let mut store = match crate::conversation::TaskBindingStore::load(&repo_root) {
+                Ok(store) => store,
+                Err(err) => {
+                    return crate::acp_plan_tasks::task_error(
+                        "conflict",
+                        &format!("failed to load task binding store: {err}"),
+                        Some(revision),
+                    );
+                }
+            };
+            let timestamp = crate::acp_plan_tasks::current_binding_timestamp();
+            store.upsert(crate::conversation::TaskBindingRecord {
+                stable_id: stable_id.to_string(),
+                task_id: binding
+                    .get("task_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                system: system.to_string(),
+                external_task_id: external_id.to_string(),
+                source,
+                revision: revision.to_string(),
+                created_at: timestamp.clone(),
+                updated_at: timestamp,
+            });
+            if let Err(err) = store.save(&repo_root) {
+                return crate::acp_plan_tasks::task_error(
+                    "conflict",
+                    &format!("failed to save task binding store: {err}"),
+                    Some(revision),
+                );
+            }
+            return serde_json::json!({
+                "accepted": true,
+                "durability": "repo",
+                "revision": revision,
+                "binding": binding
+            });
+        }
+
+        self.session_task_bindings
+            .borrow_mut()
+            .push(crate::conversation::SessionTaskBinding {
+                task_id: binding
+                    .get("task_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                stable_id: binding
+                    .get("stable_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                system: system.to_string(),
+                external_task_id: external_id.to_string(),
+                revision: revision.to_string(),
+            });
+
+        serde_json::json!({
+            "accepted": true,
+            "durability": "session",
+            "revision": revision,
+            "binding": binding,
+            "warning": "Binding accepted as a session/local hint only; it is not repo-durable or authoritative for bidirectional sync."
+        })
+    }
+
+    fn acp_task_show_json(&self, params: serde_json::Value) -> serde_json::Value {
+        let task_id = params.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+        let projection = self.acp_plan_projection_json();
+        crate::acp_plan_tasks::task_show_json(&projection, task_id)
     }
 
     async fn handle_ext_method(
@@ -1652,45 +1900,15 @@ impl OmegonAcpAgent {
                     .unwrap_or_else(|| "plan detach".to_string());
                 Ok(self.acp_plan_control_json(command).await)
             }
-            "tasks/list" | "_tasks/list" => Ok(
-                serde_json::json!({ "tasks": self.acp_plan_projection_json().get("tasks").cloned().unwrap_or_else(|| serde_json::json!([])) }),
-            ),
+            "tasks/list" | "_tasks/list" => Ok(self.acp_task_list_json(params)),
             "tasks/show" | "_tasks/show" => Ok(self.acp_task_show_json(params)),
-            "tasks/bind" | "_tasks/bind" => {
-                let task_id = params
-                    .get("task_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .trim();
-                let system = params
-                    .get("system")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("external")
-                    .trim();
-                let external_id = params
-                    .get("external_task_id")
-                    .or_else(|| params.get("flynt_task_id"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .trim();
-                if task_id.is_empty() || external_id.is_empty() {
-                    Ok(serde_json::json!({
-                        "accepted": false,
-                        "error": "task_id and external_task_id are required"
-                    }))
-                } else {
-                    Ok(self
-                        .acp_plan_control_json(format!(
-                            "plan bind task:{task_id} {system}:{external_id}"
-                        ))
-                        .await)
-                }
+            "tasks/bind" | "_tasks/bind" => Ok(self.acp_task_bind_json(params)),
+            "external_tasks/import" | "_external_tasks/import" => {
+                Ok(self.acp_external_task_import_json(params))
             }
-            "tasks/events" | "_tasks/events" => Ok(serde_json::json!({
-                "events": [],
-                "source": "lifecycle_projection_only",
-                "note": "Live task events are recorded in session state; this read surface is intentionally mutation-free."
-            })),
+            "tasks/events" | "_tasks/events" => Ok(crate::acp_plan_tasks::task_events_json(
+                &self.session_task_bindings.borrow(),
+            )),
 
             "runtime/capabilities" => Ok(serde_json::json!({
                 "surfaces": {
@@ -1713,7 +1931,8 @@ impl OmegonAcpAgent {
                     "_tasks/list": { "version": 1 },
                     "_tasks/show": { "version": 1 },
                     "_tasks/bind": { "version": 1 },
-                    "_tasks/events": { "version": 1 }
+                    "_tasks/events": { "version": 1 },
+                    "_external_tasks/import": { "version": 1 }
                 },
                 "features": {
                     "packages": true,
@@ -1723,7 +1942,21 @@ impl OmegonAcpAgent {
                     "tools": true,
                     "memory": true,
                     "plans": true,
-                    "plan_tasks": true
+                    "plan_tasks": true,
+                    "plan_tasks_contract": {
+                        "compatibility": ["read_only", "manual_link", "session_bind", "repo_bind"],
+                        "stable_id": true,
+                        "revision": true,
+                        "durable_bind": true,
+                        "structured_errors": true,
+                        "pagination": false,
+                        "filtering": true,
+                        "external_import": {
+                            "supported": true,
+                            "durability": ["session"],
+                            "targets": ["session"]
+                        }
+                    }
                 },
                 "protocols": {
                     "acp": ["1"]
@@ -3379,10 +3612,39 @@ mod extension_metadata_tests {
         assert_eq!(response["surfaces"]["_tasks/show"]["version"], 1);
         assert_eq!(response["surfaces"]["_tasks/bind"]["version"], 1);
         assert_eq!(response["surfaces"]["_tasks/events"]["version"], 1);
+        assert_eq!(response["surfaces"]["_external_tasks/import"]["version"], 1);
         assert_eq!(response["features"]["extensions"], true);
         assert_eq!(response["features"]["secrets"], true);
         assert_eq!(response["features"]["plans"], true);
         assert_eq!(response["features"]["plan_tasks"], true);
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["compatibility"][0],
+            "read_only"
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["stable_id"],
+            true
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["revision"],
+            true
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["durable_bind"],
+            true
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["structured_errors"],
+            true
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["filtering"],
+            true
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["pagination"],
+            false
+        );
     }
 
     #[tokio::test]
@@ -3400,11 +3662,10 @@ mod extension_metadata_tests {
             change_dir.join("tasks.md"),
             "## 1. Group
 
-- [ ] 1.1 Pending
+- [ ] 1.1 Pending <!-- task-id: stable-pending -->
 ",
         )
         .unwrap();
-
         let agent = Rc::new(OmegonAcpAgent::new("test-model"));
         *agent.session_cwd.borrow_mut() = Some(home.path().to_path_buf());
 
@@ -3413,6 +3674,25 @@ mod extension_metadata_tests {
             .unwrap();
         assert_eq!(plans["plans"][0]["plan_id"], "openspec:demo");
         assert_eq!(plans["tasks"][0]["plan_id"], "openspec:demo");
+        assert_eq!(plans["tasks"][0]["stable_id"], "stable-pending");
+        assert_eq!(plans["tasks"][0]["source"]["kind"], "openspec");
+        assert_eq!(
+            plans["tasks"][0]["source"]["path"],
+            "openspec/changes/demo/tasks.md"
+        );
+        assert!(
+            plans["tasks"][0]["revision"]
+                .as_str()
+                .unwrap()
+                .starts_with("source-v1:openspec:demo:1.1:")
+        );
+        assert_eq!(
+            plans["tasks"][0]["supported_mutations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
 
         let shown = handle_acp_request_result(
             agent.clone(),
@@ -3426,13 +3706,146 @@ mod extension_metadata_tests {
 
         let task_id = plans["tasks"][0]["id"].as_str().unwrap().to_string();
         let task = handle_acp_request_result(
-            agent,
+            agent.clone(),
             "_tasks/show",
             &serde_json::json!({ "task_id": task_id }),
         )
         .await
         .unwrap();
         assert_eq!(task["task"]["plan_id"], "openspec:demo");
+        assert_eq!(task["task"]["stable_id"], "stable-pending");
+        assert_eq!(task["task"]["source"]["anchor"], "1.1");
+
+        let bind = handle_acp_request_result(
+            agent.clone(),
+            "_tasks/bind",
+            &serde_json::json!({
+                "task_id": task_id,
+                "system": "flynt",
+                "external_task_id": "flynt-task-1",
+                "expected_revision": plans["tasks"][0]["revision"].as_str().unwrap()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(bind["accepted"], true);
+        assert_eq!(bind["durability"], "session");
+        assert_eq!(bind["binding"]["system"], "flynt");
+        assert_eq!(bind["binding"]["external_task_id"], "flynt-task-1");
+        assert_eq!(bind["binding"]["stable_id"], "stable-pending");
+        assert!(
+            bind["warning"]
+                .as_str()
+                .unwrap()
+                .contains("not repo-durable")
+        );
+
+        let stale = handle_acp_request_result(
+            agent,
+            "_tasks/bind",
+            &serde_json::json!({
+                "task_id": "stable-pending",
+                "system": "flynt",
+                "external_task_id": "flynt-task-1",
+                "expected_revision": "sha256:stale"
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stale["accepted"], false);
+        assert_eq!(stale["durability"], "none");
+        assert_eq!(stale["code"], "stale_revision");
+    }
+
+    #[tokio::test]
+    async fn acp_plan_projection_reports_task_identity_findings() {
+        let home = tempfile::tempdir().unwrap();
+        let change_dir = home.path().join("openspec/changes/invalid");
+        std::fs::create_dir_all(&change_dir).unwrap();
+        std::fs::write(
+            change_dir.join("proposal.md"),
+            "# Invalid
+",
+        )
+        .unwrap();
+        std::fs::write(
+            change_dir.join("tasks.md"),
+            "## 1. Group
+
+- [ ] 1.1 First <!-- task-id: duplicate -->
+- [ ] 1.2 Second <!-- task-id: duplicate -->
+",
+        )
+        .unwrap();
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        *agent.session_cwd.borrow_mut() = Some(home.path().to_path_buf());
+        let response =
+            handle_acp_request_result(agent.clone(), "_plans/list", &serde_json::json!({}))
+                .await
+                .unwrap();
+        let findings = response["task_identity_findings"].as_array().unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0]["stable_id"], "duplicate");
+        assert!(
+            findings[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("duplicate")
+        );
+
+        let tasks = handle_acp_request_result(agent, "_tasks/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(tasks["task_identity_findings"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn acp_external_task_import_accepts_session_target() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent.clone(),
+            "_external_tasks/import",
+            &serde_json::json!({
+                "system": "flynt",
+                "external_task_id": "flynt task/1",
+                "title": "Promote this task",
+                "body": "Original Flynt body",
+                "target": { "kind": "session" }
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response["accepted"], true);
+        assert_eq!(response["durability"], "session");
+        assert_eq!(response["created"]["source"]["kind"], "session");
+        assert_eq!(response["binding"]["system"], "flynt");
+        assert_eq!(response["review"]["required"], true);
+
+        let events = handle_acp_request_result(agent, "_tasks/events", &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(events["events"].as_array().unwrap().len(), 1);
+        assert_eq!(events["events"][0]["system"], "flynt");
+    }
+
+    #[tokio::test]
+    async fn acp_external_task_import_rejects_non_session_target_for_now() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_external_tasks/import",
+            &serde_json::json!({
+                "system": "flynt",
+                "external_task_id": "flynt-task-1",
+                "title": "Promote this task",
+                "target": { "kind": "openspec" }
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response["accepted"], false);
+        assert_eq!(response["code"], "unsupported_source");
     }
 
     #[tokio::test]

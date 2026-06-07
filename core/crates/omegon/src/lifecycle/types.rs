@@ -294,6 +294,7 @@ pub struct TaskGroup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskLine {
     pub id: String,
+    pub stable_id: Option<String>,
     pub description: String,
     pub done: bool,
 }

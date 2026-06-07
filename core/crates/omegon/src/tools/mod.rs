@@ -49,16 +49,36 @@ pub const PLAN_LIST_GROUP_LIMIT: usize = 4;
 pub struct LifecyclePlanProjection {
     pub entries: Vec<crate::conversation::PlanRegistryEntry>,
     pub tasks: Vec<crate::conversation::PlanItemProjection>,
+    pub task_identity_findings: Vec<crate::lifecycle::spec::TaskStableIdFinding>,
 }
 
 pub fn lifecycle_plan_projection(repo_root: &Path) -> LifecyclePlanProjection {
     use crate::conversation::{
         PlanBinding, PlanItemProjection, PlanRegistryEntry, PlanScope, PlanSource, PlanStatus,
-        ProgressSummary, TaskCompletionPolicy, TaskIntent, WorkItemStatus,
+        PlanTaskSourceRef, PlanTaskStableIdQuality, ProgressSummary, TaskCompletionPolicy,
+        TaskIntent, WorkItemStatus,
+    };
+
+    let openspec_revision = |change_name: &str, task_id: &str, label: &str| {
+        format!(
+            "source-v1:openspec:{}:{}:{}",
+            change_name,
+            task_id,
+            stable_hash(label)
+        )
+    };
+    let design_revision = |node_id: &str, anchor: &str, label: &str| {
+        format!(
+            "source-v1:design:{}:{}:{}",
+            node_id,
+            anchor,
+            stable_hash(label)
+        )
     };
 
     let mut entries = Vec::new();
     let mut tasks = Vec::new();
+    let mut task_identity_findings = Vec::new();
     for change in crate::lifecycle::spec::list_changes(repo_root) {
         let plan_id = PlanBinding::openspec_plan_id(&change.name, None);
         let binding = PlanBinding {
@@ -87,11 +107,33 @@ pub fn lifecycle_plan_projection(repo_root: &Path) -> LifecyclePlanProjection {
             },
             resume_hint: Some(format!("OpenSpec · {}", change.stage.as_str())),
         });
+        if change.has_tasks {
+            let tasks_path = change.path.join("tasks.md");
+            if let Ok(report) = crate::lifecycle::spec::validate_task_stable_ids(&tasks_path) {
+                task_identity_findings.extend(report.findings);
+            }
+        }
         for group in &change.task_groups {
             let group_plan_id = PlanBinding::openspec_plan_id(&change.name, Some(&group.title));
             for task in &group.tasks {
                 tasks.push(PlanItemProjection {
                     id: format!("{}:{}", group_plan_id, task.id),
+                    stable_id: task
+                        .stable_id
+                        .clone()
+                        .unwrap_or_else(|| format!("openspec:{}:task:{}", change.name, task.id)),
+                    stable_id_quality: if task.stable_id.is_some() {
+                        PlanTaskStableIdQuality::Explicit
+                    } else {
+                        PlanTaskStableIdQuality::Fallback
+                    },
+                    revision: openspec_revision(&change.name, &task.id, &task.description),
+                    source: PlanTaskSourceRef {
+                        kind: "openspec".to_string(),
+                        path: Some(format!("openspec/changes/{}/tasks.md", change.name)),
+                        anchor: Some(task.id.clone()),
+                    },
+                    supported_mutations: Vec::new(),
                     plan_id: plan_id.clone(),
                     label: task.description.clone(),
                     status: if task.done {
@@ -149,6 +191,24 @@ pub fn lifecycle_plan_projection(repo_root: &Path) -> LifecyclePlanProjection {
         if node.open_questions.is_empty() {
             tasks.push(PlanItemProjection {
                 id: format!("{}:decision", plan_id),
+                stable_id: format!("design:{}:decision", node.id),
+                stable_id_quality: PlanTaskStableIdQuality::Explicit,
+                revision: design_revision(
+                    &node.id,
+                    "decision",
+                    "Record or verify design decision evidence",
+                ),
+                source: PlanTaskSourceRef {
+                    kind: if node.openspec_change.is_some() {
+                        "hybrid"
+                    } else {
+                        "design"
+                    }
+                    .to_string(),
+                    path: Some(repo_relative_path(repo_root, &node.file_path)),
+                    anchor: Some("decision".to_string()),
+                },
+                supported_mutations: Vec::new(),
                 plan_id: plan_id.clone(),
                 label: "Record or verify design decision evidence".to_string(),
                 status: WorkItemStatus::Pending,
@@ -162,6 +222,20 @@ pub fn lifecycle_plan_projection(repo_root: &Path) -> LifecyclePlanProjection {
             for (idx, question) in node.open_questions.iter().enumerate() {
                 tasks.push(PlanItemProjection {
                     id: format!("{}:question:{}", plan_id, idx + 1),
+                    stable_id: format!("design:{}:question:{}", node.id, idx + 1),
+                    stable_id_quality: PlanTaskStableIdQuality::Fallback,
+                    revision: design_revision(&node.id, &format!("question:{}", idx + 1), question),
+                    source: PlanTaskSourceRef {
+                        kind: if node.openspec_change.is_some() {
+                            "hybrid"
+                        } else {
+                            "design"
+                        }
+                        .to_string(),
+                        path: Some(repo_relative_path(repo_root, &node.file_path)),
+                        anchor: Some(format!("question:{}", idx + 1)),
+                    },
+                    supported_mutations: Vec::new(),
                     plan_id: plan_id.clone(),
                     label: question.clone(),
                     status: WorkItemStatus::Pending,
@@ -175,7 +249,25 @@ pub fn lifecycle_plan_projection(repo_root: &Path) -> LifecyclePlanProjection {
         }
     }
 
-    LifecyclePlanProjection { entries, tasks }
+    LifecyclePlanProjection {
+        entries,
+        tasks,
+        task_identity_findings,
+    }
+}
+
+fn stable_hash(input: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+fn repo_relative_path(repo_root: &Path, path: &Path) -> String {
+    path.strip_prefix(repo_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string()
 }
 
 pub fn render_lifecycle_plan_list(repo_root: &Path) -> String {
@@ -1529,7 +1621,7 @@ mod tests {
             change_dir.join("tasks.md"),
             "## 1. Group
 
-- [x] 1.1 Done task
+- [x] 1.1 Done task <!-- task-id: stable-done -->
 - [ ] 1.2 Pending task
 ",
         )
@@ -1547,6 +1639,19 @@ mod tests {
 
         assert_eq!(projection.tasks.len(), 2);
         assert_eq!(projection.tasks[0].plan_id, "openspec:demo");
+        assert_eq!(projection.tasks[0].stable_id, "stable-done");
+        assert!(
+            projection.tasks[0]
+                .revision
+                .starts_with("source-v1:openspec:demo:1.1:")
+        );
+        assert_eq!(projection.tasks[0].source.kind, "openspec");
+        assert_eq!(
+            projection.tasks[0].source.path.as_deref(),
+            Some("openspec/changes/demo/tasks.md")
+        );
+        assert_eq!(projection.tasks[0].source.anchor.as_deref(), Some("1.1"));
+        assert!(projection.tasks[0].supported_mutations.is_empty());
         assert_eq!(
             projection.tasks[0].intent,
             crate::conversation::TaskIntent::Spec

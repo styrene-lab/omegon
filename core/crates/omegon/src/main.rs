@@ -24,6 +24,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 #[allow(clippy::await_holding_refcell_ref)] // single-threaded LocalSet — no concurrent mutations
 mod acp;
+mod acp_plan_tasks;
 mod acp_worker;
 mod auth;
 mod behavior;
