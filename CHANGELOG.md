@@ -16,6 +16,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.13] - 2026-06-06
+
+### Fixed
+
+- Remove the remaining race in ACP extension setup capture by assigning the original pre-spawn worker event receiver to the persistent lifecycle subscriber instead of using `resubscribe()` after the worker may have emitted setup events.
+
 ## [0.26.12] - 2026-06-06
 
 ### Fixed

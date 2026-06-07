@@ -731,7 +731,11 @@ impl OmegonAcpAgent {
             // Persistent lifecycle subscriber. Worker setup can emit extension
             // metadata/handles before any prompt is sent; prompt-time subscribers
             // are too late and broadcast receivers do not replay old events.
-            let mut lifecycle_rx = handle.event_rx.resubscribe();
+            // Use the original receiver created before the worker thread starts;
+            // `resubscribe()` would start at the current tail and can still race
+            // setup broadcasts emitted immediately after AgentSetup completes.
+            let replacement_rx = handle.event_rx.resubscribe();
+            let mut lifecycle_rx = std::mem::replace(&mut handle.event_rx, replacement_rx);
             let extension_metadata = self.extension_metadata.clone();
             let extension_rpc_handles = self.extension_rpc_handles.clone();
             let conn = self.conn.clone();
