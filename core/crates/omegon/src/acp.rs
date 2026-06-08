@@ -3680,6 +3680,46 @@ mod extension_metadata_tests {
         assert_eq!(meta["flynt"]["deployment"]["kind"], "local");
     }
 
+    #[tokio::test]
+    async fn initialize_enables_conversation_surface_for_flynt_client() {
+        let agent = OmegonAcpAgent::new("test-model");
+        let response = agent
+            .initialize(
+                InitializeRequest::new(ProtocolVersion::V1)
+                    .client_info(Implementation::new("flynt", "0.1.0").title("Flynt")),
+            )
+            .await
+            .unwrap();
+
+        let meta = response
+            .meta
+            .expect("surface metadata should be advertised");
+        assert_eq!(meta["omegon/surfaces"]["conversation"]["enabled"], true);
+        assert_eq!(
+            meta["omegon/surfaces"]["conversation"]["extensionMethod"],
+            "_surface/conversation/update"
+        );
+        assert!(*agent.surface_updates_enabled.borrow());
+    }
+
+    #[tokio::test]
+    async fn initialize_keeps_conversation_surface_disabled_for_zed_client() {
+        let agent = OmegonAcpAgent::new("test-model");
+        let response = agent
+            .initialize(
+                InitializeRequest::new(ProtocolVersion::V1)
+                    .client_info(Implementation::new("zed", "0.1.0").title("Zed")),
+            )
+            .await
+            .unwrap();
+
+        let meta = response
+            .meta
+            .expect("surface metadata should be advertised");
+        assert_eq!(meta["omegon/surfaces"]["conversation"]["enabled"], false);
+        assert!(!*agent.surface_updates_enabled.borrow());
+    }
+
     #[test]
     fn extension_metadata_meta_omits_flynt_alias_when_absent() {
         let metadata = std::collections::BTreeMap::from([(

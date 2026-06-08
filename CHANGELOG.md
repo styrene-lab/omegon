@@ -35,6 +35,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add trace-only observability for ACP shadow conversation surface updates without changing client-visible protocol output.
 - Add a default-off ACP extension-notification hook for shadow conversation surface updates.
 - Advertise ACP conversation surface metadata during initialize and enable surface updates by default for Flynt clients while preserving Zed defaults.
+- Add ACP initialize regression coverage for Flynt-enabled and Zed-disabled conversation surface metadata.
 
 ## [0.26.16] - 2026-06-07
 
