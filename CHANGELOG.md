@@ -28,6 +28,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add an instrument panel semantic projection boundary for inference, tool activity, and worker activity telemetry before Ratatui rendering.
 - Add an editor/input semantic projection boundary for prompt text, mode, cursor, visual line count, and inline token state.
 - Move tool visual color resolution out of semantic conversation projection into the Ratatui render adapter boundary.
+- Add an ACP conversation surface DTO adapter with explicit identity, revision, and redaction policy derived from semantic conversation projections.
 
 ## [0.26.16] - 2026-06-07
 

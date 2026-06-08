@@ -23,6 +23,8 @@ mod labels;
 mod model_options;
 #[path = "acp/resource_context.rs"]
 mod resource_context;
+#[path = "acp/surfaces.rs"]
+mod surfaces;
 
 use labels::compact_tool_call_label;
 use model_options::{
