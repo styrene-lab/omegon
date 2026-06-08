@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap};
 use tui_syntax_highlight::Highlighter;
 use unicode_width::UnicodeWidthStr;
 
-use super::conversation_render_projection::{SegmentRenderMetadata, tool_category_color};
+use super::conversation_render_projection::{SegmentRenderMetadata, tool_card_chrome};
 use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
@@ -197,7 +197,7 @@ fn summarize_json_paths(value: &serde_json::Value) -> Option<String> {
     Some(format!("{joined}{suffix}"))
 }
 
-fn shell_command_from_args(args: &str) -> Option<String> {
+pub(crate) fn shell_command_from_args(args: &str) -> Option<String> {
     if let Some(value) = json_arg(args)
         && let Some(command) = json_string_field(&value, &["command", "cmd"])
     {
@@ -1736,7 +1736,7 @@ impl Segment {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Scale an RGB color's intensity by `factor` (0.0–1.0). Non-RGB colors pass through.
-fn dim_color(color: Color, factor: f32) -> Color {
+pub(crate) fn dim_color(color: Color, factor: f32) -> Color {
     match color {
         Color::Rgb(r, g, b) => Color::Rgb(
             (r as f32 * factor) as u8,
@@ -2245,69 +2245,15 @@ fn render_tool_card(
     density: crate::settings::ToolDetail,
     pinned: bool,
 ) {
-    let display_name = if name == "bash" {
-        if let Some(args) = detail_args {
-            let command = shell_command_from_args(args);
-            let cmd = command
-                .as_deref()
-                .unwrap_or(args.lines().next().unwrap_or(args));
-            let first_word = cmd.split_whitespace().next().unwrap_or("bash");
-            match first_word {
-                "grep" | "rg" => "search".to_string(),
-                "find" => "find".to_string(),
-                "ls" | "dir" => "list".to_string(),
-                "cat" | "head" | "tail" | "bat" => "read".to_string(),
-                "sed" | "awk" => "transform".to_string(),
-                "curl" | "wget" => "fetch".to_string(),
-                "git" => "git".to_string(),
-                "cargo" => "cargo".to_string(),
-                "npm" | "npx" | "pnpm" | "yarn" | "bun" => "npm".to_string(),
-                "docker" | "podman" => "container".to_string(),
-                "kubectl" | "k" => "kubectl".to_string(),
-                "make" | "cmake" => "build".to_string(),
-                "python" | "python3" | "pip" => "python".to_string(),
-                "rustc" | "rustup" => "rust".to_string(),
-                "go" => "go".to_string(),
-                "dig" | "nslookup" | "host" => "dns".to_string(),
-                "ssh" | "scp" | "rsync" => "remote".to_string(),
-                "tar" | "zip" | "unzip" | "gzip" => "archive".to_string(),
-                "wc" => "count".to_string(),
-                "sort" | "uniq" => "sort".to_string(),
-                "diff" | "patch" => "diff".to_string(),
-                "mkdir" | "rm" | "mv" | "cp" | "chmod" | "chown" => "fs".to_string(),
-                "echo" | "printf" => "echo".to_string(),
-                "test" | "[" => "test".to_string(),
-                "vault" => "vault".to_string(),
-                "sh" | "bash" | "zsh" => "shell".to_string(),
-                _ => first_word.to_string(),
-            }
-        } else {
-            "shell".to_string()
-        }
-    } else {
-        name.replace('_', " ")
-    };
-
     // `▶` U+25B6 is in the Unicode emoji set — replaced with `▷` U+25B7
     // for the same reason as the instruments-panel pass. Both `✗` and
     // `▸` are already safe.
-    //
-    // Completed tools use categorical color from ToolCategory so
-    // operators can scan the timeline by tool type — file mutations
-    // are lime, shell execs are orange, reads are teal, etc.
-    let kind_color = tool_category
-        .map(|k| tool_category_color(k, t))
-        .unwrap_or(t.accent_muted());
-    let (status_icon, status_color, border_color, bg) = if is_error {
-        ("✗", t.error(), t.error(), t.tool_error_bg())
-    } else if !complete {
-        ("▷", t.warning(), t.warning(), t.tool_success_bg())
-    } else {
-        // Border uses a muted version of the kind color so it doesn't
-        // compete with diff content (red/green lines) inside the card.
-        let muted_border = dim_color(kind_color, 0.4);
-        ("▸", kind_color, muted_border, t.tool_success_bg())
-    };
+    let chrome = tool_card_chrome(name, detail_args, is_error, complete, tool_category, t);
+    let display_name = chrome.display_name;
+    let status_icon = chrome.status_icon;
+    let status_color = chrome.status_color;
+    let border_color = chrome.border_color;
+    let bg = chrome.background;
 
     let timestamp = format_timestamp(meta.timestamp);
     let title = tool_title_line(

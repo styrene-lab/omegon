@@ -63,6 +63,92 @@ pub fn segment_chrome(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCardChrome {
+    pub display_name: String,
+    pub status_icon: &'static str,
+    pub status_color: Color,
+    pub border_color: Color,
+    pub background: Color,
+    pub category_color: Color,
+}
+
+pub fn tool_display_name(name: &str, detail_args: Option<&str>) -> String {
+    if name == "bash" {
+        if let Some(args) = detail_args {
+            let command = crate::tui::segments::shell_command_from_args(args);
+            let cmd = command
+                .as_deref()
+                .unwrap_or(args.lines().next().unwrap_or(args));
+            let first_word = cmd.split_whitespace().next().unwrap_or("bash");
+            match first_word {
+                "grep" | "rg" => "search".to_string(),
+                "find" => "find".to_string(),
+                "ls" | "dir" => "list".to_string(),
+                "cat" | "head" | "tail" | "bat" => "read".to_string(),
+                "sed" | "awk" => "transform".to_string(),
+                "curl" | "wget" => "fetch".to_string(),
+                "git" => "git".to_string(),
+                "cargo" => "cargo".to_string(),
+                "npm" | "npx" | "pnpm" | "yarn" | "bun" => "npm".to_string(),
+                "docker" | "podman" => "container".to_string(),
+                "kubectl" | "k" => "kubectl".to_string(),
+                "make" | "cmake" => "build".to_string(),
+                "python" | "python3" | "pip" => "python".to_string(),
+                "rustc" | "rustup" => "rust".to_string(),
+                "go" => "go".to_string(),
+                "dig" | "nslookup" | "host" => "dns".to_string(),
+                "ssh" | "scp" | "rsync" => "remote".to_string(),
+                "tar" | "zip" | "unzip" | "gzip" => "archive".to_string(),
+                "wc" => "count".to_string(),
+                "sort" | "uniq" => "sort".to_string(),
+                "diff" | "patch" => "diff".to_string(),
+                "mkdir" | "rm" | "mv" | "cp" | "chmod" | "chown" => "fs".to_string(),
+                "echo" | "printf" => "echo".to_string(),
+                "test" | "[" => "test".to_string(),
+                "vault" => "vault".to_string(),
+                "sh" | "bash" | "zsh" => "shell".to_string(),
+                _ => first_word.to_string(),
+            }
+        } else {
+            "shell".to_string()
+        }
+    } else {
+        name.replace('_', " ")
+    }
+}
+
+pub fn tool_card_chrome(
+    name: &str,
+    detail_args: Option<&str>,
+    is_error: bool,
+    complete: bool,
+    tool_category: Option<ToolCategory>,
+    t: &dyn Theme,
+) -> ToolCardChrome {
+    let display_name = tool_display_name(name, detail_args);
+    let category_color = tool_category
+        .map(|k| tool_category_color(k, t))
+        .unwrap_or(t.accent_muted());
+    let (status_icon, status_color, border_color, background) = if is_error {
+        ("✗", t.error(), t.error(), t.tool_error_bg())
+    } else if !complete {
+        ("▷", t.warning(), t.warning(), t.tool_success_bg())
+    } else {
+        let muted_border = crate::tui::segments::dim_color(category_color, 0.4);
+        ("▸", category_color, muted_border, t.tool_success_bg())
+    };
+
+    ToolCardChrome {
+        display_name,
+        status_icon,
+        status_color,
+        border_color,
+        background,
+        category_color,
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct SegmentRenderContext<'a> {
     pub theme: &'a dyn Theme,
@@ -142,6 +228,51 @@ mod tests {
             emphasis: SegmentEmphasis::Normal,
             tool_category,
         }
+    }
+
+    #[test]
+    fn tool_display_name_classifies_shell_commands() {
+        assert_eq!(
+            tool_display_name("bash", Some(r#"{"command":"cargo check"}"#)),
+            "cargo"
+        );
+        assert_eq!(tool_display_name("bash", Some("rg needle src")), "search");
+        assert_eq!(tool_display_name("read", None), "read");
+    }
+
+    #[test]
+    fn tool_card_chrome_uses_category_color_for_completed_tools() {
+        let chrome = tool_card_chrome(
+            "bash",
+            Some("cargo check"),
+            false,
+            true,
+            Some(ToolCategory::CommandExec),
+            &Alpharius,
+        );
+        assert_eq!(chrome.display_name, "cargo");
+        assert_eq!(chrome.status_icon, "▸");
+        assert_eq!(
+            chrome.status_color,
+            tool_category_color(ToolCategory::CommandExec, &Alpharius)
+        );
+        assert_eq!(chrome.background, Alpharius.tool_success_bg());
+    }
+
+    #[test]
+    fn tool_card_chrome_prioritizes_error_state() {
+        let chrome = tool_card_chrome(
+            "write",
+            None,
+            true,
+            true,
+            Some(ToolCategory::FileMutation),
+            &Alpharius,
+        );
+        assert_eq!(chrome.status_icon, "✗");
+        assert_eq!(chrome.status_color, Alpharius.error());
+        assert_eq!(chrome.border_color, Alpharius.error());
+        assert_eq!(chrome.background, Alpharius.tool_error_bg());
     }
 
     #[test]

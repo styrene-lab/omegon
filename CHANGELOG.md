@@ -44,6 +44,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Replace footer context class Debug-string projection with explicit context-class mapping.
 - Rename the TUI conversation render adapter color hook to `tool_category_color` to align Ratatui rendering with shared semantic tool categories.
 - Centralize focus-mode conversation segment chrome resolution in the Ratatui conversation render adapter.
+- Centralize tool-card display name and status chrome resolution in the Ratatui conversation render adapter.
 
 ## [0.26.16] - 2026-06-07
 
