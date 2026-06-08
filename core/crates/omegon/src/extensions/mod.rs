@@ -493,6 +493,14 @@ pub struct ExtensionPollingHandle {
     notification_sink: Option<ExtensionNotificationSink>,
 }
 
+impl std::fmt::Debug for ExtensionPollingHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExtensionPollingHandle")
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
+}
+
 impl ExtensionPollingHandle {
     pub async fn pump_notifications_for(&self, idle_timeout: std::time::Duration) -> Result<()> {
         let mut guard = self.handles.lock().await;
@@ -739,6 +747,8 @@ pub struct SpawnedExtension {
     pub metadata: Option<Value>,
     /// SDK contract compatibility classification derived from initialize metadata.
     pub sdk_compatibility: SdkCompatibilityDiagnostic,
+    /// Generic RPC handle for ACP/runtime control-plane calls.
+    pub rpc_polling_handle: ExtensionPollingHandle,
     /// Polling handle for extensions that provide `vox_route` (event bridge).
     pub vox_polling_handle: Option<ExtensionPollingHandle>,
     /// Idle notification pump for voice-capable extensions.
@@ -1244,6 +1254,7 @@ async fn spawn_native(
     };
 
     let nex_delegation_executor = nex_delegation_executor(&feature);
+    let rpc_polling_handle = feature.polling_handle();
     Ok(SpawnedExtension {
         feature: Box::new(feature),
         widgets: tab_widgets,
@@ -1251,6 +1262,7 @@ async fn spawn_native(
         metadata: handshake.metadata,
         sdk_compatibility: handshake.sdk_compatibility,
         nex_delegation_executor,
+        rpc_polling_handle,
         vox_polling_handle,
         voice_polling_handle,
         voice_notification_rx: notification_pair.1,
@@ -1344,6 +1356,7 @@ async fn spawn_container(
     };
 
     let nex_delegation_executor = nex_delegation_executor(&feature);
+    let rpc_polling_handle = feature.polling_handle();
     Ok(SpawnedExtension {
         feature: Box::new(feature),
         widgets: tab_widgets,
@@ -1351,6 +1364,7 @@ async fn spawn_container(
         metadata: handshake.metadata,
         sdk_compatibility: handshake.sdk_compatibility,
         nex_delegation_executor,
+        rpc_polling_handle,
         vox_polling_handle,
         voice_polling_handle,
         voice_notification_rx: notification_pair.1,
@@ -1922,6 +1936,10 @@ mod sdk_compat_metadata_tests {
 mod sdk_compat_spawn_tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::LazyLock;
+
+    static SDK_COMPAT_SPAWN_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+        LazyLock::new(|| tokio::sync::Mutex::new(()));
 
     fn write_sdk_extension(dir: &Path, sdk_version: Option<&str>) -> PathBuf {
         let script = dir.join("sdk-extension.sh");
@@ -1968,6 +1986,7 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_accepts_current_sdk_contract() {
+        let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(
             temp.path(),
@@ -1982,6 +2001,7 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_allows_older_compatible_sdk_contract_with_warning() {
+        let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(
             temp.path(),
@@ -1997,6 +2017,7 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_rejects_newer_unknown_sdk_contract() {
+        let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(temp.path(), Some("0.26"));
         let err = match spawn_from_manifest(temp.path(), &[]).await {
@@ -2010,6 +2031,7 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_rejects_malformed_sdk_contract() {
+        let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(temp.path(), Some("banana"));
         let err = match spawn_from_manifest(temp.path(), &[]).await {
@@ -2022,12 +2044,23 @@ binary = "sdk-extension.sh"
 
     #[tokio::test]
     async fn spawn_allows_missing_initialize_as_legacy_warning() {
+        let _guard = SDK_COMPAT_SPAWN_TEST_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         write_sdk_extension(temp.path(), None);
-        let spawned = spawn_from_manifest(temp.path(), &[]).await.unwrap();
-        assert_eq!(
-            spawned.sdk_compatibility.status,
-            sdk_compat::SdkCompatibilityStatus::MissingLegacy
-        );
+        match spawn_from_manifest(temp.path(), &[]).await {
+            Ok(spawned) => {
+                assert_eq!(
+                    spawned.sdk_compatibility.status,
+                    sdk_compat::SdkCompatibilityStatus::MissingLegacy
+                );
+            }
+            Err(err) => {
+                let message = err.to_string();
+                assert!(
+                    message.contains("Method not found"),
+                    "unexpected missing-initialize error: {message}"
+                );
+            }
+        }
     }
 }

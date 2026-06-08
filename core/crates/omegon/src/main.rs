@@ -24,6 +24,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 #[allow(clippy::await_holding_refcell_ref)] // single-threaded LocalSet — no concurrent mutations
 mod acp;
+mod acp_plan_tasks;
 mod acp_worker;
 mod auth;
 mod behavior;
@@ -82,6 +83,7 @@ mod ollama;
 mod packages;
 mod paths;
 mod pkl_modules;
+mod plan;
 mod plugin_cli;
 mod plugins;
 mod project_rules;
@@ -1201,21 +1203,26 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(model = %model, "using Ollama-provided model");
     }
 
-    // Priority: RUST_LOG env > --log-level flag > "info" default
-    // Interactive mode: no subcommand (default) or explicit `interactive`.
-    // In both cases ratatui owns stderr — tracing must go to file only.
+    // Priority: RUST_LOG env > --log-level flag > "info" default.
+    // Interactive mode owns stderr via ratatui. ACP stdio owns stdout/stdin
+    // for JSON-RPC, and some clients surface stderr in transcripts, so keep
+    // stdio ACP logs file-only as well. ACP websocket/server mode can log to
+    // stderr because stdout is not the protocol transport there.
     let is_interactive = matches!(cli.command, Some(Commands::Interactive) | None)
         && cli.prompt.is_none()
         && cli.prompt_file.is_none();
+    let is_acp_stdio = matches!(cli.command, Some(Commands::Acp { listen: None, .. }));
+    let logs_file_only = is_interactive || is_acp_stdio;
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cli.log_level));
 
-    // Interactive mode: tracing MUST NOT go to stderr (ratatui owns it).
+    // File-only modes: tracing MUST NOT go to stderr. Interactive TUI owns
+    // stderr, and ACP stdio clients may serialize stderr as user-visible text.
     // Logs go to --log-file or ~/.config/omegon/omegon.log as default.
-    // Headless mode: stderr is fine.
+    // Other headless modes: stderr is fine.
     let _guard: Option<tracing_appender::non_blocking::WorkerGuard>;
 
-    if is_interactive {
+    if logs_file_only {
         let log_path = cli.log_file.clone().unwrap_or_else(|| {
             let dir = dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
@@ -6818,6 +6825,14 @@ async fn execute_remote_slash_command(
         crate::tui::CanonicalSlashCommand::PlanView
             | crate::tui::CanonicalSlashCommand::PlanSet(_)
             | crate::tui::CanonicalSlashCommand::PlanList
+            | crate::tui::CanonicalSlashCommand::PlanShow(_)
+            | crate::tui::CanonicalSlashCommand::PlanSwitch(_)
+            | crate::tui::CanonicalSlashCommand::PlanResume(_)
+            | crate::tui::CanonicalSlashCommand::PlanBackground(_)
+            | crate::tui::CanonicalSlashCommand::PlanDetach(_)
+            | crate::tui::CanonicalSlashCommand::PlanPromote(_)
+            | crate::tui::CanonicalSlashCommand::PlanBind(_)
+            | crate::tui::CanonicalSlashCommand::PlanLedger(_)
             | crate::tui::CanonicalSlashCommand::PlanApprove
             | crate::tui::CanonicalSlashCommand::PlanExecute
             | crate::tui::CanonicalSlashCommand::PlanAdvance
@@ -6843,12 +6858,56 @@ fn execute_plan_slash_command(
     use omegon_traits::SlashCommandResponse;
 
     let intent = &mut runtime_state.conversation.intent;
-    if matches!(command, CanonicalSlashCommand::PlanList) {
-        intent.apply_plan_action(PlanAction::View);
-        return SlashCommandResponse {
-            accepted: true,
-            output: Some(render_plan_list(runtime_state)),
-        };
+    match &command {
+        CanonicalSlashCommand::PlanList => {
+            intent.apply_plan_action(PlanAction::View);
+            return SlashCommandResponse {
+                accepted: true,
+                output: Some(render_plan_list(runtime_state)),
+            };
+        }
+        CanonicalSlashCommand::PlanShow(id) => {
+            return SlashCommandResponse {
+                accepted: true,
+                output: Some(render_plan_show(runtime_state, id)),
+            };
+        }
+        CanonicalSlashCommand::PlanLedger(id) => {
+            return SlashCommandResponse {
+                accepted: true,
+                output: Some(render_plan_ledger(runtime_state, id.as_deref())),
+            };
+        }
+        CanonicalSlashCommand::PlanBackground(id) => {
+            let output = runtime_state.conversation.intent.mark_plan_view_status(
+                id.as_deref(),
+                crate::conversation::PlanStatus::Backgrounded,
+                "Plan backgrounded; foreground unchanged.",
+            );
+            return SlashCommandResponse {
+                accepted: true,
+                output: Some(output),
+            };
+        }
+        CanonicalSlashCommand::PlanDetach(id) => {
+            let output = runtime_state.conversation.intent.mark_plan_view_status(
+                id.as_deref(),
+                crate::conversation::PlanStatus::Detached,
+                "Plan detached; durable artifacts unchanged.",
+            );
+            return SlashCommandResponse {
+                accepted: true,
+                output: Some(output),
+            };
+        }
+        CanonicalSlashCommand::PlanSwitch(id) | CanonicalSlashCommand::PlanResume(id) => {
+            let output = runtime_state.conversation.intent.switch_visible_plan(id);
+            return SlashCommandResponse {
+                accepted: true,
+                output: Some(output),
+            };
+        }
+        _ => {}
     }
 
     let clears_completed_plan = matches!(
@@ -6905,6 +6964,65 @@ Last completed plan
     }
 }
 
+fn render_plan_show(runtime_state: &InteractiveAgentState, plan_id: &str) -> String {
+    let intent = &runtime_state.conversation.intent;
+    let mut registry = intent.plan_registry();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let repo_root = setup::find_project_root(&cwd);
+    let lifecycle = crate::tools::lifecycle_plan_projection(&repo_root);
+    registry.entries.extend(lifecycle.entries);
+    registry.tasks.extend(lifecycle.tasks);
+
+    let mut lines = vec![format!("Plan {plan_id}")];
+    if let Some(entry) = registry
+        .entries
+        .iter()
+        .find(|entry| entry.plan_id == plan_id)
+    {
+        lines.push(format!(
+            "{} · {} · {} · {}/{}",
+            entry.source.label(),
+            entry.scope.label(),
+            entry.status.label(),
+            entry.progress.completed,
+            entry.progress.total
+        ));
+    } else {
+        lines.push("stale".to_string());
+        lines.push(crate::conversation::STALE_PLAN_COPY.to_string());
+    }
+    for task in registry.tasks.iter().filter(|task| task.plan_id == plan_id) {
+        lines.push(format!("- {} {}", task.status.icon(), task.label));
+    }
+    lines.join(
+        "
+",
+    )
+}
+
+fn render_plan_ledger(runtime_state: &InteractiveAgentState, plan_id: Option<&str>) -> String {
+    let intent = &runtime_state.conversation.intent;
+    let mut lines = vec!["Plan ledger".to_string()];
+    for entry in &intent.completion_ledger {
+        if plan_id.is_none_or(|id| id == entry.plan_id) {
+            lines.push(format!(
+                "- {} · {} · {} item(s) · {}",
+                entry.plan_id,
+                entry.source.label(),
+                entry.item_count,
+                entry.summary
+            ));
+        }
+    }
+    if lines.len() == 1 {
+        lines.push("- none".to_string());
+    }
+    lines.join(
+        "
+",
+    )
+}
+
 fn render_plan_list(runtime_state: &InteractiveAgentState) -> String {
     let intent = &runtime_state.conversation.intent;
     let mut lines = vec!["Plans".to_string(), String::new()];
@@ -6949,8 +7067,68 @@ fn render_plan_list(runtime_state: &InteractiveAgentState) -> String {
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let repo_root = setup::find_project_root(&cwd);
+    let lifecycle_projection = crate::tools::lifecycle_plan_projection(&repo_root);
+    let reconciliation_issues = intent.reconcile_plan_registry(&lifecycle_projection.entries);
+    if !reconciliation_issues.is_empty() {
+        lines.push(String::new());
+        lines.push("Reconciliation".to_string());
+        for issue in &reconciliation_issues {
+            lines.push(format!(
+                "- {} · {:?} · {}",
+                issue.plan_id, issue.kind, issue.message
+            ));
+        }
+    }
+
+    let promotion_nudges = intent.promotion_nudges();
+    if !promotion_nudges.is_empty() {
+        lines.push(String::new());
+        lines.push("Promotion nudges".to_string());
+        for nudge in &promotion_nudges {
+            lines.push(format!("- {nudge}"));
+        }
+    }
+
+    let resume_candidates = intent.ranked_resume_candidates(lifecycle_projection.entries.clone());
+    if !resume_candidates.is_empty() {
+        lines.push(String::new());
+        lines.push("Resume candidates".to_string());
+        lines.push("Explicit only: use /plan resume <id> or /plan switch <id>.".to_string());
+        for candidate in resume_candidates.iter().take(5) {
+            lines.push(format!(
+                "- {} · {} · {} · {}",
+                candidate.plan_id,
+                candidate.status.label(),
+                candidate.source.label(),
+                candidate.hint
+            ));
+        }
+    }
     lines.push(String::new());
     lines.push(crate::tools::render_lifecycle_plan_list(&repo_root));
+    if !lifecycle_projection.tasks.is_empty() {
+        lines.push(String::new());
+        lines.push("Tasks".to_string());
+        for task in lifecycle_projection
+            .tasks
+            .iter()
+            .take(crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT)
+        {
+            lines.push(format!(
+                "- {} · {} · {} {}",
+                task.id,
+                task.plan_id,
+                task.intent.label(),
+                task.label
+            ));
+        }
+        if lifecycle_projection.tasks.len() > crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT {
+            lines.push(format!(
+                "- … and {} more tasks",
+                lifecycle_projection.tasks.len() - crate::tools::PLAN_LIST_VISIBLE_ITEM_LIMIT
+            ));
+        }
+    }
 
     lines.join("\n")
 }
@@ -8214,6 +8392,7 @@ mod tests {
             },
             extension_widgets: vec![],
             extension_metadata: Default::default(),
+            extension_rpc_handles: Default::default(),
             widget_receivers: vec![],
             cleave_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
             delegate_event_slot: std::sync::Arc::new(std::sync::Mutex::new(None)),

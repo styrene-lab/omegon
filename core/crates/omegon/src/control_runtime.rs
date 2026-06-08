@@ -349,6 +349,14 @@ pub fn control_request_from_slash(
         }
         crate::tui::CanonicalSlashCommand::PlanView
         | crate::tui::CanonicalSlashCommand::PlanList
+        | crate::tui::CanonicalSlashCommand::PlanShow(_)
+        | crate::tui::CanonicalSlashCommand::PlanSwitch(_)
+        | crate::tui::CanonicalSlashCommand::PlanResume(_)
+        | crate::tui::CanonicalSlashCommand::PlanBackground(_)
+        | crate::tui::CanonicalSlashCommand::PlanDetach(_)
+        | crate::tui::CanonicalSlashCommand::PlanPromote(_)
+        | crate::tui::CanonicalSlashCommand::PlanBind(_)
+        | crate::tui::CanonicalSlashCommand::PlanLedger(_)
         | crate::tui::CanonicalSlashCommand::PlanSet(_)
         | crate::tui::CanonicalSlashCommand::PlanApprove
         | crate::tui::CanonicalSlashCommand::PlanExecute

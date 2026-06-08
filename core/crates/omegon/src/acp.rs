@@ -499,9 +499,13 @@ pub struct OmegonAcpAgent {
     worker: RefCell<Option<WorkerHandle>>,
     conn: SharedAcpClientConnection,
     session_id: RefCell<Option<SessionId>>,
+    session_cwd: RefCell<Option<std::path::PathBuf>>,
     secrets: RefCell<Option<std::sync::Arc<omegon_secrets::SecretsManager>>>,
     host_caps: RefCell<HostCapabilities>,
-    extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    extension_metadata: Rc<RefCell<std::collections::BTreeMap<String, serde_json::Value>>>,
+    extension_rpc_handles:
+        Rc<RefCell<std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>>>,
+    session_task_bindings: RefCell<Vec<crate::conversation::SessionTaskBinding>>,
 }
 
 impl OmegonAcpAgent {
@@ -518,14 +522,22 @@ impl OmegonAcpAgent {
             worker: RefCell::new(None),
             conn: Rc::new(RefCell::new(None)),
             session_id: RefCell::new(None),
+            session_cwd: RefCell::new(None),
             secrets: RefCell::new(None),
             host_caps: RefCell::new(HostCapabilities::default()),
-            extension_metadata,
+            extension_metadata: Rc::new(RefCell::new(extension_metadata)),
+            extension_rpc_handles: Rc::new(RefCell::new(Default::default())),
+            session_task_bindings: RefCell::new(Vec::new()),
         }
     }
 
     pub fn set_client(&self, c: AcpClientConnection) {
         *self.conn.borrow_mut() = Some(c);
+    }
+
+    #[cfg(test)]
+    fn set_secrets_for_test(&self, secrets: std::sync::Arc<omegon_secrets::SecretsManager>) {
+        *self.secrets.borrow_mut() = Some(secrets);
     }
 
     fn modes() -> SessionModeState {
@@ -717,6 +729,47 @@ impl OmegonAcpAgent {
                     *secrets_cell.borrow_mut() = Some(mgr);
                 }
             });
+
+            // Persistent lifecycle subscriber. Worker setup can emit extension
+            // metadata/handles before any prompt is sent; prompt-time subscribers
+            // are too late and broadcast receivers do not replay old events.
+            // Use the original receiver created before the worker thread starts;
+            // `resubscribe()` would start at the current tail and can still race
+            // setup broadcasts emitted immediately after AgentSetup completes.
+            let replacement_rx = handle.event_rx.resubscribe();
+            let mut lifecycle_rx = std::mem::replace(&mut handle.event_rx, replacement_rx);
+            let extension_metadata = self.extension_metadata.clone();
+            let extension_rpc_handles = self.extension_rpc_handles.clone();
+            let conn = self.conn.clone();
+            let session_id = self.session_id.borrow().clone();
+            tokio::task::spawn_local(async move {
+                loop {
+                    match lifecycle_rx.recv().await {
+                        Ok(WorkerEvent::ExtensionMetadata(metadata)) => {
+                            *extension_metadata.borrow_mut() = metadata.clone();
+                            if let (Some(c), Some(sid)) =
+                                (conn.borrow().as_ref(), session_id.clone())
+                            {
+                                let meta = extension_metadata_meta(&metadata);
+                                let _ = send_session_update(
+                                    c,
+                                    sid,
+                                    SessionUpdate::SessionInfoUpdate(
+                                        SessionInfoUpdate::new().meta(meta),
+                                    ),
+                                )
+                                .await;
+                            }
+                        }
+                        Ok(WorkerEvent::ExtensionHandles(handles)) => {
+                            *extension_rpc_handles.borrow_mut() = handles;
+                        }
+                        Ok(_) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    }
+                }
+            });
             *self.worker.borrow_mut() = Some(handle);
         }
     }
@@ -759,6 +812,79 @@ impl OmegonAcpAgent {
             );
         }
         (self.model.clone(), "minimal".into(), "fabricator".into())
+    }
+
+    fn runtime_status_json(&self) -> serde_json::Value {
+        let (model, thinking, posture) = self.current_settings();
+        let cwd = std::env::current_dir().ok();
+        let session_cwd = self.session_cwd.borrow().clone().or_else(|| cwd.clone());
+        let session_id = self.session_id.borrow().as_ref().map(|id| id.to_string());
+        let binary = std::env::current_exe().ok();
+        serde_json::json!({
+            "runtime": {
+                "name": "omegon",
+                "version": env!("CARGO_PKG_VERSION"),
+                "commit": env!("OMEGON_GIT_SHA"),
+                "build_date": env!("OMEGON_BUILD_DATE"),
+                "binary": binary.as_ref().map(|p| p.display().to_string()),
+                "cwd": cwd.as_ref().map(|p| p.display().to_string())
+            },
+            "acp": {
+                "protocol_version": 1,
+                "transport": "stdio",
+                "session_id": session_id,
+                "session_cwd": session_cwd.as_ref().map(|p| p.display().to_string()),
+                "connected": self.conn.borrow().is_some()
+            },
+            "agent": {
+                "id": "default",
+                "profile": serde_json::Value::Null,
+                "model": model,
+                "thinking": thinking,
+                "posture": posture
+            },
+            "memory": {
+                "scope": "project",
+                "root": session_cwd.as_ref().map(|p| p.join(".omegon").display().to_string())
+            }
+        })
+    }
+
+    fn provider_status_json(&self) -> serde_json::Value {
+        let (model, _thinking, _posture) = self.current_settings();
+        let active_provider_id = crate::providers::infer_provider_id(&model);
+        let providers: Vec<serde_json::Value> = crate::auth::PROVIDERS
+            .iter()
+            .map(|provider| {
+                let status = crate::auth::provider_session_status(provider);
+                let status_text = match status {
+                    crate::auth::ProviderSessionStatus::Configured => "authenticated",
+                    crate::auth::ProviderSessionStatus::Expired => "expired",
+                    crate::auth::ProviderSessionStatus::Missing => "missing",
+                };
+                serde_json::json!({
+                    "id": provider.id,
+                    "name": provider.display_name,
+                    "status": status_text,
+                    "expires_at": serde_json::Value::Null,
+                    "models": []
+                })
+            })
+            .collect();
+        let active_status = crate::auth::provider_by_id(&active_provider_id)
+            .map(crate::auth::provider_session_status);
+        let ready = matches!(
+            active_status,
+            Some(crate::auth::ProviderSessionStatus::Configured)
+        ) || active_provider_id == "ollama";
+        serde_json::json!({
+            "providers": providers,
+            "active": {
+                "provider": active_provider_id,
+                "model": model,
+                "ready": ready
+            }
+        })
     }
 }
 
@@ -805,8 +931,8 @@ impl OmegonAcpAgent {
             AuthMethodAgent::new("omegon-auth", "Omegon Authentication")
                 .description("Run `omegon auth login` in a terminal or set API keys."),
         )];
-        if !self.extension_metadata.is_empty() {
-            response.meta = Some(extension_metadata_meta(&self.extension_metadata));
+        if !self.extension_metadata.borrow().is_empty() {
+            response.meta = Some(extension_metadata_meta(&self.extension_metadata.borrow()));
         }
         Ok(response)
     }
@@ -817,6 +943,7 @@ impl OmegonAcpAgent {
 
     async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
         let cwd = args.cwd;
+        *self.session_cwd.borrow_mut() = Some(cwd.clone());
 
         // Create session ID *before* ensure_worker so the proxy pump
         // receives the correct session ID for host RPC calls.
@@ -1163,18 +1290,12 @@ impl OmegonAcpAgent {
                                 .await;
                             }
                         }
-                        Ok(WorkerEvent::ExtensionMetadata(metadata)) => {
-                            if let Some(c) = conn.borrow().as_ref() {
-                                let meta = extension_metadata_meta(&metadata);
-                                let _ = send_session_update(
-                                    c,
-                                    stream_sid.clone(),
-                                    SessionUpdate::SessionInfoUpdate(
-                                        SessionInfoUpdate::new().meta(meta),
-                                    ),
-                                )
-                                .await;
-                            }
+                        Ok(WorkerEvent::ExtensionMetadata(_))
+                        | Ok(WorkerEvent::ExtensionHandles(_)) => {
+                            // Setup/lifecycle extension state is handled by the persistent
+                            // worker-event forwarder started in ensure_worker(). Prompt
+                            // streaming subscribers may start after setup events and must not
+                            // be the sole owner of this state.
                         }
                         Ok(WorkerEvent::TurnComplete) => break,
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -1395,6 +1516,345 @@ impl OmegonAcpAgent {
 }
 
 impl OmegonAcpAgent {
+    fn acp_plan_projection_json(&self) -> serde_json::Value {
+        let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
+        let repo_root = crate::setup::find_project_root(&cwd);
+        crate::acp_plan_tasks::projection_json(&repo_root)
+    }
+
+    fn repo_relative_path(&self, path: &std::path::Path) -> String {
+        let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
+        let repo_root = crate::setup::find_project_root(&cwd);
+        path.strip_prefix(&repo_root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn acp_plan_show_json(&self, params: serde_json::Value) -> serde_json::Value {
+        let plan_id = params.get("plan_id").and_then(|v| v.as_str()).unwrap_or("");
+        let projection = self.acp_plan_projection_json();
+        crate::acp_plan_tasks::plan_show_json(&projection, plan_id)
+    }
+
+    async fn acp_plan_control_json(&self, command: String) -> serde_json::Value {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let worker_tx = self.worker.borrow().as_ref().map(|w| w.request_tx.clone());
+        let Some(worker_tx) = worker_tx else {
+            return serde_json::json!({
+                "accepted": false,
+                "error": "ACP worker is not initialized",
+            });
+        };
+        if worker_tx
+            .send(WorkerRequest::ControlRequest {
+                command,
+                response_tx: tx,
+            })
+            .await
+            .is_err()
+        {
+            return serde_json::json!({
+                "accepted": false,
+                "error": "ACP worker is not accepting requests",
+            });
+        }
+        match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+            Ok(Ok(resp)) => serde_json::json!({
+                "accepted": resp.error.is_none(),
+                "text": resp.text,
+                "error": resp.error,
+                "cancelled": resp.cancelled,
+                "mutation": "session_view_only",
+            }),
+            Ok(Err(_)) => serde_json::json!({
+                "accepted": false,
+                "error": "ACP worker dropped plan control response",
+            }),
+            Err(_) => serde_json::json!({
+                "accepted": false,
+                "error": "ACP plan control request timed out",
+            }),
+        }
+    }
+
+    fn acp_task_list_json(&self, params: serde_json::Value) -> serde_json::Value {
+        let projection = self.acp_plan_projection_json();
+        crate::acp_plan_tasks::task_list_json(&projection, &params)
+    }
+
+    fn acp_external_task_import_json(&self, params: serde_json::Value) -> serde_json::Value {
+        let system = params
+            .get("system")
+            .and_then(|v| v.as_str())
+            .unwrap_or("external")
+            .trim();
+        let external_id = params
+            .get("external_task_id")
+            .or_else(|| params.get("flynt_task_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let title = params
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if external_id.is_empty() || title.is_empty() {
+            return crate::acp_plan_tasks::task_error(
+                "target_required",
+                "external_task_id and title are required",
+                None,
+            );
+        }
+        let target_kind = params
+            .get("target")
+            .and_then(|v| v.get("kind"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("session");
+        if target_kind != "session" {
+            return crate::acp_plan_tasks::task_error(
+                "unsupported_source",
+                "external task import currently supports only target.kind=session; use the Flynt agent promotion prompt for OpenSpec/design promotion",
+                None,
+            );
+        }
+
+        let body = params.get("body").and_then(|v| v.as_str()).unwrap_or("");
+        let stable_id = format!(
+            "external:{}:{}",
+            crate::acp_plan_tasks::sanitize_external_id(system),
+            crate::acp_plan_tasks::sanitize_external_id(external_id)
+        );
+        let revision =
+            crate::acp_plan_tasks::external_import_revision(system, external_id, title, body);
+        let task_id = format!("session:external:{}", stable_id);
+        self.session_task_bindings
+            .borrow_mut()
+            .push(crate::conversation::SessionTaskBinding {
+                task_id: task_id.clone(),
+                stable_id: Some(stable_id.clone()),
+                system: system.to_string(),
+                external_task_id: external_id.to_string(),
+                revision: revision.clone(),
+            });
+
+        serde_json::json!({
+            "accepted": true,
+            "durability": "session",
+            "created": {
+                "task_id": task_id,
+                "stable_id": stable_id,
+                "revision": revision,
+                "source": {
+                    "kind": "session",
+                    "path": serde_json::Value::Null,
+                    "anchor": external_id
+                },
+                "title": title,
+                "body": body
+            },
+            "binding": {
+                "system": system,
+                "external_task_id": external_id,
+                "durability": "session"
+            },
+            "review": {
+                "required": true,
+                "reason": "Imported as session-local external task context; promote through the Flynt agent prompt for durable OpenSpec/design lifecycle state."
+            }
+        })
+    }
+
+    fn acp_task_bind_json(&self, params: serde_json::Value) -> serde_json::Value {
+        let task_id = params
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let system = params
+            .get("system")
+            .and_then(|v| v.as_str())
+            .unwrap_or("external")
+            .trim();
+        let external_id = params
+            .get("external_task_id")
+            .or_else(|| params.get("flynt_task_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if task_id.is_empty() || external_id.is_empty() {
+            return crate::acp_plan_tasks::task_error(
+                "not_found",
+                "task_id and external_task_id are required",
+                None,
+            );
+        }
+
+        let projection = self.acp_plan_projection_json();
+        let task = projection
+            .get("tasks")
+            .and_then(|v| v.as_array())
+            .and_then(|items| {
+                items.iter().find(|task| {
+                    task.get("id").and_then(|v| v.as_str()) == Some(task_id)
+                        || task.get("stable_id").and_then(|v| v.as_str()) == Some(task_id)
+                })
+            });
+        let Some(task) = task else {
+            return crate::acp_plan_tasks::task_error(
+                "not_found",
+                "task projection not found",
+                None,
+            );
+        };
+
+        let revision = task.get("revision").and_then(|v| v.as_str()).unwrap_or("");
+        if let Some(expected) = params.get("expected_revision").and_then(|v| v.as_str())
+            && !expected.is_empty()
+            && expected != revision
+        {
+            return crate::acp_plan_tasks::task_error(
+                "stale_revision",
+                "task revision does not match expected_revision",
+                Some(revision),
+            );
+        }
+
+        let requested_durability = crate::acp_plan_tasks::requested_bind_durability(&params);
+
+        let resolved_task_id = task
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(task_id)
+            .to_string();
+        let stable_id = task
+            .get("stable_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let binding = serde_json::json!({
+            "task_id": resolved_task_id,
+            "stable_id": stable_id,
+            "system": system,
+            "external_task_id": external_id
+        });
+
+        if requested_durability == crate::conversation::TaskBindingDurability::Repo {
+            let Some(stable_id) = binding.get("stable_id").and_then(|v| v.as_str()) else {
+                return crate::acp_plan_tasks::task_error(
+                    "unsupported_source",
+                    "repo-durable task bindings require stable_id",
+                    Some(revision),
+                );
+            };
+            if task.get("stable_id_quality").and_then(|v| v.as_str()) != Some("explicit") {
+                return crate::acp_plan_tasks::task_error(
+                    "unsupported_source",
+                    "repo-durable task bindings require explicit stable task-id markers",
+                    Some(revision),
+                );
+            }
+            let source: crate::conversation::PlanTaskSourceRef = match serde_json::from_value(
+                task.get("source")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({})),
+            ) {
+                Ok(source) => source,
+                Err(err) => {
+                    return crate::acp_plan_tasks::task_error(
+                        "unsupported_source",
+                        &format!("task source metadata is invalid: {err}"),
+                        Some(revision),
+                    );
+                }
+            };
+            if source.kind == "session" || source.kind.is_empty() {
+                return crate::acp_plan_tasks::task_error(
+                    "unsupported_source",
+                    "repo-durable task bindings require a repo-backed task source",
+                    Some(revision),
+                );
+            }
+            let cwd = self.session_cwd.borrow().clone().unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
+            let repo_root = crate::setup::find_project_root(&cwd);
+            let mut store = match crate::conversation::TaskBindingStore::load(&repo_root) {
+                Ok(store) => store,
+                Err(err) => {
+                    return crate::acp_plan_tasks::task_error(
+                        "conflict",
+                        &format!("failed to load task binding store: {err}"),
+                        Some(revision),
+                    );
+                }
+            };
+            let timestamp = crate::acp_plan_tasks::current_binding_timestamp();
+            store.upsert(crate::conversation::TaskBindingRecord {
+                stable_id: stable_id.to_string(),
+                task_id: binding
+                    .get("task_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                system: system.to_string(),
+                external_task_id: external_id.to_string(),
+                source,
+                revision: revision.to_string(),
+                created_at: timestamp.clone(),
+                updated_at: timestamp,
+            });
+            if let Err(err) = store.save(&repo_root) {
+                return crate::acp_plan_tasks::task_error(
+                    "conflict",
+                    &format!("failed to save task binding store: {err}"),
+                    Some(revision),
+                );
+            }
+            return serde_json::json!({
+                "accepted": true,
+                "durability": "repo",
+                "revision": revision,
+                "binding": binding
+            });
+        }
+
+        self.session_task_bindings
+            .borrow_mut()
+            .push(crate::conversation::SessionTaskBinding {
+                task_id: binding
+                    .get("task_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                stable_id: binding
+                    .get("stable_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                system: system.to_string(),
+                external_task_id: external_id.to_string(),
+                revision: revision.to_string(),
+            });
+
+        serde_json::json!({
+            "accepted": true,
+            "durability": "session",
+            "revision": revision,
+            "binding": binding,
+            "warning": "Binding accepted as a session/local hint only; it is not repo-durable or authoritative for bidirectional sync."
+        })
+    }
+
+    fn acp_task_show_json(&self, params: serde_json::Value) -> serde_json::Value {
+        let task_id = params.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+        let projection = self.acp_plan_projection_json();
+        crate::acp_plan_tasks::task_show_json(&projection, task_id)
+    }
+
     async fn handle_ext_method(
         &self,
         method: &str,
@@ -1405,6 +1865,104 @@ impl OmegonAcpAgent {
         let extensions_dir = crate::extension_cli::extensions_dir()?;
 
         match method {
+            "runtime/status" => Ok(self.runtime_status_json()),
+
+            "provider/status" => Ok(self.provider_status_json()),
+
+            "plans/list" | "_plans/list" => Ok(self.acp_plan_projection_json()),
+            "plans/show" | "_plans/show" => Ok(self.acp_plan_show_json(params)),
+            "plans/events" | "_plans/events" => Ok(serde_json::json!({
+                "events": [],
+                "source": "lifecycle_projection_only",
+                "note": "Live session plan events are available through the worker session state after a turn; this read surface is intentionally mutation-free."
+            })),
+            "plans/switch" | "_plans/switch" => {
+                let plan_id = params
+                    .get("plan_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
+                if plan_id.is_empty() {
+                    Ok(serde_json::json!({ "accepted": false, "error": "plan_id is required" }))
+                } else {
+                    Ok(self
+                        .acp_plan_control_json(format!("plan switch {plan_id}"))
+                        .await)
+                }
+            }
+            "plans/detach" | "_plans/detach" => {
+                let command = params
+                    .get("plan_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(|id| format!("plan detach {id}"))
+                    .unwrap_or_else(|| "plan detach".to_string());
+                Ok(self.acp_plan_control_json(command).await)
+            }
+            "tasks/list" | "_tasks/list" => Ok(self.acp_task_list_json(params)),
+            "tasks/show" | "_tasks/show" => Ok(self.acp_task_show_json(params)),
+            "tasks/bind" | "_tasks/bind" => Ok(self.acp_task_bind_json(params)),
+            "external_tasks/import" | "_external_tasks/import" => {
+                Ok(self.acp_external_task_import_json(params))
+            }
+            "tasks/events" | "_tasks/events" => Ok(crate::acp_plan_tasks::task_events_json(
+                &self.session_task_bindings.borrow(),
+            )),
+
+            "runtime/capabilities" => Ok(serde_json::json!({
+                "surfaces": {
+                    "_runtime/capabilities": { "version": 1 },
+                    "_runtime/status": { "version": 1 },
+                    "_extensions/list": { "version": 1 },
+                    "_extensions/call": { "version": 1 },
+                    "_provider/status": { "version": 1 },
+                    "_packages/list": { "version": 1 },
+                    "_secrets/capabilities": { "version": 1 },
+                    "_secrets/list": { "version": 1 },
+                    "_secrets/check": { "version": 1 },
+                    "_secrets/set_value": { "version": 1 },
+                    "_secrets/set_recipe": { "version": 1 },
+                    "_plans/list": { "version": 1 },
+                    "_plans/show": { "version": 1 },
+                    "_plans/events": { "version": 1 },
+                    "_plans/switch": { "version": 1 },
+                    "_plans/detach": { "version": 1 },
+                    "_tasks/list": { "version": 1 },
+                    "_tasks/show": { "version": 1 },
+                    "_tasks/bind": { "version": 1 },
+                    "_tasks/events": { "version": 1 },
+                    "_external_tasks/import": { "version": 1 }
+                },
+                "features": {
+                    "packages": true,
+                    "extensions": true,
+                    "host_actions": true,
+                    "secrets": true,
+                    "tools": true,
+                    "memory": true,
+                    "plans": true,
+                    "plan_tasks": true,
+                    "plan_tasks_contract": {
+                        "compatibility": ["read_only", "manual_link", "session_bind", "repo_bind"],
+                        "stable_id": true,
+                        "revision": true,
+                        "durable_bind": true,
+                        "structured_errors": true,
+                        "pagination": false,
+                        "filtering": true,
+                        "external_import": {
+                            "supported": true,
+                            "durability": ["session"],
+                            "targets": ["session"]
+                        }
+                    }
+                },
+                "protocols": {
+                    "acp": ["1"]
+                }
+            })),
+
             "extensions/list" => {
                 let mut extensions = Vec::new();
                 if extensions_dir.exists() {
@@ -1486,11 +2044,40 @@ impl OmegonAcpAgent {
                                 .collect()
                         };
 
+                        let id = manifest.extension.name.clone();
+                        let metadata = self
+                            .extension_metadata
+                            .borrow()
+                            .get(&id)
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
+                        let callable = self.extension_rpc_handles.borrow().contains_key(&id);
+                        let loaded = callable || self.extension_metadata.borrow().contains_key(&id);
                         extensions.push(serde_json::json!({
+                            "id": id,
                             "name": manifest.extension.name,
                             "version": manifest.extension.version,
                             "description": manifest.extension.description,
                             "enabled": state.enabled,
+                            "loaded": loaded,
+                            "callable": callable,
+                            "path": dir.display().to_string(),
+                            "source": "installed",
+                            "capabilities": {
+                                "tools": false,
+                                "resources": false,
+                                "prompts": false,
+                                "voice": manifest.capabilities.voice,
+                            },
+                            "metadata": metadata,
+                            "last_error": state.stability.last_error,
+                            "stability": {
+                                "crashes_this_session": state.stability.crashes_this_session,
+                                "health_check_failures": state.stability.health_check_failures,
+                                "last_error": state.stability.last_error,
+                                "last_error_at": state.stability.last_error_at,
+                                "auto_disabled": state.stability.auto_disabled,
+                            },
                             "config_schema": config_schema,
                             "secrets": {
                                 "required": secret_status(&manifest.secrets.required),
@@ -1501,6 +2088,32 @@ impl OmegonAcpAgent {
                 }
                 extensions.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
                 Ok(serde_json::json!({ "extensions": extensions }))
+            }
+
+            "extensions/call" => {
+                let extension = params["extension"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("invalid_request: missing 'extension' field"))?;
+                let rpc_method = params["method"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("invalid_request: missing 'method' field"))?;
+                if rpc_method.trim().is_empty() {
+                    anyhow::bail!("invalid_request: 'method' field must not be empty");
+                }
+                let rpc_params = params
+                    .get("params")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                let handle = self.extension_rpc_handles.borrow().get(extension).cloned();
+                let Some(handle) = handle else {
+                    anyhow::bail!(
+                        "extension_not_loaded: extension '{extension}' is not loaded or is not callable"
+                    );
+                };
+                handle
+                    .rpc_call(rpc_method, rpc_params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!("method_failed: {err}"))
             }
 
             "extensions/get" => {
@@ -1586,6 +2199,7 @@ impl OmegonAcpAgent {
                         "crashes_this_session": state.stability.crashes_this_session,
                         "health_check_failures": state.stability.health_check_failures,
                         "last_error": state.stability.last_error,
+                        "last_error_at": state.stability.last_error_at,
                         "auto_disabled": state.stability.auto_disabled,
                     },
                     "config_schema": config_schema,
@@ -1676,12 +2290,43 @@ impl OmegonAcpAgent {
                 }
             }
 
+            "secrets/capabilities" => Ok(serde_json::json!({
+                "version": 1,
+                "operations": {
+                    "list": true,
+                    "check": true,
+                    "set_value": true,
+                    "set_recipe": true,
+                    "extension_secret_set": true
+                },
+                "recipe_kinds": ["env", "keyring", "keychain", "vault", "file", "cmd", "unknown"],
+                "storage": {
+                    "preferred": "keyring",
+                    "recipes": true,
+                    "vault": true,
+                    "env_fallback": true
+                },
+                "safety": {
+                    "values_write_only": true,
+                    "list_resolves_values": false,
+                    "list_executes_recipes": false,
+                    "check_returns_value": false
+                }
+            })),
+
             "secrets/list" => {
                 if let Some(ref mgr) = *self.secrets.borrow() {
                     let items: Vec<serde_json::Value> = mgr
-                        .list_recipes()
+                        .list_recipe_descriptors()
                         .into_iter()
-                        .map(|(name, recipe)| serde_json::json!({ "name": name, "recipe": recipe }))
+                        .map(|entry| {
+                            serde_json::json!({
+                                "name": entry.name,
+                                "recipe": entry.recipe,
+                                "kind": entry.kind,
+                                "payload": entry.payload,
+                            })
+                        })
                         .collect();
                     Ok(serde_json::json!({ "items": items }))
                 } else {
@@ -2821,6 +3466,10 @@ fn convert_acp_mcp_server(
 #[cfg(test)]
 mod extension_metadata_tests {
     use super::*;
+    use std::sync::LazyLock;
+
+    static ACP_TEST_ENV_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+        LazyLock::new(|| tokio::sync::Mutex::new(()));
     use agent_client_protocol::schema::{InitializeRequest, ProtocolVersion};
 
     #[tokio::test]
@@ -2899,6 +3548,568 @@ mod extension_metadata_tests {
         assert_eq!(json["kind"], "extensions");
         assert_eq!(json["path"], "/tmp/extensions/recro-omegon");
         assert_eq!(json["message"], "Installed extension");
+    }
+
+    #[tokio::test]
+    async fn runtime_status_reports_session_and_agent_snapshot() {
+        let agent = Rc::new(OmegonAcpAgent::new("anthropic:claude-opus-4-6"));
+        let response = handle_acp_request_result(agent, "_runtime/status", &serde_json::json!({}))
+            .await
+            .unwrap();
+
+        assert_eq!(response["runtime"]["name"], "omegon");
+        assert_eq!(response["runtime"]["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(response["acp"]["protocol_version"], 1);
+        assert_eq!(response["acp"]["transport"], "stdio");
+        assert_eq!(response["acp"]["connected"], false);
+        assert_eq!(response["agent"]["model"], "anthropic:claude-opus-4-6");
+        assert_eq!(response["agent"]["thinking"], "minimal");
+        assert_eq!(response["agent"]["posture"], "fabricator");
+        assert_eq!(response["memory"]["scope"], "project");
+    }
+
+    #[tokio::test]
+    async fn provider_status_reports_active_model_without_prompting() {
+        let agent = Rc::new(OmegonAcpAgent::new("anthropic:claude-opus-4-6"));
+        let response = handle_acp_request_result(agent, "_provider/status", &serde_json::json!({}))
+            .await
+            .unwrap();
+
+        assert_eq!(response["active"]["provider"], "anthropic");
+        assert_eq!(response["active"]["model"], "anthropic:claude-opus-4-6");
+        assert!(response["active"]["ready"].is_boolean());
+        assert!(
+            response["providers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|provider| {
+                    provider["id"] == "anthropic" && provider["models"].as_array().is_some()
+                })
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_capabilities_advertise_secret_surfaces() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response =
+            handle_acp_request_result(agent, "_runtime/capabilities", &serde_json::json!({}))
+                .await
+                .unwrap();
+
+        assert_eq!(response["surfaces"]["_runtime/status"]["version"], 1);
+        assert_eq!(response["surfaces"]["_provider/status"]["version"], 1);
+        assert_eq!(response["surfaces"]["_extensions/list"]["version"], 1);
+        assert_eq!(response["surfaces"]["_extensions/call"]["version"], 1);
+        assert_eq!(response["surfaces"]["_secrets/capabilities"]["version"], 1);
+        assert_eq!(response["surfaces"]["_secrets/list"]["version"], 1);
+        assert_eq!(response["surfaces"]["_plans/list"]["version"], 1);
+        assert_eq!(response["surfaces"]["_plans/show"]["version"], 1);
+        assert_eq!(response["surfaces"]["_plans/events"]["version"], 1);
+        assert_eq!(response["surfaces"]["_plans/switch"]["version"], 1);
+        assert_eq!(response["surfaces"]["_plans/detach"]["version"], 1);
+        assert_eq!(response["surfaces"]["_tasks/list"]["version"], 1);
+        assert_eq!(response["surfaces"]["_tasks/show"]["version"], 1);
+        assert_eq!(response["surfaces"]["_tasks/bind"]["version"], 1);
+        assert_eq!(response["surfaces"]["_tasks/events"]["version"], 1);
+        assert_eq!(response["surfaces"]["_external_tasks/import"]["version"], 1);
+        assert_eq!(response["features"]["extensions"], true);
+        assert_eq!(response["features"]["secrets"], true);
+        assert_eq!(response["features"]["plans"], true);
+        assert_eq!(response["features"]["plan_tasks"], true);
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["compatibility"][0],
+            "read_only"
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["stable_id"],
+            true
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["revision"],
+            true
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["durable_bind"],
+            true
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["structured_errors"],
+            true
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["filtering"],
+            true
+        );
+        assert_eq!(
+            response["features"]["plan_tasks_contract"]["pagination"],
+            false
+        );
+    }
+
+    #[tokio::test]
+    async fn acp_plan_and_task_surfaces_are_read_only_shapes() {
+        let home = tempfile::tempdir().unwrap();
+        let change_dir = home.path().join("openspec/changes/demo");
+        std::fs::create_dir_all(&change_dir).unwrap();
+        std::fs::write(
+            change_dir.join("proposal.md"),
+            "# Demo
+",
+        )
+        .unwrap();
+        std::fs::write(
+            change_dir.join("tasks.md"),
+            "## 1. Group
+
+- [ ] 1.1 Pending <!-- task-id: stable-pending -->
+",
+        )
+        .unwrap();
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        *agent.session_cwd.borrow_mut() = Some(home.path().to_path_buf());
+
+        let plans = handle_acp_request_result(agent.clone(), "_plans/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(plans["plans"][0]["plan_id"], "openspec:demo");
+        assert_eq!(plans["tasks"][0]["plan_id"], "openspec:demo");
+        assert_eq!(plans["tasks"][0]["stable_id"], "stable-pending");
+        assert_eq!(plans["tasks"][0]["source"]["kind"], "openspec");
+        assert_eq!(
+            plans["tasks"][0]["source"]["path"],
+            "openspec/changes/demo/tasks.md"
+        );
+        assert!(
+            plans["tasks"][0]["revision"]
+                .as_str()
+                .unwrap()
+                .starts_with("source-v1:openspec:demo:1.1:")
+        );
+        assert_eq!(
+            plans["tasks"][0]["supported_mutations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+
+        let shown = handle_acp_request_result(
+            agent.clone(),
+            "_plans/show",
+            &serde_json::json!({ "plan_id": "openspec:demo" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(shown["plan"]["plan_id"], "openspec:demo");
+        assert_eq!(shown["tasks"].as_array().unwrap().len(), 1);
+
+        let task_id = plans["tasks"][0]["id"].as_str().unwrap().to_string();
+        let task = handle_acp_request_result(
+            agent.clone(),
+            "_tasks/show",
+            &serde_json::json!({ "task_id": task_id }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(task["task"]["plan_id"], "openspec:demo");
+        assert_eq!(task["task"]["stable_id"], "stable-pending");
+        assert_eq!(task["task"]["source"]["anchor"], "1.1");
+
+        let bind = handle_acp_request_result(
+            agent.clone(),
+            "_tasks/bind",
+            &serde_json::json!({
+                "task_id": task_id,
+                "system": "flynt",
+                "external_task_id": "flynt-task-1",
+                "expected_revision": plans["tasks"][0]["revision"].as_str().unwrap()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(bind["accepted"], true);
+        assert_eq!(bind["durability"], "session");
+        assert_eq!(bind["binding"]["system"], "flynt");
+        assert_eq!(bind["binding"]["external_task_id"], "flynt-task-1");
+        assert_eq!(bind["binding"]["stable_id"], "stable-pending");
+        assert!(
+            bind["warning"]
+                .as_str()
+                .unwrap()
+                .contains("not repo-durable")
+        );
+
+        let stale = handle_acp_request_result(
+            agent,
+            "_tasks/bind",
+            &serde_json::json!({
+                "task_id": "stable-pending",
+                "system": "flynt",
+                "external_task_id": "flynt-task-1",
+                "expected_revision": "sha256:stale"
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stale["accepted"], false);
+        assert_eq!(stale["durability"], "none");
+        assert_eq!(stale["code"], "stale_revision");
+    }
+
+    #[tokio::test]
+    async fn acp_plan_projection_reports_task_identity_findings() {
+        let home = tempfile::tempdir().unwrap();
+        let change_dir = home.path().join("openspec/changes/invalid");
+        std::fs::create_dir_all(&change_dir).unwrap();
+        std::fs::write(
+            change_dir.join("proposal.md"),
+            "# Invalid
+",
+        )
+        .unwrap();
+        std::fs::write(
+            change_dir.join("tasks.md"),
+            "## 1. Group
+
+- [ ] 1.1 First <!-- task-id: duplicate -->
+- [ ] 1.2 Second <!-- task-id: duplicate -->
+",
+        )
+        .unwrap();
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        *agent.session_cwd.borrow_mut() = Some(home.path().to_path_buf());
+        let response =
+            handle_acp_request_result(agent.clone(), "_plans/list", &serde_json::json!({}))
+                .await
+                .unwrap();
+        let findings = response["task_identity_findings"].as_array().unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0]["stable_id"], "duplicate");
+        assert!(
+            findings[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("duplicate")
+        );
+
+        let tasks = handle_acp_request_result(agent, "_tasks/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(tasks["task_identity_findings"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn acp_external_task_import_accepts_session_target() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent.clone(),
+            "_external_tasks/import",
+            &serde_json::json!({
+                "system": "flynt",
+                "external_task_id": "flynt task/1",
+                "title": "Promote this task",
+                "body": "Original Flynt body",
+                "target": { "kind": "session" }
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response["accepted"], true);
+        assert_eq!(response["durability"], "session");
+        assert_eq!(response["created"]["source"]["kind"], "session");
+        assert_eq!(response["binding"]["system"], "flynt");
+        assert_eq!(response["review"]["required"], true);
+
+        let events = handle_acp_request_result(agent, "_tasks/events", &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(events["events"].as_array().unwrap().len(), 1);
+        assert_eq!(events["events"][0]["system"], "flynt");
+    }
+
+    #[tokio::test]
+    async fn acp_external_task_import_rejects_non_session_target_for_now() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_external_tasks/import",
+            &serde_json::json!({
+                "system": "flynt",
+                "external_task_id": "flynt-task-1",
+                "title": "Promote this task",
+                "target": { "kind": "openspec" }
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response["accepted"], false);
+        assert_eq!(response["code"], "unsupported_source");
+    }
+
+    #[tokio::test]
+    async fn extensions_list_reports_installed_not_callable_extension() {
+        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let ext_dir = home.path().join("extensions").join("dummy-ext");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        std::fs::write(
+            ext_dir.join("manifest.toml"),
+            r#"[extension]
+name = "dummy-ext"
+version = "0.1.0"
+description = "Dummy extension"
+
+[runtime]
+type = "native"
+binary = "bin/dummy"
+
+[capabilities]
+voice = true
+
+[secrets]
+required = ["DUMMY_TOKEN"]
+optional = ["DUMMY_OPTIONAL"]
+"#,
+        )
+        .unwrap();
+
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(agent, "_extensions/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        let extensions = response["extensions"].as_array().unwrap();
+        let ext = extensions
+            .iter()
+            .find(|entry| entry["id"] == "dummy-ext")
+            .expect("dummy extension listed");
+        assert_eq!(ext["name"], "dummy-ext");
+        assert_eq!(ext["version"], "0.1.0");
+        assert_eq!(ext["enabled"], true);
+        assert_eq!(ext["loaded"], false);
+        assert_eq!(ext["callable"], false);
+        assert_eq!(ext["capabilities"]["voice"], true);
+        assert_eq!(ext["last_error"], serde_json::Value::Null);
+        assert_eq!(ext["stability"]["crashes_this_session"], 0);
+        assert_eq!(ext["stability"]["health_check_failures"], 0);
+        assert_eq!(ext["stability"]["last_error"], serde_json::Value::Null);
+        assert_eq!(ext["stability"]["last_error_at"], serde_json::Value::Null);
+        assert_eq!(ext["stability"]["auto_disabled"], false);
+        assert_eq!(ext["secrets"]["required"][0]["name"], "DUMMY_TOKEN");
+    }
+
+    #[tokio::test]
+    async fn extensions_enable_clears_auto_disabled_stability_state() {
+        let _guard = ACP_TEST_ENV_LOCK.lock().await;
+        let home = tempfile::tempdir().unwrap();
+        let ext_dir = home.path().join("extensions").join("flynt");
+        std::fs::create_dir_all(ext_dir.join(".omegon")).unwrap();
+        std::fs::write(
+            ext_dir.join("manifest.toml"),
+            r#"[extension]
+name = "flynt"
+version = "0.1.0"
+description = "Flynt"
+
+[runtime]
+type = "native"
+binary = "bin/flynt"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            ext_dir.join(".omegon").join("state.toml"),
+            r#"enabled = false
+
+[stability]
+crashes_this_session = 4
+health_check_failures = 2
+last_error = "transport failure: Broken pipe (os error 32)"
+last_error_at = "2026-06-06T01:46:31.022584+00:00"
+auto_disabled = true
+"#,
+        )
+        .unwrap();
+
+        let previous_home = std::env::var_os("OMEGON_HOME");
+        unsafe { std::env::set_var("OMEGON_HOME", home.path()) };
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent.clone(),
+            "_extensions/enable",
+            &serde_json::json!({ "extension": "flynt" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response["ok"], true);
+
+        let list = handle_acp_request_result(agent, "_extensions/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+
+        match previous_home {
+            Some(value) => unsafe { std::env::set_var("OMEGON_HOME", value) },
+            None => unsafe { std::env::remove_var("OMEGON_HOME") },
+        }
+
+        let state = crate::extensions::ExtensionState::load(&ext_dir).unwrap();
+        assert!(state.enabled);
+        assert_eq!(state.stability.crashes_this_session, 0);
+        assert_eq!(state.stability.health_check_failures, 0);
+        assert_eq!(state.stability.last_error, None);
+        assert_eq!(state.stability.last_error_at, None);
+        assert!(!state.stability.auto_disabled);
+
+        let ext = list["extensions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == "flynt")
+            .expect("flynt listed");
+        assert_eq!(ext["enabled"], true);
+        assert_eq!(ext["stability"]["crashes_this_session"], 0);
+        assert_eq!(ext["stability"]["health_check_failures"], 0);
+        assert_eq!(ext["stability"]["last_error"], serde_json::Value::Null);
+        assert_eq!(ext["stability"]["last_error_at"], serde_json::Value::Null);
+        assert_eq!(ext["stability"]["auto_disabled"], false);
+    }
+
+    #[tokio::test]
+    async fn extensions_call_missing_extension_returns_structured_error() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_extensions/call",
+            &serde_json::json!({
+                "extension": "missing-extension",
+                "method": "ping",
+                "params": {}
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("extension_not_loaded:")
+        );
+    }
+
+    #[tokio::test]
+    async fn extensions_call_rejects_empty_method() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_extensions/call",
+            &serde_json::json!({ "extension": "flynt", "method": "   " }),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("invalid_request:")
+        );
+    }
+
+    #[tokio::test]
+    async fn extensions_call_defaults_missing_params_to_object_before_lookup() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_extensions/call",
+            &serde_json::json!({ "extension": "missing-extension", "method": "ping" }),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("extension_not_loaded:")
+        );
+    }
+
+    #[tokio::test]
+    async fn extensions_call_rejects_missing_method() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response = handle_acp_request_result(
+            agent,
+            "_extensions/call",
+            &serde_json::json!({ "extension": "flynt" }),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("invalid_request:")
+        );
+    }
+
+    #[tokio::test]
+    async fn secrets_capabilities_describe_non_resolving_list_surface() {
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        let response =
+            handle_acp_request_result(agent, "_secrets/capabilities", &serde_json::json!({}))
+                .await
+                .unwrap();
+
+        assert_eq!(response["version"], 1);
+        assert_eq!(response["operations"]["list"], true);
+        assert_eq!(response["safety"]["values_write_only"], true);
+        assert_eq!(response["safety"]["list_resolves_values"], false);
+        assert_eq!(response["safety"]["list_executes_recipes"], false);
+        assert!(
+            response["recipe_kinds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|kind| kind == "vault")
+        );
+    }
+
+    #[tokio::test]
+    async fn secrets_list_returns_recipe_descriptors_without_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = std::sync::Arc::new(omegon_secrets::SecretsManager::new(dir.path()).unwrap());
+        secrets
+            .set_recipe("BRAVE_API_KEY", "env:OMEGON_TEST_BRAVE_KEY")
+            .unwrap();
+
+        let agent = Rc::new(OmegonAcpAgent::new("test-model"));
+        agent.set_secrets_for_test(secrets);
+        let response = handle_acp_request_result(agent, "_secrets/list", &serde_json::json!({}))
+            .await
+            .unwrap();
+
+        let items = response["items"].as_array().unwrap();
+        let item = items
+            .iter()
+            .find(|item| item["name"] == "BRAVE_API_KEY")
+            .expect("BRAVE_API_KEY descriptor");
+        assert_eq!(item["recipe"], "env:OMEGON_TEST_BRAVE_KEY");
+        assert_eq!(item["kind"], "env");
+        assert_eq!(item["payload"], "OMEGON_TEST_BRAVE_KEY");
+        assert!(!response.to_string().contains("brave-test-key"));
     }
 
     #[tokio::test]

@@ -13,9 +13,10 @@ pub enum PackageSourceKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PackageKindHint {
+    #[default]
     Auto,
     Skill,
     Extension,
@@ -24,12 +25,6 @@ pub enum PackageKindHint {
     Tone,
     Package,
     LegacyPlugin,
-}
-
-impl Default for PackageKindHint {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

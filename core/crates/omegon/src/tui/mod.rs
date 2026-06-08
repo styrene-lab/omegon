@@ -615,6 +615,14 @@ pub enum CanonicalSlashCommand {
     SkillDelete(String),
     PlanView,
     PlanList,
+    PlanShow(String),
+    PlanSwitch(String),
+    PlanResume(String),
+    PlanBackground(Option<String>),
+    PlanDetach(Option<String>),
+    PlanPromote(Option<String>),
+    PlanBind(String),
+    PlanLedger(Option<String>),
     PlanSet(Vec<String>),
     PlanApprove,
     PlanExecute,
@@ -899,6 +907,46 @@ pub(crate) fn canonical_slash_command(cmd: &str, args: &str) -> Option<Canonical
                 Some(CanonicalSlashCommand::PlanView)
             } else if args == "list" {
                 Some(CanonicalSlashCommand::PlanList)
+            } else if let Some(id) = args.strip_prefix("show ") {
+                let id = id.trim();
+                (!id.is_empty()).then(|| CanonicalSlashCommand::PlanShow(id.to_string()))
+            } else if let Some(id) = args.strip_prefix("switch ") {
+                let id = id.trim();
+                (!id.is_empty()).then(|| CanonicalSlashCommand::PlanSwitch(id.to_string()))
+            } else if let Some(id) = args.strip_prefix("resume ") {
+                let id = id.trim();
+                (!id.is_empty()).then(|| CanonicalSlashCommand::PlanResume(id.to_string()))
+            } else if args == "background" {
+                Some(CanonicalSlashCommand::PlanBackground(None))
+            } else if let Some(id) = args.strip_prefix("background ") {
+                let id = id.trim();
+                Some(CanonicalSlashCommand::PlanBackground(
+                    (!id.is_empty()).then(|| id.to_string()),
+                ))
+            } else if args == "detach" {
+                Some(CanonicalSlashCommand::PlanDetach(None))
+            } else if let Some(id) = args.strip_prefix("detach ") {
+                let id = id.trim();
+                Some(CanonicalSlashCommand::PlanDetach(
+                    (!id.is_empty()).then(|| id.to_string()),
+                ))
+            } else if args == "promote" {
+                Some(CanonicalSlashCommand::PlanPromote(None))
+            } else if let Some(target) = args.strip_prefix("promote ") {
+                let target = target.trim();
+                Some(CanonicalSlashCommand::PlanPromote(
+                    (!target.is_empty()).then(|| target.to_string()),
+                ))
+            } else if let Some(binding) = args.strip_prefix("bind ") {
+                let binding = binding.trim();
+                (!binding.is_empty()).then(|| CanonicalSlashCommand::PlanBind(binding.to_string()))
+            } else if args == "ledger" {
+                Some(CanonicalSlashCommand::PlanLedger(None))
+            } else if let Some(id) = args.strip_prefix("ledger ") {
+                let id = id.trim();
+                Some(CanonicalSlashCommand::PlanLedger(
+                    (!id.is_empty()).then(|| id.to_string()),
+                ))
             } else if let Some(raw_items) = args.strip_prefix("set ") {
                 let items = split_plan_items(raw_items);
                 (!items.is_empty()).then_some(CanonicalSlashCommand::PlanSet(items))
@@ -7597,12 +7645,24 @@ impl App {
             }
             AgentEvent::TurnEnd(te) => {
                 self.turn = te.turn;
-                self.slim_turn_state = SlimTurnState::Finished(match te.turn_end_reason {
+                let turn_end_reason = te.turn_end_reason;
+                self.slim_turn_state = SlimTurnState::Finished(match turn_end_reason {
                     omegon_traits::TurnEndReason::AssistantCompleted => "done",
                     omegon_traits::TurnEndReason::ToolContinuation => "continuing",
                     omegon_traits::TurnEndReason::ProgressNudge => "nudged",
                     omegon_traits::TurnEndReason::Cancelled => "cancelled",
                 });
+                if matches!(
+                    turn_end_reason,
+                    omegon_traits::TurnEndReason::AssistantCompleted
+                        | omegon_traits::TurnEndReason::Cancelled
+                ) {
+                    // A live slim plan lane is turn-scoped UI, not durable history.
+                    // If no completion PlanUpdated arrives before the assistant turn
+                    // finishes, clear it rather than leaving stale "plan active" chrome
+                    // pinned under a "turn done" status line.
+                    self.slim_plan_snapshot = None;
+                }
                 // Update status line with behavioral signals
                 self.status_line.phase = te.dominant_phase;
                 self.status_line.drift = te.drift_kind;

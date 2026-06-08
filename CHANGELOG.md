@@ -16,6 +16,66 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+## [0.26.16] - 2026-06-07
+
+### Added
+
+- Add ACP lifecycle task binding surfaces for Flynt and future ACP clients, including stable task identities, task revisions, source metadata, repo/session binding durability, task identity findings, filtered task listings, and session external-task imports.
+- Add design nodes for the ACP plan/task durability, stable identity, binding store, mutation, revision/event, status/error/pagination, external work surface, external task promotion, and ecosystem capability contracts needed before clients can treat task links as authoritative.
+
+## [0.26.15] - 2026-06-07
+
+### Fixed
+
+- Clear stale Slim pinned plan lanes when assistant turns complete or cancel without a final plan-complete update, preventing old plan progress from lingering under a `turn done` status.
+
+## [0.26.14] - 2026-06-06
+
+### Fixed
+
+- Preserve the tail of long assistant responses in the TUI by removing the legacy 400-row assistant measurement cap and hardening conversation scroll height arithmetic against overflow.
+
+## [0.26.13] - 2026-06-06
+
+### Fixed
+
+- Remove the remaining race in ACP extension setup capture by assigning the original pre-spawn worker event receiver to the persistent lifecycle subscriber instead of using `resubscribe()` after the worker may have emitted setup events.
+
+## [0.26.12] - 2026-06-06
+
+### Fixed
+
+- Preserve worker-emitted extension metadata and live RPC handles before the first prompt by starting a persistent ACP worker-event subscriber during worker creation, allowing `_extensions/list` and `_extensions/call` to report/call loaded extensions immediately after `new_session`.
+
+## [0.26.11] - 2026-06-06
+
+### Fixed
+
+- Keep ACP stdio runtime logs file-only by default so startup/runtime tracing and ANSI escapes do not leak into ACP client transcripts or destabilize client request handling.
+
+## [0.26.10] - 2026-06-06
+
+### Fixed
+
+- Make `_extensions/enable` fully recover auto-disabled extensions by clearing stale crash, health-check, last-error, and auto-disable state; expose full extension stability diagnostics from `_extensions/list` so ACP clients can render recovery UI without direct state-file edits.
+
+## [0.26.9] - 2026-06-06
+
+### Added
+
+- Complete ACP issue #132 P0 runtime observability with `_runtime/status`, `_provider/status`, truthful `_runtime/capabilities`, extension load/callability diagnostics, and generic `_extensions/call` for live extension RPC control-plane access.
+
+## [0.26.8] - 2026-06-06
+
+### Added
+
+- Add ACP-facing secret capability discovery and non-resolving recipe descriptors so settings panels can guide operators through keyring/Vault/env/cmd/file-backed secret setup without exposing resolved values or executing recipes during list/status rendering; setting recipes now records metadata without resolving side-effectful `cmd:`/`file:`/Vault recipes.
+
+### Fixed
+
+- Make harness secret storage idempotent across recipes, keyring values, session caches, redaction, and process-env projection so named secret repairs can recover orphaned keychain entries without scanning the whole keychain.
+- Strip TOML frontmatter from design lifecycle documents and generated site legal/changelog pages so publication metadata does not leak into rendered content or duplicate design-node titles.
+
 ## [0.26.7] - 2026-06-05
 
 ### Added
@@ -44,9 +104,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 - Enforce extension SDK contract compatibility during extension startup, accepting the current `0.25` contract, warning for legacy/missing or `0.24` compatibility-window metadata, rejecting malformed/unsupported/newer contracts, and surfacing SDK compatibility diagnostics through extension metadata.
 - Add `resource.open@1` HostAction support to the extension host pipeline, including SDK-backed manifest policy consumption, secure `${workspace}` file-root enforcement, backend registry scaffolding, deterministic unavailable-backend fallback, and fake-backend routing coverage for Flynt, Zed, terminal, and fallback resource classes.
-
-### Changed
-
 - Document the #125 `resource.open@1` real-backend implementation decisions for Flynt, Zed, terminal/Bookokrat ownership, availability diagnostics, file URI parsing, and workspace-root handling.
 - Report selected/preferred `resource.open@1` backend diagnostics when a backend is unavailable or fails after policy validation.
 - Route ebook/pdf `resource.open@1` requests through the terminal/Bookokrat backend when the real terminal executor is configured, with Flynt/Zed retaining explicit unavailable diagnostics.
@@ -241,8 +298,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Shorten pre-content provider/SSE idle detection from five minutes to 90 seconds, with environment overrides, so stale provider sessions surface as failures instead of apparent hangs.
 - Read Codex CLI JWT `exp` claims and refresh OpenAI OAuth tokens five minutes early so adopted CLI credentials do not wait for stale `last_refresh` timestamps before re-authentication.
 - Stop promoting persisted OAuth credentials into the parent process environment, so one Omegon session no longer shadows shared auth.json refreshes with a stale per-process token.
+- Skip expired OAuth entries when hydrating provider auth for child/delegate sessions, preventing stale Codex `CHATGPT_OAUTH_TOKEN` inheritance from bypassing auth.json refresh/re-login state.
 - Split well-known secrets into static env credentials and refreshable OAuth session tokens, and only auto-hydrate static credentials into the parent process environment.
 - Slim plan pinning now trusts only live `PlanUpdated` projections so legacy transcript plan text remains history instead of resurrecting stale active plan lanes.
+- Refine the `plan-refinement` OpenSpec plan around plan/task ACP projections, Flynt task-board linkage, and explicit stale/resume semantics.
+- Add plan registry core data shapes, stable plan id constructors, external task refs, and repo-bound clear-as-detach semantics.
 
 ## [0.24.2] - 2026-05-25
 

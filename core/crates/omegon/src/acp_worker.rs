@@ -96,6 +96,8 @@ pub enum WorkerEvent {
     },
     /// Extension deployment metadata discovered after worker setup.
     ExtensionMetadata(std::collections::BTreeMap<String, serde_json::Value>),
+    /// Loaded extension RPC handles discovered after worker setup.
+    ExtensionHandles(std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>),
     /// Execution plan update (decomposition children, phased work).
     PlanUpdate {
         entries: Vec<PlanEntryData>,
@@ -243,11 +245,15 @@ async fn worker_loop(
     let mut conversation = agent_setup.conversation;
     let secrets = agent_setup.secrets;
     let extension_metadata = agent_setup.extension_metadata.clone();
+    let extension_rpc_handles = agent_setup.extension_rpc_handles.clone();
     let mut cancel = CancellationToken::new();
 
     let _ = secrets_tx.send(secrets.clone());
     if !extension_metadata.is_empty() {
         let _ = event_tx.send(WorkerEvent::ExtensionMetadata(extension_metadata));
+    }
+    if !extension_rpc_handles.is_empty() {
+        let _ = event_tx.send(WorkerEvent::ExtensionHandles(extension_rpc_handles));
     }
     let host_ctx_arc = host_ctx.map(std::sync::Arc::new);
     tracing::info!(model = %model, "ACP worker ready");

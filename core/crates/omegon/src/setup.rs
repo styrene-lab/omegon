@@ -76,6 +76,9 @@ pub struct AgentSetup {
     pub extension_widgets: Vec<crate::extensions::ExtensionTabWidget>,
     /// Extension deployment metadata discovered during startup.
     pub extension_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Loaded extension RPC handles keyed by extension id/name for ACP control-plane calls.
+    pub extension_rpc_handles:
+        std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>,
     /// Extension widget event receivers discovered during setup.
     pub widget_receivers: Vec<tokio::sync::broadcast::Receiver<crate::extensions::WidgetEvent>>,
     /// Slot the AgentEvent broadcast sender gets written into once main.rs
@@ -738,6 +741,7 @@ impl AgentSetup {
             voice_notification_receivers,
             voice_polling_handles,
             extension_metadata,
+            extension_rpc_handles,
             nex_delegation_executor,
         ) = match discover_and_register_extensions(&cwd, &mut bus, std::sync::Arc::clone(&secrets))
             .await
@@ -749,6 +753,7 @@ impl AgentSetup {
                 voice_receivers,
                 voice_handles,
                 metadata,
+                rpc_handles,
                 nex_executor,
             )) => (
                 widgets,
@@ -757,6 +762,7 @@ impl AgentSetup {
                 voice_receivers,
                 voice_handles,
                 metadata,
+                rpc_handles,
                 nex_executor,
             ),
             Err(e) => {
@@ -767,6 +773,7 @@ impl AgentSetup {
                     vec![],
                     vec![],
                     vec![],
+                    Default::default(),
                     Default::default(),
                     None,
                 )
@@ -1197,6 +1204,7 @@ impl AgentSetup {
             initial_harness_status: initial_harness_status.clone(),
             extension_widgets,
             extension_metadata,
+            extension_rpc_handles,
             widget_receivers,
             dashboard_handles: crate::tui::dashboard::DashboardHandles {
                 lifecycle: Some(lifecycle_handle),
@@ -1414,6 +1422,14 @@ fn hydrate_provider_auth_env_from_auth_json(
             continue;
         }
         if let Some(creds) = crate::auth::read_credentials(provider.auth_key) {
+            if creds.cred_type == "oauth" && creds.is_expired() {
+                tracing::debug!(
+                    provider = provider.id,
+                    env = primary_env,
+                    "skipping expired provider OAuth env hydration from auth.json"
+                );
+                continue;
+            }
             secrets.register_redaction_secret(primary_env, &creds.access);
             secrets.register_redaction_secret(
                 &format!("{}_AUTH_JSON_ACCESS", provider.id),
@@ -1537,6 +1553,7 @@ async fn discover_and_register_extensions(
     Vec<tokio::sync::mpsc::UnboundedReceiver<crate::extensions::ExtensionNotification>>,
     Vec<crate::extensions::ExtensionPollingHandle>,
     std::collections::BTreeMap<String, serde_json::Value>,
+    std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>,
     Option<std::sync::Arc<dyn crate::tools::nex_substrate::NexDelegationExecutor>>,
 )> {
     let ext_dir = crate::paths::omegon_home()?.join("extensions");
@@ -1549,6 +1566,7 @@ async fn discover_and_register_extensions(
             vec![],
             vec![],
             vec![],
+            Default::default(),
             Default::default(),
             None,
         ));
@@ -1564,6 +1582,7 @@ async fn discover_and_register_extensions(
     let mut voice_notification_receivers = vec![];
     let mut voice_polling_handles = vec![];
     let mut extension_metadata = std::collections::BTreeMap::new();
+    let mut extension_rpc_handles = std::collections::BTreeMap::new();
     let mut nex_delegation_executor: Option<
         std::sync::Arc<dyn crate::tools::nex_substrate::NexDelegationExecutor>,
     > = None;
@@ -1646,6 +1665,7 @@ async fn discover_and_register_extensions(
                         &spawned.sdk_compatibility,
                     ),
                 );
+                extension_rpc_handles.insert(ext_name.to_string(), spawned.rpc_polling_handle);
                 if nex_delegation_executor.is_none() {
                     nex_delegation_executor = spawned.nex_delegation_executor.map(|executor| {
                         executor
@@ -1686,6 +1706,7 @@ async fn discover_and_register_extensions(
         voice_notification_receivers,
         voice_polling_handles,
         extension_metadata,
+        extension_rpc_handles,
         nex_delegation_executor,
     ))
 }
@@ -1793,6 +1814,62 @@ mod tests {
         assert_eq!(
             find_project_root(&member),
             dir.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn provider_auth_hydration_skips_expired_oauth_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth_path = dir.path().join("auth.json");
+        let expired = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            - 1_000;
+        std::fs::write(
+            &auth_path,
+            serde_json::json!({
+                "openai-codex": {
+                    "type": "oauth",
+                    "access": "expired-codex-token",
+                    "refresh": "refresh-token",
+                    "expires": expired,
+                    "accountId": "acct_123"
+                },
+                "brave": {
+                    "type": "api-key",
+                    "access": "brave-token",
+                    "refresh": "",
+                    "expires": u64::MAX
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let original = std::env::var("OMEGON_AUTH_JSON_PATH").ok();
+        unsafe { std::env::set_var("OMEGON_AUTH_JSON_PATH", &auth_path) };
+        let secrets = omegon_secrets::SecretsManager::new(dir.path()).expect("secrets manager");
+        let mut session_secret_env = Vec::new();
+        hydrate_provider_auth_env_from_auth_json(&mut session_secret_env, &secrets);
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var("OMEGON_AUTH_JSON_PATH", value),
+                None => std::env::remove_var("OMEGON_AUTH_JSON_PATH"),
+            }
+        }
+
+        assert!(
+            !session_secret_env.iter().any(
+                |(name, value)| name == "CHATGPT_OAUTH_TOKEN" && value == "expired-codex-token"
+            ),
+            "expired Codex OAuth must not be inherited by child sessions"
+        );
+        assert!(
+            session_secret_env
+                .iter()
+                .any(|(name, value)| name == "BRAVE_API_KEY" && value == "brave-token"),
+            "static credentials should still be hydrated"
         );
     }
 
