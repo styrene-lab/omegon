@@ -27,6 +27,7 @@ pub mod selector;
 pub mod spinner;
 pub mod splash;
 pub mod statusline;
+pub mod surface_projection;
 pub mod theme;
 pub mod tutorial;
 pub mod widget_renderer;
@@ -64,6 +65,7 @@ use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode, build_meta_tag};
+use self::surface_projection::UiSurfaces;
 
 /// Get current process RSS in megabytes (platform-specific).
 /// Uses getrusage(2) on macOS and /proc on Linux — no subprocess spawn.
@@ -248,52 +250,6 @@ enum PaneFocus {
     Editor,
     Conversation,
     Dashboard,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct UiSurfaces {
-    dashboard: bool,
-    instruments: bool,
-    footer: bool,
-}
-
-impl UiSurfaces {
-    fn lean() -> Self {
-        Self {
-            dashboard: false,
-            instruments: false,
-            footer: false,
-        }
-    }
-    fn full() -> Self {
-        Self {
-            dashboard: true,
-            instruments: true,
-            footer: true,
-        }
-    }
-
-    /// True when the layout should use compact rendering (no dashboard chrome).
-    fn is_compact(&self) -> bool {
-        !self.dashboard
-    }
-
-    /// Preset name for display.
-    fn preset_name(&self) -> &'static str {
-        match (self.dashboard, self.instruments, self.footer) {
-            (false, false, false) => "lean",
-            (true, true, true) => "full",
-            _ => "custom",
-        }
-    }
-
-    /// Toggle between the two named presets. Partial surface combinations are custom.
-    fn toggle_preset(&self) -> Self {
-        match self.preset_name() {
-            "lean" => Self::full(),
-            _ => Self::lean(),
-        }
-    }
 }
 
 struct OperatorEvent {
