@@ -15,6 +15,9 @@ use ratatui::prelude::*;
 use ratatui_textarea::TextArea;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use super::editor_projection::{
+    EditorInlineTokenProjection, EditorProjection, ProjectEditorSurface, project_editor_mode,
+};
 use super::theme::Theme;
 
 /// Split `text` into visual rows of at most `width` display columns using
@@ -1015,6 +1018,42 @@ impl Editor {
     }
 }
 
+impl ProjectEditorSurface for Editor {
+    fn project_editor_surface(&self, content_width: u16) -> EditorProjection {
+        let inline_tokens = self
+            .inline_tokens
+            .iter()
+            .map(|token| match token {
+                InlineToken::Attachment(path) => {
+                    EditorInlineTokenProjection::Attachment { path: path.clone() }
+                }
+                InlineToken::CollapsedPaste { text } => {
+                    EditorInlineTokenProjection::CollapsedPaste {
+                        byte_len: text.len(),
+                        line_count: text.split('\n').count(),
+                    }
+                }
+            })
+            .collect();
+
+        EditorProjection {
+            mode: project_editor_mode(&self.mode),
+            text: self.render_text(),
+            is_empty: self.is_empty(),
+            cursor_position: self.cursor_position(),
+            visual_line_count: self.visual_line_count(content_width),
+            inline_tokens,
+            kill_ring_present: self.kill_ring.is_some(),
+        }
+    }
+}
+
+impl Editor {
+    pub fn surface_projection(&self, content_width: u16) -> EditorProjection {
+        self.project_editor_surface(content_width)
+    }
+}
+
 #[derive(Clone)]
 struct Projection {
     text: String,
@@ -1037,7 +1076,48 @@ struct TokenSpan {
 
 #[cfg(test)]
 mod tests {
+    use super::super::editor_projection::{EditorInlineTokenProjection, EditorModeProjection};
     use super::*;
+
+    #[test]
+    fn editor_projects_input_surface() {
+        let mut e = Editor::new();
+        e.set_text("hello");
+        e.insert_attachment(PathBuf::from("/tmp/paste.png"));
+        e.move_home();
+        e.kill_to_end();
+
+        let projection = e.surface_projection(80);
+        assert_eq!(projection.mode, EditorModeProjection::Normal);
+        assert!(projection.text.contains("hello"));
+        assert_eq!(projection.inline_tokens.len(), 1);
+        assert!(projection.kill_ring_present);
+        assert!(projection.visual_line_count >= 1);
+        match &projection.inline_tokens[0] {
+            EditorInlineTokenProjection::Attachment { path } => {
+                assert_eq!(path, &PathBuf::from("/tmp/paste.png"));
+            }
+            other => panic!("expected attachment token, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn secret_editor_projection_masks_buffer_length() {
+        let mut e = Editor::new();
+        e.start_secret_input("API_KEY");
+        e.secret_insert('a');
+        e.secret_insert('b');
+
+        let projection = e.surface_projection(80);
+        assert_eq!(
+            projection.mode,
+            EditorModeProjection::SecretInput {
+                label: "API_KEY".into(),
+                masked_len: 2,
+            }
+        );
+        assert_eq!(projection.text, "");
+    }
 
     #[test]
     fn insert_paste_normalizes_crlf_and_cr() {

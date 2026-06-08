@@ -18,6 +18,7 @@ pub mod conversation_render_projection;
 pub mod dashboard;
 pub mod dashboard_projection;
 pub mod editor;
+pub mod editor_projection;
 pub mod effects;
 pub mod footer;
 pub mod footer_projection;
