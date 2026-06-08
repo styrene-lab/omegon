@@ -913,7 +913,23 @@ fn shadow_surface_update<F>(
 ) where
     F: Fn(&str) -> String,
 {
-    let _surface_updates = adapter.ingest(event, SurfaceRedaction::ExternalClient, redact);
+    let updates = adapter.ingest(event, SurfaceRedaction::ExternalClient, redact);
+    trace_shadow_surface_updates(&updates);
+}
+
+fn trace_shadow_surface_updates(updates: &[surfaces::AcpSurfaceUpdate]) {
+    for update in updates {
+        tracing::trace!(
+            segment_id = %update.segment.identity.segment_id,
+            turn_id = update.segment.identity.turn_id.as_deref(),
+            sequence = update.segment.identity.sequence,
+            revision = update.segment.identity.revision,
+            role = %update.segment.role,
+            complete = update.segment.complete,
+            completed_segment_id = update.completed_segment_id.as_deref(),
+            "ACP shadow conversation surface update"
+        );
+    }
 }
 
 fn acp_surface_tool_args(

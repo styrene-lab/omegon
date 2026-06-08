@@ -32,6 +32,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add an ACP conversation surface stream adapter that assigns stable segment identities and revisions from worker-style conversation events before protocol emission.
 - Shadow the live ACP worker event stream through the conversation surface adapter while preserving existing SessionUpdate client behavior.
 - Factor ACP shadow surface ingestion helpers so worker-event-to-surface mapping remains isolated from live SessionUpdate emission.
+- Add trace-only observability for ACP shadow conversation surface updates without changing client-visible protocol output.
 
 ## [0.26.16] - 2026-06-07
 
