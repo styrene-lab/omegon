@@ -12,8 +12,10 @@ use tui_syntax_highlight::Highlighter;
 use unicode_width::UnicodeWidthStr;
 
 use super::conversation_projection::{
-    SegmentEmphasis, SegmentPresentation, SegmentRole, ToolVisualKind, presentation_for_role,
-    tool_visual_kind_for_name,
+    AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
+    ConversationSegmentProjection, ImageSegment, LifecycleSegment, ProjectConversationSegment,
+    SegmentEmphasis, SegmentPresentation, SegmentRole, SystemSegment, ToolSegment, ToolVisualKind,
+    UserSegment,
 };
 use super::conversation_render_projection::SegmentRenderMetadata;
 use super::theme::Theme;
@@ -1233,6 +1235,67 @@ impl Segment {
     }
 }
 
+impl<'a> ProjectConversationSegment<'a> for Segment {
+    type Text = &'a str;
+    type Path = &'a std::path::Path;
+
+    fn project_conversation_segment(&'a self) -> BorrowedConversationSegmentProjection<'a> {
+        let kind = match &self.content {
+            SegmentContent::UserPrompt { text } => ConversationSegmentKind::User(UserSegment {
+                text: text.as_str(),
+            }),
+            SegmentContent::AssistantText {
+                text,
+                thinking,
+                complete,
+            } => ConversationSegmentKind::Assistant(AssistantSegment {
+                text: text.as_str(),
+                thinking: thinking.as_str(),
+                complete: *complete,
+            }),
+            SegmentContent::ToolCard {
+                id,
+                name,
+                args_summary,
+                detail_args,
+                result_summary,
+                detail_result,
+                is_error,
+                complete,
+                expanded,
+                ..
+            } => ConversationSegmentKind::Tool(ToolSegment {
+                id: id.as_str(),
+                name: name.as_str(),
+                args_summary: args_summary.as_deref(),
+                detail_args: detail_args.as_deref(),
+                result_summary: result_summary.as_deref(),
+                detail_result: detail_result.as_deref(),
+                is_error: *is_error,
+                complete: *complete,
+                expanded: *expanded,
+            }),
+            SegmentContent::SystemNotification { text } => {
+                ConversationSegmentKind::System(SystemSegment {
+                    text: text.as_str(),
+                })
+            }
+            SegmentContent::LifecycleEvent { icon, text } => {
+                ConversationSegmentKind::Lifecycle(LifecycleSegment {
+                    icon: icon.as_str(),
+                    text: text.as_str(),
+                })
+            }
+            SegmentContent::Image { path, alt } => ConversationSegmentKind::Image(ImageSegment {
+                path: path.as_path(),
+                alt: alt.as_str(),
+            }),
+            SegmentContent::TurnSeparator => ConversationSegmentKind::Separator,
+        };
+        ConversationSegmentProjection::new(kind)
+    }
+}
+
 impl SegmentRenderMetadata for Segment {
     fn is_live_render_segment(&self) -> bool {
         matches!(
@@ -1327,27 +1390,16 @@ impl Segment {
         }
     }
 
-    fn tool_visual_kind(&self) -> Option<ToolVisualKind> {
-        match &self.content {
-            SegmentContent::ToolCard { name, .. } => Some(tool_visual_kind_for_name(name)),
-            _ => None,
-        }
+    pub fn projection(&self) -> BorrowedConversationSegmentProjection<'_> {
+        self.project_conversation_segment()
     }
 
     pub fn role(&self) -> SegmentRole {
-        match self.content {
-            SegmentContent::UserPrompt { .. } => SegmentRole::Operator,
-            SegmentContent::AssistantText { .. } => SegmentRole::Assistant,
-            SegmentContent::ToolCard { .. } => SegmentRole::Tool,
-            SegmentContent::SystemNotification { .. } => SegmentRole::System,
-            SegmentContent::LifecycleEvent { .. } => SegmentRole::Lifecycle,
-            SegmentContent::Image { .. } => SegmentRole::Media,
-            SegmentContent::TurnSeparator => SegmentRole::Separator,
-        }
+        self.projection().role()
     }
 
     pub fn presentation(&self) -> SegmentPresentation {
-        presentation_for_role(self.role(), self.tool_visual_kind())
+        self.projection().presentation
     }
 
     /// Render this segment into the given area of the buffer.
@@ -4635,6 +4687,93 @@ mod tests {
             text.contains("/var/captures/screenshot.png"),
             "full disk path should appear alongside alt text: {text}"
         );
+    }
+
+    #[test]
+    fn user_prompt_projects_to_borrowed_semantic_projection() {
+        let seg = Segment::user_prompt("hello world");
+        let projection = seg.projection();
+        assert_eq!(projection.role(), SegmentRole::Operator);
+        match projection.kind {
+            ConversationSegmentKind::User(user) => assert_eq!(user.text, "hello world"),
+            other => panic!("expected user projection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn assistant_projects_completion_state() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::AssistantText {
+                text: "answer".into(),
+                thinking: "scratch".into(),
+                complete: false,
+            },
+        };
+        let projection = seg.projection();
+        assert_eq!(projection.role(), SegmentRole::Assistant);
+        match projection.kind {
+            ConversationSegmentKind::Assistant(assistant) => {
+                assert_eq!(assistant.text, "answer");
+                assert_eq!(assistant.thinking, "scratch");
+                assert!(!assistant.complete);
+            }
+            other => panic!("expected assistant projection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_projects_client_visible_fields() {
+        let seg = Segment {
+            meta: SegmentMeta::default(),
+            content: SegmentContent::ToolCard {
+                id: "tool-1".into(),
+                name: "bash".into(),
+                args_summary: Some("cargo check".into()),
+                detail_args: Some("cargo check -p omegon".into()),
+                result_summary: Some("ok".into()),
+                detail_result: Some("finished".into()),
+                is_error: false,
+                complete: true,
+                expanded: false,
+                live_partial: None,
+                started_at: None,
+            },
+        };
+        let projection = seg.projection();
+        assert_eq!(projection.role(), SegmentRole::Tool);
+        assert_eq!(
+            projection.presentation.tool_visual,
+            Some(ToolVisualKind::CommandExec)
+        );
+        match projection.kind {
+            ConversationSegmentKind::Tool(tool) => {
+                assert_eq!(tool.id, "tool-1");
+                assert_eq!(tool.name, "bash");
+                assert_eq!(tool.args_summary, Some("cargo check"));
+                assert_eq!(tool.detail_args, Some("cargo check -p omegon"));
+                assert_eq!(tool.result_summary, Some("ok"));
+                assert_eq!(tool.detail_result, Some("finished"));
+                assert!(!tool.is_error);
+                assert!(tool.complete);
+                assert!(!tool.expanded);
+            }
+            other => panic!("expected tool projection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_projects_borrowed_path_and_alt_text() {
+        let seg = Segment::image(std::path::PathBuf::from("/tmp/screenshot.png"), "screen");
+        let projection = seg.projection();
+        assert_eq!(projection.role(), SegmentRole::Media);
+        match projection.kind {
+            ConversationSegmentKind::Image(image) => {
+                assert_eq!(image.path, std::path::Path::new("/tmp/screenshot.png"));
+                assert_eq!(image.alt, "screen");
+            }
+            other => panic!("expected image projection, got {other:?}"),
+        }
     }
 
     #[test]

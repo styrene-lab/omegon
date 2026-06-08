@@ -4,7 +4,7 @@
 //! terminal rendering. It owns presentation classification that can be reasoned
 //! about without mutating the underlying conversation state.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ratatui::prelude::Color;
 
@@ -147,6 +147,20 @@ pub struct ImageSegment<TText = String, TPath = PathBuf> {
     pub path: TPath,
     pub alt: TText,
 }
+
+pub trait ProjectConversationSegment<'a> {
+    type Text: AsRef<str>;
+    type Path;
+
+    fn project_conversation_segment(
+        &'a self,
+    ) -> ConversationSegmentProjection<Self::Text, Self::Path>;
+}
+
+pub type BorrowedConversationSegmentProjection<'a> =
+    ConversationSegmentProjection<&'a str, &'a Path>;
+
+pub type OwnedConversationSegmentProjection = ConversationSegmentProjection<String, PathBuf>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolVisualKind {
