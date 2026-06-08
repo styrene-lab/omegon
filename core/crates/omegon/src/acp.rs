@@ -509,6 +509,7 @@ pub struct OmegonAcpAgent {
     extension_rpc_handles:
         Rc<RefCell<std::collections::BTreeMap<String, crate::extensions::ExtensionPollingHandle>>>,
     session_task_bindings: RefCell<Vec<crate::conversation::SessionTaskBinding>>,
+    surface_updates_enabled: RefCell<bool>,
 }
 
 impl OmegonAcpAgent {
@@ -531,6 +532,7 @@ impl OmegonAcpAgent {
             extension_metadata: Rc::new(RefCell::new(extension_metadata)),
             extension_rpc_handles: Rc::new(RefCell::new(Default::default())),
             session_task_bindings: RefCell::new(Vec::new()),
+            surface_updates_enabled: RefCell::new(false),
         }
     }
 
@@ -908,6 +910,7 @@ fn extension_metadata_meta(
 
 fn shadow_surface_update<F>(
     conn: Option<&AcpClientConnection>,
+    surface_updates_enabled: bool,
     adapter: &mut AcpConversationSurfaceAdapter,
     event: AcpConversationEvent,
     redact: F,
@@ -916,7 +919,7 @@ fn shadow_surface_update<F>(
 {
     let updates = adapter.ingest(event, SurfaceRedaction::ExternalClient, redact);
     trace_shadow_surface_updates(&updates);
-    maybe_send_shadow_surface_updates(conn, &updates);
+    maybe_send_shadow_surface_updates(conn, surface_updates_enabled, &updates);
 }
 
 fn acp_surface_updates_enabled() -> bool {
@@ -927,11 +930,40 @@ fn acp_surface_updates_enabled_value(value: Option<&str>) -> bool {
     matches!(value, Some("1" | "true" | "TRUE" | "yes" | "on"))
 }
 
+fn acp_client_is_flynt(client: Option<&Implementation>) -> bool {
+    let Some(client) = client else {
+        return false;
+    };
+    let name = client.name.to_ascii_lowercase();
+    let title = client
+        .title
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    name.contains("flynt") || title.contains("flynt")
+}
+
+fn acp_surface_updates_enabled_for_client(client: Option<&Implementation>) -> bool {
+    acp_surface_updates_enabled() || acp_client_is_flynt(client)
+}
+
+fn acp_surface_metadata(enabled: bool) -> serde_json::Value {
+    serde_json::json!({
+        "conversation": {
+            "version": surfaces::ACP_SURFACE_SCHEMA_VERSION,
+            "enabled": enabled,
+            "extensionMethod": "_surface/conversation/update",
+            "redaction": "external_client"
+        }
+    })
+}
+
 fn maybe_send_shadow_surface_updates(
     conn: Option<&AcpClientConnection>,
+    surface_updates_enabled: bool,
     updates: &[surfaces::AcpSurfaceUpdate],
 ) {
-    if updates.is_empty() || !acp_surface_updates_enabled() {
+    if updates.is_empty() || !surface_updates_enabled {
         return;
     }
     let Some(conn) = conn else {
@@ -986,6 +1018,10 @@ impl OmegonAcpAgent {
         );
         drop(caps);
 
+        let surface_updates_enabled =
+            acp_surface_updates_enabled_for_client(args.client_info.as_ref());
+        *self.surface_updates_enabled.borrow_mut() = surface_updates_enabled;
+
         let mut response = InitializeResponse::new(args.protocol_version);
         response.agent_info =
             Some(Implementation::new("omegon", env!("CARGO_PKG_VERSION")).title("Omegon Agent"));
@@ -1001,9 +1037,12 @@ impl OmegonAcpAgent {
             AuthMethodAgent::new("omegon-auth", "Omegon Authentication")
                 .description("Run `omegon auth login` in a terminal or set API keys."),
         )];
-        if !self.extension_metadata.borrow().is_empty() {
-            response.meta = Some(extension_metadata_meta(&self.extension_metadata.borrow()));
-        }
+        let mut meta = extension_metadata_meta(&self.extension_metadata.borrow());
+        meta.insert(
+            "omegon/surfaces".to_string(),
+            acp_surface_metadata(surface_updates_enabled),
+        );
+        response.meta = Some(meta);
         Ok(response)
     }
 
@@ -1161,6 +1200,7 @@ impl OmegonAcpAgent {
             let conn = self.conn.clone();
             let stream_sid = sid.clone();
             let secrets_ref = self.secrets.clone();
+            let surface_updates_enabled = *self.surface_updates_enabled.borrow();
             tokio::task::spawn_local(async move {
                 // Closure to redact text through the secrets manager if available.
                 let redact = |text: &str| -> String {
@@ -1178,6 +1218,7 @@ impl OmegonAcpAgent {
                         Ok(WorkerEvent::TextChunk(text)) => {
                             shadow_surface_update(
                                 conn.borrow().as_ref(),
+                                surface_updates_enabled,
                                 &mut surface_adapter,
                                 AcpConversationEvent::TextChunk(text.clone()),
                                 |value| redact(value),
@@ -1197,6 +1238,7 @@ impl OmegonAcpAgent {
                         Ok(WorkerEvent::ThinkingChunk(text)) => {
                             shadow_surface_update(
                                 conn.borrow().as_ref(),
+                                surface_updates_enabled,
                                 &mut surface_adapter,
                                 AcpConversationEvent::ThinkingChunk(text.clone()),
                                 |value| redact(value),
@@ -1218,6 +1260,7 @@ impl OmegonAcpAgent {
                                 acp_surface_tool_args(&name, args.as_ref());
                             shadow_surface_update(
                                 conn.borrow().as_ref(),
+                                surface_updates_enabled,
                                 &mut surface_adapter,
                                 AcpConversationEvent::ToolStart {
                                     id: id.clone(),
@@ -1247,6 +1290,7 @@ impl OmegonAcpAgent {
                         Ok(WorkerEvent::StatusUpdate(msg)) => {
                             shadow_surface_update(
                                 conn.borrow().as_ref(),
+                                surface_updates_enabled,
                                 &mut surface_adapter,
                                 AcpConversationEvent::StatusUpdate(msg.clone()),
                                 |value| redact(value),
@@ -1277,6 +1321,7 @@ impl OmegonAcpAgent {
                             let surface_result = acp_surface_tool_result(&details);
                             shadow_surface_update(
                                 conn.borrow().as_ref(),
+                                surface_updates_enabled,
                                 &mut surface_adapter,
                                 AcpConversationEvent::ToolEnd {
                                     id: id.clone(),
@@ -1309,6 +1354,7 @@ impl OmegonAcpAgent {
                         Ok(WorkerEvent::ToolOutput { id, text }) => {
                             shadow_surface_update(
                                 conn.borrow().as_ref(),
+                                surface_updates_enabled,
                                 &mut surface_adapter,
                                 AcpConversationEvent::ToolOutput {
                                     id: id.clone(),
@@ -1398,6 +1444,7 @@ impl OmegonAcpAgent {
                         Ok(WorkerEvent::TurnCancelled { reason }) => {
                             shadow_surface_update(
                                 conn.borrow().as_ref(),
+                                surface_updates_enabled,
                                 &mut surface_adapter,
                                 AcpConversationEvent::TurnCancelled {
                                     reason: reason.clone(),
@@ -1432,6 +1479,7 @@ impl OmegonAcpAgent {
                         Ok(WorkerEvent::TurnComplete) => {
                             shadow_surface_update(
                                 conn.borrow().as_ref(),
+                                surface_updates_enabled,
                                 &mut surface_adapter,
                                 AcpConversationEvent::TurnComplete,
                                 |value| redact(value),
@@ -4822,6 +4870,29 @@ Progress: 1/2"
         assert_eq!(plan_state[0].status, PlanEntryState::Pending);
         assert_eq!(plan_state[1].status, PlanEntryState::Completed);
         assert_eq!(plan_state[2].status, PlanEntryState::Pending);
+    }
+
+    #[test]
+    fn flynt_client_enables_surface_updates_by_default() {
+        let flynt = Implementation::new("flynt", "0.1.0").title("Flynt");
+        let zed = Implementation::new("zed", "0.1.0").title("Zed");
+        assert!(acp_surface_updates_enabled_for_client(Some(&flynt)));
+        assert!(!acp_surface_updates_enabled_for_client(Some(&zed)));
+        assert!(!acp_surface_updates_enabled_for_client(None));
+    }
+
+    #[test]
+    fn surface_metadata_advertises_conversation_contract() {
+        let metadata = acp_surface_metadata(true);
+        assert_eq!(
+            metadata["conversation"]["version"],
+            surfaces::ACP_SURFACE_SCHEMA_VERSION
+        );
+        assert_eq!(metadata["conversation"]["enabled"], true);
+        assert_eq!(
+            metadata["conversation"]["extensionMethod"],
+            "_surface/conversation/update"
+        );
     }
 
     #[test]
