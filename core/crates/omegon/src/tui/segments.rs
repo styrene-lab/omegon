@@ -17,7 +17,7 @@ use super::conversation_projection::{
     SegmentEmphasis, SegmentPresentation, SegmentRole, SystemSegment, ToolSegment, ToolVisualKind,
     UserSegment,
 };
-use super::conversation_render_projection::SegmentRenderMetadata;
+use super::conversation_render_projection::{SegmentRenderMetadata, tool_visual_color};
 use super::theme::Theme;
 
 const FILE_URL_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
@@ -2295,7 +2295,9 @@ fn render_tool_card(
     // Completed tools use categorical color from ToolVisualKind so
     // operators can scan the timeline by tool type — file mutations
     // are lime, shell execs are orange, reads are teal, etc.
-    let kind_color = tool_visual.map(|k| k.color(t)).unwrap_or(t.accent_muted());
+    let kind_color = tool_visual
+        .map(|k| tool_visual_color(k, t))
+        .unwrap_or(t.accent_muted());
     let (status_icon, status_color, border_color, bg) = if is_error {
         ("✗", t.error(), t.error(), t.tool_error_bg())
     } else if !complete {

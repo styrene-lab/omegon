@@ -7,8 +7,21 @@
 
 use ratatui::prelude::*;
 
+use super::conversation_projection::ToolVisualKind;
 use super::segments::{Segment, SegmentRenderMode};
 use super::theme::Theme;
+
+pub fn tool_visual_color(kind: ToolVisualKind, t: &dyn Theme) -> Color {
+    match kind {
+        ToolVisualKind::CommandExec => t.warning(),
+        ToolVisualKind::FileRead => t.accent_muted(),
+        ToolVisualKind::FileMutation => t.caution(),
+        ToolVisualKind::DesignTree => t.accent_bright(),
+        ToolVisualKind::Memory => t.accent(),
+        ToolVisualKind::Search => t.accent_muted(),
+        ToolVisualKind::Generic => t.border_dim(),
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct SegmentRenderContext<'a> {

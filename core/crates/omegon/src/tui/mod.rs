@@ -64,6 +64,7 @@ use omegon_traits::AgentEvent;
 
 use self::conversation::{ConversationView, Tab};
 use self::conversation_projection::ToolVisualKind;
+use self::conversation_render_projection::tool_visual_color;
 use self::dashboard::DashboardState;
 use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
@@ -5050,7 +5051,11 @@ impl App {
                 }
                 crate::tui::conversation_projection::SegmentRole::Tool => {
                     let kind = presentation.tool_visual.unwrap_or(ToolVisualKind::Generic);
-                    (kind.label(), "⚙", kind.color(self.theme.as_ref()))
+                    (
+                        kind.label(),
+                        "⚙",
+                        tool_visual_color(kind, self.theme.as_ref()),
+                    )
                 }
                 crate::tui::conversation_projection::SegmentRole::System => {
                     ("system", "ℹ", self.theme.dim())

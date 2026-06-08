@@ -6,10 +6,6 @@
 
 use std::path::{Path, PathBuf};
 
-use ratatui::prelude::Color;
-
-use super::theme::Theme;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentRole {
     Operator,
@@ -174,22 +170,6 @@ pub enum ToolVisualKind {
 }
 
 impl ToolVisualKind {
-    /// Categorical color for this tool kind — subtle tinting for completed
-    /// tool card borders and focus-mode gutters. Each kind gets a distinct
-    /// hue so operators can scan the timeline by color. The palette stays
-    /// within the Alpharius tonal range (no new hues invented).
-    pub fn color(&self, t: &dyn Theme) -> Color {
-        match self {
-            Self::CommandExec => t.warning(),
-            Self::FileRead => t.accent_muted(),
-            Self::FileMutation => t.caution(),
-            Self::DesignTree => t.accent_bright(),
-            Self::Memory => t.accent(),
-            Self::Search => t.accent_muted(),
-            Self::Generic => t.border_dim(),
-        }
-    }
-
     /// Short label for focus-mode display.
     pub fn label(&self) -> &'static str {
         match self {
