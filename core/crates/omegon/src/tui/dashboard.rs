@@ -17,6 +17,10 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::widgets::Scrollbar;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 
+use super::dashboard_projection::{
+    DashboardContextProjection, DashboardProjection, DashboardSessionProjection,
+    ProjectDashboardSurface,
+};
 use super::theme::Theme;
 use super::widgets;
 use crate::lifecycle::types::*;
@@ -285,7 +289,7 @@ impl DashboardState {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct StatusCounts {
     pub total: usize,
     pub implementing: usize,
@@ -335,6 +339,29 @@ pub struct ChangeSummary {
     pub stage: String,
     pub done_tasks: usize,
     pub total_tasks: usize,
+}
+
+impl ProjectDashboardSurface for DashboardState {
+    fn project_dashboard_surface(&self) -> DashboardProjection {
+        DashboardProjection {
+            focused_node: self.focused_node.as_ref().map(Into::into),
+            active_changes: self.active_changes.iter().map(Into::into).collect(),
+            status_counts: self.status_counts.clone(),
+            implementing_nodes: self.implementing_nodes.iter().map(Into::into).collect(),
+            actionable_nodes: self.actionable_nodes.iter().map(Into::into).collect(),
+            all_nodes: self.all_nodes.iter().map(Into::into).collect(),
+            degraded_nodes: self.degraded_nodes.iter().map(Into::into).collect(),
+            session: DashboardSessionProjection {
+                turns: self.turns,
+                tool_calls: self.tool_calls,
+                compactions: self.compactions,
+            },
+            context: DashboardContextProjection {
+                used_pct: self.context_used_pct,
+                window_k: self.context_window_k,
+            },
+        }
+    }
 }
 
 // ─── Rendering ──────────────────────────────────────────────────────
@@ -939,6 +966,44 @@ mod tests {
         (0..area.height)
             .flat_map(|y| (0..area.width).map(move |x| buf[(x, y)].symbol().to_string()))
             .collect()
+    }
+
+    #[test]
+    fn dashboard_projects_semantic_surface() {
+        let mut state = DashboardState::default();
+        state.focused_node = Some(FocusedNodeSummary {
+            id: "focused".into(),
+            title: "Focused Node".into(),
+            status: NodeStatus::Implementing,
+            open_questions: 2,
+            assumptions: 1,
+            decisions: 3,
+            readiness: 0.75,
+            openspec_change: Some("change-1".into()),
+        });
+        state.active_changes = vec![ChangeSummary {
+            name: "change-1".into(),
+            stage: "implementing".into(),
+            done_tasks: 2,
+            total_tasks: 4,
+        }];
+        state.turns = 7;
+        state.tool_calls = 11;
+        state.compactions = 1;
+        state.context_used_pct = 42.0;
+        state.context_window_k = 128;
+
+        let projection = state.project_dashboard_surface();
+        let focused = projection.focused_node.expect("focused node projection");
+        assert_eq!(focused.id, "focused");
+        assert_eq!(focused.status, "implementing");
+        assert_eq!(focused.openspec_change.as_deref(), Some("change-1"));
+        assert_eq!(projection.active_changes[0].name, "change-1");
+        assert_eq!(projection.session.turns, 7);
+        assert_eq!(projection.session.tool_calls, 11);
+        assert_eq!(projection.session.compactions, 1);
+        assert_eq!(projection.context.used_pct, 42.0);
+        assert_eq!(projection.context.window_k, 128);
     }
 
     #[test]

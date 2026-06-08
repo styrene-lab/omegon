@@ -23,6 +23,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add Ratatui-facing conversation render projection traits so widget measurement/rendering can target render metadata instead of matching segment internals.
 - Add a borrowed semantic projection trait for concrete conversation segments, giving TUI and future ACP adapters a shared client-facing interface boundary.
 - Extract high-level TUI surface preset state into a shared surface projection module to seed the same projection-boundary pattern for dashboard, instruments, and footer surfaces.
+- Add a dashboard semantic projection boundary for lifecycle, OpenSpec, session, and context dashboard state before Ratatui rendering.
 
 ## [0.26.16] - 2026-06-07
 
