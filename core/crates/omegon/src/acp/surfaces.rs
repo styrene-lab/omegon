@@ -270,7 +270,7 @@ pub enum AcpConversationEvent {
     TurnComplete,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcpSurfaceUpdate {
     pub segment: AcpConversationSegment,
     pub completed_segment_id: Option<String>,

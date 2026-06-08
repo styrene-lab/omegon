@@ -907,6 +907,7 @@ fn extension_metadata_meta(
 }
 
 fn shadow_surface_update<F>(
+    conn: Option<&AcpClientConnection>,
     adapter: &mut AcpConversationSurfaceAdapter,
     event: AcpConversationEvent,
     redact: F,
@@ -915,6 +916,33 @@ fn shadow_surface_update<F>(
 {
     let updates = adapter.ingest(event, SurfaceRedaction::ExternalClient, redact);
     trace_shadow_surface_updates(&updates);
+    maybe_send_shadow_surface_updates(conn, &updates);
+}
+
+fn acp_surface_updates_enabled() -> bool {
+    acp_surface_updates_enabled_value(std::env::var("OMEGON_ACP_SURFACE_UPDATES").ok().as_deref())
+}
+
+fn acp_surface_updates_enabled_value(value: Option<&str>) -> bool {
+    matches!(value, Some("1" | "true" | "TRUE" | "yes" | "on"))
+}
+
+fn maybe_send_shadow_surface_updates(
+    conn: Option<&AcpClientConnection>,
+    updates: &[surfaces::AcpSurfaceUpdate],
+) {
+    if updates.is_empty() || !acp_surface_updates_enabled() {
+        return;
+    }
+    let Some(conn) = conn else {
+        return;
+    };
+    for update in updates {
+        let Ok(payload) = serde_json::to_value(update) else {
+            continue;
+        };
+        let _ = send_acp_ext_notification(conn, "_surface/conversation/update", payload);
+    }
 }
 
 fn trace_shadow_surface_updates(updates: &[surfaces::AcpSurfaceUpdate]) {
@@ -1149,6 +1177,7 @@ impl OmegonAcpAgent {
                     match event_rx.recv().await {
                         Ok(WorkerEvent::TextChunk(text)) => {
                             shadow_surface_update(
+                                conn.borrow().as_ref(),
                                 &mut surface_adapter,
                                 AcpConversationEvent::TextChunk(text.clone()),
                                 |value| redact(value),
@@ -1167,6 +1196,7 @@ impl OmegonAcpAgent {
                         }
                         Ok(WorkerEvent::ThinkingChunk(text)) => {
                             shadow_surface_update(
+                                conn.borrow().as_ref(),
                                 &mut surface_adapter,
                                 AcpConversationEvent::ThinkingChunk(text.clone()),
                                 |value| redact(value),
@@ -1187,6 +1217,7 @@ impl OmegonAcpAgent {
                             let (surface_args_summary, surface_detail_args) =
                                 acp_surface_tool_args(&name, args.as_ref());
                             shadow_surface_update(
+                                conn.borrow().as_ref(),
                                 &mut surface_adapter,
                                 AcpConversationEvent::ToolStart {
                                     id: id.clone(),
@@ -1215,6 +1246,7 @@ impl OmegonAcpAgent {
                         }
                         Ok(WorkerEvent::StatusUpdate(msg)) => {
                             shadow_surface_update(
+                                conn.borrow().as_ref(),
                                 &mut surface_adapter,
                                 AcpConversationEvent::StatusUpdate(msg.clone()),
                                 |value| redact(value),
@@ -1244,6 +1276,7 @@ impl OmegonAcpAgent {
                         }) => {
                             let surface_result = acp_surface_tool_result(&details);
                             shadow_surface_update(
+                                conn.borrow().as_ref(),
                                 &mut surface_adapter,
                                 AcpConversationEvent::ToolEnd {
                                     id: id.clone(),
@@ -1275,6 +1308,7 @@ impl OmegonAcpAgent {
                         }
                         Ok(WorkerEvent::ToolOutput { id, text }) => {
                             shadow_surface_update(
+                                conn.borrow().as_ref(),
                                 &mut surface_adapter,
                                 AcpConversationEvent::ToolOutput {
                                     id: id.clone(),
@@ -1363,6 +1397,7 @@ impl OmegonAcpAgent {
                         }
                         Ok(WorkerEvent::TurnCancelled { reason }) => {
                             shadow_surface_update(
+                                conn.borrow().as_ref(),
                                 &mut surface_adapter,
                                 AcpConversationEvent::TurnCancelled {
                                     reason: reason.clone(),
@@ -1396,6 +1431,7 @@ impl OmegonAcpAgent {
                         }
                         Ok(WorkerEvent::TurnComplete) => {
                             shadow_surface_update(
+                                conn.borrow().as_ref(),
                                 &mut surface_adapter,
                                 AcpConversationEvent::TurnComplete,
                                 |value| redact(value),
@@ -4786,6 +4822,17 @@ Progress: 1/2"
         assert_eq!(plan_state[0].status, PlanEntryState::Pending);
         assert_eq!(plan_state[1].status, PlanEntryState::Completed);
         assert_eq!(plan_state[2].status, PlanEntryState::Pending);
+    }
+
+    #[test]
+    fn surface_updates_flag_is_default_off() {
+        assert!(!acp_surface_updates_enabled_value(None));
+        assert!(!acp_surface_updates_enabled_value(Some("0")));
+        assert!(!acp_surface_updates_enabled_value(Some("false")));
+        assert!(acp_surface_updates_enabled_value(Some("1")));
+        assert!(acp_surface_updates_enabled_value(Some("true")));
+        assert!(acp_surface_updates_enabled_value(Some("yes")));
+        assert!(acp_surface_updates_enabled_value(Some("on")));
     }
 
     #[test]
