@@ -23,6 +23,7 @@ pub mod footer;
 pub mod footer_projection;
 pub mod image;
 pub mod instruments;
+pub mod instruments_projection;
 pub mod model_catalog;
 pub mod segments;
 pub mod selector;

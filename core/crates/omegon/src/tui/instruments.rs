@@ -14,6 +14,10 @@
 //!
 //! All use unified navy→teal→amber CIE L* perceptual color ramp.
 
+use super::instruments_projection::{
+    InferenceProjection, InstrumentProjection, ProjectInstrumentSurface, ToolActivityProjection,
+    ToolProjection, WorkerActivityProjection,
+};
 use super::theme::Theme;
 use super::widgets::visible_width;
 use crate::features::cleave::CleaveProgress;
@@ -486,6 +490,55 @@ impl Default for InstrumentPanel {
             tools_heat: 0.0,
             inference_heat: 0.0,
         }
+    }
+}
+
+impl ProjectInstrumentSurface for InstrumentPanel {
+    fn project_instrument_surface(&self) -> InstrumentProjection {
+        InstrumentProjection {
+            inference: InferenceProjection {
+                context_fill: self.context_fill,
+                memory_fill: self.memory_fill,
+                thinking_level_pct: self.thinking_level_pct,
+                thinking_active: self.thinking_active,
+                thinking_intensity: self.thinking_intensity,
+                external_wait: self.external_wait,
+                context_window: self.context_window,
+                last_input_tokens: self.last_input_tokens,
+                last_output_tokens: self.last_output_tokens,
+                last_cache_read_tokens: self.last_cache_read_tokens,
+                session_stores: self.session_stores,
+                session_recalls: self.session_recalls,
+                heat: self.inference_heat,
+            },
+            tools: ToolActivityProjection {
+                tools: self
+                    .tools
+                    .iter()
+                    .map(|tool| ToolProjection {
+                        name: tool.name.clone(),
+                        last_called_s: tool.last_called,
+                        is_error: tool.is_error,
+                        running: tool.running,
+                        last_duration_ms: tool.last_duration_ms,
+                    })
+                    .collect(),
+                heat: self.tools_heat,
+                has_ever_fired: self.has_ever_fired,
+            },
+            workers: WorkerActivityProjection {
+                cleave_active: self.cleave_progress.is_some(),
+                delegate_active: self.delegate_progress.is_some(),
+            },
+            preferred_height: self.preferred_height(),
+            focus_mode: self.focus_mode,
+        }
+    }
+}
+
+impl InstrumentPanel {
+    pub fn projection(&self) -> InstrumentProjection {
+        self.project_instrument_surface()
     }
 }
 
@@ -2416,6 +2469,25 @@ mod tests {
             final_amp < peak * 0.5,
             "wave should dampen: peak={peak:.3} final={final_amp:.3}"
         );
+    }
+
+    #[test]
+    fn instrument_panel_projects_semantic_surface() {
+        let mut panel = InstrumentPanel::default();
+        panel.tool_started("bash");
+        panel.tool_finished("bash", false);
+        panel.note_thinking_activity();
+        panel.update_telemetry(50.0, 200_000, "medium", None, true, 0.1);
+
+        let projection = panel.projection();
+        assert!(projection.inference.context_fill > 0.49);
+        assert!(projection.inference.thinking_active);
+        assert_eq!(projection.inference.context_window, 200_000);
+        assert_eq!(projection.tools.tools.len(), 1);
+        assert_eq!(projection.tools.tools[0].name, "bash");
+        assert!(!projection.tools.tools[0].running);
+        assert!(projection.tools.has_ever_fired);
+        assert_eq!(projection.preferred_height, panel.preferred_height());
     }
 
     #[test]

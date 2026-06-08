@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Extract high-level TUI surface preset state into a shared surface projection module to seed the same projection-boundary pattern for dashboard, instruments, and footer surfaces.
 - Add a dashboard semantic projection boundary for lifecycle, OpenSpec, session, and context dashboard state before Ratatui rendering.
 - Add footer/status semantic projection types so slim status and future clients consume provider, context, memory, session, and workspace telemetry through a shared boundary.
+- Add an instrument panel semantic projection boundary for inference, tool activity, and worker activity telemetry before Ratatui rendering.
 
 ## [0.26.16] - 2026-06-07
 
