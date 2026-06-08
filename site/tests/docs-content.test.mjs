@@ -7,6 +7,9 @@ import { execFileSync } from 'node:child_process';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const docsDir = resolve(here, '../src/pages/docs');
+const npmRunBuild = process.platform === 'win32'
+  ? { command: 'cmd', args: ['/c', 'npm', 'run', 'build'] }
+  : { command: 'npm', args: ['run', 'build'] };
 
 function readDoc(name) {
   return readFileSync(resolve(docsDir, name), 'utf8');
@@ -59,7 +62,7 @@ test('no page imports siteVariant', () => {
 });
 
 test('site builds successfully', () => {
-  execFileSync('npm', ['run', 'build'], {
+  execFileSync(npmRunBuild.command, npmRunBuild.args, {
     cwd: resolve(here, '..'),
     env: { ...process.env },
     stdio: 'pipe',
