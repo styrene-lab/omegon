@@ -10,6 +10,7 @@
 //!   - user_input_tx → agent loop receives prompts
 //!   - AgentEvent broadcast → TUI receives streaming updates
 
+pub mod active_tool_stream;
 pub mod bootstrap;
 pub mod conv_widget;
 pub mod conversation;
@@ -59,6 +60,7 @@ use tokio_util::sync::CancellationToken;
 
 use omegon_traits::AgentEvent;
 
+use self::active_tool_stream::{ActiveToolStream, render_active_tool_stream_panel};
 use self::conversation::{ConversationView, Tab};
 use self::conversation_render_projection::segment_chrome;
 use self::dashboard::DashboardState;
@@ -1382,44 +1384,6 @@ fn slim_plan_snapshot_height(snapshot: &PlanDisplaySnapshot, width: u16) -> u16 
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ActiveToolStream {
-    id: String,
-    name: String,
-    started_at: std::time::Instant,
-    lines: Vec<String>,
-}
-
-impl ActiveToolStream {
-    fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            name: name.into(),
-            started_at: std::time::Instant::now(),
-            lines: Vec::new(),
-        }
-    }
-
-    fn update(&mut self, partial: &omegon_traits::PartialToolResult) {
-        if partial.tail.trim().is_empty() {
-            return;
-        }
-        self.lines = partial.tail.lines().map(str::to_string).collect();
-    }
-
-    fn visible_lines(&self, max_lines: usize) -> &[String] {
-        let start = self.lines.len().saturating_sub(max_lines);
-        &self.lines[start..]
-    }
-
-    fn height(&self) -> u16 {
-        // Reserve the header immediately on ToolStart so operators can see
-        // that the running tool has a live region even before the first
-        // stdout/stderr partial arrives.
-        1 + (self.lines.len() as u16).min(15)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 struct PlanDisplaySnapshot {
     mode: String,
     completed: usize,
@@ -1807,58 +1771,6 @@ fn slim_operator_hint(
             SlimPlanHintState::None => "transcript live · no pinned plan".to_string(),
         }
     }
-}
-
-fn format_short_elapsed(duration: std::time::Duration) -> String {
-    let secs = duration.as_secs();
-    if secs < 60 {
-        format!("{secs}s")
-    } else {
-        let mins = secs / 60;
-        let rem = secs % 60;
-        format!("{mins}m{rem:02}s")
-    }
-}
-
-fn render_active_tool_stream_panel(
-    area: Rect,
-    frame: &mut Frame,
-    t: &dyn theme::Theme,
-    stream: &ActiveToolStream,
-) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-
-    let bg = t.surface_bg();
-    let mut lines = Vec::new();
-    lines.push(Line::from(vec![
-        Span::styled("─ active tool ", Style::default().fg(t.border_dim()).bg(bg)),
-        Span::styled(
-            stream.name.as_str(),
-            Style::default()
-                .fg(t.accent())
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" · {}", format_short_elapsed(stream.started_at.elapsed())),
-            Style::default().fg(t.muted()).bg(bg),
-        ),
-    ]));
-    let max_tail = area.height.saturating_sub(1) as usize;
-    let text_budget = area.width.saturating_sub(2) as usize;
-    for line in stream.visible_lines(max_tail) {
-        lines.push(Line::from(Span::styled(
-            crate::util::truncate(line, text_budget),
-            Style::default().fg(t.fg()).bg(bg),
-        )));
-    }
-
-    Paragraph::new(lines)
-        .style(Style::default().bg(bg))
-        .wrap(Wrap { trim: false })
-        .render(area, frame.buffer_mut());
 }
 
 fn render_slim_plan_panel(
@@ -10280,7 +10192,7 @@ mod slash_command_parsing_tests {
     use super::TuiCommand;
     use super::canonical_slash_command;
     use super::{
-        ActiveToolStream, PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus, SlimPlanContext,
+        PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus, SlimPlanContext,
         SlimPlanHintState, dashboard, format_permission_prompt, permission_persist_scope_label,
         permission_response_for_key, slim_completed_plan_hint_available, slim_operator_hint,
         slim_pinned_plan_snapshot, slim_plan_rows,
@@ -10524,24 +10436,6 @@ mod slash_command_parsing_tests {
         assert!(text.contains("Progress: 2/2"), "{text}");
         assert!(text.contains("1. ● one"), "{text}");
         assert!(text.contains("2. ● two"), "{text}");
-    }
-
-    #[test]
-    fn active_tool_stream_reserves_header_and_caps_tail() {
-        let mut stream = ActiveToolStream::new("tool-1", "bash");
-        assert_eq!(stream.height(), 1);
-
-        let tail = (0..20)
-            .map(|idx| format!("line {idx}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        stream.update(&omegon_traits::PartialToolResult::content(tail, 100));
-
-        assert_eq!(stream.height(), 16);
-        let visible = stream.visible_lines(15);
-        assert_eq!(visible.len(), 15);
-        assert_eq!(visible.first().map(String::as_str), Some("line 5"));
-        assert_eq!(visible.last().map(String::as_str), Some("line 19"));
     }
 
     #[test]
