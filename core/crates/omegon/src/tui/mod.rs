@@ -19,6 +19,7 @@ pub mod dashboard;
 pub mod dashboard_projection;
 pub mod editor;
 pub mod effects;
+pub mod extension_overlays;
 pub mod footer;
 pub mod footer_projection;
 pub mod image;
@@ -4287,16 +4288,21 @@ impl App {
                 if spawn_time.elapsed().as_millis() > *dismiss_ms as u128 {
                     self.active_modal = None;
                 } else {
-                    self.render_modal(frame, widget_id, data);
+                    extension_overlays::render_modal(frame, self.theme.as_ref(), widget_id, data);
                 }
             } else {
-                self.render_modal(frame, widget_id, data);
+                extension_overlays::render_modal(frame, self.theme.as_ref(), widget_id, data);
             }
         }
 
         // Render action prompt if active
         if let Some((widget_id, actions)) = &self.active_action_prompt {
-            self.render_action_prompt(frame, widget_id, actions);
+            extension_overlays::render_action_prompt(
+                frame,
+                self.theme.as_ref(),
+                widget_id,
+                actions,
+            );
         }
     }
 
@@ -4519,99 +4525,6 @@ impl App {
             height: 1,
         };
         frame.render_widget(overlay, overlay_area);
-    }
-
-    /// Render an ephemeral modal from an extension widget.
-    fn render_modal(&self, frame: &mut Frame, widget_id: &str, data: &serde_json::Value) {
-        let area = frame.area();
-
-        // Center modal in viewport (40% of width, 50% of height)
-        let modal_width = (area.width as f32 * 0.4) as u16;
-        let modal_height = (area.height as f32 * 0.5) as u16;
-        let x = (area.width.saturating_sub(modal_width)) / 2;
-        let y = (area.height.saturating_sub(modal_height)) / 2;
-        let modal_area = Rect {
-            x,
-            y,
-            width: modal_width,
-            height: modal_height,
-        };
-
-        // Semi-transparent overlay (dim everything behind modal)
-        let overlay = ratatui::widgets::Clear; // Clear background for modal
-        frame.render_widget(&overlay, modal_area);
-
-        // Modal content
-        let title = widget_id.to_string();
-        let json_str = serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string());
-
-        let modal_bg = self.theme.card_bg();
-        let block = ratatui::widgets::Block::default()
-            .title(format!(" {} ", title))
-            .borders(ratatui::widgets::Borders::ALL)
-            .border_style(
-                ratatui::style::Style::default()
-                    .fg(ratatui::style::Color::Cyan)
-                    .bg(modal_bg),
-            )
-            .style(ratatui::style::Style::default().bg(modal_bg));
-
-        let para = ratatui::widgets::Paragraph::new(json_str)
-            .block(block)
-            .style(ratatui::style::Style::default().bg(modal_bg))
-            .wrap(ratatui::widgets::Wrap { trim: true });
-
-        frame.render_widget(para, modal_area);
-    }
-
-    /// Render an action prompt from an extension widget.
-    /// Shows numbered buttons for each action.
-    fn render_action_prompt(&self, frame: &mut Frame, widget_id: &str, actions: &[String]) {
-        let area = frame.area();
-
-        // Center prompt in viewport (50% of width, 30% of height)
-        let prompt_width = (area.width as f32 * 0.5) as u16;
-        let prompt_height = (area.height as f32 * 0.3) as u16;
-        let x = (area.width.saturating_sub(prompt_width)) / 2;
-        let y = (area.height.saturating_sub(prompt_height)) / 2;
-        let prompt_area = Rect {
-            x,
-            y,
-            width: prompt_width,
-            height: prompt_height,
-        };
-
-        // Clear overlay
-        let overlay = ratatui::widgets::Clear;
-        frame.render_widget(&overlay, prompt_area);
-
-        // Build action list
-        let mut lines = vec![ratatui::text::Line::from("Choose an action:")];
-        lines.push(ratatui::text::Line::from(""));
-        for (idx, action) in actions.iter().enumerate().take(9) {
-            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
-                format!("  {} {} ", idx + 1, action),
-                ratatui::style::Style::default()
-                    .fg(ratatui::style::Color::Yellow)
-                    .bold(),
-            )));
-        }
-
-        let prompt_bg = self.theme.card_bg();
-        let block = ratatui::widgets::Block::default()
-            .title(format!(" {} ", widget_id))
-            .borders(ratatui::widgets::Borders::ALL)
-            .border_style(
-                ratatui::style::Style::default()
-                    .fg(ratatui::style::Color::Green)
-                    .bg(prompt_bg),
-            )
-            .style(ratatui::style::Style::default().bg(prompt_bg));
-
-        let para = ratatui::widgets::Paragraph::new(lines)
-            .block(block)
-            .style(ratatui::style::Style::default().bg(prompt_bg));
-        frame.render_widget(para, prompt_area);
     }
 
     /// Show a transient toast notification.
