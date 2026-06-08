@@ -31,7 +31,10 @@ use model_options::{
     acp_model_provider_available, compact_model_label, unavailable_current_model_label,
 };
 use resource_context::prompt_blocks_to_text;
-use surfaces::{AcpConversationEvent, AcpConversationSurfaceAdapter, SurfaceRedaction};
+use surfaces::{
+    ACP_CONVERSATION_SURFACE_METHOD, ACP_CONVERSATION_SURFACE_REDACTION, AcpConversationEvent,
+    AcpConversationSurfaceAdapter, SurfaceRedaction,
+};
 
 type JsonRpcMessage = agent_client_protocol::jsonrpcmsg::Message;
 type JsonRpcTx =
@@ -952,8 +955,8 @@ fn acp_surface_metadata(enabled: bool) -> serde_json::Value {
         "conversation": {
             "version": surfaces::ACP_SURFACE_SCHEMA_VERSION,
             "enabled": enabled,
-            "extensionMethod": "_surface/conversation/update",
-            "redaction": "external_client"
+            "extensionMethod": ACP_CONVERSATION_SURFACE_METHOD,
+            "redaction": ACP_CONVERSATION_SURFACE_REDACTION
         }
     })
 }
@@ -973,7 +976,7 @@ fn maybe_send_shadow_surface_updates(
         let Ok(payload) = serde_json::to_value(update) else {
             continue;
         };
-        let _ = send_acp_ext_notification(conn, "_surface/conversation/update", payload);
+        let _ = send_acp_ext_notification(conn, ACP_CONVERSATION_SURFACE_METHOD, payload);
     }
 }
 
@@ -3697,7 +3700,7 @@ mod extension_metadata_tests {
         assert_eq!(meta["omegon/surfaces"]["conversation"]["enabled"], true);
         assert_eq!(
             meta["omegon/surfaces"]["conversation"]["extensionMethod"],
-            "_surface/conversation/update"
+            ACP_CONVERSATION_SURFACE_METHOD
         );
         assert!(*agent.surface_updates_enabled.borrow());
     }
@@ -4931,7 +4934,7 @@ Progress: 1/2"
         assert_eq!(metadata["conversation"]["enabled"], true);
         assert_eq!(
             metadata["conversation"]["extensionMethod"],
-            "_surface/conversation/update"
+            ACP_CONVERSATION_SURFACE_METHOD
         );
     }
 

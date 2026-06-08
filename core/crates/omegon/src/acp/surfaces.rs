@@ -13,6 +13,8 @@ use crate::tui::conversation_projection::{
 };
 
 pub const ACP_SURFACE_SCHEMA_VERSION: u32 = 1;
+pub const ACP_CONVERSATION_SURFACE_METHOD: &str = "_surface/conversation/update";
+pub const ACP_CONVERSATION_SURFACE_REDACTION: &str = "external_client";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceRedaction {

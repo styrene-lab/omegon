@@ -36,6 +36,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add a default-off ACP extension-notification hook for shadow conversation surface updates.
 - Advertise ACP conversation surface metadata during initialize and enable surface updates by default for Flynt clients while preserving Zed defaults.
 - Add ACP initialize regression coverage for Flynt-enabled and Zed-disabled conversation surface metadata.
+- Centralize ACP conversation surface extension metadata constants to keep initialize advertisements and notifications aligned.
 
 ## [0.26.16] - 2026-06-07
 
