@@ -22,6 +22,7 @@ pub mod footer;
 pub mod footer_projection;
 pub mod image;
 pub mod instruments;
+pub mod layout_projection;
 pub mod model_catalog;
 pub mod segments;
 pub mod selector;
@@ -64,6 +65,7 @@ use self::dashboard::DashboardState;
 use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
+use self::layout_projection::{TuiLayoutInputs, plan_tui_layout};
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode, build_meta_tag};
 use crate::surfaces::layout::UiSurfaces;
 
@@ -4250,39 +4252,13 @@ impl App {
             return;
         }
 
-        // ── Horizontal split: main area | dashboard panel ───────────
-        // Dashboard appears as a right-side panel when terminal is wide enough.
-        let show_dashboard = self.ui_surfaces.dashboard
-            && area.width >= 120
-            && (self.dashboard.status_counts.total > 0
-                || self.dashboard.focused_node.is_some()
-                || !self.dashboard.active_changes.is_empty()
-                || self.dashboard.cleave.as_ref().is_some_and(|c| c.active));
-
-        let (main_area, dash_area) = if show_dashboard {
-            let h = Layout::horizontal([Constraint::Min(60), Constraint::Length(36)]).split(area);
-            (h[0], h[1])
-        } else {
-            (area, Rect::ZERO)
-        };
-
-        // ── Vertical layout in the main area ────────────────────────
-        // Editor height tracks wrapped visual rows, not just logical newlines,
-        // so long prompts expand the input window instead of pretending to be
-        // a single infinitely wrapped line.
-        let editor_height = editor_height_for(&self.editor, main_area);
-
-        let footer_height = if self.focus_mode || !self.ui_surfaces.footer {
-            0
-        } else if self.ui_surfaces.instruments {
-            self.instrument_panel.preferred_height()
-        } else {
-            1
-        };
-
-        let is_slim = self.ui_surfaces.is_compact() && !self.focus_mode;
-        let status_height = if is_slim { 1u16 } else { 0 };
-        let slim_plan_snapshot = if is_slim {
+        // ── Main surface layout ────────────────────────────────────
+        let dashboard_has_content = self.dashboard.status_counts.total > 0
+            || self.dashboard.focused_node.is_some()
+            || !self.dashboard.active_changes.is_empty()
+            || self.dashboard.cleave.as_ref().is_some_and(|c| c.active);
+        let editor_height = editor_height_for(&self.editor, area);
+        let slim_plan_snapshot = if self.ui_surfaces.is_compact() && !self.focus_mode {
             slim_pinned_plan_snapshot(
                 self.slim_plan_snapshot.as_ref(),
                 self.conversation.latest_plan_progress(),
@@ -4290,12 +4266,7 @@ impl App {
         } else {
             None
         };
-        let permission_lane_height = if is_slim && self.pending_permission.is_some() {
-            2
-        } else {
-            0
-        };
-        let mut active_tool_stream_height = if is_slim {
+        let raw_active_tool_stream_height = if self.ui_surfaces.is_compact() && !self.focus_mode {
             self.active_tool_stream
                 .as_ref()
                 .map(ActiveToolStream::height)
@@ -4303,68 +4274,32 @@ impl App {
         } else {
             0
         };
-        let mut slim_plan_height = slim_plan_snapshot
+        let raw_slim_plan_height = slim_plan_snapshot
             .as_ref()
-            .map(|snapshot| slim_plan_snapshot_height(snapshot, main_area.width))
+            .map(|snapshot| slim_plan_snapshot_height(snapshot, area.width))
             .unwrap_or(0);
-        if permission_lane_height > 0 {
-            active_tool_stream_height = active_tool_stream_height.min(6);
-            slim_plan_height = slim_plan_height.min(4);
-        }
-        let fixed_without_conversation = editor_height
-            .saturating_add(status_height)
-            .saturating_add(footer_height)
-            .saturating_add(permission_lane_height);
-        let bottom_budget = main_area
-            .height
-            .saturating_sub(fixed_without_conversation)
-            .saturating_sub(3);
-        if active_tool_stream_height.saturating_add(slim_plan_height) > bottom_budget {
-            let plan_budget =
-                bottom_budget.saturating_sub(active_tool_stream_height.min(bottom_budget));
-            slim_plan_height = slim_plan_height.min(plan_budget);
-            let stream_budget = bottom_budget.saturating_sub(slim_plan_height);
-            active_tool_stream_height = active_tool_stream_height.min(stream_budget);
-        }
+        let layout_plan = plan_tui_layout(TuiLayoutInputs {
+            area,
+            surfaces: self.ui_surfaces,
+            focus_mode: self.focus_mode,
+            dashboard_has_content,
+            editor_height,
+            footer_instruments_height: self.instrument_panel.preferred_height(),
+            pending_permission: self.pending_permission.is_some(),
+            active_tool_stream_height: raw_active_tool_stream_height,
+            slim_plan_height: raw_slim_plan_height,
+        });
 
-        // Slim layout: conversation → active tool stream → permission → pinned plan → editor → status+footer.
-        // Full layout: conversation → status → editor → footer (status between).
-        let chunks = if is_slim {
-            Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(3),                            // [0] conversation
-                    Constraint::Length(active_tool_stream_height), // [1] active tool stream
-                    Constraint::Length(permission_lane_height),    // [2] permission lane
-                    Constraint::Length(slim_plan_height),          // [3] pinned plan
-                    Constraint::Length(editor_height),             // [4] editor
-                    Constraint::Length(status_height),             // [5] status line
-                    Constraint::Length(footer_height),             // [6] footer
-                ])
-                .split(main_area)
-        } else {
-            Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(3),                // [0] conversation
-                    Constraint::Length(0),             // [1] (no active tool stream in Full)
-                    Constraint::Length(0),             // [2] (no permission lane in Full)
-                    Constraint::Length(0),             // [3] (no pinned plan in Full)
-                    Constraint::Length(editor_height), // [4] editor
-                    Constraint::Length(status_height), // [5] (no status in Full)
-                    Constraint::Length(footer_height), // [6] footer
-                ])
-                .split(main_area)
-        };
-
-        // Logical zone indices — consistent regardless of layout order.
-        let conversation_area = chunks[0];
-        let active_tool_stream_area = chunks[1];
-        let permission_lane_area = chunks[2];
-        let slim_plan_area = chunks[3];
-        let editor_area = chunks[4];
-        let status_area = chunks[5];
-        let footer_area = chunks[6];
+        let show_dashboard = layout_plan.show_dashboard;
+        let dash_area = layout_plan.dashboard_area.unwrap_or(Rect::ZERO);
+        let main_area = layout_plan.main_area;
+        let conversation_area = layout_plan.conversation_area;
+        let active_tool_stream_area = layout_plan.active_tool_stream_area;
+        let permission_lane_area = layout_plan.permission_lane_area;
+        let slim_plan_area = layout_plan.slim_plan_area;
+        let editor_area = layout_plan.editor_area;
+        let status_area = layout_plan.status_area;
+        let footer_area = layout_plan.footer_area;
 
         // Render tab bar + conversation/widget content
         let t = &self.theme;
@@ -4456,7 +4391,7 @@ impl App {
         }
 
         // ── Status line (slim mode only) ────────────────────────
-        if status_height > 0 {
+        if status_area.height > 0 {
             self.status_line.sync_from_footer(&self.footer_data);
             self.status_line.viewport_hint = if self.conversation.conv_state.scroll_offset > 0 {
                 Some(format!(
