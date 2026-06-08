@@ -243,6 +243,371 @@ fn tool_category_name(kind: ToolVisualKind) -> &'static str {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AcpConversationEvent {
+    TextChunk(String),
+    ThinkingChunk(String),
+    ToolStart {
+        id: String,
+        name: String,
+        args_summary: Option<String>,
+        detail_args: Option<String>,
+    },
+    ToolOutput {
+        id: String,
+        text: String,
+    },
+    ToolEnd {
+        id: String,
+        success: bool,
+        result_summary: Option<String>,
+        detail_result: Option<String>,
+    },
+    StatusUpdate(String),
+    TurnCancelled {
+        reason: String,
+    },
+    TurnComplete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcpSurfaceUpdate {
+    pub segment: AcpConversationSegment,
+    pub completed_segment_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AcpConversationSurfaceAdapter {
+    turn_id: Option<String>,
+    next_sequence: u64,
+    assistant_id: Option<String>,
+    assistant_text: String,
+    assistant_thinking: String,
+    assistant_revision: u64,
+    tools: std::collections::BTreeMap<String, ToolSurfaceState>,
+}
+
+#[derive(Debug, Clone)]
+struct ToolSurfaceState {
+    segment_id: String,
+    sequence: u64,
+    revision: u64,
+    name: String,
+    args_summary: Option<String>,
+    detail_args: Option<String>,
+    output: String,
+    success: Option<bool>,
+    complete: bool,
+}
+
+impl AcpConversationSurfaceAdapter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_turn_id(turn_id: impl Into<String>) -> Self {
+        Self {
+            turn_id: Some(turn_id.into()),
+            ..Self::default()
+        }
+    }
+
+    pub fn ingest<F>(
+        &mut self,
+        event: AcpConversationEvent,
+        policy: SurfaceRedaction,
+        redact: F,
+    ) -> Vec<AcpSurfaceUpdate>
+    where
+        F: Fn(&str) -> String,
+    {
+        match event {
+            AcpConversationEvent::TextChunk(text) => {
+                vec![self.ingest_assistant_text(text, policy, &redact)]
+            }
+            AcpConversationEvent::ThinkingChunk(text) => {
+                vec![self.ingest_assistant_thinking(text, policy, &redact)]
+            }
+            AcpConversationEvent::ToolStart {
+                id,
+                name,
+                args_summary,
+                detail_args,
+            } => vec![self.ingest_tool_start(id, name, args_summary, detail_args, policy, &redact)],
+            AcpConversationEvent::ToolOutput { id, text } => self
+                .ingest_tool_output(id, text, policy, &redact)
+                .into_iter()
+                .collect(),
+            AcpConversationEvent::ToolEnd {
+                id,
+                success,
+                result_summary,
+                detail_result,
+            } => self
+                .ingest_tool_end(id, success, result_summary, detail_result, policy, &redact)
+                .into_iter()
+                .collect(),
+            AcpConversationEvent::StatusUpdate(text) => {
+                vec![self.one_shot_lifecycle("status", "ℹ", text, policy, &redact)]
+            }
+            AcpConversationEvent::TurnCancelled { reason } => {
+                vec![self.one_shot_lifecycle("cancelled", "⚠", reason, policy, &redact)]
+            }
+            AcpConversationEvent::TurnComplete => self.complete_turn(policy, &redact),
+        }
+    }
+
+    fn allocate_identity(&mut self, prefix: &str) -> AcpConversationIdentity {
+        let sequence = self.next_sequence;
+        self.next_sequence += 1;
+        let mut identity = AcpConversationIdentity::new(format!("{prefix}-{sequence}"), sequence);
+        if let Some(turn_id) = &self.turn_id {
+            identity = identity.with_turn_id(turn_id.clone());
+        }
+        identity
+    }
+
+    fn identity_for(
+        &self,
+        segment_id: String,
+        sequence: u64,
+        revision: u64,
+    ) -> AcpConversationIdentity {
+        let mut identity =
+            AcpConversationIdentity::new(segment_id, sequence).with_revision(revision);
+        if let Some(turn_id) = &self.turn_id {
+            identity = identity.with_turn_id(turn_id.clone());
+        }
+        identity
+    }
+
+    fn assistant_sequence(&self) -> u64 {
+        self.assistant_id
+            .as_deref()
+            .and_then(|id| id.rsplit_once('-'))
+            .and_then(|(_, n)| n.parse().ok())
+            .unwrap_or(0)
+    }
+
+    fn ensure_assistant(&mut self) {
+        if self.assistant_id.is_none() {
+            let identity = self.allocate_identity("assistant");
+            self.assistant_id = Some(identity.segment_id);
+        }
+    }
+
+    fn ingest_assistant_text<F>(
+        &mut self,
+        text: String,
+        policy: SurfaceRedaction,
+        redact: &F,
+    ) -> AcpSurfaceUpdate
+    where
+        F: Fn(&str) -> String,
+    {
+        self.ensure_assistant();
+        self.assistant_text.push_str(&text);
+        self.assistant_revision += 1;
+        self.assistant_update(false, policy, redact)
+    }
+
+    fn ingest_assistant_thinking<F>(
+        &mut self,
+        text: String,
+        policy: SurfaceRedaction,
+        redact: &F,
+    ) -> AcpSurfaceUpdate
+    where
+        F: Fn(&str) -> String,
+    {
+        self.ensure_assistant();
+        self.assistant_thinking.push_str(&text);
+        self.assistant_revision += 1;
+        self.assistant_update(false, policy, redact)
+    }
+
+    fn assistant_update<F>(
+        &self,
+        complete: bool,
+        policy: SurfaceRedaction,
+        redact: &F,
+    ) -> AcpSurfaceUpdate
+    where
+        F: Fn(&str) -> String,
+    {
+        let segment_id = self
+            .assistant_id
+            .clone()
+            .unwrap_or_else(|| "assistant-0".to_string());
+        let projection =
+            ConversationSegmentProjection::new(ConversationSegmentKind::<&str, &Path>::Assistant(
+                crate::tui::conversation_projection::AssistantSegment {
+                    text: self.assistant_text.as_str(),
+                    thinking: self.assistant_thinking.as_str(),
+                    complete,
+                },
+            ));
+        let identity = self.identity_for(
+            segment_id.clone(),
+            self.assistant_sequence(),
+            self.assistant_revision,
+        );
+        AcpSurfaceUpdate {
+            segment: AcpConversationSegment::from_projection(identity, &projection, policy, redact),
+            completed_segment_id: complete.then_some(segment_id),
+        }
+    }
+
+    fn ingest_tool_start<F>(
+        &mut self,
+        id: String,
+        name: String,
+        args_summary: Option<String>,
+        detail_args: Option<String>,
+        policy: SurfaceRedaction,
+        redact: &F,
+    ) -> AcpSurfaceUpdate
+    where
+        F: Fn(&str) -> String,
+    {
+        let identity = self.allocate_identity("tool");
+        self.tools.insert(
+            id.clone(),
+            ToolSurfaceState {
+                segment_id: identity.segment_id,
+                sequence: identity.sequence,
+                revision: 0,
+                name,
+                args_summary,
+                detail_args,
+                output: String::new(),
+                success: None,
+                complete: false,
+            },
+        );
+        self.tool_update(&id, policy, redact)
+            .expect("tool exists after start")
+    }
+
+    fn ingest_tool_output<F>(
+        &mut self,
+        id: String,
+        text: String,
+        policy: SurfaceRedaction,
+        redact: &F,
+    ) -> Option<AcpSurfaceUpdate>
+    where
+        F: Fn(&str) -> String,
+    {
+        let state = self.tools.get_mut(&id)?;
+        state.output.push_str(&text);
+        state.revision += 1;
+        self.tool_update(&id, policy, redact)
+    }
+
+    fn ingest_tool_end<F>(
+        &mut self,
+        id: String,
+        success: bool,
+        result_summary: Option<String>,
+        detail_result: Option<String>,
+        policy: SurfaceRedaction,
+        redact: &F,
+    ) -> Option<AcpSurfaceUpdate>
+    where
+        F: Fn(&str) -> String,
+    {
+        let state = self.tools.get_mut(&id)?;
+        state.success = Some(success);
+        state.complete = true;
+        state.revision += 1;
+        for text in [result_summary, detail_result].into_iter().flatten() {
+            if !state.output.is_empty() {
+                state.output.push('\n');
+            }
+            state.output.push_str(&text);
+        }
+        self.tool_update(&id, policy, redact).map(|mut update| {
+            update.completed_segment_id = Some(update.segment.identity.segment_id.clone());
+            update
+        })
+    }
+
+    fn tool_update<F>(
+        &self,
+        event_tool_id: &str,
+        policy: SurfaceRedaction,
+        redact: &F,
+    ) -> Option<AcpSurfaceUpdate>
+    where
+        F: Fn(&str) -> String,
+    {
+        let state = self.tools.get(event_tool_id)?;
+        let output = (!state.output.is_empty()).then_some(state.output.as_str());
+        let projection =
+            ConversationSegmentProjection::new(ConversationSegmentKind::<&str, &Path>::Tool(
+                crate::tui::conversation_projection::ToolSegment {
+                    id: event_tool_id,
+                    name: state.name.as_str(),
+                    args_summary: state.args_summary.as_deref(),
+                    detail_args: state.detail_args.as_deref(),
+                    result_summary: output,
+                    detail_result: output,
+                    is_error: matches!(state.success, Some(false)),
+                    complete: state.complete,
+                    expanded: false,
+                },
+            ));
+        let identity = self.identity_for(state.segment_id.clone(), state.sequence, state.revision);
+        Some(AcpSurfaceUpdate {
+            segment: AcpConversationSegment::from_projection(identity, &projection, policy, redact),
+            completed_segment_id: None,
+        })
+    }
+
+    fn one_shot_lifecycle<F>(
+        &mut self,
+        prefix: &str,
+        icon: &'static str,
+        text: String,
+        policy: SurfaceRedaction,
+        redact: &F,
+    ) -> AcpSurfaceUpdate
+    where
+        F: Fn(&str) -> String,
+    {
+        let identity = self.allocate_identity(prefix);
+        let projection =
+            ConversationSegmentProjection::new(ConversationSegmentKind::<&str, &Path>::Lifecycle(
+                crate::tui::conversation_projection::LifecycleSegment {
+                    icon,
+                    text: text.as_str(),
+                },
+            ));
+        AcpSurfaceUpdate {
+            segment: AcpConversationSegment::from_projection(
+                identity.clone(),
+                &projection,
+                policy,
+                redact,
+            ),
+            completed_segment_id: Some(identity.segment_id),
+        }
+    }
+
+    fn complete_turn<F>(&mut self, policy: SurfaceRedaction, redact: &F) -> Vec<AcpSurfaceUpdate>
+    where
+        F: Fn(&str) -> String,
+    {
+        let mut updates = Vec::new();
+        if self.assistant_id.is_some() {
+            self.assistant_revision += 1;
+            updates.push(self.assistant_update(true, policy, redact));
+        }
+        updates
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +617,127 @@ mod tests {
 
     fn redact_secret(text: &str) -> String {
         text.replace("SECRET", "[REDACTED]")
+    }
+
+    #[test]
+    fn adapter_assigns_stable_assistant_identity_and_revisions() {
+        let mut adapter = AcpConversationSurfaceAdapter::with_turn_id("turn-1");
+        let first = adapter.ingest(
+            AcpConversationEvent::TextChunk("hello ".into()),
+            SurfaceRedaction::LocalUi,
+            redact_secret,
+        );
+        let second = adapter.ingest(
+            AcpConversationEvent::TextChunk("world".into()),
+            SurfaceRedaction::LocalUi,
+            redact_secret,
+        );
+        let complete = adapter.ingest(
+            AcpConversationEvent::TurnComplete,
+            SurfaceRedaction::LocalUi,
+            redact_secret,
+        );
+
+        assert_eq!(first[0].segment.identity.segment_id, "assistant-0");
+        assert_eq!(first[0].segment.identity.turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(first[0].segment.identity.sequence, 0);
+        assert_eq!(first[0].segment.identity.revision, 1);
+        assert_eq!(second[0].segment.identity.segment_id, "assistant-0");
+        assert_eq!(second[0].segment.identity.revision, 2);
+        assert_eq!(complete[0].segment.identity.segment_id, "assistant-0");
+        assert_eq!(complete[0].segment.identity.revision, 3);
+        assert_eq!(
+            complete[0].completed_segment_id.as_deref(),
+            Some("assistant-0")
+        );
+        assert!(complete[0].segment.complete);
+        match &second[0].segment.kind {
+            AcpConversationSegmentKind::Assistant { text, .. } => assert_eq!(text, "hello world"),
+            other => panic!("expected assistant DTO, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn adapter_assigns_tool_identity_and_suppresses_external_details() {
+        let mut adapter = AcpConversationSurfaceAdapter::new();
+        let start = adapter.ingest(
+            AcpConversationEvent::ToolStart {
+                id: "runtime-tool-id".into(),
+                name: "bash".into(),
+                args_summary: Some("echo SECRET".into()),
+                detail_args: Some("TOKEN=SECRET cargo check".into()),
+            },
+            SurfaceRedaction::ExternalClient,
+            redact_secret,
+        );
+        let output = adapter.ingest(
+            AcpConversationEvent::ToolOutput {
+                id: "runtime-tool-id".into(),
+                text: "line SECRET".into(),
+            },
+            SurfaceRedaction::ExternalClient,
+            redact_secret,
+        );
+        let end = adapter.ingest(
+            AcpConversationEvent::ToolEnd {
+                id: "runtime-tool-id".into(),
+                success: false,
+                result_summary: Some("failed SECRET".into()),
+                detail_result: Some("stack SECRET".into()),
+            },
+            SurfaceRedaction::ExternalClient,
+            redact_secret,
+        );
+
+        assert_eq!(start[0].segment.identity.segment_id, "tool-0");
+        assert_eq!(start[0].segment.identity.revision, 0);
+        assert_eq!(output[0].segment.identity.segment_id, "tool-0");
+        assert_eq!(output[0].segment.identity.revision, 1);
+        assert_eq!(end[0].segment.identity.segment_id, "tool-0");
+        assert_eq!(end[0].segment.identity.revision, 2);
+        assert_eq!(end[0].completed_segment_id.as_deref(), Some("tool-0"));
+        assert_eq!(
+            end[0].segment.tool_category.as_deref(),
+            Some("command_exec")
+        );
+        match &end[0].segment.kind {
+            AcpConversationSegmentKind::Tool {
+                args_summary,
+                detail_args,
+                result_summary,
+                detail_result,
+                is_error,
+                ..
+            } => {
+                assert_eq!(args_summary.as_deref(), Some("echo [REDACTED]"));
+                assert_eq!(detail_args, &None);
+                assert_eq!(
+                    result_summary.as_deref(),
+                    Some(
+                        "line [REDACTED]
+failed [REDACTED]
+stack [REDACTED]"
+                    )
+                );
+                assert_eq!(detail_result, &None);
+                assert!(*is_error);
+            }
+            other => panic!("expected tool DTO, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn adapter_ignores_unknown_tool_updates() {
+        let mut adapter = AcpConversationSurfaceAdapter::new();
+        let updates = adapter.ingest(
+            AcpConversationEvent::ToolOutput {
+                id: "missing".into(),
+                text: "orphan".into(),
+            },
+            SurfaceRedaction::LocalUi,
+            redact_secret,
+        );
+        assert!(updates.is_empty());
     }
 
     #[test]
