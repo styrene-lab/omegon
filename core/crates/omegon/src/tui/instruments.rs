@@ -14,14 +14,14 @@
 //!
 //! All use unified navy→teal→amber CIE L* perceptual color ramp.
 
-use super::instruments_projection::{
-    InferenceProjection, InstrumentProjection, ProjectInstrumentSurface, ToolActivityProjection,
-    ToolProjection, WorkerActivityProjection,
-};
 use super::theme::Theme;
 use super::widgets::visible_width;
 use crate::features::cleave::CleaveProgress;
 use crate::features::delegate::DelegateProgress;
+use crate::surfaces::instruments::{
+    InferenceProjection, InstrumentProjection, ProjectInstrumentSurface, ToolActivityProjection,
+    ToolProjection, WorkerActivityProjection,
+};
 use omegon_traits::ContextComposition;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};

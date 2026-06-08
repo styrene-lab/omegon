@@ -1,10 +1,15 @@
 //! TUI backing-state adapter for the shared footer/status surface projection.
 
 use super::footer::FooterData;
+use crate::settings::ContextClass;
 use crate::surfaces::footer::{
     ContextProjection, EngineProjection, FooterProjection, MemoryProjection, ProjectFooterSurface,
     SessionProjection, UsageSliceProjection, WorkspaceProjection,
 };
+
+fn project_context_class(class: ContextClass) -> String {
+    class.short().to_ascii_lowercase()
+}
 
 impl ProjectFooterSurface for FooterData {
     fn project_footer_surface(&self) -> FooterProjection {
@@ -26,8 +31,8 @@ impl ProjectFooterSurface for FooterData {
             context: ContextProjection {
                 percent: self.context_percent,
                 window: self.context_window,
-                class: format!("{:?}", self.context_class).to_ascii_lowercase(),
-                actual_class: format!("{:?}", self.actual_context_class).to_ascii_lowercase(),
+                class: project_context_class(self.context_class),
+                actual_class: project_context_class(self.actual_context_class),
                 estimated_tokens: self.estimated_tokens,
             },
             memory: MemoryProjection {

@@ -1,84 +1,15 @@
-//! Shared dashboard semantic projection types.
-//!
-//! These structs describe dashboard content without binding it to Ratatui tree,
-//! layout, or frame state. The current TUI dashboard state projects into this
-//! shape before rendering; ACP or future clients can derive protocol DTOs from
-//! the same semantic surface later.
+//! TUI backing-state adapter for the shared dashboard surface projection.
 
 use super::dashboard::{
-    ChangeSummary, DegradedNodeSummary, FocusedNodeSummary, NodeSummary, StatusCounts,
+    ChangeSummary, DashboardState, DegradedNodeSummary, FocusedNodeSummary, NodeSummary,
+    StatusCounts,
 };
 use crate::lifecycle::types::{IssueType, NodeStatus};
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct DashboardProjection {
-    pub focused_node: Option<FocusedNodeProjection>,
-    pub active_changes: Vec<ChangeProjection>,
-    pub status_counts: StatusCounts,
-    pub implementing_nodes: Vec<NodeProjection>,
-    pub actionable_nodes: Vec<NodeProjection>,
-    pub all_nodes: Vec<NodeProjection>,
-    pub degraded_nodes: Vec<DegradedNodeProjection>,
-    pub session: DashboardSessionProjection,
-    pub context: DashboardContextProjection,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct DashboardSessionProjection {
-    pub turns: u32,
-    pub tool_calls: u32,
-    pub compactions: u32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct DashboardContextProjection {
-    pub used_pct: f32,
-    pub window_k: usize,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct NodeProjection {
-    pub id: String,
-    pub title: String,
-    pub status: String,
-    pub open_questions: usize,
-    pub parent: Option<String>,
-    pub priority: Option<u8>,
-    pub issue_type: Option<String>,
-    pub openspec_change: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct FocusedNodeProjection {
-    pub id: String,
-    pub title: String,
-    pub status: String,
-    pub open_questions: usize,
-    pub assumptions: usize,
-    pub decisions: usize,
-    pub readiness: f32,
-    pub openspec_change: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct DegradedNodeProjection {
-    pub id: String,
-    pub title: String,
-    pub file_path: String,
-    pub reason: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChangeProjection {
-    pub name: String,
-    pub stage: String,
-    pub done_tasks: usize,
-    pub total_tasks: usize,
-}
-
-pub trait ProjectDashboardSurface {
-    fn project_dashboard_surface(&self) -> DashboardProjection;
-}
+use crate::surfaces::dashboard::{
+    ChangeProjection, DashboardContextProjection, DashboardProjection, DashboardSessionProjection,
+    DegradedNodeProjection, FocusedNodeProjection, NodeProjection, ProjectDashboardSurface,
+    StatusCountsProjection,
+};
 
 fn project_node_status(status: NodeStatus) -> &'static str {
     status.as_str()
@@ -91,6 +22,21 @@ fn project_issue_type(issue_type: IssueType) -> &'static str {
         IssueType::Task => "task",
         IssueType::Bug => "bug",
         IssueType::Chore => "chore",
+    }
+}
+
+impl From<&StatusCounts> for StatusCountsProjection {
+    fn from(counts: &StatusCounts) -> Self {
+        Self {
+            total: counts.total,
+            implementing: counts.implementing,
+            decided: counts.decided,
+            exploring: counts.exploring,
+            implemented: counts.implemented,
+            blocked: counts.blocked,
+            deferred: counts.deferred,
+            open_questions: counts.open_questions,
+        }
     }
 }
 
@@ -144,6 +90,29 @@ impl From<&ChangeSummary> for ChangeProjection {
             stage: change.stage.clone(),
             done_tasks: change.done_tasks,
             total_tasks: change.total_tasks,
+        }
+    }
+}
+
+impl ProjectDashboardSurface for DashboardState {
+    fn project_dashboard_surface(&self) -> DashboardProjection {
+        DashboardProjection {
+            focused_node: self.focused_node.as_ref().map(Into::into),
+            active_changes: self.active_changes.iter().map(Into::into).collect(),
+            status_counts: (&self.status_counts).into(),
+            implementing_nodes: self.implementing_nodes.iter().map(Into::into).collect(),
+            actionable_nodes: self.actionable_nodes.iter().map(Into::into).collect(),
+            all_nodes: self.all_nodes.iter().map(Into::into).collect(),
+            degraded_nodes: self.degraded_nodes.iter().map(Into::into).collect(),
+            session: DashboardSessionProjection {
+                turns: self.turns,
+                tool_calls: self.tool_calls,
+                compactions: self.compactions,
+            },
+            context: DashboardContextProjection {
+                used_pct: self.context_used_pct,
+                window_k: self.context_window_k,
+            },
         }
     }
 }

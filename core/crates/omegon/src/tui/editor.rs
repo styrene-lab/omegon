@@ -15,10 +15,10 @@ use ratatui::prelude::*;
 use ratatui_textarea::TextArea;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::editor_projection::{
+use super::theme::Theme;
+use crate::surfaces::editor::{
     EditorInlineTokenProjection, EditorModeProjection, EditorProjection, ProjectEditorSurface,
 };
-use super::theme::Theme;
 
 /// Split `text` into visual rows of at most `width` display columns using
 /// character-boundary wrapping (not word-boundary wrapping).
@@ -1090,8 +1090,8 @@ struct TokenSpan {
 
 #[cfg(test)]
 mod tests {
-    use super::super::editor_projection::{EditorInlineTokenProjection, EditorModeProjection};
     use super::*;
+    use crate::surfaces::editor::{EditorInlineTokenProjection, EditorModeProjection};
 
     #[test]
     fn editor_projects_input_surface() {

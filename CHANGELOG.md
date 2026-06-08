@@ -40,6 +40,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Move conversation semantic projection out of the TUI module into shared surfaces so ACP and TUI consume a sibling contract.
 - Clarify shared conversation surface semantics by renaming tool visual classification to semantic tool categories and adding projection boundary tests.
 - Move footer/status semantic projection types into shared surfaces while keeping the TUI FooterData adapter in the TUI layer.
+- Move dashboard, editor, instrument, and layout semantic projection types into shared surfaces while keeping TUI adapters/rendering in the TUI layer.
+- Replace footer context class Debug-string projection with explicit context-class mapping.
 
 ## [0.26.16] - 2026-06-07
 

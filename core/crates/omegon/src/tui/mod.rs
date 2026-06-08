@@ -17,20 +17,17 @@ pub mod conversation_render_projection;
 pub mod dashboard;
 pub mod dashboard_projection;
 pub mod editor;
-pub mod editor_projection;
 pub mod effects;
 pub mod footer;
 pub mod footer_projection;
 pub mod image;
 pub mod instruments;
-pub mod instruments_projection;
 pub mod model_catalog;
 pub mod segments;
 pub mod selector;
 pub mod spinner;
 pub mod splash;
 pub mod statusline;
-pub mod surface_projection;
 pub mod theme;
 pub mod tutorial;
 pub mod widget_renderer;
@@ -68,8 +65,8 @@ use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode, build_meta_tag};
-use self::surface_projection::UiSurfaces;
 use crate::surfaces::conversation::ToolCategory;
+use crate::surfaces::layout::UiSurfaces;
 
 /// Get current process RSS in megabytes (platform-specific).
 /// Uses getrusage(2) on macOS and /proc on Linux — no subprocess spawn.

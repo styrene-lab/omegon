@@ -17,10 +17,6 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::widgets::Scrollbar;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 
-use super::dashboard_projection::{
-    DashboardContextProjection, DashboardProjection, DashboardSessionProjection,
-    ProjectDashboardSurface,
-};
 use super::theme::Theme;
 use super::widgets;
 use crate::lifecycle::types::*;
@@ -339,29 +335,6 @@ pub struct ChangeSummary {
     pub stage: String,
     pub done_tasks: usize,
     pub total_tasks: usize,
-}
-
-impl ProjectDashboardSurface for DashboardState {
-    fn project_dashboard_surface(&self) -> DashboardProjection {
-        DashboardProjection {
-            focused_node: self.focused_node.as_ref().map(Into::into),
-            active_changes: self.active_changes.iter().map(Into::into).collect(),
-            status_counts: self.status_counts.clone(),
-            implementing_nodes: self.implementing_nodes.iter().map(Into::into).collect(),
-            actionable_nodes: self.actionable_nodes.iter().map(Into::into).collect(),
-            all_nodes: self.all_nodes.iter().map(Into::into).collect(),
-            degraded_nodes: self.degraded_nodes.iter().map(Into::into).collect(),
-            session: DashboardSessionProjection {
-                turns: self.turns,
-                tool_calls: self.tool_calls,
-                compactions: self.compactions,
-            },
-            context: DashboardContextProjection {
-                used_pct: self.context_used_pct,
-                window_k: self.context_window_k,
-            },
-        }
-    }
 }
 
 // ─── Rendering ──────────────────────────────────────────────────────
@@ -957,6 +930,7 @@ mod tests {
 
     use super::*;
     use crate::features::cleave::ChildProgress;
+    use crate::surfaces::dashboard::ProjectDashboardSurface;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
