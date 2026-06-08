@@ -25,6 +25,7 @@ pub mod image;
 pub mod instruments;
 pub mod layout_projection;
 pub mod model_catalog;
+pub mod permission_lane;
 pub mod segments;
 pub mod selector;
 pub mod spinner;
@@ -68,6 +69,9 @@ use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
 use self::layout_projection::{TuiLayoutInputs, plan_tui_layout};
+use self::permission_lane::{
+    format_permission_prompt, permission_response_for_key, render_permission_lane,
+};
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode, build_meta_tag};
 use crate::surfaces::layout::UiSurfaces;
 
@@ -1814,105 +1818,6 @@ fn render_slim_plan_panel(
         .style(Style::default().bg(bg))
         .wrap(Wrap { trim: false })
         .render(area, frame.buffer_mut());
-}
-
-fn permission_persist_scope_label(tool_name: &str) -> &'static str {
-    match tool_name {
-        "bash" | "terminal" => "always for this command",
-        "read" | "view" => "always for this file",
-        "edit" | "write" | "change" => "always for this path",
-        _ => "always for this operation",
-    }
-}
-
-fn permission_response_for_key(
-    code: KeyCode,
-    modifiers: KeyModifiers,
-) -> Option<omegon_traits::PermissionResponse> {
-    match code {
-        KeyCode::Char('y') | KeyCode::Char('Y') => Some(omegon_traits::PermissionResponse::Allow),
-        KeyCode::Char('A') => Some(omegon_traits::PermissionResponse::AlwaysAllow),
-        KeyCode::Char('a') if modifiers.contains(KeyModifiers::SHIFT) => {
-            Some(omegon_traits::PermissionResponse::AlwaysAllow)
-        }
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-            Some(omegon_traits::PermissionResponse::Deny)
-        }
-        _ => None,
-    }
-}
-
-fn render_permission_lane(
-    area: Rect,
-    frame: &mut Frame,
-    t: &dyn theme::Theme,
-    tool_name: &str,
-    target: &str,
-) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-    let bg = t.surface_bg();
-    let text_budget = area.width.saturating_sub(2) as usize;
-    let scope = permission_persist_scope_label(tool_name);
-    let mut lines = vec![Line::from(vec![
-        Span::styled(
-            "permission required · ",
-            Style::default()
-                .fg(t.warning())
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(tool_name, Style::default().fg(t.accent()).bg(bg)),
-        Span::styled(" · ", Style::default().fg(t.dim()).bg(bg)),
-        Span::styled(
-            crate::util::truncate(target, text_budget.saturating_sub(tool_name.len() + 24)),
-            Style::default().fg(t.fg()).bg(bg),
-        ),
-    ])];
-    if area.height > 1 {
-        lines.push(Line::from(vec![
-            Span::styled(
-                "y",
-                Style::default()
-                    .fg(t.warning())
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" once · ", Style::default().fg(t.dim()).bg(bg)),
-            Span::styled(
-                "n",
-                Style::default()
-                    .fg(t.warning())
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" deny · ", Style::default().fg(t.dim()).bg(bg)),
-            Span::styled(
-                "Shift+A",
-                Style::default()
-                    .fg(t.warning())
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(format!(" {scope}"), Style::default().fg(t.dim()).bg(bg)),
-        ]));
-    }
-    Paragraph::new(lines)
-        .style(Style::default().bg(bg))
-        .wrap(Wrap { trim: false })
-        .render(area, frame.buffer_mut());
-}
-
-fn format_permission_prompt(tool_name: &str, path: &str) -> String {
-    format!(
-        "Permission required\n\
-         Tool: {tool_name}\n\
-         Target: {path}\n\
-         Reason: grant required for this operation\n\
-         Persist: project profile permissions for always-allow\n\n\
-         [y] once   [Shift+A] always + save   [n/Esc] deny"
-    )
 }
 
 /// Compact one-line tool summary for focus mode headers.
@@ -10191,10 +10096,12 @@ mod slash_command_parsing_tests {
     use super::SlashResult;
     use super::TuiCommand;
     use super::canonical_slash_command;
+    use super::permission_lane::{
+        format_permission_prompt, permission_persist_scope_label, permission_response_for_key,
+    };
     use super::{
         PlanDisplayItem, PlanDisplaySnapshot, PlanDisplayStatus, SlimPlanContext,
-        SlimPlanHintState, dashboard, format_permission_prompt, permission_persist_scope_label,
-        permission_response_for_key, slim_completed_plan_hint_available, slim_operator_hint,
+        SlimPlanHintState, dashboard, slim_completed_plan_hint_available, slim_operator_hint,
         slim_pinned_plan_snapshot, slim_plan_rows,
     };
     use crate::lifecycle::types::NodeStatus;
