@@ -13,7 +13,6 @@
 pub mod bootstrap;
 pub mod conv_widget;
 pub mod conversation;
-pub mod conversation_projection;
 pub mod conversation_render_projection;
 pub mod dashboard;
 pub mod dashboard_projection;
@@ -63,7 +62,6 @@ use tokio_util::sync::CancellationToken;
 use omegon_traits::AgentEvent;
 
 use self::conversation::{ConversationView, Tab};
-use self::conversation_projection::ToolVisualKind;
 use self::conversation_render_projection::tool_visual_color;
 use self::dashboard::DashboardState;
 use self::editor::Editor;
@@ -71,6 +69,7 @@ use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode, build_meta_tag};
 use self::surface_projection::UiSurfaces;
+use crate::surfaces::conversation::ToolVisualKind;
 
 /// Get current process RSS in megabytes (platform-specific).
 /// Uses getrusage(2) on macOS and /proc on Linux — no subprocess spawn.
@@ -5043,13 +5042,13 @@ impl App {
 
             // ── Role + color resolution ─────────────────────────────
             let (role, sigil, color) = match segment.role() {
-                crate::tui::conversation_projection::SegmentRole::Operator => {
+                crate::surfaces::conversation::SegmentRole::Operator => {
                     ("operator", "OP", self.theme.accent())
                 }
-                crate::tui::conversation_projection::SegmentRole::Assistant => {
+                crate::surfaces::conversation::SegmentRole::Assistant => {
                     ("assistant", "Ω", self.theme.success())
                 }
-                crate::tui::conversation_projection::SegmentRole::Tool => {
+                crate::surfaces::conversation::SegmentRole::Tool => {
                     let kind = presentation.tool_visual.unwrap_or(ToolVisualKind::Generic);
                     (
                         kind.label(),
@@ -5057,16 +5056,16 @@ impl App {
                         tool_visual_color(kind, self.theme.as_ref()),
                     )
                 }
-                crate::tui::conversation_projection::SegmentRole::System => {
+                crate::surfaces::conversation::SegmentRole::System => {
                     ("system", "ℹ", self.theme.dim())
                 }
-                crate::tui::conversation_projection::SegmentRole::Lifecycle => {
+                crate::surfaces::conversation::SegmentRole::Lifecycle => {
                     ("event", "⚡", self.theme.dim())
                 }
-                crate::tui::conversation_projection::SegmentRole::Media => {
+                crate::surfaces::conversation::SegmentRole::Media => {
                     ("media", "◈", self.theme.accent_muted())
                 }
-                crate::tui::conversation_projection::SegmentRole::Separator => {
+                crate::surfaces::conversation::SegmentRole::Separator => {
                     ("separator", "", self.theme.dim())
                 }
             };
@@ -5159,7 +5158,7 @@ impl App {
 
             let max_lines = if is_selected || expanded { 100 } else { 40 };
             let content_color = match segment.role() {
-                crate::tui::conversation_projection::SegmentRole::Tool if !is_selected => {
+                crate::surfaces::conversation::SegmentRole::Tool if !is_selected => {
                     self.theme.muted()
                 }
                 _ => self.theme.fg(),
@@ -5476,13 +5475,13 @@ impl App {
                 continue;
             }
             let role = match segment.role() {
-                conversation_projection::SegmentRole::Operator => "## Operator",
-                conversation_projection::SegmentRole::Assistant => "## Assistant",
-                conversation_projection::SegmentRole::Tool => "## Tool",
-                conversation_projection::SegmentRole::System => "## System",
-                conversation_projection::SegmentRole::Lifecycle => "## Event",
-                conversation_projection::SegmentRole::Media => "## Media",
-                conversation_projection::SegmentRole::Separator => continue,
+                crate::surfaces::conversation::SegmentRole::Operator => "## Operator",
+                crate::surfaces::conversation::SegmentRole::Assistant => "## Assistant",
+                crate::surfaces::conversation::SegmentRole::Tool => "## Tool",
+                crate::surfaces::conversation::SegmentRole::System => "## System",
+                crate::surfaces::conversation::SegmentRole::Lifecycle => "## Event",
+                crate::surfaces::conversation::SegmentRole::Media => "## Media",
+                crate::surfaces::conversation::SegmentRole::Separator => continue,
             };
             let text = segment.export_text(mode);
             if !text.trim().is_empty() {

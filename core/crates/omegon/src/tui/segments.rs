@@ -11,14 +11,14 @@ use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap};
 use tui_syntax_highlight::Highlighter;
 use unicode_width::UnicodeWidthStr;
 
-use super::conversation_projection::{
+use super::conversation_render_projection::{SegmentRenderMetadata, tool_visual_color};
+use super::theme::Theme;
+use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
     ConversationSegmentProjection, ImageSegment, LifecycleSegment, ProjectConversationSegment,
     SegmentEmphasis, SegmentPresentation, SegmentRole, SystemSegment, ToolSegment, ToolVisualKind,
     UserSegment,
 };
-use super::conversation_render_projection::{SegmentRenderMetadata, tool_visual_color};
-use super::theme::Theme;
 
 const FILE_URL_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
     .add(b' ')

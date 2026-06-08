@@ -8,7 +8,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::tui::conversation_projection::{
+use crate::surfaces::conversation::{
     ConversationSegmentKind, ConversationSegmentProjection, SegmentRole, ToolVisualKind,
 };
 
@@ -225,11 +225,11 @@ fn role_name(role: SegmentRole) -> &'static str {
     }
 }
 
-fn emphasis_name(emphasis: crate::tui::conversation_projection::SegmentEmphasis) -> &'static str {
+fn emphasis_name(emphasis: crate::surfaces::conversation::SegmentEmphasis) -> &'static str {
     match emphasis {
-        crate::tui::conversation_projection::SegmentEmphasis::Strong => "strong",
-        crate::tui::conversation_projection::SegmentEmphasis::Normal => "normal",
-        crate::tui::conversation_projection::SegmentEmphasis::Muted => "muted",
+        crate::surfaces::conversation::SegmentEmphasis::Strong => "strong",
+        crate::surfaces::conversation::SegmentEmphasis::Normal => "normal",
+        crate::surfaces::conversation::SegmentEmphasis::Muted => "muted",
     }
 }
 
@@ -443,7 +443,7 @@ impl AcpConversationSurfaceAdapter {
             .unwrap_or_else(|| "assistant-0".to_string());
         let projection =
             ConversationSegmentProjection::new(ConversationSegmentKind::<&str, &Path>::Assistant(
-                crate::tui::conversation_projection::AssistantSegment {
+                crate::surfaces::conversation::AssistantSegment {
                     text: self.assistant_text.as_str(),
                     thinking: self.assistant_thinking.as_str(),
                     complete,
@@ -548,7 +548,7 @@ impl AcpConversationSurfaceAdapter {
         let output = (!state.output.is_empty()).then_some(state.output.as_str());
         let projection =
             ConversationSegmentProjection::new(ConversationSegmentKind::<&str, &Path>::Tool(
-                crate::tui::conversation_projection::ToolSegment {
+                crate::surfaces::conversation::ToolSegment {
                     id: event_tool_id,
                     name: state.name.as_str(),
                     args_summary: state.args_summary.as_deref(),
@@ -581,7 +581,7 @@ impl AcpConversationSurfaceAdapter {
         let identity = self.allocate_identity(prefix);
         let projection =
             ConversationSegmentProjection::new(ConversationSegmentKind::<&str, &Path>::Lifecycle(
-                crate::tui::conversation_projection::LifecycleSegment {
+                crate::surfaces::conversation::LifecycleSegment {
                     icon,
                     text: text.as_str(),
                 },
@@ -613,7 +613,7 @@ impl AcpConversationSurfaceAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::conversation_projection::{
+    use crate::surfaces::conversation::{
         AssistantSegment, ConversationSegmentKind, ImageSegment, ToolSegment,
     };
 

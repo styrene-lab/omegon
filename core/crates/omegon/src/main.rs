@@ -55,6 +55,7 @@ mod migrate;
 mod shadow_context;
 mod skills;
 mod smoke;
+mod surfaces;
 mod switch;
 mod task_spawn;
 mod tdd;

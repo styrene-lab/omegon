@@ -7,9 +7,9 @@
 
 use ratatui::prelude::*;
 
-use super::conversation_projection::ToolVisualKind;
 use super::segments::{Segment, SegmentRenderMode};
 use super::theme::Theme;
+use crate::surfaces::conversation::ToolVisualKind;
 
 pub fn tool_visual_color(kind: ToolVisualKind, t: &dyn Theme) -> Color {
     match kind {
