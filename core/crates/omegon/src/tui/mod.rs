@@ -20,6 +20,7 @@ pub mod dashboard_projection;
 pub mod editor;
 pub mod effects;
 pub mod footer;
+pub mod footer_projection;
 pub mod image;
 pub mod instruments;
 pub mod model_catalog;

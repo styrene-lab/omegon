@@ -13,6 +13,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
+use super::footer_projection::ProjectFooterSurface;
 use super::theme::Theme;
 use super::widgets;
 
@@ -38,22 +39,15 @@ pub struct StatusLine {
 impl StatusLine {
     /// Update fields from footer_data at the start of each draw cycle.
     pub fn sync_from_footer(&mut self, footer: &super::footer::FooterData) {
-        self.context_percent = footer.context_percent;
-        self.turn = footer.turn;
-        self.model_short = crate::settings::humanize_model_id(&footer.model_id);
-        self.session_input_tokens = footer.session_input_tokens;
-        self.session_output_tokens = footer.session_output_tokens;
-        self.cwd_basename = std::path::Path::new(&footer.cwd)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-        self.git_branch = footer.harness.git_branch.clone();
-        self.persona = footer
-            .harness
-            .active_persona
-            .as_ref()
-            .map(|p| p.name.clone());
+        let projection = footer.project_footer_surface();
+        self.context_percent = projection.context.percent;
+        self.turn = projection.session.turn;
+        self.model_short = projection.engine.model_short;
+        self.session_input_tokens = projection.session.session_input_tokens;
+        self.session_output_tokens = projection.session.session_output_tokens;
+        self.cwd_basename = projection.workspace.cwd_basename;
+        self.git_branch = projection.workspace.git_branch;
+        self.persona = projection.workspace.persona;
     }
 
     pub fn render(&self, area: Rect, frame: &mut Frame, t: &dyn Theme) {

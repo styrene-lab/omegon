@@ -8,6 +8,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 use unicode_width::UnicodeWidthChar;
 
+use super::footer_projection::ProjectFooterSurface;
 use super::model_catalog::ModelCatalog;
 use super::theme::Theme;
 use super::widgets::{self, GaugeConfig};
@@ -92,6 +93,10 @@ pub struct FooterData {
 }
 
 impl FooterData {
+    pub fn projection(&self) -> super::footer_projection::FooterProjection {
+        self.project_footer_surface()
+    }
+
     /// Update the harness status snapshot from a BusEvent::HarnessStatusChanged.
     pub fn update_harness(&mut self, status: HarnessStatus) {
         self.total_facts = status.memory.total_facts;
@@ -1154,6 +1159,58 @@ mod tests {
     use crate::usage::format_duration_compact;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+
+    #[test]
+    fn footer_projects_semantic_status_surface() {
+        let mut data = FooterData {
+            model_id: "anthropic:claude-sonnet-4-6".into(),
+            model_provider: "anthropic".into(),
+            context_percent: 37.5,
+            context_window: 200_000,
+            estimated_tokens: 75_000,
+            total_facts: 10,
+            injected_facts: 3,
+            working_memory: 4,
+            memory_tokens_est: 1200,
+            session_input_tokens: 100,
+            session_output_tokens: 200,
+            last_turn_input_tokens: 10,
+            last_turn_output_tokens: 20,
+            tool_calls: 5,
+            turn: 2,
+            compactions: 1,
+            cwd: "/tmp/omegon".into(),
+            is_oauth: true,
+            model_tier: "frontier".into(),
+            thinking_level: "medium".into(),
+            posture: "engineer".into(),
+            runtime_brand: "OM".into(),
+            principal_id: "operator".into(),
+            authorization: "trusted".into(),
+            provider_connected: true,
+            update_available: Some("0.27.1".into()),
+            sandbox: true,
+            ..Default::default()
+        };
+        data.harness.git_branch = Some("release/0.27".into());
+
+        let projection = data.projection();
+        assert_eq!(projection.engine.model_id, "anthropic:claude-sonnet-4-6");
+        assert_eq!(projection.engine.model_provider, "anthropic");
+        assert!(projection.engine.model_short.contains("sonnet"));
+        assert_eq!(projection.context.percent, 37.5);
+        assert_eq!(projection.context.window, 200_000);
+        assert_eq!(projection.memory.total_facts, 10);
+        assert_eq!(projection.memory.injected_facts, 3);
+        assert_eq!(projection.session.turn, 2);
+        assert_eq!(projection.session.tool_calls, 5);
+        assert_eq!(projection.workspace.cwd_basename, "omegon");
+        assert_eq!(
+            projection.workspace.git_branch.as_deref(),
+            Some("release/0.27")
+        );
+        assert!(projection.workspace.is_oauth);
+    }
 
     #[test]
     fn footer_renders_without_panic() {
