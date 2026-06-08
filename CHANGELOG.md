@@ -50,6 +50,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Extract permission lane rendering and key mapping into a dedicated TUI sub-surface module.
 - Extract slim plan snapshot rendering and hint policy into a dedicated TUI sub-surface module.
 - Extract extension modal and action prompt overlay rendering into a dedicated TUI sub-surface module.
+- Extract focus-mode conversation line projection and rendering into a dedicated TUI sub-surface module.
 
 ## [0.26.16] - 2026-06-07
 

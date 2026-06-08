@@ -20,6 +20,7 @@ pub mod dashboard_projection;
 pub mod editor;
 pub mod effects;
 pub mod extension_overlays;
+pub mod focus_view;
 pub mod footer;
 pub mod footer_projection;
 pub mod image;
@@ -57,7 +58,7 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -65,7 +66,6 @@ use omegon_traits::AgentEvent;
 
 use self::active_tool_stream::{ActiveToolStream, render_active_tool_stream_panel};
 use self::conversation::{ConversationView, Tab};
-use self::conversation_render_projection::segment_chrome;
 use self::dashboard::DashboardState;
 use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
@@ -74,7 +74,7 @@ use self::layout_projection::{TuiLayoutInputs, plan_tui_layout};
 use self::permission_lane::{
     format_permission_prompt, permission_response_for_key, render_permission_lane,
 };
-use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode, build_meta_tag};
+use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode};
 use self::slim_plan::{
     PlanDisplaySnapshot, SlimPlanContext, SlimPlanHintState, SlimTurnState, render_slim_plan_panel,
     slim_completed_plan_hint_available, slim_operator_hint, slim_pinned_plan_snapshot,
@@ -1387,38 +1387,6 @@ fn editor_height_for(editor: &Editor, main_area: Rect) -> u16 {
 
 /// Compact one-line tool summary for focus mode headers.
 /// "cargo test" for bash, "src/main.rs · 4→6 lines" for edit, etc.
-fn focus_tool_summary(name: &str, detail_args: Option<&str>) -> String {
-    let args = match detail_args {
-        Some(a) => a,
-        None => return name.to_string(),
-    };
-    match name {
-        "bash" => {
-            let cmd = args.lines().next().unwrap_or(args);
-            crate::util::truncate(cmd, 60)
-        }
-        "edit" | "change" => {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(args) {
-                let path = v
-                    .get("file")
-                    .or(v.get("path"))
-                    .and_then(|f| f.as_str())
-                    .unwrap_or("?");
-                crate::util::truncate(path, 50)
-            } else {
-                crate::util::truncate(args, 50)
-            }
-        }
-        "read" | "write" | "view" => {
-            let first = args.lines().next().unwrap_or(args);
-            crate::util::truncate(first, 50)
-        }
-        _ => {
-            let first = args.lines().next().unwrap_or(args);
-            crate::util::truncate(first, 40)
-        }
-    }
-}
 
 impl App {
     fn current_persona_state(&self) -> crate::settings::PersonaState {
@@ -4311,220 +4279,20 @@ impl App {
         self.editor_area = None;
         self.dashboard_area = None;
 
-        let viewport_height = area.height.saturating_sub(1);
-        let content_width = area.width.saturating_sub(1).max(1);
-        let selected = self.conversation.selected_or_focused_segment();
-
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        let segments = self.conversation.segments();
-        let mut last_turn: Option<u32> = None;
-
-        for (idx, segment) in segments.iter().enumerate() {
-            if matches!(segment.content, SegmentContent::TurnSeparator) {
-                continue;
-            }
-
-            // ── Turn boundary header ────────────────────────────────
-            if let Some(turn) = segment.meta.turn
-                && last_turn != Some(turn)
-            {
-                last_turn = Some(turn);
-                if !lines.is_empty() {
-                    let mut turn_spans: Vec<Span<'static>> = vec![
-                        Span::styled("─── ", Style::default().fg(self.theme.border_dim())),
-                        Span::styled(
-                            format!("turn {turn}"),
-                            Style::default()
-                                .fg(self.theme.accent_muted())
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ];
-                    if let Some(ctx) = segment.meta.context_percent.filter(|p| *p > 5.0) {
-                        let ctx_color = widgets::percent_color(ctx, self.theme.as_ref());
-                        turn_spans.push(Span::styled(
-                            format!(" · ctx:{ctx:.0}%"),
-                            Style::default().fg(ctx_color),
-                        ));
-                    }
-                    let fill_width = content_width.saturating_sub(40) as usize;
-                    turn_spans.push(Span::styled(
-                        format!(" {}", "─".repeat(fill_width)),
-                        Style::default().fg(self.theme.border_dim()),
-                    ));
-                    lines.push(Line::from(turn_spans));
-                }
-            }
-
-            let is_selected = selected == Some(idx);
-            let presentation = segment.presentation();
-
-            // ── Role + color resolution ─────────────────────────────
-            let chrome = segment_chrome(presentation, is_selected, self.theme.as_ref());
-            let role = chrome.role_label;
-            let sigil = chrome.sigil;
-            let color = chrome.role_color;
-
-            let timestamp: Option<String> = segment.meta.timestamp.and_then(|ts| {
-                chrono::DateTime::<chrono::Local>::from(ts)
-                    .format("%H:%M:%S")
-                    .to_string()
-                    .into()
-            });
-
-            // Gutter styling — colored `▎` left bar runs through the
-            // entire segment, creating a visual stripe that ties header
-            // to content. Selected segments use `▌` (thicker) + bold.
-            let gutter_char = if is_selected { "▌" } else { "▎" };
-            let gutter_style = Style::default().fg(color).add_modifier(if is_selected {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            });
-
-            // ── Header line ────────────────────────────────────────
-            let mut header_spans: Vec<Span<'static>> = vec![
-                Span::styled(gutter_char.to_string(), gutter_style),
-                Span::styled(
-                    format!(" {sigil} "),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(role.to_string(), Style::default().fg(color)),
-            ];
-
-            // Tool-specific summary
-            if let SegmentContent::ToolCard {
-                ref name,
-                ref detail_args,
-                ..
-            } = segment.content
-            {
-                let tool_summary = focus_tool_summary(name, detail_args.as_deref());
-                header_spans.push(Span::styled(
-                    format!(" · {tool_summary}"),
-                    Style::default().fg(self.theme.muted()),
-                ));
-            }
-
-            // Meta tag (model · provider · tier · thinking)
-            let meta = build_meta_tag(&segment.meta);
-            if !meta.is_empty() {
-                header_spans.push(Span::styled(
-                    format!("  {meta}"),
-                    Style::default().fg(self.theme.dim()),
-                ));
-            }
-
-            // Right-aligned: duration · tokens · timestamp
-            let mut right_parts: Vec<String> = Vec::new();
-            if let Some(ms) = segment.meta.duration_ms {
-                right_parts.push(segments::format_duration_compact(ms));
-            }
-            if let Some(tokens) = segment.meta.actual_tokens {
-                right_parts.push(tokens.format_compact());
-            }
-            if let Some(ref stamp) = timestamp {
-                right_parts.push(stamp.clone());
-            }
-            if !right_parts.is_empty() {
-                header_spans.push(Span::styled(
-                    format!("  {}", right_parts.join(" · ")),
-                    Style::default().fg(self.theme.dim()),
-                ));
-            }
-
-            lines.push(Line::from(header_spans));
-
-            // ── Content body with colored gutter ────────────────────
-            let mut content = segment.export_text(SegmentExportMode::Plaintext);
-            let expanded = matches!(
-                segment.content,
-                SegmentContent::ToolCard { expanded: true, .. }
-            );
-            let max_chars = if is_selected || expanded {
-                usize::MAX
-            } else {
-                2000
-            };
-            if content.chars().count() > max_chars {
-                content = crate::util::truncate(&content, 2000);
-                content.push_str("\n… truncated (Enter to expand)");
-            }
-
-            let max_lines = if is_selected || expanded { 100 } else { 40 };
-            let content_color = chrome.content_color;
-            // Every content line gets the colored gutter so the stripe
-            // runs continuously from header through footer.
-            for line in content.lines().take(max_lines) {
-                lines.push(Line::from(vec![
-                    Span::styled(gutter_char.to_string(), gutter_style),
-                    Span::styled(format!("  {line}"), Style::default().fg(content_color)),
-                ]));
-            }
-            let total_content_lines = content.lines().count();
-            if total_content_lines > max_lines {
-                lines.push(Line::from(vec![
-                    Span::styled(gutter_char.to_string(), gutter_style),
-                    Span::styled(
-                        format!("  ⋯ {} more lines", total_content_lines - max_lines),
-                        Style::default().fg(self.theme.dim()),
-                    ),
-                ]));
-            }
-
-            // Footer — colored corner closes the stripe
-            lines.push(Line::from(vec![
-                Span::styled("╰", Style::default().fg(color)),
-                Span::styled(
-                    if is_selected { "── ●" } else { "──" },
-                    Style::default().fg(color),
-                ),
-            ]));
-            lines.push(Line::default());
-        }
-        if lines.last().is_some_and(|line| line.spans.is_empty()) {
-            lines.pop();
-        }
-
-        let total_lines = lines.len() as u16;
-        let max_scroll = total_lines.saturating_sub(viewport_height);
+        let focus = focus_view::build_focus_lines(
+            self.conversation.segments(),
+            self.conversation.selected_or_focused_segment(),
+            area,
+            self.theme.as_ref(),
+        );
+        let total_lines = focus.lines.len() as u16;
+        let max_scroll = total_lines.saturating_sub(focus.viewport_height);
         if self.conversation.conv_state.scroll_offset > max_scroll {
             self.conversation.conv_state.scroll_offset = max_scroll;
         }
         self.conversation.conv_state.user_scrolled = self.conversation.conv_state.scroll_offset > 0;
         let top_line = max_scroll.saturating_sub(self.conversation.conv_state.scroll_offset);
-
-        let paragraph = Paragraph::new(lines)
-            .style(
-                Style::default()
-                    .fg(self.theme.fg())
-                    .bg(self.theme.surface_bg()),
-            )
-            .wrap(Wrap { trim: false })
-            .scroll((top_line, 0));
-        let text_area = Rect {
-            x: area.x,
-            y: area.y,
-            width: content_width,
-            height: viewport_height,
-        };
-        frame.render_widget(paragraph, text_area);
-
-        let overlay = Paragraph::new(
-            "↑/↓ scroll · PgUp/PgDn jump · Home/End · Enter expand · ^Y copy · Esc exit",
-        )
-        .style(
-            Style::default()
-                .fg(self.theme.dim())
-                .bg(self.theme.surface_bg()),
-        )
-        .alignment(Alignment::Center);
-        let overlay_area = Rect {
-            x: area.x,
-            y: area.bottom().saturating_sub(1),
-            width: area.width,
-            height: 1,
-        };
-        frame.render_widget(overlay, overlay_area);
+        focus_view::render_focus_lines(frame, area, self.theme.as_ref(), focus, top_line);
     }
 
     /// Show a transient toast notification.
