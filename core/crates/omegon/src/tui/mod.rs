@@ -59,13 +59,12 @@ use tokio_util::sync::CancellationToken;
 use omegon_traits::AgentEvent;
 
 use self::conversation::{ConversationView, Tab};
-use self::conversation_render_projection::tool_category_color;
+use self::conversation_render_projection::segment_chrome;
 use self::dashboard::DashboardState;
 use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode, build_meta_tag};
-use crate::surfaces::conversation::ToolCategory;
 use crate::surfaces::layout::UiSurfaces;
 
 /// Get current process RSS in megabytes (platform-specific).
@@ -5038,34 +5037,10 @@ impl App {
             let presentation = segment.presentation();
 
             // ── Role + color resolution ─────────────────────────────
-            let (role, sigil, color) = match segment.role() {
-                crate::surfaces::conversation::SegmentRole::Operator => {
-                    ("operator", "OP", self.theme.accent())
-                }
-                crate::surfaces::conversation::SegmentRole::Assistant => {
-                    ("assistant", "Ω", self.theme.success())
-                }
-                crate::surfaces::conversation::SegmentRole::Tool => {
-                    let kind = presentation.tool_category.unwrap_or(ToolCategory::Generic);
-                    (
-                        kind.label(),
-                        "⚙",
-                        tool_category_color(kind, self.theme.as_ref()),
-                    )
-                }
-                crate::surfaces::conversation::SegmentRole::System => {
-                    ("system", "ℹ", self.theme.dim())
-                }
-                crate::surfaces::conversation::SegmentRole::Lifecycle => {
-                    ("event", "⚡", self.theme.dim())
-                }
-                crate::surfaces::conversation::SegmentRole::Media => {
-                    ("media", "◈", self.theme.accent_muted())
-                }
-                crate::surfaces::conversation::SegmentRole::Separator => {
-                    ("separator", "", self.theme.dim())
-                }
-            };
+            let chrome = segment_chrome(presentation, is_selected, self.theme.as_ref());
+            let role = chrome.role_label;
+            let sigil = chrome.sigil;
+            let color = chrome.role_color;
 
             let timestamp: Option<String> = segment.meta.timestamp.and_then(|ts| {
                 chrono::DateTime::<chrono::Local>::from(ts)
@@ -5154,12 +5129,7 @@ impl App {
             }
 
             let max_lines = if is_selected || expanded { 100 } else { 40 };
-            let content_color = match segment.role() {
-                crate::surfaces::conversation::SegmentRole::Tool if !is_selected => {
-                    self.theme.muted()
-                }
-                _ => self.theme.fg(),
-            };
+            let content_color = chrome.content_color;
             // Every content line gets the colored gutter so the stripe
             // runs continuously from header through footer.
             for line in content.lines().take(max_lines) {
