@@ -8,6 +8,7 @@
 use super::dashboard::{
     ChangeSummary, DegradedNodeSummary, FocusedNodeSummary, NodeSummary, StatusCounts,
 };
+use crate::lifecycle::types::{IssueType, NodeStatus};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DashboardProjection {
@@ -79,18 +80,32 @@ pub trait ProjectDashboardSurface {
     fn project_dashboard_surface(&self) -> DashboardProjection;
 }
 
+fn project_node_status(status: NodeStatus) -> &'static str {
+    status.as_str()
+}
+
+fn project_issue_type(issue_type: IssueType) -> &'static str {
+    match issue_type {
+        IssueType::Epic => "epic",
+        IssueType::Feature => "feature",
+        IssueType::Task => "task",
+        IssueType::Bug => "bug",
+        IssueType::Chore => "chore",
+    }
+}
+
 impl From<&NodeSummary> for NodeProjection {
     fn from(node: &NodeSummary) -> Self {
         Self {
             id: node.id.clone(),
             title: node.title.clone(),
-            status: format!("{:?}", node.status).to_ascii_lowercase(),
+            status: project_node_status(node.status).to_string(),
             open_questions: node.open_questions,
             parent: node.parent.clone(),
             priority: node.priority,
             issue_type: node
                 .issue_type
-                .map(|kind| format!("{:?}", kind).to_ascii_lowercase()),
+                .map(|kind| project_issue_type(kind).to_string()),
             openspec_change: node.openspec_change.clone(),
         }
     }
@@ -101,7 +116,7 @@ impl From<&FocusedNodeSummary> for FocusedNodeProjection {
         Self {
             id: node.id.clone(),
             title: node.title.clone(),
-            status: format!("{:?}", node.status).to_ascii_lowercase(),
+            status: project_node_status(node.status).to_string(),
             open_questions: node.open_questions,
             assumptions: node.assumptions,
             decisions: node.decisions,

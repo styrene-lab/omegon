@@ -4,7 +4,7 @@
 //! footer cards or the slim status line. TUI renderers consume this projection;
 //! future protocol clients can derive their own DTOs from the same surface.
 
-use super::footer::{FooterData, SessionUsageSlice};
+use super::footer::FooterData;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FooterProjection {
@@ -13,7 +13,7 @@ pub struct FooterProjection {
     pub memory: MemoryProjection,
     pub session: SessionProjection,
     pub workspace: WorkspaceProjection,
-    pub usage_slices: Vec<SessionUsageSlice>,
+    pub usage_slices: Vec<UsageSliceProjection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +67,14 @@ pub struct WorkspaceProjection {
     pub git_branch: Option<String>,
     pub is_oauth: bool,
     pub persona: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageSliceProjection {
+    pub model_id: String,
+    pub provider: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
 }
 
 pub trait ProjectFooterSurface {
@@ -123,7 +131,16 @@ impl ProjectFooterSurface for FooterData {
                 is_oauth: self.is_oauth,
                 persona: self.harness.active_persona.as_ref().map(|p| p.name.clone()),
             },
-            usage_slices: self.session_usage_slices.clone(),
+            usage_slices: self
+                .session_usage_slices
+                .iter()
+                .map(|slice| UsageSliceProjection {
+                    model_id: slice.model_id.clone(),
+                    provider: slice.provider.clone(),
+                    input_tokens: slice.input_tokens,
+                    output_tokens: slice.output_tokens,
+                })
+                .collect(),
         }
     }
 }

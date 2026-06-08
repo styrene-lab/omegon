@@ -5,8 +5,6 @@
 
 use std::path::PathBuf;
 
-use super::editor::EditorMode;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorProjection {
     pub mode: EditorModeProjection,
@@ -33,18 +31,4 @@ pub enum EditorInlineTokenProjection {
 
 pub trait ProjectEditorSurface {
     fn project_editor_surface(&self, content_width: u16) -> EditorProjection;
-}
-
-pub fn project_editor_mode(mode: &EditorMode) -> EditorModeProjection {
-    match mode {
-        EditorMode::Normal => EditorModeProjection::Normal,
-        EditorMode::ReverseSearch { query, match_idx } => EditorModeProjection::ReverseSearch {
-            query: query.clone(),
-            has_match: match_idx.is_some(),
-        },
-        EditorMode::SecretInput { label, buffer } => EditorModeProjection::SecretInput {
-            label: label.clone(),
-            masked_len: buffer.chars().count(),
-        },
-    }
 }

@@ -16,7 +16,7 @@ use ratatui_textarea::TextArea;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::editor_projection::{
-    EditorInlineTokenProjection, EditorProjection, ProjectEditorSurface, project_editor_mode,
+    EditorInlineTokenProjection, EditorModeProjection, EditorProjection, ProjectEditorSurface,
 };
 use super::theme::Theme;
 
@@ -1037,7 +1037,7 @@ impl ProjectEditorSurface for Editor {
             .collect();
 
         EditorProjection {
-            mode: project_editor_mode(&self.mode),
+            mode: self.project_mode(),
             text: self.render_text(),
             is_empty: self.is_empty(),
             cursor_position: self.cursor_position(),
@@ -1049,6 +1049,20 @@ impl ProjectEditorSurface for Editor {
 }
 
 impl Editor {
+    fn project_mode(&self) -> EditorModeProjection {
+        match &self.mode {
+            EditorMode::Normal => EditorModeProjection::Normal,
+            EditorMode::ReverseSearch { query, match_idx } => EditorModeProjection::ReverseSearch {
+                query: query.clone(),
+                has_match: match_idx.is_some(),
+            },
+            EditorMode::SecretInput { label, buffer } => EditorModeProjection::SecretInput {
+                label: label.clone(),
+                masked_len: buffer.chars().count(),
+            },
+        }
+    }
+
     pub fn surface_projection(&self, content_width: u16) -> EditorProjection {
         self.project_editor_surface(content_width)
     }
