@@ -16,6 +16,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 
 ## [Unreleased]
 
+### Changed
+
+- Start decoupling TUI conversation segments by moving role/emphasis/tool visual projection types into a dedicated conversation projection module.
+
 ## [0.26.16] - 2026-06-07
 
 ### Added
