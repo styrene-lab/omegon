@@ -34,6 +34,7 @@ pub mod slim_plan;
 pub mod spinner;
 pub mod splash;
 pub mod statusline;
+pub mod tab_bar;
 pub mod theme;
 pub mod tutorial;
 pub mod widget_renderer;
@@ -1384,9 +1385,6 @@ fn editor_height_for(editor: &Editor, main_area: Rect) -> u16 {
     let max_editor = (main_area.height * 40 / 100).clamp(5, 20);
     (editor_rows + 2).clamp(3, max_editor) // +2 for border
 }
-
-/// Compact one-line tool summary for focus mode headers.
-/// "cargo test" for bash, "src/main.rs · 4→6 lines" for edit, etc.
 
 impl App {
     fn current_persona_state(&self) -> crate::settings::PersonaState {
@@ -3665,7 +3663,13 @@ impl App {
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(1), Constraint::Min(1)])
                 .split(conversation_area);
-            self.render_tab_bar(frame, conv_chunks[0]);
+            tab_bar::render_tab_bar(
+                frame,
+                conv_chunks[0],
+                self.theme.as_ref(),
+                &self.conversation.tabs.tabs,
+                self.conversation.tabs.active_tab,
+            );
             conv_chunks[1]
         } else {
             conversation_area
@@ -6520,51 +6524,6 @@ impl App {
         if self.history_idx.is_some() {
             self.history_down();
         }
-    }
-
-    /// Render tab bar showing all tabs, with active tab highlighted.
-    fn render_tab_bar(&self, frame: &mut Frame, area: Rect) {
-        use ratatui::text::{Line, Span};
-        use ratatui::widgets::Paragraph;
-
-        frame.render_widget(
-            Paragraph::new(Line::from("")).style(
-                Style::default()
-                    .bg(self.theme.surface_bg())
-                    .fg(self.theme.fg()),
-            ),
-            area,
-        );
-
-        let mut line_spans = vec![];
-        for (idx, tab) in self.conversation.tabs.tabs.iter().enumerate() {
-            if idx > 0 {
-                line_spans.push(Span::raw(" "));
-            }
-
-            let label = tab.label();
-            let is_active = idx == self.conversation.tabs.active_tab;
-
-            if is_active {
-                // Active tab: reverse video
-                line_spans.push(Span::styled(
-                    format!(" {} ", label),
-                    ratatui::style::Style::default()
-                        .bg(ratatui::style::Color::Cyan)
-                        .fg(ratatui::style::Color::Black),
-                ));
-            } else {
-                // Inactive tab: dim
-                line_spans.push(Span::styled(
-                    format!(" {} ", label),
-                    ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
-                ));
-            }
-        }
-
-        let line = Line::from(line_spans);
-        let paragraph = Paragraph::new(line);
-        frame.render_widget(paragraph, area);
     }
 
     fn handle_agent_event(&mut self, event: AgentEvent) {
