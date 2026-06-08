@@ -14,6 +14,7 @@ pub mod bootstrap;
 pub mod conv_widget;
 pub mod conversation;
 pub mod conversation_projection;
+pub mod conversation_render_projection;
 pub mod dashboard;
 pub mod editor;
 pub mod effects;

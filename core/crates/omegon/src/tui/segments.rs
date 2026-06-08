@@ -15,6 +15,7 @@ use super::conversation_projection::{
     SegmentEmphasis, SegmentPresentation, SegmentRole, ToolVisualKind, presentation_for_role,
     tool_visual_kind_for_name,
 };
+use super::conversation_render_projection::SegmentRenderMetadata;
 use super::theme::Theme;
 
 const FILE_URL_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
@@ -1229,6 +1230,25 @@ impl Segment {
             meta: SegmentMeta::default(),
             content: SegmentContent::TurnSeparator,
         }
+    }
+}
+
+impl SegmentRenderMetadata for Segment {
+    fn is_live_render_segment(&self) -> bool {
+        matches!(
+            self.content,
+            SegmentContent::AssistantText {
+                complete: false,
+                ..
+            } | SegmentContent::ToolCard {
+                complete: false,
+                ..
+            }
+        )
+    }
+
+    fn is_image_render_segment(&self) -> bool {
+        matches!(self.content, SegmentContent::Image { .. })
     }
 }
 

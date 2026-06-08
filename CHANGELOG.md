@@ -19,6 +19,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 ### Changed
 
 - Start decoupling TUI conversation segments by moving role/emphasis/tool visual projection types into a dedicated conversation projection module.
+- Add parameterized conversation segment projection structs for user, assistant, tool, system, lifecycle, image, and separator segment types.
+- Add Ratatui-facing conversation render projection traits so widget measurement/rendering can target render metadata instead of matching segment internals.
 
 ## [0.26.16] - 2026-06-07
 

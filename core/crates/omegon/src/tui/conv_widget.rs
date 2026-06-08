@@ -7,7 +7,12 @@
 
 use ratatui::prelude::*;
 
-use super::segments::{Segment, SegmentContent, SegmentRenderMode};
+use super::conversation_render_projection::{
+    SegmentMeasure, SegmentRender, SegmentRenderContext, SegmentRenderMetadata,
+};
+#[cfg(test)]
+use super::segments::SegmentContent;
+use super::segments::{Segment, SegmentRenderMode};
 use super::theme::Theme;
 
 /// Scroll state for the conversation widget.
@@ -78,22 +83,22 @@ impl ConvState {
         t: &dyn Theme,
         mode: SegmentRenderMode,
     ) {
-        self.ensure_heights_with_scroll_state(segments, width, t, self.user_scrolled, mode);
+        let ctx = SegmentRenderContext::new(t, mode);
+        self.ensure_heights_with_scroll_state(segments, width, &ctx, self.user_scrolled);
     }
 
     fn ensure_heights_with_scroll_state(
         &mut self,
         segments: &[Segment],
         width: u16,
-        t: &dyn Theme,
+        ctx: &SegmentRenderContext<'_>,
         user_scrolled: bool,
-        mode: SegmentRenderMode,
     ) {
         // Full recompute if width changed
-        if width != self.cached_width || self.cached_mode != Some(mode) {
+        if width != self.cached_width || self.cached_mode != Some(ctx.mode) {
             self.heights.clear();
             self.cached_width = width;
-            self.cached_mode = Some(mode);
+            self.cached_mode = Some(ctx.mode);
             self.cached_count = 0;
         }
 
@@ -109,29 +114,20 @@ impl ConvState {
         // cached height to preserve the operator's scroll anchor; completed
         // tails must be measured again or a final assistant response can look
         // hard-truncated after the turn is marked done.
-        let last_is_live = segments.last().is_some_and(|segment| {
-            matches!(
-                segment.content,
-                SegmentContent::AssistantText {
-                    complete: false,
-                    ..
-                } | SegmentContent::ToolCard {
-                    complete: false,
-                    ..
-                }
-            )
-        });
+        let last_is_live = segments
+            .last()
+            .is_some_and(SegmentRenderMetadata::is_live_render_segment);
         if !segments.is_empty()
             && self.cached_count == segments.len()
             && (!user_scrolled || !last_is_live)
         {
             let last = segments.len() - 1;
-            self.heights[last] = segments[last].height_in_mode(width, t, mode);
+            self.heights[last] = segments[last].height_in_context(width, ctx);
         }
 
         // Compute any new segments
         while self.cached_count < segments.len() {
-            let h = segments[self.cached_count].height_in_mode(width, t, mode);
+            let h = segments[self.cached_count].height_in_context(width, ctx);
             if self.cached_count < self.heights.len() {
                 self.heights[self.cached_count] = h;
             } else {
@@ -183,7 +179,7 @@ impl ConvState {
                 break;
             }
 
-            if matches!(segment.content, SegmentContent::Image { .. }) && seg_top >= top_offset {
+            if segment.is_image_render_segment() && seg_top >= top_offset {
                 let render_y = viewport.y + (seg_top - top_offset);
                 let available_height = viewport.bottom().saturating_sub(render_y);
                 if available_height > 3 {
@@ -329,14 +325,10 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                     width: area.width,
                     height: seg_height.min(available_height),
                 };
-                segment.render_with_pinned(
-                    seg_area,
-                    buf,
-                    self.theme,
-                    self.mode,
-                    self.density,
-                    self.pinned_segment == Some(i),
-                );
+                let render_ctx = SegmentRenderContext::new(self.theme, self.mode)
+                    .with_density(self.density)
+                    .with_pinned(self.pinned_segment == Some(i));
+                segment.render_in_context(seg_area, buf, &render_ctx);
             } else {
                 // Segment starts ABOVE the viewport — partially visible.
                 // Render into a temp buffer at full size, then copy the
@@ -360,14 +352,10 @@ impl<'a> StatefulWidget for ConversationWidget<'a> {
                         cell.set_fg(fg);
                     }
                 }
-                segment.render_with_pinned(
-                    temp_area,
-                    &mut temp_buf,
-                    self.theme,
-                    self.mode,
-                    self.density,
-                    self.pinned_segment == Some(i),
-                );
+                let render_ctx = SegmentRenderContext::new(self.theme, self.mode)
+                    .with_density(self.density)
+                    .with_pinned(self.pinned_segment == Some(i));
+                segment.render_in_context(temp_area, &mut temp_buf, &render_ctx);
 
                 // Copy the visible portion from temp_buf to main buf
                 for row in 0..visible_rows {
@@ -528,13 +516,8 @@ mod tests {
         state.cached_mode = Some(SegmentRenderMode::Full);
         state.user_scrolled = true;
 
-        state.ensure_heights_with_scroll_state(
-            &segments,
-            40,
-            &Alpharius,
-            true,
-            SegmentRenderMode::Full,
-        );
+        let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Full);
+        state.ensure_heights_with_scroll_state(&segments, 40, &ctx, true);
         assert_eq!(
             state.heights[0], 7,
             "detached viewport should preserve cached tail height instead of remeasuring it"
@@ -559,13 +542,8 @@ mod tests {
         state.cached_mode = Some(SegmentRenderMode::Slim);
         state.user_scrolled = true;
 
-        state.ensure_heights_with_scroll_state(
-            &segments,
-            20,
-            &Alpharius,
-            true,
-            SegmentRenderMode::Slim,
-        );
+        let ctx = SegmentRenderContext::new(&Alpharius, SegmentRenderMode::Slim);
+        state.ensure_heights_with_scroll_state(&segments, 20, &ctx, true);
         assert!(
             state.heights[0] > 1,
             "completed detached tail must be remeasured so it cannot look truncated"
