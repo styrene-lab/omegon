@@ -39,6 +39,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Centralize ACP conversation surface extension metadata constants to keep initialize advertisements and notifications aligned.
 - Move conversation semantic projection out of the TUI module into shared surfaces so ACP and TUI consume a sibling contract.
 - Clarify shared conversation surface semantics by renaming tool visual classification to semantic tool categories and adding projection boundary tests.
+- Move footer/status semantic projection types into shared surfaces while keeping the TUI FooterData adapter in the TUI layer.
 
 ## [0.26.16] - 2026-06-07
 

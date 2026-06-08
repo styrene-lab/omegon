@@ -13,9 +13,9 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-use super::footer_projection::ProjectFooterSurface;
 use super::theme::Theme;
 use super::widgets;
+use crate::surfaces::footer::ProjectFooterSurface;
 
 #[derive(Debug, Default)]
 pub struct StatusLine {

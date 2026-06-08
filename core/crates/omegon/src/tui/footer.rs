@@ -8,10 +8,10 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 use unicode_width::UnicodeWidthChar;
 
-use super::footer_projection::ProjectFooterSurface;
 use super::model_catalog::ModelCatalog;
 use super::theme::Theme;
 use super::widgets::{self, GaugeConfig};
+use crate::surfaces::footer::ProjectFooterSurface;
 
 use crate::settings::ContextClass;
 use crate::status::HarnessStatus;
@@ -93,7 +93,7 @@ pub struct FooterData {
 }
 
 impl FooterData {
-    pub fn projection(&self) -> super::footer_projection::FooterProjection {
+    pub fn projection(&self) -> crate::surfaces::footer::FooterProjection {
         self.project_footer_surface()
     }
 
