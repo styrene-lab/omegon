@@ -48,6 +48,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Extract slim/full TUI surface area allocation into a dedicated layout projection seam.
 - Extract active tool stream rendering into a dedicated TUI sub-surface module.
 - Extract permission lane rendering and key mapping into a dedicated TUI sub-surface module.
+- Extract slim plan snapshot rendering and hint policy into a dedicated TUI sub-surface module.
 
 ## [0.26.16] - 2026-06-07
 
