@@ -1,8 +1,13 @@
-//! Conversation projection types shared by TUI segment rendering surfaces.
+//! Shared semantic conversation surface projection.
 //!
-//! This module is the first seam between conversation data (`SegmentContent`) and
-//! terminal rendering. It owns presentation classification that can be reasoned
-//! about without mutating the underlying conversation state.
+//! This module is renderer- and transport-neutral. It describes conversation
+//! segments in terms that TUI renderers, ACP DTO adapters, exports, and future
+//! clients can consume without depending on Ratatui, terminal styling, or ACP
+//! wire types.
+//!
+//! Keep this layer semantic: roles, segment payloads, completion state, and tool
+//! categories belong here; colors, protocol field names, redaction policy, and
+//! widget layout belong in downstream adapters.
 
 use std::path::{Path, PathBuf};
 
@@ -24,12 +29,16 @@ pub enum SegmentEmphasis {
     Muted,
 }
 
+/// Semantic presentation hints common to all surface adapters.
+///
+/// `tool_category` is intentionally not a color/style. Renderers map it to
+/// visual treatment; protocol adapters map it to metadata strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SegmentPresentation {
     pub role: SegmentRole,
     pub sigil: &'static str,
     pub emphasis: SegmentEmphasis,
-    pub tool_visual: Option<ToolVisualKind>,
+    pub tool_category: Option<ToolCategory>,
 }
 
 /// Typed, presentation-ready segment projection.
@@ -52,9 +61,9 @@ where
     TText: AsRef<str>,
 {
     pub fn new(kind: ConversationSegmentKind<TText, TPath>) -> Self {
-        let tool_visual = kind.tool_visual_kind();
+        let tool_category = kind.tool_category();
         Self {
-            presentation: presentation_for_role(kind.role(), tool_visual),
+            presentation: presentation_for_role(kind.role(), tool_category),
             kind,
         }
     }
@@ -94,9 +103,9 @@ impl<TText, TPath> ConversationSegmentKind<TText, TPath>
 where
     TText: AsRef<str>,
 {
-    pub fn tool_visual_kind(&self) -> Option<ToolVisualKind> {
+    pub fn tool_category(&self) -> Option<ToolCategory> {
         match self {
-            Self::Tool(tool) => Some(tool_visual_kind_for_name(tool.name.as_ref())),
+            Self::Tool(tool) => Some(tool_category_for_name(tool.name.as_ref())),
             _ => None,
         }
     }
@@ -158,8 +167,12 @@ pub type BorrowedConversationSegmentProjection<'a> =
 
 pub type OwnedConversationSegmentProjection = ConversationSegmentProjection<String, PathBuf>;
 
+/// Semantic category for known tool families.
+///
+/// This is shared classification, not presentation. TUI maps it to colors and
+/// labels; ACP maps it to stable metadata strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolVisualKind {
+pub enum ToolCategory {
     CommandExec,
     FileRead,
     FileMutation,
@@ -169,7 +182,7 @@ pub enum ToolVisualKind {
     Generic,
 }
 
-impl ToolVisualKind {
+impl ToolCategory {
     /// Short label for focus-mode display.
     pub fn label(&self) -> &'static str {
         match self {
@@ -184,66 +197,66 @@ impl ToolVisualKind {
     }
 }
 
-pub fn tool_visual_kind_for_name(name: &str) -> ToolVisualKind {
+pub fn tool_category_for_name(name: &str) -> ToolCategory {
     match name {
-        "bash" => ToolVisualKind::CommandExec,
-        "read" | "view" => ToolVisualKind::FileRead,
-        "write" | "edit" | "change" => ToolVisualKind::FileMutation,
+        "bash" => ToolCategory::CommandExec,
+        "read" | "view" => ToolCategory::FileRead,
+        "write" | "edit" | "change" => ToolCategory::FileMutation,
         "design_tree" | "design_tree_update" | "openspec_manage" | "lifecycle_doctor" => {
-            ToolVisualKind::DesignTree
+            ToolCategory::DesignTree
         }
-        name if name.starts_with("memory_") => ToolVisualKind::Memory,
-        "web_search" => ToolVisualKind::Search,
-        _ => ToolVisualKind::Generic,
+        name if name.starts_with("memory_") => ToolCategory::Memory,
+        "web_search" => ToolCategory::Search,
+        _ => ToolCategory::Generic,
     }
 }
 
 pub fn presentation_for_role(
     role: SegmentRole,
-    tool_visual: Option<ToolVisualKind>,
+    tool_category: Option<ToolCategory>,
 ) -> SegmentPresentation {
     match role {
         SegmentRole::Operator => SegmentPresentation {
             role,
             sigil: "OP",
             emphasis: SegmentEmphasis::Strong,
-            tool_visual: None,
+            tool_category: None,
         },
         SegmentRole::Assistant => SegmentPresentation {
             role,
             sigil: "Ω",
             emphasis: SegmentEmphasis::Normal,
-            tool_visual: None,
+            tool_category: None,
         },
         SegmentRole::Tool => SegmentPresentation {
             role,
             sigil: "⚙",
             emphasis: SegmentEmphasis::Normal,
-            tool_visual,
+            tool_category,
         },
         SegmentRole::System => SegmentPresentation {
             role,
             sigil: "ℹ",
             emphasis: SegmentEmphasis::Muted,
-            tool_visual: None,
+            tool_category: None,
         },
         SegmentRole::Lifecycle => SegmentPresentation {
             role,
             sigil: "⚡",
             emphasis: SegmentEmphasis::Muted,
-            tool_visual: None,
+            tool_category: None,
         },
         SegmentRole::Media => SegmentPresentation {
             role,
             sigil: "◈",
             emphasis: SegmentEmphasis::Normal,
-            tool_visual: None,
+            tool_category: None,
         },
         SegmentRole::Separator => SegmentPresentation {
             role,
             sigil: "",
             emphasis: SegmentEmphasis::Muted,
-            tool_visual: None,
+            tool_category: None,
         },
     }
 }
@@ -265,7 +278,7 @@ mod tests {
         assert_eq!(projection.role(), SegmentRole::Assistant);
         assert_eq!(projection.presentation.sigil, "Ω");
         assert_eq!(projection.presentation.emphasis, SegmentEmphasis::Normal);
-        assert_eq!(projection.presentation.tool_visual, None);
+        assert_eq!(projection.presentation.tool_category, None);
     }
 
     #[test]
@@ -286,9 +299,24 @@ mod tests {
 
         assert_eq!(projection.role(), SegmentRole::Tool);
         assert_eq!(
-            projection.presentation.tool_visual,
-            Some(ToolVisualKind::CommandExec)
+            projection.presentation.tool_category,
+            Some(ToolCategory::CommandExec)
         );
+    }
+
+    #[test]
+    fn non_tool_roles_ignore_supplied_tool_category() {
+        let presentation =
+            presentation_for_role(SegmentRole::Assistant, Some(ToolCategory::Memory));
+        assert_eq!(presentation.tool_category, None);
+        assert_eq!(presentation.role, SegmentRole::Assistant);
+    }
+
+    #[test]
+    fn tool_presentation_preserves_supplied_category() {
+        let presentation = presentation_for_role(SegmentRole::Tool, Some(ToolCategory::Memory));
+        assert_eq!(presentation.tool_category, Some(ToolCategory::Memory));
+        assert_eq!(presentation.sigil, "⚙");
     }
 
     #[test]

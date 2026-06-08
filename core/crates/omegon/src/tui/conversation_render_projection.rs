@@ -9,17 +9,17 @@ use ratatui::prelude::*;
 
 use super::segments::{Segment, SegmentRenderMode};
 use super::theme::Theme;
-use crate::surfaces::conversation::ToolVisualKind;
+use crate::surfaces::conversation::ToolCategory;
 
-pub fn tool_visual_color(kind: ToolVisualKind, t: &dyn Theme) -> Color {
+pub fn tool_visual_color(kind: ToolCategory, t: &dyn Theme) -> Color {
     match kind {
-        ToolVisualKind::CommandExec => t.warning(),
-        ToolVisualKind::FileRead => t.accent_muted(),
-        ToolVisualKind::FileMutation => t.caution(),
-        ToolVisualKind::DesignTree => t.accent_bright(),
-        ToolVisualKind::Memory => t.accent(),
-        ToolVisualKind::Search => t.accent_muted(),
-        ToolVisualKind::Generic => t.border_dim(),
+        ToolCategory::CommandExec => t.warning(),
+        ToolCategory::FileRead => t.accent_muted(),
+        ToolCategory::FileMutation => t.caution(),
+        ToolCategory::DesignTree => t.accent_bright(),
+        ToolCategory::Memory => t.accent(),
+        ToolCategory::Search => t.accent_muted(),
+        ToolCategory::Generic => t.border_dim(),
     }
 }
 

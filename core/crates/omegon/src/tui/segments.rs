@@ -16,7 +16,7 @@ use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
     ConversationSegmentProjection, ImageSegment, LifecycleSegment, ProjectConversationSegment,
-    SegmentEmphasis, SegmentPresentation, SegmentRole, SystemSegment, ToolSegment, ToolVisualKind,
+    SegmentEmphasis, SegmentPresentation, SegmentRole, SystemSegment, ToolCategory, ToolSegment,
     UserSegment,
 };
 
@@ -1467,7 +1467,7 @@ impl Segment {
                     live_partial.as_deref(),
                     *started_at,
                     &self.meta,
-                    presentation.tool_visual,
+                    presentation.tool_category,
                     area,
                     buf,
                     t,
@@ -2237,7 +2237,7 @@ fn render_tool_card(
     live_partial: Option<&omegon_traits::PartialToolResult>,
     started_at: Option<std::time::Instant>,
     meta: &SegmentMeta,
-    tool_visual: Option<ToolVisualKind>,
+    tool_category: Option<ToolCategory>,
     area: Rect,
     buf: &mut Buffer,
     t: &dyn Theme,
@@ -2292,10 +2292,10 @@ fn render_tool_card(
     // for the same reason as the instruments-panel pass. Both `✗` and
     // `▸` are already safe.
     //
-    // Completed tools use categorical color from ToolVisualKind so
+    // Completed tools use categorical color from ToolCategory so
     // operators can scan the timeline by tool type — file mutations
     // are lime, shell execs are orange, reads are teal, etc.
-    let kind_color = tool_visual
+    let kind_color = tool_category
         .map(|k| tool_visual_color(k, t))
         .unwrap_or(t.accent_muted());
     let (status_icon, status_color, border_color, bg) = if is_error {
@@ -4745,8 +4745,8 @@ mod tests {
         let projection = seg.projection();
         assert_eq!(projection.role(), SegmentRole::Tool);
         assert_eq!(
-            projection.presentation.tool_visual,
-            Some(ToolVisualKind::CommandExec)
+            projection.presentation.tool_category,
+            Some(ToolCategory::CommandExec)
         );
         match projection.kind {
             ConversationSegmentKind::Tool(tool) => {
@@ -4810,33 +4810,27 @@ mod tests {
         assert_eq!(seg.role(), SegmentRole::Assistant);
         assert_eq!(seg.presentation().sigil, "Ω");
         assert_eq!(seg.presentation().emphasis, SegmentEmphasis::Normal);
-        assert_eq!(seg.presentation().tool_visual, None);
+        assert_eq!(seg.presentation().tool_category, None);
     }
 
     #[test]
-    fn tool_visual_kinds_are_classified() {
+    fn tool_categories_are_classified() {
         let cases = [
-            (Segment::tool_card("1", "read"), ToolVisualKind::FileRead),
-            (Segment::tool_card("1", "bash"), ToolVisualKind::CommandExec),
+            (Segment::tool_card("1", "read"), ToolCategory::FileRead),
+            (Segment::tool_card("1", "bash"), ToolCategory::CommandExec),
             (
                 Segment::tool_card("1", "design_tree"),
-                ToolVisualKind::DesignTree,
+                ToolCategory::DesignTree,
             ),
             (
                 Segment::tool_card("1", "memory_query"),
-                ToolVisualKind::Memory,
+                ToolCategory::Memory,
             ),
-            (
-                Segment::tool_card("1", "web_search"),
-                ToolVisualKind::Search,
-            ),
-            (
-                Segment::tool_card("1", "write"),
-                ToolVisualKind::FileMutation,
-            ),
+            (Segment::tool_card("1", "web_search"), ToolCategory::Search),
+            (Segment::tool_card("1", "write"), ToolCategory::FileMutation),
         ];
         for (seg, expected) in cases {
-            assert_eq!(seg.presentation().tool_visual, Some(expected));
+            assert_eq!(seg.presentation().tool_category, Some(expected));
         }
     }
 

@@ -69,7 +69,7 @@ use self::footer::{FooterData, SessionUsageSlice};
 use self::instruments::InstrumentPanel;
 use self::segments::{SegmentContent, SegmentExportMode, SegmentRenderMode, build_meta_tag};
 use self::surface_projection::UiSurfaces;
-use crate::surfaces::conversation::ToolVisualKind;
+use crate::surfaces::conversation::ToolCategory;
 
 /// Get current process RSS in megabytes (platform-specific).
 /// Uses getrusage(2) on macOS and /proc on Linux — no subprocess spawn.
@@ -5049,7 +5049,7 @@ impl App {
                     ("assistant", "Ω", self.theme.success())
                 }
                 crate::surfaces::conversation::SegmentRole::Tool => {
-                    let kind = presentation.tool_visual.unwrap_or(ToolVisualKind::Generic);
+                    let kind = presentation.tool_category.unwrap_or(ToolCategory::Generic);
                     (
                         kind.label(),
                         "⚙",

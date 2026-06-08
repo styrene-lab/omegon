@@ -38,6 +38,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Add ACP initialize regression coverage for Flynt-enabled and Zed-disabled conversation surface metadata.
 - Centralize ACP conversation surface extension metadata constants to keep initialize advertisements and notifications aligned.
 - Move conversation semantic projection out of the TUI module into shared surfaces so ACP and TUI consume a sibling contract.
+- Clarify shared conversation surface semantics by renaming tool visual classification to semantic tool categories and adding projection boundary tests.
 
 ## [0.26.16] - 2026-06-07
 

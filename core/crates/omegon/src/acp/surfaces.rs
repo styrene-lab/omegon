@@ -9,7 +9,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::surfaces::conversation::{
-    ConversationSegmentKind, ConversationSegmentProjection, SegmentRole, ToolVisualKind,
+    ConversationSegmentKind, ConversationSegmentProjection, SegmentRole, ToolCategory,
 };
 
 pub const ACP_SURFACE_SCHEMA_VERSION: u32 = 1;
@@ -125,7 +125,7 @@ impl AcpConversationSegment {
             emphasis: emphasis_name(projection.presentation.emphasis).to_string(),
             tool_category: projection
                 .presentation
-                .tool_visual
+                .tool_category
                 .map(|kind| tool_category_name(kind).to_string()),
             complete: segment_complete(&projection.kind),
             kind,
@@ -233,15 +233,15 @@ fn emphasis_name(emphasis: crate::surfaces::conversation::SegmentEmphasis) -> &'
     }
 }
 
-fn tool_category_name(kind: ToolVisualKind) -> &'static str {
+fn tool_category_name(kind: ToolCategory) -> &'static str {
     match kind {
-        ToolVisualKind::CommandExec => "command_exec",
-        ToolVisualKind::FileRead => "file_read",
-        ToolVisualKind::FileMutation => "file_mutation",
-        ToolVisualKind::DesignTree => "design_tree",
-        ToolVisualKind::Memory => "memory",
-        ToolVisualKind::Search => "search",
-        ToolVisualKind::Generic => "generic",
+        ToolCategory::CommandExec => "command_exec",
+        ToolCategory::FileRead => "file_read",
+        ToolCategory::FileMutation => "file_mutation",
+        ToolCategory::DesignTree => "design_tree",
+        ToolCategory::Memory => "memory",
+        ToolCategory::Search => "search",
+        ToolCategory::Generic => "generic",
     }
 }
 
