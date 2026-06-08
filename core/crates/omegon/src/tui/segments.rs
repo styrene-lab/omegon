@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap};
 use tui_syntax_highlight::Highlighter;
 use unicode_width::UnicodeWidthStr;
 
-use super::conversation_render_projection::{SegmentRenderMetadata, tool_visual_color};
+use super::conversation_render_projection::{SegmentRenderMetadata, tool_category_color};
 use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
@@ -2296,7 +2296,7 @@ fn render_tool_card(
     // operators can scan the timeline by tool type — file mutations
     // are lime, shell execs are orange, reads are teal, etc.
     let kind_color = tool_category
-        .map(|k| tool_visual_color(k, t))
+        .map(|k| tool_category_color(k, t))
         .unwrap_or(t.accent_muted());
     let (status_icon, status_color, border_color, bg) = if is_error {
         ("✗", t.error(), t.error(), t.tool_error_bg())

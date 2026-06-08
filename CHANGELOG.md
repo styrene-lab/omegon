@@ -42,6 +42,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Move footer/status semantic projection types into shared surfaces while keeping the TUI FooterData adapter in the TUI layer.
 - Move dashboard, editor, instrument, and layout semantic projection types into shared surfaces while keeping TUI adapters/rendering in the TUI layer.
 - Replace footer context class Debug-string projection with explicit context-class mapping.
+- Rename the TUI conversation render adapter color hook to `tool_category_color` to align Ratatui rendering with shared semantic tool categories.
 
 ## [0.26.16] - 2026-06-07
 

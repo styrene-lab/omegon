@@ -11,7 +11,7 @@ use super::segments::{Segment, SegmentRenderMode};
 use super::theme::Theme;
 use crate::surfaces::conversation::ToolCategory;
 
-pub fn tool_visual_color(kind: ToolCategory, t: &dyn Theme) -> Color {
+pub fn tool_category_color(kind: ToolCategory, t: &dyn Theme) -> Color {
     match kind {
         ToolCategory::CommandExec => t.warning(),
         ToolCategory::FileRead => t.accent_muted(),

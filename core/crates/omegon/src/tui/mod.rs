@@ -59,7 +59,7 @@ use tokio_util::sync::CancellationToken;
 use omegon_traits::AgentEvent;
 
 use self::conversation::{ConversationView, Tab};
-use self::conversation_render_projection::tool_visual_color;
+use self::conversation_render_projection::tool_category_color;
 use self::dashboard::DashboardState;
 use self::editor::Editor;
 use self::footer::{FooterData, SessionUsageSlice};
@@ -5050,7 +5050,7 @@ impl App {
                     (
                         kind.label(),
                         "⚙",
-                        tool_visual_color(kind, self.theme.as_ref()),
+                        tool_category_color(kind, self.theme.as_ref()),
                     )
                 }
                 crate::surfaces::conversation::SegmentRole::System => {
