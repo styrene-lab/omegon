@@ -906,6 +906,29 @@ fn extension_metadata_meta(
     meta
 }
 
+fn shadow_surface_update<F>(
+    adapter: &mut AcpConversationSurfaceAdapter,
+    event: AcpConversationEvent,
+    redact: F,
+) where
+    F: Fn(&str) -> String,
+{
+    let _surface_updates = adapter.ingest(event, SurfaceRedaction::ExternalClient, redact);
+}
+
+fn acp_surface_tool_args(
+    name: &str,
+    args: Option<&serde_json::Value>,
+) -> (Option<String>, Option<String>) {
+    let summary = args.map(|value| compact_tool_call_label(name, Some(value)));
+    let detail = args.map(serde_json::Value::to_string);
+    (summary, detail)
+}
+
+fn acp_surface_tool_result(details: &serde_json::Value) -> Option<String> {
+    (!details.is_null()).then(|| details.to_string())
+}
+
 impl OmegonAcpAgent {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         *self.host_caps.borrow_mut() = HostCapabilities::from_client(&args.client_capabilities);
@@ -1109,9 +1132,9 @@ impl OmegonAcpAgent {
                 loop {
                     match event_rx.recv().await {
                         Ok(WorkerEvent::TextChunk(text)) => {
-                            let _surface_updates = surface_adapter.ingest(
+                            shadow_surface_update(
+                                &mut surface_adapter,
                                 AcpConversationEvent::TextChunk(text.clone()),
-                                SurfaceRedaction::ExternalClient,
                                 |value| redact(value),
                             );
                             let text = redact(&text);
@@ -1127,9 +1150,9 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ThinkingChunk(text)) => {
-                            let _surface_updates = surface_adapter.ingest(
+                            shadow_surface_update(
+                                &mut surface_adapter,
                                 AcpConversationEvent::ThinkingChunk(text.clone()),
-                                SurfaceRedaction::ExternalClient,
                                 |value| redact(value),
                             );
                             let text = redact(&text);
@@ -1145,18 +1168,16 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ToolStart { id, name, args }) => {
-                            let surface_args_summary = args
-                                .as_ref()
-                                .map(|a| compact_tool_call_label(&name, Some(a)));
-                            let surface_detail_args = args.as_ref().map(|a| a.to_string());
-                            let _surface_updates = surface_adapter.ingest(
+                            let (surface_args_summary, surface_detail_args) =
+                                acp_surface_tool_args(&name, args.as_ref());
+                            shadow_surface_update(
+                                &mut surface_adapter,
                                 AcpConversationEvent::ToolStart {
                                     id: id.clone(),
                                     name: name.clone(),
                                     args_summary: surface_args_summary,
                                     detail_args: surface_detail_args,
                                 },
-                                SurfaceRedaction::ExternalClient,
                                 |value| redact(value),
                             );
                             let args = args.map(|a| {
@@ -1177,9 +1198,9 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::StatusUpdate(msg)) => {
-                            let _surface_updates = surface_adapter.ingest(
+                            shadow_surface_update(
+                                &mut surface_adapter,
                                 AcpConversationEvent::StatusUpdate(msg.clone()),
-                                SurfaceRedaction::ExternalClient,
                                 |value| redact(value),
                             );
                             let msg = redact(&msg);
@@ -1205,15 +1226,15 @@ impl OmegonAcpAgent {
                             success,
                             details,
                         }) => {
-                            let surface_result = (!details.is_null()).then(|| details.to_string());
-                            let _surface_updates = surface_adapter.ingest(
+                            let surface_result = acp_surface_tool_result(&details);
+                            shadow_surface_update(
+                                &mut surface_adapter,
                                 AcpConversationEvent::ToolEnd {
                                     id: id.clone(),
                                     success,
                                     result_summary: surface_result.clone(),
                                     detail_result: surface_result,
                                 },
-                                SurfaceRedaction::ExternalClient,
                                 |value| redact(value),
                             );
                             if let Some(c) = conn.borrow().as_ref() {
@@ -1237,12 +1258,12 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ToolOutput { id, text }) => {
-                            let _surface_updates = surface_adapter.ingest(
+                            shadow_surface_update(
+                                &mut surface_adapter,
                                 AcpConversationEvent::ToolOutput {
                                     id: id.clone(),
                                     text: text.clone(),
                                 },
-                                SurfaceRedaction::ExternalClient,
                                 |value| redact(value),
                             );
                             let text = redact(&text);
@@ -1325,11 +1346,11 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::TurnCancelled { reason }) => {
-                            let _surface_updates = surface_adapter.ingest(
+                            shadow_surface_update(
+                                &mut surface_adapter,
                                 AcpConversationEvent::TurnCancelled {
                                     reason: reason.clone(),
                                 },
-                                SurfaceRedaction::ExternalClient,
                                 |value| redact(value),
                             );
                             if let Some(c) = conn.borrow().as_ref() {
@@ -1358,9 +1379,9 @@ impl OmegonAcpAgent {
                             // be the sole owner of this state.
                         }
                         Ok(WorkerEvent::TurnComplete) => {
-                            let _surface_updates = surface_adapter.ingest(
+                            shadow_surface_update(
+                                &mut surface_adapter,
                                 AcpConversationEvent::TurnComplete,
-                                SurfaceRedaction::ExternalClient,
                                 |value| redact(value),
                             );
                             break;
@@ -4749,6 +4770,23 @@ Progress: 1/2"
         assert_eq!(plan_state[0].status, PlanEntryState::Pending);
         assert_eq!(plan_state[1].status, PlanEntryState::Completed);
         assert_eq!(plan_state[2].status, PlanEntryState::Pending);
+    }
+
+    #[test]
+    fn surface_tool_args_project_summary_and_detail() {
+        let args = serde_json::json!({"command":"cargo check"});
+        let (summary, detail) = acp_surface_tool_args("bash", Some(&args));
+        assert_eq!(summary.as_deref(), Some("bash — cargo check"));
+        assert_eq!(detail.as_deref(), Some(r#"{"command":"cargo check"}"#));
+    }
+
+    #[test]
+    fn surface_tool_result_omits_null_details() {
+        assert_eq!(acp_surface_tool_result(&serde_json::Value::Null), None);
+        assert_eq!(
+            acp_surface_tool_result(&serde_json::json!({"ok":true})).as_deref(),
+            Some(r#"{"ok":true}"#)
+        );
     }
 
     #[test]
