@@ -30,6 +30,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Move tool visual color resolution out of semantic conversation projection into the Ratatui render adapter boundary.
 - Add an ACP conversation surface DTO adapter with explicit identity, revision, and redaction policy derived from semantic conversation projections.
 - Add an ACP conversation surface stream adapter that assigns stable segment identities and revisions from worker-style conversation events before protocol emission.
+- Shadow the live ACP worker event stream through the conversation surface adapter while preserving existing SessionUpdate client behavior.
 
 ## [0.26.16] - 2026-06-07
 

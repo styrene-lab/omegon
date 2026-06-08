@@ -31,6 +31,7 @@ use model_options::{
     acp_model_provider_available, compact_model_label, unavailable_current_model_label,
 };
 use resource_context::prompt_blocks_to_text;
+use surfaces::{AcpConversationEvent, AcpConversationSurfaceAdapter, SurfaceRedaction};
 
 type JsonRpcMessage = agent_client_protocol::jsonrpcmsg::Message;
 type JsonRpcTx =
@@ -1103,9 +1104,16 @@ impl OmegonAcpAgent {
                     }
                 };
                 let mut plan_state: Vec<acp_worker::PlanEntryData> = Vec::new();
+                let mut surface_adapter =
+                    AcpConversationSurfaceAdapter::with_turn_id(stream_sid.to_string());
                 loop {
                     match event_rx.recv().await {
                         Ok(WorkerEvent::TextChunk(text)) => {
+                            let _surface_updates = surface_adapter.ingest(
+                                AcpConversationEvent::TextChunk(text.clone()),
+                                SurfaceRedaction::ExternalClient,
+                                |value| redact(value),
+                            );
                             let text = redact(&text);
                             if let Some(c) = conn.borrow().as_ref() {
                                 let _ = send_session_update(
@@ -1119,6 +1127,11 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ThinkingChunk(text)) => {
+                            let _surface_updates = surface_adapter.ingest(
+                                AcpConversationEvent::ThinkingChunk(text.clone()),
+                                SurfaceRedaction::ExternalClient,
+                                |value| redact(value),
+                            );
                             let text = redact(&text);
                             if let Some(c) = conn.borrow().as_ref() {
                                 let _ = send_session_update(
@@ -1132,6 +1145,20 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ToolStart { id, name, args }) => {
+                            let surface_args_summary = args
+                                .as_ref()
+                                .map(|a| compact_tool_call_label(&name, Some(a)));
+                            let surface_detail_args = args.as_ref().map(|a| a.to_string());
+                            let _surface_updates = surface_adapter.ingest(
+                                AcpConversationEvent::ToolStart {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    args_summary: surface_args_summary,
+                                    detail_args: surface_detail_args,
+                                },
+                                SurfaceRedaction::ExternalClient,
+                                |value| redact(value),
+                            );
                             let args = args.map(|a| {
                                 let s = redact(&a.to_string());
                                 serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))
@@ -1150,6 +1177,11 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::StatusUpdate(msg)) => {
+                            let _surface_updates = surface_adapter.ingest(
+                                AcpConversationEvent::StatusUpdate(msg.clone()),
+                                SurfaceRedaction::ExternalClient,
+                                |value| redact(value),
+                            );
                             let msg = redact(&msg);
                             let Some(msg) = acp_status_message_text(&msg) else {
                                 continue;
@@ -1173,6 +1205,17 @@ impl OmegonAcpAgent {
                             success,
                             details,
                         }) => {
+                            let surface_result = (!details.is_null()).then(|| details.to_string());
+                            let _surface_updates = surface_adapter.ingest(
+                                AcpConversationEvent::ToolEnd {
+                                    id: id.clone(),
+                                    success,
+                                    result_summary: surface_result.clone(),
+                                    detail_result: surface_result,
+                                },
+                                SurfaceRedaction::ExternalClient,
+                                |value| redact(value),
+                            );
                             if let Some(c) = conn.borrow().as_ref() {
                                 let status = if success {
                                     ToolCallStatus::Completed
@@ -1194,6 +1237,14 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::ToolOutput { id, text }) => {
+                            let _surface_updates = surface_adapter.ingest(
+                                AcpConversationEvent::ToolOutput {
+                                    id: id.clone(),
+                                    text: text.clone(),
+                                },
+                                SurfaceRedaction::ExternalClient,
+                                |value| redact(value),
+                            );
                             let text = redact(&text);
                             if let Some(c) = conn.borrow().as_ref() {
                                 let content = ToolCallContent::Content(Content::new(
@@ -1274,6 +1325,13 @@ impl OmegonAcpAgent {
                             }
                         }
                         Ok(WorkerEvent::TurnCancelled { reason }) => {
+                            let _surface_updates = surface_adapter.ingest(
+                                AcpConversationEvent::TurnCancelled {
+                                    reason: reason.clone(),
+                                },
+                                SurfaceRedaction::ExternalClient,
+                                |value| redact(value),
+                            );
                             if let Some(c) = conn.borrow().as_ref() {
                                 let payload =
                                     turn_cancelled_payload(stream_sid.to_string(), reason);
@@ -1299,7 +1357,14 @@ impl OmegonAcpAgent {
                             // streaming subscribers may start after setup events and must not
                             // be the sole owner of this state.
                         }
-                        Ok(WorkerEvent::TurnComplete) => break,
+                        Ok(WorkerEvent::TurnComplete) => {
+                            let _surface_updates = surface_adapter.ingest(
+                                AcpConversationEvent::TurnComplete,
+                                SurfaceRedaction::ExternalClient,
+                                |value| redact(value),
+                            );
+                            break;
+                        }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     }
