@@ -944,6 +944,59 @@ pub struct Segment {
     pub content: SegmentContent,
 }
 
+/// Primitive behavior flags for a conversation segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SegmentCapabilities {
+    pub selectable: bool,
+    pub focus_traversable: bool,
+    pub tool_focus_traversable: bool,
+    pub copyable: bool,
+    pub detail_openable: bool,
+    pub stream_updatable: bool,
+    pub progress_bearing: bool,
+    pub artifact_bearing: bool,
+    pub error_bearing: bool,
+    pub replay_relevant: bool,
+    pub external_dto_candidate: bool,
+    pub frontend_local_only: bool,
+}
+
+impl SegmentCapabilities {
+    pub const fn timeline_item() -> Self {
+        Self {
+            selectable: true,
+            focus_traversable: true,
+            tool_focus_traversable: false,
+            copyable: true,
+            detail_openable: true,
+            stream_updatable: false,
+            progress_bearing: false,
+            artifact_bearing: false,
+            error_bearing: false,
+            replay_relevant: true,
+            external_dto_candidate: true,
+            frontend_local_only: false,
+        }
+    }
+
+    pub const fn frontend_chrome() -> Self {
+        Self {
+            selectable: false,
+            focus_traversable: false,
+            tool_focus_traversable: false,
+            copyable: false,
+            detail_openable: false,
+            stream_updatable: false,
+            progress_bearing: false,
+            artifact_bearing: false,
+            error_bearing: false,
+            replay_relevant: false,
+            external_dto_candidate: false,
+            frontend_local_only: true,
+        }
+    }
+}
+
 /// Clipboard/export formatting mode for segment content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentExportMode {
@@ -1184,6 +1237,37 @@ impl SegmentRenderMetadata for Segment {
 // ═══════════════════════════════════════════════════════════════════════════
 // Rendering — each segment type knows how to render into a Rect
 // ═══════════════════════════════════════════════════════════════════════════
+
+impl Segment {
+    pub fn capabilities(&self) -> SegmentCapabilities {
+        match &self.content {
+            SegmentContent::UserPrompt { .. } => SegmentCapabilities::timeline_item(),
+            SegmentContent::AssistantText { complete, .. } => SegmentCapabilities {
+                stream_updatable: !*complete,
+                ..SegmentCapabilities::timeline_item()
+            },
+            SegmentContent::ToolCard {
+                is_error, complete, ..
+            } => SegmentCapabilities {
+                tool_focus_traversable: true,
+                stream_updatable: !*complete,
+                progress_bearing: !*complete,
+                error_bearing: *is_error,
+                ..SegmentCapabilities::timeline_item()
+            },
+            SegmentContent::SystemNotification { .. } => SegmentCapabilities {
+                external_dto_candidate: false,
+                ..SegmentCapabilities::timeline_item()
+            },
+            SegmentContent::LifecycleEvent { .. } => SegmentCapabilities::timeline_item(),
+            SegmentContent::Image { .. } => SegmentCapabilities {
+                artifact_bearing: true,
+                ..SegmentCapabilities::timeline_item()
+            },
+            SegmentContent::TurnSeparator => SegmentCapabilities::frontend_chrome(),
+        }
+    }
+}
 
 impl Segment {
     pub fn plain_text(&self) -> String {

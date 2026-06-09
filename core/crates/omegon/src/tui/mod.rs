@@ -3329,9 +3329,14 @@ impl App {
         action: SelectConversationSegmentAction,
     ) -> UiActionOutcome {
         let idx = action.segment.index;
-        if idx >= self.conversation.segments().len() {
+        let Some(segment) = self.conversation.segments().get(idx) else {
             return UiActionOutcome::rejected(format!(
                 "conversation segment index out of range: {idx}"
+            ));
+        };
+        if !segment.capabilities().selectable {
+            return UiActionOutcome::rejected(format!(
+                "conversation segment is not selectable: {idx}"
             ));
         }
         self.conversation.select_segment(idx);
@@ -3343,9 +3348,14 @@ impl App {
         action: OpenConversationSegmentDetailAction,
     ) -> UiActionOutcome {
         let idx = action.segment.index;
-        if idx >= self.conversation.segments().len() {
+        let Some(segment) = self.conversation.segments().get(idx) else {
             return UiActionOutcome::rejected(format!(
                 "conversation segment index out of range: {idx}"
+            ));
+        };
+        if !segment.capabilities().detail_openable {
+            return UiActionOutcome::rejected(format!(
+                "conversation segment detail is not openable: {idx}"
             ));
         }
         self.conversation.toggle_timeline_expanded_segment(idx);

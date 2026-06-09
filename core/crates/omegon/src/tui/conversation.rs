@@ -1056,7 +1056,7 @@ impl ConversationView {
             .iter()
             .enumerate()
             .rev()
-            .find(|(_, seg)| !matches!(seg.content, SegmentContent::TurnSeparator))
+            .find(|(_, seg)| seg.capabilities().selectable)
             .map(|(idx, _)| idx)
     }
 
@@ -1064,7 +1064,7 @@ impl ConversationView {
         self.segments
             .iter()
             .enumerate()
-            .find(|(_, seg)| !matches!(seg.content, SegmentContent::TurnSeparator))
+            .find(|(_, seg)| seg.capabilities().selectable)
             .map(|(idx, _)| idx)
     }
 
@@ -1101,7 +1101,7 @@ impl ConversationView {
             .iter()
             .enumerate()
             .rev()
-            .find(|(_, seg)| !matches!(seg.content, SegmentContent::TurnSeparator))
+            .find(|(_, seg)| seg.capabilities().selectable)
             .map(|(idx, _)| idx)
             .unwrap_or(start);
         self.selected_segment = Some(idx);
@@ -1117,7 +1117,7 @@ impl ConversationView {
             .iter()
             .enumerate()
             .skip(start.saturating_add(1))
-            .find(|(_, seg)| !matches!(seg.content, SegmentContent::TurnSeparator))
+            .find(|(_, seg)| seg.capabilities().selectable)
             .map(|(idx, _)| idx)
             .unwrap_or(start);
         self.selected_segment = Some(idx);

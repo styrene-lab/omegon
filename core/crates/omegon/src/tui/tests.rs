@@ -386,6 +386,52 @@ async fn ui_action_select_conversation_segment_rejects_invalid_index() {
 }
 
 #[tokio::test]
+async fn ui_action_select_conversation_segment_rejects_separator() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.conversation.push_user("first");
+    app.conversation.push_user("second");
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::SelectConversationSegment(SelectConversationSegmentAction {
+                segment: ConversationSegmentRef::by_index(1),
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::rejected("conversation segment is not selectable: 1")
+    );
+    assert_eq!(app.conversation.selected_segment, None);
+}
+
+#[tokio::test]
+async fn ui_action_open_conversation_segment_detail_rejects_separator() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.conversation.push_user("first");
+    app.conversation.push_user("second");
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::OpenConversationSegmentDetail(OpenConversationSegmentDetailAction {
+                segment: ConversationSegmentRef::by_index(1),
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::rejected("conversation segment detail is not openable: 1")
+    );
+    assert_eq!(app.conversation.timeline_expanded_segment(), None);
+}
+
+#[tokio::test]
 async fn ui_action_open_conversation_segment_detail_toggles_expansion() {
     let mut app = test_app();
     let tx = test_tx();
