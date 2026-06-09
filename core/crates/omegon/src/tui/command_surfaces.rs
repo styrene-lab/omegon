@@ -77,6 +77,47 @@ impl CommandPanel {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::CommandPanel;
+
+    #[test]
+    fn slash_panel_preserves_command_source_and_body() {
+        let panel = CommandPanel::from_slash("/status", "runtime ok");
+
+        assert_eq!(panel.title, "command · /status");
+        assert_eq!(panel.source.as_deref(), Some("/status"));
+        assert_eq!(panel.body, "runtime ok");
+        assert!(panel.copyable);
+        assert_eq!(panel.scroll, 0);
+    }
+
+    #[test]
+    fn panel_scroll_saturates_at_top_and_bottom() {
+        let mut panel = CommandPanel::new("long", "one\ntwo\nthree");
+
+        panel.scroll_down(99);
+        assert_eq!(panel.scroll, 2);
+
+        panel.scroll_up(1);
+        assert_eq!(panel.scroll, 1);
+
+        panel.scroll_up(99);
+        assert_eq!(panel.scroll, 0);
+    }
+
+    #[test]
+    fn panel_scroll_jumps_to_top_and_bottom() {
+        let mut panel = CommandPanel::new("long", "one\ntwo\nthree\nfour");
+
+        panel.scroll_bottom();
+        assert_eq!(panel.scroll, 3);
+
+        panel.scroll_top();
+        assert_eq!(panel.scroll, 0);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CommandToast {
     pub message: String,
