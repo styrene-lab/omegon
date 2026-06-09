@@ -84,9 +84,10 @@ use self::slim_plan::{
 };
 use crate::surfaces::layout::UiSurfaces;
 use crate::ui_runtime::actions::{
-    OpenConversationSegmentDetailAction, OperatorWaitAction, PermissionAction, PromptSource,
-    SelectConversationSegmentAction, SetSurfaceVisibleAction, SetUiPresetAction, SlashCommandAction,
-    SubmitPromptAction, UiAction, UiActionOutcome, UiSurfaceToggle,
+    ConversationSegmentRef, OpenConversationSegmentDetailAction, OperatorWaitAction,
+    PermissionAction, PromptSource, SelectConversationSegmentAction, SetSurfaceVisibleAction,
+    SetUiPresetAction, SlashCommandAction, SubmitPromptAction, UiAction, UiActionOutcome,
+    UiSurfaceToggle,
 };
 
 /// Get current process RSS in megabytes (platform-specific).
@@ -1705,7 +1706,11 @@ impl App {
             // relative to the latest assistant turn.
             let focus_idx = self.conversation.select_focus_entry_segment();
             if let Some(idx) = focus_idx {
-                self.conversation.select_segment(idx);
+                let _ = self.handle_select_conversation_segment_action(
+                    SelectConversationSegmentAction {
+                        segment: ConversationSegmentRef::by_index(idx),
+                    },
+                );
             }
             self.pane_focus = PaneFocus::Conversation;
             self.terminal_copy_mode = false;
@@ -8495,7 +8500,11 @@ pub async fn run_tui(
                                         && row.abs_diff(mouse.row) <= 1
                                         && now.duration_since(t) <= Duration::from_millis(400)
                                 });
-                                app.conversation.select_segment(idx);
+                                let _ = app.handle_select_conversation_segment_action(
+                                    SelectConversationSegmentAction {
+                                        segment: ConversationSegmentRef::by_index(idx),
+                                    },
+                                );
                                 if is_double {
                                     app.conversation.toggle_expand(idx);
                                 }
@@ -9166,7 +9175,11 @@ pub async fn run_tui(
                         // Enter in focus mode toggles expansion for the focused segment.
                         (KeyCode::Enter, _) if app.focus_mode => {
                             if let Some(idx) = app.conversation.timeline_focused_segment() {
-                                app.conversation.toggle_timeline_expanded_segment(idx);
+                                let _ = app.handle_open_conversation_segment_detail_action(
+                                    OpenConversationSegmentDetailAction {
+                                        segment: ConversationSegmentRef::by_index(idx),
+                                    },
+                                );
                             }
                         }
 
