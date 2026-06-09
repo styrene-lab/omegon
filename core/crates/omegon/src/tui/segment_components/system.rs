@@ -1,4 +1,4 @@
-//! System notification segment component boundary.
+//! System notification segment component.
 
 use ratatui::prelude::*;
 
@@ -20,11 +20,8 @@ mod tests {
 
     #[test]
     fn system_props_preserve_render_inputs() {
-        let props = SystemRenderProps {
-            text: "notice",
-            mode: SegmentRenderMode::Slim,
-        };
+        let props = SystemRenderProps { text: "notice", mode: SegmentRenderMode::Full };
         assert_eq!(props.text, "notice");
-        assert_eq!(props.mode, SegmentRenderMode::Slim);
+        assert_eq!(props.mode, SegmentRenderMode::Full);
     }
 }

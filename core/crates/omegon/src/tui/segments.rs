@@ -3501,24 +3501,6 @@ pub(crate) fn render_system(
     );
 }
 
-pub(crate) fn render_lifecycle(
-    icon: &str,
-    text: &str,
-    area: Rect,
-    buf: &mut Buffer,
-    t: &dyn Theme,
-) {
-    if area.width < 4 || area.height == 0 {
-        return;
-    }
-    let line = Line::from(vec![
-        Span::styled("  ", Style::default()),
-        Span::styled(format!("{icon} "), Style::default().fg(t.border())),
-        Span::styled(text.to_string(), Style::default().fg(t.dim())),
-    ]);
-    Paragraph::new(line).render(area, buf);
-}
-
 /// Render a placeholder for an image (used when StatefulProtocol isn't available).
 /// The actual image rendering happens in conv_widget.rs via ratatui-image.
 ///
