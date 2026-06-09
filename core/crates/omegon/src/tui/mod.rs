@@ -8879,7 +8879,10 @@ pub async fn run_tui(
                             } else if app.focus_mode {
                                 app.set_focus_mode(false);
                             } else if app.agent_active {
-                                if app.interrupt() {
+                                let outcome = app
+                                    .handle_ui_action(UiAction::CancelActiveTurn, &command_tx)
+                                    .await;
+                                if matches!(outcome, UiActionOutcome::Accepted { .. }) {
                                     app.conversation.push_system(
                                         "⎋ Interrupt requested — waiting for turn to stop",
                                     );
@@ -8890,7 +8893,10 @@ pub async fn run_tui(
                         }
                         (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                             if app.agent_active {
-                                if app.interrupt() {
+                                let outcome = app
+                                    .handle_ui_action(UiAction::CancelActiveTurn, &command_tx)
+                                    .await;
+                                if matches!(outcome, UiActionOutcome::Accepted { .. }) {
                                     app.conversation.push_system(
                                         "⎋ Interrupt requested (Ctrl+C) — waiting for turn to stop",
                                     );

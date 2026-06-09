@@ -1058,6 +1058,38 @@ fn mouse_wheel_scroll_up_matches_natural_scroll_direction() {
     );
 }
 
+#[tokio::test]
+async fn ui_action_cancel_active_turn_cancels_token_and_suppresses_input() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let token = CancellationToken::new();
+    *app.cancel.lock().expect("cancel lock") = Some(token.clone());
+    app.editor.set_text("draft");
+
+    let outcome = app.handle_ui_action(UiAction::CancelActiveTurn, &tx).await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("active turn cancelled")
+    );
+    assert!(token.is_cancelled());
+    assert_eq!(app.editor.render_text(), "");
+    assert!(app.interrupt_pending);
+}
+
+#[tokio::test]
+async fn ui_action_cancel_active_turn_without_token_is_noop_but_suppresses_input() {
+    let mut app = test_app();
+    let tx = test_tx();
+    app.editor.set_text("draft");
+
+    let outcome = app.handle_ui_action(UiAction::CancelActiveTurn, &tx).await;
+
+    assert_eq!(outcome, UiActionOutcome::noop("no active turn to cancel"));
+    assert_eq!(app.editor.render_text(), "");
+    assert!(app.interrupt_pending);
+}
+
 #[test]
 fn interrupt_suppresses_terminal_protocol_fragments_from_editor() {
     let mut app = test_app();
