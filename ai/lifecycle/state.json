@@ -1082,6 +1082,96 @@
       "bound_change": null,
       "created_at": "2026-06-08T18:04:56Z",
       "updated_at": "2026-06-08T18:04:56Z"
+    },
+    {
+      "id": "ui-surface-action-protocol",
+      "title": "UI Surface Action Protocol — make Ratatui one frontend projection",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-09T14:31:49Z",
+      "updated_at": "2026-06-09T14:31:49Z"
+    },
+    {
+      "id": "ui-surface-action-protocol-inventory",
+      "title": "Inventory portable UI actions vs frontend-local state",
+      "state": "seed",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-09T14:33:41Z",
+      "updated_at": "2026-06-09T14:33:41Z"
+    },
+    {
+      "id": "ui-surface-envelope-runtime",
+      "title": "Versioned surface envelope and runtime transport",
+      "state": "seed",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-09T14:33:41Z",
+      "updated_at": "2026-06-09T14:33:41Z"
+    },
+    {
+      "id": "ui-action-core-contract",
+      "title": "Core UI action contract",
+      "state": "implementing",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-09T14:33:42Z",
+      "updated_at": "2026-06-09T14:52:52Z"
+    },
+    {
+      "id": "ratatui-frontend-adapter-boundary",
+      "title": "Ratatui frontend adapter boundary",
+      "state": "exploring",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-09T14:33:42Z",
+      "updated_at": "2026-06-09T14:53:07Z"
+    },
+    {
+      "id": "surface-replay-test-harness",
+      "title": "Surface replay and action test harness",
+      "state": "seed",
+      "parent": null,
+      "tags": [],
+      "priority": null,
+      "issue_type": null,
+      "open_questions": [],
+      "decisions": [],
+      "overview": "",
+      "bound_change": null,
+      "created_at": "2026-06-09T14:33:42Z",
+      "updated_at": "2026-06-09T14:33:42Z"
     }
   ],
   "changes": [
@@ -2686,6 +2776,114 @@
       "to_state": "exploring",
       "reason": "initial status on create",
       "forced": true
+    },
+    {
+      "timestamp": "2026-06-09T14:31:49Z",
+      "entity_type": "node",
+      "entity_id": "ui-surface-action-protocol",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T14:31:49Z",
+      "entity_type": "node",
+      "entity_id": "ui-surface-action-protocol",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": "initial status on create",
+      "forced": true
+    },
+    {
+      "timestamp": "2026-06-09T14:33:41Z",
+      "entity_type": "node",
+      "entity_id": "ui-surface-action-protocol-inventory",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T14:33:41Z",
+      "entity_type": "node",
+      "entity_id": "ui-surface-envelope-runtime",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T14:33:42Z",
+      "entity_type": "node",
+      "entity_id": "ui-action-core-contract",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T14:33:42Z",
+      "entity_type": "node",
+      "entity_id": "ratatui-frontend-adapter-boundary",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T14:33:42Z",
+      "entity_type": "node",
+      "entity_id": "surface-replay-test-harness",
+      "from_state": "(new)",
+      "to_state": "seed",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T14:52:45Z",
+      "entity_type": "node",
+      "entity_id": "ui-action-core-contract",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T14:52:52Z",
+      "entity_type": "node",
+      "entity_id": "ui-action-core-contract",
+      "from_state": "exploring",
+      "to_state": "resolved",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T14:52:52Z",
+      "entity_type": "node",
+      "entity_id": "ui-action-core-contract",
+      "from_state": "resolved",
+      "to_state": "decided",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T14:52:52Z",
+      "entity_type": "node",
+      "entity_id": "ui-action-core-contract",
+      "from_state": "decided",
+      "to_state": "implementing",
+      "reason": null,
+      "forced": false
+    },
+    {
+      "timestamp": "2026-06-09T14:53:07Z",
+      "entity_type": "node",
+      "entity_id": "ratatui-frontend-adapter-boundary",
+      "from_state": "seed",
+      "to_state": "exploring",
+      "reason": null,
+      "forced": false
     }
   ]
 }

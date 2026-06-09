@@ -296,6 +296,106 @@ async fn submit_editor_buffer_sends_prompt_with_images_when_attachment_token_pre
     }
 }
 
+#[tokio::test]
+async fn ui_action_submit_prompt_sends_local_tui_prompt() {
+    let mut app = test_app();
+    let (tx, mut rx) = test_tx_with_rx();
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::SubmitPrompt(SubmitPromptAction {
+                text: "route through action seam".into(),
+                attachments: Vec::new(),
+                source: PromptSource::LocalTui,
+                queue_mode: app.queue_mode,
+                metadata: PromptMetadata::default(),
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(outcome, UiActionOutcome::accepted());
+    match rx.recv().await.expect("submission command") {
+        TuiCommand::SubmitPrompt(PromptSubmission {
+            text,
+            image_paths,
+            submitted_by,
+            via,
+            ..
+        }) => {
+            assert_eq!(text, "route through action seam");
+            assert!(image_paths.is_empty());
+            assert_eq!(submitted_by, "local-tui");
+            assert_eq!(via, "tui");
+        }
+        other => panic!("expected semantic prompt submission, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn ui_action_permission_response_unblocks_pending_permission() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let (permission_tx, permission_rx) = std::sync::mpsc::channel();
+    app.pending_permission = Some(std::sync::Arc::new(std::sync::Mutex::new(Some(
+        permission_tx,
+    ))));
+    app.pending_permission_context = Some(("write".into(), "src/lib.rs".into()));
+    app.permission_lane_visible = true;
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::RespondToPermission(PermissionAction {
+                request_id: None,
+                response: omegon_traits::PermissionResponse::Allow,
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        permission_rx.recv().expect("permission response"),
+        omegon_traits::PermissionResponse::Allow
+    );
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("→ allowed (this session): write src/lib.rs")
+    );
+    assert!(app.pending_permission.is_none());
+    assert!(app.pending_permission_context.is_none());
+    assert!(!app.permission_lane_visible);
+}
+
+#[tokio::test]
+async fn ui_action_operator_wait_response_unblocks_pending_wait() {
+    let mut app = test_app();
+    let tx = test_tx();
+    let (wait_tx, wait_rx) = std::sync::mpsc::channel();
+    app.pending_operator_wait = Some(std::sync::Arc::new(std::sync::Mutex::new(Some(wait_tx))));
+    app.pending_operator_wait_context = Some("deploy smoke test".into());
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::RespondToOperatorWait(OperatorWaitAction {
+                request_id: None,
+                response: omegon_traits::OperatorWaitResponse::Completed,
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        wait_rx.recv().expect("operator wait response"),
+        omegon_traits::OperatorWaitResponse::Completed
+    );
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("-> manual action completed: deploy smoke test")
+    );
+    assert!(app.pending_operator_wait.is_none());
+    assert!(app.pending_operator_wait_context.is_none());
+}
+
 #[test]
 fn collapsed_paste_token_renders_as_editor_chip() {
     let mut app = test_app();

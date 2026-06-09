@@ -104,6 +104,7 @@ pub mod tool_registry;
 mod tools;
 mod triggers;
 mod tui;
+mod ui_runtime;
 pub mod util;
 mod web;
 mod workflow;

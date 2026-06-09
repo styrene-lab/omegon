@@ -83,6 +83,10 @@ use self::slim_plan::{
     slim_plan_snapshot_height, upstream_retry_hint,
 };
 use crate::surfaces::layout::UiSurfaces;
+use crate::ui_runtime::actions::{
+    OperatorWaitAction, PermissionAction, PromptSource, SlashCommandAction, SubmitPromptAction,
+    UiAction, UiActionOutcome,
+};
 
 /// Get current process RSS in megabytes (platform-specific).
 /// Uses getrusage(2) on macOS and /proc on Linux — no subprocess spawn.
@@ -3248,11 +3252,18 @@ impl App {
         ));
     }
 
-    async fn submit_editor_buffer(&mut self, command_tx: &mpsc::Sender<TuiCommand>) {
-        let (raw_text, attachments) = self.editor.take_submission();
-        if raw_text.is_empty() && attachments.is_empty() {
-            if self.awaiting_continuation && !self.agent_active {
-                // Empty Enter while agent is awaiting confirmation — send continuation.
+    async fn handle_ui_action(
+        &mut self,
+        action: UiAction,
+        command_tx: &mpsc::Sender<TuiCommand>,
+    ) -> UiActionOutcome {
+        match action {
+            UiAction::SubmitPrompt(action) => {
+                self.submit_prefixed_prompt(action.text, action.attachments, command_tx)
+                    .await;
+                UiActionOutcome::accepted()
+            }
+            UiAction::SubmitContinuation => {
                 self.awaiting_continuation = false;
                 self.editor
                     .textarea
@@ -3263,6 +3274,103 @@ impl App {
                     command_tx,
                 )
                 .await;
+                UiActionOutcome::accepted()
+            }
+            UiAction::CancelActiveTurn => {
+                if self.interrupt() {
+                    UiActionOutcome::accepted_message("active turn cancelled")
+                } else {
+                    UiActionOutcome::noop("no active turn to cancel")
+                }
+            }
+            UiAction::RespondToPermission(action) => self.handle_permission_action(action),
+            UiAction::RespondToOperatorWait(action) => self.handle_operator_wait_action(action),
+            UiAction::RunSlashCommand(action) => {
+                match self.handle_slash_command(&action.raw, command_tx) {
+                    SlashResult::Display(response) => {
+                        self.history.push(action.raw);
+                        self.history_idx = None;
+                        self.conversation.push_system(&response);
+                        UiActionOutcome::accepted_message(response)
+                    }
+                    SlashResult::Handled => {
+                        self.history.push(action.raw);
+                        self.history_idx = None;
+                        UiActionOutcome::accepted()
+                    }
+                    SlashResult::Quit => {
+                        self.history.push(action.raw);
+                        self.history_idx = None;
+                        self.should_quit = true;
+                        let _ = command_tx.send(TuiCommand::Quit).await;
+                        UiActionOutcome::accepted_message("quit requested")
+                    }
+                    SlashResult::NotACommand => UiActionOutcome::rejected("not a slash command"),
+                }
+            }
+        }
+    }
+
+    fn handle_permission_action(&mut self, action: PermissionAction) -> UiActionOutcome {
+        if self.pending_permission.is_none() {
+            return UiActionOutcome::noop("no pending permission request");
+        }
+        let context = self.pending_permission_context.take();
+        self.permission_lane_visible = false;
+        if let Some(respond) = self.pending_permission.take()
+            && let Ok(mut slot) = respond.lock()
+            && let Some(tx) = slot.take()
+        {
+            let _ = tx.send(action.response);
+        }
+        let label = match action.response {
+            omegon_traits::PermissionResponse::Allow => "allowed (this session)",
+            omegon_traits::PermissionResponse::AlwaysAllow => {
+                "always allowed - persisted to project permissions"
+            }
+            omegon_traits::PermissionResponse::Deny => "denied",
+        };
+        let message = if let Some((tool, path)) = context {
+            format!("→ {label}: {tool} {path}")
+        } else {
+            format!("→ {label}")
+        };
+        self.conversation.push_system(&message);
+        UiActionOutcome::accepted_message(message)
+    }
+
+    fn handle_operator_wait_action(&mut self, action: OperatorWaitAction) -> UiActionOutcome {
+        if self.pending_operator_wait.is_none() {
+            return UiActionOutcome::noop("no pending operator wait request");
+        }
+        let context = self.pending_operator_wait_context.take();
+        if let Some(respond) = self.pending_operator_wait.take()
+            && let Ok(mut slot) = respond.lock()
+            && let Some(tx) = slot.take()
+        {
+            let _ = tx.send(action.response);
+        }
+        let label = match action.response {
+            omegon_traits::OperatorWaitResponse::Completed => "manual action completed",
+            omegon_traits::OperatorWaitResponse::Cancelled => "manual action cancelled",
+        };
+        let message = if let Some(prompt) = context {
+            format!("-> {label}: {prompt}")
+        } else {
+            format!("-> {label}")
+        };
+        self.conversation.push_system(&message);
+        UiActionOutcome::accepted_message(message)
+    }
+
+    async fn submit_editor_buffer(&mut self, command_tx: &mpsc::Sender<TuiCommand>) {
+        let (raw_text, attachments) = self.editor.take_submission();
+        if raw_text.is_empty() && attachments.is_empty() {
+            if self.awaiting_continuation && !self.agent_active {
+                // Empty Enter while agent is awaiting confirmation — send continuation.
+                let _ = self
+                    .handle_ui_action(UiAction::SubmitContinuation, command_tx)
+                    .await;
             }
             return;
         }
@@ -3278,31 +3386,29 @@ impl App {
         }
 
         if raw_text.starts_with('/') {
-            match self.handle_slash_command(&raw_text, command_tx) {
-                SlashResult::Display(response) => {
-                    self.history.push(raw_text.clone());
-                    self.history_idx = None;
-                    self.conversation.push_system(&response);
-                }
-                SlashResult::Handled => {
-                    self.history.push(raw_text.clone());
-                    self.history_idx = None;
-                }
-                SlashResult::Quit => {
-                    self.history.push(raw_text.clone());
-                    self.history_idx = None;
-                    self.should_quit = true;
-                    let _ = command_tx.send(TuiCommand::Quit).await;
-                }
-                SlashResult::NotACommand => {
-                    self.submit_prefixed_prompt(raw_text, attachments, command_tx)
-                        .await;
-                }
-            }
+            let _ = self
+                .handle_ui_action(
+                    UiAction::RunSlashCommand(SlashCommandAction {
+                        raw: raw_text,
+                        source: PromptSource::LocalTui,
+                    }),
+                    command_tx,
+                )
+                .await;
             return;
         }
 
-        self.submit_prefixed_prompt(raw_text, attachments, command_tx)
+        let _ = self
+            .handle_ui_action(
+                UiAction::SubmitPrompt(SubmitPromptAction {
+                    text: raw_text,
+                    attachments,
+                    source: PromptSource::LocalTui,
+                    queue_mode: self.queue_mode,
+                    metadata: PromptMetadata::default(),
+                }),
+                command_tx,
+            )
             .await;
     }
 
@@ -8407,28 +8513,16 @@ pub async fn run_tui(
                             }
                             _ => None,
                         };
-                        if let Some(resp) = response {
-                            let context = app.pending_operator_wait_context.take();
-                            if let Some(respond) = app.pending_operator_wait.take()
-                                && let Ok(mut slot) = respond.lock()
-                                && let Some(tx) = slot.take()
-                            {
-                                let _ = tx.send(resp);
-                            }
-                            let label = match resp {
-                                omegon_traits::OperatorWaitResponse::Completed => {
-                                    "manual action completed"
-                                }
-                                omegon_traits::OperatorWaitResponse::Cancelled => {
-                                    "manual action cancelled"
-                                }
-                            };
-                            if let Some(prompt) = context {
-                                app.conversation
-                                    .push_system(&format!("-> {label}: {prompt}"));
-                            } else {
-                                app.conversation.push_system(&format!("-> {label}"));
-                            }
+                        if let Some(response) = response {
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::RespondToOperatorWait(OperatorWaitAction {
+                                        request_id: None,
+                                        response,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                             continue;
                         }
                     }
@@ -8440,30 +8534,16 @@ pub async fn run_tui(
                     // persistent grants require Shift+A / uppercase A.
                     if app.pending_permission.is_some() {
                         let response = permission_response_for_key(key.code, key.modifiers);
-                        if let Some(resp) = response {
-                            let context = app.pending_permission_context.take();
-                            app.permission_lane_visible = false;
-                            if let Some(respond) = app.pending_permission.take()
-                                && let Ok(mut slot) = respond.lock()
-                                && let Some(tx) = slot.take()
-                            {
-                                let _ = tx.send(resp);
-                            }
-                            let label = match resp {
-                                omegon_traits::PermissionResponse::Allow => {
-                                    "allowed (this session)"
-                                }
-                                omegon_traits::PermissionResponse::AlwaysAllow => {
-                                    "always allowed - persisted to project permissions"
-                                }
-                                omegon_traits::PermissionResponse::Deny => "denied",
-                            };
-                            if let Some((tool, path)) = context {
-                                app.conversation
-                                    .push_system(&format!("→ {label}: {tool} {path}"));
-                            } else {
-                                app.conversation.push_system(&format!("→ {label}"));
-                            }
+                        if let Some(response) = response {
+                            let _ = app
+                                .handle_ui_action(
+                                    UiAction::RespondToPermission(PermissionAction {
+                                        request_id: None,
+                                        response,
+                                    }),
+                                    &command_tx,
+                                )
+                                .await;
                             continue;
                         }
                     }

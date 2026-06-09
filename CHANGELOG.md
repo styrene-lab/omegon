@@ -68,6 +68,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [Semantic V
 - Move lifecycle segment rendering into its dedicated component module.
 - Move image placeholder segment rendering into its dedicated component module.
 - Move assistant segment rendering into its dedicated component module.
+- Add an internal UI runtime action contract and route initial Ratatui prompt, slash command, permission, and operator-wait actions through the semantic action seam.
 - Move system notification segment rendering into its dedicated component module.
 - Move user prompt segment rendering into its dedicated component module.
 - Document the TUI surface architecture boundaries across shared semantic surfaces, ACP adapters, layout projection, sub-surfaces, and segment components.
