@@ -1500,8 +1500,13 @@ impl Segment {
                 buf,
                 t,
             ),
-            Image { path, alt } => render_image_placeholder(path, alt, area, buf, t),
-            TurnSeparator => render_separator(area, buf, t),
+            Image { path, alt } => super::segment_components::image::render(
+                super::segment_components::image::ImageRenderProps { path, alt },
+                area,
+                buf,
+                t,
+            ),
+            TurnSeparator => super::segment_components::separator::render(area, buf, t),
         }
     }
 
@@ -3534,7 +3539,7 @@ pub(crate) fn render_lifecycle(
 ///   lives — especially for clipboard-paste files like
 ///   `omegon-clipboard-78315-16.png` whose names are uninformative
 ///   without their parent directory.
-fn render_image_placeholder(
+pub(crate) fn render_image_placeholder(
     path: &std::path::Path,
     alt: &str,
     area: Rect,
@@ -3609,7 +3614,7 @@ fn render_image_placeholder(
     }
 }
 
-fn render_separator(area: Rect, buf: &mut Buffer, t: &dyn Theme) {
+pub(crate) fn render_separator(area: Rect, buf: &mut Buffer, t: &dyn Theme) {
     if area.height == 0 || area.width < 4 {
         return;
     }
