@@ -90,7 +90,7 @@ pub(crate) fn clean_inline_text(text: &str) -> String {
         .join(" ")
 }
 
-fn strip_terminal_control(input: &str) -> String {
+pub(crate) fn strip_terminal_control(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -1973,144 +1973,18 @@ pub(crate) fn render_tool_card(
         return;
     }
 
-    // ── Live progress section (in-flight tools only) ────────────
-    // While the tool is still running and we don't yet have a final
-    // result, render the latest streaming partial (if any) as a tail
-    // window inside the card. This is the producer-side instrumentation
-    // from #23/#24/#31/#32 finally surfacing in the operator UI: bash
-    // line counts + tail, local_inference token counts + accumulated
-    // text, mcp progress phase + units. Without this block, in-flight
-    // tools render with an empty card body — the "anemic 17:45 with
-    // nothing to look at" failure mode.
     let mut live_row_fills: Vec<(u16, Color)> = Vec::new();
-    if !complete {
-        let pre_live_line_count = lines.len();
-        if !lines.is_empty() {
-            let sep_color = t.border_dim();
-            lines.push(Line::from(Span::styled(
-                "─".repeat(card_inner.width as usize),
-                Style::default().fg(sep_color).bg(bg),
-            )));
-            live_row_fills.push((pre_live_line_count as u16, bg));
-        }
-
-        // Status header: ▶ {phase or "running"} · {units} · {elapsed}
-        // — built from whichever fields the partial happens to carry.
-        // Falls back to a bare "▶ running" when no partial has arrived
-        // yet, so the operator at least sees a "we're alive" line
-        // instead of a blank card.
-        let mut status_parts: Vec<String> = Vec::new();
-        let phase_label = live_partial
-            .and_then(|p| p.progress.phase.as_deref())
-            .unwrap_or("running");
-        status_parts.push(phase_label.to_string());
-        if let Some(partial) = live_partial
-            && let Some(units) = &partial.progress.units
-        {
-            let label = match units.total {
-                Some(total) => format!("{}/{} {}", units.current, total, units.unit),
-                None => format!("{} {}", units.current, units.unit),
-            };
-            status_parts.push(label);
-        }
-        // Elapsed time: prefer the live wall-clock from `started_at` so
-        // the displayed timer ticks with every frame draw. Fall back to
-        // the partial's `elapsed_ms` (captured at flush time, freezes
-        // between partials) when no `started_at` is available — that's
-        // the legacy/test path where the segment doesn't carry one.
-        let elapsed_ms: Option<u64> = started_at
-            .map(|started| started.elapsed().as_millis() as u64)
-            .or_else(|| live_partial.map(|p| p.progress.elapsed_ms))
-            .filter(|ms| *ms > 0);
-        if let Some(ms) = elapsed_ms {
-            let secs = ms / 1000;
-            if secs >= 60 {
-                status_parts.push(format!("{}m{:02}s", secs / 60, secs % 60));
-            } else {
-                let tenths = (ms % 1000) / 100;
-                status_parts.push(format!("{secs}.{tenths}s"));
-            }
-        }
-        if let Some(partial) = live_partial
-            && partial.progress.heartbeat
-        {
-            status_parts.push("idle".to_string());
-        }
-        let status_text = format!("▶ {}", status_parts.join(" · "));
-        lines.push(Line::from(vec![Span::styled(
-            status_text,
-            Style::default().fg(t.warning()).bg(bg),
-        )]));
-        live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
-
-        // Tail content from the latest partial. Only renders when the
-        // partial actually carries `tail` text (bash + local_inference
-        // both do; mcp progress notifications carry only phase/units
-        // and leave tail empty, which is correct).
-        //
-        // Bash output deliberately preserves SGR color codes (the
-        // `strip_terminal_noise` helper in `tools/bash.rs` strips
-        // mouse / cursor / OSC sequences but keeps SGR for downstream
-        // colorization). We feed the tail through the same
-        // `ansi_to_tui::IntoText` parser that the completed-result
-        // section uses, which both colorizes the output AND filters
-        // out the raw ESC bytes — without this step the live tail
-        // would write SGR escape bytes directly into the cell buffer
-        // and the terminal would interpret them as the start of new
-        // sequences, swallowing nearby cells. (Same root cause as the
-        // instruments-panel ANSI fragment leakage.)
-        if let Some(partial) = live_partial
-            && !partial.tail.is_empty()
-        {
-            let tail_lines: Vec<&str> = partial.tail.lines().collect();
-            let max_tail_lines = tail_budget;
-            let take = tail_lines.len().min(max_tail_lines);
-            // Show the LAST N lines, not the first N — for streaming
-            // output the latest content is what the operator wants.
-            let start = tail_lines.len().saturating_sub(take);
-            let visible_tail: String = tail_lines[start..].join("\n");
-            let has_ansi = visible_tail.contains('\x1b');
-            let tail_style = Style::default().fg(t.muted()).bg(bg);
-
-            if has_ansi {
-                use ansi_to_tui::IntoText as _;
-                if let Ok(text) = visible_tail.into_text() {
-                    for line in text.lines {
-                        let spans: Vec<Span<'_>> = line
-                            .spans
-                            .into_iter()
-                            .map(|mut s| {
-                                s.style = s.style.bg(bg);
-                                if s.style.fg.is_none() {
-                                    s.style = s.style.fg(t.muted());
-                                }
-                                s
-                            })
-                            .collect();
-                        lines.push(Line::from(spans));
-                        live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
-                    }
-                } else {
-                    // ANSI parse failed — strip raw ESC bytes
-                    // defensively rather than letting them write
-                    // into cell symbols.
-                    for line in &tail_lines[start..] {
-                        let stripped = strip_terminal_control(line);
-                        lines.push(Line::from(Span::styled(stripped, tail_style)));
-                        live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
-                    }
-                }
-            } else {
-                for line in &tail_lines[start..] {
-                    // Even on the no-ANSI path, drop any stray
-                    // control bytes — defense in depth.
-                    let stripped: String = line.chars().filter(|c| !c.is_control()).collect();
-                    lines.push(Line::from(Span::styled(stripped, tail_style)));
-                    live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
-                }
-            }
-        }
-    }
+    super::segment_components::tool_card::append_tool_live_progress_section(
+        &mut lines,
+        &mut live_row_fills,
+        live_partial,
+        started_at,
+        complete,
+        tail_budget,
+        card_inner.width,
+        bg,
+        t,
+    );
 
     // ── Edit/change diff section ────────────────────────────────
     // For mutating-file tools (`edit`, `change`), the standard result

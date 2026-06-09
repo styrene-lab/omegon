@@ -13,7 +13,7 @@ use crate::surfaces::conversation::ToolCategory;
 
 use super::super::segments::{
     self, SegmentMeta, SegmentRenderMode, TokenUsage, apply_rendered_links, apply_rows_bg,
-    subtle_tool_row_bg, summarize_tool_args,
+    strip_terminal_control, subtle_tool_row_bg, summarize_tool_args,
 };
 use super::super::theme::Theme;
 
@@ -31,6 +31,116 @@ pub struct ToolCardRenderProps<'a> {
     pub mode: SegmentRenderMode,
     pub density: crate::settings::ToolDetail,
     pub pinned: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn append_tool_live_progress_section(
+    lines: &mut Vec<Line<'_>>,
+    live_row_fills: &mut Vec<(u16, Color)>,
+    live_partial: Option<&omegon_traits::PartialToolResult>,
+    started_at: Option<std::time::Instant>,
+    complete: bool,
+    tail_budget: usize,
+    card_width: u16,
+    bg: Color,
+    theme: &dyn Theme,
+) {
+    if complete {
+        return;
+    }
+
+    let pre_live_line_count = lines.len();
+    if !lines.is_empty() {
+        let sep_color = theme.border_dim();
+        lines.push(Line::from(Span::styled(
+            "─".repeat(card_width as usize),
+            Style::default().fg(sep_color).bg(bg),
+        )));
+        live_row_fills.push((pre_live_line_count as u16, bg));
+    }
+
+    let mut status_parts: Vec<String> = Vec::new();
+    let phase_label = live_partial
+        .and_then(|p| p.progress.phase.as_deref())
+        .unwrap_or("running");
+    status_parts.push(phase_label.to_string());
+    if let Some(partial) = live_partial
+        && let Some(units) = &partial.progress.units
+    {
+        let label = match units.total {
+            Some(total) => format!("{}/{} {}", units.current, total, units.unit),
+            None => format!("{} {}", units.current, units.unit),
+        };
+        status_parts.push(label);
+    }
+    let elapsed_ms: Option<u64> = started_at
+        .map(|started| started.elapsed().as_millis() as u64)
+        .or_else(|| live_partial.map(|p| p.progress.elapsed_ms))
+        .filter(|ms| *ms > 0);
+    if let Some(ms) = elapsed_ms {
+        let secs = ms / 1000;
+        if secs >= 60 {
+            status_parts.push(format!("{}m{:02}s", secs / 60, secs % 60));
+        } else {
+            let tenths = (ms % 1000) / 100;
+            status_parts.push(format!("{secs}.{tenths}s"));
+        }
+    }
+    if let Some(partial) = live_partial
+        && partial.progress.heartbeat
+    {
+        status_parts.push("idle".to_string());
+    }
+    let status_text = format!("▶ {}", status_parts.join(" · "));
+    lines.push(Line::from(vec![Span::styled(
+        status_text,
+        Style::default().fg(theme.warning()).bg(bg),
+    )]));
+    live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+
+    if let Some(partial) = live_partial
+        && !partial.tail.is_empty()
+    {
+        let tail_lines: Vec<&str> = partial.tail.lines().collect();
+        let take = tail_lines.len().min(tail_budget);
+        let start = tail_lines.len().saturating_sub(take);
+        let visible_tail: String = tail_lines[start..].join("\n");
+        let has_ansi = visible_tail.contains('\x1b');
+        let tail_style = Style::default().fg(theme.muted()).bg(bg);
+
+        if has_ansi {
+            use ansi_to_tui::IntoText as _;
+            if let Ok(text) = visible_tail.into_text() {
+                for line in text.lines {
+                    let spans: Vec<Span<'_>> = line
+                        .spans
+                        .into_iter()
+                        .map(|mut s| {
+                            s.style = s.style.bg(bg);
+                            if s.style.fg.is_none() {
+                                s.style = s.style.fg(theme.muted());
+                            }
+                            s
+                        })
+                        .collect();
+                    lines.push(Line::from(spans));
+                    live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+                }
+            } else {
+                for line in &tail_lines[start..] {
+                    let stripped = strip_terminal_control(line);
+                    lines.push(Line::from(Span::styled(stripped, tail_style)));
+                    live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+                }
+            }
+        } else {
+            for line in &tail_lines[start..] {
+                let stripped: String = line.chars().filter(|c| !c.is_control()).collect();
+                lines.push(Line::from(Span::styled(stripped, tail_style)));
+                live_row_fills.push((lines.len().saturating_sub(1) as u16, bg));
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -305,6 +415,39 @@ pub(crate) fn render_slim_tool_live_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_progress_section_adds_status_and_tail() {
+        let mut lines = Vec::new();
+        let mut fills = Vec::new();
+        let mut partial = omegon_traits::PartialToolResult::content("first\nsecond", 1200);
+        partial.progress.phase = Some("running".to_string());
+        append_tool_live_progress_section(
+            &mut lines,
+            &mut fills,
+            Some(&partial),
+            None,
+            false,
+            4,
+            40,
+            Color::Reset,
+            &crate::tui::theme::Alpharius,
+        );
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(
+            rendered.contains("▶ running"),
+            "status should render: {rendered}"
+        );
+        assert!(
+            rendered.contains("second"),
+            "tail should render: {rendered}"
+        );
+        assert!(!fills.is_empty());
+    }
 
     #[test]
     fn append_args_section_adds_lean_expand_hint() {
