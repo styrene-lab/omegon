@@ -16,8 +16,7 @@ use super::theme::Theme;
 use crate::surfaces::conversation::{
     AssistantSegment, BorrowedConversationSegmentProjection, ConversationSegmentKind,
     ConversationSegmentProjection, ImageSegment, LifecycleSegment, ProjectConversationSegment,
-    SegmentEmphasis, SegmentPresentation, SegmentRole, SystemSegment, ToolCategory, ToolSegment,
-    UserSegment,
+    SegmentPresentation, SegmentRole, SystemSegment, ToolCategory, ToolSegment, UserSegment,
 };
 
 const FILE_URL_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
@@ -69,7 +68,7 @@ fn normalize_markdown_for_plaintext(text: &str) -> String {
     normalized.trim_end().to_string()
 }
 
-fn split_preserving_trailing_empty_lines(text: &str) -> Vec<&str> {
+pub(crate) fn split_preserving_trailing_empty_lines(text: &str) -> Vec<&str> {
     if text.is_empty() {
         return vec![""];
     }
@@ -901,7 +900,7 @@ fn detect_links(text: &str) -> Vec<RenderedLink> {
     links
 }
 
-fn apply_rendered_links(
+pub(crate) fn apply_rendered_links(
     area: Rect,
     lines: &[Line<'_>],
     buf: &mut Buffer,
@@ -1802,84 +1801,6 @@ fn wrapped_rows(text: &str, width: u16) -> u16 {
         .max(1)
 }
 
-pub(crate) fn render_user_prompt(
-    text: &str,
-    presentation: &SegmentPresentation,
-    meta: &SegmentMeta,
-    area: Rect,
-    buf: &mut Buffer,
-    t: &dyn Theme,
-    mode: SegmentRenderMode,
-) {
-    if area.width < 3 || area.height == 0 {
-        return;
-    }
-
-    let bg = t.user_msg_bg();
-    let border_color = match presentation.emphasis {
-        SegmentEmphasis::Strong => t.accent(),
-        SegmentEmphasis::Normal => t.accent_muted(),
-        SegmentEmphasis::Muted => t.border_dim(),
-    };
-    let block = if matches!(mode, SegmentRenderMode::Slim) {
-        Block::default()
-            .padding(Padding::horizontal(0))
-            .style(Style::default().bg(bg))
-    } else {
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color).bg(bg))
-            .title_top(Line::from(Span::styled(
-                format!(" {}", presentation.sigil),
-                Style::default()
-                    .fg(border_color)
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            )))
-            .title_top(
-                top_right_timestamp(meta, t)
-                    .unwrap_or_else(Line::default)
-                    .right_aligned(),
-            )
-            .padding(Padding::horizontal(1))
-            .style(Style::default().bg(bg))
-    };
-    let inner = block.inner(area);
-    block.render(area, buf);
-
-    if inner.width == 0 || inner.height == 0 {
-        return;
-    }
-
-    let content: Vec<Line<'_>> = split_preserving_trailing_empty_lines(text)
-        .into_iter()
-        .map(|line| {
-            Line::from(Span::styled(
-                line.to_string(),
-                Style::default()
-                    .fg(t.fg())
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            ))
-        })
-        .collect();
-    Paragraph::new(content.clone())
-        .wrap(Wrap { trim: false })
-        .style(Style::default().bg(bg))
-        .render(inner, buf);
-    apply_rendered_links(
-        inner,
-        &content,
-        buf,
-        Style::default()
-            .fg(t.accent_muted())
-            .bg(bg)
-            .add_modifier(Modifier::UNDERLINED),
-        inner.height,
-    );
-}
-
 /// Build a compact meta tag string from SegmentMeta for display in the response header.
 /// Example: "claude-sonnet-4-6 · anthropic · victory · think:medium · ctx:34%"
 pub fn build_meta_tag(meta: &SegmentMeta) -> String {
@@ -1927,7 +1848,7 @@ fn format_timestamp(timestamp: Option<std::time::SystemTime>) -> Option<String> 
     Some(datetime.format("%H:%M:%S").to_string())
 }
 
-fn top_right_timestamp<'a>(meta: &SegmentMeta, t: &dyn Theme) -> Option<Line<'a>> {
+pub(crate) fn top_right_timestamp<'a>(meta: &SegmentMeta, t: &dyn Theme) -> Option<Line<'a>> {
     let timestamp = format_timestamp(meta.timestamp);
     let tokens = meta.actual_tokens;
     let ctx = meta.context_percent;
