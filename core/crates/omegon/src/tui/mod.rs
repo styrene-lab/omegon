@@ -84,8 +84,8 @@ use self::slim_plan::{
 };
 use crate::surfaces::layout::UiSurfaces;
 use crate::ui_runtime::actions::{
-    OperatorWaitAction, PermissionAction, PromptSource, SlashCommandAction, SubmitPromptAction,
-    UiAction, UiActionOutcome,
+    OperatorWaitAction, PermissionAction, PromptSource, SetSurfaceVisibleAction, SetUiPresetAction,
+    SlashCommandAction, SubmitPromptAction, UiAction, UiActionOutcome, UiSurfaceToggle,
 };
 
 /// Get current process RSS in megabytes (platform-specific).
@@ -1616,14 +1616,12 @@ impl App {
         }
     }
 
-    fn toggle_ui_surface(&mut self, surface: &str, enabled: bool) -> Result<(), String> {
+    fn toggle_ui_surface(&mut self, surface: UiSurfaceToggle, enabled: bool) {
         match surface {
-            "dashboard" | "dash" => self.ui_surfaces.dashboard = enabled,
-            "instruments" | "instrument" | "tools" => self.ui_surfaces.instruments = enabled,
-            "footer" => self.ui_surfaces.footer = enabled,
-            other => return Err(format!("Unknown UI surface: {other}")),
+            UiSurfaceToggle::Dashboard => self.ui_surfaces.dashboard = enabled,
+            UiSurfaceToggle::Instruments => self.ui_surfaces.instruments = enabled,
+            UiSurfaceToggle::Footer => self.ui_surfaces.footer = enabled,
         }
-        Ok(())
     }
 
     /// Check if the agent's last text output looks like it's asking for
@@ -3308,7 +3306,31 @@ impl App {
                     SlashResult::NotACommand => UiActionOutcome::rejected("not a slash command"),
                 }
             }
+            UiAction::SetUiPreset(action) => self.handle_ui_preset_action(action),
+            UiAction::SetSurfaceVisible(action) => self.handle_surface_visible_action(action),
         }
+    }
+
+    fn handle_ui_preset_action(&mut self, action: SetUiPresetAction) -> UiActionOutcome {
+        let name = action.surfaces.preset_name();
+        self.apply_ui_preset(action.surfaces);
+        UiActionOutcome::accepted_message(format!("UI → {name}"))
+    }
+
+    fn handle_surface_visible_action(
+        &mut self,
+        action: SetSurfaceVisibleAction,
+    ) -> UiActionOutcome {
+        self.toggle_ui_surface(action.surface, action.visible);
+        UiActionOutcome::accepted_message(format!(
+            "UI surface {}: {}",
+            if action.visible {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            action.surface.label()
+        ))
     }
 
     fn handle_permission_action(&mut self, action: PermissionAction) -> UiActionOutcome {
@@ -5963,46 +5985,91 @@ impl App {
                 if args.is_empty() || args == "status" {
                     SlashResult::Display(self.ui_status_text())
                 } else if args == "lean" {
-                    self.apply_ui_preset(UiSurfaces::lean());
-                    SlashResult::Display("UI → lean".into())
-                } else if args == "full" {
-                    self.apply_ui_preset(UiSurfaces::full());
-                    SlashResult::Display("UI → full (+ dashboard + instruments)".into())
-                } else if let Some(surface) = args.strip_prefix("toggle ") {
-                    let surface = surface.trim();
-                    let enabled = match surface {
-                        "dashboard" | "dash" => !self.ui_surfaces.dashboard,
-                        "instruments" | "instrument" | "tools" => !self.ui_surfaces.instruments,
-                        "footer" => !self.ui_surfaces.footer,
-                        other => {
-                            return SlashResult::Display(format!("Unknown UI surface: {other}"));
+                    let outcome = self.handle_ui_preset_action(SetUiPresetAction {
+                        surfaces: UiSurfaces::lean(),
+                    });
+                    match outcome {
+                        UiActionOutcome::Accepted { message } => {
+                            SlashResult::Display(message.unwrap_or_else(|| "UI → lean".into()))
                         }
+                        other => SlashResult::Display(format!("UI action failed: {other:?}")),
+                    }
+                } else if args == "full" {
+                    let outcome = self.handle_ui_preset_action(SetUiPresetAction {
+                        surfaces: UiSurfaces::full(),
+                    });
+                    match outcome {
+                        UiActionOutcome::Accepted { message } => SlashResult::Display(
+                            message
+                                .unwrap_or_else(|| "UI → full (+ dashboard + instruments)".into()),
+                        ),
+                        other => SlashResult::Display(format!("UI action failed: {other:?}")),
+                    }
+                } else if let Some(surface) = args.strip_prefix("toggle ") {
+                    let surface = match UiSurfaceToggle::parse(surface) {
+                        Ok(surface) => surface,
+                        Err(err) => return SlashResult::Display(err),
                     };
-                    match self.toggle_ui_surface(surface, enabled) {
-                        Ok(()) => SlashResult::Display(format!(
-                            "UI surface {}: {}",
-                            if enabled { "enabled" } else { "disabled" },
-                            surface
-                        )),
-                        Err(err) => SlashResult::Display(err),
+                    let enabled = match surface {
+                        UiSurfaceToggle::Dashboard => !self.ui_surfaces.dashboard,
+                        UiSurfaceToggle::Instruments => !self.ui_surfaces.instruments,
+                        UiSurfaceToggle::Footer => !self.ui_surfaces.footer,
+                    };
+                    let outcome = self.handle_surface_visible_action(SetSurfaceVisibleAction {
+                        surface,
+                        visible: enabled,
+                    });
+                    match outcome {
+                        UiActionOutcome::Accepted { message } => {
+                            SlashResult::Display(message.unwrap_or_else(|| {
+                                format!(
+                                    "UI surface {}: {}",
+                                    if enabled { "enabled" } else { "disabled" },
+                                    surface.label()
+                                )
+                            }))
+                        }
+                        other => SlashResult::Display(format!("UI action failed: {other:?}")),
                     }
                 } else if let Some(surface) = args.strip_prefix("show ") {
-                    match self.toggle_ui_surface(surface.trim(), true) {
-                        Ok(()) => {
-                            SlashResult::Display(format!("UI surface enabled: {}", surface.trim()))
+                    let surface = match UiSurfaceToggle::parse(surface) {
+                        Ok(surface) => surface,
+                        Err(err) => return SlashResult::Display(err),
+                    };
+                    let outcome = self.handle_surface_visible_action(SetSurfaceVisibleAction {
+                        surface,
+                        visible: true,
+                    });
+                    match outcome {
+                        UiActionOutcome::Accepted { message } => {
+                            SlashResult::Display(message.unwrap_or_else(|| {
+                                format!("UI surface enabled: {}", surface.label())
+                            }))
                         }
-                        Err(err) => SlashResult::Display(err),
+                        other => SlashResult::Display(format!("UI action failed: {other:?}")),
                     }
                 } else if let Some(surface) = args.strip_prefix("hide ") {
-                    match self.toggle_ui_surface(surface.trim(), false) {
-                        Ok(()) => {
-                            SlashResult::Display(format!("UI surface disabled: {}", surface.trim()))
+                    let surface = match UiSurfaceToggle::parse(surface) {
+                        Ok(surface) => surface,
+                        Err(err) => return SlashResult::Display(err),
+                    };
+                    let outcome = self.handle_surface_visible_action(SetSurfaceVisibleAction {
+                        surface,
+                        visible: false,
+                    });
+                    match outcome {
+                        UiActionOutcome::Accepted { message } => {
+                            SlashResult::Display(message.unwrap_or_else(|| {
+                                format!("UI surface disabled: {}", surface.label())
+                            }))
                         }
-                        Err(err) => SlashResult::Display(err),
+                        other => SlashResult::Display(format!("UI action failed: {other:?}")),
                     }
                 } else {
                     SlashResult::Display(format!(
-                        "Unknown UI command: {args}\n\n{}",
+                        "Unknown UI command: {args}
+
+{}",
                         self.ui_status_text()
                     ))
                 }

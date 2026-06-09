@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use omegon_traits::{OperatorWaitResponse, PermissionResponse};
 
+use crate::surfaces::layout::UiSurfaces;
 use crate::tui::{PromptMetadata, PromptQueueMode};
 
 /// Semantic operator action emitted by a frontend adapter.
@@ -21,6 +22,10 @@ pub enum UiAction {
     RespondToOperatorWait(OperatorWaitAction),
     /// Execute a raw slash command string.
     RunSlashCommand(SlashCommandAction),
+    /// Apply a coarse UI surface preset.
+    SetUiPreset(SetUiPresetAction),
+    /// Set one high-level surface visible or hidden.
+    SetSurfaceVisible(SetSurfaceVisibleAction),
 }
 
 /// Prompt submission intent independent of a concrete editor widget.
@@ -78,6 +83,43 @@ pub struct OperatorWaitAction {
 pub struct SlashCommandAction {
     pub raw: String,
     pub source: PromptSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetUiPresetAction {
+    pub surfaces: UiSurfaces,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetSurfaceVisibleAction {
+    pub surface: UiSurfaceToggle,
+    pub visible: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiSurfaceToggle {
+    Dashboard,
+    Instruments,
+    Footer,
+}
+
+impl UiSurfaceToggle {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim() {
+            "dashboard" | "dash" => Ok(Self::Dashboard),
+            "instruments" | "instrument" | "tools" => Ok(Self::Instruments),
+            "footer" => Ok(Self::Footer),
+            other => Err(format!("Unknown UI surface: {other}")),
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Dashboard => "dashboard",
+            Self::Instruments => "instruments",
+            Self::Footer => "footer",
+        }
+    }
 }
 
 /// Result of handling a semantic UI action.

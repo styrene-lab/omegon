@@ -297,6 +297,50 @@ async fn submit_editor_buffer_sends_prompt_with_images_when_attachment_token_pre
 }
 
 #[tokio::test]
+async fn ui_action_set_ui_preset_updates_surfaces() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::SetUiPreset(SetUiPresetAction {
+                surfaces: UiSurfaces::full(),
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(outcome, UiActionOutcome::accepted_message("UI → full"));
+    assert!(app.ui_surfaces.dashboard);
+    assert!(app.ui_surfaces.instruments);
+    assert!(app.ui_surfaces.footer);
+}
+
+#[tokio::test]
+async fn ui_action_set_surface_visible_updates_one_surface() {
+    let mut app = test_app();
+    let tx = test_tx();
+
+    let outcome = app
+        .handle_ui_action(
+            UiAction::SetSurfaceVisible(SetSurfaceVisibleAction {
+                surface: UiSurfaceToggle::Dashboard,
+                visible: true,
+            }),
+            &tx,
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        UiActionOutcome::accepted_message("UI surface enabled: dashboard")
+    );
+    assert!(app.ui_surfaces.dashboard);
+    assert!(!app.ui_surfaces.instruments);
+    assert!(!app.ui_surfaces.footer);
+}
+
+#[tokio::test]
 async fn ui_action_submit_prompt_sends_local_tui_prompt() {
     let mut app = test_app();
     let (tx, mut rx) = test_tx_with_rx();
